@@ -61,7 +61,8 @@ export function validateX402ReceiptUnsafe(value: unknown): X402ReceiptRecord {
   if ([settlementEvidence, unusedExpiryEvidence].some((evidence) => evidence !== undefined && (evidence.network !== receipt.network || evidence.token !== receipt.token))) stateCorrupt("Receipt evidence belongs to another network or token.");
   if (
     (settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" && receipt.transferMethod !== "erc7710") ||
-    (settlementEvidence?.schemaVersion === "apn.x402.settlement-evidence.v1" && receipt.transferMethod === "erc7710") ||
+    (settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.erc7710-settlement-evidence.v1" &&
+      receipt.transferMethod === "erc7710") ||
     (unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1" && receipt.transferMethod !== "erc7710") ||
     (unusedExpiryEvidence?.schemaVersion !== undefined && unusedExpiryEvidence.schemaVersion !== "apn.x402.erc7710-unused-expiry-evidence.v1" &&
       receipt.transferMethod === "erc7710")
@@ -72,7 +73,10 @@ export function validateX402ReceiptUnsafe(value: unknown): X402ReceiptRecord {
   }
   if (terminalState === "completed" && (receipt.settlementResponseHash === undefined || settlementEvidence === undefined || receipt.result === undefined || unusedExpiryEvidence !== undefined)) stateCorrupt("x402 completed receipt is incomplete.");
   if (terminalState === "failed_settled_without_result" && (settlementEvidence === undefined || receipt.result !== undefined || unusedExpiryEvidence !== undefined)) stateCorrupt("x402 spent-without-result receipt is invalid.");
-  if (terminalState === "failed_expired_unused" && (unusedExpiryEvidence === undefined || receipt.settlementResponseHash !== undefined || settlementEvidence !== undefined || receipt.result !== undefined)) stateCorrupt("x402 expired-unused receipt is invalid.");
+  // A finalized nonce-state proof (v2) outranks a seller's settlement claim or an unpaid delivered body.
+  const stateUnused = unusedExpiryEvidence?.schemaVersion === "apn.x402.unused-expiry-evidence.v2";
+  if (terminalState === "failed_expired_unused" && (unusedExpiryEvidence === undefined || settlementEvidence !== undefined ||
+    (!stateUnused && (receipt.settlementResponseHash !== undefined || receipt.result !== undefined)))) stateCorrupt("x402 expired-unused receipt is invalid.");
   if (terminalState === "failed_before_effect" && (receipt.settlementResponseHash !== undefined || settlementEvidence !== undefined || unusedExpiryEvidence !== undefined || receipt.result !== undefined)) stateCorrupt("x402 failed-before-effect receipt is invalid.");
   if (terminalState === "abandoned_unknown" && (settlementEvidence !== undefined || unusedExpiryEvidence !== undefined)) stateCorrupt("x402 abandonment receipt cannot carry a proven outcome.");
   hash(receipt.operationBindingHash); hash(receipt.previousLinkHash); timestamp(receipt.createdAt); hash(receipt.integrityHash);

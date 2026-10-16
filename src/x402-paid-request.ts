@@ -324,7 +324,8 @@ export class X402PaidRequest extends X402Lifecycle {
       const conflictingHint = (
         operation.transactionHint !== undefined && operation.transactionHint.transactionHash !== decoded.transactionHash
       ) || (
-        purpose === "result_recovery" && decoded.transactionHash !== operation.settlementEvidence?.transactionHash
+        purpose === "result_recovery" && operation.settlementEvidence?.transactionHash !== undefined &&
+        decoded.transactionHash !== operation.settlementEvidence.transactionHash
       );
       if (conflictingHint) {
         return publicX402Operation(await this.finishPaidAttempt(

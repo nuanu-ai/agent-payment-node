@@ -12,6 +12,7 @@ import type {
   X402HttpObservation,
 } from "./x402-state-model.js";
 import { x402OperationBindingHash } from "./x402-state-model.js";
+import { validateStateSettlementEvidence } from "./x402-state-evidence.js";
 import {
   address,
   allowedRecord,
@@ -158,7 +159,7 @@ export function validateTransferMethodEvidence(
     return;
   }
   if (
-    settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.settlement-evidence.v1" ||
+    settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" ||
     unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1"
   ) {
     stateCorrupt("x402 EIP-3009 operation contains ERC-7710 settlement evidence.");
@@ -225,7 +226,9 @@ export function validateSettlementEvidence(value: unknown, operation?: Record<st
   const candidate = record(value);
   return candidate.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1"
     ? validateErc7710SettlementEvidence(candidate, operation)
-    : validateEip3009SettlementEvidence(candidate, operation);
+    : candidate.schemaVersion === "apn.x402.settlement-evidence.v2"
+      ? validateStateSettlementEvidence(candidate, operation)
+      : validateEip3009SettlementEvidence(candidate, operation);
 }
 
 function validateEip3009SettlementEvidence(value: unknown, operation?: Record<string, unknown>): SettlementEvidence {

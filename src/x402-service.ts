@@ -340,16 +340,14 @@ export class X402Service extends X402PaidRequest {
         throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the bounded read-only x402 RPC surface.");
       }
       let verified: X402SealedPaymentMaterial | undefined;
-      let completeZeroScanValidated = false;
-      let completeZeroScanRead = false;
+      let unusedAtSafe = false;
       if (x402Rpc !== null) {
         try {
           const reconciled = await reconcileX402Method(x402Rpc, this.context.clock, {
             persist: async (next) => await this.context.state.writeX402Operation(next),
           }, operation);
           operation = reconciled.operation;
-          completeZeroScanValidated = reconciled.completeZeroScanValidated;
-          completeZeroScanRead = reconciled.completeZeroScanRead;
+          unusedAtSafe = reconciled.unusedAtSafe;
         } catch (error) {
           if (isRecoverableX402RpcObservationFailure(error)) {
             const durable = await this.context.state.loadX402Operation(operation.profileHash, operation.operationId);
@@ -370,7 +368,8 @@ export class X402Service extends X402PaidRequest {
           verified = await this.recoverPaymentMaterial(operation);
           if (verified === undefined) return publicX402Operation(operation);
         } else if (x402Rpc !== null) {
-          if (!completeZeroScanValidated) return publicX402Operation(operation);
+          // First send only after this resume read the nonce as unused at the safe head; the pending attempt marker keeps it at most once.
+          if (!unusedAtSafe) return publicX402Operation(operation);
           verified = await this.recoverPaymentMaterial(operation);
           if (verified === undefined) return publicX402Operation(operation);
         } else {
@@ -404,14 +403,13 @@ export class X402Service extends X402PaidRequest {
         return await this.sendPaidRequest(operation, "result_recovery", verified, x402Rpc !== null, deadline);
       }
 
-      const scanStatus = operation.authorizationUsedScan?.status;
+      // One resend of the byte-identical header after an ambiguous attempt, only while the nonce reads unused at safe.
       const paymentAttemptCount = operation.attempts.filter((attempt) => attempt.purpose === "payment").length;
       if (
         operation.selectedOffer.resolved.assetTransferMethod === "eip3009" &&
         operation.transactionHint === undefined && operation.settlementResponseObservation === undefined &&
-        operation.settlementEvidence === undefined && operation.resultLink === undefined &&
-        scanStatus === "complete" && operation.authorizationUsedScan?.candidates.length === 0 &&
-        completeZeroScanValidated && completeZeroScanRead && paymentAttemptCount === 1 && operation.attempts.length === 1 &&
+        operation.settlementEvidence === undefined && operation.unusedExpiryEvidence === undefined && operation.resultLink === undefined &&
+        unusedAtSafe && paymentAttemptCount === 1 && operation.attempts.length === 1 &&
         operation.state === "effect_unknown" && x402Rpc !== null
       ) {
         verified = await this.recoverPaymentMaterial(operation);
