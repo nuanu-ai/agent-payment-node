@@ -1,7 +1,7 @@
 import { hashObject, sha256 } from "../canonical.js";
 import { decodeBridgeCall } from "./decode.js";
 import { bridgeApprovalPolicyBinding, bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
-import { BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot } from "./operation-model.js";
+import { BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot } from "./operation-model.js";
 import { legacyBridgeOperationSchema, operationSchema } from "./schema.js";
 import { bridgeExecutionDestination, bridgeNativeDenominationConversion, bridgeProviderBoundNativeDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
@@ -275,7 +275,9 @@ function validateSnapshot(op, s, legacy) {
                 (approval?.phase === "included_success" || approval?.phase === "safe_success")) ||
             (s.state === "unknown_finality" && unsubmittedBridgeAfterApproval) ||
             (s.state === "failed_confirmed_revert" && unsubmittedBridgeAfterApproval && approval?.phase === "safe_revert");
-        if (s.failure.reason !== "unsent_apn_rpc_ambiguous" || !compatibleState ||
+        const deferred = s.failure.reason === BRIDGE_PRE_SIGN_RPC_UNAVAILABLE && !BRIDGE_TERMINAL.includes(s.state) &&
+            s.effects.some((effect) => effect.role === d.effectRole && (effect.phase === "unsealed" || effect.phase === "sealed") && effect.submissionAttempts === 0);
+        if (!(s.failure.reason === "unsent_apn_rpc_ambiguous" && compatibleState || deferred) ||
             d.chainId !== expectedChain || d.category !== expectedCategory ||
             (d.stage.startsWith("source_") ? d.chainRole !== "source" : d.chainRole !== "destination") ||
             !s.effects.some((effect) => effect.role === d.effectRole))
