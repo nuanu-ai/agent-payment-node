@@ -706,11 +706,12 @@ async function treeMetadataDigest(root: string): Promise<string> {
   return createHash("sha256").update(JSON.stringify(rows)).digest("hex");
 }
 
-test("MetaMask native profile is optional and identical through CLI and MCP binding",async()=>{
+test("MetaMask native profile, recipient and amount are required and identical through CLI and MCP binding",async()=>{
   const {bindArgv,bindMcpInput}=await import("../../src/command-binder.js");
-  const args=["wallet","metamask","native-transfer","--chain","ethereum","--idempotency-key","owned-profile-test","--profile","mm-owned-test"];
+  const recipient="0x5555555555555555555555555555555555555555";
+  const args=["wallet","metamask","native-transfer","--chain","ethereum","--recipient",recipient,"--amount-atomic","2500","--idempotency-key","owned-profile-test","--profile","mm-owned-test"];
   const cli=bindArgv(args).request;assert.equal("profile" in cli&&cli.profile,"mm-owned-test");
   const definition=COMMANDS.find(c=>c.path.join(" ")==="wallet metamask native-transfer")!;
-  assert.deepEqual(bindMcpInput(definition,{chain:"ethereum",idempotency_key:"owned-profile-test",profile:"mm-owned-test"}).request,cli);
-  const legacy=bindArgv(args.slice(0,7)).request;assert.ok(!("profile" in legacy));
+  assert.deepEqual(bindMcpInput(definition,{chain:"ethereum",recipient,amount_atomic:"2500",idempotency_key:"owned-profile-test",profile:"mm-owned-test"}).request,cli);
+  assert.throws(()=>bindArgv(args.slice(0,11)));
 });

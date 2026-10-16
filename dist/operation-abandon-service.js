@@ -12,7 +12,7 @@ import { railAllowlistSubject } from "./rail-direct-allowlist.js";
 import { ABANDON_OPERATION_KINDS } from "./operation-coverage.js";
 import { X402AbandonService } from "./x402-abandon.js";
 import { abandonProviderX402, abandonSmartAccountGasless } from "./operation-abandon-provider.js";
-import { abandonFixedMetaMaskNativeTransfer, metaMaskNativeOperationExists } from "./metamask-native-transfer-owner.js";
+import { abandonMetaMaskNativeTransfer, metaMaskNativeOperationExists } from "./metamask-native-transfer-owner.js";
 import { SwapOperationRepository } from "./swap/repository.js";
 import { abandonSwapOperation } from "./swap/abandon.js";
 export class OperationAbandonService {
@@ -36,7 +36,7 @@ export class OperationAbandonService {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         if (await metaMaskNativeOperationExists(this.context.state.root, operationId)) {
-            return await abandonFixedMetaMaskNativeTransfer(this.context.state.root, operationId, async (intent) => await this.context.requireOperationAbandonApproval().approve(intent), () => this.context.clock.now());
+            return await abandonMetaMaskNativeTransfer(this.context.state.root, operationId, async (intent) => await this.context.requireOperationAbandonApproval().approve(intent), () => this.context.clock.now());
         }
         // Swaps live in their own repository; a marked swap with no provable bound has an owner exit here (R4).
         if (await new SwapOperationRepository(this.context.state.root).loadAny(operationId) !== null)

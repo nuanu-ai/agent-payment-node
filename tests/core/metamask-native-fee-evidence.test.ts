@@ -9,12 +9,16 @@ import type { Hex } from "../../src/model.js";
 import {
   METAMASK_NATIVE_FEE_AMOUNT_ATOMIC,
   METAMASK_NATIVE_FEE_QUOTE_SCHEMA,
+  METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2,
   METAMASK_NATIVE_FEE_RECEIPT_SCHEMA,
+  metaMaskNativeQuoteTransfer,
+  metaMaskNativeTransferData,
   METAMASK_NATIVE_FEE_SELLER,
   validateMetaMaskNativeFeeQuote,
   validateMetaMaskNativeFeeReceipt,
   type MetaMaskNativeFeeChainId,
   type MetaMaskNativeFeeQuote,
+  type MetaMaskNativeFeeQuoteV1,
   type MetaMaskNativeFeeReceiptEvidence,
 } from "../../src/metamask-native-fee-evidence.js";
 
@@ -103,7 +107,7 @@ test("rejects zero actual debit and fee quantities beyond the quote", () => {
   assert.throws(() => validateMetaMaskNativeFeeReceipt(tooMuch, quote));
 });
 
-function makeQuote(chainId: MetaMaskNativeFeeChainId): MetaMaskNativeFeeQuote {
+function makeQuote(chainId: MetaMaskNativeFeeChainId): MetaMaskNativeFeeQuoteV1 {
   const usdc = directEvmListRows(chainId).filter((row) => row.kind === "token" && row.symbol === "USDC" && row.decimals === 6);
   assert.equal(usdc.length, 1);
   const token = getAddress(usdc[0]!.identifier!);
@@ -162,9 +166,9 @@ function makeReceipt(quote: MetaMaskNativeFeeQuote, overrides: Partial<MetaMaskN
     topics: [
       TRANSFER_TOPIC,
       `0x${quote.sender.slice(2).toLowerCase().padStart(64, "0")}` as Hex,
-      `0x${quote.seller.slice(2).toLowerCase().padStart(64, "0")}` as Hex,
+      `0x${metaMaskNativeQuoteTransfer(quote).recipient.slice(2).toLowerCase().padStart(64, "0")}` as Hex,
     ],
-    data: `0x${BigInt(METAMASK_NATIVE_FEE_AMOUNT_ATOMIC).toString(16).padStart(64, "0")}` as Hex,
+    data: `0x${BigInt(metaMaskNativeQuoteTransfer(quote).amountAtomic).toString(16).padStart(64, "0")}` as Hex,
   };
   const base: MetaMaskNativeFeeReceiptEvidence = {
     schemaVersion: METAMASK_NATIVE_FEE_RECEIPT_SCHEMA,
@@ -197,3 +201,42 @@ function makeReceipt(quote: MetaMaskNativeFeeQuote, overrides: Partial<MetaMaskN
   const result = { ...base, ...overrides };
   return result;
 }
+
+const RECIPIENT = getAddress("0x5555555555555555555555555555555555555555");
+/** A version 2 quote: the same transaction shape, with the operation's own recipient and amount. */
+function makeQuoteV2(chainId: MetaMaskNativeFeeChainId, recipient = RECIPIENT, amountAtomic = "2500"): MetaMaskNativeFeeQuote {
+  const { quoteHash: _, schemaVersion: _v, seller: _s, grossAtomic: _g, netAtomic: _n, tokenFeeAtomic: _t, ...rest } = makeQuote(chainId);
+  const body = { ...rest, schemaVersion: METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2, recipient, amountAtomic,
+    transaction: { ...rest.transaction, data: metaMaskNativeTransferData(recipient, amountAtomic) } };
+  return { ...body, quoteHash: hashObject(body) };
+}
+
+test("version 2 quotes bind any recipient and amount, and the receipt must pay exactly them", () => {
+  for (const chainId of TEST_CHAINS) {
+    const quote = makeQuoteV2(chainId);
+    assert.equal(validateMetaMaskNativeFeeQuote(quote, NOW), quote);
+    assert.deepEqual(metaMaskNativeQuoteTransfer(quote), { recipient: RECIPIENT, amountAtomic: "2500" });
+    const result = validateMetaMaskNativeFeeReceipt(makeReceipt(quote), quote);
+    assert.equal(result.transferAccepted, true);
+    const other = makeReceipt(quote, { logs: [{ ...makeReceipt(quote).logs[0]!, data: `0x${(1000n).toString(16).padStart(64, "0")}` as Hex }] });
+    assert.throws(() => validateMetaMaskNativeFeeReceipt(other, quote), (error: unknown) =>
+      error instanceof ApnError && error.details?.reason === "successful_receipt_missing_exact_usdc_transfer");
+  }
+  // The version 1 reader still binds its fixed pair.
+  assert.deepEqual(metaMaskNativeQuoteTransfer(makeQuote(1)), { recipient: getAddress(METAMASK_NATIVE_FEE_SELLER), amountAtomic: "1000" });
+});
+
+test("version 2 quotes refuse a zero or non-canonical recipient, a malformed amount, foreign calldata and version 1 fields", () => {
+  const quote = makeQuoteV2(1), { quoteHash: _, ...body } = quote;
+  const reseal = (changed: Record<string, unknown>) => ({ ...changed, quoteHash: hashObject(changed) });
+  const zero = "0x0000000000000000000000000000000000000000";
+  assert.throws(() => validateMetaMaskNativeFeeQuote(reseal({ ...body, recipient: zero, transaction: { ...body.transaction, data: metaMaskNativeTransferData(zero, "2500") } }), NOW));
+  // EIP-55 test vector: only the checksum spelling is canonical.
+  const mixed = makeQuoteV2(1, getAddress("0x52908400098527886E0F7030069857D2E4169EE7")), { quoteHash: _m, ...mixedBody } = mixed;
+  assert.equal(validateMetaMaskNativeFeeQuote(mixed, NOW), mixed);
+  assert.throws(() => validateMetaMaskNativeFeeQuote(reseal({ ...mixedBody, recipient: mixed.schemaVersion === METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2 ? mixed.recipient.toLowerCase() : "" }), NOW));
+  for (const amountAtomic of ["0", "02500", "2.5", "-1", 2500]) assert.throws(() => validateMetaMaskNativeFeeQuote(reseal({ ...body, amountAtomic }), NOW));
+  assert.throws(() => validateMetaMaskNativeFeeQuote(reseal({ ...body, amountAtomic: "2501" }), NOW), /exact type-2 USDC transfer/u);
+  assert.throws(() => validateMetaMaskNativeFeeQuote(reseal({ ...body, seller: METAMASK_NATIVE_FEE_SELLER }), NOW), /schema is invalid/u);
+  assert.throws(() => validateMetaMaskNativeFeeQuote(reseal({ ...body, schemaVersion: METAMASK_NATIVE_FEE_QUOTE_SCHEMA }), NOW), /schema is invalid/u);
+});
