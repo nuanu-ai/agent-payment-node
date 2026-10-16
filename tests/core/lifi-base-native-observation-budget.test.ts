@@ -6,6 +6,7 @@ import { canonicalJson } from "../../src/canonical.js";
 import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
 import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
 import { bridgeRpcFactory, BridgeRpcPhysicalBudget, RpcReadSession } from "../../src/lifi/rpc.js";
+import { bridgeSourceObservationRequests } from "../../src/lifi/observation-budget.js";
 import type { BridgeEnvelope } from "../../src/lifi/model.js";
 
 const captured = JSON.parse(await readFile("tests/core/lifi-fixtures/base-native-across-observation-rpc-20261008.json", "utf8"));
@@ -15,6 +16,7 @@ const normalize = (value: unknown): unknown => Array.isArray(value) ? value.map(
 const key = (role: string, method: string, params: unknown[]) => canonicalJson({ role, method, params: normalize(params) });
 const role = (url: string) => url.includes("publicnode.com") ? "primary" : url.includes("tenderly.co") ? "archive" : "receipt";
 
+const SOURCE_REQUESTS = bridgeSourceObservationRequests(8453, 1, "across", "0x0000000000000000000000000000000000000000", 3);
 function reader(mutation?: "configuration" | "multicall_code") {
   const responses = new Map<string, unknown>();
   for (const row of captured.rows) {
@@ -32,7 +34,7 @@ function reader(mutation?: "configuration" | "multicall_code") {
   let now = Date.parse(captured.capturedAt[0]);
   const wait = async (ms: number) => { now += ms; };
   const physical = new BridgeRpcPhysicalBudget(() => now, wait);
-  const session = new RpcReadSession({ now: () => now, wait, maxHttpRequests: 15, maxHttpAttempts: 16,
+  const session = new RpcReadSession({ now: () => now, wait, maxHttpRequests: SOURCE_REQUESTS, maxHttpAttempts: SOURCE_REQUESTS + 2,
     archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
   const posts: Array<{ role: string; count: number; methods: string[] }> = [];
   const read = (endpointRole: string, method: string, params: unknown[]): unknown => {
@@ -72,7 +74,7 @@ function reader(mutation?: "configuration" | "multicall_code") {
   return { rpc, session, physical, posts };
 }
 
-test("Base native Across observation and exact historical deployment fit the 15 POST source budget including fresh primary headers", async () => {
+test("Base native Across observation and exact historical deployment fit the derived 14 POST source budget including fresh primary headers", async () => {
   const r = reader();
   const observed = await r.rpc.observe(captured.transactionHash, captured.envelope as BridgeEnvelope);
   assert(observed); assert(observed.transaction.safeBlock);
@@ -80,8 +82,8 @@ test("Base native Across observation and exact historical deployment fit the 15 
   assert.deepEqual(observed.transaction.block, captured.observed.transaction.block);
   const deployment = await r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", observed.transaction.block, true);
   assert.deepEqual(deployment, captured.historical);
-  assert(r.session.telemetry().httpRequests <= 15);
-  assert(r.session.telemetry().httpAttempts <= 16);
+  assert.equal(SOURCE_REQUESTS, 14); assert.equal(r.session.telemetry().httpRequests, SOURCE_REQUESTS);
+  assert.equal(r.session.telemetry().httpAttempts, SOURCE_REQUESTS);
   assert(r.physical.remaining() >= 10);
   assert(r.posts.filter(post => post.role === "archive").every(post => post.count <= 3));
   assert(r.posts.every(post => !post.methods.includes("eth_sendRawTransaction")));

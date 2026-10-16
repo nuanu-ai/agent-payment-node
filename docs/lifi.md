@@ -1141,6 +1141,20 @@ Source gas 85529811980376 wei plus messaging value 191812223813721 wei totals
 SAFE allowance was reused without another approval. Canonical-USDC delivery
 across the three required directions is now evidenced; WBTC remains separate.
 
+## Source observation budget derived from read plans, 2026-10-16
+
+The source observation request cap was a hand-counted constant (15 on Base, 14
+elsewhere) modelled on the compact Base native route. Base canonical USDC Across
+is not compact: its historical deployment proof sends eight archive chunks after
+the fee proof, so the exact sequence needs 18 POSTs, 19 with a scalar or fallback
+receipt read, and every resume after a paid approval failed with
+`APN_RPC_BUDGET_EXCEEDED`. The cap is now counted from the same deployment and
+Base fee read plans the adapter sends (seven canonical requests, fee chunks, then
+deployment chunks after exact cache reuse), plus two retry attempts. Base USDC
+Across needs 19 and Ethereum USDC Stargate 16; no check, chunk size or the shared
+24-POST invocation cap changed. Tests compare every admitted source route and
+receipt route with its production trace.
+
 ## Finite Base to Mega native funding
 
 `apn mega funding prepare`, `approve` and `status` use an independent GasZip
