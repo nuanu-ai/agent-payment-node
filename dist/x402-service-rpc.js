@@ -28,19 +28,12 @@ export function boundedX402ReadPort(rpc, timeoutMs, chainId = 8453) {
         return null;
     return port.withTotalTimeout(timeoutMs);
 }
+/**
+ * A settlement wait first proves the endpoint's chain (read once per invocation and endpoint). The safe head is not
+ * read here: every poll reads it inside authorizationState, and the reconciler ignores a safe head behind the prepared block.
+ */
 export async function assertWaitRpcProvenance(rpc, operation) {
-    const chain = await assertX402RpcChain(rpc, x402Network(operation.network).chainId);
-    const safe = await rpc.getX402Head("safe");
-    const observedAt = Date.parse(safe.observedAt);
-    if (safe.queriedTag !== "safe" || safe.rpcOrigin !== chain.rpcOrigin ||
-        !/^(?:0|[1-9][0-9]*)$/u.test(safe.number) ||
-        !/^(?:0|[1-9][0-9]*)$/u.test(safe.timestamp) ||
-        !/^0x[0-9a-f]{64}$/u.test(safe.hash) || /^0x0{64}$/u.test(safe.hash) ||
-        !Number.isFinite(observedAt) || new Date(observedAt).toISOString() !== safe.observedAt ||
-        BigInt(safe.timestamp) > BigInt(Math.floor(observedAt / 1_000)) ||
-        BigInt(safe.number) < BigInt(operation.preparedBlock.number)) {
-        throw new ApnError("APN_RPC_PROTOCOL", "Settlement wait RPC provenance is unsafe.");
-    }
+    await assertX402RpcChain(rpc, x402Network(operation.network).chainId);
 }
 export function isRecoverableX402RpcObservationFailure(error) {
     return error instanceof ApnError && [
