@@ -44,9 +44,9 @@ declare const rpcObservedNearSafe: z.ZodObject<{
     receiptHash: z.ZodString;
     logsHash: z.ZodString;
     rpcOrigin: z.ZodString;
+    observedAt: z.ZodString;
     safeBlockNumberAtomic: z.ZodString;
     safeBlockHash: z.ZodString;
-    observedAt: z.ZodString;
     executionAdmitted: z.ZodLiteral<false>;
     bridgeCompletion: z.ZodLiteral<false>;
     protocolInputDigest: z.ZodString;
@@ -115,9 +115,9 @@ declare const schemaV1: z.ZodObject<{
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
             rpcOrigin: z.ZodString;
+            observedAt: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
-            observedAt: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
@@ -184,9 +184,9 @@ declare const schemaV1: z.ZodObject<{
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
         rpcOrigin: z.ZodString;
+        observedAt: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
-        observedAt: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
@@ -288,9 +288,9 @@ declare const schemaV2: z.ZodObject<{
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
             rpcOrigin: z.ZodString;
+            observedAt: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
-            observedAt: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
@@ -357,9 +357,9 @@ declare const schemaV2: z.ZodObject<{
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
         rpcOrigin: z.ZodString;
+        observedAt: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
-        observedAt: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
@@ -486,9 +486,9 @@ declare const schemaV3: z.ZodObject<{
             receiptHash: z.ZodString;
             logsHash: z.ZodString;
             rpcOrigin: z.ZodString;
+            observedAt: z.ZodString;
             safeBlockNumberAtomic: z.ZodString;
             safeBlockHash: z.ZodString;
-            observedAt: z.ZodString;
             executionAdmitted: z.ZodLiteral<false>;
             bridgeCompletion: z.ZodLiteral<false>;
             protocolInputDigest: z.ZodString;
@@ -541,9 +541,9 @@ declare const schemaV3: z.ZodObject<{
         receiptHash: z.ZodString;
         logsHash: z.ZodString;
         rpcOrigin: z.ZodString;
+        observedAt: z.ZodString;
         safeBlockNumberAtomic: z.ZodString;
         safeBlockHash: z.ZodString;
-        observedAt: z.ZodString;
         executionAdmitted: z.ZodLiteral<false>;
         bridgeCompletion: z.ZodLiteral<false>;
         protocolInputDigest: z.ZodString;
