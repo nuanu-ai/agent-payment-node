@@ -98,6 +98,7 @@ import { executePermit2ProductionCli } from "./x402-permit2/production-cli.js";
 import { successEnvelope, failureEnvelope } from "./output.js";
 import { randomUUID } from "node:crypto";
 import { ORCA_SOLANA_CHAIN } from "./swap/orca-solana/pins.js";
+import { solanaSwapCommandRequests } from "./swap/solana-read-plan.js";
 import { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export function createApnCore(bound, options = {}) {
@@ -114,7 +115,7 @@ export function createApnCore(bound, options = {}) {
         maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60_000 };
     const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
     // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
-    const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? (process.env.APN_SOLANA_RPC_URL || SOLANA_PUBLIC_RPC_URL), options.solanaRpcFetch, new SolanaRpcBudget({ maxPhysicalRequests: bound.request.command.startsWith("swap.jupiter.") ? 64 : 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
+    const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? (process.env.APN_SOLANA_RPC_URL || SOLANA_PUBLIC_RPC_URL), options.solanaRpcFetch, new SolanaRpcBudget({ maxPhysicalRequests: solanaSwapCommandRequests(bound.request.command) ?? 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
         wait: options.solanaRpcWait ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))) }), new SolanaRpcPacer(state, options.solanaRpcNow, options.solanaRpcWait));
     const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL, configuredTronHttpsFetch({ minimumPostStartIntervalMs: process.env.APN_TRON_RPC_MIN_POST_INTERVAL_MS }));
     const directRails = options.directRails ?? [new SolanaLocalAdapter(chainAccounts, solanaRpc, () => options.clock?.now() ?? new Date()),
@@ -214,10 +215,7 @@ export function createApnCore(bound, options = {}) {
         : undefined);
     const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.") && options.jupiter === undefined
         ? createJupiterV1Runtime({ state, clock, rpc: solanaRpc, wrappingSecret,
-            foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute",
-            stage: bound.request.command === "swap.jupiter.quote" ? "quote" : bound.request.command === "swap.jupiter.prepare" ? "prepare" :
-                bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" ? "execute" : "observe",
-            ...("operationId" in bound.request ? { operationId: bound.request.operationId } : {}) }) : undefined);
+            foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" }) : undefined);
     const stablePorts = () => ({ state, clock, accounts: chainAccounts, rpc: solanaRpc, verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
     return new ApnCore({
         state,

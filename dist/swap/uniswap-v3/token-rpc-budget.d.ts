@@ -21,7 +21,11 @@ interface BudgetRecord {
     readonly quoteBinding: string | null;
     readonly rows: readonly TokenRpcBudgetRow[];
 }
-export declare const TOKEN_OPERATION_RPC_CAP = 64;
+/**
+ * Per-command RPC telemetry of one token operation. Each command is bounded by its own request-session cap, enforced
+ * here at settle and by the transport before every request; there is no cumulative per-operation cap (SWAP-19), so a
+ * command retried after a rate limit never exhausts the operation. Rows stay bounded however often commands run.
+ */
 export declare class UniswapTokenRpcBudgetJournal extends SecureStateStore {
     reserve(binding: string, command: string, cap: number, requestSessionCap?: number, budgetClass?: NonNullable<TokenRpcBudgetRow["budgetClass"]>): Promise<string>;
     settle(binding: string, reservation: string, telemetry: RpcReadTelemetry | null, effects: number, primaryPool?: TokenPrimaryPoolTelemetry): Promise<void>;

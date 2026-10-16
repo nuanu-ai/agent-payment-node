@@ -9,8 +9,6 @@ import { type SavedJupiterV1MaterialStore } from "./v1-material.js";
 import { type JupiterV1SimulationProof } from "./v1-proof.js";
 import type { JupiterV1ResolvedMaterial } from "./v1-material.js";
 import { type SwapUnlandedProof } from "../unlanded.js";
-/** Logical reads one status or observe-only invocation may make; a new invocation starts again from zero. */
-export declare const JUPITER_V1_OBSERVATION_READ_CAP = 64;
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export declare class JupiterV1SingleSender {
     private readonly core;
@@ -57,27 +55,19 @@ export declare class JupiterV1ExecutionDriver implements GuardedSwapExecutionDri
 /** Under the operation lock that marking, signing and the single send hold: the frozen lifetime passed at finality and
  * the persisted signature, if any, has no status. Nothing is decrypted, signed or sent. */
 export declare function proveJupiterV1Unlanded(d: Pick<JupiterV1ExecutionDependencies, "core" | "bindings" | "rpc">, input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
-/** Owns the actual bounded Solana rail transport; no new URL, fallback or financial callback is accepted. */
+/**
+ * The Jupiter rail transport: the configured Solana RPC with its per-command physical budget (solanaSwapCommandRequests)
+ * and persistent provider pacing. No read budget is stored or carried across commands (SWAP-19), so retrying a command
+ * after a rate limit never exhausts an operation. A height read uses a one-element batch: PublicNode returns another
+ * shape for the scalar call.
+ */
 export declare class JupiterV1BudgetedRpc extends SolanaRpc {
     private readonly base;
-    private readonly stage;
     readonly originHash: string;
     readonly budget: SolanaRpc["budget"];
-    private readonly journal;
-    private readonly stageKey;
-    private calls;
-    private priorQuoteCalls;
-    private observing;
-    private observationCalls;
-    constructor(base: SolanaRpc, root: string, stage: "quote" | "prepare" | "execute" | "observe", operationId?: string);
-    /** Observing a marked operation: reads are bounded per invocation, never by a lifetime per-operation cap (SWAP-19). */
-    enterObservation(): void;
+    constructor(base: SolanaRpc);
     get hasPersistentPacer(): boolean;
     get maximumAccountsPerRead(): 16 | 8;
-    bindOperation(quoteHash: string): Promise<void>;
-    bindQuote(quoteHash: string): Promise<void>;
-    chargeOfficialRead(): Promise<void>;
-    private charge;
     call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
     batch(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
     sendTransactionAtStart(params: readonly unknown[], beforeStart: () => void | Promise<void>): Promise<unknown>;

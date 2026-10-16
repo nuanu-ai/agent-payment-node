@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readdir } from "node:fs/promises";
 import { SolanaRpc, SolanaRpcBudget, type SolanaBatchRead, type SolanaMethod, type SolanaRpcPort } from "../../src/solana/rpc.js";
 import { JupiterV1BudgetedRpc } from "../../src/swap/jupiter-solana/v1-execution.js";
 import { JupiterV1MaterialResolver } from "../../src/swap/jupiter-solana/v1-resolver.js";
@@ -62,11 +61,10 @@ test("PublicNode-sized reads preserve all accounts and the frozen message withou
  assert.ok(accountReads.every(r => (r.params[0] as string[]).length <= 8));
  assert.ok(accountReads.length > ordinary.reads.filter(r => r.method === "getMultipleAccounts").length);
 });
-test("the durable Jupiter RPC forwards the endpoint account-read bound", async t => {
- const temp = await temporaryState(); t.after(temp.cleanup);
+test("the Jupiter RPC forwards the endpoint account-read bound", () => {
  for (const endpoint of ["https://solana-rpc.publicnode.com", "https://solana-rpc.publicnode.com/"])
-  assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc(endpoint), temp.root, "quote").maximumAccountsPerRead, 8);
- assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc("https://api.mainnet-beta.solana.com"), temp.root, "quote").maximumAccountsPerRead, 16);
+  assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc(endpoint)).maximumAccountsPerRead, 8);
+ assert.equal(new JupiterV1BudgetedRpc(new SolanaRpc("https://api.mainnet-beta.solana.com")).maximumAccountsPerRead, 16);
 });
 test("public resolution never downloads ProgramData beyond its header", async () => {
  const p = publicPort(false); await new JupiterV1MaterialResolver(p.rpc).resolve(m.payer, m.quoteResponse, m.rawBuildResponse, m.maximumNativeExpenseLamports);
@@ -107,48 +105,41 @@ test("an incomplete public batch refuses before any fee proof", async () => {
  assert.equal(p.reads.some(r => r.method === "getFeeForMessage"), false);
 });
 const small: readonly SolanaBatchRead[] = [{method: "getBlockHeight", params: []}, {method: "getMinimumBalanceForRentExemption", params: [165]}];
-test("one physical POST retains two durable Jupiter logical charges and base budget charges", async t => {
+test("one physical POST carries two logical reads and is charged once to the command budget; nothing is stored", async t => {
  const temp = await temporaryState(); t.after(temp.cleanup); let posts = 0;
  const budget = new SolanaRpcBudget({maxPhysicalRequests: 1});
  const base = new SolanaRpc("https://rpc.example", async (_url, init) => {
   posts++; const requests = JSON.parse(String(init?.body)); assert.equal(requests.length, 2);
   return new Response(JSON.stringify(requests.map((q: any, i: number) => ({jsonrpc: "2.0", id: q.id, result: i + 1})).reverse()), {headers: {"content-type": "application/json"}});
  }, budget);
- const rpc = new JupiterV1BudgetedRpc(base, temp.root, "quote");
- assert.deepEqual(await rpc.batch(small), [1n, 2n]); await rpc.bindQuote("a".repeat(64));
- const quote = JSON.parse(await readFile(join(temp.root, "jupiter-v1-budget-quotes", `${"a".repeat(64)}.json`), "utf8"));
- assert.equal(quote.calls, 2); assert.equal(posts, 1); assert.equal(budget.physicalRequests, 1); assert.equal(budget.logicalCalls, 2);
+ const rpc = new JupiterV1BudgetedRpc(base);
+ assert.deepEqual(await rpc.batch(small), [1n, 2n]);
+ assert.equal(posts, 1); assert.equal(budget.physicalRequests, 1); assert.equal(budget.logicalCalls, 2);
+ await assert.rejects(rpc.batch(small), {code: "APN_RPC_BUDGET_EXCEEDED"}); assert.equal(posts, 1);
+ assert.deepEqual(await readdir(temp.root).catch(() => []), []);
 });
-test("a batch crossing the durable 64-call boundary refuses before transport", async t => {
- const temp = await temporaryState(); t.after(temp.cleanup); let posts = 0;
- const rpc = new JupiterV1BudgetedRpc(new SolanaRpc("https://rpc.example", async () => {posts++; throw Error("forbidden");}), temp.root, "quote");
- for (let i = 0; i < 63; i++) await rpc.chargeOfficialRead();
- await assert.rejects(rpc.batch(small), /cap was exhausted/); assert.equal(posts, 0);
- await assert.rejects(rpc.call("getBlockHeight", []), /cap was exhausted/); assert.equal(posts, 0);
-});
-test("Jupiter cannot batch a financial send into the public transport", async t => {
- const temp = await temporaryState(); t.after(temp.cleanup); let posts = 0;
- const rpc = new JupiterV1BudgetedRpc(new SolanaRpc("https://rpc.example", async () => {posts++; throw Error("forbidden");}), temp.root, "quote");
+test("Jupiter cannot batch a financial send into the public transport", async () => {
+ let posts = 0;
+ const rpc = new JupiterV1BudgetedRpc(new SolanaRpc("https://rpc.example", async () => {posts++; throw Error("forbidden");}));
  await assert.rejects(rpc.batch([{method: "sendTransaction", params: []}] as any)); assert.equal(posts, 0);
 });
 
-for(const malformed of ["none","missing","unknown"] as const)test(`single height batch charges once and refuses ${malformed} ID without scalar retry`,async t=>{
- const temp=await temporaryState();t.after(temp.cleanup);let posts=0;
+for(const malformed of ["none","missing","unknown"] as const)test(`single height batch charges once and refuses ${malformed} ID without scalar retry`,async()=>{
+ let posts=0;
  const budget=new SolanaRpcBudget({maxPhysicalRequests:1});
  const rpc=new JupiterV1BudgetedRpc(new SolanaRpc("https://rpc.example",async(_url,init)=>{
   posts++;const body=JSON.parse(String(init?.body));assert.ok(Array.isArray(body));assert.equal(body.length,1);
   assert.equal(body[0].method,"getBlockHeight");assert.deepEqual(body[0].params,[{commitment:"confirmed"}]);
   return new Response(JSON.stringify(malformed==="missing"?[]:[{jsonrpc:"2.0",id:malformed==="unknown"?"foreign":body[0].id,result:433327703}]),{headers:{"content-type":"application/json"}});
- },budget),temp.root,"quote");
+ },budget));
  if(malformed==="none")assert.equal(await rpc.call("getBlockHeight",[{commitment:"confirmed"}]),433327703n);
  else await assert.rejects(rpc.call("getBlockHeight",[{commitment:"confirmed"}]),{code:"APN_RPC_PROTOCOL"});
- await rpc.bindQuote("b".repeat(64));const record=JSON.parse(await readFile(join(temp.root,"jupiter-v1-budget-quotes",`${"b".repeat(64)}.json`),"utf8"));
- assert.equal(record.calls,1);assert.equal(posts,1);assert.equal(budget.logicalCalls,1);assert.equal(budget.physicalRequests,1);
+ assert.equal(posts,1);assert.equal(budget.logicalCalls,1);assert.equal(budget.physicalRequests,1);
 });
 
 test("a call-only alternate height port keeps its scalar dispatch",async t=>{
  const temp=await temporaryState();t.after(temp.cleanup);let calls=0;
  const base=new SolanaRpc("https://rpc.example");Object.defineProperty(base,"batch",{value:undefined});
  t.mock.method(base,"call",async(method:SolanaMethod,params:readonly unknown[])=>{calls++;assert.equal(method,"getBlockHeight");assert.deepEqual(params,[{commitment:"confirmed"}]);return 1000n;});
- const rpc=new JupiterV1BudgetedRpc(base,temp.root,"quote");assert.equal(await rpc.call("getBlockHeight",[{commitment:"confirmed"}]),1000n);assert.equal(calls,1);
+ const rpc=new JupiterV1BudgetedRpc(base);assert.equal(await rpc.call("getBlockHeight",[{commitment:"confirmed"}]),1000n);assert.equal(calls,1);
 });

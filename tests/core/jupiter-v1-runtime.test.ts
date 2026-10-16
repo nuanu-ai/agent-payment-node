@@ -11,6 +11,7 @@ import type { RuntimeContext } from "../../src/runtime.js";
 import { StateStore } from "../../src/state.js";
 import { SolanaRpc, SolanaRpcBudget } from "../../src/solana/rpc.js";
 import { JupiterV1BudgetedRpc } from "../../src/swap/jupiter-solana/v1-execution.js";
+import { solanaSwapCommandRequests } from "../../src/swap/solana-read-plan.js";
 import { JupiterV1OwnerAdmission, detached } from "../../src/swap/jupiter-solana/v1-admission.js";
 import { JupiterV1LocalSigner } from "../../src/swap/jupiter-solana/v1-effects.js";
 import { createJupiterV1Runtime } from "../../src/swap/jupiter-solana/v1-runtime-factory.js";
@@ -40,16 +41,20 @@ test("Jupiter quote refuses before any network or Native secret without an activ
  const temp=await temporaryState();t.after(temp.cleanup);let reads=0,secrets=0;
  const native=new ChainAccountStore(temp.root,wrapping);await native.ensureLocal({profile:"jupiter-test",rail:"solana",create:async()=>({address:payer,seed:Buffer.alloc(32,9)})});
  const rpc=new SolanaRpc("https://example.com",async()=>{reads++;throw new Error("network forbidden");},new SolanaRpcBudget({maxPhysicalRequests:64}));
- const runtime=createJupiterV1Runtime({state:new StateStore(temp.root),clock:{now:()=>new Date()},rpc,wrappingSecret:{async load(){secrets++;throw new Error();},async create(){throw new Error();}},foreground:false,stage:"quote",providerFetch:async()=>{reads++;throw new Error();}});
+ const runtime=createJupiterV1Runtime({state:new StateStore(temp.root),clock:{now:()=>new Date()},rpc,wrappingSecret:{async load(){secrets++;throw new Error();},async create(){throw new Error();}},foreground:false,providerFetch:async()=>{reads++;throw new Error();}});
  await assert.rejects(runtime.quote({command:"swap.jupiter.quote",profile:"jupiter-test",account:payer,recipient:payer,amountAtomic:"1000000",slippageBps:50,ownerSlippageCapBps:50},new Date()),/active owner policy/);
  assert.equal(reads,0);assert.equal(secrets,0);
 });
-test("Jupiter persisted stage budget consumes failed RPC attempts and refuses the 65th before transport across reopen",async t=>{
- const temp=await temporaryState();t.after(temp.cleanup);let network=0;const base=new SolanaRpc("https://example.com",async()=>{network++;throw new Error("failed read");});
- const one=new JupiterV1BudgetedRpc(base,temp.root,"execute","a".repeat(64));
- for(let i=0;i<32;i++)await assert.rejects(one.call("getBlockHeight",[]));
- const two=new JupiterV1BudgetedRpc(base,temp.root,"execute","a".repeat(64));for(let i=0;i<32;i++)await assert.rejects(two.call("getBlockHeight",[]));
- await assert.rejects(two.call("getBlockHeight",[]),/cap was exhausted/);assert.equal(network,64);
+// SWAP-19: a command's budget is its own physical request plan; nothing is stored, so a retried command starts afresh.
+test("Jupiter reads are bounded by the command's own physical budget and nothing carries over to the next command",async t=>{
+ const temp=await temporaryState();t.after(temp.cleanup);let network=0;const fail=async()=>{network++;throw new Error("failed read");};
+ let clock=0;const budget=()=>new SolanaRpcBudget({maxPhysicalRequests:solanaSwapCommandRequests("swap.jupiter.approve")!,now:()=>clock,wait:async ms=>{clock+=ms;}});
+ const one=new JupiterV1BudgetedRpc(new SolanaRpc("https://example.com",fail,budget()));
+ for(let i=0;i<solanaSwapCommandRequests("swap.jupiter.approve")!;i++)await assert.rejects(one.call("getSignatureStatuses",[]),/bounded Solana RPC request/);
+ await assert.rejects(one.call("getSignatureStatuses",[]),{code:"APN_RPC_BUDGET_EXCEEDED"});
+ const two=new JupiterV1BudgetedRpc(new SolanaRpc("https://example.com",fail,budget()));await assert.rejects(two.call("getSignatureStatuses",[]),/bounded Solana RPC request/);
+ assert.equal(network,solanaSwapCommandRequests("swap.jupiter.approve")!+1);
+ assert.deepEqual(await readdir(temp.root).catch(()=>[]),[]);
 });
 test("Jupiter command dispatch refuses an arbitrary financial runtime injected through core dependencies",async t=>{
  const temp=await temporaryState();t.after(temp.cleanup);let forgedCalls=0;
@@ -116,7 +121,7 @@ async function pipelineFixture(t:test.TestContext){
  const providerFetch:typeof fetch=async url=>{providerReads++;return new Response(JSON.stringify(String(url).includes("/quote?")?m.quoteResponse:m.rawBuildResponse),{headers:{"content-type":"application/json"}});};
  let dateOverride:Date|undefined;
  const state=new StateStore(temp.root),clock={now:()=>dateOverride??new Date()};
- function runtime(stage:"quote"|"prepare"|"execute"|"observe",op?:string,foreground=true,endpoint="https://example.com"){const base=new SolanaRpc(endpoint,rpcFetch,new SolanaRpcBudget({maxPhysicalRequests:64,minimumIntervalMs:750,now:()=>clockMs,wait:async ms=>{clockMs+=ms;}}),new SolanaRpcPacer(state,()=>clockMs,async ms=>{clockMs+=ms;}));return createJupiterV1Runtime({state,clock,rpc:base,wrappingSecret:{async load(){secretReads++;const key=Buffer.alloc(32,77);lastWrappingKey=key;if(revokeWrapping){revokeWrapping=false;await revokePolicy();}return key;},async create(){return Buffer.alloc(32,77);}},foreground,stage,...(op===undefined?{}:{operationId:op}),providerFetch});}
+ function runtime(stage:"quote"|"prepare"|"execute"|"observe",op?:string,foreground=true,endpoint="https://example.com"){const base=new SolanaRpc(endpoint,rpcFetch,new SolanaRpcBudget({maxPhysicalRequests:64,minimumIntervalMs:750,now:()=>clockMs,wait:async ms=>{clockMs+=ms;}}),new SolanaRpcPacer(state,()=>clockMs,async ms=>{clockMs+=ms;}));return createJupiterV1Runtime({state,clock,rpc:base,wrappingSecret:{async load(){secretReads++;const key=Buffer.alloc(32,77);lastWrappingKey=key;if(revokeWrapping){revokeWrapping=false;await revokePolicy();}return key;},async create(){return Buffer.alloc(32,77);}},foreground,providerFetch});}
  return{temp,owner,m,runtime,get rpcReads(){return rpcReads;},get providerReads(){return providerReads;},setNow(v:Date){dateOverride=v;},get heightBatches(){return heightBatches;},get sends(){return sends;},get secretReads(){return secretReads;},setFinal(){finalized=true;},setHeight(v:number){height=v;},setSenderHeight(v:number){senderHeight=v;},ambiguousSend(){ambiguous=true;},rejectSend(){rejected=true;},revokeWhileWrapping(){revokeWrapping=true;},revokeAtSenderHeight(){revokeAfterSign=true;},get lastWrappingKey(){return lastWrappingKey;}};
 }
 test("known frozen origin mismatch rejects prepare, owner approval and status without reads, custody or lease changes", async t => {
@@ -287,14 +292,11 @@ test("V1 sealed signature before transport remains observe-only after pre-send p
 });
 // SWAP-19: observation is bounded per invocation, never by a lifetime per-operation cap; a long-lived operation stays observable.
 test("V1 observation reads are bounded per status invocation and never exhaust across many status calls",async t=>{
- const temp=await temporaryState();t.after(temp.cleanup);let network=0;const base=new SolanaRpc("https://example.com",async()=>{network++;throw new Error("not found");});
- for(let i=0;i<40;i++){const rpc=new JupiterV1BudgetedRpc(base,temp.root,"observe","f".repeat(64));for(let j=0;j<3;j++)await assert.rejects(rpc.call("getSignatureStatuses",[]));}
- assert.equal(network,120);
- const one=new JupiterV1BudgetedRpc(base,temp.root,"observe","f".repeat(64));for(let i=0;i<64;i++)await assert.rejects(one.call("getSignatureStatuses",[]));
- await assert.rejects(one.call("getSignatureStatuses",[]),/per-invocation observation read cap/u);assert.equal(network,184);
- const marked=new JupiterV1BudgetedRpc(base,temp.root,"execute","e".repeat(64));marked.enterObservation();
- for(let i=0;i<64;i++)await assert.rejects(marked.call("getSignatureStatuses",[]));
- assert.deepEqual(await readdir(join(temp.root,"jupiter-v1-runtime-budgets")).catch(()=>[]),[]);
+ const temp=await temporaryState();t.after(temp.cleanup);let network=0;const fail=async()=>{network++;throw new Error("not found");};
+ const status=solanaSwapCommandRequests("swap.jupiter.status")!;let clock=0;
+ for(let i=0;i<40;i++){const rpc=new JupiterV1BudgetedRpc(new SolanaRpc("https://example.com",fail,new SolanaRpcBudget({maxPhysicalRequests:status,now:()=>clock,wait:async ms=>{clock+=ms;}})));
+  for(let j=0;j<status;j++)await assert.rejects(rpc.call("getSignatureStatuses",[]));await assert.rejects(rpc.call("getSignatureStatuses",[]),{code:"APN_RPC_BUDGET_EXCEEDED"});}
+ assert.equal(network,40*status);assert.deepEqual(await readdir(temp.root).catch(()=>[]),[]);
 });
 test("V1 status stays available across 35 consecutive status calls on a marked operation",async t=>{
  if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest("V1 status stays available across 35 consecutive status calls on a marked operation");return;}
