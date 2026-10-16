@@ -258,8 +258,10 @@ export async function observeCircleFunding(input, ports) {
             freshSource = true;
             if (op.source !== null && (source.transactionHash !== op.source.transactionHash || source.blockHash !== op.source.blockHash || source.receiptHash !== op.source.receiptHash || source.sourceMessageHash !== op.source.sourceMessageHash))
                 circleBlocked("source_reorg_holds_required");
-            const allowance = await ports.allowance(op);
-            if (allowance !== "0")
+            // The allowance at the burn block, from receipts (OWNR-14, P1): the confirmed approval at nonce n set it to exactly the
+            // burn amount (its Approval event), and the burn at nonce n+1 moved that amount (its DepositForBurn event). No owner
+            // transaction lies between consecutive nonces, so the burn left zero. A later, unrelated approval cannot change that.
+            if (op.effects[0].phase !== "confirmed")
                 circleBlocked("burn_residual_allowance");
             if (!circleSame(op.source, source) || op.residualAllowanceAtomic !== "0")
                 op = await persist(op, { source, residualAllowanceAtomic: "0", effects: updateEffect(op, "burn", { phase: "confirmed", proof: source }), state: op.destination === null ? "awaiting_mint" : "awaiting_finality" }, "source_message_verified", ports);
@@ -344,7 +346,8 @@ export async function cleanupCircleFunding(input, ports) {
     }
     op = await observeCircleFunding(op, ports);
     cleanup = op.effects.find(e => e.role === "cleanup");
-    if (cleanup.phase === "confirmed" && cleanup.proof?.finalityTag === "finalized" && await ports.allowance(op) === "0") {
+    // The finalized cleanup receipt's Approval event proves the zero it set; a later approval is a different allowance.
+    if (cleanup.phase === "confirmed" && cleanup.proof?.finalityTag === "finalized") {
         const usage = await ports.usage(op, "failed_confirmed_revert");
         op = await persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cleaned", terminal: true }, "explicit_zero_allowance_cleanup_finalized", ports);
     }

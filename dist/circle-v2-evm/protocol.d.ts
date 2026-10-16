@@ -182,12 +182,14 @@ export declare function circleRecord(value: unknown): Record<string, unknown>;
 export declare function circleHex(value: unknown, bytes?: number): Hex;
 export declare function circleUint(value: unknown): bigint;
 export declare const circleWord: (address: string) => Hex;
-/** A v2 binding is checked in full; no binding retains the exact legacy economic tuple. */
+/** A v2 binding is checked in full and carries the operation's own source wallet and beneficiary; no binding is the
+ * frozen read-only v1 schema with its fixed source wallet, beneficiary and economic tuple. */
 export declare function circleEconomics(chain: CircleDestinationChain, binding?: CircleFundingBindingV2): {
     amount: bigint;
     maxFee: bigint;
     minMint: bigint;
     recipient: `0x${string}`;
+    sourceOwner: `0x${string}`;
 };
 export declare function encodeCircleApproval(reset?: boolean, binding?: CircleFundingBindingV2): Hex;
 export declare function encodeCircleBurn(chain: CircleDestinationChain, binding?: CircleFundingBindingV2): Hex;

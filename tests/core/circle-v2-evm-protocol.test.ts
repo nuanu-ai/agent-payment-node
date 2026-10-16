@@ -5,7 +5,7 @@ import { encodeAbiParameters, encodeEventTopics, getAddress, keccak256, type Add
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../../src/canonical.js";
 import { CIRCLE_AMOUNT, CIRCLE_DEPLOYMENT_PINS, CIRCLE_MESSENGER, CIRCLE_MINTER, CIRCLE_RECIPIENT,
-  CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_TRANSMITTER, circleRoute, type CircleDestinationChain } from "../../src/circle-v2-evm/catalog.js";
+  CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_TRANSMITTER, circleLegacyRoute as circleRoute, type CircleDestinationChain } from "../../src/circle-v2-evm/catalog.js";
 import { CIRCLE_ABI, CIRCLE_ZERO, bindCircleAttestation, circleWord, decodeCircleDestination, decodeCircleMessage, decodeCircleSource,
   encodeCircleApproval, encodeCircleBurn, encodeCircleMint, verifyCircleApproval, circleAttesterConfigurationHash, verifyCircleAttestationSigners, type CircleAttesterSnapshot,
   type CircleObservation, type CircleSourceProof } from "../../src/circle-v2-evm/protocol.js";

@@ -6,7 +6,7 @@ import { canonicalJson } from "../../src/canonical.js";
 import { CircleRpc } from "../../src/circle-v2-evm/rpc.js";
 import { readCircleMintFeeRecipient } from "../../src/circle-v2-evm/mint-fee-recipient.js";
 import { decodeCircleDestination, bindCircleAttestation, decodeCircleSource, encodeCircleMint, circleWord, type CircleAttestation, type CircleObservation, type CircleSourceProof } from "../../src/circle-v2-evm/protocol.js";
-import { CIRCLE_RECIPIENT, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_RECIPIENT, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { event, observation, source, iris, message, snapshot } from "./circle-v2-evm-runtime-fixtures.js";
 interface Fixture { source: CircleSourceProof; attestation: CircleAttestation; observation: CircleObservation; feeRecipient: Address; captures: { request: {method:string;params:unknown[]}; result:unknown }[]; }
 const load = async () => JSON.parse(await readFile("tests/fixtures/circle-owned-v2/linea-public-mint.json", "utf8")) as Fixture;

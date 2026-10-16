@@ -11,7 +11,7 @@ export interface CircleFundingParameters {
 }
 export interface CircleFundingBindingV2 extends CircleFundingParameters {
     readonly schemaVersion: "apn.circle-funding-binding.v2";
-    readonly sourceProfile: "evm-live-buyer";
+    readonly sourceProfile: string;
     readonly sourceChain: 42161;
     readonly sourceDomain: 3;
     readonly sourceOwner: Address;
@@ -51,7 +51,18 @@ export interface CircleFundingIntentV2 {
 }
 /** All absent means the unchanged legacy input. A partial or unknown field set cannot select v2. */
 export declare function deriveCircleFundingParameters(value: unknown): CircleFundingParameters | null;
-export declare function circleFundingBinding(chain: CircleDestinationChain, destinationProfile: string, value: unknown): CircleFundingBindingV2;
+/** Who signs: the source profile and its custody wallet, and the destination gas profile and its custody wallet. */
+export interface CircleFundingIdentity {
+    readonly sourceProfile: string;
+    readonly sourceOwner: Address;
+    readonly destinationProfile: string;
+    readonly gasPayer: Address;
+}
+/** Protocol fields come from the route table; identity and economics are the caller's explicit, already-resolved inputs. */
+export declare function circleFundingBinding(chain: CircleDestinationChain, identity: CircleFundingIdentity, value: unknown): CircleFundingBindingV2;
+/** The STORED binding: exact keys, its own seal, canonical parameters and identity spellings, and protocol fields equal
+ * to the route table row it names (OWNR 5.2). Identity is never compared with a constant here; the operation validator
+ * binds `sourceProfile/sourceOwner/destinationProfile/gasPayer` to the operation's own profiles and custody records. */
 export declare function validateCircleFundingBinding(value: unknown): CircleFundingBindingV2;
 export declare function quoteCircleFundingFee(bindingValue: unknown, response: unknown, fetchedAtMs: number, nowMs: number): CircleFundingFeeV2;
 export declare function assertCircleFundingFee(bindingValue: unknown, value: unknown, nowMs: number): CircleFundingFeeV2;

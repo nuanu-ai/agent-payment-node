@@ -5,7 +5,7 @@ import { decodeCircleMintEvents } from "./mint-events.js";
 import { decodeEventLog, encodeAbiParameters, encodeFunctionData, encodeEventTopics, getAddress, keccak256, parseAbi, recoverAddress, toEventSelector } from "viem";
 import { hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { CIRCLE_AMOUNT, CIRCLE_MAX_FEE, CIRCLE_MIN_MINT, CIRCLE_MESSENGER, CIRCLE_RECIPIENT, CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_AMOUNT, CIRCLE_MAX_FEE, CIRCLE_MIN_MINT, CIRCLE_MESSENGER, CIRCLE_RECIPIENT, CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_TRANSMITTER, circleLegacyRoute, circleRoute, isCircleDestinationChain } from "./catalog.js";
 export const CIRCLE_ZERO = `0x${"00".repeat(32)}`;
 export const CIRCLE_ABI = parseAbi([
     "function approve(address spender,uint256 amount) returns(bool)",
@@ -34,14 +34,15 @@ export function circleUint(value) {
 }
 export const circleWord = (address) => `0x${"0".repeat(24)}${getAddress(address).slice(2).toLowerCase()}`;
 const slice = (m, start, length) => `0x${m.slice(2 + start * 2, 2 + (start + length) * 2)}`;
-/** A v2 binding is checked in full; no binding retains the exact legacy economic tuple. */
+/** A v2 binding is checked in full and carries the operation's own source wallet and beneficiary; no binding is the
+ * frozen read-only v1 schema with its fixed source wallet, beneficiary and economic tuple. */
 export function circleEconomics(chain, binding) {
     if (binding === undefined)
-        return { amount: CIRCLE_AMOUNT, maxFee: CIRCLE_MAX_FEE, minMint: CIRCLE_MIN_MINT, recipient: CIRCLE_RECIPIENT };
+        return { amount: CIRCLE_AMOUNT, maxFee: CIRCLE_MAX_FEE, minMint: CIRCLE_MIN_MINT, recipient: CIRCLE_RECIPIENT, sourceOwner: CIRCLE_SOURCE_OWNER };
     const b = validateCircleFundingBinding(binding);
     if (b.destinationChain !== chain)
         circleFail("funding_destination_binding");
-    return { amount: BigInt(b.amountAtomic), maxFee: BigInt(b.maxFeeAtomic), minMint: BigInt(b.minMintAtomic), recipient: b.recipient };
+    return { amount: BigInt(b.amountAtomic), maxFee: BigInt(b.maxFeeAtomic), minMint: BigInt(b.minMintAtomic), recipient: b.recipient, sourceOwner: b.sourceOwner };
 }
 export function encodeCircleApproval(reset = false, binding) {
     const amount = binding === undefined ? CIRCLE_AMOUNT : circleEconomics(binding.destinationChain, binding).amount;
@@ -59,7 +60,7 @@ export function decodeCircleMessage(value, chain, attested, binding) {
         slice(m, 44, 32) !== circleWord(CIRCLE_MESSENGER) || slice(m, 76, 32) !== circleWord(CIRCLE_MESSENGER) ||
         slice(m, 108, 32) !== CIRCLE_ZERO || u(140, 4) !== 1000n || u(148, 4) !== 1n ||
         slice(m, 152, 32) !== circleWord(CIRCLE_SOURCE_TOKEN) || slice(m, 184, 32) !== circleWord(e.recipient) ||
-        u(216, 32) !== e.amount || slice(m, 248, 32) !== circleWord(CIRCLE_SOURCE_OWNER) ||
+        u(216, 32) !== e.amount || slice(m, 248, 32) !== circleWord(e.sourceOwner) ||
         u(280, 32) !== e.maxFee || u(312, 32) > e.maxFee)
         circleFail("message_binding");
     if (e.amount - u(312, 32) < e.minMint)
@@ -91,7 +92,7 @@ export function verifyCircleObservation(input, expected) {
         !Array.isArray(b.transactions) || b.transactions.filter(x => typeof x === "string" && x.toLowerCase() === txHash).length !== 1 ||
         gas === 0n || gas > expected.maxGasAtomic || used > gas || price > circleUint(t.maxFeePerGas))
         circleFail("transaction_finality_binding");
-    const fee = (expected.chain === 143 ? gas : used) * price;
+    const fee = (isCircleDestinationChain(expected.chain) && circleRoute(expected.chain).gasBilling === "limit" ? gas : used) * price;
     // These finite chains account for native execution in effectiveGasPrice; unknown extra fee fields fail closed.
     for (const field of ["l1Fee", "operatorFee", "blobGasUsed", "blobGasPrice"])
         if (r[field] !== undefined && circleUint(r[field]) !== 0n)
@@ -132,12 +133,12 @@ export function oneEvent(observation, name, emitter) {
 }
 export function decodeCircleSource(input, chain, binding) {
     const e = circleEconomics(chain, binding);
-    const receipt = verifyCircleObservation(input, { chain: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_MESSENGER,
+    const receipt = verifyCircleObservation(input, { chain: 42161, from: e.sourceOwner, to: CIRCLE_MESSENGER,
         data: encodeCircleBurn(chain, binding), maxNativeDebitAtomic: 30000000000000n, maxGasAtomic: 600000n });
     const sent = oneEvent(input, "MessageSent", CIRCLE_TRANSMITTER), burn = oneEvent(input, "DepositForBurn", CIRCLE_MESSENGER), args = burn.args;
     const message = decodeCircleMessage(sent.args.message, chain, false, binding);
     if (sent.logIndex >= burn.logIndex || !addressEquals(args.burnToken, CIRCLE_SOURCE_TOKEN) || args.amount !== e.amount ||
-        !addressEquals(args.depositor, CIRCLE_SOURCE_OWNER) || circleHex(args.mintRecipient, 32) !== circleWord(e.recipient) ||
+        !addressEquals(args.depositor, e.sourceOwner) || circleHex(args.mintRecipient, 32) !== circleWord(e.recipient) ||
         args.destinationDomain !== circleRoute(chain).domain || circleHex(args.destinationTokenMessenger, 32) !== circleWord(CIRCLE_MESSENGER) ||
         circleHex(args.destinationCaller, 32) !== CIRCLE_ZERO || args.maxFee !== e.maxFee || args.minFinalityThreshold !== 1000 || args.hookData !== "0x")
         circleFail("burn_event_binding");
@@ -203,7 +204,7 @@ export async function bindCircleAttestation(source, response, snapshot, binding)
         !sameWord(decoded.sender, circleWord(CIRCLE_MESSENGER)) || !sameWord(decoded.recipient, circleWord(CIRCLE_MESSENGER)) ||
         !sameWord(decoded.destinationCaller, CIRCLE_ZERO) || circleHex(decoded.messageBody) !== m.body ||
         !sameWord(b.burnToken, circleWord(CIRCLE_SOURCE_TOKEN)) || !sameWord(b.mintRecipient, circleWord(e.recipient)) ||
-        circleUint(b.amount) !== e.amount || !sameWord(b.messageSender, circleWord(CIRCLE_SOURCE_OWNER)))
+        circleUint(b.amount) !== e.amount || !sameWord(b.messageSender, circleWord(e.sourceOwner)))
         circleFail("iris_decoded_binding");
     for (const [v, expected] of [[decoded.minFinalityThreshold, 1000n], [decoded.finalityThresholdExecuted, BigInt(m.finalityExecuted)],
         [b.maxFee, e.maxFee], [b.feeExecuted, BigInt(m.feeExecutedAtomic)], [b.expirationBlock, BigInt(m.expirationBlock)]])
@@ -236,15 +237,15 @@ export function encodeCircleMint(attested) {
 }
 export function decodeCircleDestination(source, attested, input, usedNonceAtomic, destinationProfile, feeRecipient, binding) {
     const e = circleEconomics(source.destinationChain, binding);
+    // A v2 mint is paid by the binding's own gas wallet (bound to the destination custody by the operation validator).
     assertCircleAttestation(source, attested, binding);
-    const route = circleRoute(source.destinationChain, destinationProfile);
-    if (binding !== undefined && (binding.destinationProfile !== route.gasPayerProfile || binding.gasPayer !== route.gasPayer))
-        circleFail("funding_mint_gas_owner_binding");
-    const receipt = verifyCircleObservation(input, { chain: route.chainId, from: route.gasPayer, to: CIRCLE_TRANSMITTER,
+    const route = circleRoute(source.destinationChain);
+    const gasPayer = binding === undefined ? circleLegacyRoute(source.destinationChain, destinationProfile).gasPayer : binding.gasPayer;
+    const receipt = verifyCircleObservation(input, { chain: route.chainId, from: gasPayer, to: CIRCLE_TRANSMITTER,
         data: encodeCircleMint(attested), maxNativeDebitAtomic: BigInt(route.destinationNativeCap), maxGasAtomic: 600000n });
     const received = oneEvent(input, "MessageReceived", CIRCLE_TRANSMITTER).args;
     decodeCircleMintEvents(attested, input, feeRecipient, binding);
-    if (circleUint(usedNonceAtomic) !== 1n || !addressEquals(received.caller, route.gasPayer) || received.sourceDomain !== 3 ||
+    if (circleUint(usedNonceAtomic) !== 1n || !addressEquals(received.caller, gasPayer) || received.sourceDomain !== 3 ||
         circleHex(received.nonce, 32) !== attested.nonce || circleHex(received.sender, 32) !== circleWord(CIRCLE_MESSENGER) ||
         received.finalityThresholdExecuted !== attested.finalityExecuted || circleHex(received.messageBody) !== attested.body ||
         BigInt(attested.expirationBlock) !== 0n && BigInt(attested.expirationBlock) <= BigInt(receipt.blockNumberAtomic))
@@ -257,10 +258,10 @@ export function decodeCircleDestination(source, attested, input, usedNonceAtomic
  * `approve` from the owner to the exact token, and its single canonical Approval event carries the value it set. */
 export function verifyCircleApproval(input, reset, allowanceAtReceiptAtomic, binding) {
     const e = binding === undefined ? circleEconomics(1329) : circleEconomics(binding.destinationChain, binding);
-    const proof = verifyCircleObservation(input, { chain: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_SOURCE_TOKEN,
+    const proof = verifyCircleObservation(input, { chain: 42161, from: e.sourceOwner, to: CIRCLE_SOURCE_TOKEN,
         data: encodeCircleApproval(reset, binding), maxNativeDebitAtomic: 30000000000000n, maxGasAtomic: 100000n });
     const args = oneEvent(input, "Approval", CIRCLE_SOURCE_TOKEN).args, amount = reset ? 0n : binding === undefined ? e.amount : circleEconomics(binding.destinationChain, binding).amount;
-    if (!addressEquals(args.owner, CIRCLE_SOURCE_OWNER) || !addressEquals(args.spender, CIRCLE_MESSENGER) ||
+    if (!addressEquals(args.owner, e.sourceOwner) || !addressEquals(args.spender, CIRCLE_MESSENGER) ||
         args.value !== amount || allowanceAtReceiptAtomic !== null && circleUint(allowanceAtReceiptAtomic) !== amount)
         circleFail("approval_binding");
     return proof;

@@ -3,7 +3,8 @@ import { getAddress, type Address } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, circleRoute, type CircleDestinationChain } from "./catalog.js";
+import { sealedStoredRecord, type StoredRecordFailureReason } from "../stored-record-binding.js";
+import { CIRCLE_SOURCE_TOKEN, circleFundingMechanism, circleRoute, isCircleDestinationChain, type CircleDestinationChain } from "./catalog.js";
 import type { CircleAccountPreflight } from "./preflight.js";
 
 export const CIRCLE_FUNDING_OPERATION_V2 = "apn.circle-v2-evm-operation.v2" as const;
@@ -15,7 +16,7 @@ export interface CircleFundingParameters {
 }
 export interface CircleFundingBindingV2 extends CircleFundingParameters {
   readonly schemaVersion: "apn.circle-funding-binding.v2";
-  readonly sourceProfile: "evm-live-buyer"; readonly sourceChain: 42161; readonly sourceDomain: 3;
+  readonly sourceProfile: string; readonly sourceChain: 42161; readonly sourceDomain: 3;
   readonly sourceOwner: Address; readonly sourceToken: Address; readonly decimals: 6;
   readonly destinationChain: CircleDestinationChain; readonly destinationDomain: 16 | 11 | 15;
   readonly destinationToken: Address; readonly destinationProfile: string; readonly gasPayer: Address;
@@ -57,25 +58,35 @@ export function deriveCircleFundingParameters(value: unknown): CircleFundingPara
   if (Object.keys(value).length === 0) return null;
   return parameters(value);
 }
-export function circleFundingBinding(chain: CircleDestinationChain, destinationProfile: string, value: unknown): CircleFundingBindingV2 {
-  let route;
-  try { route = circleRoute(chain, destinationProfile); } catch { return refuse("funding_destination"); }
-  const p = parameters(value);
+/** Who signs: the source profile and its custody wallet, and the destination gas profile and its custody wallet. */
+export interface CircleFundingIdentity { readonly sourceProfile: string; readonly sourceOwner: Address; readonly destinationProfile: string; readonly gasPayer: Address; }
+const BINDING_KEYS = ["schemaVersion", ...FIELDS, "sourceProfile", "sourceChain", "sourceDomain", "sourceOwner", "sourceToken", "decimals",
+  "destinationChain", "destinationDomain", "destinationToken", "destinationProfile", "gasPayer", "mechanism", "bindingHash"] as const;
+function profileName(value: unknown): string { if (typeof value !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(value)) refuse("funding_profile"); return value; }
+/** Protocol fields come from the route table; identity and economics are the caller's explicit, already-resolved inputs. */
+export function circleFundingBinding(chain: CircleDestinationChain, identity: CircleFundingIdentity, value: unknown): CircleFundingBindingV2 {
+  if (!isCircleDestinationChain(chain)) refuse("funding_destination");
+  const route = circleRoute(chain), p = parameters(value);
   const body = { schemaVersion: "apn.circle-funding-binding.v2" as const, ...p,
-    sourceProfile: "evm-live-buyer" as const, sourceChain: 42161 as const, sourceDomain: 3 as const,
-    sourceOwner: CIRCLE_SOURCE_OWNER, sourceToken: CIRCLE_SOURCE_TOKEN, decimals: 6 as const,
+    sourceProfile: profileName(identity.sourceProfile), sourceChain: 42161 as const, sourceDomain: 3 as const,
+    sourceOwner: address(identity.sourceOwner), sourceToken: CIRCLE_SOURCE_TOKEN, decimals: 6 as const,
     destinationChain: route.chainId, destinationDomain: route.domain, destinationToken: route.token,
-    destinationProfile: route.gasPayerProfile, gasPayer: route.gasPayer,
-    mechanism: Object.freeze({ provider: "circle-cctp-v2" as const, reference: `circle-v2-evm-fast-42161-${route.chainId}.v2` }) };
+    destinationProfile: profileName(identity.destinationProfile), gasPayer: address(identity.gasPayer), mechanism: circleFundingMechanism(route.chainId) };
   return Object.freeze({ ...body, bindingHash: hashObject(body) });
 }
+/** The STORED binding: exact keys, its own seal, canonical parameters and identity spellings, and protocol fields equal
+ * to the route table row it names (OWNR 5.2). Identity is never compared with a constant here; the operation validator
+ * binds `sourceProfile/sourceOwner/destinationProfile/gasPayer` to the operation's own profiles and custody records. */
 export function validateCircleFundingBinding(value: unknown): CircleFundingBindingV2 {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", ...FIELDS, "sourceProfile", "sourceChain", "sourceDomain", "sourceOwner", "sourceToken", "decimals",
-    "destinationChain", "destinationDomain", "destinationToken", "destinationProfile", "gasPayer", "mechanism", "bindingHash"])) refuse("funding_binding_shape");
-  const expected = circleFundingBinding(value.destinationChain as CircleDestinationChain, String(value.destinationProfile),
-    Object.fromEntries(FIELDS.map(k => [k, value[k]])));
-  if (hashObject(value) !== hashObject(expected)) refuse("funding_binding_changed");
-  return expected;
+  const fail = (reason: StoredRecordFailureReason): never => refuse(reason === "stored_record_shape" ? "funding_binding_shape" : "funding_binding_changed");
+  const b = sealedStoredRecord<CircleFundingBindingV2>(value, { keys: BINDING_KEYS, sealField: "bindingHash", seal: hashObject }, fail);
+  parameters(Object.fromEntries(FIELDS.map(k => [k, b[k]]))); profileName(b.sourceProfile); profileName(b.destinationProfile); address(b.sourceOwner); address(b.gasPayer);
+  if (!isCircleDestinationChain(b.destinationChain)) refuse("funding_binding_changed");
+  const route = circleRoute(b.destinationChain), mechanism = circleFundingMechanism(route.chainId);
+  if (b.schemaVersion !== "apn.circle-funding-binding.v2" || b.sourceChain !== 42161 || b.sourceDomain !== 3 || b.sourceToken !== CIRCLE_SOURCE_TOKEN || b.decimals !== 6 ||
+    b.destinationDomain !== route.domain || b.destinationToken !== route.token || !isPlainRecord(b.mechanism) || !exactKeys(b.mechanism, ["provider", "reference"]) ||
+    b.mechanism.provider !== mechanism.provider || b.mechanism.reference !== mechanism.reference) refuse("funding_binding_changed");
+  return b;
 }
 export function quoteCircleFundingFee(bindingValue: unknown, response: unknown, fetchedAtMs: number, nowMs: number): CircleFundingFeeV2 {
   const binding = validateCircleFundingBinding(bindingValue); time(fetchedAtMs); time(nowMs);
@@ -125,7 +136,7 @@ export function admitCircleFundingAssets(bindingValue: unknown, input: {
   readonly sourceTokenUsageAtomic: string; readonly sourceNativeUsageAtomic: string; readonly destinationNativeUsageAtomic: string;
   readonly nowMs: number;
 }): void {
-  const b = validateCircleFundingBinding(bindingValue), route = circleRoute(b.destinationChain, b.destinationProfile); time(input.nowMs);
+  const b = validateCircleFundingBinding(bindingValue), route = circleRoute(b.destinationChain); time(input.nowMs);
   const s = input.source, d = input.destination;
   if (s.chainId !== b.sourceChain || s.address !== b.sourceOwner || uint(s.usdcBalanceAtomic) < BigInt(b.amountAtomic) ||
     uint(s.nativeBalanceAtomic) < 75_000_000_000_000n || uint(s.allowanceAtomic) !== 0n || uint(s.latestNonceAtomic) !== uint(s.pendingNonceAtomic) ||

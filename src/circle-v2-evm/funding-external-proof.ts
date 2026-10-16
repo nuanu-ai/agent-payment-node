@@ -11,11 +11,11 @@ export interface CircleFundingExternalFulfillment extends Omit<CircleExternalFul
 }
 export async function decodeCircleFundingExternalDestination(op: CircleFundingOperationV2, input: CircleObservation, usedNonce: unknown, feeRecipient?: Address): Promise<CircleReceiptProof & { caller: Address }> {
   if (op.source === null || op.attestation === null) circleFail("external_source_attestation_required");
-  assertCircleAttestation(op.source, op.attestation, op.funding); const route = circleRoute(op.destinationChain, op.destinationProfile), a = op.attestation;
+  assertCircleAttestation(op.source, op.attestation, op.funding); const route = circleRoute(op.destinationChain), a = op.attestation;
   const t = circleRecord(input.transaction), r = circleRecord(input.receipt), b = circleRecord(input.canonicalBlock), h = circleRecord(input.finalityHead);
   const signed = await circleExternalTransaction(t), blockHash = circleExternalHeader(b); circleExternalHeader(input.recheckedBlock); circleExternalHeader(h);
   const number = circleUint(b.number), index = circleUint(t.transactionIndex), gas = circleUint(t.gas), used = circleUint(r.gasUsed), price = circleUint(r.effectiveGasPrice);
-  if (input.chainId !== route.chainId || input.finalityTag !== "safe" || circleUint(t.chainId) !== BigInt(route.chainId) || signed.caller === route.gasPayer ||
+  if (input.chainId !== route.chainId || input.finalityTag !== "safe" || circleUint(t.chainId) !== BigInt(route.chainId) || signed.caller === op.funding.gasPayer ||
     getAddress(String(t.to)) !== CIRCLE_TRANSMITTER || circleHex(t.input) !== encodeCircleMint(a) || circleUint(t.value) !== 0n ||
     circleHex(t.blockHash,32) !== blockHash || circleUint(t.blockNumber) !== number || circleHex(r.transactionHash,32) !== signed.hash ||
     circleUint(r.transactionIndex) !== index || circleHex(r.blockHash,32) !== blockHash || circleUint(r.blockNumber) !== number || circleUint(r.status) !== 1n ||
@@ -34,7 +34,7 @@ export async function decodeCircleFundingExternalDestination(op: CircleFundingOp
     received.finalityThresholdExecuted !== a.finalityExecuted || circleHex(received.messageBody) !== a.body ||
     BigInt(a.expirationBlock) !== 0n && BigInt(a.expirationBlock) <= number || BigInt(op.funding.amountAtomic) - BigInt(a.feeExecutedAtomic) !== BigInt(a.receivedAtomic) || BigInt(a.receivedAtomic) < BigInt(op.funding.minMintAtomic)) circleFail("external_message_binding");
   return { caller:signed.caller,transactionHash:signed.hash,blockHash,blockNumberAtomic:number.toString(),finalityBlockHash:circleHex(h.hash,32),finalityBlockNumberAtomic:circleUint(h.number).toString(),
-    transactionHashBinding:hashObject(t),finalityTag:"safe",receiptHash:hashObject(r),logsHash:hashObject(r.logs),actualFeeAtomic:((route.chainId === 143 ? gas : used)*price).toString() };
+    transactionHashBinding:hashObject(t),finalityTag:"safe",receiptHash:hashObject(r),logsHash:hashObject(r.logs),actualFeeAtomic:((route.gasBilling === "limit" ? gas : used)*price).toString() };
 }
 export function fundingExternalClaimKey(op: CircleFundingOperationV2): string {
   if (op.attestation === null || op.source === null) circleFail("external_claim_source");
@@ -43,11 +43,11 @@ export function fundingExternalClaimKey(op: CircleFundingOperationV2): string {
 export function validateFundingExternalFulfillment(p: CircleFundingExternalFulfillment, op: CircleFundingOperationV2): void {
   if (!isPlainRecord(p) || !exactKeys(p,["schemaVersion","operationId","fingerprint","sourceTransactionHash","sourceMessageHash","attestedMessageHash","nonce","destinationChain","recipient","token","grossAtomic","issuerFeeAtomic","netAtomic","caller","controlledDestinationNativeAtomic","sourceApprovalActualFeeAtomic","sourceBurnActualFeeAtomic","destinationReceipt","sourceFinality","recipientCredit","historicalDeploymentDigest","claimDigest","evidenceHash","proofHash"])) circleFail("external_proof_shape");
   assertCircleSource(p.sourceFinality, op.funding);
-  const {proofHash,...body}=p, route=circleRoute(op.destinationChain,op.destinationProfile), credit=p.recipientCredit;
+  const {proofHash,...body}=p, route=circleRoute(op.destinationChain), credit=p.recipientCredit;
   if (p.schemaVersion !== "apn.circle-funding-external-fulfillment.v2" || proofHash !== hashObject(body) || p.operationId !== op.operationId || p.fingerprint !== op.fingerprint ||
     p.sourceTransactionHash !== op.source?.transactionHash || p.sourceMessageHash !== op.source?.sourceMessageHash || p.attestedMessageHash !== op.attestation?.hash || p.nonce !== op.attestation?.nonce ||
     p.destinationChain !== op.destinationChain || p.recipient !== op.funding.recipient || p.token !== route.token || p.grossAtomic !== op.funding.amountAtomic || p.issuerFeeAtomic !== op.attestation?.feeExecutedAtomic || p.netAtomic !== op.attestation?.receivedAtomic ||
-    p.controlledDestinationNativeAtomic !== "0" || getAddress(p.caller) !== p.caller || p.caller === route.gasPayer || p.sourceFinality.finalityTag !== "finalized" || p.destinationReceipt.finalityTag !== "safe" ||
+    p.controlledDestinationNativeAtomic !== "0" || getAddress(p.caller) !== p.caller || p.caller === op.funding.gasPayer || p.sourceFinality.finalityTag !== "finalized" || p.destinationReceipt.finalityTag !== "safe" ||
     p.sourceFinality.sourceMessageHash !== p.sourceMessageHash || p.sourceFinality.transactionHash !== p.sourceTransactionHash || p.sourceFinality.blockHash !== op.source?.blockHash || p.sourceFinality.receiptHash !== op.source?.receiptHash ||
     p.sourceApprovalActualFeeAtomic !== op.effects[0]?.proof?.actualFeeAtomic || p.sourceBurnActualFeeAtomic !== p.sourceFinality.actualFeeAtomic ||
     ![p.historicalDeploymentDigest,p.claimDigest,p.evidenceHash].every(x=>/^[a-f0-9]{64}$/u.test(x)) ||

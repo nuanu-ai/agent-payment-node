@@ -12,7 +12,7 @@ import { seal as sealUsage, reservationIdFor, idempotency } from "../../src/asse
 import { CircleRepository, validateCircleAdvance } from "../../src/circle-v2-evm/repository.js";
 import { advanceCircle, circleEnvelope, sealCircle, validateCircle, type CircleOperationV1, type CircleEffect, type CircleRole } from "../../src/circle-v2-evm/operation-model.js";
 import { approveCircleSource, approveCircleMint, executeCircleEffect, observeCircle, cleanupCircle, type CircleLifecyclePorts } from "../../src/circle-v2-evm/lifecycle.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_RECIPIENT, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_RECIPIENT, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { decodeCircleSource, bindCircleAttestation, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, circleWord, circleHex } from "../../src/circle-v2-evm/protocol.js";
 import { OperationService } from "../../src/operation-service.js";
 import { storedOperationDomains } from "../../src/operation-conflict-domain.js";
