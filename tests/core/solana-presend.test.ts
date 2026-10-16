@@ -49,20 +49,19 @@ test("the SOL journey batches independent reads within each safety checkpoint", 
   s.approval.onApprove = () => { atApproval = s.rpc.physicalRequests; };
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
+  // Prepare; the pre-prompt check; the send guard; the one revalidation right before sealing; the finality observation.
+  // Nothing re-reads the chain after the prompt before the guard, after sealing, or inside the send itself.
   assert.deepEqual(s.rpc.batches, [
     ["getMultipleAccounts", "getLatestBlockhash"],
     ["getGenesisHash", "getMultipleAccounts"],
-    ["getGenesisHash", "getMultipleAccounts"],
     ["getGenesisHash", "getLatestBlockhash", "getBlockHeight", "getMultipleAccounts"],
-    ["getGenesisHash", "getBlockHeight", "getMultipleAccounts"],
-    ["getGenesisHash", "getBlockHeight", "getMultipleAccounts"],
     ["getGenesisHash", "getBlockHeight", "getMultipleAccounts"],
     ["getGenesisHash", "getSignatureStatuses"],
   ]);
-  assert.equal(s.rpc.calls.length, 35);
-  assert.equal(s.rpc.physicalRequests, 22);
+  assert.equal(s.rpc.calls.length, 25, "35 logical reads before phase 2");
+  assert.equal(s.rpc.physicalRequests, 17);
   assert.equal(before, 5);
-  assert.equal(s.rpc.physicalRequests - before, 17);
+  assert.equal(s.rpc.physicalRequests - before, 12, "17 approval requests before phase 2");
   assert.ok(atApproval > 0 && atApproval < s.rpc.physicalRequests);
   assert.ok(s.rpc.batches.every(batch => !batch.includes("sendTransaction") && !batch.includes("simulateTransaction")));
   assert.ok(s.rpc.calls.indexOf("simulateTransaction") < s.rpc.calls.indexOf("sendTransaction"));
@@ -74,9 +73,11 @@ test("the USDC journey batches rent with the fee after the account snapshot", as
   const id = await s.prepare("usdc");
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
-  assert.equal(s.rpc.calls.length, 42);
-  assert.equal(s.rpc.physicalRequests, 24);
-  assert.equal(s.rpc.batches.filter(batch => batch.join(",") === "getFeeForMessage,getMinimumBalanceForRentExemption").length, 5);
+  assert.equal(s.rpc.calls.length, 29, "42 logical reads before phase 2");
+  assert.equal(s.rpc.physicalRequests, 17, "24 physical requests before phase 2");
+  assert.equal(s.rpc.batches.filter(batch => batch.join(",") === "getFeeForMessage,getMinimumBalanceForRentExemption").length, 3);
+  assert.ok(s.rpc.batches.some(batch => batch.join(",") === "getGenesisHash,getMinimumBalanceForRentExemption,getMultipleAccounts"),
+    "before the send guard the frozen account creation's rent rides in the account-snapshot batch");
   assert.equal(s.rpc.submissions.length, 1);
 });
 

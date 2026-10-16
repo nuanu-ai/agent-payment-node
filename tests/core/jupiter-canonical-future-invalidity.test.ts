@@ -173,8 +173,9 @@ test("SolanaRpc batch scan counts one physical POST per batch and aggregates the
     assert.equal(result.outcome, "future_invalidity_witness");
     if (result.outcome !== "future_invalidity_witness") continue;
     assert.ok(result.providers.every(provider => provider.readCount === 72));
-    assert.equal(harness.budget.logicalCalls, operation * 144);
-    assert.equal(harness.budget.physicalRequests, operation * 32);
+    // Each SolanaRpc proves its genesis once (SURF-10): a later check on the same instances skips that POST per provider.
+    assert.equal(harness.budget.logicalCalls, 144 + (operation - 1) * 142);
+    assert.equal(harness.budget.physicalRequests, 32 + (operation - 1) * 30);
     assert.equal(harness.posts.filter(post => post.isBatch).length, operation * 20);
     assert.ok(harness.posts.every(post => post.batchSize <= 8));
   }
@@ -189,8 +190,9 @@ test("three short checks share one SolanaRpc budget and batch response IDs are c
   for (let operation = 1; operation <= 3; operation += 1) {
     const result = await verify(harness.providers, inputFor());
     assert.equal(result.outcome, "future_invalidity_witness");
-    assert.equal(harness.budget.physicalRequests, operation * 16);
-    assert.equal(harness.budget.logicalCalls, operation * 22);
+    // The genesis is proven once per SolanaRpc instance (SURF-10), so only the first check spends its two POSTs.
+    assert.equal(harness.budget.physicalRequests, 16 + (operation - 1) * 14);
+    assert.equal(harness.budget.logicalCalls, 22 + (operation - 1) * 20);
   }
 });
 

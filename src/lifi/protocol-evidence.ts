@@ -3,9 +3,8 @@ import { canonicalJson, sha256 } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
 import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
-import { decodeBridgeCall } from "./decode.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
-import type { AcrossCorrelation, BridgeDeploymentIdentity, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
+import type { AcrossCorrelation, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
 
@@ -26,18 +25,19 @@ type OFTSent = Readonly<{ guid: Hex; dstEid: number; fromAddress: Address; amoun
 type OFTReceived = Readonly<{ guid: Hex; srcEid: number; toAddress: Address; amountReceivedLD: bigint }>;
 type Transfer = Readonly<{ from: Address; to: Address; value: bigint }>;
 
-/** Frozen and observed deployment identities are checked again at the exact destination receipt block. */
+/**
+ * The reviewed StargatePoolNative on Base. The pool is immutable code at a fixed address (a Stargate upgrade deploys a new
+ * pool), and Base has EIP-6780, so its registry code hash is a fact of the address: OFTReceived from it follows its
+ * successful native outflow without re-reading the code at the receipt block (P2).
+ */
 export interface NativeStargateDestinationPin {
   readonly pool: Address;
-  readonly frozenDeployment: BridgeDeploymentIdentity;
-  readonly observedDeployment: BridgeDeploymentIdentity;
-  readonly frozenPoolCodeHash: Hex;
-  readonly observedPoolCodeHash: Hex;
+  readonly poolCodeHash: Hex;
 }
 
 export function bridgeSourceProof(materialization: BridgeMaterialization, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): BridgeSourceProof {
-  const canonical = decodeBridgeCall(materialization);
-  if (!bridgeSame(canonical, decoded) || receipt.chainId !== decoded.sourceChainId) fail("source_binding");
+  // `decoded` is the stored decode of this materialization, re-derived and compared when the record was loaded.
+  if (receipt.chainId !== decoded.sourceChainId) fail("source_binding");
   validateReceipt(receipt);
   validateCommonSourceEvents(decoded, receipt);
   const nativeStargate = decoded.tool === "stargateV2" && decoded.sourceToken === BRIDGE_ZERO_ADDRESS;
@@ -55,8 +55,7 @@ export function bridgeSourceProof(materialization: BridgeMaterialization, decode
 
 export function bridgeDestinationProof(source: BridgeSourceProof, materialization: BridgeMaterialization, decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt,
   nativeStargatePin?: NativeStargateDestinationPin): BridgeDestinationProof {
-  const canonical = decodeBridgeCall(materialization);
-  if (!bridgeSame(canonical, decoded) || source.tool !== decoded.tool || source.chainId !== decoded.sourceChainId ||
+  if (source.tool !== decoded.tool || source.chainId !== decoded.sourceChainId ||
     source.sourceAmountAtomic !== decoded.sourceAmountAtomic || source.bridgeAmountAtomic !== decoded.bridgeAmountAtomic ||
     source.feeForwardedAtomic !== decoded.feeAmountAtomic || receipt.chainId !== decoded.destinationChainId) fail("destination_binding");
   validateStoredSource(source, decoded); validateReceipt(receipt);
@@ -67,8 +66,7 @@ export function bridgeDestinationProof(source: BridgeSourceProof, materializatio
 /** Prove the canonical Across fill tuple before requesting any destination execution trace. */
 export function validateBnbFilledRelay(source: BridgeSourceProof, materialization: BridgeMaterialization,
   decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): void {
-  const canonical = decodeBridgeCall(materialization);
-  if (!bridgeSame(canonical, decoded) || decoded.composite === undefined || source.tool !== "across" ||
+  if (decoded.composite === undefined || source.tool !== "across" ||
     receipt.chainId !== decoded.destinationChainId) fail("destination_binding");
   validateStoredSource(source, decoded); validateReceipt(receipt); acrossFilledRelay(source, decoded, receipt);
 }
@@ -295,19 +293,7 @@ function validateNativeStargateDestinationPin(decoded: DecodedBridgeCall, receip
     decoded.destinationChainId !== 8453 || decoded.sourceToken !== BRIDGE_ZERO_ADDRESS ||
     decoded.destinationToken !== BRIDGE_ZERO_ADDRESS || decoded.protocol.dstEid !== 30184 || pin === undefined ||
     pin.pool !== bridgeProtocolEmitter(8453, "stargateV2", BRIDGE_ZERO_ADDRESS)) fail("stargate_native_destination_pin");
-  const frozen = pin.frozenDeployment, observed = pin.observedDeployment;
-  if (frozen.chainId !== 8453 || frozen.peerChainId !== 1 || frozen.tool !== "stargateV2" ||
-    observed.chainId !== frozen.chainId || observed.peerChainId !== frozen.peerChainId || observed.tool !== frozen.tool ||
-    observed.block.numberAtomic !== receipt.blockNumberAtomic ||
-    observed.block.hash !== receipt.blockHash ||
-    bridgeUint(frozen.block.numberAtomic, true, "APN_RPC_PROTOCOL") >
-      bridgeUint(observed.block.numberAtomic, true, "APN_RPC_PROTOCOL") ||
-    !/^[a-f0-9]{64}$/u.test(frozen.contractHash) || !/^[a-f0-9]{64}$/u.test(frozen.codeHash) ||
-    !/^[a-f0-9]{64}$/u.test(frozen.configurationHash) ||
-    frozen.contractHash !== observed.contractHash || frozen.codeHash !== observed.codeHash ||
-    frozen.configurationHash !== observed.configurationHash ||
-    pin.frozenPoolCodeHash === BRIDGE_ZERO_WORD || pin.frozenPoolCodeHash !== pin.observedPoolCodeHash ||
-    bridgeHex(pin.frozenPoolCodeHash, 32, 32, "APN_RPC_PROTOCOL") !== pin.frozenPoolCodeHash) fail("stargate_native_destination_pin");
+  if (pin.poolCodeHash === BRIDGE_ZERO_WORD || bridgeHex(pin.poolCodeHash, 32, 32, "APN_RPC_PROTOCOL") !== pin.poolCodeHash) fail("stargate_native_destination_pin");
   return pin.pool;
 }
 

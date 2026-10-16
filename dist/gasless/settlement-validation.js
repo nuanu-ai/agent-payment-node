@@ -9,6 +9,9 @@ export function validateGaslessSettlement(i, userOperationHash, value) {
         p.protocolHash !== i.initialSnapshot.protocolHash || BigInt(p.block.numberAtomic) < BigInt(i.initialSnapshot.block.numberAtomic) ||
         BigInt(p.safeBlock.numberAtomic) < BigInt(p.block.numberAtomic) || BigInt(p.safeBlock.timestampAtomic) < BigInt(p.block.timestampAtomic) ||
         (p.safeBlock.numberAtomic === p.block.numberAtomic && !gaslessSame(p.safeBlock, p.block)) ||
+        (p.accountBlock !== undefined && (BigInt(p.accountBlock.numberAtomic) < BigInt(p.safeBlock.numberAtomic) ||
+            BigInt(p.accountBlock.timestampAtomic) < BigInt(p.safeBlock.timestampAtomic) ||
+            (p.accountBlock.numberAtomic === p.safeBlock.numberAtomic && !gaslessSame(p.accountBlock, p.safeBlock)))) ||
         !consumed(i, p.effectAccount) || !consumed(i, p.safeAccount))
         gaslessFailure("APN_STATE_CORRUPT", "gasless_settlement_binding");
     const prefund = gaslessUint(a.prefundAtomic, true), refund = gaslessUint(a.refundAtomic), fee = gaslessUint(a.feeAtomic);
@@ -24,15 +27,25 @@ function consumed(i, a) {
         BigInt(a.entryPointNonceAtomic) > BigInt(i.initialSnapshot.entryPointNonceAtomic) &&
         BigInt(a.eoaNonceAtomic) >= BigInt(i.initialSnapshot.eoaNonceAtomic) + (i.initialSnapshot.delegation === "empty" ? 1n : 0n);
 }
-/** Later safe observations can establish cleanup, but cannot replace the proven effect. */
+/**
+ * Later safe observations can establish cleanup, but cannot replace the proven effect: the receipt identity, inclusion
+ * block, transaction proof, protocol hash and log accounting. Both accounts are state reads at the observing latest
+ * head (`accountBlock`; older records read them at the safe head and `effectAccount` at the inclusion block), so they
+ * may move between observations.
+ */
 export function gaslessSettlementEffect(p) {
-    const { safeBlock: _safe, safeAccount: _account, ...effect } = p;
+    const { safeBlock: _safe, safeAccount: _account, effectAccount: _effect, accountBlock: _at, ...effect } = p;
     return effect;
 }
 export function assertGaslessSettlementContinuation(previous, next) {
+    const sameSafe = next.safeBlock.numberAtomic === previous.safeBlock.numberAtomic;
     if (!gaslessSame(gaslessSettlementEffect(previous), gaslessSettlementEffect(next)) ||
         BigInt(next.safeBlock.numberAtomic) < BigInt(previous.safeBlock.numberAtomic) ||
-        (next.safeBlock.numberAtomic === previous.safeBlock.numberAtomic && !gaslessSame(next, previous))) {
+        (sameSafe && !gaslessSame(next.safeBlock, previous.safeBlock)) ||
+        // Reads at one safe block are identical; latest-head reads may advance with their own block.
+        (sameSafe && next.accountBlock === undefined && !gaslessSame(next, previous)) ||
+        (next.accountBlock !== undefined && previous.accountBlock !== undefined &&
+            BigInt(next.accountBlock.numberAtomic) < BigInt(previous.accountBlock.numberAtomic))) {
         gaslessFailure("APN_STATE_CORRUPT", "gasless_safe_proof_changed");
     }
 }

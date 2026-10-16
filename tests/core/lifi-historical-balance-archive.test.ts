@@ -44,11 +44,13 @@ for(const sessionMode of [false,true]) test(`balance rejects wrong archive chain
   await assert.rejects(call("eth_getBalance",[owner,before]),{code:"APN_RPC_CONFIG",message:/bridge_archive_RPC_chain/});
   assert.deepEqual(f.rows.map(r=>r.method),["eth_chainId"]);
 });
-test("canonical balance requires an explicit archive before transport", async () => {
-  const f = fixture();
-  await assert.rejects(bridgeRpcCall(59144, { APN_LINEA_RPC_URL: environment.APN_LINEA_RPC_URL }, { transport: f.transport }).call("eth_getBalance", [owner, before]),
-    { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", details: { reason: "explicit_archive_RPC_required" } });
-  assert.equal(f.rows.length, 0);
+// History is optional (P1): without an owner-named archive the hash-pinned balance goes to the primary, which serves
+// recent blocks; `requireCanonical` still makes the node refuse a non-canonical hash.
+for (const sessionMode of [false, true]) test(`canonical balance without a named archive reads the primary; session=${sessionMode}`, async () => {
+  const f = fixture(), d = bridgeRpcCall(59144, { APN_LINEA_RPC_URL: environment.APN_LINEA_RPC_URL }, { transport: f.transport });
+  const call = sessionMode ? d.sessionCall(new RpcReadSession({ wait: async () => {} })) : d.call;
+  assert.equal(await call("eth_getBalance", [owner, before]), "0x1");
+  assert.deepEqual(f.rows.map(row => [row.host, row.method]), [["linea-rpc.publicnode.com", "eth_getBalance"]]);
 });
 for (const sessionMode of [false, true]) test(`owner-explicit same-origin archive validates canonical balance; session=${sessionMode}`, async () => {
   const f = fixture(), d = bridgeRpcCall(59144, { ...environment, APN_LINEA_ARCHIVE_RPC_URL: `${environment.APN_LINEA_RPC_URL}/archive` }, { transport: f.transport });

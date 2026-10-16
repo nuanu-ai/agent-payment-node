@@ -243,7 +243,7 @@ export class RecoveryRpc extends TestRpc implements X402RpcPort {
   }
 
   async getX402TransferLogs(_input: {
-    readonly from: Address; readonly fromBlock: string; readonly toBlock: string;
+    readonly from: Address; readonly to?: Address; readonly fromBlock: string; readonly toBlock: string;
   }): Promise<X402TransferLogs> {
     return { kind: "complete", logs: [] };
   }

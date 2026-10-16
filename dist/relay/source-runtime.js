@@ -21,6 +21,11 @@ import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { relayExecutionRoute } from "./execution-route.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
+/** BRDG-22: the deposit may follow the approval once the approval's receipt is canonical with this many blocks on
+ * top; its nonce comes after the approval's, so it can never execute without it, and its own success still needs
+ * finality. A reverted approval is recorded only once final. */
+export const RELAY_APPROVAL_CONFIRMATIONS = 2n;
+export const RELAY_APPROVAL_INCLUSION_WAIT = { polls: 6, delayMs: 6_000 };
 const HASH = /^[a-f0-9]{64}$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay source execution is blocked.", { reason }); }
@@ -64,7 +69,7 @@ class RelayExecutionAdmissionStore extends SecureStateStore {
     }
 }
 /** Production constructor uses one explicit public HTTPS Ethereum RPC, with no Relay credential. */
-export function createRelayEthereumSourceRuntime(state, wrappingSecret, rpcUrl, authorization, clock = { now: () => new Date() }, transport) {
+export function createRelayEthereumSourceRuntime(state, wrappingSecret, rpcUrl, authorization, clock = { now: () => new Date() }, transport, approvalWait = RELAY_APPROVAL_INCLUSION_WAIT) {
     let endpoint;
     try {
         endpoint = new URL(rpcUrl);
@@ -75,7 +80,7 @@ export function createRelayEthereumSourceRuntime(state, wrappingSecret, rpcUrl, 
     if (endpoint.pathname !== "/" || endpoint.search !== "" || endpoint.hash !== "" || endpoint.username !== "" || endpoint.password !== "")
         throw new ApnError("APN_RPC_CONFIG", "Relay execution requires a keyless HTTPS RPC origin without a signed path or query.");
     const validatedTransport = new HttpsBaseRpc(rpcUrl);
-    return new RelayEthereumSourceRuntime(state, wrappingSecret, transport ?? validatedTransport, authorization, clock, endpoint.origin);
+    return new RelayEthereumSourceRuntime(state, wrappingSecret, transport ?? validatedTransport, authorization, clock, endpoint.origin, approvalWait);
 }
 /** The constructor accepts an injected RPC surface so tests can never reach a network. */
 export class RelayEthereumSourceRuntime {
@@ -84,6 +89,7 @@ export class RelayEthereumSourceRuntime {
     authorization;
     clock;
     pacedOrigin;
+    approvalWait;
     wallets;
     permissions;
     admissions;
@@ -92,12 +98,16 @@ export class RelayEthereumSourceRuntime {
     depositCustody;
     rpcScope = new AsyncLocalStorage();
     signingNonce = null;
-    constructor(state, wrapping, transport, authorization, clock = { now: () => new Date() }, pacedOrigin) {
+    /** One chain-id check per execute invocation (P2); approvals proven in this invocation are not re-read. */
+    chainVerified = false;
+    provenApprovals = new Map();
+    constructor(state, wrapping, transport, authorization, clock = { now: () => new Date() }, pacedOrigin, approvalWait = { polls: 0, delayMs: 0 }) {
         this.state = state;
         this.transport = transport;
         this.authorization = authorization;
         this.clock = clock;
         this.pacedOrigin = pacedOrigin;
+        this.approvalWait = approvalWait;
         this.wallets = new EncryptedWalletStore(state, wrapping);
         this.permissions = new EncryptedSmartAccountPermissionStore(state, wrapping);
         this.admissions = new RelayExecutionAdmissionStore(state.root);
@@ -127,6 +137,8 @@ export class RelayEthereumSourceRuntime {
     async executeScoped(operationId) {
         if (!HASH.test(operationId))
             throw new ApnError("APN_INVALID_INPUT", "Relay execution requires one operation ID.");
+        this.chainVerified = false;
+        this.provenApprovals.clear();
         const profileHash = this.state.profileHash("default");
         const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, operationId);
         if (op === null)
@@ -187,7 +199,7 @@ export class RelayEthereumSourceRuntime {
                 funding: async () => this.funding(op),
                 send: async (raw) => this.rpc.submitRawTransaction(raw),
                 unsentOutcome: async (input) => {
-                    const [count, own] = await this.rpc.batchCall([{ method: "eth_getTransactionCount", params: [input.account, "safe"] },
+                    const [count, own] = await this.read([{ method: "eth_getTransactionCount", params: [input.account, "safe"] },
                         { method: "eth_getTransactionByHash", params: [input.transactionHash] }]);
                     return evmUnsentOutcome(async (method) => method === "eth_getTransactionCount" ? count : own, input);
                 },
@@ -199,7 +211,13 @@ export class RelayEthereumSourceRuntime {
                 sign: async (operation) => this.sign(operation, "deposit"), custody: this.depositCustody,
                 observeApproval: async (hash) => this.observeApproval(hash), observe: async (hash) => this.observeDeposit(hash) };
             try {
-                let journal = await new RelayApprovalEffectService(this.state, approvalPorts).run(operationId);
+                const approvals = new RelayApprovalEffectService(this.state, approvalPorts);
+                let journal = await approvals.run(operationId);
+                // A just-sent approval is awaited for a bounded time, so one confirmed run usually sends both legs (BRDG-22).
+                for (let poll = 0; existing?.effects[0].phase !== "submitting" && journal.effects[0].phase === "submitting" && poll < this.approvalWait.polls; poll++) {
+                    await new Promise(resolve => setTimeout(resolve, this.approvalWait.delayMs));
+                    journal = await approvals.run(operationId);
+                }
                 await this.updateUsage(op, journal);
                 if (journal.effects[0].phase === "confirmed")
                     journal = await new RelayDepositEffectService(this.state, depositPorts).run(operationId);
@@ -335,39 +353,43 @@ export class RelayEthereumSourceRuntime {
             corrupt("usage total below own reservation");
         return (total - own).toString();
     }
+    /** Prepends eth_chainId to the first read batch of an invocation and checks it (P2: once per invocation). */
+    async read(calls) {
+        const checking = !this.chainVerified, rows = await this.rpc.batchCall([...(checking ? [{ method: "eth_chainId", params: [] }] : []), ...calls]);
+        if (rows.length !== calls.length + (checking ? 1 : 0))
+            blocked("ethereum_rpc_batch");
+        if (checking) {
+            if (evmRpcQuantity(rows[0]) !== 1n)
+                blocked("ethereum_rpc_chain");
+            this.chainVerified = true;
+        }
+        return checking ? rows.slice(1) : rows;
+    }
+    /** Two POSTs: the latest head, then balance, token balance and allowance pinned to its hash (EIP-1898,
+     * requireCanonical), the pending nonce and the tip. The pinned reads need no header re-read (P2). */
     async funding(op) {
         await this.assertOwner(op);
-        const heads = await this.rpc.batchCall([{ method: "eth_chainId", params: [] },
-            { method: "eth_getBlockByNumber", params: ["latest", false] }]);
-        if (heads.length !== 2 || evmRpcQuantity(heads[0]) !== 1n)
-            blocked("ethereum_rpc_chain");
-        const head = evmRpcRecord(heads[1]), block = evmRpcQuantity(head.number), blockHash = evmRpcHex(head.hash, 32);
+        const [rawHead] = await this.read([{ method: "eth_getBlockByNumber", params: ["latest", false] }]);
+        const head = evmRpcRecord(rawHead), blockHash = evmRpcHex(head.hash, 32);
         if (blockHash === `0x${"0".repeat(64)}`)
             corrupt("zero source block hash");
         const reference = { blockHash, requireCanonical: true };
         const balanceData = `0x70a08231${op.sourceAccount.slice(2).toLowerCase().padStart(64, "0")}`;
         const allowanceData = `0xdd62ed3e${op.sourceAccount.slice(2).toLowerCase().padStart(64, "0")}${ETHEREUM_DEPOSITORY.slice(2).padStart(64, "0")}`;
-        const rows = await this.rpc.batchCall([
-            { method: "eth_getBlockByNumber", params: [`0x${block.toString(16)}`, false] },
+        const rows = await this.read([
             { method: "eth_getBalance", params: [op.sourceAccount, reference] },
             { method: "eth_call", params: [{ to: ETHEREUM_USDC, data: balanceData }, reference] },
             { method: "eth_call", params: [{ to: ETHEREUM_USDC, data: allowanceData }, reference] },
             { method: "eth_getTransactionCount", params: [op.sourceAccount, "pending"] },
             { method: "eth_maxPriorityFeePerGas", params: [] },
-            { method: "eth_chainId", params: [] },
         ]);
-        if (rows.length !== 7 || evmRpcQuantity(rows[6]) !== 1n)
-            blocked("ethereum_rpc_chain");
-        const canonical = evmRpcRecord(rows[0]);
-        if (evmRpcQuantity(canonical.number) !== block || evmRpcHex(canonical.hash, 32) !== blockHash)
-            blocked("source_block_changed");
-        const priority = evmRpcQuantity(rows[5]), baseFee = evmRpcQuantity(head.baseFeePerGas);
-        const nonce = evmRpcQuantity(rows[4]);
+        const priority = evmRpcQuantity(rows[4]), baseFee = evmRpcQuantity(head.baseFeePerGas);
+        const nonce = evmRpcQuantity(rows[3]);
         this.signingNonce = nonce;
         if (baseFee * 2n + priority === 0n)
             blocked("source_fee_unavailable");
-        return { chainId: 1, nativeBalanceWei: evmRpcQuantity(rows[1]), tokenBalanceAtomic: evmRpcWord(rows[2]),
-            allowanceAtomic: evmRpcWord(rows[3]), baseFeePerGasWei: baseFee, nextNonce: nonce };
+        return { chainId: 1, nativeBalanceWei: evmRpcQuantity(rows[0]), tokenBalanceAtomic: evmRpcWord(rows[1]),
+            allowanceAtomic: evmRpcWord(rows[2]), baseFeePerGasWei: baseFee, nextNonce: nonce };
     }
     async sign(op, role) {
         await this.assertReady(op);
@@ -394,28 +416,37 @@ export class RelayEthereumSourceRuntime {
         }
     }
     async observeApproval(hash) {
-        const found = await this.observation(hash);
+        const proven = this.provenApprovals.get(hash.toLowerCase());
+        if (proven !== undefined)
+            return proven;
+        const found = await this.observation(hash, "included");
         if (found === null)
             return null;
-        return { transaction: { hash, from: found.from, to: found.to, input: found.input, chainId: 1 },
+        const observed = { transaction: { hash, from: found.from, to: found.to, input: found.input, chainId: 1 },
             receipt: { transactionHash: hash, status: found.status, blockNumber: found.blockNumber,
-                blockHash: found.blockHash, logs: found.logs }, canonicalBlockHash: found.blockHash };
+                blockHash: found.blockHash, logs: found.logs }, canonicalBlockHash: found.blockHash, finalized: found.finalized };
+        if (found.status === "success")
+            this.provenApprovals.set(hash.toLowerCase(), observed);
+        return observed;
     }
     async observeDeposit(hash) {
-        const found = await this.observation(hash);
+        const found = await this.observation(hash, "finalized");
         if (found === null)
             return null;
         return { transaction: { hash, from: found.from, to: found.to, input: found.input, value: found.value, chainId: 1 },
             receipt: { transactionHash: hash, status: found.status, blockNumber: found.blockNumber,
                 blockHash: found.blockHash }, canonicalBlockHash: found.blockHash };
     }
-    async observation(hash) {
-        const [rawTx, rawReceipt] = await this.rpc.batchCall([
+    /** Two POSTs: transaction, receipt and the latest and finalized heads, then the canonical block at the receipt
+     * height. Heads read with the receipt and before that block make a header recheck redundant (P2). `included`
+     * needs RELAY_APPROVAL_CONFIRMATIONS blocks on top; `finalized` needs the finalized head. */
+    async observation(hash, depth) {
+        const [rawTx, rawReceipt, rawLatest, rawFinalized] = await this.read([
             { method: "eth_getTransactionByHash", params: [hash] },
             { method: "eth_getTransactionReceipt", params: [hash] },
+            { method: "eth_getBlockByNumber", params: ["latest", false] },
+            { method: "eth_getBlockByNumber", params: ["finalized", false] },
         ]);
-        if (rawTx === null && rawReceipt === null)
-            return null;
         if (rawTx === null || rawReceipt === null)
             return null;
         const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt);
@@ -425,27 +456,15 @@ export class RelayEthereumSourceRuntime {
             evmRpcHex(tx.blockHash, 32) !== evmRpcHex(receipt.blockHash, 32))
             corrupt("transaction and receipt identity");
         const number = evmRpcQuantity(receipt.blockNumber);
+        const latest = evmRpcBlockResult(rawLatest, "latest"), finalized = evmRpcBlockResult(rawFinalized, "finalized");
+        const isFinal = BigInt(finalized.number) >= number;
+        if (depth === "finalized" ? !isFinal : BigInt(latest.number) < number + RELAY_APPROVAL_CONFIRMATIONS)
+            return null;
         const inclusionTag = `0x${number.toString(16)}`;
-        const [rawBlock, rawFinalized] = await this.rpc.batchCall([
-            { method: "eth_getBlockByNumber", params: [inclusionTag, false] },
-            { method: "eth_getBlockByNumber", params: ["finalized", false] },
-        ]);
+        const [rawBlock] = await this.read([{ method: "eth_getBlockByNumber", params: [inclusionTag, false] }]);
         const block = evmRpcBlockResult(rawBlock, inclusionTag);
         if (block.hash !== evmRpcHex(receipt.blockHash, 32))
             blocked("source_receipt_reorg");
-        const finalized = evmRpcBlockResult(rawFinalized, "finalized");
-        if (BigInt(finalized.number) < number)
-            return null;
-        const [rawRecheckedBlock, rawRecheckedFinalized, rawChainId] = await this.rpc.batchCall([
-            { method: "eth_getBlockByNumber", params: [block.tag, false] },
-            { method: "eth_getBlockByNumber", params: [finalized.tag, false] },
-            { method: "eth_chainId", params: [] },
-        ]);
-        if (evmRpcBlockResult(rawRecheckedBlock, block.tag).hash !== block.hash ||
-            evmRpcBlockResult(rawRecheckedFinalized, finalized.tag).hash !== finalized.hash)
-            throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.");
-        if (evmRpcQuantity(rawChainId) !== 1n)
-            blocked("ethereum_rpc_chain");
         const status = evmRpcQuantity(receipt.status);
         if (status !== 0n && status !== 1n)
             corrupt("receipt status");
@@ -461,7 +480,7 @@ export class RelayEthereumSourceRuntime {
         });
         return { from: evmRpcAddress(tx.from), to: tx.to === null ? null : evmRpcAddress(tx.to),
             input: evmRpcHex(tx.input), value: evmRpcQuantity(tx.value), status: status === 1n ? "success" : "reverted",
-            blockNumber: number, blockHash: block.hash, logs };
+            blockNumber: number, blockHash: block.hash, logs, finalized: isFinal };
     }
     async updateUsage(op, journal) {
         const approval = journal.effects[0].phase, deposit = journal.effects[1].phase;

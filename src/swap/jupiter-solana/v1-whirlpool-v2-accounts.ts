@@ -9,7 +9,7 @@ import { JUPITER_V1_WHIRLPOOL_PROGRAM as ORCA, JUPITER_V1_MEMO_PIN, JUPITER_V1_W
 import { reviewedWhirlpoolV2Pool } from "./v1-whirlpool-v2-pools.js";
 import { TOKEN_PROGRAM, WRAPPED_SOL_MINT as SOL, SOLANA_USDC_MINT as USDC } from "./catalog.js";
 export interface MutableByteRange { readonly offset: number; readonly length: number }
-export interface WhirlpoolV2PoolState { readonly config: string; readonly bump: number; readonly feeTierIndexSeed: number; readonly tickSpacing: 2 | 4; readonly feeRate: 200 | 400; readonly protocolFeeRate: 1300; readonly mintA: string; readonly mintB: string; readonly vaultA: string; readonly vaultB: string; readonly liquidity: bigint; readonly sqrtPrice: bigint; readonly tickCurrentIndex: number; readonly mutableRanges: readonly MutableByteRange[] }
+export interface WhirlpoolV2PoolState { readonly config: string; readonly bump: number; readonly feeTierIndexSeed: number; readonly tickSpacing: 2 | 4; readonly feeRate: number; readonly protocolFeeRate: number; readonly mintA: string; readonly mintB: string; readonly vaultA: string; readonly vaultB: string; readonly liquidity: bigint; readonly sqrtPrice: bigint; readonly tickCurrentIndex: number; readonly mutableRanges: readonly MutableByteRange[] }
 export interface WhirlpoolV2Tick { readonly initialized: boolean; readonly liquidityNet: bigint; readonly liquidityGross: bigint; readonly feeGrowthOutsideA: bigint; readonly feeGrowthOutsideB: bigint; readonly rewardGrowthsOutside: readonly bigint[] }
 export interface WhirlpoolV2TickArrayState { readonly kind: "fixed" | "dynamic"; readonly address: string; readonly whirlpool: string; readonly startTickIndex: number; readonly bitmap: bigint; readonly ticks: readonly WhirlpoolV2Tick[]; readonly mutableRanges: readonly MutableByteRange[] }
 export interface WhirlpoolV2OracleState { readonly whirlpool: string; readonly tradeEnableTimestamp: bigint; readonly constants: { readonly filterPeriod: number; readonly decayPeriod: number; readonly reductionFactor: number; readonly adaptiveFeeControlFactor: number; readonly maxVolatilityAccumulator: number; readonly tickGroupSize: number; readonly majorSwapThresholdTicks: number }; readonly variables: { readonly lastReferenceUpdateTimestamp: bigint; readonly lastMajorSwapTimestamp: bigint; readonly volatilityReference: number; readonly tickGroupIndexReference: number; readonly volatilityAccumulator: number }; readonly mutableRanges: readonly MutableByteRange[] }
@@ -25,12 +25,12 @@ const i128 = (d: Buffer,o: number) => { const n=u128(d,o); return n >= (1n<<127n
 function ranges(rows: readonly MutableByteRange[]): readonly MutableByteRange[] { return Object.freeze(rows.map(r=>Object.freeze({...r}))); }
 export function decodeWhirlpoolV2Pool(a: JupiterV1SemanticAccount): WhirlpoolV2PoolState {
     const d=bytes(a,ORCA), reviewed=reviewedWhirlpoolV2Pool(a.address);
-    if (d.length!==653 || d.subarray(0,8).toString("hex")!=="3f95d10ce1806309" || key(d,8)!==reviewed.config || d[40]!==reviewed.bump || d.readUInt16LE(41)!==reviewed.tickSpacing || d.readUInt16LE(43)!==reviewed.feeTierIndexSeed || d.readUInt16LE(45)!==reviewed.feeRate || d.readUInt16LE(47)!==reviewed.protocolFeeRate || key(d,101)!==SOL || key(d,181)!==USDC || key(d,133)!==reviewed.vaultA || key(d,213)!==reviewed.vaultB) blocked("pinned pool configuration");
+    if (d.length!==653 || d.subarray(0,8).toString("hex")!=="3f95d10ce1806309" || key(d,8)!==reviewed.config || d[40]!==reviewed.bump || d.readUInt16LE(41)!==reviewed.tickSpacing || d.readUInt16LE(43)!==reviewed.feeTierIndexSeed || key(d,101)!==SOL || key(d,181)!==USDC || key(d,133)!==reviewed.vaultA || key(d,213)!==reviewed.vaultB) blocked("pinned pool configuration");
     const tick=d.readInt32LE(81),sqrt=u128(d,65);
     if (tick < -443636 || tick > 443636 || sqrt < 4295048016n || sqrt > 79226673515401279992447579055n) blocked("pool price range");
     const mutable: MutableByteRange[]=[{offset:49,length:44},{offset:165,length:16},{offset:261,length:8}];
     for(let i=0;i<3;i++) if(!d.subarray(269+i*128,301+i*128).equals(Buffer.alloc(32))) mutable.push({offset:381+i*128,length:16});
-    return Object.freeze({config:key(d,8),bump:d[40]!,feeTierIndexSeed:reviewed.feeTierIndexSeed,tickSpacing:reviewed.tickSpacing,feeRate:reviewed.feeRate,protocolFeeRate:reviewed.protocolFeeRate,mintA:SOL,mintB:USDC,vaultA:key(d,133),vaultB:key(d,213),liquidity:u128(d,49),sqrtPrice:sqrt,tickCurrentIndex:tick,mutableRanges:ranges(mutable)});
+    return Object.freeze({config:key(d,8),bump:d[40]!,feeTierIndexSeed:reviewed.feeTierIndexSeed,tickSpacing:reviewed.tickSpacing,feeRate:d.readUInt16LE(45),protocolFeeRate:d.readUInt16LE(47),mintA:SOL,mintB:USDC,vaultA:key(d,133),vaultB:key(d,213),liquidity:u128(d,49),sqrtPrice:sqrt,tickCurrentIndex:tick,mutableRanges:ranges(mutable)});
 }
 export async function assertWhirlpoolV2PoolPda(a: JupiterV1SemanticAccount): Promise<void> {
     const s=decodeWhirlpoolV2Pool(a), d=bytes(a,ORCA);
@@ -68,7 +68,9 @@ export function decodeWhirlpoolV2Oracle(a: JupiterV1SemanticAccount): WhirlpoolV
     const reviewed=reviewedWhirlpoolV2Pool(key(d,8));
     if(a.address!==reviewed.oracle||d.subarray(0,8).toString("hex")!=="8bc283b38cb3e5f4"||d.readBigUInt64LE(40)!==0n||d.subarray(66,82).some(x=>x!==0)||d.subarray(110).some(x=>x!==0))blocked("oracle layout or reserved fields");
     const c={filterPeriod:d.readUInt16LE(48),decayPeriod:d.readUInt16LE(50),reductionFactor:d.readUInt16LE(52),adaptiveFeeControlFactor:d.readUInt32LE(54),maxVolatilityAccumulator:d.readUInt32LE(58),tickGroupSize:d.readUInt16LE(62),majorSwapThresholdTicks:d.readUInt16LE(64)};
-    if(c.filterPeriod!==30||c.decayPeriod!==600||c.reductionFactor!==5000||c.adaptiveFeeControlFactor!==reviewed.adaptiveFeeControlFactor||c.maxVolatilityAccumulator!==880000||c.tickGroupSize!==reviewed.tickSpacing||c.majorSwapThresholdTicks!==reviewed.tickSpacing)blocked("oracle reviewed constants");
+    // The fee authority may retune the adaptive-fee constants. APN does not price this pool itself (Jupiter quotes it and the
+    // exact-message simulation, the encoded minimum output and the receipt bound the result), so only their sanity is checked.
+    if(c.tickGroupSize<1||c.reductionFactor>10000)blocked("oracle constants");
     const v={lastReferenceUpdateTimestamp:d.readBigUInt64LE(82),lastMajorSwapTimestamp:d.readBigUInt64LE(90),volatilityReference:d.readUInt32LE(98),tickGroupIndexReference:d.readInt32LE(102),volatilityAccumulator:d.readUInt32LE(106)};
     if(v.volatilityReference>c.maxVolatilityAccumulator||v.volatilityAccumulator>c.maxVolatilityAccumulator||v.tickGroupIndexReference<Math.floor(-443636/c.tickGroupSize)||v.tickGroupIndexReference>Math.floor(443636/c.tickGroupSize))blocked("oracle variable range");
     return Object.freeze({whirlpool:reviewed.pool,tradeEnableTimestamp:0n,constants:Object.freeze(c),variables:Object.freeze(v),mutableRanges:WHIRLPOOL_V2_ORACLE_MUTABLE_RANGES});
@@ -77,14 +79,16 @@ export function assertWhirlpoolV2ClassicMint(a: JupiterV1SemanticAccount, mint: 
     const d=bytes(a,TOKEN_PROGRAM),decimals=mint===SOL?9:mint===USDC?6:blocked("mint identity");
     if(a.address!==mint||d.length!==82||d[44]!==decimals||d[45]!==1||![0,1].includes(d.readUInt32LE(0))||![0,1].includes(d.readUInt32LE(46)))blocked("classic mint");
 }
+/** Memo sits under BPFLoader2, which has no upgrade instruction: its loader and executable flag are the whole pin. */
 export function assertWhirlpoolV2Memo(a: JupiterV1SemanticAccount): void {
-    const p=JUPITER_V1_MEMO_PIN,d=Buffer.from(a.dataBase64,"base64");
-    if(a.address!==p.programId||a.existence!=="present"||a.owner!==p.loader||!a.executable||d.length!==p.byteLength||d.toString("base64")!==a.dataBase64||sha256(d)!==p.payloadHash||a.dataHash!==p.payloadHash)blocked("immutable Memo executable pin");
+    const p=JUPITER_V1_MEMO_PIN;
+    if(a.address!==p.programId||a.existence!=="present"||a.owner!==p.loader||!a.executable)blocked("immutable Memo program");
 }
+/** ATA (BPFLoader2), System and Compute Budget (native) cannot be upgraded; their loader is the pin, not their bytes. */
 export function assertWhirlpoolV2FixedPrograms(accounts: readonly JupiterV1SemanticAccount[]): void {
     for (const pin of JUPITER_V1_WHIRLPOOL_V2_FIXED_PROGRAM_PINS) {
-        const a=accounts.find(a=>a.address===pin.programId),d=Buffer.from(a?.dataBase64??"","base64");
-        if(a===undefined||a.existence!=="present"||!a.executable||a.owner!==pin.loader||d.toString("base64")!==a.dataBase64||sha256(d)!==pin.payloadHash||a.dataHash!==pin.payloadHash)blocked("fixed executable pin");
+        const a=accounts.find(a=>a.address===pin.programId);
+        if(a===undefined||a.existence!=="present"||!a.executable||a.owner!==pin.loader)blocked("immutable program loader");
     }
 }
 export function assertWhirlpoolV2ClassicTokenAccount(a: JupiterV1SemanticAccount, mint: string, owner: string): void {

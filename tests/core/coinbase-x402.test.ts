@@ -2514,3 +2514,27 @@ function exactTransfer(blockNumber: bigint): X402RpcLog {
     logIndex: "1",
   };
 }
+
+test("provider x402 reads no chain evidence before its window closes and bounds the window in one header read", async (t) => {
+  const fixture = await setup(t);
+  const operationId = await prepare(fixture.core);
+  const approved = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  assert.equal((approved.operation as { state?: unknown }).state, "settlement_pending", JSON.stringify(approved));
+  const counts = () => [fixture.rpc.chainCalls, fixture.rpc.headCalls, fixture.rpc.blockCalls, fixture.rpc.transferCalls];
+  const afterApprove = counts();
+  fixture.clock.advance(120_000);
+  const early = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((early.operation as { state?: unknown }).state, "settlement_pending");
+  assert.deepEqual(counts(), afterApprove, "before the evidence deadline a resume makes no RPC read");
+
+  armExactSettlement(fixture);
+  // Resume long after the window: the safe head is 4,000 blocks (12 s each) past the frozen lower block.
+  fixture.clock.advance(47_628_000);
+  fixture.rpc.safeNumber = 5000n;
+  const blocksBefore = fixture.rpc.blockCalls;
+  const resumed = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((resumed.operation as { state?: unknown }).state, "completed", JSON.stringify(resumed));
+  // Frozen lower block, one interpolated upper block and the transaction block: 3 reads (was ~log2(4000) + 3).
+  assert.equal(fixture.rpc.blockCalls - blocksBefore, 3);
+  assert.equal(fixture.rpc.transferCalls, 1, "one log query covers the fixed window");
+});

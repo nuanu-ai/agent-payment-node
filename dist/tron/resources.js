@@ -1,4 +1,3 @@
-import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { tronArray, tronAtomic, tronProtocolFailure, tronRecord, tronReprepare, tronSafeNumber } from "./codec.js";
 import { validateTronParameters } from "./resource-model.js";
@@ -39,34 +38,39 @@ async function parameters(rpc) {
         return unsupported();
     }
 }
+/**
+ * One read of the window: maintenance time, then chain parameters, then the head. A head still before that maintenance
+ * proves no maintenance ran between the reads, so the parameters belong to the period the transaction expires in.
+ */
 export async function readTronWindow(rpc, now) {
-    const before = tronBlock(await rpc.call("wallet/getnowblock", {}));
+    const nextMaintenance = tronAtomic(tronRecord(await rpc.call("wallet/getnextmaintenancetime", {})).num);
     // The node's software version is not read or pinned: TRON ships mandatory patch releases (4.8.2.2 on 2026-09-08),
     // an exact match refused every transfer after each upgrade, and public endpoints answer getnodeinfo with {}.
     // Charging is bound by the reviewed chain parameters below.
     const fees = await parameters(rpc);
-    const nextMaintenance = tronAtomic(tronRecord(await rpc.call("wallet/getnextmaintenancetime", {})).num);
-    const after = tronBlock(await rpc.call("wallet/getnowblock", {}));
-    const again = await parameters(rpc);
-    const nextAgain = tronAtomic(tronRecord(await rpc.call("wallet/getnextmaintenancetime", {})).num);
+    const header = tronBlock(await rpc.call("wallet/getnowblock", {}));
     const wall = BigInt(now().getTime());
-    if (after.number < before.number || after.timestamp < before.timestamp || after.timestamp > wall + 6000n || wall - after.timestamp > 60000n || after.timestamp >= nextMaintenance || nextAgain !== nextMaintenance || canonicalJson(fees) !== canonicalJson(again))
+    if (header.timestamp > wall + 6000n || wall - header.timestamp > 60000n || header.timestamp >= nextMaintenance)
         tronReprepare();
-    const expiry = after.timestamp + 120000n < nextMaintenance - 6001n ? after.timestamp + 120000n : nextMaintenance - 6001n;
+    const expiry = header.timestamp + 120000n < nextMaintenance - 6001n ? header.timestamp + 120000n : nextMaintenance - 6001n;
     if (expiry <= wall + 10000n)
         tronReprepare();
-    return { header: after, parameters: fees, nextMaintenance, expiration: expiry };
+    return { header, parameters: fees, nextMaintenance, expiration: expiry };
 }
+/**
+ * Chain parameters change only at a maintenance boundary, and the frozen window expires before the next one, so a head
+ * still inside the window proves they are unchanged without reading them again. The reference block is re-read because
+ * the signed transaction names it; the solidified recipient head the snapshot recorded is irreversible and is not.
+ */
 export async function revalidateTronWindow(rpc, snapshot, now) {
-    const current = await readTronWindow(rpc, now);
     const expiry = tronAtomic(snapshot.expirationMsAtomic);
-    if (hashObject(current.parameters) !== snapshot.parameterHash || current.nextMaintenance.toString() !== snapshot.nextMaintenanceMsAtomic || BigInt(now().getTime()) + 10000n >= expiry || current.header.timestamp + 10000n >= expiry || current.header.number < tronAtomic(snapshot.referenceBlockNumberAtomic))
+    if (expiry >= tronAtomic(snapshot.nextMaintenanceMsAtomic))
+        tronReprepare();
+    const head = tronBlock(await rpc.call("wallet/getnowblock", {}));
+    if (BigInt(now().getTime()) + 10000n >= expiry || head.timestamp + 10000n >= expiry || head.number < tronAtomic(snapshot.referenceBlockNumberAtomic))
         tronReprepare();
     const reference = tronBlock(await rpc.call("wallet/getblockbynum", { num: tronSafeNumber(tronAtomic(snapshot.referenceBlockNumberAtomic)) }));
     if (reference.id !== snapshot.referenceBlockId || reference.timestamp.toString() !== snapshot.referenceTimestampMsAtomic)
-        tronReprepare();
-    const solid = tronBlock(await rpc.call("walletsolidity/getblockbynum", { num: tronSafeNumber(tronAtomic(snapshot.recipientSolidHeadNumberAtomic)) }));
-    if (solid.id !== snapshot.recipientSolidHeadId)
         tronReprepare();
 }
 function unsupported() { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "The TRON node does not expose the reviewed protocol version and resource charging contract."); }

@@ -161,18 +161,16 @@ export async function preflightRelayArbitrumSourceDraft(draft: RelayArbitrumSour
   const reference = { blockHash, requireCanonical: true };
   const balanceOf = `0x70a08231${draft.owner.slice(2).padStart(64, "0")}`;
   const allowance = `0xdd62ed3e${draft.owner.slice(2).padStart(64, "0")}${ETHEREUM_DEPOSITORY.slice(2).padStart(64, "0")}`;
+  // EIP-1898 requireCanonical refuses a non-canonical hash; the head is not re-read around the pinned reads (P2).
   const second = await ports.batch([
-    { method: "eth_getBlockByNumber", params: [`0x${number.toString(16)}`, false] },
     { method: "eth_getBalance", params: [draft.owner, reference] },
     { method: "eth_call", params: [{ to: RELAY_ARBITRUM_USDC, data: balanceOf }, reference] },
     { method: "eth_call", params: [{ to: RELAY_ARBITRUM_USDC, data: allowance }, reference] },
   ]);
-  if (!Array.isArray(second) || second.length !== 4) blocked("rpc_state_batch");
-  const canonical = evmRpcRecord(second[0]);
-  if (evmRpcQuantity(canonical.number) !== number || evmRpcHex(canonical.hash, 32) !== blockHash) blocked("source_block_changed");
-  const nativeBalanceWei = evmRpcQuantity(second[1]);
-  const tokenBalanceAtomic = evmRpcWord(second[2]);
-  const allowanceAtomic = evmRpcWord(second[3]);
+  if (!Array.isArray(second) || second.length !== 3) blocked("rpc_state_batch");
+  const nativeBalanceWei = evmRpcQuantity(second[0]);
+  const tokenBalanceAtomic = evmRpcWord(second[1]);
+  const allowanceAtomic = evmRpcWord(second[2]);
   const approvalRequired = allowanceAtomic < BigInt(draft.amountAtomic);
   const requiredNativeWei = BigInt(draft.maxDepositNetworkFeeWei) +
     (approvalRequired ? BigInt(draft.maxApprovalNetworkFeeWei) : 0n);
@@ -187,7 +185,7 @@ export async function preflightRelayArbitrumSourceDraft(draft: RelayArbitrumSour
   return frozen({ kind: "relay_arbitrum_read_only_source_preflight" as const,
     draftIntegrityHash: draft.integrityHash, sourceChainId: 42161 as const, sourceToken: RELAY_ARBITRUM_USDC,
     sourceAccount: draft.owner, spender: ETHEREUM_DEPOSITORY, observationBlockNumber: number.toString(),
-    observationBlockHash: blockHash, rpcBatches: 2 as const, rpcMethods: 6 as const,
+    observationBlockHash: blockHash, baseFeePerGasWei: evmRpcQuantity(head.baseFeePerGas).toString(), rpcBatches: 2 as const, rpcMethods: 5 as const,
     tokenBalanceAtomic: tokenBalanceAtomic.toString(), allowanceAtomic: allowanceAtomic.toString(),
     nativeBalanceWei: nativeBalanceWei.toString(), approvalRequired, requiredNativeWei: requiredNativeWei.toString(),
     fundingReasons, fundingObserved: fundingReasons.length === 0,

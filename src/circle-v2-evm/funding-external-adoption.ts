@@ -49,18 +49,19 @@ export async function adoptCircleFundingExternalMint(state:StateStore,repo:Circl
   const [approvalObservation,burnObservation,destinationObservation]=await Promise.all([source.observation(approval.transactionHash,"finalized"),source.observation(burn.transactionHash,"finalized"),destination.observation(txHash,"safe")]);
   if(approvalObservation===null||burnObservation===null||destinationObservation===null)circleBlocked("external_finality_unresolved");
   strongSource(approvalObservation);strongSource(burnObservation);sourceEnvelope(approval,approvalObservation.transaction);sourceEnvelope(burn,burnObservation.transaction);
-  const approvalBlock=circleRecord(approvalObservation.canonicalBlock),sourceHead=circleRecord(burnObservation.finalityHead);
-  const approvalProof=verifyCircleApproval(approvalObservation,false,String(await source.read(CIRCLE_SOURCE_TOKEN,"allowance",[CIRCLE_SOURCE_OWNER,CIRCLE_MESSENGER],canonicalTag(approvalBlock))),op.funding);
+  const sourceHead=circleRecord(burnObservation.finalityHead);
+  // P1: the exact Approval event proves the approved allowance; the zero allowance is read at the latest head.
+  const approvalProof=verifyCircleApproval(approvalObservation,false,null,op.funding);
   const sourceProof=decodeCircleSource(burnObservation,op.destinationChain,op.funding);
   if(op.source===null||sourceProof.sourceMessageHash!==op.source.sourceMessageHash||sourceProof.blockHash!==op.source.blockHash||sourceProof.receiptHash!==op.source.receiptHash||approval.proof?.receiptHash!==approvalProof.receiptHash)circleBlocked("external_source_reorg");
-  if(String(await source.read(CIRCLE_SOURCE_TOKEN,"allowance",[CIRCLE_SOURCE_OWNER,CIRCLE_MESSENGER],canonicalTag(sourceHead)))!=="0")circleBlocked("external_source_allowance");
+  if(String(await source.read(CIRCLE_SOURCE_TOKEN,"allowance",[CIRCLE_SOURCE_OWNER,CIRCLE_MESSENGER],"latest"))!=="0")circleBlocked("external_source_allowance");
   const proofOp={...op,source:sourceProof},destBlock=circleRecord(destinationObservation.canonicalBlock);
   const destinationHead=circleRecord(destinationObservation.finalityHead);circleExternalHeader(destinationHead);
   const [sourceDeploy,destinationDeploy,historicalSourceDeploy,historicalDeploy]=await Promise.all([readCircleDeployment(source,op.destinationChain,sourceHead),readCircleDeployment(destination,op.destinationChain,destinationHead),readCircleDeployment(source,op.destinationChain,circleRecord(burnObservation.canonicalBlock)),readCircleDeployment(destination,op.destinationChain,destBlock)]);
   verifyCircleDeployments(sourceDeploy,destinationDeploy);const historicalDeploymentDigest=verifyCircleDeployments(historicalSourceDeploy,historicalDeploy);
   const attesters=await readCircleAttesters(destination,historicalDeploymentDigest,destBlock),signers=await verifyCircleAttestationSigners(op.attestation!,op.attestation!.attestation,attesters,op.funding);
   if(circleAttesterConfigurationHash(attesters)!==op.attestation!.attesterConfigurationHash||hashObject(signers)!==hashObject(op.attestation!.signers))circleBlocked("external_frozen_attester_configuration_changed");
-  const used=await destination.read(CIRCLE_TRANSMITTER,"usedNonces",[op.attestation!.nonce],canonicalTag(destBlock));
+  const used=await destination.read(CIRCLE_TRANSMITTER,"usedNonces",[op.attestation!.nonce],"latest"); // a used nonce never becomes unused
   const feeRecipient=BigInt(op.attestation!.feeExecutedAtomic)>0n?await readCircleMintFeeRecipient(destination,destinationObservation):undefined;
   const external=await decodeCircleFundingExternalDestination(proofOp,destinationObservation,used,feeRecipient);if(external.transactionHash!==txHash)circleBlocked("external_exact_txhash");await notControlled(state,external.caller);
   // Canonical receipt credit is historical fulfillment; later recipient spending is unrelated.

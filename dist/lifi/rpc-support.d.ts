@@ -19,7 +19,6 @@ export declare function isReceiptBatchShape(items: readonly {
     readonly method: string;
     readonly params: readonly unknown[];
 }[]): boolean;
-export declare function rpcArchiveChainValue(chainId: BridgeChainId): (value: unknown) => bigint;
 export declare function rpcFallbackChainValue(chainId: BridgeChainId, role: "receipt" | "archive"): (value: unknown) => bigint;
 export declare function rpcReceiptFallbackValue(expected: unknown): (value: unknown) => unknown;
 export declare function assertMatchingHeader(raw: Record<string, unknown>, expected: BridgeBlock): void;

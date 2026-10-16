@@ -11,8 +11,6 @@ export interface JupiterV1RuntimeOptions {
     readonly rpc: SolanaRpc;
     readonly wrappingSecret: WrappingSecretPort;
     readonly foreground: boolean;
-    readonly stage: "quote" | "prepare" | "execute" | "observe";
-    readonly operationId?: string;
     /** Official read-only API test transport. No injected signer, sender, custody, financial driver or approval actor. */
     readonly providerFetch?: typeof fetch;
 }

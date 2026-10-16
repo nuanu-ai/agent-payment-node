@@ -142,7 +142,7 @@ test("matching provider hint is tagged without replacing independent chain proof
   assert.equal(result.settlement?.txHash, harness.transactionHash);
 });
 
-test("an expired hinted transaction 37 blocks ahead checkpoints its completed scan before paced proof resumes", async () => {
+test("an expired hinted transaction 37 blocks ahead is scanned and proven within one paced pass", async () => {
   const geometry = { cursorOffset: 88n, includedOffset: 125n, safeOffset: 175n, finalizedOffset: 170n };
   const harness = await successHarness("none", null, geometry);
   const input = { ...harness.input, transactionHint: harness.transactionHash };
@@ -155,11 +155,13 @@ test("an expired hinted transaction 37 blocks ahead checkpoints its completed sc
   };
   await pacedCall("eth_chainId", []);
   const first = await observeSmartAccountGasless({ ...harness.context, call: pacedCall }, input);
-  assert.equal(first.observation.phase, "pending"); assert.equal(first.observation.reason, "sa_gasless_partial");
-  assert.equal(first.observation.candidateTxHash, harness.transactionHash); assert.equal(first.settlement, null);
+  // Safe-anchored headers are read once and the proof reads only the child's spent amount, so the scan and the
+  // proof fit one 45-call pass (they needed two before).
+  assert.equal(first.observation.phase, "success", JSON.stringify(first.observation));
+  assert.equal(first.settlement?.txHash, harness.transactionHash);
   assert.ok(BigInt(first.cursor.nextBlockAtomic) > BigInt(input.cursor.nextBlockAtomic));
   assert.deepEqual(first.cursor.candidateHashes, [harness.transactionHash]); assert.ok(first.cursor.expiryBlock);
-  assert.equal(firstStarts, 45);
+  assert.ok(firstStarts < 45, `one pass took ${firstStarts} calls`);
 
   let secondStarts = 0;
   const resumedCall = async (method: any, params: readonly unknown[]) => {
@@ -372,4 +374,16 @@ test("range rejection halves the page without skipping the failed interval", asy
   assert.equal(result.partial, false); assert.equal(result.cursor.nextBlockAtomic, (start + 2n).toString());
   assert.deepEqual(ranges, [[start, start + 3n], [start, start + 1n], [start, start + 1n]]);
   assert.equal(result.cursor.previousEndBlock?.numberAtomic, (start + 1n).toString());
+});
+
+test("the settlement and unused proofs read only the child's spent amount and use the operation's own pins", async () => {
+  const { readSmartAccountGaslessProofState } = await import("../../src/smart-account-gasless/chain/snapshot.js");
+  const harness = await successHarness(), saved = harness.input.intent, methods: string[] = [];
+  const at = { numberAtomic: "50000100", hash: `0x${"a".repeat(64)}` as Hex, timestampAtomic: "1790000000" };
+  const state = await readSmartAccountGaslessProofState(async (method: any, params: readonly unknown[]) => {
+    methods.push(method); return await harness.context.call(method, params);
+  }, saved, harness.input.material.childDelegationHash, at);
+  assert.deepEqual(methods, ["eth_call"], "one spentMap read at the current safe or finalized block, no code downloads");
+  assert.deepEqual(state.protocolCodeHashes, saved.initialSnapshot.safeState.protocolCodeHashes);
+  assert.equal(state.tokenImplementationCodeHash, saved.initialSnapshot.safeState.tokenImplementationCodeHash);
 });

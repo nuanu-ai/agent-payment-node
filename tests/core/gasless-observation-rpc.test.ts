@@ -7,6 +7,7 @@ import type { GaslessOperationRecord } from "../../src/gasless/operation-model.j
 import { GaslessObservationRpc, gaslessObservationRpcFactory,
   type GaslessObservationPacing } from "../../src/gasless/observation-rpc.js";
 import { withGaslessRpcInvocation } from "../../src/gasless/rpc.js";
+import { gaslessPostBudget } from "../../src/gasless/rpc-budget.js";
 import { gaslessDeployment } from "../../src/gasless/registry.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { ObservationTransport, type ObservationFault } from "./gasless-fixtures/observation-transport.js";
@@ -52,7 +53,7 @@ test("concrete alternate RPC proves bootstrap and final permission invalidation 
   }
 });
 
-test("alternate RPC rejects wrong binding, chain and preparation anchor before returning evidence", async t => {
+test("alternate RPC rejects wrong binding and chain before returning evidence, with no preparation-anchor read", async t => {
   const { operation } = await prepared(t, "bootstrap", "expected");
   const selected = gaslessObservationRpcFactory({ [ENVIRONMENT]: ENDPOINT,
     APN_UNUSED_RPC_URL: "https://unused.example/secret" })(8453, ENVIRONMENT);
@@ -69,12 +70,21 @@ test("alternate RPC rejects wrong binding, chain and preparation anchor before r
   }
   assert.equal(noNetwork.calls.length, 0);
 
-  for (const fault of ["chain", "initial_hash", "initial_timestamp", "post_initial_reorg"] as const) {
+  const wrongChain = await ObservationTransport.create(ENDPOINT, operation.intent);
+  wrongChain.setFault("chain");
+  await assert.rejects(new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, wrongChain, fastPacing())
+    .observe(operation.intent, identity(operation), operation.cursor), { code: "APN_CHAIN_MISMATCH" });
+  // Archive-free: the preparation block is never read again (its state may be pruned on a keyless node), and a
+  // changed preparation header no longer matters to a proof built from the receipt and current safe/latest state.
+  for (const fault of ["initial_hash", "initial_timestamp"] as const) {
     const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
     transport.setFault(fault);
-    const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
-    await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor),
-      { code: fault === "chain" ? "APN_CHAIN_MISMATCH" : "APN_RPC_PROTOCOL" }, fault);
+    const result = await new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing())
+      .observe(operation.intent, identity(operation), operation.cursor);
+    assert.equal(result.status, "permissions_invalidated", fault);
+    const initial = BigInt(operation.intent.initialSnapshot.block.numberAtomic);
+    assert.equal(transport.calls.some(call => call.method === "eth_getBlockByNumber" && call.params[0] === `0x${initial.toString(16)}`), false, fault);
+    assert.equal(transport.calls.some(call => call.method === "eth_getStorageAt"), false, fault);
   }
 
   const mutations: Array<[string, (intent: Json) => void]> = [
@@ -94,9 +104,9 @@ test("alternate RPC rejects wrong binding, chain and preparation anchor before r
 
 test("current protocol, permission, finality and log faults retain the final guard", async t => {
   const { operation } = await prepared(t, "final", "empty");
-  // Pinned bytecode is immutable and proven once per invocation at the initial anchor; proxy slots and identity
-  // reads are what can change at a current block, so those are the protocol faults observed here.
-  const protocolAndPermissionFaults: ObservationFault[] = ["protocol_storage", "protocol_domain",
+  // An already-sent operation is observed through its own saved contracts; today's protocol pins are not re-proven,
+  // so only the permission state and the current safe anchor can hold the guard.
+  const protocolAndPermissionFaults: ObservationFault[] = [
     "permit", "allowance", "pending", "entrypoint", "eoa", "owner_code", "current_reorg"];
   for (const fault of protocolAndPermissionFaults) {
     const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
@@ -128,20 +138,22 @@ test("current protocol, permission, finality and log faults retain the final gua
   }
 });
 
-test("bounded scan advances 256 blocks in ten-block requests and closes only after invalidation is covered", async t => {
+test("bounded scan advances four 256-block windows in ten-block requests and closes only after invalidation is covered", async t => {
   const { operation } = await prepared(t, "final", "expected");
-  const start = BigInt(operation.intent.initialSnapshot.block.numberAtomic), safe = start + 300n;
+  const start = BigInt(operation.intent.initialSnapshot.block.numberAtomic), safe = start + 1_100n;
   const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
   transport.setFinalIdentity(operation.userOperation.userOperationHash!); transport.setScan(safe, safe);
   const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
   const first = await rpc.observe(operation.intent, identity(operation), operation.cursor);
   assert.equal(first.status, "not_found");
   assert.equal(first.permissionInvalidation, undefined);
-  assert.equal(first.cursor.nextBlockAtomic, (start + 256n).toString());
+  assert.equal(first.cursor.nextBlockAtomic, (start + 1_024n).toString());
   const firstRanges = ranges(transport);
-  assert.equal(firstRanges.length, 26);
+  assert.equal(firstRanges.length, 4 * 26);
   assert.deepEqual(firstRanges[0], [start, start + 9n]);
-  assert.deepEqual(firstRanges.at(-1), [start + 250n, start + 255n]);
+  assert.deepEqual(firstRanges.at(-1), [start + 1_018n, start + 1_023n]);
+  // No invalidation probe before the scan reached the safe head: no latest header and no account reads yet.
+  assert.equal(transport.calls.some(call => call.method === "eth_getBlockByNumber" && call.params[0] === "latest"), false);
 
   const reorgTransport = await ObservationTransport.create(ENDPOINT, operation.intent);
   reorgTransport.setFinalIdentity(operation.userOperation.userOperationHash!);
@@ -156,8 +168,8 @@ test("bounded scan advances 256 blocks in ten-block requests and closes only aft
   assert.equal(second.status, "permissions_invalidated");
   assert.equal(second.permissionInvalidation?.safeBlock.numberAtomic, safe.toString());
   const allRanges = ranges(transport);
-  assert.equal(allRanges.length, 31);
-  assert.deepEqual(allRanges.at(-1), [start + 296n, safe]);
+  assert.equal(allRanges.length, 4 * 26 + 8);
+  assert.deepEqual(allRanges.at(-1), [start + 1_094n, safe]);
   assert.ok(allRanges.every(([from, to]) => to - from + 1n <= 10n));
 });
 
@@ -265,17 +277,18 @@ test("explicit observer serializes and spaces calls without retrying an unavaila
   }
 });
 
-test("explicit observation shares the 24 physical POST resume invocation cap", async t => {
+test("explicit observation shares the derived physical POST resume invocation cap", async t => {
   const { operation } = await prepared(t, "final", "expected");
   const transport = await ObservationTransport.create(ENDPOINT, operation.intent);
   const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
   const call = (rpc as unknown as { call(method: string, params: readonly unknown[]): Promise<unknown> }).call.bind(rpc);
+  const budget = gaslessPostBudget("resume", Number.POSITIVE_INFINITY);
   await withGaslessRpcInvocation(async () => {
-    for (let index = 0; index < 24; index += 1) await call("eth_chainId", []);
+    for (let index = 0; index < budget; index += 1) await call("eth_chainId", []);
     await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor), (error: any) =>
       error.code === "APN_RPC_AMBIGUOUS" && error.details?.reason === "gasless_observation_rpc_unavailable");
   }, "resume");
-  assert.equal(transport.calls.length, 24);
+  assert.equal(transport.calls.length, budget);
 });
 
 test("explicit observation rejects a duplicate read-batch ID without single-read fallback", async t => {
@@ -292,10 +305,10 @@ test("explicit observation rejects a duplicate read-batch ID without single-read
     return { ...response, body: JSON.stringify(rows) };
   } };
   const rpc = new GaslessObservationRpc(8453, ENDPOINT, ENVIRONMENT, transport, fastPacing());
-  await assert.rejects(rpc.observe(operation.intent, identity(operation), operation.cursor),
-    { code: "APN_RPC_PROTOCOL" });
+  const held = await rpc.observe(operation.intent, identity(operation), operation.cursor);
+  assert.equal(held.status, "unresolved"); assert.equal(held.permissionInvalidation, undefined);
   assert.equal(batches, 1);
-  assert.equal(physical, 3, "chain, initial anchor, then one malformed proof batch");
+  assert.equal(physical, 2, "chain, then one malformed head batch; no single-read fallback");
 });
 
 test("one unavailable observation does not poison a later same-instance recovery", async t => {

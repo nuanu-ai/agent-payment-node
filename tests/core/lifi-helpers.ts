@@ -19,7 +19,8 @@ import type { BridgeApprovalPort, BridgeRpcFactory, BridgeRpcPort, LifiProviderP
 import type { RpcReadSession } from "../../src/lifi/rpc.js";
 import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { BRIDGE_FEE_RULE_HASH } from "../../src/lifi/rpc-fees.js";
-import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
+import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, bridgeFailure } from "../../src/lifi/validation.js";
+import { bridgeDeploymentCheck } from "../../src/lifi/deployment-check.js";
 import { addressWord, eventLog, makeDestinationReceipt, makeSourceReceipt } from "./lifi-event-fixtures.js";
 import { BNB_COMPOSITE } from "../../src/lifi/bnb-composite.js";
 import { activateDirectPolicy, WIDE_CAPS } from "./direct-allowlist-helpers.js";
@@ -143,6 +144,16 @@ export class LifiTestRpc implements BridgeRpcPort {
     this.calls.push("deployment"); const contract = bridgeDeployment(this.chainId, peerChainId, tool, token);
     return { chainId: this.chainId, peerChainId, tool, block: block ?? await this.block("safe"), rpcOrigin: this.origin,
       contractHash: hashObject(contract), codeHash: this.drift ? "0".repeat(64) : hashObject(contract.code), configurationHash: hashObject(contract.reads) };
+  }
+  async deploymentCheck(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, role: "source" | "destination") {
+    this.calls.push(`deploymentCheck:${role}`); const check = bridgeDeploymentCheck(this.chainId, peerChainId, tool, token, role);
+    if (this.drift) bridgeFailure("APN_PROVIDER_PROTOCOL", "bridge_deployment_configuration_changed");
+    return { chainId: this.chainId, peerChainId, tool, block: await this.block("latest"), rpcOrigin: this.origin,
+      contractHash: check.contractHash, codeHash: hashObject([]), configurationHash: hashObject(check.reads) };
+  }
+  async checkedAccount(check: { readonly tool: BridgeTool; readonly peerChainId: BridgeChainId }, owner: Address, spender: Address, token: Address) {
+    const deployment = await this.deploymentCheck(check.tool, check.peerChainId, token, "source");
+    return { deployment, account: await this.account(owner, spender, token) };
   }
   async account(owner: Address, spender: Address, token: Address) {
     this.calls.push("account"); if (this.failAccount) throw new Error("synthetic RPC unavailable");

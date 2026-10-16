@@ -9,7 +9,6 @@ import { StateStore } from "../state.js";
 import { OperationService } from "../operation-service.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
-import type { GaslessTransport } from "../gasless/https.js";
 import { validatePermit2CheckedChallenge, type Permit2CheckedChallenge } from "./checked-challenge.js";
 import { permit2WalletBinding } from "./owner-binding.js";
 import { createPermit2ProductionReadPort, type Permit2ReadRpcSource } from "./read-port.js";
@@ -28,7 +27,6 @@ export interface Permit2ProductionPrepareInput {
 }
 export interface Permit2ProductionPreparePorts {
   readonly rpc: Permit2ReadRpcSource;
-  readonly transport?: GaslessTransport;
   readonly now?: () => Date;
 }
 /** Durable unsigned production preparation. No custody, send, merchant HTTP or settlement port exists. */
@@ -77,8 +75,7 @@ export class Permit2ProductionPreparation {
       const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
       const read = createPermit2ProductionReadPort({ profile, stateRoot: this.state.root,
         localAccount: async () => (await permit2WalletBinding(this.state, profile)).account,
-        usage: { usage: (identity, at) => this.usage.usageReadOnly(identity, at) }, rpc: this.ports.rpc,
-        ...(this.ports.transport === undefined ? {} : { transport: this.ports.transport }), now: () => this.now() });
+        usage: { usage: (identity, at) => this.usage.usageReadOnly(identity, at) }, rpc: this.ports.rpc, now: () => this.now() });
       const observed = await read.readChecked({ payer: wallet.account, chainId: 43114, token: asset.token,
         challengeHash: checked.challengeHash, offerHash: selection.offerHash, amountAtomic: selection.amountAtomic,
         nowSeconds: signingSecond, nonceBitmapWordIndex: (nonce >> 8n).toString() });

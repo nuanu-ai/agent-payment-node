@@ -8,7 +8,8 @@ import { ApnError } from "../../src/errors.js";
 import { acrossBridgeAbi } from "../../src/lifi/abi.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import { RpcReadSession, bridgeRpcFactory, deploymentMulticallEligible } from "../../src/lifi/rpc.js";
-import { BASE_FEE_CONTRACT } from "../../src/lifi/rpc-fees.js";
+import { bridgeDeploymentCheck } from "../../src/lifi/deployment-check.js";
+import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
 import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
 import { addressWord } from "./lifi-event-fixtures.js";
@@ -16,6 +17,7 @@ import { LIFI_RECIPIENT, LIFI_SYNTHETIC_SENDER, LifiTestProvider, lifiFixture, l
 import { temporaryState } from "./helpers.js";
 
 type Request = { id: string; method: string; params: unknown[] };
+const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const, ARB_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as const;
 type Capture = { chainId: 1 | 8453 | 42161; requests: Array<{ request: { method: string; params: unknown[] }; response: { result: unknown } }> };
 
 async function prepareSpy(now: Date, aggregateMode: "valid" | "failed" | "malformed" | "reversed" | "delegation" = "valid") {
@@ -26,8 +28,9 @@ async function prepareSpy(now: Date, aggregateMode: "valid" | "failed" | "malfor
   const runtime = new Map(runtimes.contracts.map((row) => [`${row.chainId}:${row.address.toLowerCase()}`, row.deployedBytecode]));
   const multicallCode = (await readFile(resolve("tests/core/fixtures/multicall3-runtime-code.hex"), "utf8")).trim();
   const nativeReads = new Map<string, string>();
-  for (const [chainId, peerChainId] of [[1, 8453], [8453, 1]] as const) {
-    for (const row of bridgeDeployment(chainId, peerChainId, "across", "0x0000000000000000000000000000000000000000").reads) {
+  for (const [chainId, peerChainId, tool, token] of [[1, 8453, "across", BRIDGE_ZERO_ADDRESS], [8453, 1, "across", BRIDGE_ZERO_ADDRESS],
+    [8453, 42161, "stargateV2", BASE_USDC], [42161, 8453, "stargateV2", ARB_USDC]] as const) {
+    for (const row of bridgeDeployment(chainId, peerChainId, tool, token).reads) {
       nativeReads.set(canonicalJson([chainId, row.kind, row.address.toLowerCase(), row.data]), row.expected);
     }
   }
@@ -123,96 +126,48 @@ async function nativeEthBase(now: Date): Promise<LifiTestProvider> {
 }
 
 for (const flow of [
-  { pair: "eth-base" as const, tool: "across" as const, archiveSizes: {
-    "eth-archive.example": [3, 3, 3, 3, 3, 2], "base-archive.example": [3, 3, 3, 3, 3, 2],
-  }, requests: 16, native: true },
-  { pair: "base-arb" as const, tool: "stargateV2" as const, archiveSizes: {
-    "base-archive.example": [3, 3, 3, 3, 3, 3, 2], "arb-archive.example": [3, 3, 3, 3, 3],
-  }, requests: 16, native: false },
-]) test(`LI.FI ${flow.pair} ${flow.tool} complete prepare caps archive HTTP batches at three items`, async (t) => {
+  { pair: "eth-base" as const, tool: "across" as const, native: true },
+  { pair: "base-arb" as const, tool: "stargateV2" as const, native: false },
+]) test(`LI.FI ${flow.pair} ${flow.tool} complete prepare reads two primary batches and no archive`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-    const now = new Date(flow.native ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z");
-    const spy = await prepareSpy(now); const provider = flow.native ? await nativeEthBase(now) : undefined;
-    const f = await lifiFixture(temporary.root, flow.pair, { rpcFor: spy.rpcFor, now,
-      ...(provider === undefined ? {} : { provider, maxNativeDebitWei: "3000000000000000" }) });
-    const prepared = await f.prepare(flow.tool);
-    assert.ok(prepared.operation); assert.equal(f.provider.materializeCalls, 1);
-    assert.match(prepared.operation.intent.sourceDeployment.codeHash, /^[0-9a-f]{64}$/u);
-    assert.match(prepared.operation.intent.destinationDeployment.codeHash, /^[0-9a-f]{64}$/u);
-    assert.equal(spy.calls.length, flow.requests);
-    const archive = spy.calls.filter((call) => call.host.includes("archive"));
-    for (const [host, sizes] of Object.entries(flow.archiveSizes)) {
-      assert.deepEqual(archive.filter((call) => call.host === host).map((call) => call.items.length), sizes);
-    }
-    assert.ok(archive.every((call) => call.items.length <= 3));
-    assert.equal(archive.filter((call) => call.items.some((item) => item.method === "eth_chainId")).length, 2);
-    const primary = spy.calls.filter((call) => call.host.includes("primary"));
-    assert.equal(primary.length, 4);
-    assert.equal(primary.filter((call) => call.items.some((item) => item.method === "eth_getBalance")).length, 1);
-    assert.equal(primary.filter((call) => call.items.some((item) => item.method === "eth_estimateGas")).length, 1);
-    assert.ok(primary.every((call) => !call.items.some((item) => item.method === "eth_getBalance" && item.params[1] === "latest")));
-    for (const call of primary) {
-      const stateTag = call.items.find((item) => item.method === "eth_getBalance")?.params[1];
-      const baseFeeCalls = call.items.filter((item) => item.method === "eth_call" &&
-        ["0x420000000000000000000000000000000000000f", "0x4200000000000000000000000000000000000015"]
-          .includes(String((item.params[0] as { to?: unknown }).to).toLowerCase()));
-      if (baseFeeCalls.length > 0) {
-        assert.equal(baseFeeCalls.length, 3); assert.notEqual(stateTag, undefined);
-        assert.ok(baseFeeCalls.every((item) => item.params[1] === stateTag && item.params[1] !== "latest"));
-      }
-    }
-    if (flow.pair === "base-arb") {
-      const beforeApproval = spy.calls.length; f.approval.accepted = false;
-      const rejected = await f.core.execute({ command: "bridge.approve", operationId: prepared.id });
-      assert.equal(rejected.ok, true, JSON.stringify(rejected.error));
-      assert.equal((rejected.operation as { state: string }).state, "failed_before_effect");
-      const execution = spy.calls.slice(beforeApproval), executionArchive = execution.filter((call) => call.host.includes("archive"));
-      assert.equal(execution.length, 13); assert.equal(execution.filter((call) => call.host.includes("primary")).length, 4);
-      assert.deepEqual(executionArchive.filter((call) => call.host === "base-archive.example").map((call) => call.items.length),
-        [3, 3, 3, 1]);
-      assert.deepEqual(executionArchive.filter((call) => call.host === "arb-archive.example").map((call) => call.items.length),
-        [3, 3, 3, 3, 3]);
-      assert.ok(executionArchive.every((call) => call.items.length <= 3));
-      assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 13);
-      assert.equal(spy.sessions.at(-1)!.telemetry().remainingHttpRequests, 15);
-    }
+  const now = new Date(flow.native ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z");
+  const spy = await prepareSpy(now); const provider = flow.native ? await nativeEthBase(now) : undefined;
+  const f = await lifiFixture(temporary.root, flow.pair, { rpcFor: spy.rpcFor, now,
+    ...(provider === undefined ? {} : { provider, maxNativeDebitWei: "3000000000000000" }) });
+  const prepared = await f.prepare(flow.tool), intent = prepared.operation.intent, request = intent.materialization.request;
+  assert.ok(prepared.operation); assert.equal(f.provider.materializeCalls, 1);
+  // One source batch (chain, head, account, Base fee inputs, the planned simulation and the deployment check), one destination head.
+  assert.equal(spy.calls.length, 2); assert.ok(spy.calls.every((call) => call.host.includes("primary")));
+  const [source, destination] = [spy.calls.find((call) => call.items.some((item) => item.method === "eth_getBalance"))!,
+    spy.calls.find((call) => !call.items.some((item) => item.method === "eth_getBalance"))!];
+  assert.ok(source.items.every((item) => !["eth_getCode", "eth_getStorageAt"].includes(item.method)));
+  assert.ok(source.items.filter((item) => item.params.length === 2 && typeof item.params[1] === "string" && item.method !== "eth_getTransactionCount")
+    .every((item) => item.params[1] === "latest"));
+  const check = bridgeDeploymentCheck(request.fromChainId, request.toChainId, flow.tool, request.fromToken, "source");
+  assert.equal(source.items.filter((item) => item.method === "eth_call").length, check.reads.length + (request.fromChainId === 8453 ? 3 : 0) +
+    (flow.native ? 0 : 2));
+  assert.deepEqual(destination.items.map((item) => item.method), ["eth_chainId", "eth_getBlockByNumber"]);
+  assert.equal(intent.sourceDeployment.contractHash, check.contractHash);
+  assert.equal(intent.sourceDeployment.configurationHash, hashObject(check.reads));
+  assert.equal(intent.destinationDeployment.configurationHash, hashObject([]));
+  assert.deepEqual(intent.destinationStartBlock, intent.destinationDeployment.block);
+  if (flow.pair === "base-arb") {
+    const beforeApproval = spy.calls.length; f.approval.accepted = false;
+    const rejected = await f.core.execute({ command: "bridge.approve", operationId: prepared.id });
+    assert.equal(rejected.ok, true, JSON.stringify(rejected.error));
+    assert.equal((rejected.operation as { state: string }).state, "failed_before_effect");
+    // The guard before consent is the source batch alone: an Arbitrum Stargate destination reads nothing before the send.
+    const execution = spy.calls.slice(beforeApproval);
+    assert.equal(execution.length, 1); assert.equal(execution[0]!.host, "base-primary.example");
+    assert.equal(spy.sessions.at(-1)!.telemetry().httpRequests, 1);
+  }
 });
 
-test("deployment Multicall keeps direct-proof identity and rejects unknown selectors", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const now = new Date("2026-09-08T12:00:00.000Z"), spy = await prepareSpy(now);
-  const f = await lifiFixture(temporary.root, "base-arb", { rpcFor: spy.rpcFor, now });
-  const prepared = await f.prepare("stargateV2"), intent = prepared.operation.intent;
-  const base = bridgeDeployment(8453, 42161, "stargateV2", intent.materialization.request.fromToken);
-  const arb = bridgeDeployment(42161, 8453, "stargateV2", intent.materialization.request.toToken);
-  assert.equal(intent.sourceDeployment.configurationHash, hashObject([...base.reads, ...BASE_FEE_CONTRACT.reads].map((row) => ({ ...row, expected: row.expected }))));
-  assert.equal(intent.destinationDeployment.configurationHash, hashObject(arb.reads.map((row) => ({ ...row, expected: row.expected }))));
+test("legacy deployment Multicall eligibility stays defined for the frozen migration proofs", () => {
   assert.equal(deploymentMulticallEligible("0x313ce567"), true);
   assert.equal(deploymentMulticallEligible("0xcdffacc6"), false);
   assert.equal(deploymentMulticallEligible("0x5c60da1b"), false);
   assert.equal(deploymentMulticallEligible("0x70a082310000000000000000000000000000000000000000000000000000000000000000"), false);
-  assert.equal(spy.calls.flatMap((call) => call.items).some((item) => item.method === "eth_getStorageAt"), true);
-  const archiveItems = spy.calls.filter((call) => call.host.includes("archive"))
-    .flatMap((call) => call.items.map((item) => ({ host: call.host, item })));
-  const identitySelectors = new Set(["0xcdffacc6", "0x5c60da1b"]);
-  const directIdentity = archiveItems.filter(({ item }) => item.method === "eth_call" &&
-    String((item.params[0] as { to?: unknown }).to).toLowerCase() !== MULTICALL3_ADDRESS.toLowerCase() &&
-    identitySelectors.has(String((item.params[0] as { data?: unknown }).data).slice(0, 10)));
-  assert.deepEqual(directIdentity.map(({ item }) => String((item.params[0] as { data?: unknown }).data).slice(0, 10)).sort(),
-    ["0xcdffacc6", "0xcdffacc6"]);
-  const aggregateItems = archiveItems.filter(({ item }) => item.method === "eth_call" &&
-    String((item.params[0] as { to?: unknown }).to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase());
-  assert.equal(aggregateItems.length, 3);
-  for (const { host, item } of aggregateItems) {
-    const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: (item.params[0] as { data: Hex }).data });
-    assert.equal(decoded.functionName, "aggregate3");
-    assert.ok(decoded.args[0].every((inner) => !identitySelectors.has(inner.callData.slice(0, 10))));
-    assert.ok(directIdentity.filter((direct) => direct.host === host).every((direct) => direct.item.params[1] === item.params[1]));
-  }
-  const refresh = spy.rpcFor(8453, new RpcReadSession({ maxHttpRequests: 10, maxHttpAttempts: 12, wait: async () => {} }));
-  assert.ok(refresh.refreshDeployment);
-  await assert.rejects(refresh.refreshDeployment!("stargateV2", 42161, intent.materialization.request.fromToken,
-    { ...intent.sourceDeployment, contractHash: "0".repeat(64) }), { code: "APN_OPERATION_BLOCKED" });
 });
 
 for (const [mode, code] of [["failed", "APN_RPC_PROTOCOL"], ["malformed", "APN_RPC_PROTOCOL"],

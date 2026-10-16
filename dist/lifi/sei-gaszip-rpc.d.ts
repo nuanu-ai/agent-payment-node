@@ -37,6 +37,11 @@ export declare function proveSeiSafeTransaction(rpc: SeiRpcPort, chain: 8453 | 1
     maxFee?: string;
     tip?: string;
     gasPrice?: string;
-}): Promise<SeiSafeProof | null>;
+}, known?: unknown): Promise<SeiSafeProof | null>;
+/**
+ * The payout is proved from the chain alone: the exact signed transaction from the provider's signer to the owner, its
+ * successful receipt with empty input and no logs at or below the safe head, its block membership, and an owner account
+ * that has no code, so the plain value transfer could not run code and credited exactly its value. No historical balances.
+ */
 export declare function proveSeiDelivery(rpc: SeiRpcPort, owner: string, d: SeiCorrelatedDelivery): Promise<SeiSafeProof | null>;
 export declare function proveSeiSource(rpc: SeiRpcPort, r: SeiFundingRecord): Promise<SeiSafeProof | null>;

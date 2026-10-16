@@ -337,13 +337,13 @@ test("an owner-explicit same-origin archive serves the checked receipt fallback"
   assert.deepEqual(calls, ["/:eth_getTransactionReceipt", "/archive:eth_chainId", "/archive:eth_getTransactionReceipt"]);
 });
 
-test("without an archive name historical state fails before a state read reaches the primary", async () => {
+// History is optional (P1): without an owner-named archive a block-pinned read is the primary's, which serves recent blocks.
+test("without an archive name block-pinned state and receipts stay on the primary endpoint", async () => {
   const f = fixture();
-  await assert.rejects(bridgeRpcCall(1, primary, { transport: f.transport }).call("eth_getCode", [DIAMOND, "0x18c9a42"]),
-    { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", details: { reason: "explicit_archive_RPC_required" } });
+  assert.equal(await bridgeRpcCall(1, primary, { transport: f.transport }).call("eth_getCode", [DIAMOND, "0x18c9a42"]), "0x60");
   await bridgeRpcCall(1, primary, { transport: f.transport }).call("eth_getTransactionReceipt", [`0x${"b".repeat(64)}`]);
   assert.deepEqual(f.calls, [
-    { host: "primary.example", method: "eth_getTransactionReceipt" },
+    { host: "primary.example", method: "eth_getCode" }, { host: "primary.example", method: "eth_getTransactionReceipt" },
   ]);
 });
 
@@ -508,15 +508,12 @@ test("only exact block-pinned state reads qualify as historical", () => {
   assert.equal(isArchiveRead("eth_sendRawTransaction", [`0x${"b".repeat(64)}`]), false);
 });
 
-test("LI.FI missing historical state archive refuses before transport with explicit bounded reason", async () => {
+test("LI.FI block-pinned state without a named archive reaches only the primary, in either call mode", async () => {
   const f = fixture(), descriptor = bridgeRpcCall(1, primary, { transport: f.transport });
   for (const call of [descriptor.call, descriptor.sessionCall(new RpcReadSession({ wait: async () => {} }))]) {
-    await assert.rejects(call("eth_getCode", [DIAMOND, "0x10"]), (error: unknown) => {
-      assert.ok(error instanceof ApnError); assert.equal(error.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-      assert.deepEqual(error.details, { reason: "explicit_archive_RPC_required" }); return true;
-    });
+    assert.equal(await call("eth_getCode", [DIAMOND, "0x10"]), "0x60");
   }
-  assert.equal(f.calls.length, 0);
+  assert.deepEqual(f.calls, [{ host: "primary.example", method: "eth_getCode" }, { host: "primary.example", method: "eth_getCode" }]);
 });
 
 for (const sessionMode of [false, true]) test(`same-origin explicit archive preserves checked historical state routing; session=${sessionMode}`, async () => {

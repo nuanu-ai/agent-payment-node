@@ -80,7 +80,7 @@ export class GaslessTestRpc implements GaslessRpcPort {
     this.approvedFees.push({ maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas });
     if (this.drift > 0) { this.drift -= 1; gaslessFailure("APN_OPERATION_BLOCKED", "gasless_bundler_fee_drift"); }
   }
-  async mirrorEstimate(intent: GaslessIntent, _fees?: GaslessFees) {
+  async mirrorEstimate(intent: GaslessIntent, _witness: GaslessSnapshot, _fees?: GaslessFees) {
     this.calls.push("mirror_estimate");
     if (this.mirrorUnavailable > 0) { this.mirrorUnavailable -= 1; gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_mirror_estimate_unavailable"); }
     if (this.mirrorResult === "unavailable") gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_mirror_estimate_unavailable");

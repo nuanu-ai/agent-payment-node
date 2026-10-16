@@ -101,7 +101,7 @@ export class RelayBaseObserveService {
     if (proof.status !== "recipient_credit_proven") return result("provider_candidate_unproven", proof.reason, provider.status,
       proof, sourceFinalized, sourceBound);
     if (sourceFinalized && sourceBound && usageBound && provider.status === "success" &&
-      proof.proof.method === "verified_relay_router_event_balance")
+      proof.proof.method === "relay_router_event")
       return result("operational_acceptance", "source_finalized_provider_bound_safe_base_recipient_credit",
         provider.status, proof, true, true, true, sourceHash);
     return result("recipient_credit_observed", "safe_base_native_credit_without_complete_source_binding",

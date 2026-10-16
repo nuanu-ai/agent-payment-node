@@ -1,6 +1,5 @@
 import { HttpsBaseRpc } from "../rpc.js";
 import { type Permit2ReadRpcSource, type Permit2UsageReader } from "./read-port.js";
-import type { GaslessTransport } from "../gasless/https.js";
 export interface Permit2PreflightRequest {
     readonly profile: string;
     readonly paymentRequired: string;
@@ -10,11 +9,14 @@ export interface Permit2PreflightRequest {
 }
 export interface Permit2PreflightPorts {
     readonly rpc: Permit2ReadRpcSource;
-    readonly transport?: GaslessTransport;
     readonly now?: () => Date;
     readonly usage?: Permit2UsageReader;
 }
 /** An unsigned CLI read with no payment-state persistence; only RPC pacing metadata may be written. */
 export declare function permit2CurrentOwnerPreflight(root: string, request: Permit2PreflightRequest, ports: Permit2PreflightPorts): Promise<unknown>;
-/** Cross-process pacing uses APN's kernel-backed state lock and operational RPC pacing record. */
-export declare function permit2PublicRpc(url: string, stateRoot: string, transport?: Pick<HttpsBaseRpc, "permit2ReadCall">): Permit2ReadRpcSource;
+/**
+ * Prepare-time Permit2 reads go through the shared direct-EVM transport: provider-family pacing across processes and a
+ * per-command POST cap (EvmDirectRpcGuard), the same mechanism as the signing fence and the observer. One instance per
+ * command keeps the DNS pin; each batch races the caller's abort signal.
+ */
+export declare function permit2PublicRpc(url: string, stateRoot: string, transport?: Pick<HttpsBaseRpc, "batchCall">): Permit2ReadRpcSource;

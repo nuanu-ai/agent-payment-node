@@ -1,20 +1,28 @@
-import { ApnError } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 import { type GaslessTransport } from "./https.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessFees, GaslessGas, GaslessIntent, GaslessObservation, GaslessSnapshot } from "./model.js";
 import type { GaslessBootstrapMaterial, GaslessRpcFactory, GaslessRpcPort, GaslessUserOperationMaterial } from "./ports.js";
 import { type GaslessInvocationPlan } from "./rpc-budget.js";
+export { gaslessBatchCap, gaslessBatchCapSetting, gaslessConfigError } from "./rpc-config.js";
 /** One command invocation includes RPC and bundler POSTs, including failed transport attempts. */
 export declare class GaslessRpcRequestSession {
+    private readonly plan;
     private posts;
     private terminalStatus;
     private readonly verifiedChains;
     private readonly protocolAnchors;
     private readonly provenCode;
-    readonly maxBatchItems: number;
-    /** Derived from the invocation's step plan (`rpc-budget.ts`), including its explicit retry allowance. */
-    readonly maxPosts: number;
+    private batchCap;
+    private postCap;
     constructor(plan: GaslessInvocationPlan, maxBatchItems?: number);
+    get maxBatchItems(): number;
+    /** Derived from the invocation's step plan (`rpc-budget.ts`) and batch cap, including its explicit retry allowance. */
+    get maxPosts(): number;
+    /**
+     * An endpoint's own batch cap (`APN_<NETWORK>_RPC_MAX_BATCH_ITEMS`) tightens this invocation before its reads are
+     * split; the POST budget is re-derived from the same step plan at that cap, so the split is counted, never exceeded.
+     */
+    limitBatch(cap: number | undefined): void;
     reserve(): void;
     assertActive(): void;
     rejectHttp(status: number): never;
@@ -35,6 +43,7 @@ export declare function gaslessRpcFactory(environment: Readonly<Record<string, s
 export declare class GaslessRpc implements GaslessRpcPort {
     private readonly transport;
     private readonly fallbackSession;
+    private readonly maxBatchItems?;
     readonly chainId: GaslessChainId;
     readonly rpcOrigin: string;
     readonly rpcEndpointHash: string;
@@ -47,7 +56,7 @@ export declare class GaslessRpc implements GaslessRpcPort {
     private readonly rpcCall;
     private readonly bundlerCall;
     private readonly pendingReads;
-    constructor(chainId: GaslessChainId, rpcUrl: string, bundlerUrl?: string, transport?: GaslessTransport, fallbackSession?: GaslessRpcRequestSession);
+    constructor(chainId: GaslessChainId, rpcUrl: string, bundlerUrl?: string, transport?: GaslessTransport, fallbackSession?: GaslessRpcRequestSession, maxBatchItems?: number | undefined);
     assertChain(): Promise<void>;
     private validateChain;
     private validateBundler;
@@ -55,18 +64,24 @@ export declare class GaslessRpc implements GaslessRpcPort {
     assertSignedFees(fees: GaslessFees): Promise<void>;
     /** One bounded, read-only HTTP batch; no effect call can enter this batch. */
     private bundlerState;
-    mirrorEstimate(intent: GaslessIntent, fees?: GaslessFees): Promise<GaslessEstimate>;
+    mirrorEstimate(intent: GaslessIntent, witness: GaslessSnapshot, fees?: GaslessFees): Promise<GaslessEstimate>;
     estimate(intent: GaslessIntent, bootstrap: GaslessBootstrapMaterial, fees?: GaslessFees): Promise<GaslessEstimate>;
     send(intent: GaslessIntent, sealed: GaslessUserOperationMaterial, beforeSend?: () => void): Promise<Hex>;
+    /**
+     * Observation proves an effect APN already sent, so it reads the addresses and protocol hash saved in the intent and
+     * never today's registry pins: a later pin update cannot strand an operation that was sent under the earlier set.
+     */
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
     private assertChainUnlessVerified;
+    private assertEndpoint;
     /** Returns the admitted asset the intent names, so no caller has to re-derive it from a literal. */
     private assertIntent;
     /**
      * The row's `balanceLayout` is a claim about one token implementation's storage, never protocol knowledge, so it is
      * proved twice before it is trusted. First the claim must name the implementation this chain is verified to run, so
      * a layout description can never outlive the code it describes. Then it is measured: the owner's balance word at the
-     * claimed slot must equal the balance the frozen snapshot already read through `balanceOf` at that exact block.
+     * claimed slot must equal the balance the guard snapshot just read through `balanceOf` at that exact recent block
+     * (never the prepare block, whose state a keyless node may already have pruned).
      * A row with no claim, a claim for another implementation, a zero witness balance or any disagreement fails closed
      * rather than fabricating a balance at an unverified slot.
      */
@@ -78,5 +93,3 @@ export declare class GaslessRpc implements GaslessRpcPort {
 }
 /** Storage key of a Solidity `mapping(address => uint256)` entry at the given base slot. */
 export declare function gaslessBalanceSlot(holder: Address, base: string): Hex;
-/** A configuration failure names the selected network's own setting and its exact cause, never another network's. */
-export declare function gaslessConfigError(reason: string, nextAction: string): ApnError;

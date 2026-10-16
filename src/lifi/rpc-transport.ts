@@ -6,12 +6,12 @@ import { evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
 import type { BridgeChainId } from "./chains.js";
 import { BridgeHttps } from "./https.js";
-import type { BridgeRpcFactory, BridgeRpcPort, LifiResponse } from "./ports.js";
+import type { BridgeRpcFactory, LifiResponse } from "./ports.js";
 import { bridgeArchiveEndpoint, bridgeReceiptEndpoint, isArchiveRead, isHistoricalStateRead, type BridgeReceiptEndpoint } from "./rpc-archive.js";
 import { jsonRpcRateLimit } from "./rpc-session-helpers.js";
 import { rpcBlockValue } from "./rpc-batch-codec.js";
 import { BridgeRpc } from "./rpc-adapter.js";
-import { parseRetryAfter, RpcHttpFailure, type RpcBatchAttempt, type RpcBatchReadItem, RpcReadSession } from "./rpc-session.js";
+import { parseRetryAfter, RPC_BATCH_MAX_ITEMS, RpcHttpFailure, rpcProviderFamily, type RpcBatchAttempt, type RpcBatchReadItem, RpcReadSession } from "./rpc-session.js";
 import { decodeAtomicBatchResponse, historicalReceiptUnavailable, isArchiveBatchItem, isReceiptBatchShape, isReceiptFallbackError, knownPublicNodeReceiptCapability, missingHistoricalArchive, READ_METHODS, retryDirect, rpcBodyMethod, rpcFallbackChainValue, rpcReceiptFallbackValue, submitDirect, withEndpointRole } from "./rpc-support.js";
 import { bridgeChain } from "./asset-registry.js";
 import { bridgeFailure, bridgeJson } from "./validation.js";
@@ -29,7 +29,8 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   /** Optional read-only observation hook; called from the selected production route before each physical HTTP attempt. */
   readonly onRequest?: (trace: BridgeRpcRequestTrace) => void;
 } = {}): { readonly origin: string; readonly call: EvmRpcCall; readonly attempt: EvmRpcCall; readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
-  readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]> } {
+  readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>;
+  readonly receipts: BridgeReceiptRoute } {
   bridgeChain(chainId, "APN_RPC_CONFIG");
   const transport = options.transport ?? new BridgeHttps();
   const wait = options.wait ?? (async (milliseconds: number) => await new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
@@ -59,10 +60,9 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
       if (primary !== null || receiptFallback === null) return primary;
       return await withEndpointRole(fallbackReceipt(method, params, receiptFallback), receiptFallback.role);
     }
-    if (isHistoricalStateRead(method, params)) {
-      if (explicitArchive === null) return missingHistoricalArchive();
-      return await withEndpointRole(archiveRead(method, params, explicitArchive), "archive");
-    }
+    // History is optional (P1): a hash- or number-pinned state read or a trace uses the archive role only when the owner
+    // named one; otherwise the primary serves it, which works for recent blocks on any full node.
+    if (explicitArchive !== null && historyRead(method, params)) return await withEndpointRole(archiveRead(method, params, explicitArchive), "archive");
     return await withEndpointRole(retryDirect(method, params, () => oneAttempt(endpoint, method, params), wait), "primary");
   };
   const assertArchiveChain = async (target: URL): Promise<void> => {
@@ -165,7 +165,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
       ? session.readReceiptBatch(target.toString(), chainId, bound, fallback!.maxItemsPerRequest)
       : route === "archive_deployment"
       ? session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
-      : session.readBatch(target.toString(), chainId, bound), role);
+      : session.readBatch(target.toString(), chainId, bound, knownBatchItems(target)), role);
   };
   const sessionArchiveReceipt = async (session: RpcReadSession, method: string, params: readonly unknown[]): Promise<unknown> => {
     const values = await sessionBatchCall(session)([
@@ -190,8 +190,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
       if (primary !== null || receiptFallback === null) return primary;
       return await withEndpointRole(sessionArchiveReceipt(session, method, params), receiptFallback.role);
     }
-    if (isHistoricalStateRead(method, params)) {
-      if (explicitArchive === null) return missingHistoricalArchive();
+    if (explicitArchive !== null && historyRead(method, params)) {
       const archiveAttempt = (m: string, p: readonly unknown[]) => oneAttempt(explicitArchive, m, p, session.currentTime(), "archive", session);
       return await withEndpointRole((async () => {
         const chain = await session.read(explicitArchive.toString(), chainId, "eth_chainId", [], archiveAttempt);
@@ -201,24 +200,34 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     }
     return await withEndpointRole(session.read(endpoint.toString(), chainId, method, params, primaryAttempt), "primary");
   };
-  return { origin: endpoint.origin, call, attempt: (method, params, beforeSend) => oneAttempt(endpoint, method, params, undefined, "primary", undefined, beforeSend), sessionCall, sessionBatchCall };
+  return { origin: endpoint.origin, call, attempt: (method, params, beforeSend) => oneAttempt(endpoint, method, params, undefined, "primary", undefined, beforeSend), sessionCall, sessionBatchCall,
+    receipts: { reader: distinctReceipt !== null, fallback: distinctReceipt === null && receiptFallback !== null } };
 }
+/**
+ * Known provider batch capability, configuration rather than a runtime probe (P3). dRPC's keyless free plan refuses a
+ * JSON-RPC batch of more than three requests (every item answers code 31, observed on base, arbitrum and eth.drpc.org on
+ * 2026-10-16); mainnet.base.org, arb1.arbitrum.io and publicnode.com answered 20-item batches.
+ */
+function knownBatchItems(target: URL): number { return rpcProviderFamily(target.toString()) === "drpc.org" ? 3 : RPC_BATCH_MAX_ITEMS; }
+/** State pinned to one block, or a trace: served by the owner's archive endpoint when one is configured. */
+function historyRead(method: string, params: readonly unknown[]): boolean {
+  return isHistoricalStateRead(method, params) || method === "debug_traceTransaction";
+}
+/** Where an adapter reads canonical receipts: a distinct receipt reader, and whether an empty primary receipt has a fallback. */
+export interface BridgeReceiptRoute { readonly reader: boolean; readonly fallback: boolean }
 export function bridgeRpcFactory(environment: Readonly<Record<string, string | undefined>>, options: {
   readonly transport?: Pick<BridgeHttps, "request">;
   readonly wait?: (milliseconds: number) => Promise<void>;
   readonly onRequest?: (trace: BridgeRpcRequestTrace) => void;
 } = {}): BridgeRpcFactory {
-  const cache = new Map<BridgeChainId, { origin: string; call: EvmRpcCall; attempt: EvmRpcCall; sessionCall: (session: RpcReadSession) => EvmRpcCall; sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>; base?: BridgeRpcPort }>(), transport = options.transport ?? new BridgeHttps();
+  const cache = new Map<BridgeChainId, ReturnType<typeof bridgeRpcCall>>(), transport = options.transport ?? new BridgeHttps();
   return (chainId, session) => {
     bridgeChain(chainId, "APN_RPC_CONFIG");
-    const existing = cache.get(chainId);
-    if (existing !== undefined) {
-      if (session === undefined) return existing.base!;
-      return new BridgeRpc(chainId, existing.origin, existing.call, session, existing.attempt, existing.sessionCall, existing.sessionBatchCall);
-    }
-    const { origin, call, attempt, sessionCall, sessionBatchCall } = bridgeRpcCall(chainId, environment, { ...options, transport });
-    const base = new BridgeRpc(chainId, origin, call);
-    cache.set(chainId, { origin, call, attempt, sessionCall, sessionBatchCall, base });
-    return session === undefined ? base : new BridgeRpc(chainId, origin, call, session, attempt, sessionCall, sessionBatchCall);
+    let bound = cache.get(chainId);
+    if (bound === undefined) cache.set(chainId, bound = bridgeRpcCall(chainId, environment, { ...options, transport }));
+    // Every adapter reads through a command session: one chain identity per endpoint, JSON-RPC batches and provider pacing.
+    // A caller without its own session gets a fresh bounded one for this adapter.
+    return new BridgeRpc(chainId, bound.origin, bound.call, session ?? new RpcReadSession(options.wait === undefined ? {} : { wait: options.wait }),
+      bound.attempt, bound.sessionCall, bound.sessionBatchCall, bound.receipts);
   };
 }

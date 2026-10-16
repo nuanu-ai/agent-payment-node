@@ -6,7 +6,7 @@ import { type RelayBnbProofPorts, type RelayBnbProofResult } from "./destination
 import { RelayKeylessStatusService } from "./status.js";
 import { RelayNativeObserveService } from "./native-observe.js";
 export interface RelaySourceFinalityPorts {
-    /** A fresh, canonical, finalized Ethereum observation. At most three physical RPC POSTs. */
+    /** A fresh, canonical, finalized Ethereum observation. At most two physical RPC POSTs. */
     finalizedDeposit(hash: Hex): Promise<RelayDepositObservation | null>;
 }
 export type RelayObserveState = "prepared_waiting" | "approval_pending" | "deposit_pending" | "source_unproven" | "source_finalized" | "provider_candidate_unproven" | "recipient_credit_observed" | "operational_acceptance";

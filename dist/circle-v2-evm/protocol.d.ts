@@ -293,4 +293,6 @@ export declare function decodeCircleDestination(source: CircleSourceProof, attes
     actualFeeAtomic: string;
     kind: "circle_v2_evm_destination";
 };
-export declare function verifyCircleApproval(input: CircleObservation, reset: boolean, allowanceAtReceiptAtomic: string, binding?: CircleFundingBindingV2): CircleReceiptProof;
+/** `allowanceAtReceiptAtomic: null` proves the allowance from the receipt alone (P1): the transaction is a direct
+ * `approve` from the owner to the exact token, and its single canonical Approval event carries the value it set. */
+export declare function verifyCircleApproval(input: CircleObservation, reset: boolean, allowanceAtReceiptAtomic: string | null, binding?: CircleFundingBindingV2): CircleReceiptProof;

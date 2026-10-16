@@ -232,6 +232,12 @@ export interface GaslessSettlement {
     readonly protocolHash: string;
     readonly effectAccount: GaslessAccountState;
     readonly safeAccount: GaslessAccountState;
+    /**
+     * The latest head both account fields were read at (since 0.5.43). Absent in older records, which read them at
+     * `safeBlock` (and `effectAccount` at the inclusion block). The verdict never rests on it: it rests on the receipt at
+     * or below `safeBlock`; the residual allowance read here is informational.
+     */
+    readonly accountBlock?: GaslessBlock;
     readonly accounting: GaslessAccounting;
 }
 export interface GaslessEffectIdentity {

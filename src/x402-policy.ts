@@ -91,10 +91,10 @@ export function selectPrepareOffer(
     const amount = parseAtomic(candidate.amountAtomic, { positive: true });
     if (amount > balance) continue;
     hasSufficientBalance = true;
-    if (candidate.assetTransferMethod === "eip3009" && (
-      candidate.tokenName !== evidence.tokenName || candidate.tokenVersion !== evidence.tokenVersion ||
+    // The on-chain DOMAIN_SEPARATOR equals keccak(domain(name, version, chainId, token)), so equality binds both strings.
+    if (candidate.assetTransferMethod === "eip3009" &&
       tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion, x402Network(candidate.network).chainId) !== evidence.domainSeparator
-    )) continue;
+    ) continue;
     const index = Number(candidate.index);
     const requirements = challenge.paymentRequired.accepts[index];
     if (requirements === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Selected seller index is missing from the fresh challenge.");
@@ -177,11 +177,9 @@ export function validatePrepareEvidence(
     observedAtMs < context.invocationStartedAtMs || observedAtMs > context.invocationCompletedAtMs ||
     !BYTES32.test(evidence.block.hash) || /^0x0{64}$/u.test(evidence.block.hash)
   ) throw new ApnError("APN_RPC_PROTOCOL", "x402 prepare RPC evidence is invalid or mismatched.");
-  if (transferMethod === "eip3009" && (
-    typeof evidence.tokenName !== "string" || evidence.tokenName.length === 0 || Buffer.byteLength(evidence.tokenName, "utf8") > 128 ||
-    typeof evidence.tokenVersion !== "string" || evidence.tokenVersion.length === 0 || Buffer.byteLength(evidence.tokenVersion, "utf8") > 128 ||
-    !BYTES32.test(evidence.domainSeparator)
-  )) throw new ApnError("APN_RPC_PROTOCOL", "x402 EIP-3009 token-domain evidence is invalid.");
+  if (transferMethod === "eip3009" && !BYTES32.test(evidence.domainSeparator)) {
+    throw new ApnError("APN_RPC_PROTOCOL", "x402 EIP-3009 token-domain evidence is invalid.");
+  }
   let blockNumber: bigint;
   let blockTimestamp: bigint;
   try {

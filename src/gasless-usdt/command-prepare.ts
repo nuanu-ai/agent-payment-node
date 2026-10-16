@@ -31,11 +31,15 @@ export interface UsdtCommandPrepareOptions {
 }
 
 /**
- * Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. One observation
- * pass permits ten: the locator, its receipt (chain ID, receipt, finalized head, inclusion block), the canonical scan's two
- * batches when the locator is missing or contradicted, and the scanned receipt's three reads.
+ * Read admissions derived from each command's steps, with explicit headroom. A safe snapshot is two POSTs (chain and
+ * head, then the pinned state batch). Execute: the reservation guard, the submission guard and the sponsor attestation
+ * at the fresh safe block (5), plus one snapshot of headroom. v2 preparation: the snapshot, the sponsor's quote, price
+ * and paymaster data, the second quote and price, and the sponsor attestation (8). One observation pass permits ten:
+ * the locator, its receipt (chain ID, receipt, finalized head, inclusion block), the canonical scan's two batches when
+ * the locator is missing or contradicted, and the scanned receipt's three reads.
  */
-const READ_ADMISSIONS = { "execute": 7, "prepare-v2": 8, "observe": 10 } as const;
+const SNAPSHOT_POSTS = 2;
+const READ_ADMISSIONS = { "execute": 2 * SNAPSHOT_POSTS + 1 + SNAPSHOT_POSTS, "prepare-v2": 8, "observe": 10 } as const;
 export class UsdtCommandReadBudget implements GaslessTransport {
   private readonly started: number;
   private attempts = 0;

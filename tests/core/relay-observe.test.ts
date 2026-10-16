@@ -55,8 +55,7 @@ async function fixture() {
       valueWei: BigInt(op.minOutputAtomic), blockNumber: 200n, blockHash: bnbBlock }; },
     receipt: async () => { bnbReads++; return { transactionHash: bnbHash, status: "success", blockNumber: 200n,
       blockHash: bnbBlock }; }, block: async number => { bnbReads++; return { number, hash: number === 200n ? bnbBlock : safeHash }; },
-    finalityCheckpoint: async () => { bnbReads++; return { number: 205n, hash: safeHash }; },
-    nativeTrace: async () => { bnbReads++; return null; } };
+    finalityCheckpoint: async () => { bnbReads++; return { number: 205n, hash: safeHash }; } };
   const payload = { status: "success", originChainId: 1, destinationChainId: 56,
     inTxHashes: [sourceHash], txHashes: [bnbHash] };
   const status = new RelayKeylessStatusService(state, async () => { getCount++;
@@ -105,7 +104,7 @@ test("operational acceptance requires all three layers while paid and causal rem
   assert.equal(result.destinationProof?.status, "recipient_credit_proven");
   assert.equal(result.causalLinkCryptographicallyProven, false);
   assert.equal(result.paidAcceptance, false);
-  assert.deepEqual(f.counts(), { sourceReads: 1, getCount: 1, bnbReads: 6 });
+  assert.deepEqual(f.counts(), { sourceReads: 1, getCount: 1, bnbReads: 5 });
   assert.deepEqual(await Promise.all([readFile(operationPath), readFile(journalPath)]), before);
 });
 
@@ -173,69 +172,59 @@ test("below-minimum candidate and unrelated credit cannot become paid proof", as
   assert.equal(result.causalLinkCryptographicallyProven, false);
 });
 
-test("RPC adapter rechecks finalized source in three physical POSTs and refuses reorg", async t => {
+test("RPC adapter proves a finalized source in two physical POSTs and refuses a non-canonical inclusion block", async t => {
   const f = await fixture(); t.after(f.temp.cleanup);
   const tx = { ...f.sourceObservation.transaction, blockNumber: "0x64", blockHash: sourceBlock,
     chainId: "0x1", value: "0x0", input: f.sourceObservation.transaction.input };
   const receipt = { ...f.sourceObservation.receipt, blockNumber: "0x64", status: "0x1" };
   const included = { number: "0x64", hash: sourceBlock }, finalized = { number: "0x65", hash: hash("9") };
-  let calls = 0;
-  const fake = { batchCall: async (requests: readonly unknown[]) => {
-    calls++;
-    assert.ok(calls <= 3);
-    assert.ok(Array.isArray(requests));
-    return calls === 1 ? ["0x1", tx, receipt] : calls === 2 ? [included, finalized] : [included, finalized];
-  } } as unknown as HttpsBaseRpc;
-  const adapter = new RelayEthereumFinalityRpc("https://example.com", f.state, fake);
-  assert.ok(await adapter.finalizedDeposit(sourceHash as `0x${string}`));
-  assert.equal(calls, 3);
-  let reorgCalls = 0;
-  const reorg = { batchCall: async () => {
-    reorgCalls++;
-    return reorgCalls === 1 ? ["0x1", tx, receipt] : reorgCalls === 2 ? [included, finalized] :
-      [{ ...included, hash: hash("8") }, finalized];
-  } } as unknown as HttpsBaseRpc;
-  assert.equal(await new RelayEthereumFinalityRpc("https://example.com", f.state, reorg).finalizedDeposit(sourceHash as `0x${string}`), null);
-  assert.equal(reorgCalls, 3);
-  let sequentialCalls = 0;
-  const sequential = { batchCall: async () => {
-    sequentialCalls++;
-    const step = (sequentialCalls - 1) % 3;
-    return step === 0 ? ["0x1", tx, receipt] : [included, finalized];
-  } } as unknown as HttpsBaseRpc;
-  const reusedSource = new RelayEthereumFinalityRpc("https://example.com", f.state, sequential);
+  const source = (inclusion: typeof included) => {
+    let calls = 0;
+    return { calls: () => calls, rpc: { batchCall: async (requests: readonly { method: string; params: readonly unknown[] }[]) => {
+      calls++; assert.ok(calls <= 2);
+      return requests.map(call => call.method === "eth_chainId" ? "0x1" : call.method === "eth_getTransactionByHash" ? tx :
+        call.method === "eth_getTransactionReceipt" ? receipt : call.params[0] === "finalized" ? finalized : inclusion);
+    } } as unknown as HttpsBaseRpc };
+  };
+  const ok = source(included);
+  assert.ok(await new RelayEthereumFinalityRpc("https://example.com", f.state, ok.rpc).finalizedDeposit(sourceHash as `0x${string}`));
+  assert.equal(ok.calls(), 2);
+  const reorg = source({ ...included, hash: hash("8") });
+  assert.equal(await new RelayEthereumFinalityRpc("https://example.com", f.state, reorg.rpc).finalizedDeposit(sourceHash as `0x${string}`), null);
+  assert.equal(reorg.calls(), 2);
+  // A reused reader gets a fresh two-POST guard for each proof.
+  const reusedSource = new RelayEthereumFinalityRpc("https://example.com", f.state, source(included).rpc);
   assert.ok(await reusedSource.finalizedDeposit(sourceHash as `0x${string}`));
-  assert.ok(await reusedSource.finalizedDeposit(sourceHash as `0x${string}`));
-  assert.equal(sequentialCalls, 6);
 });
 
-test("BNB RPC adapter caps physical POSTs at eight without retries", async t => {
+test("BNB RPC adapter caps physical POSTs at the two-POST proof plan without retries and reads the chain id once", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root); await state.initialize();
   let calls = 0;
-  const fake = { batchCall: async () => { calls++; return ["0x38"]; } } as unknown as HttpsBaseRpc;
+  const fake = { batchCall: async (requests: readonly { method: string; params: readonly unknown[] }[]) => { calls++;
+    return requests.map(call => call.method === "eth_chainId" ? "0x38" : { number: call.params[0], hash: hash("7") }); } } as unknown as HttpsBaseRpc;
   const adapter = new RelayBnbReadOnlyRpc("https://example.com", state, fake);
-  for (let i = 0; i < 8; i++) assert.equal(await adapter.chainId(), 56);
-  await assert.rejects(adapter.chainId(), { code: "APN_RPC_BUDGET_EXCEEDED" });
-  assert.equal(adapter.physicalPosts, 8); assert.equal(calls, 8);
+  assert.equal(await adapter.chainId(), 56); assert.ok(await adapter.block(1n)); assert.equal(await adapter.chainId(), 56);
+  await assert.rejects(adapter.block(2n), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  assert.equal(adapter.physicalPosts, 2); assert.equal(calls, 2);
 });
 
-test("two sequential observations get separate six-POST BNB budgets", async t => {
+function bnbAnswer(f: Awaited<ReturnType<typeof fixture>>, call: { method: string; params: readonly unknown[] }): unknown {
+  if (call.method === "eth_chainId") return "0x38";
+  if (call.method === "eth_getTransactionByHash") return { hash: bnbHash, chainId: "0x38",
+    to: recipient, value: `0x${BigInt(f.op.minOutputAtomic).toString(16)}`, blockNumber: "0xc8", blockHash: bnbBlock };
+  if (call.method === "eth_getTransactionReceipt") return { transactionHash: bnbHash, status: "0x1", blockNumber: "0xc8", blockHash: bnbBlock, logs: [] };
+  if (call.method === "eth_getBlockByNumber") return { number: call.params[0] === "safe" ? "0xcd" : call.params[0],
+    hash: call.params[0] === "0xc8" ? bnbBlock : safeHash };
+  throw new Error("unexpected RPC method");
+}
+
+test("two sequential observations get separate two-POST BNB budgets", async t => {
   const f = await fixture(); t.after(f.temp.cleanup); await f.journal();
   const adapters: RelayBnbReadOnlyRpc[] = [];
   let physicalPosts = 0;
   const fake = { batchCall: async (requests: readonly { method: string; params: readonly unknown[] }[]) => {
-    physicalPosts++;
-    const request = requests[0]!;
-    if (request.method === "eth_chainId") return ["0x38"];
-    if (request.method === "eth_getTransactionByHash") return [{ hash: bnbHash, chainId: "0x38",
-      to: recipient, value: `0x${BigInt(f.op.minOutputAtomic).toString(16)}`,
-      blockNumber: "0xc8", blockHash: bnbBlock }];
-    if (request.method === "eth_getTransactionReceipt") return [{ transactionHash: bnbHash,
-      status: "0x1", blockNumber: "0xc8", blockHash: bnbBlock }];
-    if (request.method === "eth_getBlockByNumber") return [{ number: request.params[0] === "safe" ? "0xcd" : request.params[0],
-      hash: request.params[0] === "0xc8" ? bnbBlock : safeHash }];
-    throw new Error("unexpected RPC method");
+    physicalPosts++; return requests.map(call => bnbAnswer(f, call));
   } } as unknown as HttpsBaseRpc;
   const service = new RelayObserveService(f.state, f.source, () => {
     const adapter = new RelayBnbReadOnlyRpc("https://example.com", f.state, fake);
@@ -244,8 +233,8 @@ test("two sequential observations get separate six-POST BNB budgets", async t =>
   }, new RelayKeylessStatusService(f.state, async () => new Response(JSON.stringify(f.payload))));
   assert.equal((await service.observe(f.op.operationId)).state, "operational_acceptance");
   assert.equal((await service.observe(f.op.operationId)).state, "operational_acceptance");
-  assert.deepEqual(adapters.map(adapter => adapter.physicalPosts), [6, 6]);
-  assert.equal(physicalPosts, 12);
+  assert.deepEqual(adapters.map(adapter => adapter.physicalPosts), [2, 2]);
+  assert.equal(physicalPosts, 4);
 });
 
 test("a reused BNB adapter is refused before a second observation spends its budget", async t => {
@@ -281,24 +270,15 @@ test("Relay observe CLI emits operational evidence with a bounded keyless adapte
   const sourceRpc = { batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
     sourceStarts.push(Date.now());
     methods.push(...calls.map(call => `eth:${call.method}`));
-    if (calls[0]?.method === "eth_chainId") return ["0x1", {
-      ...f.sourceObservation.transaction, blockNumber: "0x64", blockHash: sourceBlock,
-      chainId: "0x1", value: "0x0" }, {
-      ...f.sourceObservation.receipt, blockNumber: "0x64", status: "0x1" }];
-    return [{ number: "0x64", hash: sourceBlock }, { number: "0x65", hash: safeHash }];
+    return calls.map(call => call.method === "eth_chainId" ? "0x1" : call.method === "eth_getTransactionByHash" ? {
+      ...f.sourceObservation.transaction, blockNumber: "0x64", blockHash: sourceBlock, chainId: "0x1", value: "0x0" } :
+      call.method === "eth_getTransactionReceipt" ? { ...f.sourceObservation.receipt, blockNumber: "0x64", status: "0x1" } :
+        call.params[0] === "finalized" ? { number: "0x65", hash: safeHash } : { number: "0x64", hash: sourceBlock });
   } } as unknown as HttpsBaseRpc;
   const bnbRpc = { batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
     bnbStarts.push(Date.now());
-    const call = calls[0]!; methods.push(`bnb:${call.method}`);
-    if (call.method === "eth_chainId") return ["0x38"];
-    if (call.method === "eth_getTransactionByHash") return [{ hash: bnbHash, chainId: "0x38",
-      to: recipient, value: `0x${BigInt(f.op.minOutputAtomic).toString(16)}`,
-      blockNumber: "0xc8", blockHash: bnbBlock }];
-    if (call.method === "eth_getTransactionReceipt") return [{ transactionHash: bnbHash,
-      status: "0x1", blockNumber: "0xc8", blockHash: bnbBlock }];
-    if (call.method === "eth_getBlockByNumber") return [{ number: call.params[0] === "safe" ? "0xcd" : call.params[0],
-      hash: call.params[0] === "0xc8" ? bnbBlock : safeHash }];
-    throw new Error("Unexpected RPC method");
+    methods.push(...calls.map(call => `bnb:${call.method}`));
+    return calls.map(call => bnbAnswer(f, call));
   } } as unknown as HttpsBaseRpc;
   const result = await runCli(["relay", "observe", "--operation", f.op.operationId,
     "--rpc-url", "https://ethereum-rpc.publicnode.com", "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"], {},
@@ -315,11 +295,11 @@ test("Relay observe CLI emits operational evidence with a bounded keyless adapte
   assert.equal("requestId" in evidence, false);
   assert.ok(f.op.statusLocator);
   assert.equal(JSON.stringify(result).includes(f.op.statusLocator.requestId), false);
-  assert.equal(methods.filter(method => method.startsWith("bnb:")).length, 6);
+  assert.equal(methods.filter(method => method.startsWith("bnb:")).length, 5);
   assert.equal(methods.filter(method => method.startsWith("eth:eth_chainId")).length, 1);
-  assert.equal(methods.length, 13);
+  assert.equal(methods.length, 10);
   assert.equal(providerReads, 1);
-  assert.equal(sourceStarts.length, 3);
+  assert.equal(sourceStarts.length, 2); assert.equal(bnbStarts.length, 2);
   assert.ok(sourceStarts.slice(1).every((start, index) => start - sourceStarts[index]! >= 750), JSON.stringify(sourceStarts));
   assert.ok(bnbStarts.slice(1).every((start, index) => start - bnbStarts[index]! >= 750), JSON.stringify(bnbStarts));
   assert.deepEqual(await Promise.all([readFile(operationPath), readFile(journalPath)]), before);

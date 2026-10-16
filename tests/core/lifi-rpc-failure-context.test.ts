@@ -31,11 +31,14 @@ const cases: readonly Readonly<{
   category: BridgePreSignRpcFailure["category"];
   method: NonNullable<BridgePreSignRpcFailure["method"]>;
   fail: (fixture: Awaited<ReturnType<typeof lifiFixture>>, error: ApnError) => () => void;
+  pair?: "eth-bnb";
 }>[] = [
-  { name: "source deployment transport", stage: "source_deployment_refresh", chainRole: "source", category: "deployment_refresh",
-    method: "eth_getCode", fail: (s, error) => { const o = s.source.deployment; s.source.deployment = async () => { throw error; }; return () => { s.source.deployment = o; }; } },
-  { name: "destination deployment trace probe transport", stage: "destination_deployment_refresh", chainRole: "destination", category: "deployment_refresh",
-    method: "debug_traceTransaction", fail: (s, error) => { const o = s.destination.deployment; s.destination.deployment = async () => { throw error; }; return () => { s.destination.deployment = o; }; } },
+  // The source deployment check travels in the account batch, so its transport failure is that batch's boundary.
+  { name: "source deployment check transport", stage: "source_account_refresh", chainRole: "source", category: "account_nonce",
+    method: "eth_call", fail: (s, error) => { const o = s.source.checkedAccount; s.source.checkedAccount = async () => { throw error; }; return () => { s.source.checkedAccount = o; }; } },
+  // Only a destination whose delivery depends on third-party routing (the BNB composite) reads anything before the send.
+  { name: "destination deployment check transport", stage: "destination_deployment_refresh", chainRole: "destination", category: "deployment_refresh",
+    method: "eth_call", pair: "eth-bnb", fail: (s, error) => { const o = s.destination.deploymentCheck; s.destination.deploymentCheck = async () => { throw error; }; return () => { s.destination.deploymentCheck = o; }; } },
   { name: "source account and nonce transport", stage: "source_account_refresh", chainRole: "source", category: "account_nonce",
     method: "eth_getTransactionCount", fail: (s, error) => { const o = s.source.account; s.source.account = async () => { throw error; }; return () => { s.source.account = o; }; } },
   { name: "source simulation transport", stage: "source_execution_simulation", chainRole: "source", category: "simulation",
@@ -47,7 +50,7 @@ const pendingEffects = (record: BridgeOperationRecord) => record.effects.map(({ 
 
 for (const row of cases) test(`LI.FI ${row.name} defers the approval with only its exact redacted pre-sign boundary`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
+  const s = await lifiFixture(temporary.root, row.pair); const { id, operation } = await s.prepare();
   const loads = s.wrapping.loads;
   const restore = row.fail(s, new ApnError("APN_RPC_AMBIGUOUS", `transport failed at ${endpoint}`, { rpcMethod: row.method, leaked: secret }));
 
@@ -55,7 +58,7 @@ for (const row of cases) test(`LI.FI ${row.name} defers the approval with only i
   assert.equal(result.ok, true, result.error?.message);
   const record = (await s.core.bridges.records.findOperation(id))!;
   const expected: BridgePreSignRpcFailure = {
-    schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard", effectRole: "approval",
+    schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard", effectRole: row.pair === "eth-bnb" ? "bridge" : "approval",
     stage: row.stage, chainRole: row.chainRole, chainId: row.chainRole === "source"
       ? operation.intent.materialization.request.fromChainId : operation.intent.materialization.request.toChainId,
     category: row.category, method: row.method,
@@ -85,8 +88,10 @@ for (const row of cases) test(`LI.FI ${row.name} defers the approval with only i
 
   restore();
   const approved = await s.core.execute({ command: "bridge.approve", operationId: id });
-  assert.equal(approved.ok, true, approved.error?.message); assert.equal((approved.operation as { state: string }).state, "completed");
-  assert.equal(s.source.submissions.length, 2);
+  assert.equal(approved.ok, true, approved.error?.message);
+  // The native BNB composite has one effect and waits for its provider-bound delivery; the token route also sends its approval.
+  assert.equal((approved.operation as { state: string }).state, row.pair === "eth-bnb" ? "destination_pending" : "completed");
+  assert.equal(s.source.submissions.length, row.pair === "eth-bnb" ? 1 : 2);
 });
 
 /** Fails the bridge simulation once the approval allowance exists, as a transport failure. Returns the restore. */

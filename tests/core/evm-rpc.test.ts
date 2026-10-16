@@ -104,37 +104,35 @@ class Wire {
   };
 }
 
-test("Optimism approval funding uses one chain check at balance entry and retains the pinned and quote checks", async () => {
+test("Optimism approval funding reads in three POSTs with one chain id and no header sandwich; a wrong chain stops at the first POST", async () => {
   const wire = new Wire(); wire.chain = "0xa";
-  const rpc = new EvmRpc(wire.call, "https://rpc.example");
+  const posts: string[][] = [];
+  const batch = async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
+    posts.push(calls.map(({ method }) => method));
+    return await Promise.all(calls.map(({ method, params }) => wire.call(method, params)));
+  };
+  const rpc = new EvmRpc(async () => { throw new Error("no scalar fallback"); }, "https://rpc.example", undefined, batch);
   const operation = {
     chainId: 10, walletAddress: WALLET, recipient: RECIPIENT, amountAtomic: "123", economics: ECONOMICS,
     evm: { asset: resolveEvmAsset({ chainId: 10, token: "native" }), maxFeeWei: "1000000" },
   } as OperationRecord;
   const port = { evm: rpc } as unknown as RpcPort;
-  await checkEvmTransferFunding(port, operation, true);
-  assert.equal(wire.calls.length, 19);
-  assert.equal(wire.calls.filter(({ method }) => method === "eth_chainId").length, 8);
-  assert.equal(wire.calls[0]?.method, "eth_chainId");
-  assert.equal(wire.calls.filter(({ method }) => method === "eth_getBlockByNumber").length, 5);
-  wire.calls.length = 0;
-  await checkEvmTransferFunding(port, operation, false);
-  assert.equal(wire.calls.length, 11);
-  assert.equal(wire.calls.filter(({ method }) => method === "eth_chainId").length, 4);
-  assert.equal(wire.calls[0]?.method, "eth_chainId");
+  await checkEvmTransferFunding(port, operation);
+  assert.deepEqual(posts, [
+    ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance"],
+    ["eth_getTransactionCount", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getBlockByNumber"],
+    ["eth_call", "eth_call"],
+  ]);
+  posts.length = 0;
+  await checkEvmTransferFunding(port, operation);
+  assert.equal(posts.flat().filter(method => method === "eth_chainId").length, 0, "a proven endpoint is not asked its chain again");
 
-  wire.calls.length = 0; wire.chain = "0x1";
-  await assert.rejects(checkEvmTransferFunding(port, operation, false), { code: "APN_CHAIN_MISMATCH" });
-  assert.deepEqual(wire.calls.map(({ method }) => method), ["eth_chainId"]);
-
-  wire.calls.length = 0; wire.chain = "0xa";
-  const switching = new EvmRpc(async (method, params) => {
-    const value = await wire.call(method, params);
-    if (method === "eth_getBalance") wire.chain = "0x1";
-    return value;
-  }, "https://rpc.example");
-  await assert.rejects(checkEvmTransferFunding({ evm: switching } as unknown as RpcPort, operation, false), { code: "APN_CHAIN_MISMATCH" });
-  assert.equal(wire.calls.some(({ method }) => method === "eth_call"), false);
+  posts.length = 0; wire.chain = "0x1";
+  const wrong = new EvmRpc(async () => { throw new Error("no scalar fallback"); }, "https://rpc.example", undefined, batch);
+  await assert.rejects(checkEvmTransferFunding({ evm: wrong } as unknown as RpcPort, operation), { code: "APN_CHAIN_MISMATCH" });
+  assert.equal(posts.length, 1);
+  await assert.rejects(checkEvmTransferFunding({ evm: new EvmRpc(wire.call, "https://rpc.example") } as unknown as RpcPort, operation),
+    { code: "APN_RPC_CONFIG" }, "direct reads never run as scalar calls");
 });
 
 test("EVM RPC pins exact asset metadata and balances and includes Base L1/operator fees", async () => {
@@ -163,8 +161,11 @@ test("EVM RPC refuses wrong chain, absent contract, malformed decimals and reorg
   assert.equal((await rpc.balance(WALLET, { ...selection, decimals: 8 })).asset.decimalsSource, "caller");
   wire.decimals = toHex(8, { size: 32 });
   await assert.rejects(rpc.balance(WALLET, { ...selection, decimals: 6 }), { code: "APN_ASSET_MISMATCH" });
-  wire.blockChanged = true; wire.blocks = 0;
-  await assert.rejects(rpc.balance(WALLET, selection), { code: "APN_RPC_PROTOCOL" });
+  wire.calls.length = 0;
+  await rpc.balance(WALLET, selection);
+  assert.deepEqual(wire.calls.map(({ method }) => method), ["eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_call", "eth_call"],
+    "the endpoint's chain is proven once and no header is re-read around the pinned reads");
+  await assert.rejects(rpc.balance(WALLET, { chainId: 1, token: EVM_TOKEN }), { code: "APN_CHAIN_MISMATCH" });
 });
 
 test("receipt codec rejects log substitution, removed logs, malformed status and chain switches", async () => {
@@ -178,13 +179,11 @@ test("receipt codec rejects log substitution, removed logs, malformed status and
   }
   wire.receipt.logs = []; wire.receipt.status = "0x2";
   await assert.rejects(rpc.receipt(8453, HASH), { code: "APN_RPC_PROTOCOL" });
-  wire.receipt.status = "0x1";
-  const switched = new EvmRpc(async (method, params) => {
-    const result = await wire.call(method, params);
-    if (method === "eth_getTransactionReceipt") wire.chain = "0x1";
-    return result;
-  }, "https://rpc.example");
-  await assert.rejects(switched.receipt(8453, HASH), { code: "APN_CHAIN_MISMATCH" });
+  wire.receipt.status = "0x1"; wire.calls.length = 0;
+  assert.equal((await rpc.receipt(8453, HASH))?.status, "success");
+  assert.deepEqual(wire.calls.map(({ method }) => method), ["eth_getTransactionReceipt"]);
+  wire.chain = "0x1";
+  await assert.rejects(new EvmRpc(wire.call, "https://rpc.example").receipt(8453, HASH), { code: "APN_CHAIN_MISMATCH" });
 });
 
 for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId} on-chain evidence verifies the signed fields with no historical balance read`, async (context) => {
@@ -226,7 +225,7 @@ test("Ethereum fees are execution-only without Base oracle calls, while chain mi
   const balance = await rpc.balance(WALLET, { chainId: 1, token: EVM_TOKEN });
   assert.equal(balance.asset.chainId, 1); assert.equal(balance.asset.decimals, 8);
   wire.chain = "0x2105";
-  await assert.rejects(rpc.feeQuote(1, ECONOMICS), { code: "APN_CHAIN_MISMATCH" });
+  await assert.rejects(new EvmRpc(wire.call, "https://rpc.example").feeQuote(1, ECONOMICS), { code: "APN_CHAIN_MISMATCH" });
 });
 
 for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain ${chainId} token, chain, log filters and bounded copies without weakening Base assertions`, async () => {
@@ -241,7 +240,8 @@ for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain
     if (method === "eth_getLogs") return [];
     if (method === "eth_call") {
       const input = params[0] as { to: string; data: string };
-      assert.equal(input.to, x402Network(chainId).token); assert.equal(params[1], "0x3039");
+      assert.equal(input.to, x402Network(chainId).token);
+      assert.ok(params[1] === "0x3039" || JSON.stringify(params[1]) === JSON.stringify({ blockHash: EVM_BLOCK_HASH, requireCanonical: true }));
       if (input.data.startsWith("0x70a08231")) return toHex(50000000n, { size: 32 });
       if (input.data === "0x06fdde03") return encodeAbiParameters([{ type: "string" }], ["USD Coin"]);
       if (input.data === "0x54fd4d50") return encodeAbiParameters([{ type: "string" }], ["2"]);
@@ -253,6 +253,8 @@ for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain
   const wire = (rpc: unknown) => {
     (rpc as { call: typeof call }).call = call;
     (rpc as { callX402Logs: (params: readonly unknown[]) => Promise<unknown> }).callX402Logs = async (params) => ({ kind: "complete", value: await call("eth_getLogs", params) });
+    (rpc as { batchCall: (batch: readonly { method: string; params: readonly unknown[] }[]) => Promise<unknown[]> }).batchCall =
+      async (batch) => await Promise.all(batch.map(({ method, params }) => call(method, params)));
   };
   wire(ethereum); wire(base);
   assert.equal((await ethereum.assertX402Chain(chainId)).chainId, chainId);
@@ -265,9 +267,12 @@ for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain
   assert.equal(filter.address, x402Network(chainId).token);
   const bounded = ethereum.withTotalTimeout(20000); wire(bounded);
   assert.equal((await bounded.assertX402Chain!(chainId)).chainId, chainId);
+  assert.equal(calls.filter(({ method }) => method === "eth_chainId").length, 1, "one eth_chainId per invocation and endpoint, shared by bounded copies");
   chain = "0x2105";
-  await assert.rejects(bounded.assertX402Chain!(chainId), { code: "APN_CHAIN_MISMATCH" });
-  assert.equal((await base.assertBaseChain()).chainId, 8453);
+  const fresh = new HttpsBaseRpc("https://rpc.example").forX402Network(chainId); wire(fresh);
+  await assert.rejects(fresh.assertX402Chain(chainId), { code: "APN_CHAIN_MISMATCH" });
+  const freshBase = new HttpsBaseRpc("https://rpc.example"); wire(freshBase);
+  assert.equal((await freshBase.assertBaseChain()).chainId, 8453);
   assert.equal(calls.some(({ method }) => method.startsWith("eth_send")), false);
 });
 
@@ -288,7 +293,7 @@ test("Arbitrum gas quote includes all estimated gas once, with no Base oracle or
     assert.throws(() => validateEvmFeeQuote({ ...quote, ...override }, economics), { code: "APN_STATE_CORRUPT" });
   }
   wire.chain = "0x1";
-  await assert.rejects(rpc.feeQuote(42161, economics), { code: "APN_CHAIN_MISMATCH" });
+  await assert.rejects(new EvmRpc(wire.call, "https://rpc.example").feeQuote(42161, economics), { code: "APN_CHAIN_MISMATCH" });
 });
 
 test("Arbitrum receipt and supersession evidence refuse latest-only or reorged safe heads", async (context) => {
@@ -312,7 +317,7 @@ test("Arbitrum receipt and supersession evidence refuse latest-only or reorged s
       tags.push(String(params[0]));
       if (params[0] === "safe") safeReads += 1;
       const number = params[0] === "safe" ? safeNumber : String(params[0]);
-      return { ...BLOCK, number, hash: reorg && safeReads > 1 ? HASH : number === "0x303a" ? EVM_BLOCK_HASH : HASH, transactions: number === "0x303a" ? [transaction] : [] };
+      return { ...BLOCK, number, hash: reorg && params[0] === "safe" ? HASH : number === "0x303a" ? EVM_BLOCK_HASH : HASH, transactions: number === "0x303a" ? [transaction] : [] };
     }
     throw new Error(`unexpected ${method}`);
   }, "https://rpc.example");

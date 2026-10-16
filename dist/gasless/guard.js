@@ -17,9 +17,9 @@ export function assertGaslessRemaining(op, now) {
 export async function guardGaslessOperation(state, rpc, op, now, signed) {
     assertGaslessExecutionChain(op.intent.request.chainId);
     assertGaslessRemaining(op, now());
-    const fees = await checkGaslessCurrentState(state, rpc, op, signed);
+    const checked = await checkGaslessCurrentState(state, rpc, op, signed);
     assertGaslessRemaining(op, now());
-    return fees;
+    return checked;
 }
 /** Read-only facts shared by original-window execution and fresh sealed-first-send consent. */
 export async function checkGaslessCurrentState(state, rpc, op, signed) {
@@ -37,7 +37,7 @@ export async function checkGaslessCurrentState(state, rpc, op, signed) {
     const fees = gaslessWireFees(op.intent, approved ?? { maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas });
     assertGaslessSnapshot(op.intent, current, fees);
     await assertGaslessOwner(state, op.intent);
-    return fees;
+    return { fees, snapshot: current };
 }
 /** Only reason tokens produced by this module family may enter the durable journal. */
 export function gaslessReason(error, fallback) {

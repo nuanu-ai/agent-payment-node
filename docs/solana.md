@@ -117,8 +117,13 @@ reference that expired while the screen was being read.
 The terminal displays the sender, recipient, network, asset, decimal and atomic
 amount, fee/rent payers and caps, policy, operation, fingerprint and expiry, and
 on a local Solana transfer states that the block reference is re-acquired after
-approval and these exact bytes simulated before anything is signed. It rechecks
-the frozen bounds before signing and submission. A stale preparation
+approval and these exact bytes simulated before anything is signed. It checks
+the frozen bounds before the prompt, in the send guard, and once more immediately
+before sealing; nothing re-reads the chain between sealing and the send, because
+the network itself refuses an expired blockhash or an unfunded transfer. A
+signature recovered by a later `operation resume` is revalidated once before its
+send; a failed read leaves it sealed and resumable, and only proof (expiry, funds,
+fee or owner policy) ends it unsent. A stale preparation
 fails before effect and needs a new idempotency key. Solana uses
 `APN_SOLANA_RPC_URL`; the common `--rpc-url` option continues to select the EVM
 RPC for EVM operations.
@@ -142,8 +147,13 @@ The production factory attaches a fresh 24-physical-POST budget to each command
 invocation. JSON-RPC batches count as one POST, and submission counts as one.
 Starts for the same public RPC provider are paced across processes through
 durable state with at least 500 ms between POSTs. HTTP 429 stops the command
-without a retry. Synthetic full journeys use 21 POSTs for SOL and 23 for USDC;
-live request counts and rate-limit acceptance remain unverified.
+without a retry. The genesis hash is read once per command and RPC instance.
+On `api.mainnet-beta.solana.com`, where account reads cannot be batched, a USDC
+transfer that creates the recipient account now makes 12 physical requests in its
+approving command up to and including the send (25 before), so the finality
+observation that follows also fits the 24-POST budget; synthetic batched journeys use 17 POSTs for SOL and 17 for USDC
+including preparation (22 and 24 before). Live request counts and rate-limit
+acceptance remain unverified.
 
 After the owner approves and before anything is signed, the send guard runs
 once:

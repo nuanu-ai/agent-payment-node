@@ -107,12 +107,23 @@ test("unknown source and missing correlated delivery remain held and never resen
  assert.equal((await f.service.status(r.operationId) as SeiFundingRecord).terminal,false);await f.service.approve(r.operationId);assert.equal(f.source.sends,1);
  f.source.hidden=false;f.pending();assert.equal((await f.service.status(r.operationId) as SeiFundingRecord).terminal,false);assert.equal(f.source.sends,1);
 });
-test("source calldata drift and destination amount/delta drift cannot finalize",async(t)=>{
+test("source calldata drift and destination amount drift cannot finalize",async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);
  f.source.wrongData=true;await assert.rejects(f.service.status(r.operationId));f.source.wrongData=false;
- f.source.operatorNonzero=true;await assert.rejects(f.service.status(r.operationId),/base_operator_fee_unreviewed/);f.source.operatorNonzero=false;
  f.destination.wrongAmount=true;await assert.rejects(f.service.status(r.operationId));f.destination.wrongAmount=false;
- f.destination.balanceDrift=true;await assert.rejects(f.service.status(r.operationId));assert.equal((await new SeiFundingJournal(f.state.root).findOperation(r.operationId))?.terminal,false);assert.equal(f.source.sends,1);
+ assert.equal((await new SeiFundingJournal(f.state.root).findOperation(r.operationId))?.terminal,false);assert.equal(f.source.sends,1);
+});
+test("a nonzero Base operator fee is counted in the paid source fee instead of refusing the deposit",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);
+ f.source.operatorNonzero=true;const done=await f.service.status(r.operationId) as SeiFundingRecord&{sourceProof:{actualFee:string}};
+ assert.equal(done.state,"completed");assert.equal(done.sourceProof.actualFee,(21256n*6_000_000n+21256n*1n*100n).toString());assert.equal(f.source.sends,1);
+});
+test("a payout to an owner that has code cannot settle, with no historical balance read",async(t)=>{
+ const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);
+ const call=f.destination.call.bind(f.destination),seen:string[]=[];
+ f.destination.call=async(m:string,p:readonly unknown[])=>{seen.push(m);if(m==="eth_getCode"){assert.deepEqual(p[1],"latest");return "0x6000";}return call(m,p);};
+ await assert.rejects(f.service.status(r.operationId),/destination_owner_code/);assert.equal(seen.includes("eth_getBalance"),false);
+ assert.equal((await new SeiFundingJournal(f.state.root).findOperation(r.operationId))?.terminal,false);
 });
 test("an actual Base fee over the owner's quote ceiling is reported on the terminal outcome, never a wedge",async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as SeiFundingRecord;await f.service.approve(r.operationId);
@@ -218,8 +229,8 @@ test("normal direct Base prepare cannot interleave the held caller fee reserve",
 });
 test("native payout proof keeps r/s lossless in QUANTITY and 32-byte DATA forms on Sei and MegaETH; malformed scalars refuse",async()=>{
  const relayer=privateKeyToAccount(`0x${"5a".repeat(32)}`),owner=getAddress(SIGNER),value=300_000_000_000_000_000n,gas=23_520n,gasPrice=73_150_000_000n;
- const lanes=[{chain:1329 as const,floor:SEI_FUNDING.minimumOutput,prefix:"sei",h:{fail:seiFail,object:seiObject,uint:seiUint,quantity:seiQuantity,hash:seiHash,address:seiAddress,exact:seiExact}},
-  {chain:4326 as const,floor:MEGA_FUNDING.minimumOutput,prefix:"mega",h:{fail:megaFail,object:megaObject,uint:megaUint,quantity:megaQuantity,hash:megaHash,address:megaAddress,exact:megaExact}}];
+ const lanes=[{chain:1329 as const,floor:250_000_000_000_000_000n,prefix:"sei",h:{fail:seiFail,object:seiObject,uint:seiUint,quantity:seiQuantity,hash:seiHash,address:seiAddress,exact:seiExact}},
+  {chain:4326 as const,floor:8_000_000_000_000n,prefix:"mega",h:{fail:megaFail,object:megaObject,uint:megaUint,quantity:megaQuantity,hash:megaHash,address:megaAddress,exact:megaExact}}];
  for(const lane of lanes){
   const short={r:undefined as Record<string,string>|undefined,s:undefined as Record<string,string>|undefined};
   const vector=async(nonce:number)=>{const raw=await relayer.signTransaction({type:"legacy",chainId:lane.chain,nonce,gas,gasPrice,to:owner,value,data:"0x"}),t=parseTransaction(raw),hash=keccak256(raw);

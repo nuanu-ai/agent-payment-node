@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { readFile, writeFile, lstat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { StateStore, sealWallet } from "../../src/state.js";
@@ -15,7 +16,7 @@ import { Permit2ProductionPreparation } from "../../src/x402-permit2/production-
 import { PERMIT2_PRODUCTION_SCHEMA, validatePermit2ProductionMaterial, reconstructPermit2ProductionMaterial } from "../../src/x402-permit2/production-material.js";
 import { Permit2ProductionRepository, permit2ProductionId, publicPermit2Production, productionUsageIdentity,
   productionUsageKey, productionRecordBody, sealPermit2ProductionRecord } from "../../src/x402-permit2/production-repository.js";
-import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
+import { PERMIT2_ADDRESS, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
 import type { X402PaymentRequired } from "../../src/x402-codec.js";
 import { temporaryState } from "./helpers.js";
 import { activateDirectPolicy, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
@@ -42,7 +43,9 @@ function input(key = "production-test-key-001", ch = challenge()) {
       bodyBase64: Buffer.from("private-body").toString("base64") }),
     expected: { index: selection.index, requirement: selection.requirement, challengeHash: hashChallenge(ch) } };
 }
-async function setup(t: test.TestContext, options: { allowance?: bigint; sponsor?: boolean; badDomain?: boolean; badProxy?: boolean; advanceDuringHttpMs?: number } = {}) {
+const proxyCode = readFileSync("tests/fixtures/x402-permit2/original-proxy-runtime.hex", "utf8").trim();
+const permit2Code = readFileSync("tests/fixtures/x402-permit2/avalanche-permit2-runtime.hex", "utf8").trim();
+async function setup(t: test.TestContext, options: { allowance?: bigint; badDomain?: boolean; badProxy?: boolean; advanceDuringReadMs?: number } = {}) {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root); await state.initialize();
   const bindingHash = hashObject({ profile: "owner", address: payer, createdAt: at.toISOString() });
@@ -57,29 +60,28 @@ async function setup(t: test.TestContext, options: { allowance?: bigint; sponsor
         maximumPerTransferAtomic: cap, dailyLimitAtomic: daily, mechanism: X402_PERMIT2_MECHANISM }] });
   }
   await activate();
-  let clock = new Date(at), calls: string[] = [], ethCalls = 0, httpCalls = 0;
+  let clock = new Date(at), calls: string[] = [], ethCalls = 0, posts = 0;
   const service = new Permit2ProductionPreparation(temp.root, { now: () => clock,
-    rpc: { call: async (method, params) => {
-      calls.push(method);
-      if (method === "eth_chainId") return "0xa86a";
-      if (method === "eth_getBlockByNumber") return { number: "0x12", hash: `0x${"1".repeat(64)}`, timestamp: `0x${Math.floor(clock.getTime() / 1000).toString(16)}` };
-      if (method === "eth_call") return [word(20000n), word(options.allowance ?? 10000n), options.badDomain ? word(0n) : asset.tokenDomainSeparator,
-        word(9n), word(0n)][ethCalls++ % 5];
-      if (method === "eth_getProof") return { address: params[0], codeHash: params[0] === PERMIT2_ADDRESS ? PERMIT2_CODE_HASH : options.badProxy ? word(0n) : asset.proxyCodeHash };
-      throw new Error(`Unexpected ${method}`);
-    } }, transport: { request: async (url, method, body) => {
-      httpCalls++; assert.equal(url, "https://facilitator.payai.network/supported"); assert.equal(method, "GET"); assert.equal(body, null);
-      if (options.advanceDuringHttpMs !== undefined) clock = new Date(at.getTime() + options.advanceDuringHttpMs);
-      return { status: 200, body: JSON.stringify({ kinds: [{ x402Version: 2, network: asset.chain, scheme: "exact" }],
-        extensions: options.sponsor ? ["eip2612GasSponsoring"] : [] }) };
+    rpc: { batch: async (batch) => {
+      // The clock moves while the pinned state batch is in flight, as a slow public RPC would.
+      if (++posts % 2 === 0 && options.advanceDuringReadMs !== undefined) clock = new Date(at.getTime() + options.advanceDuringReadMs);
+      return batch.map(({ method, params }) => {
+        calls.push(method);
+        if (method === "eth_chainId") return "0xa86a";
+        if (method === "eth_getBlockByNumber") return { number: "0x12", hash: `0x${"1".repeat(64)}`, timestamp: `0x${Math.floor(clock.getTime() / 1000).toString(16)}` };
+        if (method === "eth_call") return [word(20000n), word(options.allowance ?? 10000n), options.badDomain ? word(0n) : asset.tokenDomainSeparator,
+          word(9n), word(0n)][ethCalls++ % 5];
+        if (method === "eth_getCode") return params[0] === PERMIT2_ADDRESS ? permit2Code : options.badProxy ? "0x6000" : proxyCode;
+        throw new Error(`Unexpected ${method}`);
+      });
     } } });
-  return { ...temp, state, service, calls, activate, httpCount: () => httpCalls, advance: (seconds: number) => { clock = new Date(at.getTime() + seconds * 1000); } };
+  return { ...temp, state, service, calls, activate, postCount: () => posts, advance: (seconds: number) => { clock = new Date(at.getTime() + seconds * 1000); } };
 }
 
 test("durable exact private preparation replays immutable nonce before reads; changed request/challenge conflicts", async t => {
   const f = await setup(t), request = input();
   const [a, b] = await Promise.all([f.service.prepare(request), f.service.prepare(request)]);
-  assert.deepEqual(a, b); assert.equal(f.calls.length, 10); assert.equal(f.httpCount(), 1);
+  assert.deepEqual(a, b); assert.equal(f.calls.length, 9); assert.equal(f.postCount(), 2, "chain+header, one pinned batch; no facilitator GET");
   assert.equal(a.operationId, permit2ProductionId("owner", request.idempotencyKey));
   assert.notEqual(a.operationId, f.state.operationId("owner", request.idempotencyKey));
   assert.equal(a.material.checked.request.method, "POST"); assert.equal(a.material.checked.request.bodyBase64, request.checked.request.bodyBase64);
@@ -93,7 +95,7 @@ test("durable exact private preparation replays immutable nonce before reads; ch
   });
   assert.deepEqual(Object.keys(publicPermit2Production(a).resource).sort(), ["origin", "urlHash"]);
   assert.equal(publicPermit2Production(a).capability, "execution_blocked");
-  f.advance(120); assert.deepEqual(await f.service.prepare(request), a); assert.equal(f.calls.length, 10);
+  f.advance(120); assert.deepEqual(await f.service.prepare(request), a); assert.equal(f.calls.length, 9);
   for (const change of [{ method: "GET" }, { headers: { accept: "application/json" } }, { bodyBase64: null }]) {
     const changed = { ...request, checked: checkPermit2Challenge(request.checked.challenge, { ...request.checked.request, ...change }) };
     await assert.rejects(f.service.prepare(changed), { code: "APN_IDEMPOTENCY_CONFLICT" });
@@ -105,18 +107,18 @@ test("durable exact private preparation replays immutable nonce before reads; ch
 });
 
 test("slow read cannot persist an expired Permit2 challenge; a saved near-deadline record still replays", async t => {
-  const near = await setup(t, { advanceDuringHttpMs: 999 });
+  const near = await setup(t, { advanceDuringReadMs: 999 });
   const nearRequest = input("permit2-near-deadline-001", challenge(false, false, 1));
   const saved = await near.service.prepare(nearRequest);
-  assert.equal(saved.state, "prepared"); assert.equal(near.httpCount(), 1);
+  assert.equal(saved.state, "prepared"); assert.equal(near.postCount(), 2);
   const readCount = near.calls.length;
   near.advance(1);
   await assert.rejects(near.service.records.persistLocked(saved), { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(await near.service.records.findOperation(saved.operationId), saved);
   assert.deepEqual(await near.service.prepare(nearRequest), saved);
-  assert.equal(near.calls.length, readCount); assert.equal(near.httpCount(), 1);
+  assert.equal(near.calls.length, readCount); assert.equal(near.postCount(), 2);
 
-  const expired = await setup(t, { advanceDuringHttpMs: 1000 });
+  const expired = await setup(t, { advanceDuringReadMs: 1000 });
   const expiredRequest = input("permit2-expired-read-001", challenge(false, false, 1));
   await assert.rejects(expired.service.prepare(expiredRequest), { code: "APN_OPERATION_BLOCKED" });
   const operationId = permit2ProductionId("owner", expiredRequest.idempotencyKey);
@@ -142,11 +144,11 @@ test("reconstructed frozen material rejects rehashed plan, nonce, domain, checkp
 });
 
 test("sponsored branch accepts zero-native route only with matching merchant domain and exact checked contracts", async t => {
-  const f = await setup(t, { allowance: 0n, sponsor: true });
+  const f = await setup(t, { allowance: 0n });
   const record = await f.service.prepare(input("sponsored-valid-key-001", challenge(true)));
   assert.notEqual(reconstructPermit2ProductionMaterial(record.material).plan.eip2612, null);
   assert.equal(f.calls.includes("eth_getBalance"), false);
-  const bad = await setup(t, { allowance: 0n, sponsor: true });
+  const bad = await setup(t, { allowance: 0n });
   await assert.rejects(bad.service.prepare(input("sponsored-missing-hints", challenge(true, false))));
   const noSponsor = await setup(t, { allowance: 0n }); await assert.rejects(noSponsor.service.prepare(input()));
   const badDomain = await setup(t, { badDomain: true }); await assert.rejects(badDomain.service.prepare(input()));

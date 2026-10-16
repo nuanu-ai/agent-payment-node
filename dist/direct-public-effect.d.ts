@@ -31,6 +31,7 @@ export declare class DirectPublicEffectJournal extends SecureStateStore {
     private binding;
     prepare(operation: OperationRecord): Promise<void>;
     prepared(operation: OperationRecord): Promise<Binding>;
+    /** One custody read: the public wallet and provider binding and the encrypted envelope's identity, all against the frozen custody. */
     private assertCustody;
     assertUnstarted(operation: OperationRecord): Promise<void>;
     beginSigning(operation: OperationRecord): Promise<DirectSigningAttempt>;
@@ -41,6 +42,7 @@ export declare class DirectPublicEffectJournal extends SecureStateStore {
     private checkNoPrivateContext;
     private syncAncestors;
     attestationMessage(operation: OperationRecord, effect: DirectPublicEffect): Promise<string>;
+    /** The caller verified `binding` under the locks it still holds; nothing is re-read after the signature check. */
     private verifyAttestation;
     publish(operation: OperationRecord, effect: DirectEffectMaterial, attestation: Hex): Promise<void>;
     effect(operation: OperationRecord): Promise<DirectPublicEffect>;

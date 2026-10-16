@@ -40,8 +40,7 @@ export interface FeeEstimate {
 export interface X402PrepareEvidence {
     readonly address: Address;
     readonly usdcAtomic: string;
-    readonly tokenName: string;
-    readonly tokenVersion: string;
+    /** keccak(domain(name, version, chainId, token)): binds the seller's name and version without reading them. */
     readonly domainSeparator: Hex;
     readonly rpcOriginHash: string;
     readonly observedAt: string;
@@ -155,14 +154,16 @@ export interface X402RpcPort {
     }): Promise<X402AuthorizationUsedLogs>;
     getX402TransferLogs(input: {
         readonly from: Address;
+        /** Optional recipient topic, so a busy payer's other transfers neither count against nor overflow the log bound. */
+        readonly to?: Address;
         readonly fromBlock: string;
         readonly toBlock: string;
     }): Promise<X402TransferLogs>;
 }
 export interface RpcPort {
     /** Arm the command-scoped public BNB transport cap before any direct BNB network read. */
-    armBnbDirectRpcGuard?(): void;
-    armEvmDirectRpcGuard?(): void;
+    /** Arms this command's physical POST cap; a direct EVM step passes the cap derived from its read plan. */
+    armEvmDirectRpcGuard?(maxPhysicalRequests?: number): void;
     /** Command-scoped, bounded public read for native Sei balance. */
     seiNativeBalance?(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot>;
     forX402Network?(chainId: EvmChainId): RpcPort & X402RpcPort;

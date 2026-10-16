@@ -69,8 +69,8 @@ function deploymentPins(snapshot, op) {
     if (snapshot.chainId !== 42161 || snapshot.domain !== 3 || snapshot.remoteDomain !== route.domain || snapshot.remoteMessenger !== circleWord(CIRCLE_MESSENGER) || snapshot.pairedToken !== CIRCLE_SOURCE_TOKEN || snapshot.localMinter !== CIRCLE_MINTER || snapshot.localMessageTransmitter !== CIRCLE_TRANSMITTER || snapshot.localTokenMessenger !== CIRCLE_MESSENGER || snapshot.messageVersion !== 1 || snapshot.messageBodyVersion !== 1 || snapshot.tokenDecimals !== 6 || snapshot.transmitterPaused || snapshot.minterPaused || snapshot.tokenPaused)
         circleBlocked("historical_paid_deployment_configuration");
     for (const key of ["messenger", "transmitter", "minter", "token"]) {
-        const actual = snapshot.contracts[key], pin = expected[key];
-        if (actual.address.toLowerCase() !== pin.address.toLowerCase() || actual.implementation.toLowerCase() !== pin.implementation.toLowerCase() || actual.proxyCodeHash !== pin.proxyCodeHash || actual.implementationCodeHash !== pin.implementationCodeHash)
+        const actual = snapshot.contracts?.[key], pin = expected[key];
+        if (actual === undefined || actual.address.toLowerCase() !== pin.address.toLowerCase() || actual.implementation.toLowerCase() !== pin.implementation.toLowerCase() || actual.proxyCodeHash !== pin.proxyCodeHash || actual.implementationCodeHash !== pin.implementationCodeHash)
             circleBlocked("historical_paid_deployment_code_pin");
     }
 }

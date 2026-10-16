@@ -7,10 +7,10 @@ import { verifyEffect } from "./transfer-policy.js";
 export async function assertFreshDirectEffect(state, operation, effect) {
     const journal = new DirectPublicEffectJournal(state);
     await verifyEffect(effect, operation);
-    await journal.prepared(operation);
     if (operation.evm !== undefined) {
         await new DirectAllowlistGate({ state, clock: { now: () => new Date() } }).confirm(evmAllowlistSubject(operation), operation.allowlist);
     }
+    // One binding check under the custody lock the caller holds; the allowlist confirm above writes nothing it depends on.
     await journal.prepared(operation);
 }
 /** Called inside Native's already-loaded custody context after its encrypted effect was saved. */

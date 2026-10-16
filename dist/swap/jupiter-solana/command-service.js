@@ -2,7 +2,8 @@ import { ApnError } from "../../errors.js";
 import { SwapOperationRepository } from "../repository.js";
 import { SWAP_TERMINAL_STATES } from "../model.js";
 import { EMPTY_PROGRAM_SNAPSHOT, JUPITER_SOLANA_SCHEMA, JUPITER_SWAP_API_V2, JUPITER_V2_SOURCE, JUPITER_V6_PROGRAM, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, WRAPPED_SOL_MINT, } from "./catalog.js";
-import { JUPITER_V1_CURRENT_ROUTES, JUPITER_V1_FINITE_ROUTES } from "./v1-route-config.js";
+import { JUPITER_V1_HISTORICAL_ROUTES, JUPITER_V1_KNOWN_ROUTES, JUPITER_V1_ROUTES } from "./v1-route-config.js";
+import { JUPITER_V1_IMMUTABLE_PROGRAMS, JUPITER_V1_PROGRAM_AUTHORITIES } from "./v1-pins.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "../route-admission.js";
 import { assertJupiterV1Runtime } from "./v1-runtime-factory.js";
 import { swapMechanismDigest } from "../pin.js";
@@ -21,7 +22,7 @@ export async function executeJupiterCommand(request, context) {
         const op = await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
         if (op === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
-        if (!JUPITER_V1_FINITE_ROUTES.some(route => op.mechanismDigest === swapMechanismDigest(route.mechanismPin)))
+        if (!JUPITER_V1_KNOWN_ROUTES.some(route => op.mechanismDigest === swapMechanismDigest(route.mechanismPin)))
             throw new ApnError("APN_OPERATION_BLOCKED", "This operation belongs to another mechanism.");
         if (request.command === "swap.jupiter.status")
             return await withDispatch(await runtime.status(request.operationId, context.clock.now()), context);
@@ -47,7 +48,7 @@ async function status(operationId, context) {
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
     return { proofClass: operation.state, data: null, operation, receipt: null, nextActions: [] };
 }
-/** Only the current executable generation of each pool can quote; older generations stay listed for observation only. */
+/** One current route per pool quotes; the byte-pinned generations of APN 0.5.42 and earlier stay listed for observation only. */
 function jupiterInventory(installed) {
     const route = (r) => ({ routeId: r.routeId, pool: r.pool, route: swapRouteOf(r.mechanismPin),
         routeDigest: swapRouteDigest(r.mechanismPin), mechanismPin: r.mechanismPin, mechanismDigest: swapMechanismDigest(r.mechanismPin),
@@ -56,9 +57,9 @@ function jupiterInventory(installed) {
             program: JUPITER_V6_PROGRAM, nativeInput: WRAPPED_SOL_MINT, outputToken: SOLANA_USDC_MINT, source: JUPITER_V2_SOURCE, programSnapshot: EMPTY_PROGRAM_SNAPSHOT }),
         ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION, execution: installed ? "foreground_cli_after_owner_admission" : "dormant",
         v2Quantum: { signable: false, execution: "dormant" },
-        v1: { installed, provenance: "runtime_bytes_only", routes: JUPITER_V1_CURRENT_ROUTES.map(route),
-            historicalObserveOnly: JUPITER_V1_FINITE_ROUTES.filter((r) => !JUPITER_V1_CURRENT_ROUTES.includes(r))
-                .map((r) => ({ routeId: r.routeId, mechanismDigest: swapMechanismDigest(r.mechanismPin) })) } };
+        v1: { installed, provenance: "upgrade_authority", programAuthorities: [...JUPITER_V1_PROGRAM_AUTHORITIES, ...JUPITER_V1_IMMUTABLE_PROGRAMS],
+            routes: JUPITER_V1_ROUTES.map(route),
+            historicalObserveOnly: JUPITER_V1_HISTORICAL_ROUTES.map((r) => ({ routeId: r.routeId, mechanismDigest: swapMechanismDigest(r.mechanismPin) })) } };
 }
 function data(value, proofClass) {
     return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };

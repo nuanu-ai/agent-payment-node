@@ -98,7 +98,7 @@ export function validateJupiterV1PreparedMaterial(value) {
         corrupt();
     return value;
 }
-/** Complete public ProgramData bytes are chunked below the shared store's 1 MiB per-file cap. */
+/** Materials are chunked below the shared store's 1 MiB per-file cap; byte-pinned historical ones held whole ProgramData. */
 export function jupiterV1GasDisplay(execution) { return { networkFeeLamports: execution.networkFeeLamports ?? "0", tokenAccountRentLamports: execution.tokenAccountRentLamports, maximumNativeExpenseLamports: execution.maximumNativeExpenseLamports }; }
 export class SavedJupiterV1MaterialStore extends SecureStateStore {
     initialized;

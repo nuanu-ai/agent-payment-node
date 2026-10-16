@@ -29,12 +29,7 @@ const received = eventLog(basePool, "OFTReceived", { guid, srcEid: 30101, toAddr
 // Synthetic destination evidence exercises continuation validation; the retained fixture proves source only.
 const destination: BridgeProtocolReceipt = { chainId: 8453, transactionHash: `0x${"33".repeat(32)}`,
   blockNumberAtomic: "123", blockHash: `0x${"44".repeat(32)}`, logs: [received] };
-const deployment = { chainId: 8453, peerChainId: 1, tool: "stargateV2", block: {
-  numberAtomic: destination.blockNumberAtomic, hash: destination.blockHash, timestampAtomic: "2" }, rpcOrigin: "https://offline.example",
-  contractHash: "a".repeat(64), codeHash: "b".repeat(64), configurationHash: "c".repeat(64) } as const;
-const pin: NativeStargateDestinationPin = { pool: basePool, frozenDeployment: deployment, observedDeployment: deployment,
-  frozenPoolCodeHash: BRIDGE_ASSET_REGISTRY[8453].nativeCoin.stargate!.routerCodeHash,
-  observedPoolCodeHash: BRIDGE_ASSET_REGISTRY[8453].nativeCoin.stargate!.routerCodeHash };
+const pin: NativeStargateDestinationPin = { pool: basePool, poolCodeHash: BRIDGE_ASSET_REGISTRY[8453].nativeCoin.stargate!.routerCodeHash };
 function source(replacement = sent, materialization = m): BridgeSourceProof {
   return bridgeSourceProof(materialization, decodeBridgeCall(materialization), { ...receipt,
     logs: receipt.logs.map((log, index) => index === sentIndex ? replacement : log) });
