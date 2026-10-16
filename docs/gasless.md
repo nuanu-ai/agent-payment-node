@@ -505,6 +505,20 @@ finality tag, complete transaction/receipt membership and bounded log queries.
 APN checks protocol and USDC implementation code at preparation and settlement.
 Unichain and Avalanche belong to the local-wallet path above.
 
+After dispatch, each resume first reads the delegation's one-use counter
+(`LimitedCallsEnforcer.callCounts` for the pinned DelegationManager) and the
+enforcer code at the finality block, pinned by block hash. The counter only
+ever rises, and only inside a successful redemption of this exact delegation,
+so a count of 0 proves that no redemption exists up to that block: APN moves
+its scan cursor there without any `eth_getLogs` request. Only once the count
+is 1 does APN search the logs, in windows of at most 2000 blocks from the
+cursor and at most eight `eth_getLogs` requests per resume. A window the RPC
+refuses as too wide, or rate-limits, is halved and asked again, down to 62
+blocks. A refusal at that width ends the resume as
+`mm_gasless_rpc_log_range` or `mm_gasless_rpc_rate_limited`; a transport
+failure is `mm_gasless_rpc_unavailable`. In every case the blocks already
+proved in that resume stay proved, and the next resume continues from there.
+
 For MetaMask, `--amount` is the exact successful sender debit `G`. APN quotes the
 provider's USDC fee `F` and recipient amount `N`, requiring `G = N + F`,
 `F <= --max-fee` and `N >= --min-received`. It makes at most three quote attempts

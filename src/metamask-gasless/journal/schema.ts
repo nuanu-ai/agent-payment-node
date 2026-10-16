@@ -156,9 +156,11 @@ function observation(value: unknown, at: string): MetaMaskGaslessObservation | n
   if (sourced) observationSource(o.source);
   if (time(mmIso(o.observedAt)) > time(at) || !["pending", "unavailable", "invalid", "reorg", "reverted", "success"].includes(o.phase as string) ||
     typeof o.reason !== "string" || !Object.hasOwn(MM_REASON_CODES, o.reason)) corrupt();
-  const exactReason: Readonly<Record<string, string>> = { pending: "mm_gasless_pending", unavailable: "mm_gasless_rpc_unavailable",
+  const exactReason: Readonly<Record<string, string>> = { pending: "mm_gasless_pending",
     reorg: "mm_gasless_scan_reorg", reverted: "mm_gasless_transaction_reverted", success: "mm_gasless_success" };
-  if (o.phase !== "invalid" && o.reason !== exactReason[o.phase as string]) corrupt();
+  if (o.phase === "unavailable" && !["mm_gasless_rpc_unavailable", "mm_gasless_rpc_log_range",
+    "mm_gasless_rpc_rate_limited"].includes(o.reason as string)) corrupt();
+  if (o.phase !== "invalid" && o.phase !== "unavailable" && o.reason !== exactReason[o.phase as string]) corrupt();
   if (o.phase === "invalid" && !["mm_gasless_evidence_invalid", "mm_gasless_rpc_binding"].includes(o.reason as string)) corrupt();
   if (o.candidateTxHash !== null) mmHex(o.candidateTxHash, 32);
   const transaction = o.transactionBlock === null ? null : block(o.transactionBlock);

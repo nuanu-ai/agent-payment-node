@@ -26,6 +26,14 @@ export function metaMaskGaslessNextActions(operation: MetaMaskGaslessOperationRe
     "Confirm this existing transaction in MetaMask Mobile or the email registered to your MetaMask dashboard.",
     `apn operation resume --operation ${op.operationId}`,
   ];
+  if (op.failure?.reason === "mm_gasless_rpc_log_range") return [
+    "The RPC refused even narrow eth_getLogs ranges. Put a public HTTPS RPC that serves bounded log queries in an APN_<NAME>_RPC_URL variable and add --observation-rpc-env APN_<NAME>_RPC_URL to the resume.",
+    `apn operation resume --operation ${op.operationId}`,
+  ];
+  if (op.failure?.reason === "mm_gasless_rpc_rate_limited") return [
+    "The RPC asked APN to slow down. Wait before resuming; every block already proved stays proved.",
+    `apn operation resume --operation ${op.operationId}`,
+  ];
   return [`apn operation resume --operation ${op.operationId}`];
 }
 
