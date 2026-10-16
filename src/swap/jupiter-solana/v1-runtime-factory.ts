@@ -63,6 +63,8 @@ export function createJupiterV1Runtime(options:JupiterV1RuntimeOptions):GuardedS
   override async prepare(request:{readonly profile:string;readonly quoteHash:string;readonly idempotencyKey:string},now:Date){
    const saved=await materials.load(request.quoteHash);if(saved===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Jupiter quote was not found.");
    if(routeConfigForMaterial(saved.execution).routeId!==route.routeId)blocked("Jupiter saved material belongs to another finite runtime.");
+   // A byte-pinned generation of APN 0.5.42 and earlier is a read-only parser: its quotes are observed, never prepared.
+   if(route.programAuthorities===undefined)throw new ApnError("APN_REPREPARE_REQUIRED","This saved Jupiter quote pinned executable bytes of an earlier APN release; quote again.",{reason:"jupiter_v1_historical_route"});
    await selectedOwner(route,request.profile,saved.quote.inputAmountAtomic,saved.quote.minimumOutputAtomic,saved.quote.account);
    const operation=await super.prepare(detached(request),now),owner=await admission.assert(operation,saved);await bindings.bindPrepared(operation,owner,saved);return operation;
   }

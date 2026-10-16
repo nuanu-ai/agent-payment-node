@@ -190,3 +190,27 @@ test("the Whirlpool fixture is the exact two-origin capture", () => {
   [WHIRLPOOL_C422B2.programDataHash, WHIRLPOOL_C422B2.headerHash, WHIRLPOOL_C422B2.payloadHash, WHIRLPOOL_C422B2.deploymentSlot]);
  assert.equal(JUPITER_V6_PROGRAM, "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
 });
+
+test("a saved byte-pinned quote of an earlier release is read-only: prepare refuses before any operation exists", async t => {
+ const { temporaryState: temp } = await import("./helpers.js"), { StateStore } = await import("../../src/state.js");
+ const { SavedJupiterV1MaterialStore } = await import("../../src/swap/jupiter-solana/v1-material.js");
+ const { createJupiterV1Runtime } = await import("../../src/swap/jupiter-solana/v1-runtime-factory.js");
+ const { SolanaRpc } = await import("../../src/solana/rpc.js"), { SwapOperationRepository } = await import("../../src/swap/repository.js");
+ const { createSwapQuote } = await import("../../src/swap/quote.js");
+ const state = await temp(); t.after(state.cleanup);
+ const m = syntheticC422b2Material("83"), now = new Date();
+ const quote = createSwapQuote({ profile: "historical", account: m.payer, recipient: m.payer, sourceAsset: { chain: `solana:${m.genesis}`, kind: "native", identifier: null },
+  destinationAsset: { chain: `solana:${m.genesis}`, kind: "token", identifier: SOLANA_USDC_MINT }, inputAmountAtomic: m.quoteResponse.inAmount,
+  expectedOutputAtomic: m.quoteResponse.outAmount, minimumOutputAtomic: m.quoteResponse.otherAmountThreshold, slippageBps: m.quoteResponse.slippageBps,
+  effectiveAt: now.toISOString(), expiresAt: new Date(now.getTime() + 60_000).toISOString(), providerResponseHash: m.materialDigest,
+  routeHash: "a".repeat(64), unsignedTransactionPayloadHash: sha256(m.transactionBase64), simulation: { requestHash: "b".repeat(64), resultHash: "c".repeat(64),
+   success: true, blockNumber: m.accountSlot, blockHash: `0x${"1".repeat(64)}`, headBlockNumber: m.accountSlot, maxHeadDrift: 256, gasEstimate: "100000" } });
+ await new SavedJupiterV1MaterialStore(state.root).save({ quote, approvalCapAtomic: "0", gasOrEnergy: { networkFeeLamports: m.networkFeeLamports!,
+  tokenAccountRentLamports: m.tokenAccountRentLamports, maximumNativeExpenseLamports: m.maximumNativeExpenseLamports }, execution: m });
+ const runtime = createJupiterV1Runtime({ state: new StateStore(state.root), clock: { now: () => now }, rpc: new SolanaRpc("https://example.com", async () => { throw Error("no RPC"); }),
+  wrappingSecret: { async load() { throw Error("no custody"); }, async create() { throw Error(); } }, foreground: false });
+ await assert.rejects(runtime.prepare({ profile: "historical", quoteHash: quote.quoteHash, idempotencyKey: "historical-prepare" }, now),
+  (error: { code?: string; details?: { reason?: string } }) => error.code === "APN_REPREPARE_REQUIRED" && error.details?.reason === "jupiter_v1_historical_route");
+ const { preparedSwapOperationId } = await import("../../src/swap/service.js");
+ assert.equal(await new SwapOperationRepository(state.root).loadAny(preparedSwapOperationId("historical", "historical-prepare")), null);
+});
