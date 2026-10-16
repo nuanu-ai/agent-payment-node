@@ -1,4 +1,5 @@
 import { gaszipNativeNet } from "./gaszip-native-delivery.js";
+import { gaszipSendRefused } from "./gaszip-outcome.js";
 import { assertGaszipPhysicalGuard } from "./gaszip-authority.js";
 import { gaszipOracleUint256 } from "./gaszip-oracle-data.js";
 import { encodeFunctionData, parseAbi, type Hex } from "viem";
@@ -23,6 +24,8 @@ export class SeiFundingRpc implements SeiRpcPort {
     if(method==="eth_sendRawTransaction"){if(params.length!==1)seiFail("send_parameters");assertGaszipPhysicalGuard(beforeSend,params[0]);}
     const id=String(++this.sequence);const r=await this.https.request(this.url,"POST",canonicalJson({jsonrpc:"2.0",id,method,params}),1024*1024,"APN_RPC_CONFIG",beforeSend);
     if(r.status!==200)seiFail("rpc_http");let v:Record<string,unknown>;try{v=seiObject(JSON.parse(r.body));}catch{return seiFail("rpc_json");}
+    // A well-formed JSON-RPC error answer to the one send is a definite refusal, unless it says the node already holds the bytes.
+    if(method==="eth_sendRawTransaction" && gaszipSendRefused(v,id))seiFail("send_rejected");
     if(v.jsonrpc!=="2.0" || v.id!==id || !Object.hasOwn(v,"result") || Object.hasOwn(v,"error"))seiFail("rpc_result");return v.result;
   }
 }
@@ -92,7 +95,7 @@ export async function proveSeiDelivery(rpc:SeiRpcPort,owner:string,d:SeiCorrelat
   let amount=d.amount;let signedBudget:{gas:string;gasPrice:string}|undefined;
   if(d.grossNative===true){const tv=await rpc.call("eth_getTransactionByHash",[d.hash]);if(tv===null)return null;
     const t=seiObject(tv);signedBudget={gas:seiQuantity(t.gas).toString(),gasPrice:seiQuantity(t.gasPrice).toString()};
-    amount=await gaszipNativeNet(tv,d,owner,1329,SEI_FUNDING.minimumOutput,
+    amount=await gaszipNativeNet(tv,d,owner,1329,0n,
       {fail:seiFail,object:seiObject,uint:seiUint,quantity:seiQuantity,hash:seiHash,address:seiAddress,exact:seiExact});}
   const p=await proveSeiSafeTransaction(rpc,1329,d.hash,{from:d.signer,to:owner,data:"0x",value:amount,nonce:d.nonce,...signedBudget});
   if(p===null)return null;if(p.status!=="success")seiFail("destination_revert");

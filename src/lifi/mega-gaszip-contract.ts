@@ -1,4 +1,4 @@
-import { inspectGaszipNativeDelivery } from "./gaszip-native-delivery.js";
+import { gaszipProviderFlags, inspectGaszipNativeDelivery, type GaszipProviderFailure } from "./gaszip-native-delivery.js";
 import { getAddress, type Hex } from "viem";
 import { ApnError } from "../errors.js";
 import { hashObject } from "../canonical.js";
@@ -53,24 +53,29 @@ export function inspectMegaFundingQuote(value: unknown, now: number): MegaFundin
 }
 export interface MegaCorrelatedDelivery { readonly hash: Hex; readonly amount: string; readonly signer: string; readonly nonce: string; readonly providerDigest: string; readonly grossNative?: true }
 /** Provider mapping authorizes observation only; both effects must be independently proved by their chain RPC. */
-export function inspectMegaDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): MegaCorrelatedDelivery | null {
+export function inspectMegaDelivery(value: unknown, sourceHash: Hex, owner: string, amount: string, sourceBlock?: string): MegaCorrelatedDelivery | GaszipProviderFailure | null {
   if(owner!==MEGA_FUNDING.owner)megaFail("owner_pin");
   const v=megaObject(value); megaExact(v,["deposit","txs"]); const d=megaObject(v.deposit);
-  if(Object.hasOwn(d,"seen"))return inspectGaszipNativeDelivery(value,sourceHash,owner,amount,sourceBlock,4326,514,MEGA_FUNDING.minimumOutput,
+  if(Object.hasOwn(d,"seen"))return inspectGaszipNativeDelivery(value,sourceHash,owner,amount,sourceBlock,4326,514,0n,
     {fail:megaFail,object:megaObject,uint:megaUint,quantity:megaQuantity,hash:megaHash,address:megaAddress,exact:megaExact});
   megaExact(d,["block","chain","hash","log","sender","shorts","status","time","to","usd","value"]);
   if (megaHash(d.hash)!==sourceHash || megaUint(d.chain)!==8453n || megaAddress(d.sender)!==owner || megaUint(d.value)!==megaUint(amount) ||
     megaAddress(d.to)!==owner || !Array.isArray(d.shorts) || d.shorts.length!==1 || megaUint(d.shorts[0])!==514n) megaFail("deposit_binding");
   if (sourceBlock!==undefined && megaUint(d.block).toString()!==sourceBlock)megaFail("deposit_block_binding");
   if (!["SEEN","PENDING","CONFIRMED","PRIORITY","CANCELLED"].includes(String(d.status)))megaFail("deposit_status");
+  if (d.status==="CANCELLED") return { providerFailure:"provider_cancelled", providerDigest:hashObject(value) };
   if (d.status!=="CONFIRMED") return null;
   if (!Array.isArray(v.txs) || v.txs.length>8) megaFail("delivery_count");
-  const rows=v.txs.map(megaObject);if(rows.some(t => megaUint(t.chain)!==4326n))megaFail("unexpected_outbound_chain");
+  const rows=v.txs.map(megaObject), failed=rows.map(t => gaszipProviderFlags(t,megaFail)).find(x => x!==null);
+  if (failed!==undefined) return { providerFailure:failed, providerDigest:hashObject(value) };
+  if(rows.some(t => megaUint(t.chain)!==4326n))megaFail("unexpected_outbound_chain");
   if (rows.length===0) return null; if (rows.length!==1) megaFail("delivery_ambiguous");
   const t=rows[0]!; megaExact(t,["chain","hash","nonce","refund","cancelled","signer","status","time","to","usd","value"]);
-  if (t.refund!==false || t.cancelled!==false || megaAddress(t.to)!==owner) megaFail("delivery_binding");
+  if (megaAddress(t.to)!==owner) megaFail("delivery_binding");
   if (!["SEEN","PENDING","CONFIRMED","PRIORITY","CANCELLED"].includes(String(t.status)))megaFail("outbound_status");
+  if (t.status==="CANCELLED") return { providerFailure:"provider_cancelled", providerDigest:hashObject(value) };
   if (t.status!=="CONFIRMED") return null;
-  const output=megaUint(t.value); if (output<MEGA_FUNDING.minimumOutput) megaFail("delivery_floor");
+  // The owner's floor is applied after the payout is proved on chain; a lower payout is a terminal destination failure.
+  const output=megaUint(t.value);
   return { hash:megaHash(t.hash), amount:output.toString(), signer:megaAddress(t.signer), nonce:megaUint(t.nonce).toString(), providerDigest:hashObject(value) };
 }

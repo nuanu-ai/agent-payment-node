@@ -178,15 +178,17 @@ export class OneClickSourceService {
             const q = inspectOneClickSourceQuote(await getQuote(actualRequest), actualRequest, minOutput, maxLoss, now(), lane);
             const call = oneClickSourceCall(lane, q.deposit, q.amountIn.toString()), deadlineMs = Date.parse(q.effectiveDeadline);
             const caps = { maxGas, maxFee, maxPriority, maxNative };
-            const read = async () => {
+            const read = async (signed) => {
                 if (lane.origin.kind === "erc20")
-                    return await source.readToken(payer, call.data, amount, caps, deadlineMs, now);
+                    return await source.readToken(payer, call.data, amount, caps, deadlineMs, now, signed);
                 const plan = planOneClickNative(await source.observeNative(payer, q.deposit, amount), amount, caps);
                 if (now() > deadlineMs - 45_000)
                     fail("block_or_quote_expired");
                 return plan;
             };
             const initial = await read();
+            // A nonce an earlier operation sealed blocks this one before consent, unless that operation can no longer land.
+            const releasedReservation = await this.releasableNonce(journal, lane, profileHash, payer, initial.nonce, source, now());
             let record = await journal.stage({ lane: lane.id, operationId, profileHash, payer, recipient, refundTo: payer,
                 depositAddress: q.deposit, ...(initial.depositCode === null ? {} : { depositCode: initial.depositCode }),
                 quoteHash: q.quoteHash, quoteRequestDeadline: actualRequest.deadline,
@@ -197,7 +199,7 @@ export class OneClickSourceService {
                     maxFeePerGas: initial.fee.toString(), maxPriorityFeePerGas: initial.tip.toString(), maxNativeDebitWei: maxNative.toString() } });
             await new TtyOneClickSourceApproval().approve(record, initial);
             if (lane.origin.kind === "erc20")
-                assertOneClickPostApproval(initial, await read(), maxNative, deadlineMs, now());
+                assertOneClickPostApproval(initial, await read(initial), maxNative, deadlineMs, now());
             else
                 assertOneClickNativePostApproval(initial, await source.observeNative(payer, q.deposit, amount), amount, deadlineMs, now());
             if (now() > deadlineMs - 15_000)
@@ -208,9 +210,8 @@ export class OneClickSourceService {
             const raw = lane.origin.kind === "erc20"
                 ? await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, data: call.data, value: 0n, ...fees })
                 : await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, value: amount, ...fees });
-            record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) });
-            if (now() > Date.parse(record.effectiveDeadline) - 15_000)
-                fail("quote_expired_before_send");
+            // Every pre-send check ran before signing; the sealed bytes go to the single send without a check that could strand them.
+            record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, releasedReservation);
             record = await journal.advance(operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
             try {
                 const returned = await source.send(raw);
@@ -229,13 +230,40 @@ export class OneClickSourceService {
             walletStore.clear(loaded.secret);
         }
     }
+    /**
+     * An earlier operation's nonce reservation is released only when it can no longer land: its quote deadline passed and the
+     * node does not know its hash (pending or mined). Otherwise this submit refuses before staging, consent or signing.
+     */
+    async releasableNonce(journal, lane, profileHash, payer, nonce, source, nowMs) {
+        const holder = await journal.nonceHolder(lane, profileHash, payer, nonce);
+        if (holder === null)
+            return undefined;
+        const prior = await journal.load(holder.operationId);
+        if (prior === null || Date.parse(prior.effectiveDeadline) > nowMs || await source.transactionKnown(holder.transactionHash))
+            fail("nonce_reserved");
+        return holder.operationId;
+    }
     async status(operationId) {
-        const record = await this.journal().load(operationId);
+        const journal = this.journal();
+        let record = await journal.load(operationId);
         if (record === null)
             fail("missing_operation");
-        const lane = oneClickRecordLane(record), https = new BridgeHttps();
+        const lane = oneClickRecordLane(record);
+        // A finished operation answers from its journal with no RPC: a reverted safe source, or a stored finalized destination.
+        if (record.phase === "source_observed" && (record.sourceReceiptStatus === "reverted" || record.destinationStatus !== null)) {
+            return statusView(record, lane, { safe: true, transactionHash: record.transactionHash, status: record.sourceReceiptStatus,
+                receiptHash: record.sourceReceiptHash, provenance: "apn_journal" }, { status: null, provenance: "apn_journal" }, record.destinationStatus);
+        }
+        const https = new BridgeHttps();
         const source = new OneClickEvmSource(lane, this.rpcUrl(lane.origin.rpcEnvironment, lane.origin.network), https);
         const sourceReceipt = record.transactionHash === null ? null : await source.observe(record);
+        const safe = sourceReceipt;
+        if (safe?.safe === true && (safe.status === "success" || safe.status === "reverted") && typeof safe.receiptHash === "string" &&
+            ["submitting", "submitted_pending", "unknown_finality"].includes(record.phase)) {
+            record = await journal.advance(operationId, record.integrityHash, "source_observed", { sourceReceiptStatus: safe.status, sourceReceiptHash: safe.receiptHash });
+        }
+        if (record.sourceReceiptStatus === "reverted")
+            return statusView(record, lane, sourceReceipt, { status: null, provenance: "not_queried" }, null);
         // Destination status is obtained from a separate provider read and is never inferred from the source receipt.
         const endpoint = new URL(`${ORIGIN}/v0/status`);
         endpoint.searchParams.set("depositAddress", record.depositAddress);
@@ -252,18 +280,25 @@ export class OneClickSourceService {
                 fail("status_json_or_binding");
             }
         }
-        const provider = { operationId, lane: lane.id, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
-            sourceReceipt, oneClickProviderStatus: providerStatus, providerStatusProvenance: "oneclick_https_untrusted" };
-        if (lane.id === LEGACY_ONECLICK_LANE)
-            return { ...provider, tronDestinationClaimed: providerStatus === "SUCCESS", tronDestinationFinalized: false };
+        // Every lane, the original Base USDC to TRON USDT one included, proves delivery on the destination chain.
         const hashes = body === null ? [] : oneClickDestinationHashes(lane, body);
         const destinationProof = await proveOneClickDestination({ lane, recipient: record.recipient, minimumOutputAtomic: record.minAmountOutAtomic,
             notBeforeMs: Date.parse(record.quoteRequestDeadline) - QUOTE_WINDOW_MS, hashes,
             tron: () => new TronRpc(this.rpcUrl(lane.destination.rpcEnvironment, lane.destination.network)),
             solana: () => new SolanaRpc(this.rpcUrl(lane.destination.rpcEnvironment, lane.destination.network)) });
-        return { ...provider, destinationClaimed: providerStatus === "SUCCESS", providerDestinationTransactions: hashes,
-            destinationProof, destinationFinalized: destinationProof.status === "finalized" };
+        if (destinationProof.status === "finalized" && record.phase === "source_observed" && record.sourceReceiptStatus === "success") {
+            record = await journal.recordDestination(operationId, record.integrityHash, destinationProof);
+        }
+        return statusView(record, lane, sourceReceipt, { status: providerStatus, provenance: "oneclick_https_untrusted" }, destinationProof, hashes);
     }
+}
+/** One status shape for live and journal answers. The legacy lane keeps its original TRON field names as aliases. */
+function statusView(record, lane, sourceReceipt, provider, destinationProof, hashes = destinationProof?.transactions.map((row) => row.id) ?? []) {
+    const destinationClaimed = provider.status === "SUCCESS", destinationFinalized = destinationProof?.status === "finalized";
+    return { operationId: record.operationId, lane: lane.id, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
+        sourceReceipt, oneClickProviderStatus: provider.status, providerStatusProvenance: provider.provenance,
+        destinationClaimed, providerDestinationTransactions: hashes, destinationProof, destinationFinalized,
+        ...(lane.id === LEGACY_ONECLICK_LANE ? { tronDestinationClaimed: destinationClaimed, tronDestinationFinalized: destinationFinalized } : {}) };
 }
 /** Foreground-only consent with a six-character code bound to the exact staged record. */
 export class TtyOneClickSourceApproval {

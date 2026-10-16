@@ -11,25 +11,40 @@ export interface GaszipNativeDelivery {
   readonly hash:Hex; readonly amount:string; readonly signer:string; readonly nonce:string;
   readonly providerDigest:string; readonly grossNative?:true;
 }
+/** The provider says this exact deposit (or its outbound payout) was cancelled or refunded: a terminal destination failure. */
+export interface GaszipProviderFailure { readonly providerFailure: "provider_cancelled" | "provider_refund"; readonly providerDigest: string }
+/** Exact boolean refund/cancelled flags; any other value is malformed. */
+export function gaszipProviderFlags(row: Record<string, unknown>, fail: (reason: string) => never): GaszipProviderFailure["providerFailure"] | null {
+  for (const key of ["refund", "cancelled"]) if (Object.hasOwn(row, key) && row[key] !== false && row[key] !== true) fail("delivery_binding");
+  return row.refund === true ? "provider_refund" : row.cancelled === true ? "provider_cancelled" : null;
+}
 const DEPOSIT=["block","chain","hash","log","seen","sender","shorts","status","time","to","token","type","usd","value","valueNative"];
 const OUTBOUND=["chain","data","hash","minValue","nonce","retries","signer","status","time","to","updated","usd","value","valueNative"];
 const STATUSES=["SEEN","PENDING","CONFIRMED","PRIORITY","CANCELLED"];
-/** Only the fully observed native EOA API schema. Legacy responses use their existing parser. */
+/**
+ * Only the fully observed native EOA API schema. Legacy responses use their existing parser. The deposit binding is checked
+ * first; a cancelled or refunded deposit or payout is then a terminal provider failure, and the owner's floor is applied by
+ * the caller after the payout is proved on chain (`floor` stays the structural minimum, 0 for the caller's own check).
+ */
 export function inspectGaszipNativeDelivery(value:unknown,sourceHash:Hex,owner:string,amount:string,sourceBlock:string|undefined,
-  chain:1329|4326,short:246|514,floor:bigint,h:Helpers):GaszipNativeDelivery|null {
+  chain:1329|4326,short:246|514,floor:bigint,h:Helpers):GaszipNativeDelivery|GaszipProviderFailure|null {
   const v=h.object(value);h.exact(v,["deposit","txs"]);const d=h.object(v.deposit);h.exact(d,DEPOSIT,["refund","cancelled"]);
-  const flags=(r:Record<string,unknown>)=>{for(const k of ["refund","cancelled"])if(Object.hasOwn(r,k)&&r[k]!==false)h.fail("delivery_binding");};
   const usd=(x:unknown)=>{if(typeof x!=="number" || !Number.isFinite(x) || x<0)h.fail("native_usd");};
-  flags(d);usd(d.usd);for(const k of ["block","log","seen","time"])h.uint(d[k]);
+  const depositFailure=gaszipProviderFlags(d,h.fail);usd(d.usd);for(const k of ["block","log","seen","time"])h.uint(d[k]);
   if(d.type!=="EOA" || h.address(d.token)!==getAddress("0x0000000000000000000000000000000000000000") ||
     h.uint(d.valueNative)!==h.uint(d.value) || h.uint(d.log)!==0n || h.hash(d.hash)!==sourceHash || h.uint(d.chain)!==8453n ||
     h.address(d.sender)!==owner || h.address(d.to)!==owner || h.uint(d.value)!==h.uint(amount) ||
     !Array.isArray(d.shorts) || d.shorts.length!==1 || h.uint(d.shorts[0])!==BigInt(short))h.fail("deposit_binding");
   if(sourceBlock!==undefined && h.uint(d.block).toString()!==sourceBlock)h.fail("deposit_block_binding");
   if(typeof d.status!=="string" || !STATUSES.includes(d.status))h.fail("deposit_status");
+  const providerDigest=hashObject(value);
+  if(depositFailure!==null || d.status==="CANCELLED")return {providerFailure:depositFailure??"provider_cancelled",providerDigest};
   if(!Array.isArray(v.txs) || v.txs.length>1)h.fail("delivery_ambiguous");
   if(v.txs.length===0)return null;
-  const t=h.object(v.txs[0]);h.exact(t,OUTBOUND,["refund","cancelled"]);flags(t);usd(t.usd);
+  const t=h.object(v.txs[0]);h.exact(t,OUTBOUND,["refund","cancelled"]);
+  const outboundFailure=gaszipProviderFlags(t,h.fail);
+  if(outboundFailure!==null || t.status==="CANCELLED")return {providerFailure:outboundFailure??"provider_cancelled",providerDigest};
+  usd(t.usd);
   for(const k of ["nonce","retries","time","updated","minValue"])h.uint(t[k]);
   if(h.uint(t.chain)!==BigInt(chain) || t.data!=="0x" || h.uint(t.minValue)!==0n || h.uint(t.valueNative)!==h.uint(t.value) ||
     h.address(t.to)!==owner)h.fail("delivery_binding");
@@ -37,7 +52,7 @@ export function inspectGaszipNativeDelivery(value:unknown,sourceHash:Hex,owner:s
   if(typeof t.status!=="string" || !STATUSES.includes(t.status))h.fail("outbound_status");
   if(d.status!=="CONFIRMED" || t.status!=="CONFIRMED")return null;
   if(output<floor)h.fail("delivery_floor");
-  return {hash,amount:output.toString(),signer,nonce,providerDigest:hashObject(value),grossNative:true};
+  return {hash,amount:output.toString(),signer,nonce,providerDigest,grossNative:true};
 }
 /** Observed type-0 EIP-155 native payouts only. Reconstruct signed bytes before trusting the gross/net equation. */
 export async function gaszipNativeNet(tv:unknown,d:GaszipNativeDelivery,owner:string,chain:1329|4326,floor:bigint,h:Helpers):Promise<string> {

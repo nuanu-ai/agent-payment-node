@@ -16,6 +16,8 @@ export interface OneClickSourcePlan {
     readonly gas: bigint;
     readonly fee: bigint;
     readonly tip: bigint;
+    /** The block's base fee the plan was priced from; after consent only the signed max fee must still cover it plus the signed tip. */
+    readonly baseFee: bigint;
     readonly nativeDebit: bigint;
     readonly depositCode: "eoa" | "contract" | null;
 }
@@ -29,6 +31,11 @@ export interface OneClickNativeObservation {
     readonly tip: bigint;
     readonly balance: bigint;
 }
+/**
+ * After consent the signed envelope keeps the approved nonce, gas, max fee and tip (the bounded fee cap shown at consent).
+ * A fresh base fee may move: require the same nonce, no larger gas need, a signed max fee that still covers the fresh base
+ * fee plus the signed tip, and a debit at the signed values that still fits the owner's cap. A one-wei tick never aborts.
+ */
 export declare function assertOneClickPostApproval(initial: Readonly<{
     nonce: bigint;
     gas: bigint;
@@ -37,8 +44,7 @@ export declare function assertOneClickPostApproval(initial: Readonly<{
 }>, fresh: Readonly<{
     nonce: bigint;
     gas: bigint;
-    fee: bigint;
-    tip: bigint;
+    baseFee: bigint;
     nativeDebit: bigint;
 }>, maxNativeDebit: bigint, effectiveDeadlineMs: number, nowMs: number): void;
 /**
@@ -61,13 +67,21 @@ export declare class OneClickEvmSource {
     private readonly rpc;
     constructor(lane: OneClickLane, url: string, https: Pick<BridgeHttps, "request">);
     private chain;
-    /** Base USDC: hash-pinned token, native, nonce, simulation and OP-stack fee reads (unchanged lane behaviour). */
-    readToken(payer: string, data: Hex, amount: bigint, caps: OneClickSourceCaps, effectiveDeadlineMs: number, now: () => number): Promise<OneClickSourcePlan>;
+    /**
+     * Base USDC: hash-pinned token, native, nonce, simulation and OP-stack fee reads. Before consent the fresh suggestions must
+     * fit the owner's caps; after consent (`signed`) the debit is priced at the signed gas and max fee instead.
+     */
+    readToken(payer: string, data: Hex, amount: bigint, caps: OneClickSourceCaps, effectiveDeadlineMs: number, now: () => number, signed?: Readonly<{
+        gas: bigint;
+        fee: bigint;
+    }>): Promise<OneClickSourcePlan>;
     /** Ethereum ETH: balance and deposit code pinned to the safe block; the base fee reference is max(safe, latest). */
     observeNative(payer: string, deposit: string, amount: bigint): Promise<OneClickNativeObservation>;
     send(raw: Hex): Promise<Hex>;
+    /** Whether the node knows this hash at all (pending or mined). Read only when an earlier operation still reserves the nonce. */
+    transactionKnown(hash: Hex): Promise<boolean>;
     /** Safe-block receipt observation. It never implies destination delivery. */
     observe(record: OneClickSourceRecord): Promise<unknown>;
-    /** Two reads outside the shared reader's method list, over the same validated endpoint and transport. */
+    /** Reads outside the shared reader's method list, over the same validated endpoint and transport. */
     private raw;
 }

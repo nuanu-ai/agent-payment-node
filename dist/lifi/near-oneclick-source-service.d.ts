@@ -43,6 +43,11 @@ export declare class OneClickSourceService {
     private journal;
     private rpcUrl;
     submit(input: OneClickSubmitRequest): Promise<unknown>;
+    /**
+     * An earlier operation's nonce reservation is released only when it can no longer land: its quote deadline passed and the
+     * node does not know its hash (pending or mined). Otherwise this submit refuses before staging, consent or signing.
+     */
+    private releasableNonce;
     status(operationId: string): Promise<unknown>;
 }
 /** Foreground-only consent with a six-character code bound to the exact staged record. */

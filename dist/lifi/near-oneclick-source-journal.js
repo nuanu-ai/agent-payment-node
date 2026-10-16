@@ -40,7 +40,11 @@ function validate(value) {
         !/^(?:0|[1-9][0-9]*)$/u.test(r.amountInAtomic) ||
         !Number.isFinite(Date.parse(r.quoteRequestDeadline)) || !Number.isFinite(Date.parse(r.quoteDeadline)) ||
         r.effectiveDeadline !== new Date(Math.min(Date.parse(r.quoteRequestDeadline), Date.parse(r.quoteDeadline))).toISOString() ||
-        r.destinationStatus !== null || r.submissionAttempts > 1)
+        r.submissionAttempts > 1)
+        fail();
+    const d = r.destinationStatus;
+    if (d !== null && (r.phase !== "source_observed" || r.sourceReceiptStatus !== "success" || typeof d !== "object" || d.status !== "finalized" ||
+        d.recipient !== r.recipient || d.minimumOutputAtomic !== r.minAmountOutAtomic || !Array.isArray(d.transactions) || d.transactions.length === 0))
         fail();
     const lane = oneClickRecordLane(r), expected = oneClickSourceCall(lane, r.depositAddress, r.amountInAtomic);
     const v3 = r.schemaVersion === "apn.oneclick-source.v3";
@@ -87,10 +91,13 @@ function validate(value) {
     return r;
 }
 /** Base keeps its original reservation path; every other origin chain is scoped by its EIP-155 chain ID. */
+function nonceReservationPath(chainId, profileHash, payer, nonce) {
+    stateIdentifier(profileHash, "profile hash");
+    const owner = `${payer.toLowerCase()}-${BigInt(nonce).toString()}.json`;
+    return chainId === 8453 ? `oneclick-source-nonces/${profileHash}/${owner}` : `oneclick-source-nonces/${profileHash}/eip155-${chainId}/${owner}`;
+}
 function nonceReservation(record) {
-    const lane = oneClickRecordLane(record), owner = `${record.payer.toLowerCase()}-${record.sourceCall.nonce}.json`;
-    return lane.origin.chainId === 8453 ? `oneclick-source-nonces/${record.profileHash}/${owner}`
-        : `oneclick-source-nonces/${record.profileHash}/eip155-${lane.origin.chainId}/${owner}`;
+    return nonceReservationPath(oneClickRecordLane(record).origin.chainId, record.profileHash, record.payer, record.sourceCall.nonce);
 }
 export class OneClickSourceJournal extends SecureStateStore {
     path(id) { stateIdentifier(id, "operation ID"); return `oneclick-source/${id}.json`; }
@@ -118,7 +125,41 @@ export class OneClickSourceJournal extends SecureStateStore {
             return record;
         });
     }
-    async advance(id, expectedHash, phase, changes = {}) {
+    /** The operation that sealed a transaction at this payer nonce, if any. */
+    async nonceHolder(lane, profileHash, payer, nonce) {
+        const value = await this.readJson(nonceReservationPath(lane.origin.chainId, profileHash, payer, nonce.toString()));
+        if (value === null)
+            return null;
+        const holder = value;
+        if (typeof holder.operationId !== "string" || !/^[a-f0-9]{64}$/u.test(holder.operationId) ||
+            typeof holder.transactionHash !== "string" || !/^0x[a-fA-F0-9]{64}$/u.test(holder.transactionHash))
+            fail();
+        return { operationId: holder.operationId, transactionHash: holder.transactionHash };
+    }
+    /** Stores the finalized destination proof once; later status answers come from the journal. */
+    async recordDestination(id, expectedHash, proof) {
+        await this.initialize();
+        return this.withLocks([`oneclick:${id}`], async () => {
+            const prior = await this.load(id);
+            if (prior === null || prior.integrityHash !== expectedHash || prior.phase !== "source_observed" || prior.destinationStatus !== null)
+                blocked();
+            const { integrityHash: _old, ...body } = prior, next = { ...body, destinationStatus: proof, updatedAt: new Date().toISOString() };
+            let record;
+            try {
+                record = validate({ ...next, integrityHash: hashObject(next) });
+            }
+            catch {
+                return blocked();
+            }
+            await this.writeJson(this.path(id), record);
+            return record;
+        });
+    }
+    /**
+     * `releasedReservation` names an earlier operation whose nonce reservation the caller proved dead before consent: its
+     * deadline passed and the chain does not know its hash. At most one of the two signed transactions can use the nonce.
+     */
+    async advance(id, expectedHash, phase, changes = {}, releasedReservation) {
         await this.initialize();
         return this.withLocks([`oneclick:${id}`, `oneclick-nonces`], async () => {
             const prior = await this.load(id);
@@ -151,7 +192,7 @@ export class OneClickSourceJournal extends SecureStateStore {
                     blocked();
                 const reservation = nonceReservation(prior);
                 const existing = await this.readJson(reservation);
-                if (existing !== null)
+                if (existing !== null && (releasedReservation === undefined || existing.operationId !== releasedReservation))
                     blocked();
                 await this.ensureDirectory(reservation.slice(0, reservation.lastIndexOf("/")));
                 await this.writeJson(reservation, { operationId: id, transactionHash: changes.transactionHash });

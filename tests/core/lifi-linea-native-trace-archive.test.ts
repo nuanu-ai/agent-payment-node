@@ -111,7 +111,8 @@ for (const limits of [{ maxHttpRequests: 1 }, { deadlineMs: 1 }]) test("Linea ar
 });
 
 
-test("Linea observation still refuses proof with a changed frozen primary RPC origin", async (t) => {
+// LIFI-06: the operation binds the chain, not the endpoint URL frozen at prepare; another endpoint of Linea proves the same delivery.
+test("Linea observation accepts proof read through another primary RPC endpoint of the same chain", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root, "eth-linea");
   s.provider.statusValue = "completed_observed";
@@ -124,8 +125,8 @@ test("Linea observation still refuses proof with a changed frozen primary RPC or
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true);
   const record = (await s.core.bridges.records.findOperation(id))!;
-  assert.equal(record.state, "unknown_finality");
-  assert.equal(record.destinationProof, null);
+  assert.equal(record.state, "completed");
+  assert.equal(record.destinationProof?.rpcOrigin, s.destination.origin);
   assert.equal(s.source.submissions.length, 1);
 });
 
