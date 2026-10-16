@@ -7,6 +7,7 @@ import { parseRpcBatchResultEnvelope } from "../rpc.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
 import { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNativeSigner, prepareStargateV2NativeEth, stargateV2NativeCanonicalReceipt } from "./native-execution.js";
 import { TtyStargateNativeApproval } from "./native-tty.js";
+import { StargateNativeUsage } from "./native-usage.js";
 const SOURCE_POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
 const DESTINATION_POOL = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
 function blocked(reason) { throw new ApnError("APN_RPC_CONFIG", `Stargate native runtime unavailable: ${reason}.`, { reason }); }
@@ -103,12 +104,14 @@ export class StargateNativeService {
     destination;
     journal;
     local;
+    usage;
     constructor(state, wrapping, environment, now = Date.now) {
         this.state = state;
         this.environment = environment;
         this.now = now;
         this.journal = new FileStargateNativeJournal(state.root, state);
         this.local = new LocalStargateNativeSigner(state, wrapping);
+        this.usage = new StargateNativeUsage(state, now);
     }
     async prepare(input) {
         this.remote();
@@ -122,7 +125,8 @@ export class StargateNativeService {
     }
     async observe(operationId) {
         const operation = await this.required(operationId);
-        if (!["submission_started", "submitted", "unknown_finality"].includes(operation.phase))
+        // Terminal phases only settle their usage hold; they never sign or send.
+        if (!["submission_started", "submitted", "unknown_finality", "observed", "failed_confirmed_revert"].includes(operation.phase))
             throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate operation can be observed.");
         return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner), this.journal);
     }
@@ -161,6 +165,8 @@ export class StargateNativeService {
                 return { nonceAtomic: quantity(nonce).toString(), gasLimitAtomic: gasLimit.toString(), maxFeePerGasAtomic: maxFee.toString(),
                     maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
             }, signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async (operation) => await new TtyStargateNativeApproval().approve(operation),
+            admitPolicy: async (input) => await this.usage.admitPolicy(input), reserveUsage: async (operation) => await this.usage.reserve(operation),
+            followUsage: async (operation, target) => await this.usage.follow(operation, target),
             sendRawTransaction: async (raw) => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw))
                 throw new Error("hash"); return returned; },
             waitSourceReceipt: async (transactionHash, finalityTag) => await confirmedStargateSourceReceipt(source, transactionHash, finalityTag),

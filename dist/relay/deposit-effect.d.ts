@@ -4,7 +4,7 @@ import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { type RelayEffectJournal } from "./effect-journal.js";
-import { type RelayApprovalObservation } from "./approval-effect.js";
+import { type RelayApprovalObservation, type RelayUnsentOutcomePort } from "./approval-effect.js";
 export interface RelaySignedDeposit {
     readonly rawTransaction: Hex;
     readonly transactionHash: Hex;
@@ -13,6 +13,8 @@ export interface RelayDepositCustodyPort {
     /** Durable, operation-bound storage. An unreadable or missing sealed value must fail closed. */
     load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null>;
     seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void>;
+    /** Only after the journal records the sealed bytes as never landing. */
+    discard?(op: RelayUnsignedOperation): Promise<void>;
 }
 /** Encrypted, hash-bound signed material for the one permitted deposit attempt. */
 export declare class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
@@ -20,6 +22,7 @@ export declare class RelayEncryptedDepositCustody implements RelayDepositCustody
     private readonly wallets;
     constructor(state: StateStore, wrapping: WrappingSecretPort);
     load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null>;
+    discard(op: RelayUnsignedOperation): Promise<void>;
     seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void>;
 }
 export interface RelayDepositObservation {
@@ -56,12 +59,13 @@ export interface RelayDepositPorts {
         nativeBalanceWei: bigint;
         tokenBalanceAtomic: bigint;
         allowanceAtomic: bigint;
-        currentMaxFeePerGasWei: bigint;
+        baseFeePerGasWei: bigint;
         nextNonce: bigint;
     }>>;
     observeApproval(hash: Hex): Promise<RelayApprovalObservation | null>;
     sign(op: RelayUnsignedOperation): Promise<Hex>;
     readonly custody: RelayDepositCustodyPort;
+    readonly unsentOutcome?: RelayUnsentOutcomePort;
     send(rawTransaction: Hex): Promise<string>;
     observe(hash: Hex): Promise<RelayDepositObservation | null>;
 }

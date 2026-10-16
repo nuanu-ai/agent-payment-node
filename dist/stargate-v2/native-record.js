@@ -12,6 +12,11 @@ const UINT = /^(?:0|[1-9][0-9]{0,77})$/u;
 export const HASH = /^0x[0-9a-f]{64}$/u;
 export const CODE = /^0x(?:[0-9a-f]{2})+$/u;
 export const MAX_TTL_MS = 120_000;
+/** Owner admission pin for this exact native lane, in the same provider/reference form as the token lane. */
+export const STARGATE_NATIVE_MECHANISM = Object.freeze({ provider: "stargate-v2",
+    reference: `eip155:${SOURCE_CHAIN}:${SOURCE_POOL}/eip155:${DESTINATION_CHAIN}:${DESTINATION_POOL}` });
+export const STARGATE_NATIVE_SCHEMAS = ["apn.stargate-v2-native-operation.v1", "apn.stargate-v2-native-operation.v2",
+    "apn.stargate-v2-native-operation.v3"];
 export function fail(code, reason) {
     throw new ApnError(code, `Direct Stargate V2 native execution failed closed: ${reason}.`, { reason });
 }
@@ -52,7 +57,7 @@ export function seal(value) {
     return Object.freeze({ ...body, integrityHash: hashObject(body) });
 }
 export function validateRecord(value) {
-    if (!isPlainRecord(value) || !["apn.stargate-v2-native-operation.v1", "apn.stargate-v2-native-operation.v2"].includes(String(value.schemaVersion)))
+    if (!isPlainRecord(value) || !STARGATE_NATIVE_SCHEMAS.includes(String(value.schemaVersion)))
         fail("APN_STATE_CORRUPT", "schema");
     const raw = value, { integrityHash, ...body } = raw;
     if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64)
@@ -74,10 +79,21 @@ export function validateRecord(value) {
         if (raw.finalityPolicyProvenance !== "pinned_v2")
             fail("APN_STATE_CORRUPT", "finality_policy_provenance");
     }
+    // v3 binds owner admission at prepare; older schemas were written before the native lane reserved usage.
+    if (raw.schemaVersion === "apn.stargate-v2-native-operation.v3")
+        assertPolicyBinding(raw.policy);
+    else if (raw.policy !== undefined)
+        fail("APN_STATE_CORRUPT", "legacy_policy_field");
     const order = ["prepared", "approved", "submission_started", "submitted", "observed"];
     for (let i = 1; i < record.transitions.length; i++) {
         const a = record.transitions[i - 1].phase, b = record.transitions[i].phase;
-        if (b === "unknown_finality") {
+        if (a === "failed_confirmed_revert")
+            fail("APN_STATE_CORRUPT", "transition");
+        else if (b === "failed_confirmed_revert") {
+            if (!["submission_started", "submitted", "unknown_finality"].includes(a))
+                fail("APN_STATE_CORRUPT", "transition");
+        }
+        else if (b === "unknown_finality") {
             if (!["submission_started", "submitted"].includes(a))
                 fail("APN_STATE_CORRUPT", "transition");
         }
@@ -89,6 +105,14 @@ export function validateRecord(value) {
             fail("APN_STATE_CORRUPT", "transition");
     }
     return record;
+}
+function assertPolicyBinding(policy) {
+    const binding = policy;
+    if (!isPlainRecord(policy) || Object.keys(policy).sort().join() !== "mechanism,policyDigest,policyRevision" || typeof binding?.policyDigest !== "string" ||
+        !/^[a-f0-9]{64}$/u.test(binding.policyDigest) || !Number.isSafeInteger(binding.policyRevision) || binding.policyRevision < 1 ||
+        !isPlainRecord(binding.mechanism) || Object.keys(binding.mechanism).sort().join() !== "provider,reference" ||
+        typeof binding.mechanism.provider !== "string" || typeof binding.mechanism.reference !== "string")
+        fail("APN_STATE_CORRUPT", "policy_binding");
 }
 function assertLegacyNativeLane(record) {
     const route = record.quote?.route;

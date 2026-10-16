@@ -13,6 +13,7 @@ import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator, validateRelayQu
 import { RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
 import { StateStore } from "../../src/state.js";
+import { OperationService } from "../../src/operation-service.js";
 import { temporaryState } from "./helpers.js";
 
 const account = privateKeyToAccount(`0x${"1".repeat(64)}`);
@@ -71,7 +72,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
     executionAdmission: async operation => ({ requestId,
       operationIntegrityHash: operation.integrityHash, quoteDigest: operation.quoteDigest }),
     funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n, tokenBalanceAtomic: 2500000n,
-      allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 7n }),
+      allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 7n }),
     sign: async operation => { signs++; const a = operation.quote!.approval;
       return account.signTransaction({ type: "eip1559", chainId: 1, to: a.to as Hex, data: a.data as Hex,
         value: 0n, nonce: 7, gas: BigInt(a.gas), maxFeePerGas: BigInt(a.maxFeePerGas),
@@ -120,9 +121,9 @@ test("wrong requestId and stale source funding or nonce block approval before se
     { ...f.ports, executionAdmission: async operation => ({ requestId: "wrong-request-0001",
       operationIntegrityHash: operation.integrityHash, quoteDigest: operation.quoteDigest }) },
     { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 0n,
-      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 7n }) },
+      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 7n }) },
     { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
-      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, currentMaxFeePerGasWei: 1n, nextNonce: 8n }) },
+      tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 8n }) },
   ];
   for (const ports of invalid) await assert.rejects(new RelayApprovalEffectService(f.state, ports).run(f.op.operationId));
   assert.equal(f.counts.sends, 0);
@@ -209,3 +210,82 @@ test("wrong receipt, event, and canonical block fail closed without resending", 
   }
   assert.equal(f.counts.sends, 1); assert.equal(f.counts.signs, 1);
 });
+
+test("a finality-proven approval revert makes the Relay operation terminal and frees the profile", async t => {
+  const f = await setup(t); const service = new RelayApprovalEffectService(f.state, f.ports);
+  let journal = await service.run(f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
+  const operations = new OperationService(f.state);
+  assert.equal((await operations.relayStatus(f.op)).terminal, false);
+  f.setObservation({ ...f.receipt(hash, []), receipt: { ...f.receipt(hash, []).receipt, status: "reverted" } });
+  journal = await service.run(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "failed");
+  const status = await operations.relayStatus(f.op);
+  assert.equal(status.state, "failed_confirmed_revert"); assert.equal(status.terminal, true);
+  assert.equal(status.proofClass, "source_effect_reverted");
+  await operations.assertProfileAvailable(f.op.profileHash);
+  assert.equal(f.counts.sends, 1);
+});
+
+test("a route abandoned after its confirmed approval retires only under fresh owner consent", async t => {
+  const f = await setup(t); const service = new RelayApprovalEffectService(f.state, f.ports);
+  let journal = await service.run(f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
+  f.setObservation(f.receipt(hash, [f.event(hash)]));
+  journal = await service.run(f.op.operationId); assert.equal(journal.effects[0].phase, "confirmed");
+  const retire = (confirm?: () => Promise<boolean>) => new RelayRetireService(f.state, { now: () => now }, undefined,
+    confirm === undefined ? undefined : { confirm: async summary => {
+      assert.equal(summary.operationId, f.op.operationId); assert.equal(summary.journalIntegrityHash, journal.integrityHash);
+      return confirm(); } }).retire({ profile: "default", operationId: f.op.operationId });
+  await assert.rejects(retire(), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(retire(async () => false), { code: "APN_OPERATION_BLOCKED" });
+  const operations = new OperationService(f.state);
+  await assert.rejects(operations.assertProfileAvailable(f.op.profileHash), { code: "APN_OPERATION_BLOCKED" });
+  const retired = await retire(async () => true);
+  assert.equal(retired.state, "retired"); assert.equal(retired.terminal, true);
+  await operations.assertProfileAvailable(f.op.profileHash);
+  assert.equal(f.counts.sends, 1);
+});
+
+test("a risen base fee that still fits the frozen envelopes admits the approval; one that cannot be included refuses before signing", async t => {
+  const f = await setup(t);
+  const a = f.op.quote!.approval, d = f.op.quote!.deposit;
+  const fits = BigInt(a.maxFeePerGas) - BigInt(a.maxPriorityFeePerGas);
+  const depositFits = BigInt(d.maxFeePerGas) - BigInt(d.maxPriorityFeePerGas);
+  const limit = fits < depositFits ? fits : depositFits;
+  const risen = new RelayApprovalEffectService(f.state, { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
+    tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: limit, nextNonce: 7n }) });
+  const blocked = new RelayApprovalEffectService(f.state, { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
+    tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: limit + 1n, nextNonce: 7n }) });
+  await assert.rejects(blocked.run(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(f.counts.signs, 0);
+  assert.equal((await risen.run(f.op.operationId)).effects[0].phase, "submitting");
+  assert.equal(f.counts.signs, 1); assert.equal(f.counts.sends, 1);
+});
+
+for (const outcome of ["never_lands", "nonce_not_consumed", "own_transaction_known"] as const)
+  test(`a resumed sealed approval whose nonce check says ${outcome} ends, resumes once, or is fenced for observation`, async t => {
+    const f = await setup(t); let fundingCalls = 0, checks = 0, discards = 0;
+    const interrupted = new RelayApprovalEffectService(f.state, { ...f.ports, funding: async op => {
+      if (++fundingCalls === 2) throw new Error("rpc 429"); return f.ports.funding(op); } });
+    await assert.rejects(interrupted.run(f.op.operationId), /rpc 429/);
+    const journals = new RelayEffectJournalRepository(f.state.root);
+    const sealed = (await journals.load(f.op.profileHash, f.op.operationId))!;
+    assert.equal(sealed.effects[0].phase, "sealed"); assert.equal(f.counts.sends, 0);
+    const resumed = new RelayApprovalEffectService(f.state, { ...f.ports,
+      custody: { ...f.ports.custody, discard: async () => { discards++; } },
+      unsentOutcome: async input => { checks++; assert.equal(input.nonce, 7n); assert.equal(input.transactionHash, sealed.effects[0].attempt!.transactionHash);
+        return outcome; } });
+    const journal = await resumed.run(f.op.operationId);
+    assert.equal(checks, 1);
+    if (outcome === "never_lands") {
+      assert.equal(journal.effects[0].phase, "abandoned_unsent"); assert.equal(discards, 1); assert.equal(f.counts.sends, 0);
+      const status = await new OperationService(f.state).relayStatus(f.op);
+      assert.equal(status.state, "failed_before_effect"); assert.equal(status.terminal, true);
+      assert.equal(status.proofClass, "source_effect_never_landed");
+      assert.equal((await resumed.run(f.op.operationId)).effects[0].phase, "abandoned_unsent"); assert.equal(checks, 1);
+    } else if (outcome === "nonce_not_consumed") {
+      assert.equal(journal.effects[0].phase, "submitting"); assert.equal(f.counts.sends, 1); assert.equal(discards, 0);
+    } else {
+      assert.equal(journal.effects[0].phase, "submitting"); assert.equal(f.counts.sends, 0); assert.equal(discards, 0);
+    }
+    assert.equal(f.counts.signs, 1);
+  });

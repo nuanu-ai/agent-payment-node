@@ -1,4 +1,5 @@
 import { ApnError } from "../errors.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { HttpsBaseRpc } from "../rpc.js";
@@ -41,9 +42,8 @@ export async function preflightRelayArbitrumDeposit(operation, active, publicAcc
     const baseFee = evmRpcQuantity(block.baseFeePerGas);
     const confirmedNonce = evmRpcQuantity(rows[2]);
     const pendingNonce = evmRpcQuantity(rows[3]);
-    const maxFee = BigInt(quote.deposit.maxFeePerGas);
-    const priority = BigInt(quote.deposit.maxPriorityFeePerGas);
-    const feeWithinQuote = baseFee + priority <= maxFee;
+    const feeWithinQuote = evmFrozenFeeAdmitted(baseFee, { maxFeePerGasWei: BigInt(quote.deposit.maxFeePerGas),
+        maxPriorityFeePerGasWei: BigInt(quote.deposit.maxPriorityFeePerGas) });
     const nonceUncontended = confirmedNonce === pendingNonce;
     const observedAt = ports.now();
     if (!(observedAt instanceof Date) || !Number.isFinite(observedAt.getTime()) ||

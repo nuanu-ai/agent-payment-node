@@ -2,7 +2,7 @@ import { type ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore } from "../secure-state-store.js";
 export type ArbitrumEffectRole = "approval" | "deposit";
-export type ArbitrumEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submitted" | "unknown_finality" | "confirmed" | "failed" | "approval_skipped";
+export type ArbitrumEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submitted" | "unknown_finality" | "confirmed" | "failed" | "approval_skipped" | "abandoned_unsent";
 export interface ArbitrumApprovalSkipProof {
     readonly proofClass: "canonical_allowance_observation";
     readonly operationIntegrityHash: string;
@@ -70,6 +70,12 @@ export type ArbitrumEffectEvent = {
     readonly role: ArbitrumEffectRole;
     readonly outcome: "confirmed" | "failed";
     readonly proofDigest: string;
+}
+/** Sealed bytes that never crossed `submitting` and provably can never land: the raw bytes are discarded. */
+ | {
+    readonly kind: "record_never_landed";
+    readonly role: ArbitrumEffectRole;
+    readonly proofDigest: string;
 };
 export declare function validateArbitrumSourceEffectJournal(value: unknown, op: RelayUnsignedOperation): Promise<ArbitrumSourceEffectJournal>;
 export declare function createArbitrumSourceEffectJournal(op: RelayUnsignedOperation, createdAt: string): Promise<ArbitrumSourceEffectJournal>;
@@ -83,7 +89,7 @@ export declare class ArbitrumSourceEffectJournalRepository extends SecureStateSt
         readonly operation: RelayUnsignedOperation;
         readonly journal: ArbitrumSourceEffectJournal;
         readonly role: ArbitrumEffectRole;
-        readonly outcome: "confirmed" | "failed";
+        readonly outcome: "confirmed" | "failed" | "never_landed";
         readonly proofDigest: string;
     }) => Promise<boolean>) | undefined, verifiedAllowance?: ((input: {
         readonly operation: RelayUnsignedOperation;

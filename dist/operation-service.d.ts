@@ -129,7 +129,7 @@ export declare class OperationService {
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;
     relayStatus(operation: RelayUnsignedOperation): Promise<import("./relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
-    /** Source finality ends this operation's spend attempt. Destination delivery is observed separately. */
+    /** Source finality or a finality-proven revert ends this spend attempt. Destination delivery is observed separately. */
     private relaySourceCompletion;
     private relayLifecycle;
     private listAllBridgeOperations;

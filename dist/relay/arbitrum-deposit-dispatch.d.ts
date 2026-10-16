@@ -13,6 +13,8 @@ export interface RelayArbitrumDepositSummary {
     readonly token: string;
     readonly spender: string;
     readonly depositAmountAtomic: string;
+    readonly recipient: string;
+    readonly minimumOutputAtomic: string;
     readonly quoteDigest: string;
     readonly deadline: string;
     readonly depositNetworkFeeCeilingWei: string;

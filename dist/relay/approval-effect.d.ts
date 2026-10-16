@@ -4,6 +4,7 @@ import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { type RelayEffectJournal } from "./effect-journal.js";
+import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 export interface RelaySignedApproval {
     readonly rawTransaction: Hex;
     readonly transactionHash: Hex;
@@ -11,7 +12,17 @@ export interface RelaySignedApproval {
 export interface RelayApprovalCustodyPort {
     load(op: RelayUnsignedOperation): Promise<RelaySignedApproval | null>;
     seal(op: RelayUnsignedOperation, signed: RelaySignedApproval): Promise<void>;
+    /** Only after the journal records the sealed bytes as never landing. */
+    discard?(op: RelayUnsignedOperation): Promise<void>;
 }
+/** Production source runtimes always provide it; injected test ports may omit it. */
+export type RelayUnsentOutcomePort = (input: Readonly<{
+    account: string;
+    nonce: bigint;
+    transactionHash: string;
+}>) => Promise<EvmUnsentOutcome>;
+/** Signed nonce of saved bytes; the bytes were verified against the frozen envelope when sealed. */
+export declare function relaySignedNonce(raw: string): bigint;
 /** Reuses the existing AES-GCM encrypted wallet secret and hash-bound direct-effect slot. */
 export declare class RelayEncryptedApprovalCustody implements RelayApprovalCustodyPort {
     private readonly state;
@@ -23,6 +34,7 @@ export declare class RelayEncryptedApprovalCustody implements RelayApprovalCusto
     load(op: RelayUnsignedOperation): Promise<RelaySignedApproval | null>;
     private loadLocked;
     seal(op: RelayUnsignedOperation, signed: RelaySignedApproval): Promise<void>;
+    discard(op: RelayUnsignedOperation): Promise<void>;
     private sealLocked;
 }
 export interface RelayApprovalObservation {
@@ -66,13 +78,14 @@ export interface RelayApprovalPorts {
         nativeBalanceWei: bigint;
         tokenBalanceAtomic: bigint;
         allowanceAtomic: bigint;
-        currentMaxFeePerGasWei: bigint;
+        baseFeePerGasWei: bigint;
         nextNonce: bigint;
     }>>;
     sign(op: RelayUnsignedOperation): Promise<Hex>;
     send(rawTransaction: Hex): Promise<string>;
     observe(transactionHash: Hex): Promise<RelayApprovalObservation | null>;
     readonly custody: RelayApprovalCustodyPort;
+    readonly unsentOutcome?: RelayUnsentOutcomePort;
 }
 /** A resumed call never signs again and never sends after `submitting` is durable. */
 export declare class RelayApprovalEffectService {
@@ -87,3 +100,8 @@ export declare class RelayApprovalEffectService {
 }
 export declare function verifySigned(op: RelayUnsignedOperation, raw: Hex, claimedHash?: string, expectedNonce?: bigint): Promise<RelaySignedApproval>;
 export declare function verifyApprovalObservation(op: RelayUnsignedOperation, hash: Hex, value: RelayApprovalObservation): "pending" | "confirmed" | "failed";
+/** The shared frozen-envelope rule: the signed `gas × maxFeePerGas` within the consented ceiling bounds spend. */
+export declare function relayEnvelopeFeeAdmitted(baseFeePerGasWei: bigint, envelope: Readonly<{
+    maxFeePerGas: string;
+    maxPriorityFeePerGas: string;
+}>): boolean;

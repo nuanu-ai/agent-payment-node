@@ -14,7 +14,7 @@ import { ETHEREUM_DEPOSITORY } from "./quote.js";
 
 export type ArbitrumEffectRole = "approval" | "deposit";
 export type ArbitrumEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submitted" |
-  "unknown_finality" | "confirmed" | "failed" | "approval_skipped";
+  "unknown_finality" | "confirmed" | "failed" | "approval_skipped" | "abandoned_unsent";
 export interface ArbitrumApprovalSkipProof {
   readonly proofClass: "canonical_allowance_observation";
   readonly operationIntegrityHash: string;
@@ -66,14 +66,16 @@ export type ArbitrumEffectEvent =
   | { readonly kind: "mark_submitting"; readonly role: ArbitrumEffectRole; readonly at: string }
   | { readonly kind: "record_send"; readonly role: ArbitrumEffectRole; readonly outcome: "accepted" | "uncertain" }
   | { readonly kind: "record_verified_observation"; readonly role: ArbitrumEffectRole;
-      readonly outcome: "confirmed" | "failed"; readonly proofDigest: string };
+      readonly outcome: "confirmed" | "failed"; readonly proofDigest: string }
+  /** Sealed bytes that never crossed `submitting` and provably can never land: the raw bytes are discarded. */
+  | { readonly kind: "record_never_landed"; readonly role: ArbitrumEffectRole; readonly proofDigest: string };
 
 const HASH = /^[a-f0-9]{64}$/u;
 const TX = /^0x(?:[a-fA-F0-9]{2})+$/u;
 const UINT = /^(0|[1-9][0-9]*)$/u;
 const BLOCK_HASH = /^0x[a-f0-9]{64}$/u;
 const phases: readonly ArbitrumEffectPhase[] = ["pending", "signing_started", "sealed", "submitting",
-  "submitted", "unknown_finality", "confirmed", "failed", "approval_skipped"];
+  "submitted", "unknown_finality", "confirmed", "failed", "approval_skipped", "abandoned_unsent"];
 const iso = (value: unknown): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value)) &&
   new Date(value).toISOString() === value;
 const exact = (value: object, names: readonly string[]) => Object.keys(value).sort().join() === [...names].sort().join();
@@ -163,6 +165,11 @@ function shape(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation): void
         a.submittingAt !== null || a.observationDigest !== null) corrupt("signing_marker");
       continue;
     }
+    if (effect.phase === "abandoned_unsent") {
+      if (a.rawTransaction !== null || typeof a.transactionHash !== "string" || !/^0x[a-f0-9]{64}$/u.test(a.transactionHash) ||
+        typeof a.nonce !== "string" || !UINT.test(a.nonce) || a.submittingAt !== null || !HASH.test(a.observationDigest ?? "")) corrupt("never_landed_attempt");
+      continue;
+    }
     if (typeof a.rawTransaction !== "string" || !TX.test(a.rawTransaction) || a.rawTransaction.length > 16_386 ||
       typeof a.transactionHash !== "string" || a.transactionHash !== keccak256(a.rawTransaction as Hex) ||
       typeof a.nonce !== "string" || !UINT.test(a.nonce)) corrupt("signed_material");
@@ -238,6 +245,10 @@ export async function advanceArbitrumSourceEffectJournal(j: ArbitrumSourceEffect
         blocked("send_outcome_requires_submitting");
       next = { ...current, phase: event.outcome === "accepted" ? "submitted" : "unknown_finality" };
       break;
+    case "record_never_landed":
+      if (current.phase !== "sealed" || !HASH.test(event.proofDigest)) blocked("never_landed_requires_sealed_effect");
+      next = { role: event.role, phase: "abandoned_unsent", attempt: { ...current.attempt!, rawTransaction: null, observationDigest: event.proofDigest } };
+      break;
     case "record_verified_observation":
       if (!["submitting", "submitted", "unknown_finality"].includes(current.phase) ||
         !HASH.test(event.proofDigest) || !["confirmed", "failed"].includes(event.outcome))
@@ -253,7 +264,8 @@ export async function arbitrumSourceRecoveryClass(j: ArbitrumSourceEffectJournal
   Promise<"not_started" | "observation_only" | "approval_confirmed" | "approval_skipped" | "completed" | "failed"> {
   await validateArbitrumSourceEffectJournal(j, op);
   const [approval, deposit] = j.effects;
-  if (approval.phase === "failed" || deposit.phase === "failed") return "failed";
+  if (approval.phase === "failed" || deposit.phase === "failed" ||
+    approval.phase === "abandoned_unsent" || deposit.phase === "abandoned_unsent") return "failed";
   if (deposit.phase === "confirmed") return "completed";
   if (deposit.phase !== "pending" || ["signing_started", "sealed", "submitting", "submitted", "unknown_finality"].includes(approval.phase))
     return "observation_only";
@@ -263,7 +275,7 @@ export async function arbitrumSourceRecoveryClass(j: ArbitrumSourceEffectJournal
 export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
   constructor(root: string, private readonly verifiedObservation?: (input: {
     readonly operation: RelayUnsignedOperation; readonly journal: ArbitrumSourceEffectJournal;
-    readonly role: ArbitrumEffectRole; readonly outcome: "confirmed" | "failed";
+    readonly role: ArbitrumEffectRole; readonly outcome: "confirmed" | "failed" | "never_landed";
     readonly proofDigest: string;
   }) => Promise<boolean>, private readonly verifiedAllowance?: (input: {
     readonly operation: RelayUnsignedOperation; readonly journal: ArbitrumSourceEffectJournal;
@@ -314,9 +326,9 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     if (data === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay Arbitrum source effect journal was not found.");
     const j = await validateArbitrumSourceEffectJournal(data, op);
     if (j.integrityHash !== expectedIntegrityHash) blocked("stale_journal_revision");
-    if (event.kind === "record_verified_observation" &&
-      (this.verifiedObservation === undefined || !(await this.verifiedObservation({ operation: op,
-        journal: j, role: event.role, outcome: event.outcome, proofDigest: event.proofDigest }))))
+    if ((event.kind === "record_verified_observation" || event.kind === "record_never_landed") &&
+      (this.verifiedObservation === undefined || !(await this.verifiedObservation({ operation: op, journal: j, role: event.role,
+        outcome: event.kind === "record_never_landed" ? "never_landed" : event.outcome, proofDigest: event.proofDigest }))))
       blocked("verified_observation_unavailable");
     const next = await advanceArbitrumSourceEffectJournal(j, op, event);
     await this.writeJson(path, next); return next;

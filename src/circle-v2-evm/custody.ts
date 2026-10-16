@@ -48,6 +48,11 @@ export class CircleEffectStore extends SecureStateStore {
       value.schemaVersion !== VERSION || value.operationId !== op.operationId || value.role !== "approval" || value.fingerprint !== op.fingerprint || value.envelopeHash !== approval.envelope.envelopeHash ||
       typeof value.ciphertext !== "string" || value.ciphertext.length === 0 || await this.readJson(this.path(op, burn.role)) !== null) circleBlocked("retirement_original_material_or_burn_guard");
   }
+  /** Only for an effect already recorded `abandoned_unsent`: its bytes provably can never land. */
+  async discard(op: CircleOperationV1, effect: CircleEffect): Promise<void> {
+    if (effect.phase !== "abandoned_unsent") circleBlocked("discard_requires_never_landed_effect");
+    await this.removeFile(this.path(op, effect.role));
+  }
   async load(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial | null> {
     const value = await this.readJson(this.path(op, effect.role)); if (value === null) return null;
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"])) circleCorrupt("material_envelope");
@@ -84,6 +89,10 @@ export class LocalCircleCustody {
   async assertCleanupAbsent(op: CircleOperationV1) { return this.material.assertCleanupAbsent(op); }
   async assertRetirementHeaders(op: CircleOperationV1) { return this.material.assertRetirementHeaders(op); }
   async load(op: CircleOperationV1, effect: CircleEffect) { return await this.material.load(op, effect); }
+  async discard(op: CircleOperationV1, effect: CircleEffect) {
+    const custody = effect.role === "mint" ? op.destinationCustody : op.sourceCustody;
+    await this.state.withLocks([`custody:${custody.profileHash}`], async () => this.material.discard(op, effect));
+  }
   async seal(op: CircleOperationV1, effect: CircleEffect, guard: () => void): Promise<CircleMaterial> {
     guard(); if (effect.role === "approval" || effect.role === "burn") await new CircleNonceRetirementStore(this.state.root).assertOriginalEffectsAvailable(op.operationId); guard(); if (effect.role === "cleanup" && await new CircleNonceRetirementStore(this.state.root).intent(op) !== null) { assertCircleEffectGuard(op, effect, guard); await new CircleNonceRetirementStore(this.state.root).assertClaim(op, "sign"); } guard(); if (op.terminal || effect.phase !== "signing_started") circleBlocked("signing_gate");
     const destination = effect.role === "mint", profile = destination ? op.destinationProfile : op.profile, custody = destination ? op.destinationCustody : op.sourceCustody;

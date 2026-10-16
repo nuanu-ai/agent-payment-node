@@ -13,6 +13,7 @@ import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce } from "../../src/relay/native-source.js";
 import { proveRelayNativeDestination, type RelayBnbProofPorts } from "../../src/relay/destination-proof.js";
 import { StateStore } from "../../src/state.js";
+import { relaySourceTerminal } from "../../src/relay/lifecycle.js";
 import { temporaryState } from "./helpers.js";
 const clock = 1791517419;
 const raw = async (mega = true): Promise<any> => JSON.parse(await readFile(`tests/core/relay-fixtures/relay-base-${mega ? "mega-usdm" : "polygon-pol"}-quote-20261009.json`, "utf8"));
@@ -112,8 +113,8 @@ test("Base funding rechecks chain, balance plus full fee, nonce and pinned block
   function rpc(balance = 51000000000000n, drift = false) {
     let n = 0;
     return { batchCall: async () => {
-      n++; if (n === 1) return ["0x2105", { number: "0x1", hash }];
-      if (n === 2) return [{ number: "0x1", hash }, `0x${balance.toString(16)}`, "0x1", "0x100000", "0x2105"];
+      n++; if (n === 1) return ["0x2105", { number: "0x1", hash, baseFeePerGas: "0x1" }];
+      if (n === 2) return [{ number: "0x1", hash }, `0x${balance.toString(16)}`, "0x1", "0x2105"];
       if (n === 3) return [code, "0x7fc9", word, word];
       return [{ number: "0x1", hash: drift ? `0x${"c".repeat(64)}` : hash }];
     }, submitRawTransaction: async () => { throw new Error("no send in funding"); } };
@@ -252,4 +253,17 @@ for (const mega of [true, false]) test(`Base ${mega ? "USDm" : "POL"} custody is
     assert.equal(entered, 0);
   });
   assert.equal(await runtime.execute(saved.operationId), null); assert.equal(entered, 1);
+});
+
+test("Base sealed bytes recorded as never landing end the operation without any send", async t => {
+  const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root), saved = await op(state);
+  const store = new RelayNativeSourceJournalRepository(tmp.root); let j = await store.advance(saved, null, "pending");
+  j = await store.advance(saved, j.integrityHash, "signing_started"); j = await store.advance(saved, j.integrityHash, "sealed", keccak256("0x0102"));
+  await assert.rejects(store.advance(saved, j.integrityHash, "failed_before_effect"));
+  const ended = await store.advance(saved, j.integrityHash, "abandoned_unsent");
+  assert.equal(ended.phase, "abandoned_unsent"); assert.equal(ended.transactionHash, j.transactionHash); assert.notEqual(ended.observedAt, null);
+  await assert.rejects(store.advance(saved, ended.integrityHash, "submitting"));
+  await assert.rejects(dispatchRelayNativeDepositOnce(saved, ended, store, async () => { throw new Error("no send"); }, "0x0102" as Hex, new Date()),
+    { code: "APN_OPERATION_BLOCKED" });
+  assert.deepEqual(await relaySourceTerminal(tmp.root, saved), { state: "failed_before_effect", journalIntegrityHash: ended.integrityHash });
 });
