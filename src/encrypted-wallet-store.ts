@@ -10,6 +10,7 @@ import type { StateStore } from "./state.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import { listEncryptedWalletEnvelopes, listLocalProviderProfiles, listLocalWallets } from "./wallet-import-collision.js";
+import { releaseSettledWalletEffects } from "./wallet-effect-retention.js";
 
 const ENVELOPE_VERSION = "apn.wallet-envelope.v1";
 const SECRET_VERSION = "apn.wallet-secret.v1";
@@ -36,6 +37,8 @@ export interface DirectEffectMaterial {
   readonly rawTransaction: Hex;
   readonly rawTransactionHash: Hex;
   readonly primaryProviderId?: string | null;
+  /** The generic direct-transfer operation that owns this slot; the slot is released once it is terminal. */
+  readonly operationId?: string;
 }
 
 export interface X402EffectMaterial {
@@ -177,6 +180,8 @@ export class EncryptedWalletStore {
   }
 
   async save(identity: WalletIdentity, secret: WalletSecretState, wrappingInput?: Buffer, createOnly = false): Promise<void> {
+    // Signed material is kept only while it can still be used, so the envelope stays bounded under the state-file cap.
+    if (!createOnly) await releaseSettledWalletEffects(this.state, identity.profile, secret, Date.now());
     const wrapping = wrappingInput === undefined ? await this.requiredWrappingSecret() : Buffer.from(wrappingInput);
     const salt = randomBytes(32);
     const nonce = randomBytes(12);
@@ -301,8 +306,9 @@ function parseDirectEffects(value: unknown): Record<string, DirectEffectMaterial
   for (const [slot, item] of Object.entries(value)) {
     if (
       !HASH.test(slot) || !isPlainRecord(item) ||
-      !exactKeys(item, item.primaryProviderId === undefined ? ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash"] :
-        ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash", "primaryProviderId"]) ||
+      !exactKeys(item, ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash",
+        ...(item.primaryProviderId === undefined ? [] : ["primaryProviderId"]), ...(item.operationId === undefined ? [] : ["operationId"])]) ||
+      (item.operationId !== undefined && (typeof item.operationId !== "string" || !HASH.test(item.operationId))) ||
       typeof item.payloadHash !== "string" || !HASH.test(item.payloadHash) ||
       typeof item.transactionHash !== "string" || !HEX32.test(item.transactionHash) ||
       typeof item.rawTransactionHash !== "string" || !HEX32.test(item.rawTransactionHash) ||

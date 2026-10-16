@@ -22,7 +22,7 @@ export class JupiterHistoricalRetirementReader extends SecureStateStore {
  async forBucketDuringPublication(identity: AssetUsageIdentity, rows: readonly AssetUsageReservation[],
    expectedRecord: HistoricalRetirementRecord): Promise<readonly HistoricalRetirementRecord[]> {
    if(!sameIdentity(identity,HISTORICAL_RETIREMENT_IDENTITY))return [];
-   const entries=await this.readDirectory(HISTORICAL_RETIREMENT_NAMESPACE),operationId=expectedRecord.operationId;
+   const entries=await this.readDirectoryWithStagedWrites(HISTORICAL_RETIREMENT_NAMESPACE),operationId=expectedRecord.operationId;
    const target=this.resolveRelative(`${HISTORICAL_RETIREMENT_NAMESPACE}/${operationId}.json`),prefix=`.${sha256(target).slice(0,12)}.`;
    const staged=entries.filter(e=>e.name.startsWith(prefix));
    if(staged.length!==1||!/^\.[a-f0-9]{12}\.[a-f0-9]{24}\.tmp$/u.test(staged[0]!.name)||!staged[0]!.isFile()||staged[0]!.isSymbolicLink())corrupt();

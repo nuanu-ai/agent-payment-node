@@ -1,4 +1,5 @@
 import { runFixedMetaMaskNativeTransfer, readFixedMetaMaskNativeTransfer } from "./metamask-native-transfer-owner.js";
+import { explainOperationNotFound } from "./operation-coverage.js";
 import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";import { readPermit2IntentStatus } from "./x402-permit2/status.js";
 import { publicKnownCircle, validateKnownCircle } from "./circle-v2-evm/funding-operation.js";
 import type { CommandOutcome, CommandRequest, OutputEnvelope } from "./commands.js";import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { failureEnvelope, successEnvelope } from "./output.js";
@@ -84,7 +85,7 @@ export class ApnCore {
     try {
       return successEnvelope(request, requestId, await this.dispatch(request));
     } catch (error) {
-      return failureEnvelope(request.command, requestId, error);
+      return failureEnvelope(request.command, requestId, await explainOperationNotFound(this.context.state.root, request, error));
     }
   }
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
@@ -287,7 +288,7 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
           cli_version: OUTPUT_VERSION,
           proof_class: "local_build_metadata",
         }, "local_build_metadata");
-      case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(), "encrypted_apn_home_status");
+      case "doctor.keychain": return dataOutcome(await this.wallet.doctorKeychain(request.profile), "encrypted_apn_home_status");
       case "wallet.ensure": return dataOutcome(await this.wallet.ensure(request.profile), "encrypted_apn_home_status");
       case "wallet.import": return dataOutcome(await this.wallet.importNew(request.profile, request.keyFile, request.keyName, request.expectedAddress), "encrypted_apn_home_status");
       case "wallet.ensure-tron": return dataOutcome(await this.rails.policies.ensure(request.profile, "tron", request.provider, request.acceptRisk), "chain_account_binding");

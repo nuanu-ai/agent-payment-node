@@ -8,6 +8,7 @@ import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
+import { ABANDON_OPERATION_KINDS } from "./operation-coverage.js";
 export class OperationAbandonService {
     context;
     rails;
@@ -42,7 +43,7 @@ export class OperationAbandonService {
             return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
         }
         if (found.kind !== "direct_transfer")
-            return ineligible();
+            return ineligible(found.kind);
         const profileHash = found.record.profileHash;
         return await this.context.state.withLocks([
             `profile:${profileHash}`,
@@ -170,8 +171,10 @@ function assertEligible(operation) {
         operation.transactionHash !== undefined || operation.providerEffect !== undefined)
         ineligible();
 }
-function ineligible() {
-    throw new ApnError("APN_OPERATION_BLOCKED", "Only an eligible ambiguous provider-atomic direct operation can be abandoned; Coinbase gasless guards have no manual release.");
+function ineligible(kind) {
+    throw new ApnError("APN_OPERATION_BLOCKED", kind === undefined
+        ? "Only an eligible ambiguous provider-atomic direct operation can be abandoned; Coinbase gasless guards have no manual release."
+        : `Operation abandon does not cover ${kind} operations yet; use that family's own recovery command.`, kind === undefined ? undefined : { reason: "operation_kind_not_abandonable", kind, abandon_kinds: ABANDON_OPERATION_KINDS });
 }
 function ineligibleRail() {
     throw new ApnError("APN_OPERATION_BLOCKED", "Only a local Solana or TRON transfer with an unknown outcome and a bound transaction can be abandoned after its validity window.");

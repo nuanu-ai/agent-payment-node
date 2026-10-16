@@ -4,6 +4,7 @@ import { lstat, link, mkdir, open, readdir, realpath, rename, stat, unlink, } fr
 import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import { canonicalJson, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
+import { atomicTemporaryPrefix, releasePublishedTemporary, withoutAtomicTemporaries } from "./atomic-write-temporaries.js";
 import { MacosAdvisoryLock } from "./macos-advisory-lock.js";
 const FILE_MODE = 0o600;
 const DIRECTORY_MODE = 0o700;
@@ -141,7 +142,13 @@ export class SecureStateStore {
         }
         validateDirectory(await lstat(target), target === this.root);
     }
+    /** Records only: atomic-write stages are never records, and an abandoned stage cannot wedge a listing. */
     async readDirectory(relativePath) {
+        const entries = await this.readDirectoryWithStagedWrites(relativePath);
+        return await withoutAtomicTemporaries(this.resolveRelative(relativePath), entries, Date.now());
+    }
+    /** Raw listing that still shows atomic-write stages; only for code that inspects its own in-flight stage. */
+    async readDirectoryWithStagedWrites(relativePath) {
         const target = this.resolveRelative(relativePath);
         await this.assertNoSymlinkAncestors(target);
         const before = await this.directorySnapshot(target);
@@ -233,7 +240,9 @@ export class SecureStateStore {
             throw error;
         }
         try {
-            const info = await handle.stat();
+            let info = await handle.stat();
+            if (await releasePublishedTemporary(target, info))
+                info = await handle.stat();
             validateFile(info);
             this.assertSameDirectorySnapshot(directoriesBefore, await this.directorySnapshot(parent));
             if (info.size > MAX_STATE_BYTES)
@@ -277,6 +286,8 @@ export class SecureStateStore {
         let targetBefore = null;
         try {
             targetBefore = await lstat(target);
+            if (await releasePublishedTemporary(target, targetBefore))
+                targetBefore = await lstat(target);
             validateFile(targetBefore);
         }
         catch (error) {
@@ -285,7 +296,7 @@ export class SecureStateStore {
         }
         if (createOnly && targetBefore !== null)
             stateSecurity("State target is already occupied.");
-        const temporary = join(parent, `.${sha256(target).slice(0, 12)}.${randomBytes(12).toString("hex")}.tmp`);
+        const temporary = join(parent, `${atomicTemporaryPrefix(target)}${randomBytes(12).toString("hex")}.tmp`);
         const handle = await open(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, FILE_MODE);
         let writeFailure;
         try {
@@ -337,7 +348,9 @@ export class SecureStateStore {
                         stateSecurity("State target is already occupied.");
                     throw error;
                 }
-                await unlink(temporary);
+                // The target is published. A concurrent reader may already have released this stage's second link.
+                await unlink(temporary).catch((error) => { if (!isCode(error, "ENOENT"))
+                    throw error; });
             }
             else {
                 await rename(temporary, target);

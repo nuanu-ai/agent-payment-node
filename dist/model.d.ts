@@ -54,7 +54,8 @@ export interface CoinbaseGaslessBinding {
     readonly allowlist?: CoinbaseGaslessAllowlistBinding;
     readonly exclusiveAccountUseRequired: true;
     readonly awalPackage: "awal";
-    readonly awalVersion: "2.12.1";
+    /** The AWAL release that prepared the operation; new prepares pin the shipped release. */
+    readonly awalVersion: string;
     readonly awalCommand: "send_base_usdc";
     readonly rpcOrigin: string;
     readonly safeBlock: CoinbaseGaslessBlock;

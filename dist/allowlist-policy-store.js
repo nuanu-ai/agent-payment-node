@@ -31,7 +31,7 @@ export class AllowlistPolicyStore extends SecureStateStore {
         return await this.writeRevision(input.profile, input.expectedRevision, compiled.overlay.accounts, compiled.overlay.overlayVersion, async (revision) => sealAllowlistPolicyRecordV2({ schemaVersion: ALLOWLIST_POLICY_RECORD_SCHEMA_V2, revision,
             status: "staged_unadmitted", preparedAt, overlay: compiled.overlay, registry: compiled.registry }));
     }
-    /** The latest staged revision, authenticated. */
+    /** The latest staged revision, integrity-checked. */
     async status(profile) {
         return (await this.read(profile)).records.at(-1) ?? null;
     }
@@ -154,7 +154,7 @@ export function validateStagedAllowlistPolicyRecord(value) {
     catch (error) {
         if (error instanceof ApnError && error.code === "APN_STATE_CORRUPT")
             throw error;
-        return corrupt("Allowlist policy record no longer compiles against the frozen inventory.");
+        return corrupt("Allowlist policy record is invalid.");
     }
 }
 export function stagedRecordAccounts(record) {

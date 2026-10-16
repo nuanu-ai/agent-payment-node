@@ -7,6 +7,7 @@ import { CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { listEncryptedWalletEnvelopes, listLocalProviderProfiles, listLocalWallets } from "./wallet-import-collision.js";
+import { releaseSettledWalletEffects } from "./wallet-effect-retention.js";
 const ENVELOPE_VERSION = "apn.wallet-envelope.v1";
 const SECRET_VERSION = "apn.wallet-secret.v1";
 const KDF_NAME = "HKDF-SHA-256";
@@ -137,6 +138,9 @@ export class EncryptedWalletStore {
         }
     }
     async save(identity, secret, wrappingInput, createOnly = false) {
+        // Signed material is kept only while it can still be used, so the envelope stays bounded under the state-file cap.
+        if (!createOnly)
+            await releaseSettledWalletEffects(this.state, identity.profile, secret, Date.now());
         const wrapping = wrappingInput === undefined ? await this.requiredWrappingSecret() : Buffer.from(wrappingInput);
         const salt = randomBytes(32);
         const nonce = randomBytes(12);
@@ -270,8 +274,9 @@ function parseDirectEffects(value) {
         corrupt("Wallet effect map is invalid.");
     for (const [slot, item] of Object.entries(value)) {
         if (!HASH.test(slot) || !isPlainRecord(item) ||
-            !exactKeys(item, item.primaryProviderId === undefined ? ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash"] :
-                ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash", "primaryProviderId"]) ||
+            !exactKeys(item, ["payloadHash", "transactionHash", "rawTransaction", "rawTransactionHash",
+                ...(item.primaryProviderId === undefined ? [] : ["primaryProviderId"]), ...(item.operationId === undefined ? [] : ["operationId"])]) ||
+            (item.operationId !== undefined && (typeof item.operationId !== "string" || !HASH.test(item.operationId))) ||
             typeof item.payloadHash !== "string" || !HASH.test(item.payloadHash) ||
             typeof item.transactionHash !== "string" || !HEX32.test(item.transactionHash) ||
             typeof item.rawTransactionHash !== "string" || !HEX32.test(item.rawTransactionHash) ||

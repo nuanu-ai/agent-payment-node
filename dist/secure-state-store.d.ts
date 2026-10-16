@@ -23,7 +23,10 @@ export declare class SecureStateStore {
     }): Promise<T>;
     protected beforeLockAcquire(_key: string): Promise<void>;
     protected ensureDirectory(relativePath: string): Promise<void>;
+    /** Records only: atomic-write stages are never records, and an abandoned stage cannot wedge a listing. */
     protected readDirectory(relativePath: string): Promise<readonly Dirent[]>;
+    /** Raw listing that still shows atomic-write stages; only for code that inspects its own in-flight stage. */
+    protected readDirectoryWithStagedWrites(relativePath: string): Promise<readonly Dirent[]>;
     protected resolveRelative(relativePath: string): string;
     protected assertNoSymlinkAncestors(target: string): Promise<void>;
     private directorySnapshot;
