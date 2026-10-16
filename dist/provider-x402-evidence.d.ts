@@ -16,4 +16,4 @@ export declare function captureProviderEvidenceLowerBlock(rpc: X402RpcPort): Pro
     readonly lowerBlock: Awaited<ReturnType<X402RpcPort["getX402Head"]>>;
     readonly rpcOriginHash: string;
 }>;
-export declare function observeProviderSettlement(operation: ProviderX402OperationRecord, rpc: X402RpcPort): Promise<ProviderSettlementObservation>;
+export declare function observeProviderSettlement(operation: ProviderX402OperationRecord, rpc: X402RpcPort, nowMs: number): Promise<ProviderSettlementObservation>;
