@@ -35,7 +35,16 @@ export declare function rpcTransaction(t: MerchantTerms): {
     data: `0x${string}`;
     value: string;
 };
-/** Fresh runtime, proxy implementation, real domain, balances and pending nonce at one rechecked anchor. */
+type Read = {
+    method: string;
+    params: readonly unknown[];
+};
+/** Named reads in one batch: positions never shift when an asset has no deployment pins. */
+export declare function readNamed<K extends string>(rpc: MerchantRpcPort, reads: readonly (readonly [K, Read])[]): Promise<Readonly<Record<K, unknown>>>;
+/** The asset's EIP-1967 proxy, implementation slot and implementation code at `tag`, when the asset pins its deployment. */
+export declare function deploymentReads(t: MerchantTerms, tag: unknown): readonly (readonly ["code" | "slot" | "impl", Read])[];
+export declare function deploymentMatches(t: MerchantTerms, v: Readonly<Record<string, unknown>>): boolean;
+/** Fresh chain, token identity (and deployment pins when the asset has them), balances and pending nonce at one rechecked anchor. */
 export declare function merchantCurrent(rpc: MerchantRpcPort, t: MerchantTerms, frozenEnvelope?: MerchantEnvelope, maximumNativeFee?: string): Promise<{
     nonce: string;
     gas: string;
@@ -49,3 +58,4 @@ export declare function checkMerchantEnvelope(current: Awaited<ReturnType<typeof
 export declare function merchantHeader(value: unknown): Record<string, unknown>;
 /** Independent canonical finalized receipt + full transaction + exact token Transfer. No HTTP settlement inference. */
 export declare function merchantReceipt(rpc: MerchantRpcPort, o: MerchantOperation): Promise<MerchantReceipt | null>;
+export {};

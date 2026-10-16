@@ -3,6 +3,7 @@ import { activeAssetPolicyFromState, loadActiveAssetPolicyRegistry, type ActiveA
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity } from "../asset-usage-ledger.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { assertExclusiveEvmRawSigner } from "../evm-address-ownership.js";
@@ -24,6 +25,8 @@ export class MerchantOwner {
         // Wallet/operation/address outer locks precede the distinct real allowlist profile lock.
         return this.state.withLocks([`profile:${allowlistProfileHash(profile)}`],()=>action(new MerchantOwner(this.state,this.now,true)));
     }
+    /** Before any merchant request: the profile has an active policy naming the payer as its EVM account. */
+    async assertPayerPolicy(profile:string,payer:string):Promise<void> { await this.active(profile,payer); }
     /** The profile's active policy, whose EVM account must be the payer (custody of the same profile). */
     private async active(profile:string,payer:string):Promise<ActiveAssetPolicy> {
         const active=this.policyLocked ? activeAssetPolicyFromState(await new AllowlistPolicyStore(this.state.root).readUnderProfileLock(profile),this.now()) : await loadActiveAssetPolicyRegistry(this.state.root,profile,this.now());
@@ -36,7 +39,10 @@ export class MerchantOwner {
         const own=reservation!==null&&["reserved","submitted","unknown_finality"].includes(reservation.state)?BigInt(amount):0n;
         if(own>BigInt(usage.amountAtomic))refuse("merchant_usage_accounting");
         const admission=evaluateAssetPolicy(active.registry,{chain:identity.chain,asset:identity.asset,rail:"x402",amountAtomic:amount,dailyUsageAtomic:(BigInt(usage.amountAtomic)-own).toString(),asOfDate:at.toISOString().slice(0,10),asOf:at.toISOString()});
-        if(admission.asset.decimals!==18 || canonicalJson(admission.asset.mechanismPins?.x402??null)!==canonicalJson(terms.mechanism))refuse("merchant_mechanism_pin_required");
+        const token=identity.asset.kind==="token";
+        if(admission.asset.decimals!==(token?terms.asset.decimals:18) || canonicalJson(admission.asset.mechanismPins?.x402??null)!==canonicalJson(terms.mechanism))refuse("merchant_mechanism_pin_required");
+        // OD-1: an owner `recipients` pin on the token's x402 admission must list the merchant payee (the native fee has no recipient).
+        if(token)assertRecipientAdmitted({admission,recipient:terms.payee});
         return reservation;
     }
     /** Token and (when given) native fee admission of `terms` under the profile's active policy. */

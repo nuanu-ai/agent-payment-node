@@ -17,10 +17,10 @@ import { executeMerchantCli } from "../../src/x402-merchant/cli.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { temporaryState } from "./helpers.js";
-import { merchantFixture,TX_HASH,PROFILE } from "./merchant-x402-fixtures.js";
+import { merchantFixture,TX_HASH,PROFILE,MERCHANT_URL } from "./merchant-x402-fixtures.js";
 import { merchantTerms } from "../../src/x402-merchant/terms.js";
 async function setup(t:test.TestContext){const temp=await temporaryState();t.after(temp.cleanup);return merchantFixture(temp.root);}
-async function headroom(f:Awaited<ReturnType<typeof merchantFixture>>,reserve="2000000000000") {return f.service.prepare({profile:PROFILE,maximumNativeFee:"100000000000000",nativeFeeReserveWei:reserve,idempotencyKey:"merchant-headroom-test"});}
+async function headroom(f:Awaited<ReturnType<typeof merchantFixture>>,reserve="2000000000000") {return f.service.prepare({profile:PROFILE,url:MERCHANT_URL,maximumNativeFee:"100000000000000",nativeFeeReserveWei:reserve,idempotencyKey:"merchant-headroom-test"});}
 async function fenced(f:Awaited<ReturnType<typeof merchantFixture>>,o:MerchantOperation){
  const s=new MerchantService(f.state,{rpc:f.rpc,http:f.http,now:f.now,approve:async()=>{f.rpc.operation=o;},custody:{sign:async()=>{throw new ApnError("APN_OPERATION_BLOCKED","arbitrary secret should never persist",{reason:"merchant_fee_witness_expired"});},verify:async()=>TX_HASH,seal:async()=>{throw Error("never seal");}}});return s.approve(o.operationId);
 }
@@ -47,7 +47,7 @@ test("normal production prepare and foreground approve freeze2T then late privat
  t.mock.method(BridgeHttps.prototype,"request",async(_url:string,_verb:"GET"|"POST",body?:string)=>{physical++;const req=JSON.parse(body!);const rows=Array.isArray(req)?req:[req],result=await Promise.all(rows.map(async(x:any)=>{assert.notEqual(x.method,"eth_sendRawTransaction");return {jsonrpc:"2.0",id:x.id,result:await f.rpc.value(x.method,x.params)};}));return {status:200,body:JSON.stringify(Array.isArray(req)?result:result[0])};});
  const {EncryptedWalletStore}=await import("../../src/encrypted-wallet-store.js");t.mock.method(EncryptedWalletStore.prototype,"describe",async()=>{f.rpc.l1Upper=2000000000000n;const o=(await f.service.records.listAllOperations())[0]!;return {identity:{profile:o.profile,address:o.custody.walletAddress,chainId:8453,createdAt:o.custody.walletCreatedAt,bindingHash:o.custody.walletBindingHash},secret:{get privateKey(){keyReads++;throw Error('private key must not be read');}}} as never;});t.mock.method(EncryptedWalletStore.prototype,"clear",()=>{});
  const options={clock:{now:f.now},http:f.http,wrappingSecret:{load:async()=>{keychainLoads++;return null;},create:async()=>{throw Error('no key creation');}},merchantTtyOptions:{isTerminal:()=>true,openTerminal:async()=>{ttyOpens++;return {fd:1,write:async(text:string)=>{terminalText+=text;phrase=/Type ([a-f0-9]{8})/.exec(text)![1]!;},read:async function*(){yield Buffer.from(phrase+'\n');},close:async()=>{}};}}};
- const prepared=await executeMerchantCli(bindArgv(["x402","merchant","prepare","--profile",PROFILE,"--max-native-fee-wei","100000000000000","--native-fee-reserve-wei","2000000000000","--idempotency-key","production-headroom-normal"]),options,f.state.root);assert.equal(prepared.ok,true);const id=(prepared.data as any).operationId;
+ const prepared=await executeMerchantCli(bindArgv(["x402","merchant","prepare","--profile",PROFILE,"--url",MERCHANT_URL,"--max-native-fee-wei","100000000000000","--native-fee-reserve-wei","2000000000000","--idempotency-key","production-headroom-normal"]),options,f.state.root);assert.equal(prepared.ok,true);const id=(prepared.data as any).operationId;
  const result=await executeMerchantCli(bindArgv(["x402","merchant","approve","--operation",id]),options,f.state.root);assert.equal(result.ok,true);const o=await f.service.status(id);assert.equal(o.state,"unknown_finality");assert.equal(o.submissionAttempts,0);assert.equal(o.failures?.[0]?.phase,"custody");assert.equal(o.failures?.[0]?.reason,"merchant_full_fee_admission_changed");assert.match(terminalText,/full owner hold: 2000000000000/);assert.equal(ttyOpens,1);assert.equal(keyReads,0);assert.equal(keychainLoads,0);assert.equal(f.rpc.sends,0);assert.ok(physical<=64);
 });
 

@@ -94,7 +94,7 @@ export const COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["wallet", "metamask"], summary: "Finite fixed MetaMask native-paid transfer.", kind: "group" },
   { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
   { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
-  { path: ["x402", "merchant"], summary: "Finite external USDm merchant transfer-proof payment and delivery.", kind: "group" },
+  { path: ["x402", "merchant"], summary: "x402 ERC-20 transfer-proof merchant payment and delivery.", kind: "group" },
   { path: ["x402", "permit2"], summary: "Read owner admission and intents, approve one foreground Permit2 GET and observe chain evidence.", kind: "group" },
   { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
   { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },

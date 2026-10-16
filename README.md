@@ -749,7 +749,7 @@ finalized chain time beyond the saved deadline and unused nonce evidence.
 See the [Permit2 guide](docs/x402-non-usdc.md#foreground-production-cli) for exact
 options, saved-hint handling and recovery boundaries.
 
-The finite [x402engine USDm merchant adapter](docs/x402-merchant-usdm.md) uses one foreground local ERC20 transfer on MegaETH and a canonical v2 transaction-hash proof. Payment finality and upstream Bitcoin-price delivery are recorded separately; delivery retries use the same original proof and never create another payment.
+The [x402 ERC-20 transfer-proof merchant adapter](docs/x402-merchant-usdm.md) pays any merchant at `--url` whose challenge names a pinned asset (MegaETH USDm first), from the `--profile` wallet, with one foreground local ERC20 transfer on MegaETH and a canonical v2 transaction-hash proof. Payee and amount come from the challenge and must fit the owner admission (optional payee pin). Payment finality and the merchant's HTTP 200 delivery are recorded separately; delivery retries use the same original proof and never create another payment.
 
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
@@ -757,7 +757,7 @@ apn x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <pro
 apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> [--profile <profile>] [--transaction <hash> | --expired-unused]
 apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>
 apn x402 permit2 status --profile <profile> --operation <operation-id>
-apn x402 merchant prepare --profile <profile> --max-native-fee-wei <wei> --idempotency-key <key>
+apn x402 merchant prepare --profile <profile> --url <https-url> --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]
 apn x402 merchant retire-unsent --operation <operation-id>

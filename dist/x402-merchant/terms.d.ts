@@ -1,6 +1,11 @@
+import type { MerchantAssetPin } from "./asset-pins.js";
 import type { MerchantOperation } from "./model.js";
+import type { FrozenMerchantChallenge } from "./protocol.js";
 import { MERCHANT_CHAIN } from "./pins.js";
-/** The exact payment one merchant operation makes. The payer is always the operation's own custody wallet. */
+/**
+ * The exact payment one merchant operation makes. The payer is always the operation's own custody wallet; the payee
+ * and amount are the challenge row frozen at prepare; the asset is the pin that row named.
+ */
 export interface MerchantTerms {
     readonly payer: string;
     readonly url: string;
@@ -12,8 +17,11 @@ export interface MerchantTerms {
         provider: string;
         reference: string;
     }>;
+    readonly asset: MerchantAssetPin;
+    /** Version 1 (x402engine Bitcoin-price lane): legacy mechanism, URL and delivery schema. */
+    readonly legacy: boolean;
 }
-/** Terms of a new operation for the payer custody(profile) resolved at prepare. */
-export declare function merchantPrepareTerms(payer: string): MerchantTerms;
-/** Terms of a stored operation, from its own recorded custody. */
-export declare function merchantTerms(o: Pick<MerchantOperation, "custody">): MerchantTerms;
+/** Terms of a new operation: payer custody(profile), `--url`, and the single challenge row naming a pinned asset. */
+export declare function merchantPrepareTerms(payer: string, url: string, frozen: FrozenMerchantChallenge, asset: MerchantAssetPin): MerchantTerms;
+/** Terms of a stored operation, from its own recorded custody, URL, asset and frozen row (version 1: the frozen legacy table). */
+export declare function merchantTerms(o: Pick<MerchantOperation, "schemaVersion" | "custody" | "frozen" | "url" | "asset">): MerchantTerms;

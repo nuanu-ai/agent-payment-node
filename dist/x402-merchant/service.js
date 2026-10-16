@@ -14,8 +14,8 @@ import { MerchantRepository } from "./repository.js";
 import { MerchantOwner } from "./owner.js";
 import { checkMerchantEnvelope, merchantCurrent, merchantReceipt, hexHash } from "./rpc.js";
 import {} from "./custody.js";
-import { merchantChallenge, merchantPrice, merchantProof, refuse } from "./protocol.js";
-import { MERCHANT_URL } from "./pins.js";
+import { canonicalMerchantUrl, merchantChallenge, merchantDelivery, merchantGenericChallenge, merchantProof, refuse } from "./protocol.js";
+import { MERCHANT_ASSET_PINS } from "./asset-pins.js";
 import { merchantPrepareTerms, merchantTerms } from "./terms.js";
 export class MerchantService {
     state;
@@ -34,11 +34,12 @@ export class MerchantService {
         const profile = canonicalProfile(input.profile), key = canonicalIdempotencyKey(input.idempotencyKey), maximumNativeFee = input.maximumNativeFee;
         if (!/^[1-9][0-9]*$/u.test(maximumNativeFee) || BigInt(maximumNativeFee) > 10n ** 18n)
             refuse("merchant_fee_ceiling");
-        const profileHash = this.state.profileHash(profile), operationId = this.state.operationId(profile, key), idempotencyHash = this.state.idempotencyHash(key), requestHash = hashObject({ kind: "merchant_x402", profile, url: MERCHANT_URL, maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) });
+        const url = canonicalMerchantUrl(input.url);
+        const profileHash = this.state.profileHash(profile), operationId = this.state.operationId(profile, key), idempotencyHash = this.state.idempotencyHash(key), requestHash = hashObject({ kind: "merchant_x402", profile, url, maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) });
         await this.state.initialize();
         // The payer is custody(profile); its address lock is taken with the others, and custody is rechecked under it.
-        const custody = await evmNativeCustody(this.state, profile), terms = merchantPrepareTerms(custody.walletAddress);
-        return this.state.withLocks(this.locks(profileHash, operationId, idempotencyHash, terms.payer), async () => {
+        const custody = await evmNativeCustody(this.state, profile), payer = custody.walletAddress;
+        return this.state.withLocks(this.locks(profileHash, operationId, idempotencyHash, payer), async () => {
             const existing = await this.operations.resolvePrepare({ kind: "merchant_x402", profileHash, operationId, idempotencyHash, requestHash });
             if (existing !== null) {
                 if (existing.kind !== "merchant_x402")
@@ -46,18 +47,23 @@ export class MerchantService {
                 return existing.record;
             }
             await assertEvmNativeCustody(this.state, profile, custody);
-            await assertExclusiveEvmRawSigner(this.state, terms.payer, profileHash);
-            await this.operations.assertEvmAccountAvailable(profileHash, 4326, terms.payer);
-            const policy = await this.owner.admit(profile, terms), observation = await this.ports.http.get({ url: terms.url }), frozen = merchantChallenge(observation), current = await merchantCurrent(this.ports.rpc, terms, undefined, maximumNativeFee);
+            await assertExclusiveEvmRawSigner(this.state, payer, profileHash);
+            await this.operations.assertEvmAccountAvailable(profileHash, 4326, payer);
+            // Only a profile whose active policy names its own wallet reaches the merchant; the challenge then names payee,
+            // amount and asset, which the owner's admission (asset, mechanism, caps, optional payee pin) must cover.
+            await this.owner.assertPayerPolicy(profile, payer);
+            const observation = await this.ports.http.get({ url }), selected = merchantGenericChallenge(observation, url, this.ports.assets ?? MERCHANT_ASSET_PINS);
+            const { asset, ...frozen } = selected, terms = merchantPrepareTerms(payer, url, frozen, asset);
+            const policy = await this.owner.admit(profile, terms), current = await merchantCurrent(this.ports.rpc, terms, undefined, maximumNativeFee);
             const createdAt = this.ports.now().toISOString();
             if (Date.parse(createdAt) - Date.parse(observation.observedAt) > 30000 || Date.parse(createdAt) < Date.parse(observation.observedAt))
                 refuse("merchant_challenge_read_age");
             const envelope = { nonce: current.nonce, gas: current.gas, maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas, maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) };
             checkMerchantEnvelope(current, envelope, terms, current.feeContext);
             if (BigInt(current.token) < BigInt(terms.amount))
-                refuse("merchant_usdm_balance");
+                refuse("merchant_token_balance");
             const effectBinding = await this.owner.effectBinding(profile, terms, envelope.nativeFeeReserveWei ?? current.feeContext.admissionEstimatedUpper, new Date(Date.parse(createdAt) + 300000).toISOString());
-            const body = { feeContext: current.feeContext, effectBinding, schemaVersion: "apn.x402-merchant.v1", kind: "merchant_x402", operationId, profile, profileHash, idempotencyHash, requestHash, custody, frozen, envelope, policy, createdAt, expiresAt: new Date(Date.parse(createdAt) + 300000).toISOString(), state: "prepared", terminal: false, signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [], events: [{ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }), eventHash: hashObject({ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }) }) }] };
+            const body = { feeContext: current.feeContext, effectBinding, schemaVersion: "apn.x402-merchant.v2", kind: "merchant_x402", operationId, profile, profileHash, idempotencyHash, requestHash, custody, frozen, url, asset, envelope, policy, createdAt, expiresAt: new Date(Date.parse(createdAt) + 300000).toISOString(), state: "prepared", terminal: false, signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [], events: [{ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }), eventHash: hashObject({ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }) }) }] };
             const o = sealMerchant({ ...body, fingerprint: merchantFingerprint(body) });
             await this.records.persist(o);
             return o;
@@ -70,7 +76,7 @@ export class MerchantService {
             if (o.state !== "prepared" || o.signingAttempts !== 0 || o.submissionAttempts !== 0)
                 refuse("merchant_once_only_approval");
             if (this.ports.approve === undefined || this.ports.custody === undefined)
-                throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "The pinned USDm payment requires foreground CLI confirmation.");
+                throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "The merchant payment requires foreground CLI confirmation.");
             if (o.feeContext === undefined)
                 refuse("merchant_new_full_fee_context_required");
             if (o.effectBinding === undefined)
@@ -109,7 +115,8 @@ export class MerchantService {
                 phase = "post_seal_fee";
                 await this.refreshFee(o, grant);
                 phase = "challenge";
-                if (canonicalJson(merchantChallenge(await this.ports.http.get({ url: merchantTerms(o).url }))) !== canonicalJson(o.frozen))
+                const t = merchantTerms(o);
+                if (canonicalJson(merchantChallenge(await this.ports.http.get({ url: t.url }), t)) !== canonicalJson(o.frozen))
                     refuse("merchant_challenge_changed_after_sealing");
                 this.fresh(o);
                 assertMerchantAuthority(grant, this, o, this.ports.now());
@@ -180,13 +187,13 @@ export class MerchantService {
         o = beforeDelivery.operation;
         if (!beforeDelivery.verified)
             return o;
-        const proof = merchantProof(o.frozen, o.txHash), proofHash = hashObject(proof), at = this.at();
+        const t = merchantTerms(o), proof = merchantProof(o.frozen, o.txHash, t), proofHash = hashObject(proof), at = this.at();
         o = merchantMove(o, "delivery_unknown", at, { deliveryAttempts: [...o.deliveryAttempts, { at, proofHash, outcome: "started" }] });
         await this.records.persist(o);
         let response;
         try {
-            response = await this.ports.http.get({ url: merchantTerms(o).url, paymentSignature: proof });
-            const result = merchantPrice(response), bodyHash = hashObject(Buffer.from(response.bodyBytes).toString("base64"));
+            response = await this.ports.http.get({ url: t.url, paymentSignature: proof });
+            const result = merchantDelivery(response, t), bodyHash = hashObject(Buffer.from(response.bodyBytes).toString("base64"));
             o = merchantMove(o, "delivered", this.at(), { deliveryAttempts: [...o.deliveryAttempts, { at: this.at(), proofHash, outcome: "delivered", httpStatus: response.status, bodyHash, headers: response.rawHeaderPairs, result }] });
         }
         catch {
@@ -236,7 +243,7 @@ export class MerchantService {
         await this.operations.assertMerchantAccountAvailable(o);
         const t = merchantTerms(o), current = await merchantCurrent(this.ports.rpc, t, o.envelope);
         checkMerchantEnvelope(current, o.envelope, t, o.feeContext);
-        const fresh = merchantChallenge(await this.ports.http.get({ url: t.url }));
+        const fresh = merchantChallenge(await this.ports.http.get({ url: t.url }), t);
         if (canonicalJson(fresh) !== canonicalJson(o.frozen))
             refuse("merchant_challenge_changed");
         this.fresh(o);
@@ -259,7 +266,7 @@ export class MerchantService {
     async required(id) {
         const o = await this.records.findOperation(canonicalOperationId(id));
         if (o === null)
-            throw new ApnError("APN_OPERATION_NOT_FOUND", "Pinned merchant operation was not found.");
+            throw new ApnError("APN_OPERATION_NOT_FOUND", "Merchant operation was not found.");
         return o;
     }
 }

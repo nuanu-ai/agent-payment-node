@@ -3,6 +3,7 @@ import { type MerchantFeeContext } from "./mega-fee.js";
 import type { Hex } from "viem";
 import type { EvmNativeCustody } from "../evm-native-custody.js";
 import { type FrozenMerchantChallenge } from "./protocol.js";
+import type { MerchantAssetPin } from "./asset-pins.js";
 export interface MerchantEnvelope {
     readonly nonce: string;
     readonly gas: string;
@@ -64,7 +65,8 @@ export interface MerchantEvent {
     readonly eventHash: string;
 }
 export interface MerchantOperation {
-    readonly schemaVersion: "apn.x402-merchant.v1";
+    /** v1: the x402engine Bitcoin-price lane (legacy mechanism, read and finish only). v2: any merchant (`url`, `asset`). */
+    readonly schemaVersion: "apn.x402-merchant.v1" | "apn.x402-merchant.v2";
     readonly kind: "merchant_x402";
     readonly operationId: string;
     readonly profile: string;
@@ -74,6 +76,10 @@ export interface MerchantOperation {
     readonly fingerprint: string;
     readonly custody: EvmNativeCustody;
     readonly frozen: FrozenMerchantChallenge;
+    /** v2 only: the canonical merchant URL (`--url`) the challenge, proof and delivery use. */
+    readonly url?: string;
+    /** v2 only: the pinned asset the selected challenge row named, frozen as it was at prepare. */
+    readonly asset?: MerchantAssetPin;
     readonly envelope: MerchantEnvelope;
     readonly policy: {
         readonly digest: string;
@@ -142,11 +148,24 @@ export declare function publicMerchant(o: MerchantOperation): {
     provider: {
         id: string;
         reference: string;
-        protocolSnapshot: string;
+        protocolSnapshot: string | null;
         assetTransferMethod: string;
         eip3009: boolean;
         gasless: boolean;
     };
+    url: string;
+    payer: string;
+    payee: string;
+    asset: {
+        chain: "eip155:4326";
+        token: string;
+        symbol: string;
+        decimals: number;
+    };
+    legacyMechanism: {
+        readonly provider: "x402engine-erc20-transfer-proof";
+        readonly reference: "megaeth-usdm-crypto-price-v1";
+    } | null;
     paymentFinalized: boolean;
     merchantDelivered: boolean;
     transactionHash: `0x${string}` | null;

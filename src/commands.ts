@@ -17,7 +17,7 @@ export type CommandRequest =
   | { readonly command: "circle.evm.prepare"; readonly profile: string; readonly destinationProfile: string; readonly destinationChain: 1329 | 59144 | 143; readonly idempotencyKey: string; readonly funding?: CircleFundingParameters }
   | { readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.cleanup85-prepare" | "circle.evm.cleanup85-cancel" | "circle.evm.cleanup86-approve" | "circle.evm.status"; readonly operationId: string }
   | { readonly command: "mega.funding.approve" | "mega.funding.status"; readonly operationId: string }
-  | { readonly command: "x402.merchant.prepare"; readonly profile: string; readonly maximumNativeFee: string; readonly nativeFeeReserveWei?: string; readonly idempotencyKey: string }
+  | { readonly command: "x402.merchant.prepare"; readonly profile: string; readonly url: string; readonly maximumNativeFee: string; readonly nativeFeeReserveWei?: string; readonly idempotencyKey: string }
   | { readonly command: "x402.merchant.approve" | "x402.merchant.status" | "x402.merchant.retire-unsent"; readonly operationId: string }
   | { readonly command: "x402.merchant.observe"; readonly operationId: string; readonly deliver: boolean }
   | { readonly command: "x402.permit2.approve"; readonly profile: string; readonly url: string; readonly idempotencyKey: string }

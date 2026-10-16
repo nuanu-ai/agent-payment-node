@@ -77,7 +77,7 @@ function bindParsedCatalog(parsed) {
             },
             rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "x402 merchant prepare")
-        return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"] === undefined ? {} : { nativeFeeReserveWei: value(options, "--native-fee-reserve-wei") }), idempotencyKey: value(options, "--idempotency-key") } };
+        return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), url: value(options, "--url"), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"] === undefined ? {} : { nativeFeeReserveWei: value(options, "--native-fee-reserve-wei") }), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "x402 merchant approve")
         return { request: { command: "x402.merchant.approve", operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "x402 merchant observe")
