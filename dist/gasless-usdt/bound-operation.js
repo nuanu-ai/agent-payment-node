@@ -425,7 +425,9 @@ export async function classifyUsdtBoundRecovery(operation, port) {
             snapshot.account.usdtBalanceAtomic < BigInt(b.plan.request.grossAtomic)) {
             return { state: "capability_unavailable", reason: "chain_state_drift", operation };
         }
-        if (snapshot.blockNumber !== BigInt(b.safeBlockNumber) || snapshot.blockHash !== b.safeBlockHash) {
+        // A later safe block is the normal case: execution re-guards at its own fresh safe block. Only a different block at
+        // the prepared height (the prepared anchor itself left the canonical chain) needs recovery.
+        if (snapshot.blockNumber === BigInt(b.safeBlockNumber) && snapshot.blockHash !== b.safeBlockHash) {
             return { state: "recovery_required", reason: "safe_block_changed", operation };
         }
         return { state: "prepared", operation };

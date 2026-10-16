@@ -33,6 +33,23 @@ export interface UsdtExecutionRecord extends UsdtExecutionIntent {
     readonly outcomeDigest?: string;
     readonly settlement?: UsdtSettlement | null;
 }
+/**
+ * Ethereum's safe head moves once per epoch, so execution takes a fresh safe snapshot instead of the prepared one. It must
+ * be at or after the prepared block (the same block only with the same hash), keep the exact EntryPoint and EOA nonces and
+ * delegation the signed UserOperation and authorization use, and hold at least the gross the batch can debit (N + F).
+ * The prepared block itself is deterministic state: a different balance reported for it is provider equivocation.
+ */
+export declare function usdtSafeSnapshotFresh(bound: UsdtBoundOperation, snapshot: {
+    readonly chainId: bigint;
+    readonly blockNumber: bigint;
+    readonly blockHash: string;
+    readonly account: {
+        readonly usdtBalanceAtomic: bigint;
+        readonly entryPointNonce: bigint;
+        readonly eoaNonce: bigint;
+        readonly delegation: string;
+    };
+}): boolean;
 export declare function validateUsdtExecutionRecord(value: unknown): UsdtExecutionRecord;
 /** Separate v1 effect journal. It cannot sign or send; each phase is fsynced before returning. */
 export declare class UsdtExecutionJournal extends SecureStateStore {

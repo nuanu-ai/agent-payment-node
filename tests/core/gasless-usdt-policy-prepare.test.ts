@@ -374,6 +374,16 @@ test("bound journal persists the complete preparation and classifies revocation 
   assert.equal(saved.binding.account.entryPointNonce, "7");
   assert.equal((await service.statusBound(saved.operationId)).integrityHash, saved.integrityHash);
   assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare), { state: "prepared", operation: saved });
+  const preparedSnapshot = f.ports.prepare.safeSnapshot;
+  // The safe head moves every epoch and incoming USDT raises the balance; neither needs recovery.
+  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_982n, blockHash: `0x${"34".repeat(32)}`,
+    account: { usdtBalanceAtomic: 1_500_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
+  assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare), { state: "prepared", operation: saved });
+  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n, blockHash: `0x${"34".repeat(32)}`,
+    account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
+  assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare),
+    { state: "recovery_required", reason: "safe_block_changed", operation: saved });
+  f.ports.prepare.safeSnapshot = preparedSnapshot;
   const alternate = fixture();
   alternate.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n,
     blockHash: `0x${"14".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n,
@@ -551,9 +561,12 @@ test("USDT execution journal repairs reserve interruption and refuses binding, p
   await assert.rejects(() => journal.reserve(another, usdtExecutionIntent(another), fresh.ports.prepare));
   const expired = fixture(); expired.ports.prepare.now = () => new Date(NOW.getTime() + 600_000);
   await assert.rejects(() => journal.reserve(another, usdtExecutionIntent(another), expired.ports.prepare));
-  const drift = fixture(); drift.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_951n,
-    blockHash: `0x${"12".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
-  await assert.rejects(() => journal.reserve(another, usdtExecutionIntent(another), drift.ports.prepare));
+  // A safe block behind the prepared one and a balance below the gross both refuse; a later block alone does not.
+  for (const [blockNumber, usdtBalanceAtomic] of [[26_002_949n, 1_000_000n], [26_002_951n, 999_999n]] as const) {
+    const drift = fixture(); drift.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber,
+      blockHash: `0x${"35".repeat(32)}`, account: { usdtBalanceAtomic, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
+    await assert.rejects(() => journal.reserve(another, usdtExecutionIntent(another), drift.ports.prepare), /safe_snapshot_changed/u);
+  }
 });
 
 test("USDT execution intent survives a crash before usage reserve without consuming the cap", async t => {
