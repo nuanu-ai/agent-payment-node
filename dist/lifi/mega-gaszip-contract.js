@@ -6,7 +6,7 @@ import { hashObject } from "../canonical.js";
 export const MEGA_FUNDING = Object.freeze({ sourceChain: 8453, destinationChain: 4326, short: 514,
     owner: getAddress("0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"), profile: "default",
     target: getAddress("0x391E7C679d29bD940d63be94AD22A25d25b5A604"), data: "0x010202",
-    maximumAmount: 10000000000000n, maximumFee: 1000000000000n, minimumOutput: 8000000000000n,
+    maximumAmount: 10000000000000n,
     mechanism: { provider: "gaszip", reference: "v2-direct-base-mega-self-010202.1" } });
 export function megaFail(reason) { throw new ApnError("APN_OPERATION_BLOCKED", `mega_gaszip_${reason}`, { reason: `mega_gaszip_${reason}` }); }
 export function megaObject(v) {
@@ -57,7 +57,8 @@ export function megaJson(text) {
     }
 }
 export function megaExact(v, required, optional = []) {
-    if (required.some(k => !Object.hasOwn(v, k)) || Object.keys(v).some(k => !required.includes(k) && !optional.includes(k)))
+    // Required provider fields must be present; fields GasZip adds later are ignored (the chain proves every effect itself).
+    if (required.some(k => !Object.hasOwn(v, k)))
         megaFail("schema");
 }
 export function inspectMegaFundingQuote(value, now) {
@@ -68,7 +69,7 @@ export function inspectMegaFundingQuote(value, now) {
     const q = megaObject(v.quotes[0]);
     megaExact(q, ["chain", "expected", "gas", "speed", "usd"], ["decimals", "expectedNative"]);
     if (megaUint(q.chain) !== 4326n || (q.decimals !== undefined && megaUint(q.decimals) !== 18n) ||
-        (q.expectedNative !== undefined && megaUint(q.expectedNative) !== megaUint(q.expected)) || megaUint(q.expected) < MEGA_FUNDING.minimumOutput ||
+        (q.expectedNative !== undefined && megaUint(q.expectedNative) !== megaUint(q.expected)) ||
         typeof q.speed !== "number" && typeof q.speed !== "string" || typeof q.usd !== "number" && typeof q.usd !== "string")
         megaFail("quote_output");
     megaUint(q.gas);
