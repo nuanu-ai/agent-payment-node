@@ -48,13 +48,15 @@ export function chainEnvironment(chains: readonly BridgeChainId[], receipt: Rece
 }
 
 /**
- * A read-only chain double. Pinned deployment and Base fee reads answer their reviewed values, code answers captured
+ * A chain double. Pinned deployment and Base fee reads answer their reviewed values, code answers captured
  * runtime bytecode (or bytes that cannot verify), and registered signed transactions are included at block 2000.
  */
 export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<string, Hex>, receipt: ReceiptRoute, options: {
   readonly nowSeconds: bigint; readonly allowance?: bigint; readonly nonce?: bigint;
   /** callTracer answers for `debug_traceTransaction`, by transaction hash. */
   readonly trace?: (hash: string) => unknown;
+  /** Accepts raw sends (recorded in `sent`); without it any send fails the test. */
+  readonly acceptSend?: boolean;
 }) {
   const expected = new Map<string, Hex>(), key = (chainId: number, kind: string, address: string, data: string) =>
     canonicalJson([chainId, kind, address.toLowerCase(), data.toLowerCase()]);
@@ -64,12 +66,12 @@ export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<str
     }
   }
   const transactions = new Map<string, { tx: Record<string, unknown>; receipt: Record<string, unknown> }>();
-  const posts: Array<{ host: string; role: string; methods: string[] }> = [];
+  const posts: Array<{ host: string; role: string; methods: string[] }> = [], sent: Hex[] = [];
   const blockHash = (chainId: number, number: bigint) => word((BigInt(chainId) << 64n) + number + 1n);
   const block = (chainId: number, tag: string) => {
     const number = tag === "safe" ? INCLUDED_BLOCK + 1n : tag === "latest" ? INCLUDED_BLOCK + 2n : BigInt(tag);
     return { number: `0x${number.toString(16)}`, hash: blockHash(chainId, number), parentHash: blockHash(chainId, number - 1n),
-      timestamp: `0x${(options.nowSeconds - INCLUDED_BLOCK - 2n + number).toString(16)}`, baseFeePerGas: "0x3b9aca00",
+      timestamp: `0x${(options.nowSeconds - INCLUDED_BLOCK - 2n + number).toString(16)}`, baseFeePerGas: "0x1",
       transactions: number === INCLUDED_BLOCK ? [...transactions.entries()].filter(([, row]) => row.tx.chainId === `0x${chainId.toString(16)}`).map(([hash]) => hash) : [] };
   };
   const call = (chainId: number, request: { to: string; data: string }, tag: unknown): Hex => {
@@ -86,7 +88,7 @@ export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<str
     return word(0n);
   };
   const answer = (chainId: number, role: string, { method, params }: Rpc): unknown => {
-    assert.notEqual(method, "eth_sendRawTransaction", "a read-only chain double never accepts a send");
+    if (method === "eth_sendRawTransaction") { assert(options.acceptSend, "this chain double accepts no send"); sent.push(params[0]); return keccak256(params[0]); }
     if (method === "eth_chainId") return `0x${chainId.toString(16)}`;
     if (method === "eth_getBlockByNumber") return block(chainId, params[0]);
     if (method === "eth_getTransactionByHash") return transactions.get(params[0])?.tx ?? null;
@@ -96,7 +98,7 @@ export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<str
     if (method === "eth_call") return call(chainId, params[0], params[1]);
     if (method === "eth_getBalance") return "0xde0b6b3a7640000";
     if (method === "eth_getTransactionCount") return `0x${(options.nonce ?? 3n).toString(16)}`;
-    if (method === "eth_maxPriorityFeePerGas") return "0x3b9aca00";
+    if (method === "eth_maxPriorityFeePerGas") return "0x1";
     if (method === "eth_estimateGas") return "0x186a0";
     if (method === "debug_traceTransaction" && options.trace !== undefined) return options.trace(params[0]);
     return assert.fail(`unexpected read ${method}`);
@@ -126,5 +128,5 @@ export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<str
         topics: [APPROVAL_TOPIC, word(BigInt(LIFI_SYNTHETIC_SENDER)), word(BigInt(approval.spender))], data: word(approval.amount) }] } });
     return { hash, gasUsed, price: t.maxFeePerGas!, l1Fee };
   };
-  return { transport, posts, include };
+  return { transport, posts, sent, include };
 }

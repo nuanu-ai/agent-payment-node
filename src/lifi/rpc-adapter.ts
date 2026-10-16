@@ -1,5 +1,5 @@
 import { assertBridgePhysicalGrant, type BridgeAuthorityCheck } from "./effect-authority.js";
-import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256 } from "viem";
+import { encodeFunctionData, getAddress, keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { EvmRpc } from "../evm-rpc.js";
@@ -7,15 +7,14 @@ import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, ev
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Address, Hex } from "../model.js";
 import { MULTICALL3_ADDRESS } from "../portfolio/registry.js";
-import { MULTICALL3_ABI } from "../portfolio/evm-reader.js";
 import { bridgeAssetRow, bridgeChain } from "./asset-registry.js";
 import { BNB_COMPOSITE, bnbPoolReadData, verifyBnbCompositeTrace, verifyBnbPoolConfiguration } from "./bnb-composite.js";
 import type { BridgeChainId } from "./chains.js";
 import { bridgeDeployment } from "./deployments.js";
 import type { BridgeBlock, BridgeDeploymentIdentity, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTool, BridgeTransaction, BridgeTransactionProof } from "./model.js";
 import type { BridgeRpcPort } from "./ports.js";
-import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue, rpcHexValue, rpcQuantityValue, rpcRecordValue, rpcTransactionInput, rpcWordValue } from "./rpc-batch-codec.js";
-import { BASE_ECOTONE_EIP6780_TIMESTAMP, basePinnedFeeReadPlan, bridgeDeploymentReadPlan, deploymentMulticallEligible, ERC20_READ, GAS_ORACLE, GAS_ORACLE_ABI, L1_BLOCK } from "./rpc-deployment.js";
+import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue, rpcQuantityValue, rpcRecordValue, rpcTransactionInput, rpcWordValue } from "./rpc-batch-codec.js";
+import { BASE_ECOTONE_EIP6780_TIMESTAMP, basePinnedFeeReadPlan, bridgeDeploymentReadPlan, bridgeRetainedDeploymentReadPlan, bridgeRetainedRefreshEligible, ERC20_READ, GAS_ORACLE, GAS_ORACLE_ABI, L1_BLOCK } from "./rpc-deployment.js";
 import { BASE_FEE_CONTRACT, bridgeActualFees } from "./rpc-fees.js";
 import { exactNativeTransfer, parseReceiptLogs } from "./rpc-proof-codec.js";
 import type { RpcBatchReadItem, RpcReadSession } from "./rpc-session.js";
@@ -119,42 +118,14 @@ export class BridgeRpc implements BridgeRpcPort {
       bridgeFailure("APN_OPERATION_BLOCKED", "bridge_prepared_deployment_binding_changed");
     }
     // Only this compact lane is admitted to retained code proof reuse. All proxy/admin/facet/storage/config reads remain fresh.
-    if (this.batchCall === undefined || tool !== "stargateV2" || this.chainId !== 8453) {
+    if (this.batchCall === undefined || !bridgeRetainedRefreshEligible(this.chainId, tool, frozen.block)) {
       return await this.deployment(tool, peerChainId, token);
     }
-    if (BigInt(frozen.block.timestampAtomic) < BASE_ECOTONE_EIP6780_TIMESTAMP) {
-      return await this.deployment(tool, peerChainId, token);
-    }
-    const at = await this.block("safe"), tag = quantity(BigInt(at.numberAtomic)), readRows = [...contract.reads, ...feeContract.reads];
+    const at = await this.block("safe");
     if (BigInt(at.timestampAtomic) < BASE_ECOTONE_EIP6780_TIMESTAMP || BigInt(at.numberAtomic) < BigInt(frozen.block.numberAtomic)) {
       bridgeFailure("APN_OPERATION_BLOCKED", "bridge_retained_deployment_proof_not_final");
     }
-    const aggregateRows = readRows.filter((row) => row.kind === "call" && deploymentMulticallEligible(row.data));
-    const directRows = readRows.filter((row) => !aggregateRows.includes(row));
-    const aggregateData = encodeFunctionData({ abi: MULTICALL3_ABI, functionName: "aggregate3", args: [aggregateRows.map((row) => ({
-      target: row.address, allowFailure: false, callData: row.data,
-    }))] });
-    const aggregateDecoder = (value: unknown): readonly Hex[] => {
-      const raw = rpcHexValue(512 * 1024)(value);
-      let decoded: readonly { success: boolean; returnData: Hex }[];
-      try { decoded = decodeFunctionResult({ abi: MULTICALL3_ABI, functionName: "aggregate3", data: raw }); }
-      catch { return bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response"); }
-      if (decoded.length !== aggregateRows.length || decoded.some((row) => !row.success)) bridgeFailure("APN_RPC_PROTOCOL", "bridge_multicall_response");
-      return decoded.map((row) => rpcHexValue(64 * 1024)(row.returnData));
-    };
-    const items: Array<Omit<RpcBatchReadItem, "batchAttempt">> = [
-      { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: rpcExpectedChainValue(this.chainId) },
-      // Base fee machinery is system/predeploy code and is never covered by retained ordinary-code proof.
-      ...feeContract.code.map((row) => ({ method: "eth_getCode", params: [row.address, tag], cachePolicy: "immutable" as const,
-        decoder: rpcHexValue(128 * 1024) })),
-      ...directRows.map((row) => ({ method: row.kind === "storage" ? "eth_getStorageAt" : "eth_call",
-        params: row.kind === "storage" ? [row.address, row.data, tag] : [{ to: row.address, data: row.data }, tag],
-        cachePolicy: "immutable" as const, decoder: rpcHexValue(64 * 1024) })),
-      ...(aggregateRows.length === 0 ? [] : [{ method: "eth_call", params: [{ to: MULTICALL3_ADDRESS, data: aggregateData }, tag],
-        cachePolicy: "immutable" as const, decoder: aggregateDecoder }]),
-      { method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "immutable", decoder: rpcBlockValue },
-      { method: "eth_getBlockByNumber", params: [quantity(BigInt(frozen.block.numberAtomic)), false], cachePolicy: "immutable", decoder: rpcBlockValue },
-    ];
+    const { readRows, directRows, aggregateRows, items } = bridgeRetainedDeploymentReadPlan(this.chainId, peerChainId, tool, token, at, frozen.block);
     const values = await this.batchCall(items, "archive_deployment");
     let offset = 0;
     if (values[offset++] !== BigInt(this.chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");

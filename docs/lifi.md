@@ -1162,6 +1162,15 @@ trace). Ethereum or Arbitrum to Base USDC Across needs 17 with a scalar Base
 receipt reader and the Ethereum to BNB composite needs 19; both previously failed
 after the principal had left. Every admitted destination is tested the same way.
 
+The step that signs and sends an unsent effect is counted from the guard's read
+plans too: per chain a safe head and its deployment chunks, two account batches,
+a second guard's two account batches after sealing and the raw send, plus two
+more account batches when a foreground approval runs it. The 24-POST invocation
+cap is raised to that step plus four retry POSTs: Base USDC to Arbitrum Across
+sends at POST 24 of 28 (it had been 24 of 24), and its foreground approval step
+fits in 30. Guards, the sign-before-send room check and continuation caps are
+unchanged; an exhausted budget still stops before signing and resumes cleanly.
+
 ## Finite Base to Mega native funding
 
 `apn mega funding prepare`, `approve` and `status` use an independent GasZip

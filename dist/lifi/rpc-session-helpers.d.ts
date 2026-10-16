@@ -9,10 +9,14 @@ export declare class BridgeRpcPhysicalBudget {
     private readonly now;
     private readonly wait;
     private readonly policy;
+    /** The derived sign-and-send step with its retry headroom; it raises the policy cap and is zero without an unsent effect. */
+    private readonly sendStepPosts;
     private posts;
     private lastStart;
     private tail;
-    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>, policy?: BridgeRpcPhysicalPolicy);
+    constructor(now?: () => number, wait?: (milliseconds: number) => Promise<void>, policy?: BridgeRpcPhysicalPolicy, 
+    /** The derived sign-and-send step with its retry headroom; it raises the policy cap and is zero without an unsent effect. */
+    sendStepPosts?: number);
     remaining(): number;
     require(posts: number, method: string): void;
     beforePost(method: string): Promise<void>;
