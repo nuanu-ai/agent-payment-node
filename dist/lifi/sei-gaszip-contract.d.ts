@@ -7,9 +7,6 @@ export declare const SEI_FUNDING: Readonly<{
     short: 246;
     target: `0x${string}`;
     data: Hex;
-    maximumAmount: 10000000000000n;
-    maximumFee: 1000000000000n;
-    minimumOutput: 250000000000000000n;
     mechanism: {
         provider: string;
         reference: string;

@@ -55,7 +55,7 @@ export async function readSeiFundingPlan(rpc, owner, amount, maxFee, frozenPlan)
     if (seiQuantity(await rpc.call("eth_chainId", [])) !== 8453n)
         seiFail("source_chain");
     const block = seiObject(await rpc.call("eth_getBlockByNumber", ["latest", false]));
-    const blockHash = seiHash(block.hash), number = seiQuantity(block.number);
+    const blockHash = seiHash(block.hash);
     const tag = { blockHash, requireCanonical: true };
     const tx = { from: owner, to: SEI_FUNDING.target, data: SEI_FUNDING.data, value: hex(BigInt(amount)) };
     const [code, balance, n, p, g] = await Promise.all([rpc.call("eth_getCode", [SEI_FUNDING.target, tag]), rpc.call("eth_getBalance", [owner, tag]),
@@ -64,20 +64,15 @@ export async function readSeiFundingPlan(rpc, owner, amount, maxFee, frozenPlan)
         seiFail("source_code_or_nonce");
     // Base requires a quoted total fee including L1 data and operator components. It is not an on-chain total-fee cap.
     const gas = frozenPlan === undefined ? (seiQuantity(g) * 110n + 99n) / 100n : seiQuantity(g), tip = 1000000n, fee = 2n * seiQuantity(block.baseFeePerGas) + tip;
-    if (gas > 30000n || fee > 100000000n)
-        seiFail("source_fee_pair");
     const [l1, op] = await Promise.all([rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: ABI, functionName: "getL1FeeUpperBound", args: [BigInt(MAX_DIRECT_TRANSACTION_BYTES)] }) }, tag]),
         rpc.call("eth_call", [{ to: ORACLE, data: encodeFunctionData({ abi: ABI, functionName: "getOperatorFee", args: [frozenPlan === undefined ? gas : BigInt(frozenPlan.gas)] }) }, tag])]);
     const l1Fee = gaszipOracleUint256(l1, seiFail), operator = gaszipOracleUint256(op, seiFail), total = gas * fee + l1Fee + operator;
-    if (operator !== 0n)
-        seiFail("base_operator_fee_unreviewed");
     // The exclusive owner conflict keeps the full caller-authorized fee reserve unavailable to other local rails.
     const signedUpper = (frozenPlan === undefined ? gas * fee : BigInt(frozenPlan.gas) * BigInt(frozenPlan.maxFee)) + l1Fee + operator;
-    if (signedUpper > BigInt(maxFee) || signedUpper > SEI_FUNDING.maximumFee || seiQuantity(balance) < BigInt(amount) + BigInt(maxFee))
+    // The owner's fee ceiling bounds the signed upper fee, operator component included; reads pinned with requireCanonical
+    // need no header recheck (the node refuses a non-canonical hash).
+    if (signedUpper > BigInt(maxFee) || seiQuantity(balance) < BigInt(amount) + BigInt(maxFee))
         seiFail("source_balance_or_fee_cap");
-    const check = seiObject(await rpc.call("eth_getBlockByNumber", [hex(number), false]));
-    if (seiHash(check.hash) !== blockHash)
-        seiFail("source_reorg");
     return { blockHash, nonce: seiQuantity(n).toString(), gas: gas.toString(), maxFee: fee.toString(), tip: tip.toString(), l1FeeUpper: l1Fee.toString(), operatorFeeUpper: operator.toString(), feeUpper: total.toString() };
 }
 export function assertSeiFundingFresh(initial, fresh, maximumFee) {
@@ -85,14 +80,14 @@ export function assertSeiFundingFresh(initial, fresh, maximumFee) {
     const minimumPrice = (BigInt(fresh.maxFee) - BigInt(fresh.tip)) / 2n + BigInt(initial.tip);
     const fullUpper = BigInt(initial.gas) * BigInt(initial.maxFee) + BigInt(fresh.l1FeeUpper) + BigInt(fresh.operatorFeeUpper);
     if (initial.nonce !== fresh.nonce || BigInt(fresh.gas) > BigInt(initial.gas) || initial.tip !== fresh.tip ||
-        minimumPrice > BigInt(initial.maxFee) || fullUpper > BigInt(maximumFee) || fullUpper > SEI_FUNDING.maximumFee)
+        minimumPrice > BigInt(initial.maxFee) || fullUpper > BigInt(maximumFee))
         seiFail("source_plan_drift");
 }
 /** The exact transaction and receipt must agree, have canonical block identity, and lie at or below a fresh safe head. */
-export async function proveSeiSafeTransaction(rpc, chain, hash, expected) {
+export async function proveSeiSafeTransaction(rpc, chain, hash, expected, known) {
     if (seiQuantity(await rpc.call("eth_chainId", [])) !== BigInt(chain))
         seiFail("proof_chain");
-    const [tv, rv, sv] = await Promise.all([rpc.call("eth_getTransactionByHash", [hash]), rpc.call("eth_getTransactionReceipt", [hash]), rpc.call("eth_getBlockByNumber", ["safe", false])]);
+    const [tv, rv, sv] = await Promise.all([known ?? rpc.call("eth_getTransactionByHash", [hash]), rpc.call("eth_getTransactionReceipt", [hash]), rpc.call("eth_getBlockByNumber", ["safe", false])]);
     if (tv === null || rv === null)
         return null;
     const t = seiObject(tv), r = seiObject(rv), safe = seiObject(sv);
@@ -110,58 +105,49 @@ export async function proveSeiSafeTransaction(rpc, chain, hash, expected) {
     const included = seiObject(await rpc.call("eth_getBlockByNumber", [hex(number), false]));
     if (seiHash(included.hash) !== blockHash || seiQuantity(r.status) !== 0n && seiQuantity(r.status) !== 1n)
         seiFail("proof_reorg_or_status");
+    if (expected.gasPrice !== undefined && (!Array.isArray(included.transactions) || included.transactions.filter(x => x === hash).length !== 1))
+        seiFail("destination_canonical_membership");
     if (expected.gas !== undefined && seiQuantity(r.gasUsed) > BigInt(expected.gas) || expected.maxFee !== undefined && seiQuantity(r.effectiveGasPrice) > BigInt(expected.maxFee))
         seiFail("source_receipt_gas_binding");
     let actualFee = null;
     if (chain === 8453) {
         if (r.l1Fee === undefined)
             seiFail("source_receipt_l1_fee_missing");
-        let fee = seiQuantity(r.gasUsed) * seiQuantity(r.effectiveGasPrice) + seiQuantity(r.l1Fee);
-        // Current Base operator fee is zero; a nonzero/configured future operator component is required explicitly.
-        if (r.operatorFeeScalar !== undefined || r.operatorFeeConstant !== undefined) {
-            if (r.operatorFeeScalar === undefined || r.operatorFeeConstant === undefined)
-                seiFail("operator_receipt_shape");
-            if (seiQuantity(r.operatorFeeConstant) !== 0n || seiQuantity(r.operatorFeeScalar) !== 0n)
-                seiFail("base_operator_fee_unreviewed");
-        }
-        if (r.operatorFee !== undefined && seiQuantity(r.operatorFee) !== 0n)
-            seiFail("base_operator_fee_unreviewed");
-        actualFee = fee.toString();
+        // The paid fee is the receipt's: execution, L1 data fee and the Jovian operator fee from its own fields (absent = zero).
+        if ((r.operatorFeeScalar === undefined) !== (r.operatorFeeConstant === undefined))
+            seiFail("operator_receipt_shape");
+        const operator = r.operatorFeeScalar === undefined ? 0n : seiQuantity(r.gasUsed) * seiQuantity(r.operatorFeeScalar) * 100n + seiQuantity(r.operatorFeeConstant);
+        if (r.operatorFee !== undefined && seiQuantity(r.operatorFee) !== operator)
+            seiFail("operator_receipt_shape");
+        actualFee = (seiQuantity(r.gasUsed) * seiQuantity(r.effectiveGasPrice) + seiQuantity(r.l1Fee) + operator).toString();
     }
     return { hash, blockHash, blockNumber: number.toString(), status: seiQuantity(r.status) === 1n ? "success" : "reverted",
         transactionDigest: hashObject(t), receiptDigest: hashObject(r), amount: expected.value, actualFee };
 }
+/**
+ * The payout is proved from the chain alone: the exact signed transaction from the provider's signer to the owner, its
+ * successful receipt with empty input and no logs at or below the safe head, its block membership, and an owner account
+ * that has no code, so the plain value transfer could not run code and credited exactly its value. No historical balances.
+ */
 export async function proveSeiDelivery(rpc, owner, d) {
     let amount = d.amount;
     let signedBudget;
+    let known;
     if (d.grossNative === true) {
-        const tv = await rpc.call("eth_getTransactionByHash", [d.hash]);
-        if (tv === null)
+        known = await rpc.call("eth_getTransactionByHash", [d.hash]);
+        if (known === null)
             return null;
-        const t = seiObject(tv);
+        const t = seiObject(known);
         signedBudget = { gas: seiQuantity(t.gas).toString(), gasPrice: seiQuantity(t.gasPrice).toString() };
-        amount = await gaszipNativeNet(tv, d, owner, 1329, 0n, { fail: seiFail, object: seiObject, uint: seiUint, quantity: seiQuantity, hash: seiHash, address: seiAddress, exact: seiExact });
+        amount = await gaszipNativeNet(known, d, owner, 1329, 0n, { fail: seiFail, object: seiObject, uint: seiUint, quantity: seiQuantity, hash: seiHash, address: seiAddress, exact: seiExact });
     }
-    const p = await proveSeiSafeTransaction(rpc, 1329, d.hash, { from: d.signer, to: owner, data: "0x", value: amount, nonce: d.nonce, ...signedBudget });
+    const p = await proveSeiSafeTransaction(rpc, 1329, d.hash, { from: d.signer, to: owner, data: "0x", value: amount, nonce: d.nonce, ...signedBudget }, known);
     if (p === null)
         return null;
     if (p.status !== "success")
         seiFail("destination_revert");
-    const number = BigInt(p.blockNumber);
-    if (number === 0n)
-        seiFail("destination_genesis");
-    const previous = seiObject(await rpc.call("eth_getBlockByNumber", [hex(number - 1n), false]));
-    const previousHash = seiHash(previous.hash);
-    if (d.grossNative === true) {
-        const included = seiObject(await rpc.call("eth_getBlockByNumber", [hex(number), false]));
-        if (seiQuantity(previous.number) !== number - 1n || seiQuantity(included.number) !== number || seiHash(included.hash) !== p.blockHash ||
-            seiHash(included.parentHash) !== previousHash || !Array.isArray(included.transactions) || included.transactions.filter(x => x === d.hash).length !== 1)
-            seiFail("destination_canonical_membership");
-    }
-    const [before, after, code] = await Promise.all([rpc.call("eth_getBalance", [owner, { blockHash: previousHash, requireCanonical: true }]),
-        rpc.call("eth_getBalance", [owner, { blockHash: p.blockHash, requireCanonical: true }]), rpc.call("eth_getCode", [owner, { blockHash: previousHash, requireCanonical: true }])]);
-    if (code !== "0x" || seiQuantity(after) - seiQuantity(before) !== BigInt(p.amount))
-        seiFail("destination_exact_delta");
+    if (await rpc.call("eth_getCode", [owner, "latest"]) !== "0x")
+        seiFail("destination_owner_code");
     return p;
 }
 export async function proveSeiSource(rpc, r) {

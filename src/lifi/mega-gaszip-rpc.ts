@@ -31,22 +31,21 @@ export class MegaFundingRpc implements MegaRpcPort {
 }
 export async function readMegaFundingPlan(rpc:MegaRpcPort,owner:string,amount:string,maxFee:string,frozenPlan?:MegaFundingPlan):Promise<MegaFundingPlan>{
   if(megaQuantity(await rpc.call("eth_chainId",[]))!==8453n)megaFail("source_chain");
-  const block=megaObject(await rpc.call("eth_getBlockByNumber",["latest",false]));const blockHash=megaHash(block.hash),number=megaQuantity(block.number);
+  const block=megaObject(await rpc.call("eth_getBlockByNumber",["latest",false]));const blockHash=megaHash(block.hash);
   const tag={blockHash,requireCanonical:true};const tx={from:owner,to:MEGA_FUNDING.target,data:MEGA_FUNDING.data,value:hex(BigInt(amount))};
   const [code,balance,n,p,g]=await Promise.all([rpc.call("eth_getCode",[MEGA_FUNDING.target,tag]),rpc.call("eth_getBalance",[owner,tag]),
     rpc.call("eth_getTransactionCount",[owner,"latest"]),rpc.call("eth_getTransactionCount",[owner,"pending"]),rpc.call("eth_estimateGas",[tx,tag])]);
   if(code!=="0x" || megaQuantity(n)!==megaQuantity(p) || megaQuantity(n)>BigInt(Number.MAX_SAFE_INTEGER))megaFail("source_code_or_nonce");
   // Base requires a quoted total fee including L1 data and operator components. It is not an on-chain total-fee cap.
   const gas=frozenPlan===undefined?(megaQuantity(g)*110n+99n)/100n:megaQuantity(g),tip=1_000_000n,fee=2n*megaQuantity(block.baseFeePerGas)+tip;
-  if(gas>30_000n || fee>100_000_000n)megaFail("source_fee_pair");
   const [l1,op]=await Promise.all([rpc.call("eth_call",[{to:ORACLE,data:encodeFunctionData({abi:ABI,functionName:"getL1FeeUpperBound",args:[BigInt(MAX_DIRECT_TRANSACTION_BYTES)]})},tag]),
     rpc.call("eth_call",[{to:ORACLE,data:encodeFunctionData({abi:ABI,functionName:"getOperatorFee",args:[frozenPlan===undefined?gas:BigInt(frozenPlan.gas)]})},tag])]);
   const l1Fee=gaszipOracleUint256(l1,megaFail),operator=gaszipOracleUint256(op,megaFail),total=gas*fee+l1Fee+operator;
-  if(operator!==0n)megaFail("base_operator_fee_unreviewed");
   // The exclusive owner conflict keeps the full caller-authorized fee reserve unavailable to other local rails.
   const signedUpper=(frozenPlan===undefined?gas*fee:BigInt(frozenPlan.gas)*BigInt(frozenPlan.maxFee))+l1Fee+operator;
-  if(signedUpper>BigInt(maxFee) || signedUpper>MEGA_FUNDING.maximumFee || megaQuantity(balance)<BigInt(amount)+BigInt(maxFee))megaFail("source_balance_or_fee_cap");
-  const check=megaObject(await rpc.call("eth_getBlockByNumber",[hex(number),false]));if(megaHash(check.hash)!==blockHash)megaFail("source_reorg");
+  // The owner's fee ceiling bounds the signed upper fee, operator component included; reads pinned with requireCanonical
+  // need no header recheck (the node refuses a non-canonical hash).
+  if(signedUpper>BigInt(maxFee) || megaQuantity(balance)<BigInt(amount)+BigInt(maxFee))megaFail("source_balance_or_fee_cap");
   return {blockHash,nonce:megaQuantity(n).toString(),gas:gas.toString(),maxFee:fee.toString(),tip:tip.toString(),l1FeeUpper:l1Fee.toString(),operatorFeeUpper:operator.toString(),feeUpper:total.toString()};
 }
 export function assertMegaFundingFresh(initial:MegaFundingPlan,fresh:MegaFundingPlan,maximumFee:string):void{
@@ -54,15 +53,15 @@ export function assertMegaFundingFresh(initial:MegaFundingPlan,fresh:MegaFunding
   const minimumPrice=(BigInt(fresh.maxFee)-BigInt(fresh.tip))/2n+BigInt(initial.tip);
   const fullUpper=BigInt(initial.gas)*BigInt(initial.maxFee)+BigInt(fresh.l1FeeUpper)+BigInt(fresh.operatorFeeUpper);
   if(initial.nonce!==fresh.nonce || BigInt(fresh.gas)>BigInt(initial.gas) || initial.tip!==fresh.tip ||
-    minimumPrice>BigInt(initial.maxFee) || fullUpper>BigInt(maximumFee) || fullUpper>MEGA_FUNDING.maximumFee)megaFail("source_plan_drift");
+    minimumPrice>BigInt(initial.maxFee) || fullUpper>BigInt(maximumFee))megaFail("source_plan_drift");
 }
 export interface MegaSafeProof { readonly hash: Hex; readonly blockHash: Hex; readonly blockNumber:string; readonly status:"success"|"reverted";
   readonly transactionDigest:string; readonly receiptDigest:string; readonly amount:string; readonly actualFee:string|null }
 /** The exact transaction and receipt must agree, have canonical block identity, and lie at or below a fresh safe head. */
 export async function proveMegaSafeTransaction(rpc:MegaRpcPort,chain:8453|4326,hash:Hex,
-  expected:{from:string;to:string;data:Hex;value:string;nonce:string;gas?:string;maxFee?:string;tip?:string;gasPrice?:string}):Promise<MegaSafeProof|null>{
+  expected:{from:string;to:string;data:Hex;value:string;nonce:string;gas?:string;maxFee?:string;tip?:string;gasPrice?:string},known?:unknown):Promise<MegaSafeProof|null>{
   if(megaQuantity(await rpc.call("eth_chainId",[]))!==BigInt(chain))megaFail("proof_chain");
-  const [tv,rv,sv]=await Promise.all([rpc.call("eth_getTransactionByHash",[hash]),rpc.call("eth_getTransactionReceipt",[hash]),rpc.call("eth_getBlockByNumber",["safe",false])]);
+  const [tv,rv,sv]=await Promise.all([known??rpc.call("eth_getTransactionByHash",[hash]),rpc.call("eth_getTransactionReceipt",[hash]),rpc.call("eth_getBlockByNumber",["safe",false])]);
   if(tv===null || rv===null)return null;const t=megaObject(tv),r=megaObject(rv),safe=megaObject(sv);
   const blockHash=megaHash(r.blockHash),number=megaQuantity(r.blockNumber);
   if(number>megaQuantity(safe.number))return null;
@@ -75,38 +74,34 @@ export async function proveMegaSafeTransaction(rpc:MegaRpcPort,chain:8453|4326,h
       megaQuantity(r.effectiveGasPrice).toString()!==expected.gasPrice || megaQuantity(r.gasUsed)===0n || !Array.isArray(r.logs) || r.logs.length!==0 || r.contractAddress!==null)))megaFail("proof_binding");
   const included=megaObject(await rpc.call("eth_getBlockByNumber",[hex(number),false]));
   if(megaHash(included.hash)!==blockHash || megaQuantity(r.status)!==0n && megaQuantity(r.status)!==1n)megaFail("proof_reorg_or_status");
+  if(expected.gasPrice!==undefined && (!Array.isArray(included.transactions) || included.transactions.filter(x=>x===hash).length!==1))megaFail("destination_canonical_membership");
   if(expected.gas!==undefined && megaQuantity(r.gasUsed)>BigInt(expected.gas) || expected.maxFee!==undefined && megaQuantity(r.effectiveGasPrice)>BigInt(expected.maxFee))megaFail("source_receipt_gas_binding");
   let actualFee:string|null=null;
   if(chain===8453){
     if(r.l1Fee===undefined)megaFail("source_receipt_l1_fee_missing");
-    let fee=megaQuantity(r.gasUsed)*megaQuantity(r.effectiveGasPrice)+megaQuantity(r.l1Fee);
-    // Current Base operator fee is zero; a nonzero/configured future operator component is required explicitly.
-    if(r.operatorFeeScalar!==undefined || r.operatorFeeConstant!==undefined){
-      if(r.operatorFeeScalar===undefined || r.operatorFeeConstant===undefined)megaFail("operator_receipt_shape");
-      if(megaQuantity(r.operatorFeeConstant)!==0n || megaQuantity(r.operatorFeeScalar)!==0n)megaFail("base_operator_fee_unreviewed");
-    }
-    if(r.operatorFee!==undefined && megaQuantity(r.operatorFee)!==0n)megaFail("base_operator_fee_unreviewed");
-    actualFee=fee.toString();
+    // The paid fee is the receipt's: execution, L1 data fee and the Jovian operator fee from its own fields (absent = zero).
+    if((r.operatorFeeScalar===undefined)!==(r.operatorFeeConstant===undefined))megaFail("operator_receipt_shape");
+    const operator=r.operatorFeeScalar===undefined?0n:megaQuantity(r.gasUsed)*megaQuantity(r.operatorFeeScalar)*100n+megaQuantity(r.operatorFeeConstant);
+    if(r.operatorFee!==undefined && megaQuantity(r.operatorFee)!==operator)megaFail("operator_receipt_shape");
+    actualFee=(megaQuantity(r.gasUsed)*megaQuantity(r.effectiveGasPrice)+megaQuantity(r.l1Fee)+operator).toString();
   }
   return {hash,blockHash,blockNumber:number.toString(),status:megaQuantity(r.status)===1n?"success":"reverted",
     transactionDigest:hashObject(t),receiptDigest:hashObject(r),amount:expected.value,actualFee};
 }
+/**
+ * The payout is proved from the chain alone: the exact signed transaction from the provider's signer to the owner, its
+ * successful receipt with empty input and no logs at or below the safe head, its block membership, and an owner account
+ * that has no code, so the plain value transfer could not run code and credited exactly its value. No historical balances.
+ */
 export async function proveMegaDelivery(rpc:MegaRpcPort,owner:string,d:MegaCorrelatedDelivery):Promise<MegaSafeProof|null>{
-  let amount=d.amount;let signedBudget:{gas:string;gasPrice:string}|undefined;
-  if(d.grossNative===true){const tv=await rpc.call("eth_getTransactionByHash",[d.hash]);if(tv===null)return null;
-    const t=megaObject(tv);signedBudget={gas:megaQuantity(t.gas).toString(),gasPrice:megaQuantity(t.gasPrice).toString()};
-    amount=await gaszipNativeNet(tv,d,owner,4326,0n,
+  let amount=d.amount;let signedBudget:{gas:string;gasPrice:string}|undefined;let known:unknown;
+  if(d.grossNative===true){known=await rpc.call("eth_getTransactionByHash",[d.hash]);if(known===null)return null;
+    const t=megaObject(known);signedBudget={gas:megaQuantity(t.gas).toString(),gasPrice:megaQuantity(t.gasPrice).toString()};
+    amount=await gaszipNativeNet(known,d,owner,4326,0n,
       {fail:megaFail,object:megaObject,uint:megaUint,quantity:megaQuantity,hash:megaHash,address:megaAddress,exact:megaExact});}
-  const p=await proveMegaSafeTransaction(rpc,4326,d.hash,{from:d.signer,to:owner,data:"0x",value:amount,nonce:d.nonce,...signedBudget});
+  const p=await proveMegaSafeTransaction(rpc,4326,d.hash,{from:d.signer,to:owner,data:"0x",value:amount,nonce:d.nonce,...signedBudget},known);
   if(p===null)return null;if(p.status!=="success")megaFail("destination_revert");
-  const number=BigInt(p.blockNumber);if(number===0n)megaFail("destination_genesis");
-  const previous=megaObject(await rpc.call("eth_getBlockByNumber",[hex(number-1n),false]));const previousHash=megaHash(previous.hash);
-  if(d.grossNative===true){const included=megaObject(await rpc.call("eth_getBlockByNumber",[hex(number),false]));
-    if(megaQuantity(previous.number)!==number-1n || megaQuantity(included.number)!==number || megaHash(included.hash)!==p.blockHash ||
-      megaHash(included.parentHash)!==previousHash || !Array.isArray(included.transactions) || included.transactions.filter(x=>x===d.hash).length!==1)megaFail("destination_canonical_membership");}
-  const [before,after,code]=await Promise.all([rpc.call("eth_getBalance",[owner,{blockHash:previousHash,requireCanonical:true}]),
-    rpc.call("eth_getBalance",[owner,{blockHash:p.blockHash,requireCanonical:true}]),rpc.call("eth_getCode",[owner,{blockHash:previousHash,requireCanonical:true}])]);
-  if(code!=="0x" || megaQuantity(after)-megaQuantity(before)!==BigInt(p.amount))megaFail("destination_exact_delta");return p;
+  if(await rpc.call("eth_getCode",[owner,"latest"])!=="0x")megaFail("destination_owner_code");return p;
 }
 export async function proveMegaSource(rpc:MegaRpcPort,r:MegaFundingRecord):Promise<MegaSafeProof|null>{
   if(r.transactionHash===null)return null;return proveMegaSafeTransaction(rpc,8453,r.transactionHash,{from:r.owner.address,to:MEGA_FUNDING.target,

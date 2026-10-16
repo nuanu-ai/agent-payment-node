@@ -5,7 +5,6 @@ import { hashObject } from "../canonical.js";
 /** A separate GasZip direct deposit; never grants LI.FI GasZip execution. */
 export const SEI_FUNDING = Object.freeze({ sourceChain: 8453, destinationChain: 1329, short: 246,
     target: getAddress("0x391E7C679d29bD940d63be94AD22A25d25b5A604"), data: "0x0100f6",
-    maximumAmount: 10000000000000n, maximumFee: 1000000000000n, minimumOutput: 250000000000000000n,
     mechanism: { provider: "gaszip", reference: "v2-direct-base-sei-self-0100f6.1" } });
 export function seiFail(reason) { throw new ApnError("APN_OPERATION_BLOCKED", `sei_gaszip_${reason}`, { reason: `sei_gaszip_${reason}` }); }
 export function seiObject(v) {
@@ -56,7 +55,8 @@ export function seiJson(text) {
     }
 }
 export function seiExact(v, required, optional = []) {
-    if (required.some(k => !Object.hasOwn(v, k)) || Object.keys(v).some(k => !required.includes(k) && !optional.includes(k)))
+    // Required provider fields must be present; fields GasZip adds later are ignored (the chain proves every effect itself).
+    if (required.some(k => !Object.hasOwn(v, k)))
         seiFail("schema");
 }
 export function inspectSeiFundingQuote(value, now) {
@@ -67,7 +67,7 @@ export function inspectSeiFundingQuote(value, now) {
     const q = seiObject(v.quotes[0]);
     seiExact(q, ["chain", "expected", "gas", "speed", "usd"], ["decimals", "expectedNative"]);
     if (seiUint(q.chain) !== 1329n || (q.decimals !== undefined && seiUint(q.decimals) !== 18n) ||
-        (q.expectedNative !== undefined && seiUint(q.expectedNative) !== seiUint(q.expected)) || seiUint(q.expected) < SEI_FUNDING.minimumOutput ||
+        (q.expectedNative !== undefined && seiUint(q.expectedNative) !== seiUint(q.expected)) ||
         typeof q.speed !== "number" && typeof q.speed !== "string" || typeof q.usd !== "number" && typeof q.usd !== "string")
         seiFail("quote_output");
     seiUint(q.gas);

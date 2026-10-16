@@ -24,7 +24,7 @@ export function validateMegaFunding(value: unknown): MegaFundingRecord {
   if(r.activationDigest!==undefined)stateIdentifier(r.activationDigest,"GasZip policy activation");
   for(const s of [r.operationId,r.profileHash,r.idempotencyHash,r.requestHash,r.policyDigest,r.quoteDigest]) stateIdentifier(s,"GasZip record identity");
   if(r.profile!==MEGA_FUNDING.profile || r.owner.address!==MEGA_FUNDING.owner || r.profileHash!==r.owner.profileHash || r.profile!==r.owner.profile || megaUint(r.amountAtomic)!==MEGA_FUNDING.maximumAmount ||
-    megaUint(r.maximumFeeAtomic)>MEGA_FUNDING.maximumFee || megaUint(r.minimumOutputAtomic)<MEGA_FUNDING.minimumOutput ||
+    megaUint(r.maximumFeeAtomic)<=0n || megaUint(r.minimumOutputAtomic)<=0n ||
     megaUint(r.quoteExpectedAtomic)<megaUint(r.minimumOutputAtomic) || !Number.isFinite(Date.parse(r.expiresAt)) || !Number.isSafeInteger(r.policyRevision) || r.policyRevision<1) megaFail("record_terms");
   megaHash(r.plan.blockHash); for(const x of [r.plan.nonce,r.plan.gas,r.plan.maxFee,r.plan.tip,r.plan.l1FeeUpper,r.plan.operatorFeeUpper,r.plan.feeUpper]) megaUint(x);
   if(megaUint(r.plan.feeUpper)!==megaUint(r.plan.gas)*megaUint(r.plan.maxFee)+megaUint(r.plan.l1FeeUpper)+megaUint(r.plan.operatorFeeUpper) ||

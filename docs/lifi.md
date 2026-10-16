@@ -37,7 +37,7 @@ policy are still required before any execution design or funding attempt.
 
 `sei funding` adds one separate local-wallet funding route: native Base ETH
 (chain 8453) to the same owner's native Sei SEI (chain 1329). The source sends
-at most 10000000000000 wei ETH to the official GasZip V2 direct deposit address
+the amount the asset policy and usage ledger admit to the official GasZip V2 direct deposit address
 `0x391E7C679d29bD940d63be94AD22A25d25b5A604` with exactly `0x0100f6`.
 APN requires that target to have empty code. The calldata selects the source
 sender as recipient and GasZip short chain ID 246. No approval is involved.
@@ -45,10 +45,10 @@ The LI.FI Sei inspection described above keeps its existing execution block.
 
 The active Base native bridge admission must name exactly
 `{ "provider": "gaszip", "reference": "v2-direct-base-sei-self-0100f6.1" }`.
-Preparation refuses an output floor below 250000000000000000 wei SEI or a total
-source fee ceiling above 1000000000000 wei ETH. Base fee quotes include L2 gas,
+The owner's `--minimum-output-atomic` floor and `--maximum-fee-atomic` ceiling are
+the only output and fee bounds; no lane constant caps them. Base fee quotes include L2 gas,
 the OP GasPriceOracle L1 data fee upper bound for 512 signed bytes, and the
-operator fee. This version admits only the observed zero operator fee. The
+operator fee, and the paid fee counts the receipt's L1 and operator fees. The
 signed EIP-1559 gas price limits the L2 component; the Base total is a quoted
 ceiling, not an on-chain total fee cap. The destination floor is an acceptance
 requirement and is not enforced by the source transaction.
@@ -1182,7 +1182,7 @@ recipient `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14`, Base source chain 8453 a
 Mega destination chain 4326 are admitted. The direct target is the official
 EOA `0x391E7C679d29bD940d63be94AD22A25d25b5A604`, whose code must be empty;
 calldata is exactly `0x010202` (short 514). Input is exactly 10000000000000 wei.
-The full Base network fee ceiling is 1000000000000 wei, including L1 and operator
+The owner's Base network fee ceiling includes L1 and operator
 fees. A fresh balance must cover the frozen signed envelope's full fee upper
 bound even when a later estimate is lower.
 
@@ -1190,8 +1190,8 @@ The active Base native bridge policy must admit
 `{ "provider": "gaszip", "reference": "v2-direct-base-mega-self-010202.1" }`.
 `APN_BASE_RPC_URL` and `APN_MEGA_RPC_URL` must be public HTTPS RPC URLs. Production
 Mega mainnet RPC is `https://mainnet.megaeth.com/rpc`; chain identity and safe
-receipt inclusion are independently checked. Minimum delivered Mega ETH is at
-least 8000000000000 wei. This floor is checked during acceptance; the source
+receipt inclusion are independently checked. Minimum delivered Mega ETH is the
+owner's floor. This floor is checked during acceptance; the source
 calldata cannot enforce it. Quote expiry, owner binding, custody, usage and
 shared Base owner conflicts are checked before the single signature/send attempt.
 
@@ -1319,3 +1319,12 @@ destination observation 11 → 7; a Circle approval state read about 25 → 1.
 
 `operation repair-deployment` keeps its frozen archive proofs unchanged for the
 two recognized historical migrations.
+
+GasZip (Sei, Mega): a payout is proved from the chain alone (exact signed payout,
+successful receipt with empty input and no logs at or below the safe head, block
+membership, and an owner without code), with no historical balance delta: 11 →
+6 POSTs per completed status. The source plan drops its header recheck (one POST
+per prepare and approve), counts a nonzero Base operator fee instead of refusing
+it, and no longer applies lane constants (30k gas, 0.1 gwei, global fee, floor and,
+for Sei, amount caps) on top of the owner's ceiling, floor and asset policy.
+Provider responses must carry their required fields; fields GasZip adds later are ignored.
