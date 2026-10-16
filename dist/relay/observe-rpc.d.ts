@@ -32,7 +32,7 @@ export declare class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     finalityCheckpoint(): Promise<RelayBnbBlock | null>;
     polygonFinalizedCheckpoint(): Promise<RelayBnbBlock | null>;
     nativeTrace(): Promise<null>;
-    polygonNativeTrace(hash: string): Promise<import("./destination-proof.js").RelayBnbNativeTrace>;
+    polygonNativeTrace(hash: string, recipient: string): Promise<import("./destination-proof.js").RelayBnbNativeTrace>;
     routerCodeHash(address: string, blockNumber: bigint): Promise<string>;
     tokenIdentityAndBalances(token: string, recipient: string, number: bigint, expectedHash: string): Promise<{
         proxyHash: `0x${string}`;

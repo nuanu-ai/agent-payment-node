@@ -1,13 +1,15 @@
 /** Finite Polygon callTracer decoder; no trace enrichment or absent-data inference. */
 import { ApnError } from "../errors.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
-import { RELAY_BNB_SOURCE } from "./native-quote.js";
 import type { RelayBnbNativeTrace } from "./destination-proof.js";
 export const POLYGON_PAYOUT_ROUTER = "0xccc88a9d1b4ed6b0eaba998850414b24f1c315be";
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 function invalid(): never { throw new ApnError("APN_RPC_PROTOCOL", "Polygon exhaustive trace or recipient balance binding failed."); }
+/** `recipient` is the operation's own recorded recipient: exactly one credit to it, no debit from it, and its
+ * adjacent-block balance delta equal to that credit. */
 export function decodePolygonPayoutTrace(value: unknown, transaction: Record<string, unknown>, hash: string,
-  blockHash: string, before: bigint, after: bigint): RelayBnbNativeTrace {
+  blockHash: string, recipient: string, before: bigint, after: bigint): RelayBnbNativeTrace {
+  if (!/^0x[0-9a-fA-F]{40}$/u.test(recipient)) invalid();
   const root = evmRpcRecord(value);
   if (root.type !== "CALL" || root.error !== undefined || root.revertReason !== undefined ||
     !same(evmRpcHex(transaction.hash, 32), hash) || !same(evmRpcHex(transaction.blockHash, 32), blockHash) ||
@@ -37,8 +39,8 @@ export function decodePolygonPayoutTrace(value: unknown, transaction: Record<str
     }
   }
   visit(root, 0, false);
-  const credits = transfers.filter(t => same(t.to, RELAY_BNB_SOURCE));
-  if (credits.length !== 1 || transfers.some(t => same(t.from, RELAY_BNB_SOURCE)) ||
+  const credits = transfers.filter(t => same(t.to, recipient));
+  if (credits.length !== 1 || transfers.some(t => same(t.from, recipient)) ||
     before < 0n || after - before !== credits[0]!.valueWei) invalid();
   return { transactionHash: hash.toLowerCase(), blockHash: blockHash.toLowerCase(), complete: true,
     revertedCallsExcluded: true, transfers };
