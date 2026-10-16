@@ -39,6 +39,7 @@ import { X402PaidRequest } from "./x402-paid-request.js";
 import {
   assertWaitRpcProvenance,
   remainingWaitMs,
+  waitOutcome,
   waitTimeout,
   boundedX402ReadPort,
   isPostExposureWaitState,
@@ -94,7 +95,8 @@ export class X402Service extends X402PaidRequest {
       });
       if (existing !== null) return publicX402Operation(existing.record as X402OperationRecord);
       const payer = await resolveX402Payer(this.context, profileHash, network.chainId);
-      await this.operations.assertEvmAccountAvailable(profileHash, network.chainId, payer.wallet);
+      // EIP-3009 uses its own random nonce, not the account nonce, so it neither waits for nor blocks other operations.
+      if (payer.transferMethod !== "eip3009") await this.operations.assertEvmAccountAvailable(profileHash, network.chainId, payer.wallet);
 
       const profilePolicy = requireProfilePolicy(
         await this.context.requirePolicy().load(payer.policy),
@@ -240,6 +242,8 @@ export class X402Service extends X402PaidRequest {
       if (current.state !== "awaiting_approval") {
         throw new ApnError("APN_OPERATION_BLOCKED", "x402 operation is already authorized; use operation resume.");
       }
+      // Nothing was signed yet, so an approval after validBefore ends with no effect instead of a stranded signature.
+      if (this.authorizationExpired(current)) return publicX402Operation(await this.commitTerminal(current, "failed_before_effect"));
       const pending = await this.transition(current, "authorization_material_pending");
       return await this.completeAuthorization(pending, "create");
     });
@@ -275,11 +279,7 @@ export class X402Service extends X402PaidRequest {
       }
     }
     if (found.record.terminal) {
-      return waitSeconds === undefined ? undefined : {
-        outcome: "completed",
-        requestedSeconds: waitSeconds.toString(),
-        observationCount: "0",
-      };
+      return waitSeconds === undefined ? undefined : waitOutcome("completed", waitSeconds, 0);
     }
     try { await this.resumeOnce(found.record, deadline); }
     catch (error) {
@@ -326,7 +326,8 @@ export class X402Service extends X402PaidRequest {
       operation = await this.recoverOrphanResult(operation);
       operation = await this.finishReconciledEvidence(operation);
       if (operation.terminal) return publicX402Operation(operation);
-
+      const expiredUnexposed = await this.closeExpiredUnexposed(operation);
+      if (expiredUnexposed !== null) return publicX402Operation(expiredUnexposed);
       const rpc = this.context.requireRpc();
       const rpcRemaining = deadline === undefined ? undefined : remainingWaitMs(deadline, this.context.wait.nowMs());
       if (rpcRemaining !== undefined && rpcRemaining < 1) return publicX402Operation(operation);
@@ -428,13 +429,7 @@ export class X402Service extends X402PaidRequest {
     while (remainingWaitMs(deadline, this.context.wait.nowMs()) >= 1) {
       const current = await this.operations.required(operationId);
       if (current.kind !== "x402_fetch" || current.strategy !== "local") throw new ApnError("APN_STATE_CORRUPT", "x402 operation changed strategy during settlement wait.");
-      if (current.record.terminal) {
-        return {
-          outcome: "completed",
-          requestedSeconds: waitSeconds.toString(),
-          observationCount: observations.toString(),
-        };
-      }
+      if (current.record.terminal) return waitOutcome("completed", waitSeconds, observations);
       if (!isPostExposureWaitState(current.record)) {
         throw new ApnError("APN_OPERATION_BLOCKED", "x402 operation has no proven post-exposure state to observe.");
       }
@@ -442,29 +437,13 @@ export class X402Service extends X402PaidRequest {
       observations += 1;
       const observed = await this.operations.required(operationId);
       if (observed.kind !== "x402_fetch" || observed.strategy !== "local") throw new ApnError("APN_STATE_CORRUPT", "x402 operation changed strategy during settlement wait.");
-      if (observed.record.terminal) {
-        return {
-          outcome: "completed",
-          requestedSeconds: waitSeconds.toString(),
-          observationCount: observations.toString(),
-        };
-      }
+      if (observed.record.terminal) return waitOutcome("completed", waitSeconds, observations);
       const remaining = remainingWaitMs(deadline, this.context.wait.nowMs());
       if (remaining <= 0) break;
       const result = await this.context.wait.wait(Math.min(5_000, Math.max(1, Math.floor(remaining))));
-      if (result === "interrupted") {
-        return {
-          outcome: "interrupted",
-          requestedSeconds: waitSeconds.toString(),
-          observationCount: observations.toString(),
-        };
-      }
+      if (result === "interrupted") return waitOutcome("interrupted", waitSeconds, observations);
     }
-    return {
-      outcome: "timeout",
-      requestedSeconds: waitSeconds.toString(),
-      observationCount: observations.toString(),
-    };
+    return waitOutcome("timeout", waitSeconds, observations);
   }
 
   private async reconcileOnly(operation: X402OperationRecord, deadline: number): Promise<void> {

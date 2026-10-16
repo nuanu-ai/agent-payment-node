@@ -8,6 +8,7 @@ import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
+import { X402AbandonService } from "./x402-abandon.js";
 export class OperationAbandonService {
     context;
     rails;
@@ -41,6 +42,8 @@ export class OperationAbandonService {
         if (found.kind === "facilitator_gasless_transfer" && this.facilitatorGasless !== undefined) {
             return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
         }
+        if (found.kind === "x402_fetch" && found.strategy === "local")
+            return await new X402AbandonService(this.context).abandon(operationId);
         if (found.kind !== "direct_transfer")
             return ineligible();
         const profileHash = found.record.profileHash;

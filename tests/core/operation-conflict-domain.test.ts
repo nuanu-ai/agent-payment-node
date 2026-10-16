@@ -129,7 +129,9 @@ test("every stored money family maps to its network and sending account", () => 
   const evm = (network: string, account: string) => [{ family: "evm", network, account: account.toLowerCase() }];
   assert.deepEqual(domains({ kind: "direct_transfer", record: open("d", { chainId: 42161, walletAddress: A }) }), evm("42161", A));
   assert.deepEqual(domains({ kind: "relay_unsigned", record: open("u", { sourceChainId: 1, sourceAccount: A }) }), evm("1", A));
-  assert.deepEqual(domains({ kind: "x402_fetch", strategy: "local", record: open("x", { chainId: "10", wallet: A.toLowerCase() }) }), evm("10", A));
+  const offer = (assetTransferMethod: string) => ({ selectedOffer: { resolved: { assetTransferMethod } } });
+  assert.deepEqual(domains({ kind: "x402_fetch", strategy: "local", record: open("x", { chainId: "10", wallet: A.toLowerCase(), ...offer("erc7710") }) }), evm("10", A));
+  assert.deepEqual(domains({ kind: "x402_fetch", strategy: "local", record: open("x", { chainId: "10", wallet: A.toLowerCase(), ...offer("eip3009") }) }), []);
   assert.deepEqual(domains({ kind: "x402_fetch", strategy: "provider_atomic", record: open("p", { provider: { payer: B } }) }), evm("8453", B));
   assert.deepEqual(domains({ kind: "rail_transfer", record: open("r", { account: { rail: "solana", address: SOLANA } }) }),
     [{ family: "solana", network: SOLANA_GENESIS, account: SOLANA }]);

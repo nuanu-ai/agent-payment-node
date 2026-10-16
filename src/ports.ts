@@ -133,6 +133,8 @@ export interface X402AuthorizationState {
   readonly value: boolean;
   readonly blockNumber: string;
   readonly blockHash: Hex;
+  /** Timestamp of the block the state was read at; it proves when an EIP-3009 validBefore has passed. */
+  readonly blockTimestamp: string;
   readonly blockTag: "safe" | "finalized" | "number";
   readonly observedAt: string;
   readonly rpcOrigin: string;

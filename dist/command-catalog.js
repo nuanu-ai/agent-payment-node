@@ -37,7 +37,7 @@ const directStates = {
     ],
 };
 const x402States = {
-    terminal: ["completed", "failed_before_effect", "failed_expired_unused", "failed_settled_without_result"],
+    terminal: ["completed", "failed_before_effect", "failed_expired_unused", "failed_settled_without_result", "abandoned_unknown"],
     non_terminal: [
         "preparing",
         "awaiting_approval",
@@ -237,7 +237,7 @@ const BASE_COMMANDS = [
         { command_path: ["operation", "abandon"], when: "Only for a provider-atomic ambiguous effect with no transaction hash or provider recovery reference, a local Solana/TRON transfer whose validity window passed with no RPC history, or a Local or MetaMask gasless transfer still unknown after its approval window, after accepting the unresolved financial risk." },
         { command_path: ["receipt", "get"], when: "When the operation is terminal." },
     ], ["apn operation status --operation <operation-id>"]),
-    command(["operation", "abandon"], "apn operation abandon --operation <operation-id>", "Administratively terminalize one strictly eligible unknown provider, expired local rail or expired gasless effect.", [operationRequired], "local_write", "After exact owner confirmation, appends an abandonment transition and authoritative receipt; expired local rail eligibility uses read-only RPC checks, gasless eligibility first retries read-only observation, and it never signs, submits or relays.", "foreground_tty", "Requires the exact operation-bound phrase and acknowledgement that the financial outcome remains unknown.", { terminal: ["abandoned_unknown"], non_terminal: ["ambiguous_effect", "unknown_finality", "submitted_pending"] }, [
+    command(["operation", "abandon"], "apn operation abandon --operation <operation-id>", "Administratively terminalize one strictly eligible unknown provider, expired local rail, expired gasless or expired local x402 effect.", [operationRequired], "local_write", "After exact owner confirmation, appends an abandonment transition and authoritative receipt; expired local rail eligibility uses read-only RPC checks, gasless eligibility first retries read-only observation, and it never signs, submits or relays.", "foreground_tty", "Requires the exact operation-bound phrase and acknowledgement that the financial outcome remains unknown.", { terminal: ["abandoned_unknown"], non_terminal: ["ambiguous_effect", "unknown_finality", "submitted_pending"] }, [
         { command_path: ["operation", "status"], when: "To inspect the immutable administrative terminal state." },
         { command_path: ["receipt", "get"], when: "To read the owner-acknowledgement receipt." },
     ], ["apn operation abandon --operation <operation-id>"]),

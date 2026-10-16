@@ -439,6 +439,7 @@ test("public x402 projection snapshots every state tuple and excludes protected 
     failed_before_effect: ["terminal", "x402_failed_before_effect", ["receipt.get"], "x402_proven_no_effect"],
     failed_expired_unused: ["terminal", "x402_failed_expired_unused", ["receipt.get"], "x402_expired_unused_finalized"],
     failed_settled_without_result: ["terminal", "x402_failed_settled_without_result", ["receipt.get"], "x402_settled_result_unavailable"],
+    abandoned_unknown: ["terminal", "x402_owner_abandoned_unknown", ["receipt.get"], "x402_owner_acknowledgement_only"],
   };
   for (const [state, [finalityClass, reason, nextActions, proofClass]] of Object.entries(cases) as Array<[
     X402State,

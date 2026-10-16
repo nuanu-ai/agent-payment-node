@@ -96,7 +96,9 @@ export function terminalClassification(state: X402TerminalState): {
       ? { reason: "x402_failed_before_effect", proofClass: "x402_proven_no_effect" }
       : state === "failed_expired_unused"
         ? { reason: "x402_failed_expired_unused", proofClass: "x402_expired_unused_finalized" }
-        : { reason: "x402_failed_settled_without_result", proofClass: "x402_settled_result_unavailable" };
+        : state === "abandoned_unknown"
+          ? { reason: "x402_owner_abandoned_unknown", proofClass: "x402_owner_acknowledgement_only" }
+          : { reason: "x402_failed_settled_without_result", proofClass: "x402_settled_result_unavailable" };
 }
 
 export function settlementResponseTransaction(response: SettlementResponseObservation): string | undefined {
@@ -113,5 +115,9 @@ export function remainingWaitMs(deadline: number, nowMs: number): number {
 }
 
 export function waitTimeout(seconds: number, observations: number): X402SettlementWaitProjection {
-  return { outcome: "timeout", requestedSeconds: seconds.toString(), observationCount: observations.toString() };
+  return waitOutcome("timeout", seconds, observations);
+}
+
+export function waitOutcome(outcome: X402SettlementWaitProjection["outcome"], seconds: number, observations: number): X402SettlementWaitProjection {
+  return { outcome, requestedSeconds: seconds.toString(), observationCount: observations.toString() };
 }

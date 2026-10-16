@@ -1141,10 +1141,9 @@ test("recoverable RPC faults after intermediate fsync return the latest durable 
       rpcOrigin: fixture.rpc.rpcOrigin,
     };
     fixture.rpc.logOutcomes.push({ kind: "complete", logs: [] });
-    let finalizedReads = 0;
     fixture.rpc.onX402Call = (name) => {
-      if (name === "finalized" && ++finalizedReads === 2) {
-        throw new ApnError("APN_RPC_AMBIGUOUS", "finalized-head recheck fault after zero-scan fsync");
+      if (name === "state:finalized") {
+        throw new ApnError("APN_RPC_AMBIGUOUS", "finalized nonce-state fault after zero-scan fsync");
       }
     };
 
@@ -1928,7 +1927,7 @@ test("authorized but never sent can finalize unused expiry after native material
   assert.deepEqual(fixture.native.calls, [], "finalized expiry is classified before any optional pre-send material read");
 });
 
-test("authorized but never sent extends a stale zero scan before finalized unused expiry", async (t) => {
+test("authorized but never sent closes on the finalized nonce state even with a stale zero scan", async (t) => {
   const fixture = await authorizedFixture(t, { idempotencyKey: "expiry-before-send-safe-advance" });
   failRecoveredNativeMaterial(fixture, "APN_KEYCHAIN_LOCKED");
   const unavailable = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
@@ -1974,63 +1973,10 @@ test("authorized but never sent extends a stale zero scan before finalized unuse
 
   const expired = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal((expired.operation as { readonly state?: unknown } | null)?.state, "failed_expired_unused", JSON.stringify(expired));
-  assert.deepEqual(
-    fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")),
-    [`logs:${fixture.rpc.safeHead.number}-${fixture.rpc.safeHead.number}`],
-  );
+  assert.deepEqual(fixture.rpc.x402Calls.filter((call) => call.startsWith("logs:")), [], "the finalized nonce state alone proves non-use");
+  assert.equal((await operation(fixture)).unusedExpiryEvidence?.schemaVersion, "apn.x402.unused-expiry-evidence.v2");
   assert.equal(fixture.native.calls.length, nativeCalls, "finalized expiry completes before another material read");
   assert.equal(fixture.http.calls.length, httpCalls, "pre-send expiry never exposes a paid request");
-});
-
-test("inconsistent safe and finalized ancestry cannot prove unused expiry", async (t) => {
-  for (const posture of ["same-height", "lower-height", "timestamp"] as const) {
-    await t.test(posture, async (nested) => {
-      const fixture = await authorizedFixture(nested, { idempotencyKey: `expiry-ancestry-${posture}` });
-      const current = await operation(fixture);
-      fixture.clock.advance(61_000);
-      fixture.rpc.safeHead = {
-        ...fixture.rpc.safeHead,
-        timestamp: current.authorization.validBefore,
-        observedAt: fixture.clock.now().toISOString(),
-      };
-      if (posture === "same-height") {
-        fixture.rpc.finalizedHead = {
-          queriedTag: "finalized",
-          number: fixture.rpc.safeHead.number,
-          hash: `0x${"c".repeat(64)}` as Hex,
-          timestamp: current.authorization.validBefore,
-          observedAt: fixture.rpc.safeHead.observedAt,
-          rpcOrigin: fixture.rpc.rpcOrigin,
-        };
-      } else if (posture === "lower-height") {
-        fixture.rpc.finalizedHead = {
-          ...fixture.rpc.finalizedHead,
-          timestamp: current.authorization.validBefore,
-          observedAt: fixture.rpc.safeHead.observedAt,
-        };
-        fixture.rpc.blockHashes.set(fixture.rpc.finalizedHead.number, `0x${"c".repeat(64)}` as Hex);
-      } else {
-        fixture.rpc.finalizedHead = {
-          queriedTag: "finalized",
-          number: fixture.rpc.safeHead.number,
-          hash: fixture.rpc.safeHead.hash,
-          timestamp: current.authorization.validBefore,
-          observedAt: fixture.rpc.safeHead.observedAt,
-          rpcOrigin: fixture.rpc.rpcOrigin,
-        };
-        fixture.rpc.blockTimestamps.set(
-          fixture.rpc.finalizedHead.number,
-          (BigInt(current.authorization.validBefore) - 1n).toString(),
-        );
-      }
-      fixture.rpc.authorizationStateValue = false;
-      const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal(resumed.ok, true, JSON.stringify(resumed));
-      assert.equal((resumed.operation as { readonly terminal?: unknown } | null)?.terminal, false);
-      assert.equal((await operation(fixture)).unusedExpiryEvidence, undefined);
-      assert.equal(fixture.http.calls.length, 1);
-    });
-  }
 });
 
 test("expiry requires finalized timestamp, false state, and complete zero scan", async (t) => {
