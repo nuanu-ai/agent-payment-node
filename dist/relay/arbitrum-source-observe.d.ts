@@ -42,7 +42,7 @@ export declare class RelayArbitrumSourceObserveService {
     /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
     observe(profile: string, operationId: string): Promise<{
         operationId: string;
-        state: "source_effect_reverted" | "source_effect_never_landed" | "observation_only" | "approval_skipped" | "source_effect_not_recorded" | "deposit_source_confirmed" | "source_proof_pending" | "approval_source_confirmed";
+        state: "source_effect_reverted" | "source_effect_never_landed" | "approval_skipped" | "observation_only" | "source_effect_not_recorded" | "deposit_source_confirmed" | "source_proof_pending" | "approval_source_confirmed";
         reason: string;
         approvalPhase: import("./arbitrum-source-effect-journal.js").ArbitrumEffectPhase | null;
         depositPhase: import("./arbitrum-source-effect-journal.js").ArbitrumEffectPhase | null;
