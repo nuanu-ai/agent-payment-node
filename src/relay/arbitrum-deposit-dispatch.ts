@@ -190,17 +190,13 @@ export class RelayArbitrumDepositDispatchService {
         return this.result(op, journal, "observation_only", "deposit_effect_already_started");
       if (journal === null || !["confirmed", "approval_skipped"].includes(journal.effects[0].phase))
         blocked("approval_not_confirmed_or_verified_skipped");
-      const firstPolicy = await this.lockedPolicy(profile);
-      if (firstPolicy === null) blocked("active_owner_policy_required");
-      const first = await this.snapshot(op, firstPolicy);
-      if (!first.readOnlyConditionsSatisfied) blocked(`preflight:${first.reasons.join(",")}`);
-      // A second canonical read closes the gap between owner consent and signing. Every refusable check runs here,
-      // before signing (R3); the profile, policy and owner-address locks stay held until the send settles.
+      // One canonical read after owner consent, under the held profile, policy and owner-address locks, closes the
+      // gap between consent and signing (BRDG-21); every refusable check runs here, before signing (R3).
       const freshPolicy = await this.lockedPolicy(profile);
       if (freshPolicy === null) blocked("active_owner_policy_required");
       const fresh = await this.snapshot(op, freshPolicy);
-      if (!fresh.readOnlyConditionsSatisfied || fresh.confirmedNonce !== fresh.pendingNonce ||
-        this.now().getTime() - Date.parse(fresh.observedAt) > 30_000) blocked("deposit_preflight_changed");
+      if (!fresh.readOnlyConditionsSatisfied) blocked(`preflight:${fresh.reasons.join(",")}`);
+      if (fresh.confirmedNonce !== fresh.pendingNonce || this.now().getTime() - Date.parse(fresh.observedAt) > 30_000) blocked("deposit_preflight_changed");
       const sealedNonce = journal.effects[1].phase === "sealed" ? journal.effects[1].attempt!.nonce : null;
       if (sealedNonce !== null && sealedNonce !== fresh.confirmedNonce) blocked("sealed_deposit_nonce_unavailable");
 

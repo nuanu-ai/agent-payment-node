@@ -9,7 +9,7 @@ import { RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE, createRelayArbitrumSourceDraft,
 const owner = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const now = new Date(1790347296 * 1000);
 const blockHash = `0x${"12".repeat(32)}`;
-const head = { number: "0x100", hash: blockHash };
+const head = { number: "0x100", hash: blockHash, baseFeePerGas: "0x1" };
 const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 const quote = async (): Promise<any> => JSON.parse(await readFile(
   "tests/core/relay-fixtures/arbitrum-usdc-ethereum-usdc-quote-20260925.json", "utf8"));
@@ -85,11 +85,11 @@ test("read-only preflight binds Arbitrum funding reads to one block and keeps di
       assert.deepEqual(calls.map(call => call.method), ["eth_chainId", "eth_getBlockByNumber"]);
       return ["0xa4b1", head]; // 42161
     }
-    assert.deepEqual(calls.map(call => call.method), ["eth_getBlockByNumber", "eth_getBalance", "eth_call", "eth_call"]);
-    for (const call of calls.slice(1)) assert.deepEqual(call.params[1], { blockHash, requireCanonical: true });
-    assert.equal((calls[2]!.params[0] as { to: string }).to, RELAY_ARBITRUM_USDC);
-    assert.equal((calls[3]!.params[0] as { data: string }).data.slice(0, 10), "0xdd62ed3e");
-    return [head, "0x3a352944000", word(500_000n), word(0n)];
+    assert.deepEqual(calls.map(call => call.method), ["eth_getBalance", "eth_call", "eth_call"]);
+    for (const call of calls) assert.deepEqual(call.params[1], { blockHash, requireCanonical: true });
+    assert.equal((calls[1]!.params[0] as { to: string }).to, RELAY_ARBITRUM_USDC);
+    assert.equal((calls[2]!.params[0] as { data: string }).data.slice(0, 10), "0xdd62ed3e");
+    return ["0x3a352944000", word(500_000n), word(0n)];
   } });
   assert.equal(batches, 2);
   assert.equal(result.fundingObserved, true);
@@ -104,7 +104,7 @@ test("preflight needs deposit gas only when exact owner allowance already covers
   const result = await preflightRelayArbitrumSourceDraft(draft, active(), owner, "0", now, {
     now: () => now,
     batch: async calls => calls.length === 2 ? ["0xa4b1", head]
-      : [head, "0x1d1a94a2000", word(500_000n), word(500_000n)], // 2,000,000,000,000 wei
+      : ["0x1d1a94a2000", word(500_000n), word(500_000n)], // 2,000,000,000,000 wei
   });
   assert.equal(result.approvalRequired, false);
   assert.equal(result.requiredNativeWei, draft.maxDepositNetworkFeeWei);
@@ -112,7 +112,7 @@ test("preflight needs deposit gas only when exact owner allowance already covers
   assert.deepEqual(result.fundingReasons, []);
 });
 
-test("preflight rejects reorg after EIP-1898 pinned reads and malformed RPC results", async () => {
+test("preflight pins every state read to the head hash with requireCanonical and rejects malformed RPC results", async () => {
   const draft = await createRelayArbitrumSourceDraft(await input());
   let batches = 0;
   await assert.rejects(preflightRelayArbitrumSourceDraft(draft, active(), owner, "0", now, {
@@ -120,17 +120,17 @@ test("preflight rejects reorg after EIP-1898 pinned reads and malformed RPC resu
     batch: async calls => {
       batches++;
       if (batches === 1) return ["0xa4b1", head];
-      assert.deepEqual(calls[0]!.params, ["0x100", false]);
-      for (const call of calls.slice(1)) assert.deepEqual(call.params[1], { blockHash, requireCanonical: true });
-      return [{ ...head, hash: `0x${"34".repeat(32)}` }, "0x3a352944000", word(500_000n), word(0n)];
+      for (const call of calls) assert.deepEqual(call.params[1], { blockHash, requireCanonical: true });
+      // A node refuses a pinned read once the hash is no longer canonical (EIP-1898).
+      return [{ error: { code: -32000, message: "block hash not canonical" } }, word(500_000n), word(0n)];
     },
-  }), { code: "APN_OPERATION_BLOCKED", details: { reason: "source_block_changed" } });
+  }), { code: "APN_RPC_PROTOCOL" });
   assert.equal(batches, 2);
   for (const malformed of [{ error: { code: -32000, message: "block not found" } }, "0x1", null]) {
     await assert.rejects(preflightRelayArbitrumSourceDraft(draft, active(), owner, "0", now, {
       now: () => now,
       batch: async calls => calls.length === 2 ? ["0xa4b1", head]
-        : [head, "0x3a352944000", malformed, word(0n)],
+        : ["0x3a352944000", malformed, word(0n)],
     }), { code: "APN_RPC_PROTOCOL" });
   }
 });
@@ -143,9 +143,8 @@ test("preflight fails closed on chain, block, funding and draft tamper", async (
       { now: () => now, batch: async () => responses[call++]! });
   };
   await assert.rejects(fail([["0x1", head]]), { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects(fail([["0xa4b1", head], [{ ...head, hash: `0x${"34".repeat(32)}` }, "0x1", word(500_000n), word(0n)]]),
-    { code: "APN_OPERATION_BLOCKED" });
-  const unfunded = await fail([["0xa4b1", head], [head, "0x0", word(1n), word(0n)]]);
+  await assert.rejects(fail([["0xa4b1", head], ["0x1", word(500_000n)]]), { code: "APN_OPERATION_BLOCKED" });
+  const unfunded = await fail([["0xa4b1", head], ["0x0", word(1n), word(0n)]]);
   assert.deepEqual(unfunded.fundingReasons, ["insufficient_usdc_balance", "insufficient_native_fee_balance"]);
   const changed = { ...draft, orderId: `0x${"11".repeat(32)}` };
   await assert.rejects(preflightRelayArbitrumSourceDraft(changed, active(), owner, "0", now,
@@ -155,5 +154,5 @@ test("preflight fails closed on chain, block, funding and draft tamper", async (
   { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(preflightRelayArbitrumSourceDraft(draft, active(), owner, "0", now,
     { now: () => new Date(draft.deadline), batch: async calls => calls.length === 2 ? ["0xa4b1", head]
-      : [head, "0x3a352944000", word(500_000n), word(0n)] }), { code: "APN_OPERATION_BLOCKED" });
+      : ["0x3a352944000", word(500_000n), word(0n)] }), { code: "APN_OPERATION_BLOCKED" });
 });

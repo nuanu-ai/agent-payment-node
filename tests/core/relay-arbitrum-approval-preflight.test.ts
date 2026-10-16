@@ -48,8 +48,8 @@ async function prepared() {
 }
 
 function rows(allowance = 0n, baseFee = "0x1", pendingNonce = "0x7") {
-  return [["0xa4b1", head], [head, "0x3a352944000", word(500_000n), word(allowance)],
-    ["0xa4b1", { ...head, baseFeePerGas: baseFee }, "0x7", pendingNonce]] as const;
+  return [["0xa4b1", { ...head, baseFeePerGas: baseFee }], ["0x3a352944000", word(500_000n), word(allowance)],
+    ["0x7", pendingNonce]] as const;
 }
 
 test("saved operation approval preflight pins balance, allowance, nonce and fee without admitting execution", async t => {
@@ -59,11 +59,9 @@ test("saved operation approval preflight pins balance, allowance, nonce and fee 
     now: () => now, batch: async calls => {
       const current = index++;
       if (current === 2) {
-        assert.deepEqual(calls.map(c => c.method), ["eth_chainId", "eth_getBlockByNumber",
-          "eth_getTransactionCount", "eth_getTransactionCount"]);
-        assert.deepEqual(calls[1]!.params, ["0x100", false]);
-        assert.deepEqual(calls[2]!.params, [owner.toLowerCase(), { blockHash, requireCanonical: true }]);
-        assert.deepEqual(calls[3]!.params, [owner.toLowerCase(), "pending"]);
+        assert.deepEqual(calls.map(c => c.method), ["eth_getTransactionCount", "eth_getTransactionCount"]);
+        assert.deepEqual(calls[0]!.params, [owner.toLowerCase(), { blockHash, requireCanonical: true }]);
+        assert.deepEqual(calls[1]!.params, [owner.toLowerCase(), "pending"]);
       }
       return rows()[current]!;
     },
@@ -88,26 +86,23 @@ test("sufficient allowance only produces a read-only skip candidate", async t =>
   assert.equal(result.executionAdmitted, false);
 });
 
-test("third batch rejects reorg, malformed nonce and fee; pending conflict and fee drift stay blocked", async t => {
+test("nonce batch rejects a malformed nonce and the head a malformed fee; pending conflict and fee drift stay blocked", async t => {
   const { temporary, operation } = await prepared(); t.after(temporary.cleanup);
-  for (const [name, third, code] of [
-    ["reorg", ["0xa4b1", { ...head, hash: `0x${"34".repeat(32)}` }, "0x7", "0x7"], "APN_OPERATION_BLOCKED"],
-    ["nonce error", ["0xa4b1", head, { error: { code: -32000 } }, "0x7"], "APN_RPC_PROTOCOL"],
-    ["base fee error", ["0xa4b1", { ...head, baseFeePerGas: null }, "0x7", "0x7"], "APN_RPC_PROTOCOL"],
-  ] as const) {
-    let index = 0;
-    await assert.rejects(preflightRelayArbitrumApproval(operation, active(), owner, "0", now,
-      { now: () => now, batch: async () => index++ < 2 ? rows()[index - 1]! : third }), { code }, name);
-    assert.equal(index, 3);
-  }
-  for (const [third, reason] of [
-    [["0xa4b1", head, "0x7", "0x8"], ["pending_nonce_conflict"]],
+  let index = 0;
+  await assert.rejects(preflightRelayArbitrumApproval(operation, active(), owner, "0", now,
+    { now: () => now, batch: async () => index++ < 2 ? rows()[index - 1]! : [{ error: { code: -32000 } }, "0x7"] }), { code: "APN_RPC_PROTOCOL" }, "nonce error");
+  assert.equal(index, 3);
+  index = 0;
+  await assert.rejects(preflightRelayArbitrumApproval(operation, active(), owner, "0", now,
+    { now: () => now, batch: async () => index++ === 0 ? ["0xa4b1", { ...head, baseFeePerGas: null }] : rows()[index - 1]! }), { code: "APN_RPC_PROTOCOL" }, "base fee error");
+  for (const [batches, reason] of [
+    [rows(0n, "0x1", "0x8"), ["pending_nonce_conflict"]],
     // The deposit that must follow is checked before any paid approval: both frozen envelopes are refused here.
-    [["0xa4b1", { ...head, baseFeePerGas: "0x174876e800" }, "0x7", "0x7"], ["approval_base_fee_exceeds_quote", "deposit_base_fee_exceeds_quote"]],
+    [rows(0n, "0x174876e800"), ["approval_base_fee_exceeds_quote", "deposit_base_fee_exceeds_quote"]],
   ] as const) {
-    let index = 0;
+    let next = 0;
     const result = await preflightRelayArbitrumApproval(operation, active(), owner, "0", now,
-      { now: () => now, batch: async () => index++ < 2 ? rows()[index - 1]! : third });
+      { now: () => now, batch: async () => batches[next++]! });
     assert.equal(result.readOnlyConditionsSatisfied, false);
     assert.deepEqual(result.reasons, reason);
   }

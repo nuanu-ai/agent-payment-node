@@ -76,9 +76,9 @@ test("saved Base quote hides provider locator and cannot turn a candidate into p
   const ports: RelayBnbProofPorts = { chainId: async () => 8453,
     transaction: async () => ({ hash, chainId: 8453, to: recipient, valueWei: BigInt(op.minOutputAtomic),
       blockNumber: 100n, blockHash }),
-    receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash }),
+    receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash, logs: [] }),
     block: async number => ({ number, hash: number === 100n ? blockHash : safeHash }),
-    finalityCheckpoint: async () => ({ number: 101n, hash: safeHash }), nativeTrace: async () => null };
+    finalityCheckpoint: async () => ({ number: 101n, hash: safeHash }) };
   const proof = await proveRelayBaseDestination(op, [hash], ports);
   assert.equal(proof.status, "recipient_credit_proven"); assert.equal(proof.paidAcceptance, false);
   assert.equal(proof.relayOrderFulfillmentProven, false);
@@ -91,7 +91,6 @@ test("saved Base quote hides provider locator and cannot turn a candidate into p
   assert.equal((await proveRelayBaseDestination(op, [hash], { ...ports,
     finalityCheckpoint: async () => ({ number: 99n, hash: safeHash }) })).status, "pending");
   const router = "0xb92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
-  const codeHash = "0xde894e5c12e9513d50613c8fff375ecbf19b5d9a53bec0662e2b9667e3ec8f15";
   const topic = "0xd35467972d1fda5b63c735f59d3974fa51785a41a92aa3ed1b70832836f8dba6";
   const amount = BigInt(op.minOutputAtomic);
   const event = { address: router, topics: [topic],
@@ -100,15 +99,13 @@ test("saved Base quote hides provider locator and cannot turn a candidate into p
     transaction: async () => ({ hash, chainId: 8453, to: router, valueWei: amount,
       blockNumber: 100n, blockHash }),
     receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash, logs: [event] }),
-    routerCodeHash: async () => codeHash,
-    adjacentBalances: async () => [100n, 100n + amount],
   };
   const credited = await proveRelayBaseDestination(op, [hash], contract);
   assert.equal(credited.status, "recipient_credit_proven");
   assert.equal(credited.paidAcceptance, false);
   assert.equal(credited.relayOrderFulfillmentProven, false);
   if (credited.status === "recipient_credit_proven") {
-    assert.equal(credited.proof.method, "verified_relay_router_event_balance");
+    assert.equal(credited.proof.method, "relay_router_event");
     assert.equal(credited.proof.creditedWei, amount.toString());
   }
   assert.equal((await proveRelayBaseDestination(op, [hash], { ...contract,
@@ -116,18 +113,13 @@ test("saved Base quote hides provider locator and cannot turn a candidate into p
       logs: [{ ...event, address: recipient }] }) })).status, "unproven");
   assert.equal((await proveRelayBaseDestination(op, [hash], { ...contract,
     receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash,
-      logs: [{ ...event, data: `0x${op.recipient.slice(2).padStart(64, "0")}${(amount + 1n).toString(16).padStart(64, "0")}` }] }) })).status, "unproven");
+      logs: [{ ...event, data: `0x${op.recipient.slice(2).padStart(64, "0")}${(amount - 1n).toString(16).padStart(64, "0")}` }] }) })).status, "mismatch");
   assert.equal((await proveRelayBaseDestination(op, [hash], { ...contract,
-    adjacentBalances: async () => [100n, 101n + amount] })).status, "unproven");
-  assert.equal((await proveRelayBaseDestination(op, [hash], { ...contract,
-    routerCodeHash: async () => safeHash })).status, "mismatch");
+    receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash, logs: [event, event] }) })).status, "unproven");
   assert.equal((await proveRelayBaseDestination(op, [hash], { ...contract,
     finalityCheckpoint: async () => ({ number: 99n, hash: safeHash }) })).status, "pending");
   assert.equal((await proveRelayBaseDestination(op, [hash], { ...contract,
     block: async number => ({ number, hash: number === 100n ? safeHash : blockHash }) })).status, "mismatch");
-  assert.equal((await proveRelayBaseDestination(op, [hash], { ...contract,
-    nativeTrace: async () => ({ transactionHash: hash, blockHash, complete: true,
-      revertedCallsExcluded: true, transfers: [] }) })).status, "unproven");
 });
 
 test("Base observe reads one provider candidate and never promotes credit to paid acceptance", async t => {
@@ -165,9 +157,9 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   let rpcCalls = 0, statusCalls = 0;
   const ports: RelayBnbProofPorts = { chainId: async () => { rpcCalls++; return 8453; },
     transaction: async () => ({ hash, chainId: 8453, to: recipient, valueWei: BigInt(op.minOutputAtomic), blockNumber: 100n, blockHash }),
-    receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash }),
+    receipt: async () => ({ transactionHash: hash, status: "success", blockNumber: 100n, blockHash, logs: [] }),
     block: async number => ({ number, hash: number === 100n ? blockHash : safeHash }),
-    finalityCheckpoint: async () => ({ number: 101n, hash: safeHash }), nativeTrace: async () => null };
+    finalityCheckpoint: async () => ({ number: 101n, hash: safeHash }) };
   const fetcher = (async () => { statusCalls++; return new Response(JSON.stringify({ status: "success", originChainId: 1,
     destinationChainId: 8453, txHashes: [hash] }), { status: 200 }); }) as typeof fetch;
   const service = new RelayBaseObserveService(state, () => ports, new RelayKeylessStatusService(state, fetcher));
@@ -223,8 +215,6 @@ test("Base observe reads one provider candidate and never promotes credit to pai
       logs: [{ address: router,
         topics: ["0xd35467972d1fda5b63c735f59d3974fa51785a41a92aa3ed1b70832836f8dba6"],
         data: `0x${op.recipient.slice(2).padStart(64, "0")}${amount.toString(16).padStart(64, "0")}` }] }),
-    routerCodeHash: async () => "0xde894e5c12e9513d50613c8fff375ecbf19b5d9a53bec0662e2b9667e3ec8f15",
-    adjacentBalances: async () => [100n, 100n + amount],
   };
   const operationalService = new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
     new RelayKeylessStatusService(state, boundFetcher), finalized, usage);
@@ -283,12 +273,10 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   assert.equal(missingUsage.operationalAcceptance, false);
 });
 
-test("Base adapter obtains code and both adjacent balances within eight paced POSTs", async t => {
+test("Base adapter proves one candidate in two batched POSTs with the chain id read once", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root); await state.initialize();
-  const txHash = `0x${"a".repeat(64)}`, inclusionHash = `0x${"b".repeat(64)}`,
-    safeHash = `0x${"c".repeat(64)}`;
-  const previousHash = `0x${"d".repeat(64)}`;
+  const txHash = `0x${"a".repeat(64)}`, inclusionHash = `0x${"b".repeat(64)}`, safeHash = `0x${"c".repeat(64)}`;
   const batches: string[][] = [];
   const rpc = { batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
     batches.push(calls.map(call => call.method));
@@ -299,30 +287,16 @@ test("Base adapter obtains code and both adjacent balances within eight paced PO
           value: "0x1", blockNumber: "0x64", blockHash: inclusionHash };
         case "eth_getTransactionReceipt": return { transactionHash: txHash, status: "0x1",
           blockNumber: "0x64", blockHash: inclusionHash, logs: [] };
-        case "eth_getBlockByNumber": return call.params[0] === "safe"
-          ? { number: "0x65", hash: safeHash } : call.params[0] === "0x63"
-            ? { number: "0x63", hash: previousHash } : call.params[0] === "0x64"
-              ? { number: "0x64", hash: inclusionHash, parentHash: previousHash } :
-                { number: "0x65", hash: safeHash };
-        case "eth_getCode": return "0x6000";
-        case "eth_getBalance": return call.params[1] === "0x63" ? "0x64" : "0x65";
+        case "eth_getBlockByNumber": return call.params[0] === "safe" ? { number: "0x65", hash: safeHash } : { number: "0x64", hash: inclusionHash };
         default: throw new Error(`Unexpected RPC ${call.method}`);
       }
     });
   } } as unknown as HttpsBaseRpc;
   const adapter = new RelayBnbReadOnlyRpc("https://base.example", state, rpc, undefined, 8453);
-  assert.equal(await adapter.chainId(), 8453);
-  assert.ok(await adapter.transaction(txHash));
-  assert.ok(await adapter.receipt(txHash));
-  assert.ok(await adapter.block(100n));
-  assert.deepEqual(await adapter.finalityCheckpoint(), { number: 101n, hash: safeHash });
-  assert.ok(await adapter.block(101n));
-  assert.ok(await adapter.routerCodeHash(recipient, 100n));
-  assert.deepEqual(await adapter.adjacentBalances(recipient, 100n, inclusionHash), [100n, 101n]);
-  assert.equal(adapter.physicalPosts, 8);
-  assert.equal(batches.length, 8);
-  assert.deepEqual(batches[7], ["eth_getBalance", "eth_getBalance", "eth_getBlockByNumber", "eth_getBlockByNumber"]);
-  await assert.rejects(adapter.chainId(), { code: "APN_RPC_BUDGET_EXCEEDED" });
-  const split = new RelayBnbReadOnlyRpc("https://base.example", state, rpc, undefined, 8453);
-  await assert.rejects(split.adjacentBalances(recipient, 100n, safeHash), { code: "APN_RPC_PROTOCOL" });
+  const [chain, tx, receipt, checkpoint] = await Promise.all([adapter.chainId(), adapter.transaction(txHash), adapter.receipt(txHash), adapter.finalityCheckpoint()]);
+  assert.equal(chain, 8453); assert.ok(tx); assert.ok(receipt); assert.deepEqual(checkpoint, { number: 101n, hash: safeHash });
+  assert.ok(await adapter.block(100n)); assert.equal(await adapter.chainId(), 8453);
+  assert.equal(adapter.physicalPosts, 2);
+  assert.deepEqual(batches, [["eth_chainId", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getBlockByNumber"], ["eth_getBlockByNumber"]]);
+  await assert.rejects(adapter.block(101n), { code: "APN_RPC_BUDGET_EXCEEDED" });
 });

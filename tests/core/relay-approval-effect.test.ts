@@ -263,9 +263,10 @@ test("a risen base fee that still fits the frozen envelopes admits the approval;
 
 for (const outcome of ["never_lands", "nonce_not_consumed", "own_transaction_known"] as const)
   test(`a resumed sealed approval whose nonce check says ${outcome} ends, resumes once, or is fenced for observation`, async t => {
-    const f = await setup(t); let fundingCalls = 0, checks = 0, discards = 0;
-    const interrupted = new RelayApprovalEffectService(f.state, { ...f.ports, funding: async op => {
-      if (++fundingCalls === 2) throw new Error("rpc 429"); return f.ports.funding(op); } });
+    const f = await setup(t); let loads = 0, checks = 0, discards = 0;
+    // Interrupted after the seal and before the submission marker: the bytes stay sealed and unsent.
+    const interrupted = new RelayApprovalEffectService(f.state, { ...f.ports, custody: { ...f.ports.custody, load: async op => {
+      if (++loads === 2) throw new Error("rpc 429"); return f.ports.custody.load(op); } } });
     await assert.rejects(interrupted.run(f.op.operationId), /rpc 429/);
     const journals = new RelayEffectJournalRepository(f.state.root);
     const sealed = (await journals.load(f.op.profileHash, f.op.operationId))!;

@@ -1,4 +1,4 @@
-/** Full canonical receipt fee for the finite post-Jovian Base Relay lanes. */
+/** Full canonical receipt fee for the finite Base Relay lanes, before or after Jovian. */
 import { ApnError } from "../errors.js";
 import { evmRpcQuantity } from "../evm-rpc-codec.js";
 export interface RelayBaseReceiptFee {
@@ -12,8 +12,8 @@ export function decodeRelayBaseReceiptFee(receipt: Record<string, unknown>): Rel
   const gas = evmRpcQuantity(receipt.gasUsed), price = evmRpcQuantity(receipt.effectiveGasPrice);
   const l1 = evmRpcQuantity(receipt.l1Fee);
   // OP-geth JSON fee extensions are QUANTITY, with uint32/uint64 protocol bounds.
-  // daFootprintGasScalar is emitted only after Jovian: do not silently apply its formula to an older fork.
-  evmRpcQuantity(receipt.daFootprintGasScalar);
+  // daFootprintGasScalar (Jovian) does not enter the fee charged here; when present it must still be a QUANTITY.
+  if (receipt.daFootprintGasScalar !== undefined) evmRpcQuantity(receipt.daFootprintGasScalar);
   const scalar = receipt.operatorFeeScalar, constant = receipt.operatorFeeConstant;
   if ((scalar === undefined) !== (constant === undefined)) invalid();
   const scalarValue = scalar === undefined ? 0n : evmRpcQuantity(scalar);

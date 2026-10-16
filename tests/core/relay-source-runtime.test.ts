@@ -68,39 +68,45 @@ async function setup(t: test.TestContext) {
     amountAtomic: "2500000", minOutputAtomic: quote.minimumOutputWei,
     createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
   const operations = new RelayUnsignedOperationRepository(temp.root); await operations.initialize(); await operations.persistLocked(op);
-  let batches = 0, sends = 0, confirms = 0, approvalVisible = false, depositVisible = false, reorgOnRecheck = false;
+  let batches = 0, sends = 0, confirms = 0, approvalVisible = false, depositVisible = false, reorgOnRecheck = false, finalized = true;
+  let onTransactionLookup: ((index: number) => void) | undefined;
   let summary: RelayExecutionSummary | null = null;
   const submitted: Hex[] = [];
   const approvalTopic = keccak256(toBytes("Approval(address,address,uint256)"));
+  const latestHash = `0x${"d".repeat(64)}`;
+  const answer = (item: { method: string; params: readonly unknown[] }): unknown => {
+    const index = submitted.findIndex(raw => keccak256(raw) === item.params[0]);
+    const visible = index >= 0 && ((index === 0 && approvalVisible) || (index === 1 && depositVisible));
+    switch (item.method) {
+      case "eth_chainId": return "0x1";
+      case "eth_getTransactionByHash":
+        onTransactionLookup?.(index);
+        return !visible ? null : { hash: item.params[0], chainId: "0x1", type: "0x2", blockNumber: "0x10", blockHash,
+          from: owner, to: index === 0 ? ETHEREUM_USDC : ETHEREUM_DEPOSITORY,
+          input: index === 0 ? quote.approval.data : quote.deposit.data, value: "0x0" };
+      case "eth_getTransactionReceipt": return !visible ? null : { transactionHash: item.params[0], blockNumber: "0x10", blockHash, status: "0x1",
+        logs: index === 0 ? [{ address: ETHEREUM_USDC, transactionHash: item.params[0], blockNumber: "0x10", blockHash,
+          removed: false, topics: [approvalTopic, word(BigInt(owner)), word(BigInt(ETHEREUM_DEPOSITORY))], data: word(2500000n) }] : [] };
+      case "eth_getBlockByNumber":
+        if (item.params[0] === "latest") return { number: "0x12", hash: latestHash, baseFeePerGas: "0x1" };
+        if (item.params[0] === "finalized") return { number: finalized ? "0x10" : "0xf", hash: `0x${"e".repeat(64)}` };
+        assert.equal(item.params[0], "0x10");
+        return { number: "0x10", hash: reorgOnRecheck ? `0x${"c".repeat(64)}` : blockHash };
+      case "eth_getBalance": assert.deepEqual(item.params.at(-1), { blockHash: latestHash, requireCanonical: true }); return "0xde0b6b3a7640000";
+      case "eth_call": {
+        assert.deepEqual(item.params.at(-1), { blockHash: latestHash, requireCanonical: true });
+        const data = (item.params[0] as { data: string }).data;
+        return data.startsWith("0x70a08231") ? word(2500000n) : word(approvalVisible ? 2500000n : 0n);
+      }
+      case "eth_getTransactionCount": return item.params[1] === "safe" ? "0x7" : approvalVisible ? "0x8" : "0x7";
+      case "eth_maxPriorityFeePerGas": return "0x1";
+      default: throw new Error(`Unexpected RPC ${item.method}`);
+    }
+  };
   const rpc = {
     batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]): Promise<readonly unknown[]> => {
       batches++;
-      if (calls[0]?.method === "eth_getTransactionByHash") {
-        assert.deepEqual(calls.map(item => item.method), ["eth_getTransactionByHash", "eth_getTransactionReceipt"]);
-        const index = submitted.findIndex(raw => keccak256(raw) === calls[0]?.params[0]);
-        if (index < 0 || (index === 0 && !approvalVisible) || (index === 1 && !depositVisible))
-          return [null, null];
-        const hash = calls[0].params[0];
-        return [{ hash, chainId: "0x1", type: "0x2", blockNumber: "0x10", blockHash,
-          from: owner, to: index === 0 ? ETHEREUM_USDC : ETHEREUM_DEPOSITORY,
-          input: index === 0 ? quote.approval.data : quote.deposit.data, value: "0x0" },
-        { transactionHash: hash, blockNumber: "0x10", blockHash, status: "0x1",
-          logs: index === 0 ? [{ address: ETHEREUM_USDC, transactionHash: hash, blockNumber: "0x10", blockHash,
-            removed: false, topics: [approvalTopic, word(BigInt(owner)), word(BigInt(ETHEREUM_DEPOSITORY))],
-            data: word(2500000n) }] : [] }];
-      }
-      if (calls[0]?.method === "eth_getBlockByNumber" && calls[0].params[0] === "0x10" && calls.length === 2)
-        return [{ number: "0x10", hash: blockHash }, { number: "0x10", hash: blockHash }];
-      if (calls.length === 3 && calls[2]?.method === "eth_chainId")
-        return [{ number: "0x10", hash: reorgOnRecheck ? `0x${"c".repeat(64)}` : blockHash },
-          { number: "0x10", hash: blockHash }, "0x1"];
-      if (calls.length === 2) return ["0x1", { number: "0x10", hash: blockHash, baseFeePerGas: "0x1" }];
-      if (calls.length === 7) {
-        for (const item of calls.slice(1, 4)) assert.deepEqual(item.params.at(-1), { blockHash, requireCanonical: true });
-        return [{ number: "0x10", hash: blockHash }, "0xde0b6b3a7640000", word(2500000n),
-          word(approvalVisible ? 2500000n : 0n), approvalVisible ? "0x8" : "0x7", "0x1", "0x1"];
-      }
-      throw new Error("Unexpected RPC batch");
+      return calls.map(answer);
     },
     submitRawTransaction: async (raw: Hex) => { sends++; submitted.push(raw); return keccak256(raw); },
   };
@@ -110,6 +116,8 @@ async function setup(t: test.TestContext) {
     showApproval: () => { approvalVisible = true; },
     showDeposit: () => { depositVisible = true; },
     reorgOnRecheck: () => { reorgOnRecheck = true; },
+    notFinal: () => { finalized = false; },
+    onTransactionLookup: (hook: (index: number) => void) => { onTransactionLookup = hook; },
     get evidence() { return { batches, sends, confirms, summary }; } };
 }
 
@@ -120,8 +128,8 @@ function usageFor(f: Awaited<ReturnType<typeof setup>>, operationId = f.op.opera
 }
 
 function wrongChainRpc(f: Awaited<ReturnType<typeof setup>>) {
-  return { ...f.rpc, batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) =>
-    calls.length === 2 ? ["0x38", { number: "0x10", hash: blockHash, baseFeePerGas: "0x1" }] : f.rpc.batchCall(calls) };
+  return { ...f.rpc, batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
+    const rows = await f.rpc.batchCall(calls); return calls.map((call, index) => call.method === "eth_chainId" ? "0x38" : rows[index]); } };
 }
 
 test("explicit authorization seals exact admission and sends the signed approval once", async t => {
@@ -208,7 +216,7 @@ test("installed Relay execute CLI confirms exact saved operation and explicit re
     close: async () => {} };
   const args = ["relay", "execute", "--operation", f.op.operationId, "--rpc-url", "https://rpc.example"];
   const options = { stateRoot: f.state.root, wrappingSecret: f.wrapping,
-    clock: { now: () => new Date(fixtureNow()) }, relayExecuteTransport: f.rpc,
+    clock: { now: () => new Date(fixtureNow()) }, relayExecuteTransport: f.rpc, relayApprovalInclusionWait: { polls: 0, delayMs: 0 },
     relayExecuteTtyOptions: { openTerminal: async () => terminal, isTerminal: () => true } };
   const first = await runCli(args, {}, options);
   assert.equal(first.ok, true);
@@ -234,7 +242,7 @@ test("finalized canonical approval advances to one deposit send", async t => {
   assert.equal(f.evidence.sends, 2);
 });
 
-test("approval and deposit finality use bounded physical POSTs and preserve journal phases", async t => {
+test("approval inclusion and deposit finality use two-POST observations and preserve journal phases", async t => {
   const f = await setup(t);
   let journal = await f.runtime.execute(f.op.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
@@ -250,12 +258,14 @@ test("approval and deposit finality use bounded physical POSTs and preserve jour
   assert.equal(journal.effects[0].phase, "confirmed");
   assert.equal(journal.effects[1].phase, "confirmed");
   assert.equal(f.evidence.sends, 2);
+  // Run 1: chain+head, pinned funding, approval lookup. Run 2: approval found + inclusion block, head + pinned funding
+  // (chain and approval proven once), deposit lookup. Run 3: deposit found + inclusion block.
   assert.deepEqual({ pendingApprovalPosts, pendingDepositPosts, finalizedPosts: f.evidence.batches },
-    { pendingApprovalPosts: 5, pendingDepositPosts: 19, finalizedPosts: 22 });
-  assert.equal(f.evidence.batches + f.evidence.sends, 24);
+    { pendingApprovalPosts: 3, pendingDepositPosts: 8, finalizedPosts: 10 });
+  assert.equal(f.evidence.batches + f.evidence.sends, 12);
 });
 
-test("paced source runtime reaches finalized approval and deposit through 24 synthetic physical POSTs", async t => {
+test("paced source runtime reaches the included approval and finalized deposit through 12 synthetic physical POSTs", async t => {
   const f = await setup(t);
   const runtime = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc,
     { confirm: async () => true }, { now: () => now }, "https://ethereum-rpc.publicnode.com");
@@ -268,7 +278,7 @@ test("paced source runtime reaches finalized approval and deposit through 24 syn
   f.showDeposit();
   journal = await runtime.execute(f.op.operationId);
   assert.equal(journal.effects[1].phase, "confirmed");
-  assert.deepEqual({ batches: f.evidence.batches, sends: f.evidence.sends }, { batches: 22, sends: 2 });
+  assert.deepEqual({ batches: f.evidence.batches, sends: f.evidence.sends }, { batches: 10, sends: 2 });
 });
 
 test("recheck reorg preserves the submitting approval and never resends", async t => {
@@ -279,7 +289,33 @@ test("recheck reorg preserves the submitting approval and never resends", async 
   assert.equal(journal.effects[0].phase, "submitting");
   assert.equal(journal.effects[1].phase, "pending");
   assert.equal(f.evidence.sends, 1);
-  assert.equal(f.evidence.batches, 8);
+  assert.equal(f.evidence.batches, 5);
+});
+
+test("an included approval with confirmations lets the deposit go out; the deposit confirms only at finality (BRDG-22)", async t => {
+  const f = await setup(t);
+  await f.runtime.execute(f.op.operationId);
+  f.showApproval(); f.notFinal();
+  let journal = await f.runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "confirmed");
+  assert.equal(journal.effects[1].phase, "submitting");
+  assert.equal(f.evidence.sends, 2);
+  f.showDeposit();
+  journal = await f.runtime.execute(f.op.operationId);
+  assert.equal(journal.effects[1].phase, "submitting");
+  assert.equal(f.evidence.sends, 2);
+});
+
+test("one confirmed run waits a bounded time for the just-sent approval and then sends the deposit", async t => {
+  const f = await setup(t);
+  const waiting = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc, { confirm: async () => true }, { now: () => now }, undefined, { polls: 3, delayMs: 1 });
+  let lookups = 0;
+  f.onTransactionLookup(index => { if (index === 0 && ++lookups === 2) f.showApproval(); });
+  const journal = await waiting.execute(f.op.operationId);
+  assert.equal(journal.effects[0].phase, "confirmed");
+  assert.equal(journal.effects[1].phase, "submitting");
+  assert.equal(f.evidence.sends, 2);
+  assert.equal(f.evidence.confirms, 0);
 });
 
 test("production Relay RPC factory rejects signed paths and query credentials", async t => {
