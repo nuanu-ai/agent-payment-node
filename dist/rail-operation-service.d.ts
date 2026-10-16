@@ -20,13 +20,16 @@ export declare class RailOperationService {
     private readonly lifecycle;
     constructor(context: RuntimeContext);
     prepare(input: RailPrepareInput): Promise<unknown>;
+    private prepareOperation;
     /** A durable, key-scoped claim survives a crash; only its short commit phases hold money-operation locks. */
     private prepareLocalSolana;
     approve(operationId: string): Promise<unknown>;
+    private approveOperation;
     /** The owner prompt and send-window reads run under a durable claim, outside money-operation locks. */
     private approveLocalSolana;
     private failApprovalClaim;
     resume(operationId: string): Promise<unknown>;
+    private resumeOperation;
     /** Observe an already bound local SOL effect without holding the profile lock during RPC pacing. */
     private resumeLocalSolana;
     receipt(operationId: string): Promise<unknown>;
