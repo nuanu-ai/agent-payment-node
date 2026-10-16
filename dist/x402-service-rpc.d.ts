@@ -8,6 +8,10 @@ export declare function assertX402RpcChain(rpc: Pick<RpcPort, "assertBaseChain">
 }>;
 export declare function x402ReadPort(rpc: RpcPort, chainId?: EvmChainId): X402RpcPort | null;
 export declare function boundedX402ReadPort(rpc: RpcPort, timeoutMs: number, chainId?: EvmChainId): X402RpcPort | null;
+/**
+ * A settlement wait first proves the endpoint's chain (read once per invocation and endpoint). The safe head is not
+ * read here: every poll reads it inside authorizationState, and the reconciler ignores a safe head behind the prepared block.
+ */
 export declare function assertWaitRpcProvenance(rpc: X402RpcPort, operation: X402OperationRecord): Promise<void>;
 export declare function isRecoverableX402RpcObservationFailure(error: unknown): boolean;
 export declare function isPostExposureWaitState(operation: X402OperationRecord): boolean;
