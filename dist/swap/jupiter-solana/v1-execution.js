@@ -192,14 +192,19 @@ export class JupiterV1ExecutionDriver {
             const claim = await this.d.bindings.loadClaim(op);
             if (claim !== null && claim.signature !== signature)
                 corrupt();
+            const { fresh } = await this.d.bindings.loadFresh(op, binding), guarded = await guardReceipt(fresh);
+            // Only the chain answer may leave the operation pending: no finalized status yet, or a failed or refused read.
+            let receipt;
             try {
-                const { fresh } = await this.d.bindings.loadFresh(op, binding), guarded = await guardReceipt(fresh);
-                const receipt = await validateFinalizedJupiterV1Receipt(this.d.rpc, guarded, { signature });
-                return await this.d.core.finalize(op, this.d.clock.now(), { receiptHash: receipt.receiptHash, transactionHash: receipt.signature, observedAt: this.d.clock.now().toISOString(), finalized: true });
+                receipt = await validateFinalizedJupiterV1Receipt(this.d.rpc, guarded, { signature });
             }
             catch {
                 return op;
             }
+            // A finalized receipt is always recorded. One clock read is both the transition instant and the proof's observedAt:
+            // two reads could straddle a millisecond and fail the receipt time binding (observedAt after the transition).
+            const at = this.d.clock.now();
+            return await this.d.core.finalize(op, at, { receiptHash: receipt.receiptHash, transactionHash: receipt.signature, observedAt: at.toISOString(), finalized: true });
         });
     }
     async proveUnlanded(input) { return await proveJupiterV1Unlanded(this.d, input); }

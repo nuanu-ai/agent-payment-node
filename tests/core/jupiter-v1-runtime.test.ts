@@ -119,8 +119,10 @@ async function pipelineFixture(t:test.TestContext){
  };
  function accountWire(key:string,slice?:{offset:number;length:number}){const a=m.semanticAccounts.find(a=>a.address===key);if(a===undefined||a.existence==="absent")return null;const bytes=Buffer.from(a.dataBase64,"base64");return {owner:a.owner,lamports:Number(a.lamports),executable:a.executable,data:[(slice===undefined?bytes:bytes.subarray(slice.offset,slice.offset+slice.length)).toString("base64"),"base64"],space:bytes.length,rentEpoch:0};}
  const providerFetch:typeof fetch=async url=>{providerReads++;return new Response(JSON.stringify(String(url).includes("/quote?")?m.quoteResponse:m.rawBuildResponse),{headers:{"content-type":"application/json"}});};
- let dateOverride:Date|undefined;
- const state=new StateStore(temp.root),clock={now:()=>dateOverride??new Date()};
+ let dateOverride:Date|undefined,clockReads=0;
+ // A real clock never returns the same instant twice under load: every read advances at least one millisecond, so a
+ // product path that reads the clock twice for one event is exercised deterministically, not by scheduler chance.
+ const state=new StateStore(temp.root),clock={now:()=>dateOverride??new Date(Date.now()+(++clockReads))};
  function runtime(stage:"quote"|"prepare"|"execute"|"observe",op?:string,foreground=true,endpoint="https://example.com"){const base=new SolanaRpc(endpoint,rpcFetch,new SolanaRpcBudget({maxPhysicalRequests:64,minimumIntervalMs:750,now:()=>clockMs,wait:async ms=>{clockMs+=ms;}}),new SolanaRpcPacer(state,()=>clockMs,async ms=>{clockMs+=ms;}));return createJupiterV1Runtime({state,clock,rpc:base,wrappingSecret:{async load(){secretReads++;const key=Buffer.alloc(32,77);lastWrappingKey=key;if(revokeWrapping){revokeWrapping=false;await revokePolicy();}return key;},async create(){return Buffer.alloc(32,77);}},foreground,providerFetch});}
  return{temp,owner,m,runtime,get rpcReads(){return rpcReads;},get providerReads(){return providerReads;},setNow(v:Date){dateOverride=v;},get heightBatches(){return heightBatches;},get sends(){return sends;},get secretReads(){return secretReads;},setFinal(){finalized=true;},setHeight(v:number){height=v;},setSenderHeight(v:number){senderHeight=v;},ambiguousSend(){ambiguous=true;},rejectSend(){rejected=true;},revokeWhileWrapping(){revokeWrapping=true;},revokeAtSenderHeight(){revokeAfterSign=true;},get lastWrappingKey(){return lastWrappingKey;}};
 }
