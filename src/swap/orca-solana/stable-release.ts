@@ -3,7 +3,7 @@ import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { GuardedSwapService } from "../service.js";
 import { SavedOrcaStableMaterialStore } from "./stable-material.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "./stable-mechanism.js";
 import { ORCA_SOLANA_CHAIN, USDC_MINT } from "./pins.js";
 
 /** Retires an unsigned stable preparation and its exact principal lease, including an orphan after a reserve crash. */
@@ -12,7 +12,7 @@ export async function releaseOrcaStableNoEffect(service: GuardedSwapService, mat
   return await service.operations.withLocks([`orca-stable-operation:${operationId}`], async () => {
     const operation = await service.operations.loadAny(operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stable Orca operation was not found.");
-    if (operation.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST)
+    if (!isOrcaStableGuardedMechanismDigest(operation.mechanismDigest))
       blocked("Operation does not use the stable guarded mechanism.", "orca_stable_mechanism_mismatch");
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()) || now.toISOString() < operation.updatedAt)
       throw new ApnError("APN_INVALID_INPUT", "Stable release time is invalid.");

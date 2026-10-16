@@ -5,7 +5,7 @@ import { SOLANA_USDT } from "../../chain-policy.js";
 import { validateSwapOperation } from "../model.js";
 import { validateSwapQuote } from "../quote.js";
 import { preparedSwapOperationId, swapIdempotencyHash } from "../service.js";
-import { ORCA_PROTOCOL_REGISTRY, ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest, orcaStableGuardedRegistryDigest } from "./stable-mechanism.js";
 import { validateOrcaStableUnsigned } from "./stable-prepare.js";
 import { ORCA_SOLANA_CHAIN, USDC_MINT, WHIRLPOOL_PROGRAM } from "./pins.js";
 import { ORCA_STABLE_POOL } from "./stable-readonly.js";
@@ -46,7 +46,8 @@ export async function validateOrcaStableMaterial(value, operation) {
     const evidence = value.evidence;
     if (evidence.policyDigest !== value.policyDigest || evidence.policyRevision !== value.policyRevision ||
         canonicalJson(evidence.sourceBinding) !== canonicalJson(sourceBinding) ||
-        evidence.activationDigest !== value.activationDigest || evidence.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
+        evidence.activationDigest !== value.activationDigest || typeof evidence.mechanismDigest !== "string" ||
+        !isOrcaStableGuardedMechanismDigest(evidence.mechanismDigest) ||
         evidence.messageHash !== preview.messageHash || evidence.unsignedPayloadHash !== sha256(preview.unsignedPayload) ||
         evidence.blockhash !== preview.blockhash || evidence.lastValidBlockHeight !== preview.lastValidBlockHeight ||
         quote.providerResponseHash !== domainHash("apn.orca-stable-candidate-evidence.v1", canonicalJson(value.evidence)) ||
@@ -61,8 +62,8 @@ export async function validateOrcaStableMaterial(value, operation) {
         const op = validateSwapOperation(operation);
         if (value.operationId !== op.operationId || value.idempotencyHash !== op.idempotencyHash ||
             quote.quoteHash !== op.quote.quoteHash || canonicalJson(quote) !== canonicalJson(op.quote) ||
-            value.policyDigest !== op.policyDigest || op.mechanismDigest !== ORCA_STABLE_GUARDED_MECHANISM_DIGEST ||
-            op.protocolRegistryDigest !== ORCA_PROTOCOL_REGISTRY.registryDigest ||
+            value.policyDigest !== op.policyDigest || op.mechanismDigest !== evidence.mechanismDigest ||
+            op.protocolRegistryDigest !== orcaStableGuardedRegistryDigest(op.mechanismDigest) ||
             !["quoted", "prepared", "awaiting_approval", "reserved", "submitting", "submitted", "unknown_finality",
                 "finalized", "failed_confirmed_revert"].includes(op.state) ||
             (op.submissionMarker === null ? (op.state === "reserved" ? op.usageLease === null : op.usageLease !== null) :
