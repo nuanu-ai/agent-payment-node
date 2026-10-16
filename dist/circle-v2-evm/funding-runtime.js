@@ -6,7 +6,7 @@ import { verifyCircleFinalizedRevert } from "./revert-proof.js";
 import { getAddress, keccak256 } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
+import { evmSentOutcome, evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import { OperationService } from "../operation-service.js";
@@ -275,6 +275,12 @@ export class CircleFundingEvmService {
                     const remote = rpc(effect);
                     await remote.identity();
                     return evmUnsentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
+                        nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
+                },
+                sentOutcome: async (_op, effect) => {
+                    const remote = rpc(effect);
+                    await remote.identity();
+                    return evmSentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
                         nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
                 },
                 discard: (op, effect) => this.custody.discard(op, effect) },

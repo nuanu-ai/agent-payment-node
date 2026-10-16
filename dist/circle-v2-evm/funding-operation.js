@@ -86,7 +86,8 @@ export function validateCircleFundingOperation(value) {
         if (u.account !== expected.account || u.chain !== expected.chain || u.asset.kind !== expected.kind || u.asset.identifier !== expected.identifier || u.amountAtomic !== expected.amount || u.rail !== "bridge" || !op.policies.some(p => p.policyDigest === u.policyDigest))
             circleCorrupt("usage_binding");
     }
-    if (op.usageFinalized && op.state !== "external_fulfilled" && (op.state === "cancelled_unsubmitted" ? op.usage.some(u => u.state !== "failed_before_effect") : op.usage.length !== 5 || op.usage.some(u => !["finalized", "failed_confirmed_revert"].includes(u.state))))
+    // A never-landed approval releases holds that its submission fence had exposed (`released_unsubmitted`); both mean nothing counted.
+    if (op.usageFinalized && op.state !== "external_fulfilled" && (op.state === "cancelled_unsubmitted" ? op.usage.some(u => !["failed_before_effect", "released_unsubmitted"].includes(u.state)) : op.usage.length !== 5 || op.usage.some(u => !["finalized", "failed_confirmed_revert"].includes(u.state))))
         circleCorrupt("usage_finality");
     if (op.externalFulfillment !== undefined) {
         validateFundingExternalFulfillment(op.externalFulfillment, op);

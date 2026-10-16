@@ -6,7 +6,7 @@ import { verifyCircleFinalizedRevert } from "./revert-proof.js";
 import { getAddress, keccak256, type Hex } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
+import { evmSentOutcome, evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -173,6 +173,9 @@ export class CircleFundingEvmService {
       unsent: { outcome: async (_op, effect) => { const remote = rpc(effect); await remote.identity();
         return evmUnsentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
           nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") }); },
+        sentOutcome: async (_op, effect) => { const remote = rpc(effect); await remote.identity();
+          return evmSentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
+            nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") }); },
         discard: (op, effect) => this.custody.discard(op, effect) },
       broadcast: async (e, raw, guard) => { guard(); const current = await this.required(initial.operationId); if (e.role === "mint" || e.role === "cleanup") await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(current); guard(); const effect = snapshotCircleFundingEffect(current, e); await this.custody.claimSend(current, effect, guard); guard(); if (keccak256(raw) !== e.transactionHash) circleBlocked("sealed_broadcast_hash_changed"); const returned = circleHex(await rpc(e).call("eth_sendRawTransaction", [raw], guard), 32); if (returned !== keccak256(raw)) circleBlocked("broadcast_hash_changed"); return returned; },
       observeEffect: async (op, effect) => {

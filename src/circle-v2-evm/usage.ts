@@ -208,7 +208,7 @@ export class CircleUsage {
     }
     return result;
   }
-  async follow(op: CircleKnownOperation, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<readonly AssetUsageReservation[]> {
+  async follow(op: CircleKnownOperation, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect" | "released_unsubmitted"): Promise<readonly AssetUsageReservation[]> {
     let rows = op.usage;
     if (target === "failed_before_effect" && rows.length === 0) {
       const existing: AssetUsageReservation[] = [];
