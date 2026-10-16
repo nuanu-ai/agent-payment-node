@@ -5,6 +5,7 @@ import { decodeAbiParameters, decodeEventLog, decodeFunctionResult, encodeFuncti
 import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -117,9 +118,10 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
     if (rpcQuantity(checkedSource.number) !== BigInt(quote.block.numberAtomic) ||
         hex32(checkedSource.hash) !== quote.block.hash)
         fail("APN_RPC_PROTOCOL", "source_block_changed_after_prepare_reads");
+    const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString() });
     const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
     const body = {
-        schemaVersion: "apn.stargate-v2-native-operation.v2", operationId, profile, profileHash, idempotencyHash,
+        schemaVersion: "apn.stargate-v2-native-operation.v3", operationId, profile, profileHash, idempotencyHash, policy,
         owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy,
         finalityPolicyProvenance: "pinned_v2", sourcePool: SOURCE_POOL,
         destinationPool: DESTINATION_POOL, sourceEid: SOURCE_EID, destinationEid: DESTINATION_EID, quote, sourceCodeHash: config.codeHash,
@@ -139,7 +141,7 @@ export async function executeStargateV2NativeEth(operationId, ports, journal) {
     const initial = await journal.load(operationId);
     if (initial === null)
         fail("APN_OPERATION_BLOCKED", "operation_missing");
-    return await journal.withOwnerChainLock(initial.owner, SOURCE_CHAIN, async () => await journal.withLock(operationId, async () => await executeLocked(operationId, ports, journal)));
+    return await journal.withOwnerLock(initial.owner, async () => await journal.withLock(operationId, async () => await executeLocked(operationId, ports, journal)));
 }
 async function executeLocked(operationId, ports, journal) {
     let operation = await journal.load(operationId);
@@ -147,20 +149,24 @@ async function executeLocked(operationId, ports, journal) {
         fail("APN_OPERATION_BLOCKED", "operation_missing");
     if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase))
         return await observeOnly(operation, ports, journal);
-    if (operation.phase === "observed")
-        return operation;
+    if (operation.phase === "observed" || operation.phase === "failed_confirmed_revert")
+        return await followPhaseUsage(operation, ports);
     if (operation.finalityPolicyProvenance === "derived_legacy_v1")
         fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
+    if (operation.policy === undefined)
+        fail("APN_REPREPARE_REQUIRED", "owner_policy_binding_required");
     const now = ports.now ?? Date.now;
+    // Nothing was marked for sending, so an expired operation releases any hold an interrupted earlier run took.
+    const expired = async (reason) => { await ports.followUsage(operation, "failed_before_effect"); return fail("APN_REPREPARE_REQUIRED", reason); };
     if (Date.parse(operation.expiresAt) <= now())
-        fail("APN_REPREPARE_REQUIRED", "expired");
+        await expired("expired");
     if (operation.phase === "prepared") {
         await ports.approve(operation);
         operation = transition(operation, "approved", "foreground_owner_confirmation", now());
         await journal.save(operation);
     }
     if (Date.parse(operation.expiresAt) <= now())
-        fail("APN_REPREPARE_REQUIRED", "expired_after_approval");
+        await expired("expired_after_approval");
     const fresh = await quoteStargateV2Direct({ sourceChainId: 1, destinationChainId: 130, sourceToken: "native", destinationToken: "native",
         recipient: operation.recipient, amountAtomic: operation.amountAtomic }, ports.sourceCall);
     assertLane(fresh);
@@ -177,6 +183,14 @@ async function executeLocked(operationId, ports, journal) {
     const destination = await readPoolConfig(ports.destinationCall, DESTINATION_CHAIN, DESTINATION_POOL, DESTINATION_EID, "latest");
     if (destination.codeHash !== operation.destinationCodeHash)
         fail("APN_REPREPARE_REQUIRED", "destination_code_changed");
+    // One fee rule: the frozen envelope must be includable now; its signed gas × maxFeePerGas stays the approved spend bound.
+    const head = await ports.sourceCall("eth_getBlockByNumber", ["latest", false]);
+    if (head === null || typeof head !== "object" || Array.isArray(head))
+        fail("APN_RPC_PROTOCOL", "source_head");
+    if (!evmFrozenFeeAdmitted(rpcQuantity(head.baseFeePerGas), { maxFeePerGasWei: BigInt(operation.envelope.maxFeePerGasAtomic),
+        maxPriorityFeePerGasWei: BigInt(operation.envelope.maxPriorityFeePerGasAtomic) }))
+        fail("APN_REPREPARE_REQUIRED", "fee_spike");
+    await ports.reserveUsage(operation);
     // Re-read the encrypted profile after every network preflight and immediately before signing.
     const identity = await ports.signerIdentity();
     if (canonicalProfile(identity.profile) !== operation.profile || address(identity.address) !== operation.owner ||
@@ -198,9 +212,18 @@ async function executeLocked(operationId, ports, journal) {
     catch {
         operation = transition(operation, "unknown_finality", "broadcast_result_ambiguous_no_resend", now());
         await journal.save(operation);
-        return operation;
+        return await followPhaseUsage(operation, ports);
     }
+    await followPhaseUsage(operation, ports);
     return await observeOnly(operation, ports, journal);
+}
+/** The ledger state a phase proves; phases before the attempt marker imply nothing yet. */
+async function followPhaseUsage(operation, ports) {
+    const phase = operation.phase, target = phase === "submitted" ? "submitted" :
+        phase === "unknown_finality" ? "unknown_finality" : phase === "observed" ? "finalized" : phase === "failed_confirmed_revert" ? "failed_confirmed_revert" : undefined;
+    if (target !== undefined)
+        await ports.followUsage(operation, target);
+    return operation;
 }
 async function observeOnly(input, ports, journal) {
     let operation = input;
@@ -212,7 +235,15 @@ async function observeOnly(input, ports, journal) {
             operation = transition(operation, "unknown_finality", "source_receipt_not_safe", (ports.now ?? Date.now)());
             await journal.save(operation);
         }
-        return operation;
+        return await followPhaseUsage(operation, ports);
+    }
+    if (receipt.status === "reverted") {
+        // A revert at the route's source finality is final: nothing was bridged and the same bytes are never resent.
+        if (receipt.transactionHash !== operation.transactionHash || receipt.finality !== operation.finalityPolicy.source.blockTag)
+            fail("APN_RPC_PROTOCOL", "source_revert_receipt");
+        operation = transition(operation, "failed_confirmed_revert", "source_reverted_at_finality", (ports.now ?? Date.now)());
+        await journal.save(operation);
+        return await followPhaseUsage(operation, ports);
     }
     const source = sourceReceipt(operation, receipt);
     const destination = await ports.observeDestination({ sourceTransactionHash: source.transactionHash, guid: source.guid,
@@ -227,15 +258,15 @@ async function observeOnly(input, ports, journal) {
             operation = seal({ ...operation, phase: "submitted", sourceReceipt: source, transitions });
             await journal.save(operation);
         }
-        return operation;
+        return await followPhaseUsage(operation, ports);
     }
     if (destination.mode === "balance_delta")
-        return operation;
+        return await followPhaseUsage(operation, ports);
     validateDestination(operation, source, destination);
     operation = seal({ ...operation, phase: "observed", guid: source.guid, sourceReceipt: source, destinationEvidence: destination,
         transitions: [...operation.transitions, { phase: "observed", at: new Date((ports.now ?? Date.now)()).toISOString(), reason: "destination_delivery_safe" }] });
     await journal.save(operation);
-    return operation;
+    return await followPhaseUsage(operation, ports);
 }
 function sourceReceipt(operation, receipt) {
     if (receipt.status !== "success" || receipt.finality !== operation.finalityPolicy.source.blockTag || receipt.transactionHash !== operation.transactionHash)

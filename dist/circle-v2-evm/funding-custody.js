@@ -28,6 +28,12 @@ export class CircleFundingEffectStore extends SecureStateStore {
                 if (await this.readJson(`circle-v2-evm-funding-effects/${op.operationId}-${role}${suffix}.json`) !== null)
                     circleBlocked("external_owned_private_entry");
     }
+    /** Only for an effect already recorded `abandoned_unsent`; its permanent sign claim stays and refuses any re-signing. */
+    async discard(op, effect) {
+        if (effect.phase !== "abandoned_unsent")
+            circleBlocked("discard_requires_never_landed_effect");
+        await this.removeFile(this.path(op, effect.role));
+    }
     async load(op, effect, guard) {
         const value = await this.readJson(this.path(op, effect.role));
         if (value === null)
@@ -147,6 +153,10 @@ export class LocalCircleFundingCustody {
         this.material = new CircleFundingEffectStore(state.root, wrapping);
     }
     async load(op, effect) { return await this.material.load(op, effect); }
+    async discard(op, effect) {
+        const custody = effect.role === "mint" ? op.destinationCustody : op.sourceCustody;
+        await this.state.withLocks([`custody:${custody.profileHash}`], async () => this.material.discard(op, effect));
+    }
     async claimSend(op, effect, guard) {
         const gate = () => { assertCircleFundingEffectGuard(op, effect, guard); assertCircleFundingRuntimeAuthority(this.state, op, effect); };
         gate();

@@ -101,8 +101,6 @@ test("offline command prepares one durable unsigned Arbitrum operation and repla
   if (required.kind !== "relay_unsigned") throw new Error("wrong operation kind");
   assert.equal(required.record.arbitrumDraft?.quoteDigest, prepared.quoteDigest);
   assert.throws(() => relayExecutionRoute(required.record), { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects(new RelayRetireService(state, { now: () => now }).retire({ profile: "default",
-    operationId: prepared.operationId }), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(reopened.assertEvmAccountAvailable(required.record.profileHash, 42161, owner),
     { code: "APN_OPERATION_BLOCKED" });
   await reopened.assertEvmAccountAvailable(required.record.profileHash, 1, owner);
@@ -113,6 +111,11 @@ test("offline command prepares one durable unsigned Arbitrum operation and repla
   const changed = await core.execute({ command: "relay.arbitrum.prepare", ...input, maxProviderFeeAtomic: "401483" });
   assert.equal(changed.ok, false);
   assert.equal(changed.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  // An untouched Arbitrum quote no longer holds the account forever: retirement closes it.
+  const retired = await new RelayRetireService(state, { now: () => now }).retire({ profile: "default",
+    operationId: prepared.operationId });
+  assert.equal(retired.state, "retired"); assert.equal(retired.terminal, true);
+  await reopened.assertEvmAccountAvailable(required.record.profileHash, 42161, owner);
 });
 
 test("default reader refuses a quote-file symlink before creating an operation", async t => {

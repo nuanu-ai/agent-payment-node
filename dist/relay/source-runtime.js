@@ -10,6 +10,7 @@ import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
 import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
 import { ApnError } from "../errors.js";
+import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { isGrantedPermissionRecord } from "../metamask-smart-account-record.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { HttpsBaseRpc } from "../rpc.js";
@@ -137,8 +138,8 @@ export class RelayEthereumSourceRuntime {
             await this.reconcilePreEffectReservation(op);
             const existing = await new RelayEffectJournalRepository(this.state.root).load(profileHash, operationId);
             const observationOnly = existing !== null && (existing.effects[0].phase === "submitting" ||
-                existing.effects[1].phase === "submitting" || existing.effects[0].phase === "failed" ||
-                existing.effects[1].phase === "failed" || existing.effects[1].phase === "confirmed");
+                existing.effects[1].phase === "submitting" || existing.effects.some(e => e.phase === "failed" || e.phase === "abandoned_unsent") ||
+                existing.effects[1].phase === "confirmed");
             if (observationOnly) {
                 if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
                     blocked("operation_retired");
@@ -185,6 +186,11 @@ export class RelayEthereumSourceRuntime {
                 },
                 funding: async () => this.funding(op),
                 send: async (raw) => this.rpc.submitRawTransaction(raw),
+                unsentOutcome: async (input) => {
+                    const [count, own] = await this.rpc.batchCall([{ method: "eth_getTransactionCount", params: [input.account, "safe"] },
+                        { method: "eth_getTransactionByHash", params: [input.transactionHash] }]);
+                    return evmUnsentOutcome(async (method) => method === "eth_getTransactionCount" ? count : own, input);
+                },
             };
             const approvalPorts = { ...common,
                 sign: async (operation) => this.sign(operation, "approval"), custody: this.approvalCustody,
@@ -358,11 +364,10 @@ export class RelayEthereumSourceRuntime {
         const priority = evmRpcQuantity(rows[5]), baseFee = evmRpcQuantity(head.baseFeePerGas);
         const nonce = evmRpcQuantity(rows[4]);
         this.signingNonce = nonce;
-        const currentMaxFeePerGasWei = baseFee * 2n + priority;
-        if (currentMaxFeePerGasWei === 0n)
+        if (baseFee * 2n + priority === 0n)
             blocked("source_fee_unavailable");
         return { chainId: 1, nativeBalanceWei: evmRpcQuantity(rows[1]), tokenBalanceAtomic: evmRpcWord(rows[2]),
-            allowanceAtomic: evmRpcWord(rows[3]), currentMaxFeePerGasWei, nextNonce: nonce };
+            allowanceAtomic: evmRpcWord(rows[3]), baseFeePerGasWei: baseFee, nextNonce: nonce };
     }
     async sign(op, role) {
         await this.assertReady(op);
@@ -460,8 +465,10 @@ export class RelayEthereumSourceRuntime {
     }
     async updateUsage(op, journal) {
         const approval = journal.effects[0].phase, deposit = journal.effects[1].phase;
-        const state = deposit === "confirmed" ? "finalized" : deposit === "failed" ? "failed_confirmed_revert" :
-            approval === "failed" ? "failed_confirmed_revert" :
+        // Never-landing bytes moved no principal: an approval that never landed releases the untouched hold, a deposit
+        // that never landed after a confirmed approval releases it uncounted (failed_confirmed_revert without consumption).
+        const state = deposit === "confirmed" ? "finalized" : deposit === "failed" || deposit === "abandoned_unsent" ? "failed_confirmed_revert" :
+            approval === "failed" ? "failed_confirmed_revert" : approval === "abandoned_unsent" ? "failed_before_effect" :
                 (approval === "pending" || approval === "signing_started" || approval === "sealed") ? null : "submitted";
         if (state === null)
             return;
@@ -473,7 +480,7 @@ export class RelayEthereumSourceRuntime {
         if (existing.state === state)
             return;
         await this.usage.transition({ ...identity, reservationId: id, policyDigest: op.policyDigest, state,
-            now: this.clock.now(), ...(state === "finalized" || state === "failed_confirmed_revert"
+            now: this.clock.now(), ...(state === "finalized" || state === "failed_confirmed_revert" || state === "failed_before_effect"
                 ? { outcomeDigest: journal.integrityHash } : {}) });
     }
 }

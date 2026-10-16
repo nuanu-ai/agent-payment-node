@@ -125,6 +125,7 @@ function harness(state: StateStore, op: RelayUnsignedOperation, initial: Arbitru
   } } as unknown as Pick<RelayArbitrumDepositPreflightReader, "read">;
   const service = new RelayArbitrumDepositDispatchService(state, reader, {
     confirm: async summary => { confirmations++; assert.equal(summary.depositAmountAtomic, "500000");
+      assert.equal(summary.recipient, op.recipient); assert.equal(summary.minimumOutputAtomic, op.minOutputAtomic);
       return options.confirm ?? true; },
     signer: { sign: async (operation, nonce) => { signs++;
       const envelope = (operation.arbitrumDraft!.rawQuote as any).steps[1].items[0].data;
@@ -158,7 +159,7 @@ test("verified skip permits one pinned deposit; replay is observation only and l
   assert.equal((await lease(state, op))?.state, "submitted");
   const replay = await h.service.execute("default", op.operationId);
   assert.equal(replay.state, "observation_only");
-  assert.deepEqual(h.counts(), { reads: 3, signs: 1, sends: 1, confirmations: 1 });
+  assert.deepEqual(h.counts(), { reads: 2, signs: 1, sends: 1, confirmations: 1 });
 });
 
 test("buyer deposit dispatch reads its selected profile policy and rejects profile mismatch", async t => {
@@ -190,7 +191,7 @@ test("confirmed approval admits deposit but ambiguous send cannot replay", async
   assert.equal(h.counts().sends, 1);
   let depositJournal = h.journal();
   const blockHash = `0x${"3".repeat(64)}` as Hex;
-  const source = new RelayArbitrumSourceObserveService(state, { observe: async (deposit, approval) => ({
+  const source = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observeUnsent: async () => ({ outcome: "nonce_not_consumed" as const, proof: null }), observe: async (deposit, approval) => ({
     sourceChainId: 42161 as const, rpcOrigin: "https://arb-rpc.example",
     deposit: { transactionHash: deposit.transactionHash, blockNumber: "120", blockHash },
     approval: approval === undefined ? null : { transactionHash: approval.transactionHash,
@@ -223,12 +224,32 @@ test("approval gate, owner decline, policy race and canonical reorg prevent send
   const declined = harness(state, op, await skippedJournal(op), { confirm: false });
   await assert.rejects(() => declined.service.execute("default", op.operationId));
   assert.equal(declined.counts().signs, 0);
-  const race = harness(state, op, await skippedJournal(op), { revokeAtPolicyRead: 3 });
-  assert.equal((await race.service.execute("default", op.operationId)).state, "observation_only");
-  assert.equal(race.counts().sends, 0);
-  const reorg = harness(state, op, await skippedJournal(op), { failReadAt: 2 });
-  assert.equal((await reorg.service.execute("default", op.operationId)).state, "observation_only");
-  assert.equal(reorg.counts().sends, 0);
+  const race = harness(state, op, await skippedJournal(op), { revokeAtPolicyRead: 2 });
+  await assert.rejects(race.service.execute("default", op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  assert.equal(race.counts().signs, 0); assert.equal(race.counts().sends, 0);
+  const reorg = harness(state, op, await skippedJournal(op), { failReadAt: 1 });
+  await assert.rejects(reorg.service.execute("default", op.operationId), /canonical block reorg/);
+  assert.equal(reorg.counts().signs, 0); assert.equal(reorg.counts().sends, 0);
+  assert.equal(reorg.journal().effects[1].phase, "pending");
+});
+
+test("a deposit sealed before an interrupted send resumes under fresh consent and sends the sealed bytes once", async t => {
+  const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
+  const sent: Hex[] = [];
+  let current = await skippedJournal(op);
+  current = await advanceArbitrumSourceEffectJournal(current, op, { kind: "begin_signing", role: "deposit",
+    marker: randomBytes(32).toString("hex"), at: now.toISOString() });
+  const envelope = (op.arbitrumDraft!.rawQuote as any).steps[1].items[0].data;
+  const raw = await account.signTransaction({ type: "eip1559", chainId: 42161, nonce: 7,
+    to: envelope.to as Hex, data: envelope.data as Hex, value: 0n, gas: BigInt(envelope.gas),
+    maxFeePerGas: BigInt(envelope.maxFeePerGas), maxPriorityFeePerGas: BigInt(envelope.maxPriorityFeePerGas) });
+  current = await advanceArbitrumSourceEffectJournal(current, op, { kind: "seal_signed", role: "deposit", rawTransaction: raw, nonce: "7" });
+  const resumed = harness(state, op, current, { send: async value => { sent.push(value); return (await import("viem")).keccak256(value); } });
+  const result = await resumed.service.execute("default", op.operationId);
+  assert.equal(result.state, "deposit_submitted");
+  assert.deepEqual(sent, [raw]);
+  assert.equal(resumed.counts().signs, 0);
+  assert.equal(resumed.journal().effects[1].phase, "submitted");
 });
 
 test("uncertain approval lease remains counted after safe approval proof and permits one deposit", async t => {
@@ -246,7 +267,7 @@ test("uncertain approval lease remains counted after safe approval proof and per
   const unconfirmed = harness(state, op, journal);
   await assert.rejects(() => unconfirmed.service.execute("default", op.operationId));
   assert.equal(unconfirmed.counts().sends, 0);
-  const observe = new RelayArbitrumSourceObserveService(state, { observe: async expected => ({
+  const observe = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observeUnsent: async () => ({ outcome: "nonce_not_consumed" as const, proof: null }), observe: async expected => ({
     sourceChainId: 42161 as const, rpcOrigin: "https://arb-rpc.example",
     deposit: { transactionHash: expected.transactionHash, blockNumber: "100",
       blockHash: `0x${"1".repeat(64)}` as Hex }, approval: null,

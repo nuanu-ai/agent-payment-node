@@ -54,8 +54,7 @@ import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
 import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation,
   type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
-import { RelayEffectJournalRepository } from "./relay/effect-journal.js";
-import { RelayNativeSourceJournalRepository } from "./relay/native-source.js";
+import { relaySourceTerminal, type RelaySourceTerminal } from "./relay/lifecycle.js";
 export type StoredMoneyOperation =
   | { readonly kind: "sei_gaszip"; readonly record: SeiFundingRecord }
   | { readonly kind: "circle_route"; readonly record: CircleKnownOperation }
@@ -405,20 +404,14 @@ export class OperationService {
     return publicRelayUnsignedOperation(operation, retirement, completion);
   }
 
-  /** Source finality ends this operation's spend attempt. Destination delivery is observed separately. */
-  private async relaySourceCompletion(operation: RelayUnsignedOperation): Promise<{ journalIntegrityHash: string } | null> {
-    if (operation.arbitrumDraft !== undefined) return null;
-    if (operation.nativeQuote !== undefined) {
-      const journal = await new RelayNativeSourceJournalRepository(this.state.root).load(operation);
-      return journal?.phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
-    }
-    const journal = await new RelayEffectJournalRepository(this.state.root).load(operation.profileHash, operation.operationId);
-    return journal?.effects[1].phase === "confirmed" ? { journalIntegrityHash: journal.integrityHash } : null;
+  /** Source finality or a finality-proven revert ends this spend attempt. Destination delivery is observed separately. */
+  private async relaySourceCompletion(operation: RelayUnsignedOperation): Promise<RelaySourceTerminal | null> {
+    return relaySourceTerminal(this.state.root, operation);
   }
 
-  private async relayLifecycle(operation: RelayUnsignedOperation): Promise<"active" | "retired" | "source_confirmed"> {
+  private async relayLifecycle(operation: RelayUnsignedOperation): Promise<"active" | "retired" | RelaySourceTerminal["state"]> {
     if (await new RelayRetirementRepository(this.state.root).load(operation) !== null) return "retired";
-    return await this.relaySourceCompletion(operation) === null ? "active" : "source_confirmed";
+    return (await this.relaySourceCompletion(operation))?.state ?? "active";
   }
 
   // Test and embedding ports written before the compatibility reader expose the

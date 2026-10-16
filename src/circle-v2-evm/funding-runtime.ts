@@ -7,6 +7,7 @@ import { readCircleMintFeeRecipient } from "./mint-fee-recipient.js";
 import { getAddress, keccak256, type Hex } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -166,6 +167,10 @@ export class CircleFundingEvmService {
         const transaction = circleRpcTransaction(e), estimate = circleUint(await remote.call("eth_estimateGas", [transaction, "pending"])); if (estimate > BigInt(e.gasLimitAtomic)) circleBlocked("simulation_exceeds_gas_ceiling"); const simulated = circleHex(await remote.call("eth_call", [transaction, "pending"]));
         if (effect.role === "mint") { if (op.source === null || op.attestation === null) circleCorrupt("mint_without_source"); const observation = await source.observation(op.source.transactionHash, op.source.finalityTag === "finalized" ? "finalized" : "included"); if (observation === null) circleBlocked("source_reorg_before_mint"); assertObservedEnvelope(op.effects[1]!, observation.transaction); const proof = decodeCircleSource(observation, op.destinationChain, op.funding); if (proof.blockHash !== op.source.blockHash || proof.receiptHash !== op.source.receiptHash || proof.sourceMessageHash !== op.source.sourceMessageHash || await allowance() !== "0") circleBlocked("source_reorg_before_mint"); const snapshot = await this.preflightAttesters(destination, freshDeployments.digest); await verifyCircleAttestationSigners(op.attestation, op.attestation.attestation, snapshot, op.funding); const block = await destination.block("latest"), used = String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [op.attestation.nonce], String(block.number))); verifyCircleMintPreflight(op.source, op.attestation, { destinationBlockAtomic: circleUint(block.number).toString(), usedNonceAtomic: used, attesterConfigurationHash: circleAttesterConfigurationHash(snapshot), transactionSimulationResult: simulated }, op.funding); }
       }, seal: (op, e, guard) => this.custody.seal(op, e, guard), loadMaterial: (op, e) => this.custody.load(op, e),
+      unsent: { outcome: async (_op, effect) => { const remote = rpc(effect); await remote.identity();
+        return evmUnsentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
+          nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") }); },
+        discard: (op, effect) => this.custody.discard(op, effect) },
       broadcast: async (e, raw, guard) => { guard(); const current = await this.required(initial.operationId); if (e.role === "mint" || e.role === "cleanup") await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(current); guard(); const effect = snapshotCircleFundingEffect(current, e); await this.custody.claimSend(current, effect, guard); guard(); if (keccak256(raw) !== e.transactionHash) circleBlocked("sealed_broadcast_hash_changed"); const returned = circleHex(await rpc(e).call("eth_sendRawTransaction", [raw], guard), 32); if (returned !== keccak256(raw)) circleBlocked("broadcast_hash_changed"); return returned; },
       observeEffect: async (op, effect) => {
         if (effect.transactionHash === null) return null;

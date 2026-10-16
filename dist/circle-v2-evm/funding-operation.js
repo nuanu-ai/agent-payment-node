@@ -96,12 +96,14 @@ export function validateCircleFundingOperation(value) {
         circleCorrupt("effects");
     for (const inputEffect of op.effects) {
         const e = inputEffect;
-        if (!shape(e, ["role", "phase", "envelope", "transactionHash", "materialHash", "proof"]) || !["approval", "burn", "mint", "cleanup"].includes(e.role) || !["prepared", "signing_started", "sealed", "submission_started", "submitted", "unknown", "confirmed", "reverted"].includes(e.phase))
+        if (!shape(e, ["role", "phase", "envelope", "transactionHash", "materialHash", "proof"]) || !["approval", "burn", "mint", "cleanup"].includes(e.role) || !["prepared", "signing_started", "sealed", "submission_started", "submitted", "unknown", "confirmed", "reverted", "abandoned_unsent"].includes(e.phase))
             circleCorrupt("effect_shape");
         validateCircleFundingEnvelope(e.envelope, e.role, op.destinationChain, op.attestation, op.destinationProfile, funding);
         if ((e.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(e.transactionHash)) || (e.materialHash !== null && !/^[a-f0-9]{64}$/u.test(e.materialHash)) ||
             (["sealed", "submission_started", "submitted", "confirmed", "reverted"].includes(e.phase) && (e.materialHash === null || e.transactionHash === null)) ||
-            (["confirmed", "reverted"].includes(e.phase) && (e.proof === null || e.proof.transactionHash !== e.transactionHash)))
+            (["confirmed", "reverted"].includes(e.phase) && (e.proof === null || e.proof.transactionHash !== e.transactionHash)) ||
+            // Never crossed its submission fence and can never be sent: no bytes were saved, or they were discarded after a never-lands proof.
+            (e.phase === "abandoned_unsent" && (e.proof !== null || (e.transactionHash === null) !== (e.materialHash === null))))
             circleCorrupt("effect_material");
         if (e.phase === "reverted" && (e.proof?.finalityTag !== "finalized" || e.role === "mint"))
             circleCorrupt("revert_finality");
@@ -124,7 +126,7 @@ export function validateCircleFundingOperation(value) {
         circleCorrupt("funding_destination_economics");
     if (op.state === "completed" && (op.source?.finalityTag !== "finalized" || op.destination?.finalityTag !== "safe" || op.residualAllowanceAtomic !== "0" || !op.usageFinalized))
         circleCorrupt("completion_finality");
-    if (op.state === "cancelled_unsubmitted" && (op.source !== null || op.attestation !== null || op.destination !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized || op.effects.some(e => e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)))
+    if (op.state === "cancelled_unsubmitted" && (op.source !== null || op.attestation !== null || op.destination !== null || op.residualAllowanceAtomic !== "0" || !op.usageFinalized || op.effects.some(e => e.phase !== "abandoned_unsent" && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null))))
         circleCorrupt("cancel_private_entry");
     if (op.state === "cleaned" && (op.residualAllowanceAtomic !== "0" || op.source !== null || !op.usageFinalized))
         circleCorrupt("cleanup_completion");

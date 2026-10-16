@@ -4,7 +4,7 @@ import { executeMerchantCli } from "./x402-merchant/cli.js";
 import { createSpecialApnCore } from "./runtime-factory-special.js";
 import { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
-import { RelayRetireService } from "./relay/retire.js";
+import { RelayRetireService, TtyRelayAbandonConfirmation } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
 import { createRelayNativeSourceRuntime } from "./relay/native-source.js";
@@ -229,7 +229,7 @@ export function createApnCore(bound, options = {}) {
         ...(bound.request.command === "relay.prepare" || bound.request.command === "relay.base.prepare" ||
             bound.request.command === "relay.arbitrum.prepare" || bound.request.command === "relay.native.prepare" ||
             options.relayPrepare !== undefined ? { relayPrepare: options.relayPrepare ?? new RelayUnsignedPrepareService(state, clock, undefined, options.relayPreparePorts) } : {}),
-        ...(bound.request.command === "relay.retire" ? { relayRetire: new RelayRetireService(state, clock, wrappingSecret) } : {}),
+        ...(bound.request.command === "relay.retire" ? { relayRetire: new RelayRetireService(state, clock, wrappingSecret, new TtyRelayAbandonConfirmation(options.relayExecuteTtyOptions)) } : {}),
         ...(bound.request.command === "relay.status" || options.relayStatus !== undefined ? {
             relayStatus: options.relayStatus ?? new RelayKeylessStatusService(state, options.relayStatusFetch),
         } : {}),

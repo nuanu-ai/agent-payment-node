@@ -1,6 +1,7 @@
 /** Read-only deposit boundary for a saved Relay Arbitrum operation. Never signs, sends, or admits execution. */
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { ApnError } from "../errors.js";
+import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import type { ReadOnlyRpcBatchCall } from "../rpc.js";
@@ -51,9 +52,8 @@ export async function preflightRelayArbitrumDeposit(operation: RelayUnsignedOper
   const baseFee = evmRpcQuantity(block.baseFeePerGas);
   const confirmedNonce = evmRpcQuantity(rows[2]);
   const pendingNonce = evmRpcQuantity(rows[3]);
-  const maxFee = BigInt(quote.deposit.maxFeePerGas);
-  const priority = BigInt(quote.deposit.maxPriorityFeePerGas);
-  const feeWithinQuote = baseFee + priority <= maxFee;
+  const feeWithinQuote = evmFrozenFeeAdmitted(baseFee, { maxFeePerGasWei: BigInt(quote.deposit.maxFeePerGas),
+    maxPriorityFeePerGasWei: BigInt(quote.deposit.maxPriorityFeePerGas) });
   const nonceUncontended = confirmedNonce === pendingNonce;
   const observedAt = ports.now();
   if (!(observedAt instanceof Date) || !Number.isFinite(observedAt.getTime()) ||

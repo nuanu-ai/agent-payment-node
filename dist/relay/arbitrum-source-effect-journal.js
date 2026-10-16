@@ -15,7 +15,7 @@ const TX = /^0x(?:[a-fA-F0-9]{2})+$/u;
 const UINT = /^(0|[1-9][0-9]*)$/u;
 const BLOCK_HASH = /^0x[a-f0-9]{64}$/u;
 const phases = ["pending", "signing_started", "sealed", "submitting",
-    "submitted", "unknown_finality", "confirmed", "failed", "approval_skipped"];
+    "submitted", "unknown_finality", "confirmed", "failed", "approval_skipped", "abandoned_unsent"];
 const iso = (value) => typeof value === "string" && !Number.isNaN(Date.parse(value)) &&
     new Date(value).toISOString() === value;
 const exact = (value, names) => Object.keys(value).sort().join() === [...names].sort().join();
@@ -116,6 +116,12 @@ function shape(j, op) {
                 corrupt("signing_marker");
             continue;
         }
+        if (effect.phase === "abandoned_unsent") {
+            if (a.rawTransaction !== null || typeof a.transactionHash !== "string" || !/^0x[a-f0-9]{64}$/u.test(a.transactionHash) ||
+                typeof a.nonce !== "string" || !UINT.test(a.nonce) || a.submittingAt !== null || !HASH.test(a.observationDigest ?? ""))
+                corrupt("never_landed_attempt");
+            continue;
+        }
         if (typeof a.rawTransaction !== "string" || !TX.test(a.rawTransaction) || a.rawTransaction.length > 16_386 ||
             typeof a.transactionHash !== "string" || a.transactionHash !== keccak256(a.rawTransaction) ||
             typeof a.nonce !== "string" || !UINT.test(a.nonce))
@@ -201,6 +207,11 @@ export async function advanceArbitrumSourceEffectJournal(j, op, event) {
                 blocked("send_outcome_requires_submitting");
             next = { ...current, phase: event.outcome === "accepted" ? "submitted" : "unknown_finality" };
             break;
+        case "record_never_landed":
+            if (current.phase !== "sealed" || !HASH.test(event.proofDigest))
+                blocked("never_landed_requires_sealed_effect");
+            next = { role: event.role, phase: "abandoned_unsent", attempt: { ...current.attempt, rawTransaction: null, observationDigest: event.proofDigest } };
+            break;
         case "record_verified_observation":
             if (!["submitting", "submitted", "unknown_finality"].includes(current.phase) ||
                 !HASH.test(event.proofDigest) || !["confirmed", "failed"].includes(event.outcome))
@@ -216,7 +227,8 @@ export async function advanceArbitrumSourceEffectJournal(j, op, event) {
 export async function arbitrumSourceRecoveryClass(j, op) {
     await validateArbitrumSourceEffectJournal(j, op);
     const [approval, deposit] = j.effects;
-    if (approval.phase === "failed" || deposit.phase === "failed")
+    if (approval.phase === "failed" || deposit.phase === "failed" ||
+        approval.phase === "abandoned_unsent" || deposit.phase === "abandoned_unsent")
         return "failed";
     if (deposit.phase === "confirmed")
         return "completed";
@@ -287,9 +299,9 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
         const j = await validateArbitrumSourceEffectJournal(data, op);
         if (j.integrityHash !== expectedIntegrityHash)
             blocked("stale_journal_revision");
-        if (event.kind === "record_verified_observation" &&
-            (this.verifiedObservation === undefined || !(await this.verifiedObservation({ operation: op,
-                journal: j, role: event.role, outcome: event.outcome, proofDigest: event.proofDigest }))))
+        if ((event.kind === "record_verified_observation" || event.kind === "record_never_landed") &&
+            (this.verifiedObservation === undefined || !(await this.verifiedObservation({ operation: op, journal: j, role: event.role,
+                outcome: event.kind === "record_never_landed" ? "never_landed" : event.outcome, proofDigest: event.proofDigest }))))
             blocked("verified_observation_unavailable");
         const next = await advanceArbitrumSourceEffectJournal(j, op, event);
         await this.writeJson(path, next);

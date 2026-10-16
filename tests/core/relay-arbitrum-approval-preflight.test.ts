@@ -101,14 +101,15 @@ test("third batch rejects reorg, malformed nonce and fee; pending conflict and f
     assert.equal(index, 3);
   }
   for (const [third, reason] of [
-    [["0xa4b1", head, "0x7", "0x8"], "pending_nonce_conflict"],
-    [["0xa4b1", { ...head, baseFeePerGas: "0x174876e800" }, "0x7", "0x7"], "approval_base_fee_exceeds_quote"],
+    [["0xa4b1", head, "0x7", "0x8"], ["pending_nonce_conflict"]],
+    // The deposit that must follow is checked before any paid approval: both frozen envelopes are refused here.
+    [["0xa4b1", { ...head, baseFeePerGas: "0x174876e800" }, "0x7", "0x7"], ["approval_base_fee_exceeds_quote", "deposit_base_fee_exceeds_quote"]],
   ] as const) {
     let index = 0;
     const result = await preflightRelayArbitrumApproval(operation, active(), owner, "0", now,
       { now: () => now, batch: async () => index++ < 2 ? rows()[index - 1]! : third });
     assert.equal(result.readOnlyConditionsSatisfied, false);
-    assert.deepEqual(result.reasons, [reason]);
+    assert.deepEqual(result.reasons, reason);
   }
 });
 

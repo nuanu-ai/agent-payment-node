@@ -30,6 +30,8 @@ export declare class CircleEffectStore extends SecureStateStore {
     assertExternalAbsent(op: CircleOperationV1): Promise<void>;
     assertCleanupAbsent(op: CircleOperationV1): Promise<void>;
     assertRetirementHeaders(op: CircleOperationV1): Promise<void>;
+    /** Only for an effect already recorded `abandoned_unsent`: its bytes provably can never land. */
+    discard(op: CircleOperationV1, effect: CircleEffect): Promise<void>;
     load(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial | null>;
     save(op: CircleOperationV1, effect: CircleEffect, material: CircleMaterial): Promise<CircleMaterial>;
 }
@@ -41,6 +43,7 @@ export declare class LocalCircleCustody {
     assertCleanupAbsent(op: CircleOperationV1): Promise<void>;
     assertRetirementHeaders(op: CircleOperationV1): Promise<void>;
     load(op: CircleOperationV1, effect: CircleEffect): Promise<CircleMaterial | null>;
+    discard(op: CircleOperationV1, effect: CircleEffect): Promise<void>;
     seal(op: CircleOperationV1, effect: CircleEffect, guard: () => void): Promise<CircleMaterial>;
 }
 export declare function verifyCircleMaterial(op: CircleOperationV1, effect: CircleEffect, input: unknown): Promise<CircleMaterial>;

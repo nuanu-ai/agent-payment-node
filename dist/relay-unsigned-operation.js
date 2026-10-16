@@ -158,9 +158,11 @@ export function publicRelayUnsignedOperation(operation, retirement = null, sourc
                 routeReference: "arbitrum-usdc-ethereum-usdc-source-draft-v1" } }),
         ...(retirement === null ? {} : { state: "retired", terminal: true,
             retiredAt: retirement.retiredAt, retirementIntegrityHash: retirement.integrityHash }),
-        ...(sourceCompletion === null ? {} : { state: "source_confirmed", terminal: true,
+        ...(sourceCompletion === null ? {} : { state: sourceCompletion.state, terminal: true,
             sourceEffectTerminal: true, sourceJournalIntegrityHash: sourceCompletion.journalIntegrityHash }),
-        proofClass: sourceCompletion === null ? "saved_unsigned_quote" : "source_effect_confirmed",
+        proofClass: sourceCompletion === null ? "saved_unsigned_quote" :
+            sourceCompletion.state === "source_confirmed" ? "source_effect_confirmed" :
+                sourceCompletion.state === "failed_confirmed_revert" ? "source_effect_reverted" : "source_effect_never_landed",
         balanceEvidence: "not_checked",
         allowanceEvidence: "not_checked", statusObservable: operation.statusLocator !== undefined,
         executionAdmitted: false, nextActions: [] };

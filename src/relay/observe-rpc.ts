@@ -6,7 +6,6 @@ import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc, type ReadOnlyRpcBatchCall } from "../rpc.js";
 import type { StateStore } from "../state.js";
 import { decodePolygonPayoutTrace } from "./polygon-trace.js";
-import { RELAY_BNB_SOURCE } from "./native-quote.js";
 import { decodeRelayBaseReceiptFee } from "./source-fee-proof.js";
 import type { RelayDepositObservation } from "./deposit-effect.js";
 import type { RelayBnbProofPorts, RelayBnbBlock, RelayBnbReceipt, RelayBnbTransaction } from "./destination-proof.js";
@@ -149,7 +148,7 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
     return block(await this.read("eth_getBlockByNumber", ["finalized", false]), "finalized");
   }
   async nativeTrace(): Promise<null> { return null; }
-  async polygonNativeTrace(hash: string) {
+  async polygonNativeTrace(hash: string, recipient: string) {
     if (this.expectedChainId !== 137) throw new ApnError("APN_CHAIN_MISMATCH", "Polygon trace requires Polygon RPC.");
     const tx = this.transactions.get(hash.toLowerCase());
     if (!tx || tx.blockNumber === null) throw new ApnError("APN_RPC_PROTOCOL", "Polygon trace requires the original included transaction.");
@@ -167,12 +166,12 @@ export class RelayBnbReadOnlyRpc implements RelayBnbProofPorts {
         same(evmRpcHex(evmRpcRecord(row).hash, 32), hash)).length !== 1)
       throw new ApnError("APN_RPC_PROTOCOL", "Polygon trace block membership changed.");
     const [before, after, again] = await this.readBatch([
-      { method: "eth_getBalance", params: [RELAY_BNB_SOURCE, { blockHash: parent.hash, requireCanonical: true }] },
-      { method: "eth_getBalance", params: [RELAY_BNB_SOURCE, { blockHash: included.hash, requireCanonical: true }] },
+      { method: "eth_getBalance", params: [recipient, { blockHash: parent.hash, requireCanonical: true }] },
+      { method: "eth_getBalance", params: [recipient, { blockHash: included.hash, requireCanonical: true }] },
       { method: "eth_getBlockByNumber", params: [tag, false] },
     ]);
     if (!same(evmRpcBlockResult(again, tag).hash, included.hash)) throw new ApnError("APN_RPC_PROTOCOL", "Polygon trace inclusion changed.");
-    return decodePolygonPayoutTrace(trace, tx, hash, included.hash, evmRpcQuantity(before), evmRpcQuantity(after));
+    return decodePolygonPayoutTrace(trace, tx, hash, included.hash, recipient, evmRpcQuantity(before), evmRpcQuantity(after));
   }
   async routerCodeHash(address: string, blockNumber: bigint): Promise<string> {
     const code = evmRpcHex(await this.read("eth_getCode", [address, `0x${blockNumber.toString(16)}`]));
