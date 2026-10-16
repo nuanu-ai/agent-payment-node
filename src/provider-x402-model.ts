@@ -4,7 +4,7 @@ import { ApnError } from "./errors.js";
 import type { ProviderX402Invocation, ProviderX402SellerResult } from "./provider-ports.js";
 import type { ProfilePolicyRecord } from "./profile-policy.js";
 import type { X402RpcBlock, X402RpcHead, X402RpcLog } from "./ports.js";
-import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
+import { canonicalizeSellerResultJson } from "./normalized-provider-json.js";
 import { x402WaitProjectedStatus, type X402SettlementWaitProjection } from "./x402-state-integrity.js";
 import {
   providerX402CompleteBindingHash,
@@ -201,14 +201,15 @@ export function providerX402RequestHash(input: {
   readonly httpRequest?: X402HttpRequestV1;
   readonly profile: string;
   readonly canonicalUrl: string;
-  readonly rpcUrl: string;
+  /** Present only to match operations prepared while the RPC URL was part of the request identity. */
+  readonly legacyRpcUrl?: string;
   readonly callerCapAtomic?: string;
 }): string {
   return hashObject({
     method: "x402.fetch.prepare",
     profile: input.profile,
     canonicalUrl: input.canonicalUrl,
-    rpcUrl: input.rpcUrl,
+    ...(input.legacyRpcUrl === undefined ? {} : { rpcUrl: input.legacyRpcUrl }),
     methodShape: input.httpRequest === undefined ? "GET_absent_body" : "apn.http-request.v1",
     ...x402HttpRequestBinding(input.httpRequest),
     callerCapAtomic: input.callerCapAtomic ?? null,
@@ -443,7 +444,7 @@ function validateSellerResult(result: ProviderX402SellerResult, amount: string):
   ) corrupt();
   try {
     const parsed = JSON.parse(result.canonical_json) as unknown;
-    if (canonicalizeNormalizedProviderJson(parsed) !== result.canonical_json) corrupt();
+    if (canonicalizeSellerResultJson(parsed) !== result.canonical_json) corrupt();
   }
   catch { corrupt(); }
 }

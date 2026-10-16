@@ -170,7 +170,8 @@ export declare function providerX402RequestHash(input: {
     readonly httpRequest?: X402HttpRequestV1;
     readonly profile: string;
     readonly canonicalUrl: string;
-    readonly rpcUrl: string;
+    /** Present only to match operations prepared while the RPC URL was part of the request identity. */
+    readonly legacyRpcUrl?: string;
     readonly callerCapAtomic?: string;
 }): string;
 export declare function providerX402BindingHash(operation: ProviderX402OperationRecord): string;

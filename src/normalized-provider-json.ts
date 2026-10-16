@@ -29,10 +29,23 @@ const PROTECTED_TEXT = [
   /^(?=.{28,}$)(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])[A-Za-z0-9_-]+$/u,
 ] as const;
 const PUBLIC_EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
+/** Field names that carry a secret by meaning. A paid seller body keeps every other field verbatim. */
+const SECRET_FIELD = /^(?:(?:access|auth|bearer|id|refresh|session)token|apikey|authorization|clientsecret|cookie|credentials?|mnemonic|passphrase|password|paymentheader|privatekey|rawtransaction|reusableauthorization|secret|secretkey|seedphrase|setcookie|signedtransaction|wrappingsecret|xpayment)$/iu;
+const REDACTED = JSON.stringify("[redacted]");
 
-/** Canonicalize one bounded, provider-neutral seller JSON value. */
+/** Canonicalize one bounded, provider-neutral JSON value; provider-authored text is screened for secrets. */
 export function canonicalizeNormalizedProviderJson(value: unknown): string {
-  const state = { nodes: 0, bytes: 0, output: [] as string[], path: new WeakSet<object>() };
+  const state = { nodes: 0, bytes: 0, output: [] as string[], path: new WeakSet<object>(), seller: false };
+  appendValue(value, 0, state);
+  return state.output.join("");
+}
+
+/**
+ * Canonicalize the paid seller body: the same bounds and canonical form, values kept verbatim except
+ * known secret-bearing fields, which are redacted. Text heuristics would discard results the owner paid for.
+ */
+export function canonicalizeSellerResultJson(value: unknown): string {
+  const state = { nodes: 0, bytes: 0, output: [] as string[], path: new WeakSet<object>(), seller: true };
   appendValue(value, 0, state);
   return state.output.join("");
 }
@@ -51,6 +64,7 @@ interface CanonicalState {
   bytes: number;
   readonly output: string[];
   readonly path: WeakSet<object>;
+  readonly seller: boolean;
 }
 
 function appendValue(value: unknown, depth: number, state: CanonicalState): void {
@@ -65,7 +79,7 @@ function appendValue(value: unknown, depth: number, state: CanonicalState): void
     return append(JSON.stringify(value), state);
   }
   if (typeof value === "string") {
-    validateText(value);
+    validateText(value, state.seller);
     return append(JSON.stringify(value), state);
   }
   if (typeof value !== "object") invalid();
@@ -103,8 +117,8 @@ function appendObject(value: object, depth: number, state: CanonicalState): void
   if (keys.length > NORMALIZED_PROVIDER_JSON_LIMITS.maxObjectKeys) invalid();
   const entries: Array<{ readonly key: string; readonly value: unknown }> = [];
   for (const key of keys) {
-    if (isProtectedNormalizedProviderKey(key)) invalid();
-    validateText(key);
+    if (state.seller ? DANGEROUS_KEYS.has(key) : isProtectedNormalizedProviderKey(key)) invalid();
+    validateText(key, state.seller);
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) invalid();
     entries.push({ key, value: descriptor.value });
@@ -115,14 +129,17 @@ function appendObject(value: object, depth: number, state: CanonicalState): void
     if (index > 0) append(",", state);
     append(JSON.stringify(entry.key), state);
     append(":", state);
-    appendValue(entry.value, depth + 1, state);
+    if (state.seller && SECRET_FIELD.test(compactKey(entry.key))) {
+      state.nodes += 1;
+      append(REDACTED, state);
+    } else appendValue(entry.value, depth + 1, state);
   });
   append("}", state);
 }
 
-function validateText(value: string): void {
+function validateText(value: string, seller: boolean): void {
   if (Buffer.byteLength(value, "utf8") > NORMALIZED_PROVIDER_JSON_LIMITS.maxStringBytes) invalid();
-  if (!PUBLIC_EVM_ADDRESS.test(value) && PROTECTED_TEXT.some((pattern) => pattern.test(value))) invalid();
+  if (!seller && !PUBLIC_EVM_ADDRESS.test(value) && PROTECTED_TEXT.some((pattern) => pattern.test(value))) invalid();
 }
 
 function compactKey(value: string): string {

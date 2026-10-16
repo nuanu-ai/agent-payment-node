@@ -11,6 +11,7 @@ export declare class ProviderX402Service {
     constructor(context: RuntimeContext);
     canHandle(profileInput: string): Promise<boolean>;
     prepare(request: PrepareRequest): Promise<unknown>;
+    private resolvePrepare;
     private completePreparation;
     approve(operationIdInput: string): Promise<unknown>;
     recoverRead(operationIdInput: string): Promise<void>;

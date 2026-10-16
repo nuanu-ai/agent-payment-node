@@ -9,8 +9,8 @@ export class BaseExactTransactionEvidence {
     async observe(intent) {
         const rpc = exactReadPort(this.rpc);
         const chain = await rpc.assertBaseChain();
-        if (chain.chainId !== 8453 || sha256(chain.rpcOrigin) !== intent.rpcOriginHash) {
-            throw new ApnError("APN_CHAIN_MISMATCH", "Exact transaction recovery RPC does not match the frozen Base binding.");
+        if (chain.chainId !== 8453 || chain.rpcOrigin.length === 0) {
+            throw new ApnError("APN_CHAIN_MISMATCH", "Exact transaction recovery RPC is not Base.");
         }
         const receipt = await rpc.getX402Receipt(intent.transactionHash);
         if (receipt === null) {
@@ -20,8 +20,9 @@ export class BaseExactTransactionEvidence {
             invalid();
         const safeHead = await rpc.getX402Head("safe");
         const receiptBlock = await rpc.getX402Block(receipt.blockNumber);
+        // Any Base endpoint may serve the evidence, but one observation must come from one endpoint.
         for (const origin of [receipt.rpcOrigin, safeHead.rpcOrigin, receiptBlock.rpcOrigin]) {
-            if (sha256(origin) !== intent.rpcOriginHash) {
+            if (origin !== chain.rpcOrigin) {
                 throw new ApnError("APN_CHAIN_MISMATCH", "Exact transaction evidence changed RPC origin.");
             }
         }
@@ -59,7 +60,7 @@ export class BaseExactTransactionEvidence {
                 transactionHash: transfer.transactionHash,
             },
             qualifyingTransferCount: "1",
-            rpcOriginHash: intent.rpcOriginHash,
+            rpcOriginHash: sha256(chain.rpcOrigin),
             observedAt,
         };
         return { ...base, evidenceHash: hashObject(base) };
