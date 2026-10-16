@@ -19,6 +19,8 @@ import { ABANDON_OPERATION_KINDS } from "./operation-coverage.js";
 import { X402AbandonService } from "./x402-abandon.js";
 import { abandonProviderX402, abandonSmartAccountGasless } from "./operation-abandon-provider.js";
 import { abandonFixedMetaMaskNativeTransfer, metaMaskNativeOperationExists } from "./metamask-native-transfer-owner.js";
+import { SwapOperationRepository } from "./swap/repository.js";
+import { abandonSwapOperation } from "./swap/abandon.js";
 
 export class OperationAbandonService {
   private readonly operations: OperationService;
@@ -38,6 +40,8 @@ export class OperationAbandonService {
       return await abandonFixedMetaMaskNativeTransfer(this.context.state.root, operationId,
         async (intent) => await this.context.requireOperationAbandonApproval().approve(intent), () => this.context.clock.now());
     }
+    // Swaps live in their own repository; a marked swap with no provable bound has an owner exit here (R4).
+    if (await new SwapOperationRepository(this.context.state.root).loadAny(operationId) !== null) return await abandonSwapOperation(this.context, operationId);
     const found = await this.operations.required(operationId);
     if (found.kind === "rail_transfer") return found.record.account.rail === "solana"
       ? await this.abandonLocalSolana(found.record.profileHash, operationId)

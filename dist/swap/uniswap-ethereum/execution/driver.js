@@ -63,7 +63,7 @@ export class UniswapEthereumExecutionDriver {
         if (operation.submissionMarker === null)
             blocked("Uniswap observation is available only after the submission marker.", "uniswap_resume_before_marker");
         validateUniswapKeylessMaterial(input.material);
-        if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(operation.state))
+        if (["finalized", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"].includes(operation.state))
             return operation;
         const binding = await this.d.bindings.load(operation);
         const effect = binding === null ? null : await this.d.effects.load(operation, binding);

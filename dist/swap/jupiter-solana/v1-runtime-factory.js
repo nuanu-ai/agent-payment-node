@@ -114,14 +114,16 @@ export function createJupiterV1Runtime(options) {
                 if (expired !== null)
                     return expired;
                 const operation = await required(operationId);
-                if (operation.submissionMarker !== null)
+                if (operation.submissionMarker !== null) {
+                    rpc.enterObservation();
                     return await super.status(operationId, now);
+                }
                 await rpc.bindOperation(operation.quote.quoteHash);
                 if (!native.hasForegroundGrant(operation))
                     await this.approve(operationId, now);
                 return await super.execute(operationId, clock.now());
             }
-            async status(operationId, now) { const expired = await releaseExpiredUnsent(operationId); return expired ?? await super.status(operationId, now); }
+            async status(operationId, now) { rpc.enterObservation(); const expired = await releaseExpiredUnsent(operationId); return expired ?? await super.status(operationId, now); }
         }
         const runtime = new JupiterRuntime({ chain: JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain, builder, policy: async (profile) => (await activePolicy(profile))?.registry ?? null, clock,
             protocolRegistry: route.protocolRegistry, usage, operations, ownerAdmission: admission, foregroundApproval: { approve: async () => { throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Use Jupiter's finite Native foreground approval."); } },
