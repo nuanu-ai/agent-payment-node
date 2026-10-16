@@ -264,7 +264,12 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
             if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_NOT_FOUND") throw error;
           }
         }
-        return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash)[request.command.endsWith("status") ? "status" : "resume"](request.operationId));
+        if (request.command === "gasless.usdt.resume") {
+          if (this.context.gaslessUsdtExecute === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+            "Gasless USDT execution runtime is unavailable.", { reason: "gasless_usdt_command_runtime_unavailable" });
+          return operationOutcome(await this.context.gaslessUsdtExecute.resume(request.profileHash, request.operationId));
+        }
+        return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash).status(request.operationId));
       case "gasless.transfer.approve-sealed": return operationOutcome(await this.gasless.approveSealed(request.operationId));
       case "gasless.transfer.approve": {
         const stored = await this.operations.required(request.operationId), { kind } = stored;

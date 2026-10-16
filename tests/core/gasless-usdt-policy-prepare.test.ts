@@ -245,7 +245,7 @@ test("CLI and MCP replay the first bound claim after time, policy, safe block an
   assert.equal(f.offered.length, 1);
 });
 
-test("the same key can independently prepare an older direct rail and the bound USDT journal", async t => {
+test("bound USDT shares the idempotency key space of every money family: a direct rail's key refuses before sponsor reads", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const key = "cross-family-local-001";
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
@@ -253,10 +253,14 @@ test("the same key can independently prepare an older direct rail and the bound 
   const direct = await makeCore({ root: temporary.root, rpc: directRpc }).execute({ command: "transfer.prepare",
     profile: "default", recipient: RECIPIENT, amount: "1", idempotencyKey: key });
   assert.equal(direct.ok, true, JSON.stringify(direct.error));
-  const f = commandFixture(), usdt = await runCli(["gasless", "usdt", "prepare", "--profile", "owner", "--to", RECIPIENT,
-    "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", key], {},
+  const f = commandFixture(), usdtWith = async (idempotencyKey: string) => await runCli(["gasless", "usdt", "prepare", "--profile", "owner",
+    "--to", RECIPIENT, "--amount", "1", "--max-fee", "0.5", "--min-received", "0.5", "--idempotency-key", idempotencyKey], {},
   { stateRoot: temporary.root, clock: { now: () => NOW },
     gaslessUsdtPrepareOptions: { preparePort: f.ports.prepare, sponsorPort: f.ports.sponsor } });
+  const shared = await usdtWith(key);
+  assert.equal(shared.error?.code, "APN_IDEMPOTENCY_CONFLICT");
+  assert.equal(f.offered.length, 0);
+  const usdt = await usdtWith("cross-family-local-002");
   assert.equal(usdt.ok, true, JSON.stringify(usdt.error));
   assert.notEqual((direct.operation as { operationId: string }).operationId,
     (usdt.operation as { operationId: string }).operationId);

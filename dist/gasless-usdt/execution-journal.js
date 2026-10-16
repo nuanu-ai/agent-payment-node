@@ -163,6 +163,20 @@ export class UsdtExecutionJournal extends SecureStateStore {
             fail("execution_path_binding", "APN_STATE_CORRUPT");
         return record;
     }
+    /** Every saved execution record. A store's own in-flight atomic-write temporaries are not records. */
+    async listAll() {
+        const records = [];
+        for (const entry of await this.readDirectory("gasless-usdt-executions")) {
+            if (/^\.[a-f0-9]{12}\.[a-f0-9]{24}\.tmp$/u.test(entry.name) && entry.isFile() && !entry.isSymbolicLink())
+                continue;
+            if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name))
+                fail("execution_inventory", "APN_STATE_CORRUPT");
+            const record = await this.load(entry.name.slice(0, -5));
+            if (record !== null)
+                records.push(record);
+        }
+        return records;
+    }
     async ready() {
         await this.initialize();
         await this.ensureDirectory("gasless-usdt-executions");

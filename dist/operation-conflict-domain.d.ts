@@ -16,5 +16,8 @@ export declare const SOLANA_BRIDGE_CHAIN_ID = "1151111081099710";
  */
 export declare function bridgeConflictDomain(chainId: number | string, account: string): MoneyConflictDomain;
 export declare function conflictDomainKey(domain: MoneyConflictDomain): string;
+/** An unreadable domain list yields no keys; the caller then blocks the whole profile. */
+export declare function conflictDomainKeys(domains: () => readonly MoneyConflictDomain[]): ReadonlySet<string>;
+export { assertUsdtConflictDomainsAvailable } from "./gasless-usdt/account-conflict.js";
 /** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
 export declare function storedOperationDomains(operation: StoredMoneyOperation): readonly MoneyConflictDomain[] | null;

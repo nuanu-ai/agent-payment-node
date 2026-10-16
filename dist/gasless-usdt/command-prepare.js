@@ -13,6 +13,7 @@ import { preparePolicyBoundUsdtV2 } from "./policy-prepare-v2.js";
 import { attestUsdtSponsor } from "./sponsor-auth.js";
 import { UsdtCodePins, usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
 import { GaslessUsdtOperationService } from "./service.js";
+import { OperationService } from "../operation-service.js";
 /**
  * Seven read admissions by default; v2 preparation alone permits eight including sponsor authentication. One observation
  * pass permits ten: the locator, its receipt (chain ID, receipt, finalized head, inclusion block), the canonical scan's two
@@ -85,12 +86,22 @@ export class GaslessUsdtCommandPrepare {
         const saved = await this.operations.forProfile(profileHash).replayBound(input.idempotencyKey, input);
         if (saved !== null)
             return saved;
+        // Every money family shares one idempotency key space; the lock is the one their prepares hold for the same key.
+        await this.state.initialize();
+        return await this.state.withLocks([`operation:idempotency:${this.state.idempotencyHash(input.idempotencyKey)}`], async () => await this.prepareNew(input, profileHash));
+    }
+    async prepareNew(input, profileHash) {
         const active = await (this.options.preparePort === undefined
             ? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile)
             : this.options.preparePort.activePolicy(input.profile));
         if (active === null || active.accounts.evm === undefined) {
             throw new ApnError("APN_ALLOWLIST_REFUSED", "An active Ethereum owner asset policy is required.", { reason: "gasless_usdt_policy_required" });
         }
+        const sender = gaslessAddress(active.accounts.evm, "APN_ALLOWLIST_REFUSED"), operations = new OperationService(this.state);
+        if (await operations.findIdempotency(this.state.idempotencyHash(input.idempotencyKey)) !== null) {
+            throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to another money operation.", { reason: "gasless_usdt_idempotency_other_family" });
+        }
+        await operations.assertEvmAccountAvailable(this.state.profileHash(input.profile), USDT_GASLESS.chainId, sender);
         const rpcUrl = this.options.rpcUrl ?? process.env.APN_ETHEREUM_RPC_URL;
         const needRpc = this.options.preparePort === undefined || this.options.sponsorPort === undefined;
         if (needRpc && (rpcUrl === undefined || rpcUrl === "")) {
@@ -107,8 +118,7 @@ export class GaslessUsdtCommandPrepare {
             sponsorAuth: async (op, snapshot) => await attestUsdtSponsor({ op, snapshot, expectedBlockHash: snapshot.blockHash, transport: budget, rpcUrl: rpcUrl, clock: this.clock }),
         };
         const sponsor = this.options.sponsorPort ?? usdtSponsorPort(budget);
-        const policy = await preparePolicyBoundUsdtV2({ prepare, sponsor }, { profile: input.profile,
-            sender: gaslessAddress(active.accounts.evm, "APN_ALLOWLIST_REFUSED"),
+        const policy = await preparePolicyBoundUsdtV2({ prepare, sponsor }, { profile: input.profile, sender,
             recipient: input.recipient, grossAtomic: BigInt(input.grossAtomic), maxFeeAtomic: BigInt(input.maxFeeAtomic),
             minReceivedAtomic: BigInt(input.minReceivedAtomic), chain: USDT_GASLESS.chain, token: USDT_GASLESS.token,
             sponsorUrl: USDT_GASLESS.bundlerUrl });

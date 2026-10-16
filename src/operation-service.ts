@@ -19,7 +19,7 @@ import { ApnError } from "./errors.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
-import { conflictDomainKey, evmConflictDomain, railConflictDomain, storedOperationDomains, type MoneyConflictDomain } from "./operation-conflict-domain.js";
+import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, storedOperationDomains, type MoneyConflictDomain } from "./operation-conflict-domain.js";
 import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
 import {
   publicX402Operation,
@@ -212,8 +212,8 @@ export class OperationService {
   }
 
   private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>, cleanup85Parent?: { readonly operationId: string; readonly integrityHash: string }, nativeOwner?: { readonly scope:MetaMaskNativeOwnedScope; readonly context:MetaMaskNativeOwnedContext }): Promise<void> {
-    let wanted: ReadonlySet<string>;
-    try { wanted = new Set(domains().map(conflictDomainKey)); } catch { wanted = new Set(); }
+    const wanted = conflictDomainKeys(domains);
+    if (this.state.root !== undefined) await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
     if(this.state.root!==undefined) {
       for(const wantedKey of wanted) {
         const [family,network,account]=wantedKey.split(":");

@@ -29,6 +29,16 @@ export function bridgeConflictDomain(chainId, account) {
 export function conflictDomainKey(domain) {
     return `${domain.family}:${domain.network}:${domain.account}`;
 }
+/** An unreadable domain list yields no keys; the caller then blocks the whole profile. */
+export function conflictDomainKeys(domains) {
+    try {
+        return new Set(domains().map(conflictDomainKey));
+    }
+    catch {
+        return new Set();
+    }
+}
+export { assertUsdtConflictDomainsAvailable } from "./gasless-usdt/account-conflict.js";
 /** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
 export function storedOperationDomains(operation) {
     try {

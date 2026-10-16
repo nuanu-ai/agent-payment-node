@@ -67,6 +67,8 @@ export declare class UsdtExecutionJournal extends SecureStateStore {
     /** Caller holds the effect lock. The terminal marker is fsynced before releasing a reserved usage lease. */
     private abortUnsentLocked;
     load(operationId: string): Promise<UsdtExecutionRecord | null>;
+    /** Every saved execution record. A store's own in-flight atomic-write temporaries are not records. */
+    listAll(): Promise<readonly UsdtExecutionRecord[]>;
     private ready;
     protected syncExecutionDirectoryParent(): Promise<void>;
     private write;
