@@ -487,6 +487,11 @@ and its existing production session. The current selected wallet must resolve
 to that same address. This path does not create a wallet, change selection,
 refresh a login or complete provider MFA. If the session is unavailable,
 complete the normal provider login separately and continue the saved operation.
+Observing a dispatched operation never needs the session. While an unresolved
+operation holds the profile, wallet connect for that profile waits for it, so a
+prepare refused for a missing session names that operation instead: inspect it
+with `apn operation status`, and release an outcome still unknown after its
+approval window with `apn operation abandon` before connecting again.
 
 | Network | Chain ID | Required RPC environment | Finality |
 | --- | --- | --- | --- |
@@ -663,7 +668,13 @@ operations block competing payments and wallet lifecycle changes for the profile
 A MetaMask Agent transfer whose outcome is still unknown after its approval window
 can be released with `apn operation abandon --operation <operation-id>` after the
 exact acknowledgement. APN records `abandoned_unknown`; MetaMask may still relay the
-transfer later because its delegation has no on-chain expiry.
+transfer later because its delegation has no on-chain expiry. The confirmation
+screen shows the gross of the batch actually dispatched; for a fixed-net transfer
+it also shows the approved ceiling beside it.
+
+When an observation went through `--observation-rpc-env`, the next action of the
+still unresolved operation repeats that option. Receipts written before this
+option appeared in next actions remain valid.
 
 ## MetaMask Smart Account
 
