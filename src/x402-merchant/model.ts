@@ -5,7 +5,7 @@ import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonica
 import type { EvmNativeCustody } from "../evm-native-custody.js";
 import { validateEvmNativeCustody } from "../evm-native-custody.js";
 import { checkMerchantChallenge, refuse, type FrozenMerchantChallenge } from "./protocol.js";
-import { MERCHANT_OWNER } from "./pins.js";
+import { merchantTerms } from "./terms.js";
 export interface MerchantEnvelope {
     readonly nonce: string;
     readonly gas: string;
@@ -114,13 +114,14 @@ export function validateMerchant(v: unknown): MerchantOperation {
         o.terminal !== ["delivered", "reverted", "retired_unsent"].includes(o.state) || ![0, 1].includes(o.signingAttempts) || ![0, 1].includes(o.submissionAttempts) || o.submissionAttempts > o.signingAttempts)
         refuse("merchant_state_integrity");
     validateEvmNativeCustody(o.custody);
-    if (o.custody.walletAddress !== MERCHANT_OWNER || o.custody.profileHash !== o.profileHash || canonicalJson(checkMerchantChallenge(o.frozen.challenge)) !== canonicalJson(o.frozen))
+    // The payer is the operation's own custody record for its profile (custody(profile) at prepare), never a fixed owner.
+    if (o.custody.profileHash !== o.profileHash || canonicalJson(checkMerchantChallenge(o.frozen.challenge)) !== canonicalJson(o.frozen))
         refuse("merchant_state_binding");
     if (!exactKeys(o.envelope as unknown as Record<string, unknown>, ["nonce", "gas", "maxFeePerGas", "maxPriorityFeePerGas", "maximumNativeFee", ...(o.envelope.nativeFeeReserveWei===undefined?[]:["nativeFeeReserveWei"])]) || !Object.values(o.envelope).every(a => /^(0|[1-9][0-9]*)$/u.test(a)) ||
         BigInt(o.envelope.nonce) > BigInt(Number.MAX_SAFE_INTEGER) || BigInt(o.envelope.gas) < 21000n || BigInt(o.envelope.maxPriorityFeePerGas) > BigInt(o.envelope.maxFeePerGas) ||
         BigInt(o.envelope.maximumNativeFee) < BigInt(o.envelope.gas) * BigInt(o.envelope.maxFeePerGas))
         refuse("merchant_state_envelope");
-    if(o.feeContext!==undefined)validateMerchantFeeContext(o.feeContext,o.envelope);
+    if(o.feeContext!==undefined)validateMerchantFeeContext(o.feeContext,o.envelope,merchantTerms(o));
     if(o.envelope.nativeFeeReserveWei!==undefined&&(o.feeContext===undefined||BigInt(o.envelope.nativeFeeReserveWei)<BigInt(o.feeContext.admissionEstimatedUpper)||BigInt(o.envelope.nativeFeeReserveWei)>BigInt(o.envelope.maximumNativeFee)))refuse("merchant_native_reserve_binding");
     if(o.failures!==undefined)validateMerchantFailures(o.failures);
     if(o.retirementDigest!==undefined&&(!/^[a-f0-9]{64}$/u.test(o.retirementDigest)||o.state!=="retired_unsent")||o.state==="retired_unsent"&&(o.retirementDigest===undefined||o.signingAttempts!==1||o.submissionAttempts!==0||o.txHash!==null||o.receipt!==null||o.deliveryAttempts.length!==0))refuse("merchant_retirement_binding");

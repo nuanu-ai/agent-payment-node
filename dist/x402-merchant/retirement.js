@@ -8,7 +8,7 @@ import { MerchantRepository } from "./repository.js";
 import { MerchantOwner, merchantUsageIdentity, merchantNativeUsageIdentity, merchantUsageKey, merchantNativeUsageKey } from "./owner.js";
 import { MerchantRetirementClaims } from "./retirement-claims.js";
 import { merchantUnsentProof } from "./retirement-proof.js";
-import { MERCHANT_OWNER } from "./pins.js";
+import { merchantTerms } from "./terms.js";
 import { refuse } from "./protocol.js";
 export class MerchantRetirement {
     state;
@@ -24,23 +24,24 @@ export class MerchantRetirement {
         const found = await records.findOperation(canonicalOperationId(id));
         if (found === null)
             refuse("merchant_operation_missing");
-        return this.state.withLocks([`profile:${found.profileHash}`, `operation:${found.operationId}`, `operation:idempotency:${found.idempotencyHash}`, evmAddressLock(MERCHANT_OWNER), `custody:${found.profileHash}`], () => owner.withPolicyLock(found.profile, async (locked) => {
+        return this.state.withLocks([`profile:${found.profileHash}`, `operation:${found.operationId}`, `operation:idempotency:${found.idempotencyHash}`, evmAddressLock(found.custody.walletAddress), `custody:${found.profileHash}`], () => owner.withPolicyLock(found.profile, async (locked) => {
             let o = await records.findOperation(found.operationId);
             if (o === null)
                 refuse("merchant_operation_missing");
-            if (!["unknown_finality", "retired_unsent"].includes(o.state) || o.profile !== "default")
+            if (!["unknown_finality", "retired_unsent"].includes(o.state))
                 refuse("merchant_retirement_phase");
+            const t = merchantTerms(o);
             const signAt = o.events.find(e => e.state === "signing_started")?.at;
             if (signAt === undefined || this.now().getTime() < Date.parse(signAt) + 60000 || this.now().getTime() < Date.parse(o.expiresAt))
                 refuse("merchant_retirement_foreground_live");
             await claims.unsent(o);
             await assertEvmNativeCustody(this.state, o.profile, o.custody);
-            await assertExclusiveEvmRawSigner(this.state, MERCHANT_OWNER, o.profileHash);
-            await locked.admit(o.profile, o); // Current true-policy owner/admission, not stale parent activation permission.
+            await assertExclusiveEvmRawSigner(this.state, t.payer, o.profileHash);
+            await locked.admit(o.profile, t, o); // Current true-policy owner/admission, not stale parent activation permission.
             let claim = await claims.find(o);
             if (claim === null) {
                 const proofHash = await merchantUnsentProof(this.rpc, o);
-                await locked.admit(o.profile, o);
+                await locked.admit(o.profile, t, o);
                 await assertEvmNativeCustody(this.state, o.profile, o.custody);
                 await claims.unsent(o);
                 claim = await claims.mark(o, proofHash, this.now().toISOString());
@@ -48,8 +49,8 @@ export class MerchantRetirement {
             await claims.unsent(o); // Check again AFTER durable permanent tombstone, before either hold changes.
             if (o.state === "retired_unsent" && o.retirementDigest !== claim.claimDigest)
                 refuse("merchant_retirement_tombstone_required");
-            for (const [identity, key] of [[merchantUsageIdentity, merchantUsageKey(o.operationId)], [merchantNativeUsageIdentity, merchantNativeUsageKey(o.operationId)]]) {
-                await locked.admit(o.profile, o);
+            for (const [identity, key] of [[merchantUsageIdentity(t), merchantUsageKey(o.operationId)], [merchantNativeUsageIdentity(t), merchantNativeUsageKey(o.operationId)]]) {
+                await locked.admit(o.profile, t, o);
                 await claims.unsent(o);
                 const reservationId = assetUsageReservationId(identity, key), r = await ledger.load(identity, reservationId), amount = identity.asset.kind === "native" ? o.effectBinding?.nativeAmountAtomic : o.frozen.accepted.amount;
                 const outcomeDigest = hashObject({ kind: "merchant_retired_unsent", operationId: o.operationId, fingerprint: o.fingerprint, retirementDigest: claim.claimDigest, consumedAtomic: "0" });
