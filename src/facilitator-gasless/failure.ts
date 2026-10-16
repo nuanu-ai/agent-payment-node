@@ -25,6 +25,14 @@ export function facilitatorFail(reason: FacilitatorReason): never {
   throw new ApnError(FACILITATOR_REASONS[reason], "Avalanche facilitator transfer could not continue safely.", { reason });
 }
 
+/** The Avalanche RPC setting is missing or unusable; the guidance names this route's own environment variable. */
+export function facilitatorRpcConfigFail(cause: "missing" | "invalid"): never {
+  throw new ApnError("APN_RPC_CONFIG", "Avalanche facilitator transfer could not continue safely.", {
+    reason: "facilitator_gasless_rpc_binding", nextActions: [cause === "missing"
+      ? "Set APN_AVALANCHE_RPC_URL to a public HTTPS Avalanche C-Chain RPC endpoint."
+      : "Set APN_AVALANCHE_RPC_URL to a public, credential-free HTTPS Avalanche C-Chain RPC endpoint without a fragment."] });
+}
+
 export function facilitatorReason(error: unknown, fallback: FacilitatorReason): FacilitatorReason {
   const reason = error instanceof ApnError ? error.details?.reason : undefined;
   return typeof reason === "string" && Object.hasOwn(FACILITATOR_REASONS, reason) ? reason as FacilitatorReason : fallback;

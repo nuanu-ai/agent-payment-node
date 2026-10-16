@@ -1,3 +1,4 @@
+import { ApnError } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 import { type GaslessTransport } from "./https.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessEstimate, GaslessFees, GaslessGas, GaslessIntent, GaslessObservation, GaslessSnapshot } from "./model.js";
@@ -29,7 +30,8 @@ export declare function withGaslessRpcInvocation<T>(work: () => Promise<T>, plan
 /** Reuse the public command's budget, or start one observation step for a directly invoked observation port. */
 export declare function withinGaslessRpcInvocation<T>(work: () => Promise<T>): Promise<T>;
 export declare function gaslessRpcInvocation(): GaslessRpcRequestSession;
-export declare function gaslessRpcFactory(environment: Readonly<Record<string, string | undefined>>): GaslessRpcFactory;
+/** `rpcSetting` names where the RPC URL came from when it is not the chain's own `APN_*_RPC_URL` (quote: `--rpc-url`). */
+export declare function gaslessRpcFactory(environment: Readonly<Record<string, string | undefined>>, rpcSetting?: string): GaslessRpcFactory;
 export declare class GaslessRpc implements GaslessRpcPort {
     private readonly transport;
     private readonly fallbackSession;
@@ -76,3 +78,5 @@ export declare class GaslessRpc implements GaslessRpcPort {
 }
 /** Storage key of a Solidity `mapping(address => uint256)` entry at the given base slot. */
 export declare function gaslessBalanceSlot(holder: Address, base: string): Hex;
+/** A configuration failure names the selected network's own setting and its exact cause, never another network's. */
+export declare function gaslessConfigError(reason: string, nextAction: string): ApnError;

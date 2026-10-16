@@ -61,7 +61,7 @@ function nextActions(error: ReturnType<typeof asApnError>): readonly string[] {
       return typeof handoff === "string" ? [handoff] : [];
     }
     case "APN_NATIVE_CHANNEL_REQUIRED": return ["Initialize the local APN custody adapter."];
-    case "APN_RPC_CONFIG": return ["Provide --rpc-url with an explicit HTTPS Base endpoint."];
+    case "APN_RPC_CONFIG": return ["Correct the selected network's RPC setting named in the error (its --rpc-url or APN_*_RPC_URL), then retry."];
     case "APN_REPREPARE_REQUIRED": return ["Prepare a new transfer with a new idempotency key."];
     case "APN_STATE_BUSY": return ["The kernel lock stayed busy through the bounded wait; retry after the active APN process exits. APN keeps stable lock files in place."];
     default: return [];

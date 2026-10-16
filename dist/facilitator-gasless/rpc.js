@@ -2,7 +2,7 @@ import { canonicalJson, exactKeys, sha256 } from "../canonical.js";
 import { GaslessHttps } from "../gasless/https.js";
 import { addressWord, parseReceiptLogs, quantity, rpcBlock, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord, receiptHash, recheckBlock } from "../gasless/rpc-codec.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
-import { facilitatorFail } from "./failure.js";
+import { facilitatorFail, facilitatorRpcConfigFail } from "./failure.js";
 import { AVALANCHE_FACILITATOR as R } from "./registry.js";
 const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_call", "eth_getTransactionReceipt", "eth_getLogs"]);
 const MAX_RESPONSE = 4 * 1024 * 1024;
@@ -10,7 +10,7 @@ const LOG_WINDOW = 2048n;
 export function avalancheFacilitatorRpc(environment, transport) {
     const rpcUrl = environment[R.rpcEnv];
     if (rpcUrl === undefined || rpcUrl.length === 0)
-        facilitatorFail("facilitator_gasless_rpc_binding");
+        facilitatorRpcConfigFail("missing");
     return new AvalancheFacilitatorRpc(rpcUrl, transport);
 }
 export class AvalancheFacilitatorRpc {
@@ -118,7 +118,7 @@ function rpcEndpoint(value) {
         return parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "Avalanche RPC endpoint", 2048);
     }
     catch {
-        return facilitatorFail("facilitator_gasless_rpc_binding");
+        return facilitatorRpcConfigFail("invalid");
     }
 }
 //# sourceMappingURL=rpc.js.map
