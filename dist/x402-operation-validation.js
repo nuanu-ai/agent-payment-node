@@ -1,9 +1,8 @@
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
 import { validX402Tuple, x402Network } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
-import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
 import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
-import { frozenErc7710FacilitatorsMatch } from "./x402-erc7710-codec.js";
+import { frozenOfferTimeout } from "./x402-frozen-offer.js";
 import { isX402ResultStatus, validateX402Resource } from "./x402-http-request.js";
 import { X402_STATE_VERSION, TRANSITION_VERSION, ZERO_HASH, deliversX402Result, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, x402TransactionHintSourceBindingHash, } from "./x402-state-model.js";
 import { STATE_SHAPE, legalNextState, validateStateTuple } from "./x402-state-shape.js";
@@ -33,7 +32,7 @@ export function validateX402OperationUnsafe(value) {
         stateCorrupt("x402 profile hash is invalid.");
     const resource = validateX402Resource(operation.resource);
     const sellerWire = exactRecord(operation.sellerWire, ["resourceCanonicalJson", "resourceHash"]);
-    const resourceValue = canonicalText(sellerWire.resourceCanonicalJson);
+    canonicalText(sellerWire.resourceCanonicalJson);
     hash(sellerWire.resourceHash);
     if (sellerWire.resourceHash !== domainHash("apn.x402.resource.v1", sellerWire.resourceCanonicalJson))
         stateCorrupt("x402 seller resource hash is invalid.");
@@ -69,36 +68,17 @@ export function validateX402OperationUnsafe(value) {
     hash(selectedOffer.offerHash);
     if (selectedOffer.offerHash !== domainHash("apn.x402.offer.v1", selectedOffer.declaredCanonicalJson))
         stateCorrupt("x402 offer hash is invalid.");
-    let declaration;
     if (operation.paymentIdentifier !== undefined) {
         const paymentIdentifier = exactRecord(operation.paymentIdentifier, ["declarationCanonicalJson", "declarationHash", "value"]);
-        declaration = canonicalText(paymentIdentifier.declarationCanonicalJson);
+        canonicalText(paymentIdentifier.declarationCanonicalJson);
         hash(paymentIdentifier.declarationHash);
         if (paymentIdentifier.declarationHash !== domainHash("apn.x402.payment-identifier-declaration.v1", paymentIdentifier.declarationCanonicalJson) ||
             paymentIdentifier.value !== `apn_${operation.operationId}`)
             stateCorrupt("x402 payment identifier binding is invalid.");
     }
-    const paymentRequired = {
-        x402Version: 2,
-        resource: resourceValue,
-        accepts: [requirements],
-        ...(declaration === undefined ? {} : { extensions: { "payment-identifier": declaration } }),
-    };
-    const header = Buffer.from(canonicalJson(paymentRequired), "utf8").toString("base64");
-    const decoded = decodePaymentRequiredHeader(header);
-    const candidates = inspectCandidates(decoded, resource.canonicalUrl, x402Network(operation.network).chainId);
-    if (candidates.length !== 1)
-        stateCorrupt("x402 frozen offer is no longer statically compatible.");
-    const candidate = candidates[0];
-    const methodFieldsMatch = candidate?.assetTransferMethod === "erc7710" && resolved.assetTransferMethod === "erc7710"
-        ? frozenErc7710FacilitatorsMatch(record(record(requirements).extra), resolved.facilitatorAddresses)
-        : candidate?.assetTransferMethod === "eip3009" && resolved.assetTransferMethod === "eip3009" &&
-            candidate.tokenName === resolved.tokenName && candidate.tokenVersion === resolved.tokenVersion;
-    if (candidate === undefined || candidate.offerHash !== selectedOffer.offerHash || candidate.asset !== operation.token ||
-        candidate.amountAtomic !== operation.amountAtomic || candidate.payTo !== operation.payee ||
-        candidate.assetTransferMethod !== resolved.assetTransferMethod || candidate.paymentFlow !== resolved.paymentFlow ||
-        !methodFieldsMatch)
-        stateCorrupt("x402 frozen offer economics disagree with protected state.");
+    // The frozen offer is checked against this record's own fields, never against today's admission rules:
+    // a tightened prepare rule refuses new offers but cannot turn a saved operation corrupt.
+    const maxTimeoutSeconds = frozenOfferTimeout(requirements, operation, resolved);
     const preparedBlock = exactRecord(operation.preparedBlock, ["number", "hash", "observedAt"]);
     parseAtomic(preparedBlock.number);
     bytes32(preparedBlock.hash);
@@ -157,9 +137,9 @@ export function validateX402OperationUnsafe(value) {
     if (authorization.from !== operation.wallet || authorization.to !== operation.payee || authorization.value !== operation.amountAtomic ||
         authorization.validAfter !== "0" ||
         (resolved.assetTransferMethod === "eip3009"
-            ? BigInt(authorization.validBefore) !== BigInt(authorization.createdAt) + BigInt(candidate.maxTimeoutSeconds)
+            ? BigInt(authorization.validBefore) !== BigInt(authorization.createdAt) + maxTimeoutSeconds
             : BigInt(authorization.validBefore) !== BigInt(operation.delegatedMaterial === undefined ? "0" : String(record(operation.delegatedMaterial).effectiveExpiryUnix)) ||
-                BigInt(authorization.validBefore) > BigInt(authorization.createdAt) + BigInt(candidate.maxTimeoutSeconds)))
+                BigInt(authorization.validBefore) > BigInt(authorization.createdAt) + maxTimeoutSeconds))
         stateCorrupt("x402 authorization economics are invalid.");
     const { intentHash: _intentHash, ...intent } = authorization;
     if (authorization.intentHash !== x402AuthorizationIntentHash(intent))
