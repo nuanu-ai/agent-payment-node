@@ -5,9 +5,10 @@ import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { swapMechanismDigest } from "./pin.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry } from "./protocol-registry.js";
 import { createSwapQuote } from "./quote.js";
-import { newSwapOperation, validateSwapOperation, validateSwapReceiptProof } from "./model.js";
+import { newSwapOperation, SWAP_TERMINAL_STATES, validateSwapOperation, validateSwapReceiptProof } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
 import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
+import { swapUnlandedProofHash, validateSwapUnlandedProof } from "./unlanded.js";
 export class GuardedSwapService {
     operations;
     usage;
@@ -129,9 +130,26 @@ export class GuardedSwapService {
                 state: "failed_before_effect", now, outcomeDigest: failureProofHash });
         return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "failed_before_effect", { failureProofHash, ...(lease === undefined ? {} : { usageLease: lease }) }, now);
     }
+    /**
+     * The chain proved the marked effect can never land: its lifetime, deadline or expiration passed at finality with no
+     * inclusion. The principal lease is released and the operation is terminal. Nothing is re-signed or resent.
+     */
+    async expireUnlanded(operation, now, proof) {
+        operation = validateSwapOperation(operation);
+        if (!["submitting", "submitted", "unknown_finality"].includes(operation.state) || operation.submissionMarker === null ||
+            operation.receiptProof !== null || operation.usageLease === null)
+            blocked("Swap has no unlanded effect to expire.");
+        instant(now);
+        const proofHash = swapUnlandedProofHash(operation, validateSwapUnlandedProof(proof, operation.quote.sourceAsset.chain));
+        if (operation.state !== "unknown_finality")
+            operation = await this.recordPossibleSend(operation, "unknown_finality", now);
+        const lease = await this.usage.transition({ ...usageIdentity(operation), reservationId: operation.usageLease.reservationId,
+            policyDigest: operation.policyDigest, state: "released_unsubmitted", now, outcomeDigest: proofHash });
+        return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "expired_unlanded", { usageLease: lease, failureProofHash: proofHash }, now);
+    }
     resumeDirective(operation) {
         operation = validateSwapOperation(operation);
-        if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(operation.state))
+        if (SWAP_TERMINAL_STATES.includes(operation.state))
             return "terminal";
         return operation.submissionMarker === null ? "prepare_or_approve" : "observe_only";
     }

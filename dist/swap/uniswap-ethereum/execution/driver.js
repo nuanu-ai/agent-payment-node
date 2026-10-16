@@ -63,7 +63,7 @@ export class UniswapEthereumExecutionDriver {
         if (operation.submissionMarker === null)
             blocked("Uniswap observation is available only after the submission marker.", "uniswap_resume_before_marker");
         validateUniswapKeylessMaterial(input.material);
-        if (["finalized", "failed_confirmed_revert"].includes(operation.state))
+        if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(operation.state))
             return operation;
         const binding = await this.d.bindings.load(operation);
         const effect = binding === null ? null : await this.d.effects.load(operation, binding);
@@ -75,6 +75,16 @@ export class UniswapEthereumExecutionDriver {
         if (operation.state === "submitting")
             operation = await this.d.core.recordPossibleSend(operation, effect.phase === "send_accepted" ? "submitted" : "unknown_finality", this.d.clock.now());
         return await this.observeExact(operation, binding, effect.transactionHash, true);
+    }
+    /** The router deadline is the quote expiry; the signed hash, when one was ever sealed, is read after the finalized block. */
+    async proveUnlanded(input) {
+        const operation = validateSwapOperation(input.operation);
+        validateUniswapKeylessMaterial(input.material);
+        return await this.d.observer.proveUnlanded(Math.floor(Date.parse(operation.quote.expiresAt) / 1000), async () => {
+            const binding = await this.d.bindings.load(operation);
+            const effect = binding === null ? null : await this.d.effects.load(operation, binding);
+            return effect === null ? null : effect.transactionHash;
+        });
     }
     /**
      * Right after the single send an observation failure must not hide the recorded send, so it returns the operation. A status

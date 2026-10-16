@@ -10,10 +10,11 @@ const ALLOWED = {
     reserved: ["submitting", "failed_before_effect"],
     submitting: ["submitted", "unknown_finality"],
     submitted: ["unknown_finality", "finalized", "failed_confirmed_revert"],
-    unknown_finality: ["finalized", "failed_confirmed_revert"],
+    unknown_finality: ["finalized", "failed_confirmed_revert", "expired_unlanded"],
     finalized: [],
     failed_before_effect: [],
     failed_confirmed_revert: [],
+    expired_unlanded: [],
 };
 export function transitionSwapOperation(opValue, state, evidence, now) {
     const op = validateSwapOperation(opValue);
@@ -73,6 +74,15 @@ function transitionPatch(op, state, evidence, at) {
             invalid("Confirmed swap revert requires a released lease and its finalized revert proof.");
         }
         return { usageLease: evidence.usageLease, receiptProof: evidence.receiptProof, failureProofHash: evidence.failureProofHash };
+    }
+    if (state === "expired_unlanded") {
+        if (op.receiptProof !== null || op.submissionMarker === null || evidence.usageLease?.state !== "released_unsubmitted" ||
+            evidence.failureProofHash === undefined || !/^[a-f0-9]{64}$/u.test(evidence.failureProofHash) ||
+            evidence.usageLease.outcomeDigest !== evidence.failureProofHash || evidence.usageLease.reservationId !== op.usageLease?.reservationId ||
+            Object.keys(evidence).length !== 2) {
+            invalid("Expired unlanded swap requires its expiry proof and the released lease bound to it.");
+        }
+        return { usageLease: evidence.usageLease, failureProofHash: evidence.failureProofHash };
     }
     if (state === "failed_before_effect") {
         if (op.state === "submitting") {

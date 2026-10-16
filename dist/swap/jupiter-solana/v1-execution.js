@@ -12,6 +12,7 @@ import { JupiterV1MaterialResolver } from "./v1-resolver.js";
 import { routeConfigForMaterial } from "./v1-route-config.js";
 import { JupiterV1DispatchStore, jupiterV1DispatchResult } from "./v1-dispatch.js";
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
+import { proveSolanaUnlanded } from "../unlanded.js";
 /** The public sender reloads durable ownership and consumes its fsynced create-only claim under the operation lock. */
 export class JupiterV1SingleSender {
     core;
@@ -162,7 +163,7 @@ export class JupiterV1ExecutionDriver {
                 corrupt();
             if (op.submissionMarker === null)
                 blocked("Jupiter observation requires its durable effect marker.");
-            if (["finalized", "failed_confirmed_revert"].includes(op.state))
+            if (["finalized", "failed_confirmed_revert", "expired_unlanded"].includes(op.state))
                 return op;
             if (op.state === "submitting")
                 op = await this.d.core.recordPossibleSend(op, "unknown_finality", this.d.clock.now());
@@ -186,6 +187,23 @@ export class JupiterV1ExecutionDriver {
             }
         });
     }
+    async proveUnlanded(input) { return await proveJupiterV1Unlanded(this.d, input); }
+}
+/** Under the operation lock that marking, signing and the single send hold: the frozen lifetime passed at finality and
+ * the persisted signature, if any, has no status. Nothing is decrypted, signed or sent. */
+export async function proveJupiterV1Unlanded(d, input) {
+    return await d.core.operations.withLocks([`jupiter-v1-operation:${input.operation.operationId}`], async () => {
+        const op = await d.core.operations.loadAny(input.operation.operationId);
+        if (op === null)
+            corrupt();
+        if (op.submissionMarker === null || op.receiptProof !== null || !["submitting", "submitted", "unknown_finality"].includes(op.state))
+            return null;
+        const material = validateJupiterV1PreparedMaterial(input.material);
+        return await proveSolanaUnlanded(d.rpc, { lastValidBlockHeight: material.execution.lifetime.lastValidBlockHeight, loadSignature: async () => {
+                const binding = await d.bindings.load(op, material);
+                return binding === null ? null : await d.bindings.loadSignature(op, binding);
+            } });
+    });
 }
 async function guardReceipt(fresh) {
     return await guardJupiterV1WhirlpoolMaterial(fresh);
