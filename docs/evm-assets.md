@@ -122,10 +122,36 @@ the approving invocation. Each step's hard POST cap is derived from this plan
 times two (`directEvmStepBudget`): prepare 4 (6), approve 10 (12), resume 12, and
 every listed network is capped and paced the same way. A missing, malformed,
 rejected or rate-limited batch ends that step without scalar fallback; there is
-no per-call variant, so an endpoint that refuses JSON-RPC batches is not usable
-for direct transfers. `--rpc-read-mode batch` is still accepted and changes
-nothing. Provider batch acceptance and live payment execution are separate
-operational checks.
+no per-call variant: **the selected `--rpc-url` must accept JSON-RPC batches**.
+An endpoint that answers a batch with a single object fails with
+`APN_RPC_PROTOCOL` and reason `rpc_batch_unsupported`, after that one POST.
+`--rpc-read-mode batch` is still accepted and changes nothing.
+
+Keyless public endpoints checked on 2026-10-17 without keys. Each was sent one
+`[eth_chainId, eth_blockNumber]` batch. The endpoint in the second column also
+answered the reader's three real POST shapes (a six-item token balance batch;
+nonce, estimate, tip and head; the receipt block, the transaction and, on `safe`
+networks, the `safe` head). This is the same endpoint APN's portfolio uses by
+default.
+
+| Network | Batches verified with the reader's real shapes | Also accepted the 2-item batch | Refused or limited |
+| --- | --- | --- | --- |
+| Ethereum | `https://ethereum-rpc.publicnode.com` | `https://eth.drpc.org` | |
+| Base | `https://mainnet.base.org` | `https://base-rpc.publicnode.com`, `https://base.drpc.org` | |
+| Arbitrum One | `https://arb1.arbitrum.io/rpc` | `https://arbitrum-one-rpc.publicnode.com`, `https://arbitrum.drpc.org` | |
+| OP Mainnet | `https://mainnet.optimism.io` | `https://optimism-rpc.publicnode.com`, `https://optimism.drpc.org` | |
+| Polygon PoS | `https://polygon-bor-rpc.publicnode.com` | `https://polygon.drpc.org` | `https://polygon-rpc.com`: HTTP 401, "API key disabled" |
+| BNB Smart Chain | `https://bsc-rpc.publicnode.com`, `https://bsc-dataseed.bnbchain.org` | `https://bsc-dataseed.binance.org` | `https://bsc.drpc.org`: HTTP 429, public rate limit |
+| Avalanche C-Chain | `https://api.avax.network/ext/bc/C/rpc` | `https://avalanche-c-chain-rpc.publicnode.com`, `https://avalanche.drpc.org` | |
+| Unichain | `https://mainnet.unichain.org` | `https://unichain-rpc.publicnode.com` | `https://unichain.drpc.org`: accepted the batch but answered `eth_blockNumber` with -32601 "not available" |
+| Linea | `https://rpc.linea.build` | `https://linea-rpc.publicnode.com`, `https://linea.drpc.org` | |
+| Monad | `https://rpc.monad.xyz` | `https://rpc2.monad.xyz`, `https://rpc3.monad.xyz`, `https://monad.drpc.org` | `https://rpc1.monad.xyz`: HTTP 403 |
+| Sei EVM | `https://evm-rpc.sei-apis.com` | `https://sei-evm-rpc.publicnode.com`, `https://sei.drpc.org` | |
+
+No keyless endpoint above refused the batch format itself; every refusal was an
+access or rate limit that a per-call transport would hit too. Provider limits
+change, so this table is evidence for that date, not a guarantee. Live payment
+execution is a separate operational check.
 
 - **OP-stack (Base, OP Mainnet, Unichain).** The L1 data fee upper bound for
   512 signed bytes (`getL1FeeUpperBound`) and the operator fee
