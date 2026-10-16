@@ -1,7 +1,7 @@
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { HttpsBaseRpc } from "../rpc.js";
 import type { StateStore } from "../state.js";
-import { validateRelayArbitrumUsdcEthereumUsdcQuote } from "./arbitrum-usdc-ethereum-quote.js";
+import type { validateRelayArbitrumUsdcEthereumUsdcQuote } from "./arbitrum-usdc-ethereum-quote.js";
 type Quote = Awaited<ReturnType<typeof validateRelayArbitrumUsdcEthereumUsdcQuote>>;
 export interface RelayEthereumUsdcTransaction {
     readonly hash: string;

@@ -2,23 +2,31 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "../../src/relay/quote.js";
-import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT,
+import { RELAY_ARBITRUM_USDC,
   relayArbitrumUsdcEthereumUsdcQuoteRequest, validateRelayArbitrumUsdcEthereumUsdcQuote,
 } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
+import { RELAY_ETHEREUM_USDC_RECIPIENT } from "./relay-legacy-accounts.js";
 
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
-const intent = { payer, amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 };
+const intent = { payer, recipient: RELAY_ETHEREUM_USDC_RECIPIENT, amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 };
 const fixture = async (): Promise<any> => JSON.parse(await readFile(
   "tests/core/relay-fixtures/arbitrum-usdc-ethereum-usdc-quote-20260925.json", "utf8"));
 
-test("Arbitrum USDC to exact Ethereum recipient request is finite and unsigned", () => {
+test("Arbitrum USDC to the caller's Ethereum recipient request is unsigned", () => {
   assert.deepEqual(relayArbitrumUsdcEthereumUsdcQuoteRequest(intent), {
     user: payer.toLowerCase(), originChainId: 42161, destinationChainId: 1,
     originCurrency: RELAY_ARBITRUM_USDC, destinationCurrency: ETHEREUM_USDC,
-    amount: "500000", tradeType: "EXACT_INPUT", recipient: RELAY_ETHEREUM_USDC_RECIPIENT,
+    amount: "500000", tradeType: "EXACT_INPUT", recipient: RELAY_ETHEREUM_USDC_RECIPIENT.toLowerCase(),
     refundTo: payer.toLowerCase(), includeProtocolData: true, usePermit: false, useDepositAddress: false,
   });
   assert.throws(() => relayArbitrumUsdcEthereumUsdcQuoteRequest({ ...intent, amountAtomic: "0" }));
+  assert.equal(relayArbitrumUsdcEthereumUsdcQuoteRequest({ ...intent, recipient: payer }).recipient, payer.toLowerCase());
+  assert.throws(() => relayArbitrumUsdcEthereumUsdcQuoteRequest({ ...intent, recipient: "0x1234" }));
+});
+
+test("the signed order must pay exactly the named recipient", async () => {
+  await assert.rejects(validateRelayArbitrumUsdcEthereumUsdcQuote(await fixture(), { ...intent, recipient: payer }),
+    /Relay Arbitrum quote rejected: order identity/u);
 });
 
 test("fresh captured approve and deposit quote materializes offline with exact bindings", async () => {

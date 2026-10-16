@@ -5,7 +5,7 @@ import type { StateStore } from "../state.js";
 import { type ArbitrumEffectEvent, type ArbitrumEffectRole, type ArbitrumSourceEffectJournal } from "./arbitrum-source-effect-journal.js";
 import { RelayArbitrumSourceFinalityObserver } from "./arbitrum-source-finality.js";
 export interface RelayArbitrumSourceObservePorts {
-    readonly operation?: (operationId: string) => Promise<RelayUnsignedOperation | null>;
+    readonly operation?: (profileHash: string, operationId: string) => Promise<RelayUnsignedOperation | null>;
     readonly journal?: (profileHash: string, operationId: string) => Promise<ArbitrumSourceEffectJournal | null>;
     readonly transition?: (profileHash: string, operationId: string, expectedHash: string, role: ArbitrumEffectRole, proofDigest: string, verify: (input: {
         operation: RelayUnsignedOperation;
@@ -31,7 +31,8 @@ export declare class RelayArbitrumSourceObserveService {
     private holdUncertainSend;
     /** A reverted or never-landed approval or deposit moved no principal: the hold is released, never counted as spent. */
     private releaseRevertedUsage;
-    observe(operationId: string): Promise<{
+    /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+    observe(profile: string, operationId: string): Promise<{
         operationId: string;
         state: "source_effect_reverted" | "source_effect_never_landed" | "observation_only" | "approval_skipped" | "source_effect_not_recorded" | "source_proof_pending" | "approval_source_confirmed" | "deposit_source_confirmed";
         reason: string;

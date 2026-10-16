@@ -3,10 +3,11 @@ import { canonicalJson, domainHash, hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { RelayNativeSourceJournalRepository } from "./native-source.js";
+import { RELAY_MEGA_USDM } from "./native-routes.js";
 const hash = /^0x[0-9a-fA-F]{64}$/u;
 export class RelayDestinationClaimRepository extends SecureStateStore {
     async claim(op, sourceHash, proof) {
-        if (op.sourceChainId !== 8453 || ![137, 4326].includes(op.destinationChainId) || !op.nativeQuote || !op.statusLocator ||
+        if (![56, 8453].includes(op.sourceChainId) || ![137, 143, 4326].includes(op.destinationChainId) || !op.nativeQuote || !op.statusLocator ||
             !hash.test(sourceHash) || !hash.test(proof.destinationTransactionHash) || proof.sourceDepositHash?.toLowerCase() !== sourceHash.toLowerCase() ||
             proof.operationId !== op.operationId || proof.operationIntegrityHash !== op.integrityHash || proof.quoteDigest !== op.quoteDigest ||
             proof.orderId !== op.nativeQuote.orderId || proof.recipient !== op.recipient.toLowerCase() ||
@@ -20,7 +21,7 @@ export class RelayDestinationClaimRepository extends SecureStateStore {
             transactionHash: proof.destinationTransactionHash.toLowerCase(), requestId: op.statusLocator.requestId,
             operationId: op.operationId, operationIntegrityHash: op.integrityHash, sourceTransactionHash: sourceHash.toLowerCase(),
             orderId: op.nativeQuote.orderId, recipient: proof.recipient,
-            token: op.destinationChainId === 4326 ? "0xfafddbb3fc7688494971a79cc65dca3ef82079e7" : "native",
+            token: op.destinationChainId === 4326 ? RELAY_MEGA_USDM : "native",
             amountAtomic: proof.creditedWei, blockNumber: proof.destinationBlockNumber, blockHash: proof.destinationBlockHash };
         const expected = { ...binding, integrityHash: hashObject(binding) };
         await this.initialize();

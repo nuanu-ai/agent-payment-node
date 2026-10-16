@@ -48,7 +48,7 @@ async function setup(policyFactory?: (root: string) => Promise<ActiveAssetPolicy
   const policy = policyFactory === undefined ? active(fixtureOwner, profile) :
     { ...await policyFactory(temporary.root), accounts: { evm: fixtureOwner } };
   const prepared = await new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
-    { activePolicy: async () => policy, dailyUsage: async () => "0" }).prepareArbitrum({
+    { activePolicy: async () => policy, dailyUsage: async () => "0" }).prepareArbitrum({ recipient: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04",
     profile, owner: fixtureOwner, amountAtomic: "500000", minOutputAtomic: "94065",
     maxProviderFeeAtomic: "401482", maxApprovalNetworkFeeWei: "2000000000000",
     maxDepositNetworkFeeWei: "2000000000000", quoteFile, idempotencyKey: "relay-arb-execute-test",
@@ -209,10 +209,10 @@ test("confirmed approval admits deposit but ambiguous send cannot replay", async
         { kind: "record_verified_observation", role, outcome: "confirmed", proofDigest: digest });
       return depositJournal;
     } });
-  assert.equal((await source.observe(op.operationId)).state, "deposit_source_confirmed");
+  assert.equal((await source.observe("default", op.operationId)).state, "deposit_source_confirmed");
   assert.equal((await lease(state, op))?.state, "finalized");
   assert.equal((await lease(state, op))?.outcomeDigest, depositJournal.effects[1].attempt?.observationDigest);
-  assert.equal((await source.observe(op.operationId)).state, "deposit_source_confirmed");
+  assert.equal((await source.observe("default", op.operationId)).state, "deposit_source_confirmed");
 });
 
 test("approval gate, owner decline, policy race and canonical reorg prevent send", async t => {
@@ -283,7 +283,7 @@ test("uncertain approval lease remains counted after safe approval proof and per
         { kind: "record_verified_observation", role, outcome: "confirmed", proofDigest: digest });
       return journal;
     } });
-  assert.equal((await observe.observe(op.operationId)).state, "approval_source_confirmed");
+  assert.equal((await observe.observe("default", op.operationId)).state, "approval_source_confirmed");
   assert.equal(journal.effects[0].phase, "confirmed");
   const h = harness(state, op, journal);
   assert.equal((await h.service.execute("default", op.operationId)).state, "deposit_submitted");

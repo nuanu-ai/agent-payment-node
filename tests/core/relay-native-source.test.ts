@@ -13,9 +13,9 @@ import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce,
   createRelayNativeSourceRuntime, publicRelayNativeSourceJournal, RelayNativeSourceRuntime } from "../../src/relay/native-source.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
-import { RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE, RELAY_BNB_DEFAULT_SOURCE,
-  RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT, validateRelayNativeQuote,
-  verifySavedRelayNativeQuote } from "../../src/relay/native-quote.js";
+import { RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE,
+  validateRelayNativeQuote, verifySavedRelayNativeQuote } from "../../src/relay/native-quote.js";
+import { RELAY_BNB_DEFAULT_SOURCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT } from "./relay-legacy-accounts.js";
 import { StateStore } from "../../src/state.js";
 import { RelayNativeObserveService } from "../../src/relay/native-observe.js";
 import { RelayKeylessStatusService } from "../../src/relay/status.js";
@@ -32,7 +32,8 @@ async function prepared(state: StateStore, monad = false) {
   const raw = monad ? JSON.parse(await readFile("tests/core/relay-fixtures/bnb-native-monad-native-quote-20260925.json", "utf8")) : await fixture();
   const quote = await validateRelayNativeQuote(raw, { payer: RELAY_BNB_SOURCE,
     recipient, amountAtomic: "1500000000000000",
-    minimumOutputWei: monad ? "40000000000000000000" : "9000000000000000000", nowSeconds: Math.floor(now.getTime() / 1000) });
+    minimumOutputWei: monad ? "40000000000000000000" : "9000000000000000000", nowSeconds: Math.floor(now.getTime() / 1000),
+    routeReference: monad ? RELAY_BNB_MONAD_ROUTE_REFERENCE : RELAY_BNB_POLYGON_ROUTE_REFERENCE, maximumNetworkFeeWei: "30000000000000" });
   assert.ok(quote.statusLocator);
   return freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned",
     state: "prepared", terminal: false, profileHash: state.profileHash("evm-live-buyer"),
@@ -48,7 +49,9 @@ async function preparedDefault(state: StateStore) {
   const raw = JSON.parse(await readFile("tests/core/relay-fixtures/bnb-native-monad-native-default-quote-20260925.json", "utf8"));
   const quote = await validateRelayNativeQuote(raw, { payer: RELAY_BNB_DEFAULT_SOURCE,
     recipient: RELAY_BNB_DEFAULT_SOURCE, amountAtomic: "1200000000000000",
-    minimumOutputWei: "32000000000000000000", nowSeconds: Math.floor(now.getTime() / 1000) });
+    minimumOutputWei: "32000000000000000000", nowSeconds: Math.floor(now.getTime() / 1000),
+    // An operation 0.5.43 wrote under the owner-named reference: it still executes, observes and retires.
+    routeReference: RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE, maximumNetworkFeeWei: "30000000000000" });
   assert.ok(quote.statusLocator);
   return freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned",
     state: "prepared", terminal: false, profileHash: state.profileHash("default"),
@@ -108,7 +111,7 @@ test("native observation reconciles one BNB source send and bounded Monad recipi
   let observation = sourceObservation;
   let sourceReady = false;
   const status = new RelayKeylessStatusService(state, async () => new Response(JSON.stringify(payload), { status: 200 }));
-  assert.equal((await status.status(saved.operationId)).status, "success");
+  assert.equal((await status.status("evm-live-buyer", saved.operationId)).status, "success");
   const service = new RelayNativeObserveService(state, { finalizedDeposit: async () => sourceReady ? observation : null }, destination,
     status,
     { now: () => now });
@@ -223,7 +226,9 @@ test("Monad execute uses the shared source journal and refuses absent buyer cust
     { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) },
     "https://bsc-rpc.publicnode.com", async () => { calls++; return true; }, { now: () => now },
     { batchCall: async () => { calls++; return []; }, submitRawTransaction: async () => { calls++; return "0x0"; } });
-  await assert.rejects(runtime.execute(op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(runtime.execute("evm-live-buyer", op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  // Another profile cannot reach this operation at all.
+  await assert.rejects(runtime.execute("default", op.operationId), { code: "APN_OPERATION_BLOCKED", details: { reason: "prepared_operation_missing" } });
   assert.equal(calls, 0);
   assert.equal(await new RelayNativeSourceJournalRepository(temp.root).load(op), null);
 });
@@ -244,7 +249,7 @@ for (const profile of ["evm-live-buyer", "default"] as const) test(`${profile} n
     } }, { now: () => now });
   Object.assign(runtime, { permissions: { listAll: async () => [{ phase: "active",
     owner_address: op.sourceAccount, profile_hash: "f".repeat(64) }] } });
-  await assert.rejects(runtime.execute(op.operationId), { code: "APN_OPERATION_BLOCKED",
+  await assert.rejects(runtime.execute(profile, op.operationId), { code: "APN_OPERATION_BLOCKED",
     details: { reason: "foreign_encrypted_metamask_grant" } });
   assert.equal(calls, 0);
   assert.equal(await new RelayNativeSourceJournalRepository(temp.root).load(op), null);
@@ -322,9 +327,11 @@ test("native execute command remains distinct and keyless RPC URL is mandatory",
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root);
   const op = await prepared(state);
-  assert.deepEqual(bindArgv(["relay", "native", "execute", "--operation", op.operationId,
+  assert.deepEqual(bindArgv(["relay", "native", "execute", "--profile", "evm-live-buyer", "--operation", op.operationId,
     "--rpc-url", "https://bsc-rpc.publicnode.com"]),
-    { request: { command: "relay.native.execute", operationId: op.operationId }, rpcUrl: "https://bsc-rpc.publicnode.com" });
+    { request: { command: "relay.native.execute", profile: "evm-live-buyer", operationId: op.operationId }, rpcUrl: "https://bsc-rpc.publicnode.com" });
+  assert.throws(() => bindArgv(["relay", "native", "execute", "--operation", op.operationId, "--rpc-url", "https://bsc-rpc.publicnode.com"]),
+    { code: "APN_INVALID_INPUT" });
   const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
   for (const url of ["http://rpc.example", "https://user:secret@rpc.example", "https://rpc.example/signed?key=x"])
     assert.throws(() => createRelayNativeSourceRuntime(state, wrapping, url, async () => true),
@@ -338,7 +345,7 @@ test("installed native execute CLI refuses absent buyer custody before any RPC o
   await repository.persistLocked(op);
   let posts = 0;
   const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
-  const result = await runCli(["relay", "native", "execute", "--operation", op.operationId,
+  const result = await runCli(["relay", "native", "execute", "--profile", "evm-live-buyer", "--operation", op.operationId,
     "--rpc-url", "https://bsc-rpc.publicnode.com"], {}, { stateRoot: temp.root, wrappingSecret: wrapping,
     clock: { now: () => now }, relayExecuteTransport: {
       batchCall: async () => { posts++; return []; },
@@ -355,7 +362,7 @@ for (const lane of ["polygon", "buyer-monad", "default-monad"] as const) test(`$
   const monad = lane !== "polygon", defaultRoute = lane === "default-monad";
   const profile = defaultRoute ? "default" : "evm-live-buyer";
   const owner = defaultRoute ? RELAY_BNB_DEFAULT_SOURCE : RELAY_BNB_SOURCE;
-  const routeReference = defaultRoute ? RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE :
+  const routeReference = defaultRoute ? RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE :
     monad ? RELAY_BNB_MONAD_ROUTE_REFERENCE : "bnb-native-polygon-native-v1";
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
     registryVersion: "relay-native-crash.test.1", publishedAt: "2026-09-30T00:00:00.000Z",
@@ -394,15 +401,15 @@ for (const lane of ["polygon", "buyer-monad", "default-monad"] as const) test(`$
   const directEffects: Record<string, unknown> = { [key]: { unreadable: true } };
   Object.assign(runtime, { wallets: { describe: async () => ({ identity: { address: owner },
     secret: { directEffects } }), clear: () => {} } });
-  await assert.rejects(runtime.execute(op.operationId), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(runtime.execute(profile, op.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal((await journalStore.load(op))?.phase, "signing_started");
   assert.equal((await ledger.load(identity, reservationId))?.state, "reserved");
   delete directEffects[key];
-  journal = await runtime.execute(op.operationId);
+  journal = await runtime.execute(profile, op.operationId);
   assert.equal(journal.phase, "failed_before_effect"); assert.equal(journal.transactionHash, null);
   assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
   assert.equal(sends, 0);
-  assert.equal((await runtime.execute(op.operationId)).phase, "failed_before_effect");
+  assert.equal((await runtime.execute(profile, op.operationId)).phase, "failed_before_effect");
   const retired = await new RelayRetireService(state, { now: () => now }, wrapping).retire({
     profile, operationId: op.operationId });
   assert.equal(retired.state, "retired");

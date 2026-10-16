@@ -12,7 +12,8 @@ export declare class RelayBaseObserveService {
     private readonly usedInvocations;
     constructor(state: StateStore, destinationInvocation: () => RelayBnbProofPorts, status?: RelayKeylessStatusService, source?: RelaySourceFinalityPorts | undefined, usage?: Pick<AssetUsageLedger, "load" | "transition">);
     private reconcileFinalizedSource;
-    observe(operationId: string): Promise<{
+    /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+    observe(profile: string, operationId: string): Promise<{
         operationId: string;
         state: "prepared_waiting" | "provider_candidate_unproven" | "recipient_credit_observed" | "operational_acceptance";
         reason: string;

@@ -1,4 +1,4 @@
-/** Full canonical receipt fee for the finite Base Relay lanes, before or after Jovian. */
+/** Full canonical receipt fee of a Base Relay native deposit, before or after Jovian. */
 import { ApnError } from "../errors.js";
 import { evmRpcQuantity } from "../evm-rpc-codec.js";
 export interface RelayBaseReceiptFee {

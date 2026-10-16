@@ -3,6 +3,7 @@ import { getAddress, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import { ArbitrumSourceEffectJournalRepository, type ArbitrumEffectEvent, type ArbitrumEffectRole,
@@ -43,7 +44,7 @@ function boundProof(proof: RelayArbitrumSourceProof, role: ArbitrumEffectRole,
       proof.approval !== null && same(proof.approval.transactionHash, approval.transactionHash));
 }
 export interface RelayArbitrumSourceObservePorts {
-  readonly operation?: (operationId: string) => Promise<RelayUnsignedOperation | null>;
+  readonly operation?: (profileHash: string, operationId: string) => Promise<RelayUnsignedOperation | null>;
   readonly journal?: (profileHash: string, operationId: string) => Promise<ArbitrumSourceEffectJournal | null>;
   readonly transition?: (profileHash: string, operationId: string, expectedHash: string,
     role: ArbitrumEffectRole, proofDigest: string, verify: (input: {
@@ -101,12 +102,15 @@ export class RelayArbitrumSourceObserveService {
       expectedCurrentStates: ["reserved", "submitted", "unknown_finality"], now: new Date() });
   }
 
-  async observe(operationId: string) {
+  /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+  async observe(profile: string, operationId: string) {
     if (!HASH.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum observe requires an operation ID.");
-    const op = await (this.ports.operation?.(operationId) ??
-      new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId));
-    if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
-    if (op.operationId !== operationId || op.sourceChainId !== 42161 || op.destinationChainId !== 1 ||
+    allowlistProfileHash(profile);
+    const profileHash = this.state.profileHash(profile);
+    const op = await (this.ports.operation?.(profileHash, operationId) ??
+      new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, operationId));
+    if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found for this profile.");
+    if (op.operationId !== operationId || op.profileHash !== profileHash || op.sourceChainId !== 42161 || op.destinationChainId !== 1 ||
       op.arbitrumDraft === undefined || op.arbitrumDraft.executionAdmitted !== false) blocked("exact_saved_arbitrum_route");
     if (await new RelayRetirementRepository(this.state.root).load(op) !== null) blocked("operation_retired");
     const repository = new ArbitrumSourceEffectJournalRepository(this.state.root);

@@ -124,13 +124,13 @@ export class ApnCore {
         if (service === undefined || this.context.relayExecuteConfirmation === undefined) {
           throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay execute runtime and foreground confirmation are required.");
         }
-        return dataOutcome(await service.execute(request.operationId), "source_effect_journal");
+        return dataOutcome(await service.execute(request.profile, request.operationId), "source_effect_journal");
       }
       case "relay.native.execute": {
         canonicalOperationId(request.operationId);
         const service = this.context.relayNativeExecute;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native execute runtime and foreground confirmation are required.");
-        return dataOutcome(publicRelayNativeSourceJournal(await service.execute(request.operationId)), "source_effect_journal");
+        return dataOutcome(publicRelayNativeSourceJournal(await service.execute(request.profile, request.operationId)), "source_effect_journal");
       }
       case "relay.retire": {
         const service = this.context.relayRetire;
@@ -140,22 +140,22 @@ export class ApnCore {
       case "relay.status": {
         const service = this.context.relayStatus;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay status runtime is unavailable.");
-        return dataOutcome(await service.status(request.operationId), "provider_assertion");
+        return dataOutcome(await service.status(request.profile, request.operationId), "provider_assertion");
       }
       case "relay.observe": {
         const service = this.context.relayObserve;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay observe runtime is unavailable.");
-        return dataOutcome(await service.observe(request.operationId), "read_only_rpc_observation");
+        return dataOutcome(await service.observe(request.profile, request.operationId), "read_only_rpc_observation");
       }
       case "relay.base.observe": {
         const service = this.context.relayBaseObserve;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Base observe runtime is unavailable.");
-        return dataOutcome(await service.observe(request.operationId), "read_only_rpc_observation");
+        return dataOutcome(await service.observe(request.profile, request.operationId), "read_only_rpc_observation");
       }
       case "relay.arbitrum.observe": {
         const service = this.context.relayArbitrumObserve;
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay Arbitrum source observer is unavailable.");
-        return dataOutcome(await service.observe(request.operationId), "read_only_rpc_observation");
+        return dataOutcome(await service.observe(request.profile, request.operationId), "read_only_rpc_observation");
       }
       case "relay.arbitrum.approval-check": {
         const service = this.context.relayArbitrumApprovalDecision;

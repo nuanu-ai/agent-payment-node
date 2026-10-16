@@ -103,13 +103,13 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }, createAppr
 
 test("exact saved deposit signs and sends once; canonical source receipt confirms only deposit", async t => {
   const f = await setup(t); const service = new RelayDepositEffectService(f.state, f.ports);
-  let journal = await service.run(f.op.operationId);
+  let journal = await service.run("default", f.op.operationId);
   assert.equal(journal.effects[1].phase, "submitting"); assert.equal(journal.effects[1].attempt?.attemptNumber, 1);
   assert.deepEqual(f.counts, { signs: 1, sends: 1, observations: 1 });
   f.setObservation(f.receipt(journal.effects[1].attempt!.transactionHash as Hex));
-  journal = await service.run(f.op.operationId);
+  journal = await service.run("default", f.op.operationId);
   assert.equal(journal.effects[1].phase, "confirmed"); assert.equal(journal.effects[0].phase, "confirmed");
-  await service.run(f.op.operationId);
+  await service.run("default", f.op.operationId);
   assert.deepEqual(f.counts, { signs: 1, sends: 1, observations: 2 });
 });
 
@@ -121,7 +121,7 @@ test("saved request admission, approval receipt, and allowance are required befo
     { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
       tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 8n }) },
   ];
-  for (const ports of variants) await assert.rejects(new RelayDepositEffectService(f.state, ports).run(f.op.operationId),
+  for (const ports of variants) await assert.rejects(new RelayDepositEffectService(f.state, ports).run("default", f.op.operationId),
     { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.counts.signs, 0); assert.equal(f.counts.sends, 0);
 });
@@ -129,9 +129,9 @@ test("saved request admission, approval receipt, and allowance are required befo
 test("ambiguous send and replay never sign or send again", async t => {
   const f = await setup(t);
   const journal = await new RelayDepositEffectService(f.state, { ...f.ports,
-    send: async () => { throw new Error("timeout"); } }).run(f.op.operationId);
+    send: async () => { throw new Error("timeout"); } }).run("default", f.op.operationId);
   assert.equal(journal.effects[1].phase, "submitting");
-  await new RelayDepositEffectService(f.state, f.ports).run(f.op.operationId);
+  await new RelayDepositEffectService(f.state, f.ports).run("default", f.op.operationId);
   assert.deepEqual(f.counts, { signs: 1, sends: 0, observations: 2 });
 });
 
@@ -141,13 +141,13 @@ test("signed nonce mismatch fails before the first send", async t => {
     funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
       tokenBalanceAtomic: 2500000n, allowanceAtomic: 2500000n,
       baseFeePerGasWei: 1n, nextNonce: 9n }) });
-  await assert.rejects(wrongNonce.run(f.op.operationId), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(wrongNonce.run("default", f.op.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(f.counts.sends, 0);
 });
 
 test("receipt hash, chain, order calldata, and canonical block are bound", async t => {
   const f = await setup(t); const service = new RelayDepositEffectService(f.state, f.ports);
-  const journal = await service.run(f.op.operationId);
+  const journal = await service.run("default", f.op.operationId);
   const hash = journal.effects[1].attempt!.transactionHash as Hex;
   const receipt = f.receipt(hash);
   for (const bad of [
@@ -157,7 +157,7 @@ test("receipt hash, chain, order calldata, and canonical block are bound", async
     { ...receipt, canonicalBlockHash: `0x${"e".repeat(64)}` },
   ]) {
     f.setObservation(bad);
-    await assert.rejects(service.run(f.op.operationId), { code: "APN_STATE_CORRUPT" });
+    await assert.rejects(service.run("default", f.op.operationId), { code: "APN_STATE_CORRUPT" });
   }
   assert.equal(f.counts.sends, 1);
 });
@@ -165,23 +165,23 @@ test("receipt hash, chain, order calldata, and canonical block are bound", async
 test("expired saved quote and changed policy refuse deposit", async t => {
   const f = await setup(t);
   await assert.rejects(new RelayDepositEffectService(f.state, { ...f.ports,
-    now: () => new Date(f.op.deadline) }).run(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+    now: () => new Date(f.op.deadline) }).run("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(new RelayDepositEffectService(f.state, { ...f.ports,
-    activePolicy: async () => null }).run(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+    activePolicy: async () => null }).run("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.counts.signs, 0);
 });
 
 test("retired operation refuses deposit without signing", async t => {
   const f = await setup(t, false);
   await new RelayRetireService(f.state, { now: () => now }).retire({ profile: "default", operationId: f.op.operationId });
-  await assert.rejects(new RelayDepositEffectService(f.state, f.ports).run(f.op.operationId),
+  await assert.rejects(new RelayDepositEffectService(f.state, f.ports).run("default", f.op.operationId),
     { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(f.counts, { signs: 0, sends: 0, observations: 0 });
 });
 
 test("missing approval effect refuses deposit without signing", async t => {
   const f = await setup(t, false);
-  await assert.rejects(new RelayDepositEffectService(f.state, f.ports).run(f.op.operationId),
+  await assert.rejects(new RelayDepositEffectService(f.state, f.ports).run("default", f.op.operationId),
     { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(f.counts, { signs: 0, sends: 0, observations: 0 });
 });
@@ -194,10 +194,10 @@ test("crash after custody seal resumes the same transaction without a second sig
       await f.ports.custody.seal(op, signed);
       if (crash) { crash = false; throw new Error("crash after seal"); }
     } };
-  await assert.rejects(new RelayDepositEffectService(f.state, { ...f.ports, custody }).run(f.op.operationId),
+  await assert.rejects(new RelayDepositEffectService(f.state, { ...f.ports, custody }).run("default", f.op.operationId),
     /crash after seal/);
   assert.deepEqual(f.counts, { signs: 1, sends: 0, observations: 0 });
-  const journal = await new RelayDepositEffectService(f.state, f.ports).run(f.op.operationId);
+  const journal = await new RelayDepositEffectService(f.state, f.ports).run("default", f.op.operationId);
   assert.equal(journal.effects[1].phase, "submitting");
   assert.deepEqual(f.counts, { signs: 1, sends: 1, observations: 1 });
 });
@@ -210,11 +210,14 @@ test("encrypted deposit custody survives restart and rejects a changed binding",
   await wallets.importNew("default", key, account.address);
   const rawTransaction = await f.ports.sign(f.op);
   const signed = { rawTransaction, transactionHash: keccak256(rawTransaction) };
-  await new RelayEncryptedDepositCustody(f.state, wrapping).seal(f.op, signed);
-  assert.deepEqual(await new RelayEncryptedDepositCustody(f.state, wrapping).load(f.op), signed);
-  await assert.rejects(new RelayEncryptedDepositCustody(f.state, wrapping).seal(f.op, signed),
+  await new RelayEncryptedDepositCustody(f.state, wrapping, "default").seal(f.op, signed);
+  assert.deepEqual(await new RelayEncryptedDepositCustody(f.state, wrapping, "default").load(f.op), signed);
+  await assert.rejects(new RelayEncryptedDepositCustody(f.state, wrapping, "default").seal(f.op, signed),
     { code: "APN_OPERATION_BLOCKED" });
   const changed = { ...f.op, quoteDigest: "f".repeat(64) };
-  await assert.rejects(new RelayEncryptedDepositCustody(f.state, wrapping).load(changed),
+  await assert.rejects(new RelayEncryptedDepositCustody(f.state, wrapping, "default").load(changed),
     { code: "APN_STATE_CORRUPT" });
+  // The custody slot is the operation's own profile envelope: another profile's custody cannot read or seal it.
+  await assert.rejects(new RelayEncryptedDepositCustody(f.state, wrapping, "alice").load(f.op),
+    { code: "APN_OPERATION_BLOCKED", details: { reason: "custody_profile_mismatch" } });
 });

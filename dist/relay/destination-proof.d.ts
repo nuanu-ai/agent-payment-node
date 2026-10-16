@@ -33,7 +33,7 @@ export interface RelayBnbProofPorts {
     block(number: bigint): Promise<RelayBnbBlock | null>;
     /** A consensus safe or finalized checkpoint; null when the RPC cannot supply one. */
     finalityCheckpoint(): Promise<RelayBnbBlock | null>;
-    /** Polygon milestone consensus finality, required by the new Base source lane. */
+    /** Polygon milestone consensus finality: every Polygon destination proof uses it, whatever the source chain. */
     polygonFinalizedCheckpoint?(): Promise<RelayBnbBlock | null>;
 }
 export interface RelaySourceDepositProof {

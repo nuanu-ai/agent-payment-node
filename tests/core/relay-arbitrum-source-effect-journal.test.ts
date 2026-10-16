@@ -43,7 +43,7 @@ async function prepared() {
   const state = new StateStore(temporary.root);
   const service = new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
     { activePolicy: async () => active(), dailyUsage: async () => "0" });
-  const publicOp = await service.prepareArbitrum({ profile: "default", owner, amountAtomic: "500000",
+  const publicOp = await service.prepareArbitrum({ recipient: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04", profile: "default", owner, amountAtomic: "500000",
     minOutputAtomic: "94065", maxProviderFeeAtomic: "401482", maxApprovalNetworkFeeWei: "2000000000000",
     maxDepositNetworkFeeWei: "2000000000000", quoteFile, idempotencyKey: "relay-arb-effects-0001" });
   const op = await new RelayUnsignedOperationRepository(temporary.root).loadOperation(
@@ -260,7 +260,7 @@ test("approval skip persists a canonical allowance proof and permits a separate 
   const observe = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observeUnsent: async () => ({ outcome: "nonce_not_consumed" as const, proof: null }), observe: async () => {
     throw new Error("skipped approval has no receipt to observe");
   } }, { operation: async () => op });
-  const reported = await observe.observe(op.operationId);
+  const reported = await observe.observe("default", op.operationId);
   assert.equal(reported.state, "approval_skipped");
   assert.equal(reported.sourceProof, null);
   assert.equal(reported.sourceFinalized, false);

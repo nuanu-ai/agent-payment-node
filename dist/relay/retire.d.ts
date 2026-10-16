@@ -12,6 +12,8 @@ export declare class RelayRetireService {
     constructor(state: StateStore, clock: ClockPort, wrapping?: WrappingSecretPort, 
     /** Required only to abandon a route after its confirmed approval; without it that case is refused. */
     abandon?: RelayAbandonConsentPort | undefined);
+    /** Any profile retires its own operations: the operation is found only under `profileHash(profile)` (other profiles'
+     * operations are invisible), and the owner lock is taken on the operation's own recorded source account (OWNR-08). */
     retire(input: {
         readonly profile: string;
         readonly operationId: string;

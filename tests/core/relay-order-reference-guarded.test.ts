@@ -16,7 +16,7 @@ const transferTopic = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const sourceHash = hash("a"), sourceBlockHash = hash("b"), destinationHash = hash("c"), destinationBlockHash = hash("d");
 const sourceSafeHash = hash("e"), destinationSafeHash = hash("f");
-const intent = { payer, amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 };
+const intent = { payer, recipient: "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04", amountAtomic: "500000", minimumOutputAtomic: "94065", nowSeconds: 1790347296 };
 type Mutation = (rows: unknown[], chain: "source" | "destination", pass: number) => void;
 
 async function setup(mutate?: Mutation, guardLimit = 6) {

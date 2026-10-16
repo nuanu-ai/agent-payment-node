@@ -95,23 +95,23 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
 
 test("Relay approval uses the exact saved envelope, sends once, and confirms only the canonical Approval event", async t => {
   const f = await setup(t); const service = new RelayApprovalEffectService(f.state, f.ports);
-  let journal = await service.run(f.op.operationId);
+  let journal = await service.run("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
   assert.equal(journal.effects[0].attempt?.attemptNumber, 1);
   assert.deepEqual(f.counts, { signs: 1, sends: 1, observations: 1 });
   const hash = journal.effects[0].attempt!.transactionHash as Hex;
   f.setObservation(f.receipt(hash, [f.event(hash)]));
-  journal = await new RelayApprovalEffectService(f.state, f.ports).run(f.op.operationId);
+  journal = await new RelayApprovalEffectService(f.state, f.ports).run("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "confirmed");
   assert.equal(journal.effects[1].phase, "pending");
-  await service.run(f.op.operationId);
+  await service.run("default", f.op.operationId);
   assert.deepEqual(f.counts, { signs: 1, sends: 1, observations: 2 });
 });
 
 test("missing external requestId admission blocks old saved operation before signing", async t => {
   const f = await setup(t);
   const service = new RelayApprovalEffectService(f.state, { ...f.ports, executionAdmission: async () => null });
-  await assert.rejects(service.run(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(service.run("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.counts.signs, 0); assert.equal(f.counts.sends, 0);
 });
 
@@ -125,14 +125,14 @@ test("wrong requestId and stale source funding or nonce block approval before se
     { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
       tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: 1n, nextNonce: 8n }) },
   ];
-  for (const ports of invalid) await assert.rejects(new RelayApprovalEffectService(f.state, ports).run(f.op.operationId));
+  for (const ports of invalid) await assert.rejects(new RelayApprovalEffectService(f.state, ports).run("default", f.op.operationId));
   assert.equal(f.counts.sends, 0);
 });
 
 test("retired Relay operation cannot enter approval signing or submission", async t => {
   const f = await setup(t);
   await new RelayRetireService(f.state, { now: () => now }).retire({ profile: "default", operationId: f.op.operationId });
-  await assert.rejects(new RelayApprovalEffectService(f.state, f.ports).run(f.op.operationId),
+  await assert.rejects(new RelayApprovalEffectService(f.state, f.ports).run("default", f.op.operationId),
     { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(f.counts, { signs: 0, sends: 0, observations: 0 });
 });
@@ -143,7 +143,7 @@ test("retirement and approval effect cannot deadlock after the journal is create
   const signing = new Promise<void>(resolve => { entered = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; });
   const effect = new RelayApprovalEffectService(f.state, { ...f.ports,
-    sign: async op => { entered(); await gate; return f.ports.sign(op); } }).run(f.op.operationId);
+    sign: async op => { entered(); await gate; return f.ports.sign(op); } }).run("default", f.op.operationId);
   await signing;
   try {
     await assert.rejects(new RelayRetireService(f.state, { now: () => now }).retire({
@@ -157,10 +157,10 @@ test("signer failure and crash before custody seal leave signing marker and neve
   const f = await setup(t); let calls = 0;
   const ports = { ...f.ports, sign: async () => { calls++; throw new Error("signer failed"); } };
   const service = new RelayApprovalEffectService(f.state, ports);
-  await assert.rejects(service.run(f.op.operationId), /signer failed/);
+  await assert.rejects(service.run("default", f.op.operationId), /signer failed/);
   const journal = await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId);
   assert.equal(journal!.effects[0].phase, "signing_started");
-  await service.run(f.op.operationId);
+  await service.run("default", f.op.operationId);
   assert.equal(calls, 1); assert.equal(f.counts.sends, 0);
 });
 
@@ -170,9 +170,9 @@ test("crash after encrypted custody seal recovers the same raw effect for its fi
     load: f.ports.custody.load,
     seal: async (op, signed) => { await f.ports.custody.seal(op, signed); if (crash) { crash = false; throw new Error("crash after seal"); } },
   };
-  await assert.rejects(new RelayApprovalEffectService(f.state, { ...f.ports, custody }).run(f.op.operationId), /crash after seal/);
+  await assert.rejects(new RelayApprovalEffectService(f.state, { ...f.ports, custody }).run("default", f.op.operationId), /crash after seal/);
   assert.equal(f.counts.signs, 1); assert.equal(f.counts.sends, 0);
-  const resumed = await new RelayApprovalEffectService(f.state, f.ports).run(f.op.operationId);
+  const resumed = await new RelayApprovalEffectService(f.state, f.ports).run("default", f.op.operationId);
   assert.equal(resumed.effects[0].phase, "submitting");
   assert.equal(f.counts.signs, 1); assert.equal(f.counts.sends, 1);
 });
@@ -185,39 +185,39 @@ test("wrong signed target fails before custody and send", async t => {
         data: a.data as Hex, value: 0n, nonce: 7, gas: BigInt(a.gas),
         maxFeePerGas: BigInt(a.maxFeePerGas), maxPriorityFeePerGas: BigInt(a.maxPriorityFeePerGas) }); },
   });
-  await assert.rejects(service.run(f.op.operationId), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(service.run("default", f.op.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(f.counts.sends, 0);
 });
 
 test("ambiguous send and replay only observe saved hash", async t => {
   const f = await setup(t);
   const service = new RelayApprovalEffectService(f.state, { ...f.ports, send: async () => { throw new Error("timeout"); } });
-  const journal = await service.run(f.op.operationId);
+  const journal = await service.run("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
-  await new RelayApprovalEffectService(f.state, f.ports).run(f.op.operationId);
+  await new RelayApprovalEffectService(f.state, f.ports).run("default", f.op.operationId);
   assert.equal(f.counts.signs, 1); assert.equal(f.counts.sends, 0); assert.equal(f.counts.observations, 2);
 });
 
 test("wrong receipt, event, and canonical block fail closed without resending", async t => {
   const f = await setup(t); const service = new RelayApprovalEffectService(f.state, f.ports);
-  const journal = await service.run(f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
+  const journal = await service.run("default", f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
   for (const wrong of [f.receipt(hash, []),
     { ...f.receipt(hash, [f.event(hash)]), canonicalBlockHash: `0x${"b".repeat(64)}` },
     f.receipt(hash, [{ ...f.event(hash), data: word("0x1") }]),
     { ...f.receipt(hash, [f.event(hash)]), transaction: { ...f.receipt(hash, []).transaction, input: "0x" } }]) {
     f.setObservation(wrong);
-    await assert.rejects(service.run(f.op.operationId), { code: "APN_STATE_CORRUPT" });
+    await assert.rejects(service.run("default", f.op.operationId), { code: "APN_STATE_CORRUPT" });
   }
   assert.equal(f.counts.sends, 1); assert.equal(f.counts.signs, 1);
 });
 
 test("a finality-proven approval revert makes the Relay operation terminal and frees the profile", async t => {
   const f = await setup(t); const service = new RelayApprovalEffectService(f.state, f.ports);
-  let journal = await service.run(f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
+  let journal = await service.run("default", f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
   const operations = new OperationService(f.state);
   assert.equal((await operations.relayStatus(f.op)).terminal, false);
   f.setObservation({ ...f.receipt(hash, []), receipt: { ...f.receipt(hash, []).receipt, status: "reverted" } });
-  journal = await service.run(f.op.operationId);
+  journal = await service.run("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "failed");
   const status = await operations.relayStatus(f.op);
   assert.equal(status.state, "failed_confirmed_revert"); assert.equal(status.terminal, true);
@@ -228,9 +228,9 @@ test("a finality-proven approval revert makes the Relay operation terminal and f
 
 test("a route abandoned after its confirmed approval retires only under fresh owner consent", async t => {
   const f = await setup(t); const service = new RelayApprovalEffectService(f.state, f.ports);
-  let journal = await service.run(f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
+  let journal = await service.run("default", f.op.operationId); const hash = journal.effects[0].attempt!.transactionHash as Hex;
   f.setObservation(f.receipt(hash, [f.event(hash)]));
-  journal = await service.run(f.op.operationId); assert.equal(journal.effects[0].phase, "confirmed");
+  journal = await service.run("default", f.op.operationId); assert.equal(journal.effects[0].phase, "confirmed");
   const retire = (confirm?: () => Promise<boolean>) => new RelayRetireService(f.state, { now: () => now }, undefined,
     confirm === undefined ? undefined : { confirm: async summary => {
       assert.equal(summary.operationId, f.op.operationId); assert.equal(summary.journalIntegrityHash, journal.integrityHash);
@@ -255,9 +255,9 @@ test("a risen base fee that still fits the frozen envelopes admits the approval;
     tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: limit, nextNonce: 7n }) });
   const blocked = new RelayApprovalEffectService(f.state, { ...f.ports, funding: async () => ({ chainId: 1, nativeBalanceWei: 10n ** 18n,
     tokenBalanceAtomic: 2500000n, allowanceAtomic: 0n, baseFeePerGasWei: limit + 1n, nextNonce: 7n }) });
-  await assert.rejects(blocked.run(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(blocked.run("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.counts.signs, 0);
-  assert.equal((await risen.run(f.op.operationId)).effects[0].phase, "submitting");
+  assert.equal((await risen.run("default", f.op.operationId)).effects[0].phase, "submitting");
   assert.equal(f.counts.signs, 1); assert.equal(f.counts.sends, 1);
 });
 
@@ -267,7 +267,7 @@ for (const outcome of ["never_lands", "nonce_not_consumed", "own_transaction_kno
     // Interrupted after the seal and before the submission marker: the bytes stay sealed and unsent.
     const interrupted = new RelayApprovalEffectService(f.state, { ...f.ports, custody: { ...f.ports.custody, load: async op => {
       if (++loads === 2) throw new Error("rpc 429"); return f.ports.custody.load(op); } } });
-    await assert.rejects(interrupted.run(f.op.operationId), /rpc 429/);
+    await assert.rejects(interrupted.run("default", f.op.operationId), /rpc 429/);
     const journals = new RelayEffectJournalRepository(f.state.root);
     const sealed = (await journals.load(f.op.profileHash, f.op.operationId))!;
     assert.equal(sealed.effects[0].phase, "sealed"); assert.equal(f.counts.sends, 0);
@@ -275,14 +275,14 @@ for (const outcome of ["never_lands", "nonce_not_consumed", "own_transaction_kno
       custody: { ...f.ports.custody, discard: async () => { discards++; } },
       unsentOutcome: async input => { checks++; assert.equal(input.nonce, 7n); assert.equal(input.transactionHash, sealed.effects[0].attempt!.transactionHash);
         return outcome; } });
-    const journal = await resumed.run(f.op.operationId);
+    const journal = await resumed.run("default", f.op.operationId);
     assert.equal(checks, 1);
     if (outcome === "never_lands") {
       assert.equal(journal.effects[0].phase, "abandoned_unsent"); assert.equal(discards, 1); assert.equal(f.counts.sends, 0);
       const status = await new OperationService(f.state).relayStatus(f.op);
       assert.equal(status.state, "failed_before_effect"); assert.equal(status.terminal, true);
       assert.equal(status.proofClass, "source_effect_never_landed");
-      assert.equal((await resumed.run(f.op.operationId)).effects[0].phase, "abandoned_unsent"); assert.equal(checks, 1);
+      assert.equal((await resumed.run("default", f.op.operationId)).effects[0].phase, "abandoned_unsent"); assert.equal(checks, 1);
     } else if (outcome === "nonce_not_consumed") {
       assert.equal(journal.effects[0].phase, "submitting"); assert.equal(f.counts.sends, 1); assert.equal(discards, 0);
     } else {
