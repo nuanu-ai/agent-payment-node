@@ -16,6 +16,8 @@ export interface DirectEffectMaterial {
     readonly rawTransaction: Hex;
     readonly rawTransactionHash: Hex;
     readonly primaryProviderId?: string | null;
+    /** The generic direct-transfer operation that owns this slot; the slot is released once it is terminal. */
+    readonly operationId?: string;
 }
 export interface X402EffectMaterial {
     readonly createPayloadHash: string;
