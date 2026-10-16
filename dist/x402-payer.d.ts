@@ -15,4 +15,6 @@ export interface X402PayerBinding {
         readonly port: X402PaymentMaterialPort;
     };
 }
+/** The profile x402 policy binding of a payer, from local state only (no provider call). */
+export declare function x402PolicyBinding(context: RuntimeContext, profileHash: string, chainId: EvmChainId): Promise<ProfilePolicyBinding>;
 export declare function resolveX402Payer(context: RuntimeContext, profileHash: string, chainId?: EvmChainId): Promise<X402PayerBinding>;

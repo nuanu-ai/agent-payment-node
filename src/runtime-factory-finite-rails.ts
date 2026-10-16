@@ -1,8 +1,8 @@
 import { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import { Cleanup85NativeCancellation, verifyCleanup85CancellationAccounting } from "./circle-cleanup85-native-cancellation.js";
 import { CircleEvmService } from "./circle-v2-evm/runtime.js";
-import { SeiFundingService } from "./lifi/sei-gaszip-service.js";
-import { MegaFundingService } from "./lifi/mega-gaszip-service.js";
+import { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
+import { GASZIP_DIRECT_ROUTES } from "./lifi/gaszip-direct-route.js";
 import type { StateStore } from "./state.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
@@ -19,8 +19,8 @@ export function finiteFundingRuntime(command: string, state: StateStore, wrappin
       verifyCancellationAccounting: verifyCleanup85CancellationAccounting,
     }),
     ...(command.startsWith("sei.funding.") || options.seiFunding !== undefined
-      ? { seiFunding: options.seiFunding ?? new SeiFundingService(state, wrappingSecret, environment) } : {}),
+      ? { seiFunding: options.seiFunding ?? new GaszipFundingService(GASZIP_DIRECT_ROUTES.sei, state, wrappingSecret, environment) } : {}),
     ...(command.startsWith("mega.funding.") || options.megaFunding !== undefined
-      ? { megaFunding: options.megaFunding ?? new MegaFundingService(state, wrappingSecret, environment) } : {}),
+      ? { megaFunding: options.megaFunding ?? new GaszipFundingService(GASZIP_DIRECT_ROUTES.mega, state, wrappingSecret, environment) } : {}),
   };
 }

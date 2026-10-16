@@ -4,10 +4,10 @@ import { cleanup85UnsignedResumeExclusion } from "./circle-cleanup85-unsigned-re
 import { cleanup85ConflictExclusion, type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { circleNativeSourceIdentity, circleSourceSettled, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
-import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
+import { GaszipFundingJournal, publicGaszipFunding, type GaszipFundingRecord } from "./lifi/gaszip-direct-journal.js";
+import { GASZIP_DIRECT_ROUTES } from "./lifi/gaszip-direct-route.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { publicCircle, type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operation-model.js";
-import { MegaFundingJournal, publicMegaFunding, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant, type MerchantOperation } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
@@ -52,9 +52,9 @@ import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRela
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
 import { relaySourceTerminal, type RelaySourceTerminal } from "./relay/lifecycle.js";
 export type StoredMoneyOperation =
-  | { readonly kind: "sei_gaszip"; readonly record: SeiFundingRecord }
+  | { readonly kind: "sei_gaszip"; readonly record: GaszipFundingRecord }
   | { readonly kind: "circle_route"; readonly record: CircleKnownOperation }
-  | { readonly kind: "mega_gaszip"; readonly record: MegaFundingRecord }
+  | { readonly kind: "mega_gaszip"; readonly record: GaszipFundingRecord }
   | { readonly kind: "merchant_x402"; readonly record: MerchantOperation }
   | { readonly kind: "permit2_production"; readonly record: Permit2ProductionRecord }
   | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
@@ -78,8 +78,8 @@ export class OperationService {
     private readonly smartAccountGasless: SmartAccountGaslessRepositoryPort = new SmartAccountGaslessOperationRepository(state.root),
     private readonly facilitatorGasless: FacilitatorGaslessRepositoryPort = new FacilitatorGaslessOperationRepository(state.root),
     private readonly relayUnsigned = new RelayUnsignedOperationRepository(state.root),
-    private readonly seiFunding: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new SeiFundingJournal(state.root),
-    private readonly megaFunding: Pick<MegaFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new MegaFundingJournal(state.root),
+    private readonly seiFunding: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new GaszipFundingJournal(state.root, GASZIP_DIRECT_ROUTES.sei),
+    private readonly megaFunding: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new GaszipFundingJournal(state.root, GASZIP_DIRECT_ROUTES.mega),
   ) {}
   /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
    * locks are acquired together so owner validation and durable write are atomic. */
@@ -361,9 +361,9 @@ export class OperationService {
 
   async status(operationId: string): Promise<unknown> {
     const operation = await this.required(operationId);
-    if (operation.kind === "sei_gaszip") return publicSeiFunding(operation.record);
+    if (operation.kind === "sei_gaszip") return publicGaszipFunding(GASZIP_DIRECT_ROUTES.sei, operation.record);
     if (operation.kind === "circle_route") return publicKnownCircle(operation.record);
-    if (operation.kind === "mega_gaszip") return publicMegaFunding(operation.record);
+    if (operation.kind === "mega_gaszip") return publicGaszipFunding(GASZIP_DIRECT_ROUTES.mega, operation.record);
     if (operation.kind === "merchant_x402") return publicMerchant(operation.record);
     if (operation.kind === "permit2_production") return publicPermit2Production(operation.record);
     if (operation.kind === "relay_unsigned") return this.relayStatus(operation.record);

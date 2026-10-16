@@ -12,6 +12,7 @@ import {
   assertUnattendedX402Balance,
   effectiveX402Cap,
   requireProfilePolicy,
+  x402PayeeAdmittedOffers,
 } from "./profile-policy.js";
 import {
   candidatesWithinCap,
@@ -51,6 +52,7 @@ import { isCode } from "./secure-state-store.js";
 import { resolveX402Payer } from "./x402-payer.js";
 import { reconcileX402Method } from "./x402-method-reconciliation.js";
 import { optionalX402HttpRequest } from "./x402-http-request.js";
+import { assertCurrentX402Payee } from "./x402-network-policy.js";
 
 export class X402Service extends X402PaidRequest {
   private readonly providerX402: ProviderX402Service;
@@ -108,7 +110,8 @@ export class X402Service extends X402PaidRequest {
       const http = this.context.requireHttp();
       const rpc = selectX402Rpc(this.context.requireRpc(), network.chainId);
       const discovered = await freshChallenge(http, canonicalUrl, httpRequest, network.chainId);
-      const underCap = candidatesWithinCap(discovered, capAtomic);
+      // The owner's optional payee pin narrows the offers before selection (checked again before signing and the first send).
+      const underCap = x402PayeeAdmittedOffers(profilePolicy, candidatesWithinCap(discovered, capAtomic));
       const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
       const createdAt = createdAtDate.toISOString();
       const createdAtUnix = Math.floor(createdAtDate.getTime() / 1000).toString();
@@ -244,6 +247,8 @@ export class X402Service extends X402PaidRequest {
       }
       // Nothing was signed yet, so an approval after validBefore ends with no effect instead of a stranded signature.
       if (this.authorizationExpired(current)) return publicX402Operation(await this.commitTerminal(current, "failed_before_effect"));
+      // The owner's payee pin is re-read before any hold or signature (and again inside authorization and before the first send).
+      await assertCurrentX402Payee(this.context, current);
       // The shared daily usage sees this spend before anything is signed.
       await this.usage.reserve(current);
       const pending = await this.transition(current, "authorization_material_pending");

@@ -1,7 +1,6 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
-import type { SeiFundingService } from "./lifi/sei-gaszip-service.js";
+import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
 import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
-import type { MegaFundingService } from "./lifi/mega-gaszip-service.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
@@ -122,8 +121,8 @@ export interface CoreDependencies {
     readonly circleApproval?: CircleV2ApprovalExecutor;
     readonly circleSource?: CircleV2SourceService;
     readonly oneClickSource?: OneClickSourceService;
-    readonly seiFunding?: SeiFundingService;
-    readonly megaFunding?: MegaFundingService;
+    readonly seiFunding?: GaszipFundingService;
+    readonly megaFunding?: GaszipFundingService;
     readonly directRails?: readonly DirectRailPort[];
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;
@@ -205,8 +204,8 @@ export declare class RuntimeContext {
     readonly circleApproval?: CircleV2ApprovalExecutor;
     readonly circleSource?: CircleV2SourceService;
     readonly oneClickSource?: OneClickSourceService;
-    readonly seiFunding?: SeiFundingService;
-    readonly megaFunding?: MegaFundingService;
+    readonly seiFunding?: GaszipFundingService;
+    readonly megaFunding?: GaszipFundingService;
     readonly directRails: readonly DirectRailPort[];
     readonly chainAccounts?: ChainWalletStoragePort;
     readonly railApproval?: RailApprovalPort;

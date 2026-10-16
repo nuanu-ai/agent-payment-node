@@ -36,12 +36,15 @@ export class EncryptedProfilePolicy {
     }
     async set(binding, input) {
         const current = await this.loadForSet(binding);
-        const supplied = canonicalPolicyInput(input);
+        const { x402Payees: suppliedPayees, ...supplied } = canonicalPolicyInput(input);
+        // An omitted payee pin keeps the current one; null removes it.
+        const x402Payees = suppliedPayees === undefined ? current?.x402Payees : suppliedPayees ?? undefined;
         const effective = {
             ...supplied,
             ...(supplied.maxBalanceEthWei === undefined && current?.maxBalanceEthWei !== undefined
                 ? { maxBalanceEthWei: current.maxBalanceEthWei }
                 : {}),
+            ...(x402Payees === undefined ? {} : { x402Payees: x402Payees }),
         };
         const increase = policyIncrease(current, effective);
         const now = this.clock.now().toISOString();

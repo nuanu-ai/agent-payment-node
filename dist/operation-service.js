@@ -4,10 +4,10 @@ import { cleanup85UnsignedResumeExclusion } from "./circle-cleanup85-unsigned-re
 import { cleanup85ConflictExclusion } from "./circle-cleanup85-native-conflict.js";
 import { circleNativeSourceIdentity, circleSourceSettled, verifiedCircleNativeSources } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
-import { SeiFundingJournal, publicSeiFunding } from "./lifi/sei-gaszip-journal.js";
+import { GaszipFundingJournal, publicGaszipFunding } from "./lifi/gaszip-direct-journal.js";
+import { GASZIP_DIRECT_ROUTES } from "./lifi/gaszip-direct-route.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { publicCircle } from "./circle-v2-evm/operation-model.js";
-import { MegaFundingJournal, publicMegaFunding } from "./lifi/mega-gaszip-journal.js";
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
@@ -45,7 +45,7 @@ export class OperationService {
     relayUnsigned;
     seiFunding;
     megaFunding;
-    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root), gasless = new GaslessOperationRepository(state.root), metaMaskGasless = new MetaMaskGaslessOperationRepository(state.root), smartAccountGasless = new SmartAccountGaslessOperationRepository(state.root), facilitatorGasless = new FacilitatorGaslessOperationRepository(state.root), relayUnsigned = new RelayUnsignedOperationRepository(state.root), seiFunding = new SeiFundingJournal(state.root), megaFunding = new MegaFundingJournal(state.root)) {
+    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root), gasless = new GaslessOperationRepository(state.root), metaMaskGasless = new MetaMaskGaslessOperationRepository(state.root), smartAccountGasless = new SmartAccountGaslessOperationRepository(state.root), facilitatorGasless = new FacilitatorGaslessOperationRepository(state.root), relayUnsigned = new RelayUnsignedOperationRepository(state.root), seiFunding = new GaszipFundingJournal(state.root, GASZIP_DIRECT_ROUTES.sei), megaFunding = new GaszipFundingJournal(state.root, GASZIP_DIRECT_ROUTES.mega)) {
         this.state = state;
         this.providerX402 = providerX402;
         this.rails = rails;
@@ -358,11 +358,11 @@ export class OperationService {
     async status(operationId) {
         const operation = await this.required(operationId);
         if (operation.kind === "sei_gaszip")
-            return publicSeiFunding(operation.record);
+            return publicGaszipFunding(GASZIP_DIRECT_ROUTES.sei, operation.record);
         if (operation.kind === "circle_route")
             return publicKnownCircle(operation.record);
         if (operation.kind === "mega_gaszip")
-            return publicMegaFunding(operation.record);
+            return publicGaszipFunding(GASZIP_DIRECT_ROUTES.mega, operation.record);
         if (operation.kind === "merchant_x402")
             return publicMerchant(operation.record);
         if (operation.kind === "permit2_production")

@@ -3,6 +3,16 @@ import { networkPolicyBinding } from "./x402-network.js";
 import { policyBinding } from "./profile-policy.js";
 import { LOCAL_PROVIDER_ID } from "./provider-profile.js";
 import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
+/** The profile x402 policy binding of a payer, from local state only (no provider call). */
+export async function x402PolicyBinding(context, profileHash, chainId) {
+    const provider = context.profileRepository === undefined ? null : await context.requireProfileRepository().load(profileHash);
+    if (provider !== null && provider.provider_id !== LOCAL_PROVIDER_ID)
+        return policyBinding(provider);
+    const wallet = await context.state.loadWallet(profileHash);
+    if (wallet === null)
+        throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
+    return networkPolicyBinding(policyBinding(wallet), chainId);
+}
 export async function resolveX402Payer(context, profileHash, chainId = 8453) {
     let provider = context.profileRepository === undefined
         ? null

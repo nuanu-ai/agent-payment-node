@@ -7,3 +7,8 @@ import type { X402OperationRecord } from "./x402-state-integrity.js";
  * expires by its own validBefore. Base keeps its single prepare-time admission.
  */
 export declare function assertCurrentNetworkPolicy(context: RuntimeContext, operation: X402OperationRecord): Promise<void>;
+/**
+ * The owner's optional x402 payee pin (profile policy; absent = not restricted), re-read from local state before signing
+ * and before the first paid request on every network, so a pin added after prepare stops an unsent payment.
+ */
+export declare function assertCurrentX402Payee(context: RuntimeContext, operation: X402OperationRecord): Promise<void>;

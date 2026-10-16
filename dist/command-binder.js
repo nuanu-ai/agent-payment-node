@@ -1,7 +1,6 @@
 import { coinbaseObservationPreset } from "./coinbase-gasless-observation-source.js";
-import { bindSeiFundingCommand } from "./lifi/sei-gaszip-command-catalog.js";
+import { bindGaszipFundingCommand } from "./lifi/gaszip-direct-command-catalog.js";
 import { bindCircleEvmCommand } from "./circle-v2-evm/command-catalog.js";
-import { bindMegaFundingCommand } from "./lifi/mega-gaszip-command-catalog.js";
 import { isPlainRecord } from "./canonical.js";
 import { parseCatalogArgv, parseCatalogInput, } from "./command-catalog.js";
 import { ApnError } from "./errors.js";
@@ -10,6 +9,7 @@ import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { directEvmChain } from "./evm-direct-networks.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
 import { chainDecimal } from "./chain-policy.js";
+import { X402_PAYEES_UNRESTRICTED } from "./profile-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
 import { tronAddress } from "./tron/codec.js";
 import { bindBridgeCommand } from "./lifi/command-catalog.js";
@@ -78,7 +78,7 @@ function bindParsedCatalog(parsed) {
             },
             rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "x402 merchant prepare")
-        return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"] === undefined ? {} : { nativeFeeReserveWei: value(options, "--native-fee-reserve-wei") }), idempotencyKey: value(options, "--idempotency-key") } };
+        return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), url: value(options, "--url"), ...(options["--asset"] === undefined ? {} : { asset: options["--asset"] }), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"] === undefined ? {} : { nativeFeeReserveWei: value(options, "--native-fee-reserve-wei") }), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "x402 merchant approve")
         return { request: { command: "x402.merchant.approve", operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "x402 merchant observe")
@@ -166,11 +166,11 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path[0] === "oneclick")
         return { request: bindOneClickCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "sei")
-        return { request: bindSeiFundingCommand(parsed.command.path.join(" "), options) };
+        return { request: bindGaszipFundingCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path.slice(0, 2).join(" ") === "circle evm")
         return { request: bindCircleEvmCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "mega")
-        return { request: bindMegaFundingCommand(parsed.command.path.join(" "), options) };
+        return { request: bindGaszipFundingCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "circle")
         return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
     switch (parsed.command.path.join(" ")) {
@@ -294,6 +294,7 @@ function bindParsedCatalog(parsed) {
                 maxBalanceUsdcAtomic: value(options, "--max-balance-usdc-atomic"),
                 maxX402AmountAtomic: value(options, "--max-x402-amount-atomic"),
                 ...(options["--max-balance-eth-wei"] === undefined ? {} : { maxBalanceEthWei: options["--max-balance-eth-wei"] }),
+                ...(options["--x402-payees"] === undefined ? {} : { x402Payees: options["--x402-payees"] === X402_PAYEES_UNRESTRICTED ? null : options["--x402-payees"].split(",") }),
             },
         };
         case "x402 inspect-network":

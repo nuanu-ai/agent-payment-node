@@ -3,7 +3,7 @@ import { appendMerchantFailure } from "./failure.js";
 import { MerchantRetirement } from "./retirement.js";
 import { MerchantClaims } from "./claims.js";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { evmNativeCustody } from "../evm-native-custody.js";
+import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
@@ -14,8 +14,10 @@ import { MerchantRepository } from "./repository.js";
 import { MerchantOwner } from "./owner.js";
 import { checkMerchantEnvelope, merchantCurrent, merchantReceipt, hexHash } from "./rpc.js";
 import {} from "./custody.js";
-import { merchantChallenge, merchantPrice, merchantProof, refuse } from "./protocol.js";
-import { MERCHANT_AMOUNT, MERCHANT_OWNER, MERCHANT_URL } from "./pins.js";
+import { assertMerchantPaymentWindow, canonicalMerchantUrl, merchantChallenge, merchantDelivery, merchantGenericChallenge, merchantProof, refuse } from "./protocol.js";
+import { MERCHANT_ASSET_PINS } from "./asset-pins.js";
+import { MERCHANT_CHAIN, merchantAssetPin } from "./pins.js";
+import { merchantPrepareTerms, merchantTerms } from "./terms.js";
 export class MerchantService {
     state;
     ports;
@@ -33,30 +35,41 @@ export class MerchantService {
         const profile = canonicalProfile(input.profile), key = canonicalIdempotencyKey(input.idempotencyKey), maximumNativeFee = input.maximumNativeFee;
         if (!/^[1-9][0-9]*$/u.test(maximumNativeFee) || BigInt(maximumNativeFee) > 10n ** 18n)
             refuse("merchant_fee_ceiling");
-        const profileHash = this.state.profileHash(profile), operationId = this.state.operationId(profile, key), idempotencyHash = this.state.idempotencyHash(key), requestHash = hashObject({ kind: "merchant_x402", profile, url: MERCHANT_URL, maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) });
+        const url = canonicalMerchantUrl(input.url), registry = this.ports.assets ?? MERCHANT_ASSET_PINS;
+        // --asset names a pinned asset (any spelling of its address); an unpinned token is refused before any network read.
+        const chosen = input.asset === undefined ? undefined : merchantAssetPin(MERCHANT_CHAIN, input.asset, registry)?.token;
+        if (input.asset !== undefined && chosen === undefined)
+            refuse("merchant_asset_not_pinned");
+        const profileHash = this.state.profileHash(profile), operationId = this.state.operationId(profile, key), idempotencyHash = this.state.idempotencyHash(key), requestHash = hashObject({ kind: "merchant_x402", profile, url, ...(chosen === undefined ? {} : { asset: chosen }), maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) });
         await this.state.initialize();
-        return this.state.withLocks(this.locks(profileHash, operationId, idempotencyHash), async () => {
+        // The payer is custody(profile); its address lock is taken with the others, and custody is rechecked under it.
+        const custody = await evmNativeCustody(this.state, profile), payer = custody.walletAddress;
+        return this.state.withLocks(this.locks(profileHash, operationId, idempotencyHash, payer), async () => {
             const existing = await this.operations.resolvePrepare({ kind: "merchant_x402", profileHash, operationId, idempotencyHash, requestHash });
             if (existing !== null) {
                 if (existing.kind !== "merchant_x402")
                     refuse("merchant_idempotency_kind");
                 return existing.record;
             }
-            const custody = await evmNativeCustody(this.state, profile);
-            if (custody.walletAddress !== MERCHANT_OWNER)
-                refuse("merchant_finite_owner");
-            await assertExclusiveEvmRawSigner(this.state, MERCHANT_OWNER, profileHash);
-            await this.operations.assertEvmAccountAvailable(profileHash, 4326, MERCHANT_OWNER);
-            const policy = await this.owner.admit(profile), observation = await this.ports.http.get({ url: MERCHANT_URL }), frozen = merchantChallenge(observation), current = await merchantCurrent(this.ports.rpc, undefined, maximumNativeFee);
+            await assertEvmNativeCustody(this.state, profile, custody);
+            await assertExclusiveEvmRawSigner(this.state, payer, profileHash);
+            await this.operations.assertEvmAccountAvailable(profileHash, 4326, payer);
+            // Only a profile whose active policy names its own wallet reaches the merchant; the challenge then names payee,
+            // amount and asset, which the owner's admission (asset, mechanism, caps, optional payee pin) must cover.
+            await this.owner.assertPayerPolicy(profile, payer);
+            const observation = await this.ports.http.get({ url }), selected = merchantGenericChallenge(observation, url, registry, chosen);
+            const { asset, ...frozen } = selected, terms = merchantPrepareTerms(payer, url, frozen, asset);
+            const policy = await this.owner.admit(profile, terms), current = await merchantCurrent(this.ports.rpc, terms, undefined, maximumNativeFee);
             const createdAt = this.ports.now().toISOString();
             if (Date.parse(createdAt) - Date.parse(observation.observedAt) > 30000 || Date.parse(createdAt) < Date.parse(observation.observedAt))
                 refuse("merchant_challenge_read_age");
+            assertMerchantPaymentWindow(frozen, observation.observedAt, createdAt);
             const envelope = { nonce: current.nonce, gas: current.gas, maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas, maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) };
-            checkMerchantEnvelope(current, envelope, current.feeContext);
-            if (BigInt(current.token) < BigInt(MERCHANT_AMOUNT))
-                refuse("merchant_usdm_balance");
-            const effectBinding = await this.owner.effectBinding(profile, envelope.nativeFeeReserveWei ?? current.feeContext.admissionEstimatedUpper, new Date(Date.parse(createdAt) + 300000).toISOString());
-            const body = { feeContext: current.feeContext, effectBinding, schemaVersion: "apn.x402-merchant.v1", kind: "merchant_x402", operationId, profile, profileHash, idempotencyHash, requestHash, custody, frozen, envelope, policy, createdAt, expiresAt: new Date(Date.parse(createdAt) + 300000).toISOString(), state: "prepared", terminal: false, signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [], events: [{ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }), eventHash: hashObject({ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }) }) }] };
+            checkMerchantEnvelope(current, envelope, terms, current.feeContext);
+            if (BigInt(current.token) < BigInt(terms.amount))
+                refuse("merchant_token_balance");
+            const effectBinding = await this.owner.effectBinding(profile, terms, envelope.nativeFeeReserveWei ?? current.feeContext.admissionEstimatedUpper, new Date(Date.parse(createdAt) + 300000).toISOString());
+            const body = { feeContext: current.feeContext, effectBinding, schemaVersion: "apn.x402-merchant.v2", kind: "merchant_x402", operationId, profile, profileHash, idempotencyHash, requestHash, custody, frozen, url, asset, envelope, policy, createdAt, expiresAt: new Date(Date.parse(createdAt) + 300000).toISOString(), state: "prepared", terminal: false, signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [], events: [{ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }), eventHash: hashObject({ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }) }) }] };
             const o = sealMerchant({ ...body, fingerprint: merchantFingerprint(body) });
             await this.records.persist(o);
             return o;
@@ -64,12 +77,12 @@ export class MerchantService {
     }
     async approve(id) {
         const found = await this.required(id);
-        return this.state.withLocks(this.locks(found.profileHash, found.operationId, found.idempotencyHash), () => this.owner.withPolicyLock(found.profile, async (owner) => {
+        return this.state.withLocks(this.locks(found.profileHash, found.operationId, found.idempotencyHash, found.custody.walletAddress), () => this.owner.withPolicyLock(found.profile, async (owner) => {
             let o = await this.required(id);
             if (o.state !== "prepared" || o.signingAttempts !== 0 || o.submissionAttempts !== 0)
                 refuse("merchant_once_only_approval");
             if (this.ports.approve === undefined || this.ports.custody === undefined)
-                throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "The pinned USDm payment requires foreground CLI confirmation.");
+                throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "The merchant payment requires foreground CLI confirmation.");
             if (o.feeContext === undefined)
                 refuse("merchant_new_full_fee_context_required");
             if (o.effectBinding === undefined)
@@ -108,8 +121,11 @@ export class MerchantService {
                 phase = "post_seal_fee";
                 await this.refreshFee(o, grant);
                 phase = "challenge";
-                if (canonicalJson(merchantChallenge(await this.ports.http.get({ url: MERCHANT_URL }))) !== canonicalJson(o.frozen))
+                const t = merchantTerms(o);
+                const sealedRead = await this.ports.http.get({ url: t.url });
+                if (canonicalJson(merchantChallenge(sealedRead, t)) !== canonicalJson(o.frozen))
                     refuse("merchant_challenge_changed_after_sealing");
+                assertMerchantPaymentWindow(o.frozen, sealedRead.observedAt, this.at());
                 this.fresh(o);
                 assertMerchantAuthority(grant, this, o, this.ports.now());
                 phase = "send_claim";
@@ -138,7 +154,7 @@ export class MerchantService {
     }
     async observe(id, deliver = false) {
         const found = await this.required(id);
-        return this.state.withLocks(this.locks(found.profileHash, found.operationId, found.idempotencyHash), async () => this.observeLocked(await this.required(id), deliver));
+        return this.state.withLocks(this.locks(found.profileHash, found.operationId, found.idempotencyHash, found.custody.walletAddress), async () => this.observeLocked(await this.required(id), deliver));
     }
     async retireUnsent(id) { return new MerchantRetirement(this.state, this.ports.rpc, this.ports.now).retire(id); }
     async status(id) { return await this.required(id); }
@@ -179,13 +195,13 @@ export class MerchantService {
         o = beforeDelivery.operation;
         if (!beforeDelivery.verified)
             return o;
-        const proof = merchantProof(o.frozen, o.txHash), proofHash = hashObject(proof), at = this.at();
+        const t = merchantTerms(o), proof = merchantProof(o.frozen, o.txHash, t), proofHash = hashObject(proof), at = this.at();
         o = merchantMove(o, "delivery_unknown", at, { deliveryAttempts: [...o.deliveryAttempts, { at, proofHash, outcome: "started" }] });
         await this.records.persist(o);
         let response;
         try {
-            response = await this.ports.http.get({ url: MERCHANT_URL, paymentSignature: proof });
-            const result = merchantPrice(response), bodyHash = hashObject(Buffer.from(response.bodyBytes).toString("base64"));
+            response = await this.ports.http.get({ url: t.url, paymentSignature: proof });
+            const result = merchantDelivery(response, t), bodyHash = hashObject(Buffer.from(response.bodyBytes).toString("base64"));
             o = merchantMove(o, "delivered", this.at(), { deliveryAttempts: [...o.deliveryAttempts, { at: this.at(), proofHash, outcome: "delivered", httpStatus: response.status, bodyHash, headers: response.rawHeaderPairs, result }] });
         }
         catch {
@@ -233,18 +249,19 @@ export class MerchantService {
         this.fresh(o);
         await owner.confirm(o);
         await this.operations.assertMerchantAccountAvailable(o);
-        const current = await merchantCurrent(this.ports.rpc, o.envelope);
-        checkMerchantEnvelope(current, o.envelope, o.feeContext);
-        const fresh = merchantChallenge(await this.ports.http.get({ url: MERCHANT_URL }));
+        const t = merchantTerms(o), current = await merchantCurrent(this.ports.rpc, t, o.envelope);
+        checkMerchantEnvelope(current, o.envelope, t, o.feeContext);
+        const read = await this.ports.http.get({ url: t.url }), fresh = merchantChallenge(read, t);
         if (canonicalJson(fresh) !== canonicalJson(o.frozen))
             refuse("merchant_challenge_changed");
+        assertMerchantPaymentWindow(fresh, read.observedAt, this.at());
         this.fresh(o);
     }
     async refreshFee(o, grant) {
         const started = this.ports.now();
         this.fresh(o);
-        const current = await merchantCurrent(this.ports.rpc, o.envelope);
-        checkMerchantEnvelope(current, o.envelope, o.feeContext);
+        const t = merchantTerms(o), current = await merchantCurrent(this.ports.rpc, t, o.envelope);
+        checkMerchantEnvelope(current, o.envelope, t, o.feeContext);
         bindMerchantFeeAdmission(grant, this, o, current.feeContext, started, this.ports.now());
     }
     consentFresh(o, approvalEndsAt) { this.fresh(o); if (o.effectBinding === undefined || this.at() >= approvalEndsAt || this.at() >= o.effectBinding.policyEndsAt)
@@ -254,11 +271,11 @@ export class MerchantService {
             refuse("merchant_local_deadline_expired");
     }
     at() { return this.ports.now().toISOString(); }
-    locks(profileHash, id, idempotencyHash) { return [`profile:${profileHash}`, `operation:${id}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(MERCHANT_OWNER)]; }
+    locks(profileHash, id, idempotencyHash, payer) { return [`profile:${profileHash}`, `operation:${id}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(payer)]; }
     async required(id) {
         const o = await this.records.findOperation(canonicalOperationId(id));
         if (o === null)
-            throw new ApnError("APN_OPERATION_NOT_FOUND", "Pinned merchant operation was not found.");
+            throw new ApnError("APN_OPERATION_NOT_FOUND", "Merchant operation was not found.");
         return o;
     }
 }

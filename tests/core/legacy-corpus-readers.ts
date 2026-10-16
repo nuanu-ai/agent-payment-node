@@ -14,8 +14,11 @@ import { CircleNonceRetirementStore } from "../../src/circle-v2-evm/nonce-retire
 import { CircleRetirementAuthorityStore } from "../../src/circle-v2-evm/nonce-retirement-authority.js";
 import type { CircleKnownOperation } from "../../src/circle-v2-evm/funding-operation.js";
 import { MerchantRepository } from "../../src/x402-merchant/repository.js";
-import { MegaFundingJournal } from "../../src/lifi/mega-gaszip-journal.js";
-import { SeiFundingJournal } from "../../src/lifi/sei-gaszip-journal.js";
+import { GASZIP_DIRECT_ROUTES, gaszipCodec, inspectGaszipDelivery, inspectGaszipFundingQuote, type GaszipCorrelatedDelivery } from "../../src/lifi/gaszip-direct-route.js";
+import { GaszipFundingJournal, publicGaszipFunding, sealGaszipFunding, validateGaszipFunding, type GaszipFundingRecord } from "../../src/lifi/gaszip-direct-journal.js";
+import { GaszipFundingRpc, assertGaszipFundingFresh, proveGaszipDelivery, proveGaszipSafeTransaction, readGaszipFundingPlan, type GaszipRpcPort } from "../../src/lifi/gaszip-direct-rpc.js";
+import { GaszipFundingService } from "../../src/lifi/gaszip-direct-service.js";
+const SEI_ROUTE=GASZIP_DIRECT_ROUTES.sei,MEGA_ROUTE=GASZIP_DIRECT_ROUTES.mega,seiCodec=gaszipCodec(SEI_ROUTE),megaCodec=gaszipCodec(MEGA_ROUTE);
 import { assertMetaMaskNativeConflictDomainAvailable, metaMaskNativeOperationExists } from "../../src/metamask-native-transfer-owner.js";
 import { AssetUsageLedger, validateAssetUsageReservation } from "../../src/asset-usage-ledger.js";
 
@@ -78,8 +81,8 @@ export async function readEveryLegacyRecord(root: string, at: Date): Promise<Rea
     for (const kind of await readCircleSidecars(root, op)) kinds.add(kind);
   }
   for (const op of await new MerchantRepository(root).listAllOperations()) await visit(`merchant:${op.state}`, op.operationId, op.profileHash);
-  for (const op of await new MegaFundingJournal(root).listAllOperations()) await visit(`mega-gaszip:${op.state}`, op.operationId, op.profileHash);
-  for (const op of await new SeiFundingJournal(root).listAllOperations()) await visit(`sei-gaszip:${op.state}`, op.operationId, op.profileHash);
+  for (const op of await new GaszipFundingJournal(root,MEGA_ROUTE).listAllOperations()) await visit(`mega-gaszip:${op.state}`, op.operationId, op.profileHash);
+  for (const op of await new GaszipFundingJournal(root,SEI_ROUTE).listAllOperations()) await visit(`sei-gaszip:${op.state}`, op.operationId, op.profileHash);
   for (const name of await jsonNames(root, "metamask-native-operations")) {
     assert.equal(await metaMaskNativeOperationExists(root, name.slice(0, -5)), true);
     const op = JSON.parse(await readFile(join(root, "metamask-native-operations", name), "utf8")) as

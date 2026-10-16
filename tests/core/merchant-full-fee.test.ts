@@ -7,6 +7,7 @@ import { merchantActualFee, merchantOracleAt, merchantPayerDebit, MEGA_FEE_ORACL
 import { issueMerchantAuthority, bindMerchantFeeAdmission, assertMerchantAuthority, disposeMerchantAuthority } from "../../src/x402-merchant/authority.js";
 import { merchantFingerprint, sealMerchant } from "../../src/x402-merchant/model.js";
 import { merchantFixture, TX_HASH, BLOCK_HASH } from "./merchant-x402-fixtures.js";
+import { merchantTerms } from "../../src/x402-merchant/terms.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 const load=async(name:string)=>JSON.parse(await readFile(`tests/core/merchant-fee-fixtures/${name}`,"utf8"));
@@ -52,9 +53,46 @@ for(const kind of ["incoming","extra-outgoing","receipt-block","receipt-fee","de
  const {rpc}=await actualRpc(tmp.root,f);await assert.rejects(merchantPayerDebit(rpc,f.receipt.from,f.block,f.receipt,kind==="budget"?"1":"100000000000000"));
 });
 async function setup(t:test.TestContext){const tmp=await temporaryState();t.after(tmp.cleanup);return merchantFixture(tmp.root);}
-for(const kind of ["oracle-proxy","oracle-storage","oracle-implementation","oracle-version","oracle-flag","operator","anchor","l1-budget","balance"] as const)test(`normal fresh full-fee preflight refuses ${kind} before sign/send`,async t=>{
- const f=await setup(t),read=f.rpc.value.bind(f.rpc);f.rpc.value=async(m,p)=>{const v=await read(m,p);if(m==="eth_getCode"&&p[0]===MEGA_FEE_ORACLE.address&&kind==="oracle-proxy")return "0x00";if(m==="eth_getStorageAt"&&p[0]===MEGA_FEE_ORACLE.address&&kind==="oracle-storage")return `0x${"0".repeat(64)}`;if(m==="eth_getCode"&&p[0]===MEGA_FEE_ORACLE.implementation&&kind==="oracle-implementation")return "0x00";if(m==="eth_call"&&(p[0] as {to:string}).to===MEGA_FEE_ORACLE.address){const selector=(p[0] as {data:string}).data.slice(0,10);if(kind==="oracle-version"&&selector==="0x54fd4d50")return "0x";if(kind==="oracle-flag"&&!['0x54fd4d50','0xf1c7a58b','0x275aedd2'].includes(selector))return `0x${"0".repeat(64)}`;if(kind==="operator"&&selector==="0x275aedd2")return `0x${"0".repeat(63)}1`;if(kind==="l1-budget"&&selector==="0xf1c7a58b")return `0x${(1000000000001n).toString(16).padStart(64,"0")}`;}if(m==="eth_getBlockByNumber"&&p[0]==="0x10"&&kind==="anchor")return {...v as object,hash:`0x${"f".repeat(64)}`};if(m==="eth_getBalance"&&kind==="balance")return "0x57e43";return v;};
+for(const kind of ["anchor","l1-budget","balance"] as const)test(`normal fresh full-fee preflight refuses ${kind} before sign/send`,async t=>{
+ const f=await setup(t),read=f.rpc.value.bind(f.rpc);f.rpc.value=async(m,p)=>{const v=await read(m,p);if(m==="eth_call"&&(p[0] as {to:string}).to===MEGA_FEE_ORACLE.address&&kind==="l1-budget"&&(p[0] as {data:string}).data.startsWith("0xf1c7a58b"))return `0x${(1000000000001n).toString(16).padStart(64,"0")}`;if(m==="eth_getBlockByNumber"&&p[0]==="0x10"&&kind==="anchor")return {...v as object,hash:`0x${"f".repeat(64)}`};if(m==="eth_getBalance"&&kind==="balance")return "0x57e43";return v;};
  await assert.rejects(f.prepare());assert.equal(f.signs(),0);assert.equal(f.rpc.sends,0);
+});
+/** A fee-oracle RPC whose code, implementation slot, version or fork flags changed (a legitimate oracle upgrade). */
+function upgradedOracle(f:Awaited<ReturnType<typeof setup>>,kind:"oracle-proxy"|"oracle-storage"|"oracle-implementation"|"oracle-version"|"oracle-flag"){
+ const read=f.rpc.value.bind(f.rpc),seen:string[]=[];f.rpc.value=async(m,p)=>{const v=await read(m,p);seen.push(m==="eth_call"?`${m}:${String((p[0] as {to:string}).to).toLowerCase()}:${(p[0] as {data:string}).data.slice(0,10)}`:`${m}:${String(p[0]).toLowerCase()}`);
+  if(m==="eth_getCode"&&p[0]===MEGA_FEE_ORACLE.address&&kind==="oracle-proxy")return "0x00";if(m==="eth_getStorageAt"&&p[0]===MEGA_FEE_ORACLE.address&&kind==="oracle-storage")return `0x${"0".repeat(64)}`;if(m==="eth_getCode"&&p[0]===MEGA_FEE_ORACLE.implementation&&kind==="oracle-implementation")return "0x00";
+  if(m==="eth_call"&&(p[0] as {to:string}).to===MEGA_FEE_ORACLE.address){const selector=(p[0] as {data:string}).data.slice(0,10);if(kind==="oracle-version"&&selector==="0x54fd4d50")return "0x";if(kind==="oracle-flag"&&!['0x54fd4d50','0xf1c7a58b','0x275aedd2'].includes(selector))return `0x${"0".repeat(64)}`;}return v;};
+ return seen;
+}
+for(const kind of ["oracle-proxy","oracle-storage","oracle-implementation","oracle-version","oracle-flag"] as const)test(`an upgraded fee oracle (${kind}) does not stop a new operation: no oracle or token code, version or flag pin is read`,async t=>{
+ const f=await setup(t),seen=upgradedOracle(f,kind),o=await f.prepare();assert.equal(o.feeContext?.schemaVersion,"apn.merchant-mega-fee.v2");assert.equal(o.asset?.deployment,undefined);
+ const done=await f.service.approve(o.operationId);assert.equal(done.state,"delivered");assert.equal(f.signs(),1);assert.equal(f.rpc.sends,1);
+ const oracle=MEGA_FEE_ORACLE.address.toLowerCase();
+ assert.deepEqual(seen.filter(x=>x.startsWith("eth_getCode:")||x.startsWith("eth_getStorageAt:")).filter(x=>!x.endsWith(o.custody.walletAddress.toLowerCase())),[]);
+ assert.deepEqual([...new Set(seen.filter(x=>x.startsWith(`eth_call:${oracle}`)).map(x=>x.slice(-10)))].sort(),["0x275aedd2","0xf1c7a58b"]);
+});
+test("a nonzero oracle operator fee enters a new operation's admission estimate instead of refusing",async t=>{
+ const f=await setup(t);f.rpc.operator=7n;const o=await f.prepare();assert.equal(o.feeContext?.operatorEstimatedUpper,"7");
+ assert.equal(o.effectBinding!.nativeAmountAtomic,(BigInt(o.envelope.gas)*BigInt(o.envelope.maxFeePerGas)+f.rpc.l1Upper+7n).toString());
+});
+test("v1 fee contexts keep the pinned oracle rule: the same upgrade still refuses a pinned quote",async t=>{
+ const {merchantFeeQuote}=await import("../../src/x402-merchant/mega-fee.js");const f=await setup(t),o=await f.prepare();upgradedOracle(f,"oracle-proxy");
+ const head={number:"0x10",hash:BLOCK_HASH},terms=merchantTerms(o);
+ await assert.rejects(merchantFeeQuote(f.rpc,head,o.envelope,terms,true),/refused/);assert.equal((await merchantFeeQuote(f.rpc,head,o.envelope,terms,false)).schemaVersion,"apn.merchant-mega-fee.v2");
+});
+test("a new operation's paid fee comes from the receipt fields, including a Jovian operator fee",async t=>{
+ const f=await setup(t),o=await f.prepare(),read=f.rpc.value.bind(f.rpc);
+ f.rpc.receiptOverride=r=>{r.operatorFeeScalar="0x0";r.operatorFeeConstant="0x5";};
+ f.rpc.value=async(m,p)=>m==="eth_getBalance"&&typeof p[1]==="object"&&(p[1] as {blockHash:string}).blockHash===BLOCK_HASH?`0x${(0x100000000000000n-200000n-f.rpc.l1Actual-5n).toString(16)}`:read(m,p);
+ const done=await f.service.approve(o.operationId);assert.equal(done.state,"delivered");
+ assert.equal(done.receipt?.fullFee?.operatorWei,"5");assert.equal(done.receipt?.networkFeeWei,(200000n+f.rpc.l1Actual+5n).toString());
+ f.rpc.receiptOverride=r=>{r.operatorFeeScalar="0x0";r.operatorFeeConstant="0x5";r.operatorFee="0x6";};
+ const other=await setup(t),p2=await other.prepare();other.rpc.receiptOverride=f.rpc.receiptOverride;const held=await other.service.approve(p2.operationId);assert.equal(held.receipt,null);
+});
+test("a v2 record written with USDm code pins and a pinned fee context still validates against what it stored",async()=>{
+ const {validateMerchant}=await import("../../src/x402-merchant/model.js"),stored=JSON.parse(await readFile("tests/core/merchant-fee-fixtures/v2-pinned-delivered-operation.json","utf8"));
+ const o=validateMerchant(stored),t=merchantTerms(o);assert.equal(o.integrityHash,stored.integrityHash);
+ assert.equal(o.feeContext?.schemaVersion,"apn.merchant-mega-fee.v1");assert.equal(t.feePins,true);assert.ok(t.asset.deployment);assert.equal(o.state,"delivered");
 });
 test("new native reserve includes L1 estimate and actual full fee; total accounting is separate from delivery",async t=>{
  const f=await setup(t),o=await f.prepare();assert.equal(o.effectBinding!.nativeAmountAtomic,(BigInt(o.envelope.gas)*BigInt(o.envelope.maxFeePerGas)+f.rpc.l1Upper).toString());
@@ -64,8 +102,8 @@ test("fresh increased L1 above original hold refuses before signing; safe decrea
  const f=await setup(t),o=await f.prepare();f.rpc.l1Upper=101n;await assert.rejects(f.service.approve(o.operationId));assert.equal(f.signs(),0);assert.equal(f.rpc.sends,0);f.rpc.l1Upper=99n;const done=await f.service.approve(o.operationId);assert.equal(done.state,"delivered");
 });
 test("current canonical fee check is for frozen unsigned bytes, not resealed fresh envelope",async t=>{
- const f=await setup(t),o=await f.prepare(),current=await merchantCurrent(f.rpc,o.envelope);assert.equal(current.feeContext.unsignedHash,o.feeContext!.unsignedHash);checkMerchantEnvelope(current,o.envelope,o.feeContext);
- assert.throws(()=>checkMerchantFullFee({...current.feeContext,admissionEstimatedUpper:(BigInt(o.effectBinding!.nativeAmountAtomic)+1n).toString(),l1EstimatedUpper:"101"},o.feeContext!,o.envelope,current.native));
+ const f=await setup(t),o=await f.prepare(),current=await merchantCurrent(f.rpc,merchantTerms(o),o.envelope);assert.equal(current.feeContext.unsignedHash,o.feeContext!.unsignedHash);checkMerchantEnvelope(current,o.envelope,merchantTerms(o),o.feeContext);
+ assert.throws(()=>checkMerchantFullFee({...current.feeContext,admissionEstimatedUpper:(BigInt(o.effectBinding!.nativeAmountAtomic)+1n).toString(),l1EstimatedUpper:"101"},o.feeContext!,o.envelope,current.native,merchantTerms(o)));
 });
 test(`absolute fee witness expires at queue, zero POST and no resend`,async t=>{
  const f=await setup(t),o=await f.prepare();f.rpc.queued=async()=>f.advance(10001);const held=await f.service.approve(o.operationId);assert.equal(held.state,"unknown_finality");assert.equal(f.rpc.sends,0);assert.equal(f.signs(),1);await assert.rejects(f.service.approve(o.operationId));
@@ -91,5 +129,5 @@ test("production custody fresh fee guard after wallet read blocks private key ac
  const o=merchantMove(prepared,"signing_started",prepared.createdAt,{signingAttempts:1}),controller={},grant=issueMerchantAuthority(controller,o,"token","native",new Date(f.now().getTime()+60000).toISOString());bindMerchantFeeAdmission(grant,controller,o,o.feeContext!,f.now(),f.now());await new MerchantClaims(f.state.root).claim(o,"sign");let reads=0,keyReads=0;
  t.mock.method(EncryptedWalletStore.prototype,"describe",async()=>{reads++;f.rpc.l1Upper=101n;return {identity:{profile:o.profile,address:o.custody.walletAddress,chainId:8453,createdAt:o.custody.walletCreatedAt,bindingHash:o.custody.walletBindingHash},secret:{get privateKey(){keyReads++;throw new Error("private key access forbidden");}}} as never;});t.mock.method(EncryptedWalletStore.prototype,"clear",()=>{});
  const custody=new MerchantCustody(f.state,{load:async()=>null,create:async()=>{throw new Error("unexpected create");}},f.now);
- await assert.rejects(custody.sign(o,grant,controller,async()=>{const current=await merchantCurrent(f.rpc,o.envelope);checkMerchantEnvelope(current,o.envelope,o.feeContext);}),/Pinned USDm merchant operation refused/);assert.equal(reads,1);assert.equal(keyReads,0);assert.equal(f.rpc.sends,0);
+ await assert.rejects(custody.sign(o,grant,controller,async()=>{const current=await merchantCurrent(f.rpc,merchantTerms(o),o.envelope);checkMerchantEnvelope(current,o.envelope,merchantTerms(o),o.feeContext);}),/Merchant transfer-proof operation refused/);assert.equal(reads,1);assert.equal(keyReads,0);assert.equal(f.rpc.sends,0);
 });

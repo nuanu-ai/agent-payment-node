@@ -4,7 +4,7 @@ import { AssetUsageLedger, assetUsageReservationId } from "./asset-usage-ledger.
 /** The profile x402 policy, not an allowlist registry, governs local x402; its version names that source. */
 const PROFILE_POLICY_SOURCE = "profile-x402-policy.v1";
 const OUTCOME_DOMAIN = "apn.rail-usage-outcome.v1";
-/** The same key the shared rail gate uses, so one operation can never hold two x402 reservations. */
+/** Persisted reservation key; stored holds are found by it, so it never changes. One operation holds one x402 reservation. */
 export function x402UsageKey(operationId) { return `apn.rail-usage:x402:${operationId}`; }
 /**
  * Local x402 spend in the shared asset-usage ledger. The reservation is made before anything is signed, under the

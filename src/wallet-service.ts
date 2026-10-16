@@ -222,6 +222,7 @@ export class WalletService {
         maxBalanceUsdcAtomic: request.maxBalanceUsdcAtomic,
         maxX402AmountAtomic: request.maxX402AmountAtomic,
         ...(request.maxBalanceEthWei === undefined ? {} : { maxBalanceEthWei: request.maxBalanceEthWei }),
+        ...(request.x402Payees === undefined ? {} : { x402Payees: request.x402Payees }),
       });
       return publicProfilePolicy(profile, policy, request.chainId);
     });
