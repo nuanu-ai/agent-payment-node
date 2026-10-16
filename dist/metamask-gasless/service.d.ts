@@ -34,6 +34,12 @@ export declare class MetaMaskGaslessService {
         proof_class: string;
     }>;
     prepare(input: Parameters<MetaMaskGaslessPreparation["prepare"]>[0]): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
+    /**
+     * A lost provider session is normally renewed with the foreground wallet connect handoff, but wallet lifecycle
+     * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile instead
+     * of at a command that would only be refused.
+     */
+    private sessionGuidance;
     approve(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     resume(operationId: string, observationRpcEnv?: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     status(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;

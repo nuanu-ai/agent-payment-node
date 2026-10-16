@@ -1,7 +1,7 @@
 import type { StateStore } from "../state.js";
 import type { MetaMaskGaslessClock } from "./clock.js";
-import type { MetaMaskGaslessMutable, MetaMaskGaslessProviderObservation } from "./model.js";
-import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
+import type { MetaMaskGaslessCursor, MetaMaskGaslessMutable, MetaMaskGaslessObservation, MetaMaskGaslessProviderObservation } from "./model.js";
+import { type MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "./ports.js";
 import { type MetaMaskGaslessFailure, type MetaMaskGaslessFailureReason } from "./reasons.js";
 export type MetaMaskGaslessSave = (op: MetaMaskGaslessOperationRecord, patch: Partial<MetaMaskGaslessMutable>, at: string) => Promise<MetaMaskGaslessOperationRecord>;
@@ -9,6 +9,11 @@ export interface MetaMaskGaslessStep {
     readonly operation: MetaMaskGaslessOperationRecord;
     /** Explicitly transient; never part of the stored operation or its receipt. */
     readonly warning?: MetaMaskGaslessFailure;
+    /** A nonterminal result read after only the reserved terminal slot was left; reported, never saved. */
+    readonly unsaved?: {
+        readonly observation: MetaMaskGaslessObservation;
+        readonly cursor: MetaMaskGaslessCursor;
+    };
 }
 /** An owner-named observation RPC with the environment variable that named it. */
 export interface MetaMaskGaslessObserver {

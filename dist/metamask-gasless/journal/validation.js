@@ -1,5 +1,5 @@
 import { hashObject, sha256 } from "../../canonical.js";
-import { mmImmutable, mmMutable, MM_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_TERMINAL, mmRequestHash } from "../operation-model.js";
+import { mmImmutable, mmMutable, MM_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_TERMINAL, MM_TERMINAL_HISTORY_LIMIT, mmRequestHash } from "../operation-model.js";
 import { MM_ZERO_HASH } from "../model.js";
 import { mmFail } from "../reasons.js";
 import { mmExact, mmHash, mmIso, mmSame } from "../validation.js";
@@ -112,7 +112,7 @@ function validate(value) {
         corrupt();
     const expectedRequestHash = mmRequestHash(profileHash, intent);
     if (requestHash !== expectedRequestHash || !Array.isArray(r.transitions) || r.transitions.length < 1 ||
-        r.transitions.length > MM_HISTORY_LIMIT)
+        r.transitions.length > MM_TERMINAL_HISTORY_LIMIT)
         corrupt();
     const transitions = [];
     for (const raw of r.transitions) {
@@ -141,6 +141,9 @@ function validate(value) {
         transitions.push(current);
     }
     const last = transitions.at(-1);
+    // Only a terminal transition may follow a journal that an earlier release filled to the old limit.
+    if (transitions.length > MM_HISTORY_LIMIT && !MM_TERMINAL.includes(last.state))
+        corrupt();
     const currentMutable = mmJournalMutable(mutable(r), intent, fingerprint, updatedAt);
     if (last.at !== updatedAt || !mmSame(mmMutable(last), currentMutable) ||
         r.terminal !== MM_TERMINAL.includes(currentMutable.state))

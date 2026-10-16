@@ -1,5 +1,6 @@
 import { readDataRecord, validateReadDiagnostic } from "./read-diagnostic.js";
 import { isPlainRecord } from "../../canonical.js";
+import { MM_PROVIDER_STATUSES } from "../model.js";
 import { mmAssertProfileBinding, mmBinding, mmPrivateHash } from "../identity.js";
 import { mmAssertStableQuote, mmQuote, mmQuoteHash } from "../economics.js";
 import { mmRegistry } from "../registry.js";
@@ -194,7 +195,7 @@ function observation(value, intentValue) {
     const o = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"], "mm_gasless_provider_unavailable");
     mmIso(o.observedAt, "mm_gasless_provider_unavailable");
     mmHash(o.requestIdHash, "mm_gasless_provider_unavailable");
-    if (!["awaiting_approval", "pending", "broadcasted", "confirmed", "failed", "unavailable"].includes(String(o.status)) ||
+    if (!MM_PROVIDER_STATUSES.includes(String(o.status)) ||
         (o.txHash !== null && mmHex(o.txHash, 32, "mm_gasless_provider_unavailable") !== o.txHash))
         mmFail("mm_gasless_provider_unavailable");
     mmUuid(intentValue.requestId, "mm_gasless_state_corrupt");

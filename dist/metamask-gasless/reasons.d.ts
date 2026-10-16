@@ -15,6 +15,10 @@ export declare const MM_REASON_CODES: {
     readonly mm_gasless_clock: "APN_REPREPARE_REQUIRED";
     readonly mm_gasless_rpc_binding: "APN_RPC_PROTOCOL";
     readonly mm_gasless_rpc_unavailable: "APN_RPC_AMBIGUOUS";
+    /** The RPC refused eth_getLogs as too wide even at the narrowest bounded window. */
+    readonly mm_gasless_rpc_log_range: "APN_RPC_CONFIG";
+    /** The RPC asked APN to slow down (HTTP 429 or a request-limit error). */
+    readonly mm_gasless_rpc_rate_limited: "APN_RPC_RATE_LIMITED";
     readonly mm_gasless_scan_reorg: "APN_RPC_PROTOCOL";
     readonly mm_gasless_evidence_invalid: "APN_RPC_PROTOCOL";
     readonly mm_gasless_submit_unknown: "APN_OPERATION_BLOCKED";
@@ -24,6 +28,8 @@ export declare const MM_REASON_CODES: {
     readonly mm_gasless_provider_unavailable: "APN_PROVIDER_UNAVAILABLE";
     readonly mm_gasless_guard_unavailable: "APN_PROVIDER_UNAVAILABLE";
     readonly mm_gasless_provider_failed: "APN_PROVIDER_EFFECT_UNAVAILABLE";
+    /** DENIED or EXPIRED after AWAITING_MFA: by MetaMask's job order the request closed before signing. Not proof. */
+    readonly mm_gasless_provider_mfa_rejected: "APN_PROVIDER_EFFECT_UNAVAILABLE";
     readonly mm_gasless_transaction_reverted: "APN_PROVIDER_EFFECT_UNAVAILABLE";
     readonly mm_gasless_owner_abandoned: "APN_OPERATION_BLOCKED";
     readonly mm_gasless_state_corrupt: "APN_STATE_CORRUPT";
