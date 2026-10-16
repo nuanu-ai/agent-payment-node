@@ -329,3 +329,47 @@ test("finalized Linea mint scopes conflicts to its destination payer without fre
     assert.equal(await readFile(join(root, "circle-v2-evm", `${other.operationId}.json`), "utf8"), oldBytes); assert.equal(current.terminal, false); assert.ok(current.usage.every(u => u.state === "unknown_finality"));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+function noEffectUsage(op: CircleOperationV1) {
+  return usage(op).map(u => { const { reservationDigest: _digest, ...body } = u; return sealUsage({ ...body, state: "failed_before_effect", outcomeDigest: "f".repeat(64) }); });
+}
+for (const outcome of ["never_lands", "nonce_not_consumed", "own_transaction_known"] as const)
+  test(`a resumed sealed approval whose nonce check says ${outcome} ends, resumes once, or is fenced for observation`, async () => {
+    let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at);
+    op = advanceCircle(op, { state: "source_unknown", effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "sealed", transactionHash: tx, materialHash: "9".repeat(64) } : e) }, "approval_material_sealed", at);
+    let checks = 0, discards = 0;
+    const p = ports(op, { usage: async (o, target) => target === "failed_before_effect" ? noEffectUsage(o) : usage(o, target === "finalized" ? "finalized" : "unknown_finality"),
+      unsent: { outcome: async (_o, effect) => { checks++; assert.equal(effect.transactionHash, tx); return outcome; },
+        discard: async (_o, effect) => { discards++; assert.equal(effect.phase, "abandoned_unsent"); } } });
+    const result = await approveCircleSource(op, p.p);
+    assert.equal(checks, 1); assert.equal(p.signs(), 0);
+    if (outcome === "never_lands") {
+      assert.equal(result.state, "cancelled_unsubmitted"); assert.equal(result.terminal, true);
+      assert.equal(result.effects[0]!.phase, "abandoned_unsent"); assert.equal(result.effects[0]!.transactionHash, tx);
+      assert.ok(result.usage.every(u => u.state === "failed_before_effect")); assert.equal(discards, 1); assert.equal(p.sends(), 0);
+    } else if (outcome === "nonce_not_consumed") {
+      assert.equal(result.effects[0]!.phase, "submitted"); assert.equal(p.sends(), 1); assert.equal(discards, 0);
+    } else {
+      assert.equal(result.effects[0]!.phase, "submission_started"); assert.equal(p.sends(), 0); assert.equal(discards, 0);
+      assert.ok(result.usage.every(u => u.state === "unknown_finality"));
+      await approveCircleSource(result, p.p); assert.equal(p.sends(), 0);
+    }
+  });
+test("a sealed burn that can never land leaves the confirmed approval to explicit cleanup", async () => {
+  const ready = await sourceReady();
+  const sealedBurn = advanceCircle(ready, { source: null, attestation: null, state: "source_unknown", residualAllowanceAtomic: "40100", effects: ready.effects.map(e => e.role === "burn" ? { ...e, phase: "sealed", proof: null } : e) }, "burn_sealed_unsent", at);
+  let discards = 0;
+  const p = ports(sealedBurn, { unsent: { outcome: async () => "never_lands", discard: async () => { discards++; } } });
+  const result = await observeCircle(sealedBurn, p.p);
+  assert.equal(result.state, "cleanup_required"); assert.equal(result.terminal, false); assert.equal(result.effects[1]!.phase, "abandoned_unsent");
+  assert.equal(discards, 1); assert.equal(p.sends(), 0);
+  await assert.rejects(approveCircleSource(result, p.p), /explicit_cleanup_required/);
+});
+test("a signing fence without saved bytes is cancelled as never sent", async () => {
+  let op = initial(); op = advanceCircle(op, { usage: usage(op) }, "reserved", at);
+  op = advanceCircle(op, { state: "source_unknown", effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "signing_started" } : e) }, "signing_fence", at);
+  const p = ports(op, { loadMaterial: async () => null, usage: async o => noEffectUsage(o) });
+  const cancelled = await cleanupCircle(op, p.p);
+  assert.equal(cancelled.state, "cancelled_unsubmitted"); assert.equal(cancelled.effects[0]!.phase, "abandoned_unsent");
+  assert.equal(cancelled.effects[0]!.transactionHash, null); assert.equal(p.sends(), 0);
+});

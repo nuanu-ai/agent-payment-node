@@ -161,7 +161,8 @@ export function publicRelayUnsignedOperation(operation, retirement = null, sourc
         ...(sourceCompletion === null ? {} : { state: sourceCompletion.state, terminal: true,
             sourceEffectTerminal: true, sourceJournalIntegrityHash: sourceCompletion.journalIntegrityHash }),
         proofClass: sourceCompletion === null ? "saved_unsigned_quote" :
-            sourceCompletion.state === "source_confirmed" ? "source_effect_confirmed" : "source_effect_reverted",
+            sourceCompletion.state === "source_confirmed" ? "source_effect_confirmed" :
+                sourceCompletion.state === "failed_confirmed_revert" ? "source_effect_reverted" : "source_effect_never_landed",
         balanceEvidence: "not_checked",
         allowanceEvidence: "not_checked", statusObservable: operation.statusLocator !== undefined,
         executionAdmitted: false, nextActions: [] };

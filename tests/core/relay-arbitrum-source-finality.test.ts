@@ -109,6 +109,28 @@ test("a receipt reverted at safe finality yields a bound revert proof; a success
   assert.equal(await success.observer.observeRevert(deposit), null);
 });
 
+test("unsent bytes: one read-only POST decides never-lands, resumable or normal observation", async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup);
+  const state = new StateStore(temp.root); await state.initialize();
+  let clock = 1_000_000;
+  for (const [count, own, expected] of [["0x8", null, "never_lands"], ["0x7", null, "nonce_not_consumed"],
+    ["0x8", tx(deposit), "own_transaction_known"]] as const) {
+    let posts = 0;
+    const rpc = { batchCall: async (calls: readonly { method: string; params: readonly unknown[] }[]) => {
+      posts++;
+      assert.deepEqual(calls.map(call => call.method), ["eth_chainId", "eth_getTransactionCount", "eth_getTransactionByHash", "eth_getBlockByNumber"]);
+      assert.deepEqual(calls[1]!.params, [owner, "safe"]);
+      return ["0xa4b1", count, own, { number: "0x70", hash: safe }];
+    } };
+    const observer = new RelayArbitrumSourceFinalityObserver("https://arb-rpc.publicnode.com", state, rpc,
+      () => new EvmDirectRpcGuard(state, 24, () => clock, async ms => { clock += ms; }), async () => {});
+    const result = await observer.observeUnsent({ transactionHash: deposit.transactionHash, from: owner, nonce: 7n });
+    assert.equal(result.outcome, expected);
+    assert.equal(result.proof?.proofClass ?? null, expected === "never_lands" ? "canonical_safe_nonce_consumed" : null);
+    assert.equal(posts, 1);
+  }
+});
+
 test("failed approval blocks deposit reads; malformed receipt status fails protocol", async t => {
   const failed = await setup((rows, leg, pass) => {
     if (leg === 0 && pass === 0) rows[2] = { ...rows[2] as object, status: "0x0" };

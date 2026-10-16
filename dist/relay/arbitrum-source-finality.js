@@ -1,4 +1,5 @@
 import { ApnError } from "../errors.js";
+import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { EvmDirectRpcGuard } from "../evm-direct-rpc-guard.js";
 import { evmRpcAddress, evmRpcBlockResult, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import { HttpsBaseRpc } from "../rpc.js";
@@ -42,6 +43,29 @@ export class RelayArbitrumSourceFinalityObserver {
             deposit: deposited.effect, approval: approved?.effect ?? null, safeHead: finalSafe,
             proofClass: "canonical_safe_source_receipts", destinationDeliveryProven: false,
             causalLinkCryptographicallyProven: false, paidAcceptance: false };
+    }
+    /** One read-only POST: the safe nonce is past the signed nonce and the node does not know the signed hash. */
+    async observeUnsent(effect) {
+        const guard = this.guardFactory();
+        const [chain, safeNonce, own, safe] = await this.batch(guard, [
+            { method: "eth_chainId", params: [] },
+            { method: "eth_getTransactionCount", params: [effect.from, "safe"] },
+            { method: "eth_getTransactionByHash", params: [effect.transactionHash] },
+            { method: "eth_getBlockByNumber", params: ["safe", false] },
+        ]);
+        if (evmRpcQuantity(chain) !== 42161n)
+            throw new ApnError("APN_CHAIN_MISMATCH", "Relay source RPC is not Arbitrum One.");
+        const rows = { eth_getTransactionCount: safeNonce, eth_getTransactionByHash: own };
+        const outcome = await evmUnsentOutcome(async (method) => rows[method], { account: effect.from, nonce: effect.nonce,
+            transactionHash: effect.transactionHash });
+        if (outcome !== "never_lands")
+            return { outcome, proof: null };
+        if (safe === null)
+            return { outcome: "nonce_not_consumed", proof: null };
+        const head = evmRpcBlockResult(safe, "safe");
+        return { outcome, proof: { sourceChainId: 42161, rpcOrigin: new URL(this.url).origin, transactionHash: effect.transactionHash,
+                signedNonce: effect.nonce.toString(), safeNonce: evmRpcQuantity(safeNonce).toString(), safeHead: { number: head.number, hash: head.hash },
+                proofClass: "canonical_safe_nonce_consumed" } };
     }
     /** The same canonical safe reads as `observe`, accepting only a reverted receipt. */
     async observeRevert(effect) {

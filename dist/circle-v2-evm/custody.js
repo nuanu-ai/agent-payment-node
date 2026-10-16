@@ -55,6 +55,12 @@ export class CircleEffectStore extends SecureStateStore {
             typeof value.ciphertext !== "string" || value.ciphertext.length === 0 || await this.readJson(this.path(op, burn.role)) !== null)
             circleBlocked("retirement_original_material_or_burn_guard");
     }
+    /** Only for an effect already recorded `abandoned_unsent`: its bytes provably can never land. */
+    async discard(op, effect) {
+        if (effect.phase !== "abandoned_unsent")
+            circleBlocked("discard_requires_never_landed_effect");
+        await this.removeFile(this.path(op, effect.role));
+    }
     async load(op, effect) {
         const value = await this.readJson(this.path(op, effect.role));
         if (value === null)
@@ -134,6 +140,10 @@ export class LocalCircleCustody {
     async assertCleanupAbsent(op) { return this.material.assertCleanupAbsent(op); }
     async assertRetirementHeaders(op) { return this.material.assertRetirementHeaders(op); }
     async load(op, effect) { return await this.material.load(op, effect); }
+    async discard(op, effect) {
+        const custody = effect.role === "mint" ? op.destinationCustody : op.sourceCustody;
+        await this.state.withLocks([`custody:${custody.profileHash}`], async () => this.material.discard(op, effect));
+    }
     async seal(op, effect, guard) {
         guard();
         if (effect.role === "approval" || effect.role === "burn")

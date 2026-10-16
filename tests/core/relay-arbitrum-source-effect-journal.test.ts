@@ -257,7 +257,7 @@ test("approval skip persists a canonical allowance proof and permits a separate 
   assert.equal(skipped.effects[0].skipProof?.operationIntegrityHash, op.integrityHash);
   assert.equal(await arbitrumSourceRecoveryClass(skipped, op), "approval_skipped");
   assert.deepEqual(await repository().load(op.profileHash, op.operationId), skipped);
-  const observe = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observe: async () => {
+  const observe = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observeUnsent: async () => ({ outcome: "nonce_not_consumed" as const, proof: null }), observe: async () => {
     throw new Error("skipped approval has no receipt to observe");
   } }, { operation: async () => op });
   const reported = await observe.observe(op.operationId);
