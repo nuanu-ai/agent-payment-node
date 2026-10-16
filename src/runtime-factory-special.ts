@@ -3,6 +3,8 @@ import { RelayObserveService } from "./relay/observe.js";
 import { RelayNativeObserveService } from "./relay/native-observe.js";
 import { RelayBaseObserveService } from "./relay/base-observe.js";
 import { RelayArbitrumSourceObserveService } from "./relay/arbitrum-source-observe.js";
+import { RelayArbitrumDestinationObserver } from "./relay/arbitrum-destination.js";
+import { RelayEthereumUsdcReadOnlyRpc } from "./relay/ethereum-usdc-credit-proof.js";
 import { RelayArbitrumApprovalDecisionService } from "./relay/arbitrum-approval-decision.js";
 import { LocalRelayArbitrumApprovalSigner, RelayArbitrumApprovalExecuteService } from "./relay/arbitrum-approval-execute.js";
 import { LocalRelayArbitrumDepositSigner, RelayArbitrumDepositDispatchService } from "./relay/arbitrum-deposit-dispatch.js";
@@ -36,8 +38,14 @@ export function createSpecialApnCore(bound: BoundCommand, options: RuntimeFactor
     const url = bound.rpcUrl ?? "";
     // Construct only the guarded Arbitrum read path. No wallet, signer, or send transport exists here.
     const observer = new RelayArbitrumSourceFinalityObserver(url, state, options.relayArbitrumObserveRpc);
+    // With --ethereum-rpc-url a final deposit continues to the keyless Relay status hint and the Ethereum USDC credit proof.
+    const ethereumUrl = bound.ethereumRpcUrl;
+    const destination = ethereumUrl === undefined ? undefined : new RelayArbitrumDestinationObserver(state.root, {
+      status: new RelayKeylessStatusService(state, options.relayStatusFetch),
+      ethereum: () => new RelayEthereumUsdcReadOnlyRpc(ethereumUrl, state, options.relayArbitrumDestinationRpc),
+      now: () => options.clock?.now() ?? new Date() });
     return new ApnCore({ state, relayArbitrumObserve: options.relayArbitrumObserve ??
-      new RelayArbitrumSourceObserveService(state, observer) });
+      new RelayArbitrumSourceObserveService(state, observer, {}, destination) });
   }
   if (bound.request.command === "relay.arbitrum.approval-check") {
     const url = bound.rpcUrl ?? "";

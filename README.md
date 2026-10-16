@@ -763,7 +763,7 @@ apn x402 merchant observe --operation <operation-id> [--deliver]
 apn x402 merchant retire-unsent --operation <operation-id>
 apn x402 merchant status --operation <operation-id>
 apn relay arbitrum prepare --profile <profile> --owner <arbitrum-account> --recipient <ethereum-address> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
-apn relay arbitrum observe --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
+apn relay arbitrum observe --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc> [--ethereum-rpc-url <ethereum-rpc>]
 apn relay arbitrum approval-check --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
 apn relay arbitrum approval-execute --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
 apn relay arbitrum deposit-dispatch --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
@@ -992,6 +992,16 @@ and one qualifying destination candidate can yield `operationalAcceptance:
 true`; one destination payout can accept one operation only. The output always
 keeps `paidAcceptance: false` and `causalLinkCryptographicallyProven: false`.
 The command does not sign or submit.
+
+`relay arbitrum observe` proves the saved Arbitrum approval and deposit at
+Arbitrum safe finality. With `--ethereum-rpc-url`, a final deposit continues in
+the same invocation: one keyless Relay status read names the candidate payout
+(a discovery hint only), and at most seven Ethereum RPC POSTs prove one canonical
+safe Ethereum USDC Transfer to the operation's own recipient. An accepted credit
+takes the create-only payout claim (one payout accepts one operation) and an
+operation record; the result is `operationalAcceptance: true` with
+`terminal: true`, and later observations return the record without network
+reads. Without `--ethereum-rpc-url` the command reads Arbitrum only, as before.
 
 `apn doctor keychain` performs a read-only query against the ordinary login
 Keychain. An `ok: true` result means the Keychain command path is usable; an

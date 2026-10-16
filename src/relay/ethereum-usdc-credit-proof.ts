@@ -40,6 +40,7 @@ export type RelayEthereumUsdcCreditResult = Readonly<{
   minimumOutputAtomic: string; creditedAtomic: string; transferLogIndex: string;
   proofClass: "canonical_safe_erc20_transfer_log";
 }> }> | Readonly<{ status: "pending" | "unproven" | "mismatch"; reason: string }>);
+export type RelayEthereumUsdcCreditProof = Extract<RelayEthereumUsdcCreditResult, { status: "recipient_credit_proven" }>["proof"];
 
 function result(status: "pending" | "unproven" | "mismatch", reason: string): RelayEthereumUsdcCreditResult {
   return { status, reason, relayOrderFulfillmentProven: false, paidAcceptance: false };

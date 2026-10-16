@@ -73,6 +73,8 @@ export interface RuntimeFactoryOptions {
     readonly relayBaseObserve?: RelayBaseObserveService;
     readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
     readonly relayArbitrumObserveRpc?: HttpsBaseRpc;
+    /** Synthetic CLI test seam for the Ethereum reader of `relay arbitrum observe --ethereum-rpc-url`. */
+    readonly relayArbitrumDestinationRpc?: HttpsBaseRpc;
     readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
     readonly relayArbitrumApprovalExecute?: RelayArbitrumApprovalExecuteService;
     readonly relayArbitrumDepositDispatch?: RelayArbitrumDepositDispatchService;
