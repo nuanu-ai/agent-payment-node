@@ -1,3 +1,4 @@
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { hashObject } from "../canonical.js";
 import { gaslessOwner } from "../gasless/owner.js";
 import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, validateGaslessRequest } from "../gasless/validation.js";
@@ -9,6 +10,7 @@ import type { FacilitatorPort } from "./facilitator.js";
 import { facilitatorFail } from "./failure.js";
 import { FACILITATOR_KIND, FACILITATOR_POLICY, type FacilitatorOperationRecord, type FacilitatorRequest } from "./operation-model.js";
 import type { FacilitatorGaslessRepositoryPort } from "./operation-repository.js";
+import type { FacilitatorGaslessPolicy } from "./policy.js";
 import { AVALANCHE_FACILITATOR as R } from "./registry.js";
 import { facilitatorRequirement, facilitatorRequirementHash } from "./requirement.js";
 import type { FacilitatorRpcPort } from "./rpc.js";
@@ -21,6 +23,7 @@ export interface FacilitatorPreparationOptions {
   readonly rpc: () => FacilitatorRpcPort;
   readonly facilitator: FacilitatorPort;
   readonly now: () => number;
+  readonly policy: FacilitatorGaslessPolicy;
 }
 
 export function facilitatorRequest(value: unknown): FacilitatorRequest {
@@ -39,7 +42,8 @@ export class FacilitatorPreparation {
     const key = canonicalIdempotencyKey(input.idempotencyKey), state = this.o.state;
     const profileHash = state.profileHash(profile), operationId = state.operationId(profile, key);
     const idempotencyHash = state.idempotencyHash(key), requestHash = hashObject({ kind: FACILITATOR_KIND, profile, request });
-    return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
+    return await state.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () =>
+      await state.withLocks([`profile:${allowlistProfileHash(profile)}`], async () => {
       const existing = await this.o.operations.resolvePrepare({ kind: FACILITATOR_KIND, profileHash, operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== FACILITATOR_KIND) return facilitatorFail("facilitator_gasless_state_corrupt");
@@ -47,6 +51,8 @@ export class FacilitatorPreparation {
         return existing.record;
       }
       const binding = await gaslessOwner(state, profile), owner = binding.owner.address;
+      // Owner admission and caps come first: no policy means no transfer, as on every other money route.
+      const allowlist = await this.o.policy.prepare({ profile, owner: binding.owner, request }, operationId);
       await this.o.operations.assertEvmAccountAvailable(profileHash, R.chainId, owner);
       if ([GASLESS_ZERO_ADDRESS, owner, R.token].some((alias) => alias.toLowerCase() === request.recipient.toLowerCase())) {
         facilitatorFail("facilitator_gasless_input");
@@ -64,9 +70,9 @@ export class FacilitatorPreparation {
           supportedResponseHash: support.supportedResponseHash },
         initial: { block, balanceAtomic: balance.toString(), rpcOrigin: rpc.rpcOrigin, rpcEndpointHash: rpc.rpcEndpointHash },
         preparedAt, expiresAt: new Date(Date.parse(preparedAt) + GASLESS_TTL_MS).toISOString(),
-        policyHash: hashObject({ identity: FACILITATOR_POLICY, request }) } });
+        policyHash: hashObject({ identity: FACILITATOR_POLICY, request }), allowlist } });
       await this.o.records.persist(operation);
       return operation;
-    });
+    }));
   }
 }

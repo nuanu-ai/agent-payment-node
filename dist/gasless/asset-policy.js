@@ -4,11 +4,13 @@ import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { gaslessDeployment } from "./registry.js";
-import { gaslessFailure } from "./validation.js";
-export const BASE_GASLESS_CHAIN = "eip155:8453";
-export const ETHEREUM_GASLESS_CHAIN = "eip155:1";
+import { GASLESS_EIP7702_CHAINS, gaslessFailure } from "./validation.js";
+/**
+ * Every executable Circle gasless chain moves USDC only under the owner's allowlist and asset-usage caps, exactly like
+ * a direct transfer. Only the historical, non-executable Avalanche row of this adapter has no policy chain.
+ */
 export function gaslessPolicyChain(chainId) {
-    return chainId === 8453 ? BASE_GASLESS_CHAIN : chainId === 1 ? ETHEREUM_GASLESS_CHAIN : null;
+    return GASLESS_EIP7702_CHAINS.includes(chainId) ? `eip155:${chainId}` : null;
 }
 /** The reference names the canonical Circle USDC paymaster for the selected network. */
 export function localGaslessMechanism(chainId) {
