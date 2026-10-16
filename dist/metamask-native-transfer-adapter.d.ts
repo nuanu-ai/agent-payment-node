@@ -3,16 +3,15 @@ import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from 
 import type { Hex } from "./model.js";
 import { type MetaMaskNativeFeeChainId } from "./metamask-native-fee-evidence.js";
 import { type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
-interface FixedMetaMaskNativePolicyBase {
+/** What the vendor CLI reported for the selected wallet; `vendorPolicyHash` pins the policy bytes between prepare and send. */
+export interface MetaMaskNativeVendorPolicy {
     readonly selectedAddress: Address;
     readonly vendorProjectHash: string;
+    readonly vendorPolicyHash: string;
     readonly tradingMode: "guard";
+    readonly outflowLimitsUsd: Readonly<Record<string, string>>;
     readonly observedAt: string;
 }
-export type FixedMetaMaskNativePolicy = FixedMetaMaskNativePolicyBase & {
-    readonly vendorPolicyHash: string;
-    readonly policyBytes: 866 | 945;
-};
 export type MetaMaskNativeSubmission = ({
     readonly disposition: "acknowledged";
     readonly transactionHash: Hex;
@@ -29,8 +28,8 @@ export type MetaMaskNativeSubmission = ({
 }) & {
     readonly diagnostic?: MetaMaskNativeDiagnostic;
 };
-/** Normal pinned CLI GETs only. No YAML decoder, policy mutation or remote rolling-usage prediction. */
-export declare function readFixedMetaMaskNativePolicy(chainId: MetaMaskNativeFeeChainId, deadline?: MetaMaskNativeDeadlineInput, expectedPayer?: string): Promise<FixedMetaMaskNativePolicy>;
+/** Normal vendor CLI reads only; no policy mutation or remote rolling-usage prediction. */
+export declare function readMetaMaskNativeVendorPolicy(chainId: MetaMaskNativeFeeChainId, payer: Address, recipient: Address, deadline?: MetaMaskNativeDeadlineInput): Promise<MetaMaskNativeVendorPolicy>;
 /** A failure before the vendor child process was spawned: nothing was handed to the vendor. */
 export declare class MetaMaskNativeHandoffNotStarted extends Error {
     readonly causeError: unknown;
@@ -41,6 +40,7 @@ export declare function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScop
 /** Transient read evidence only. No field grants financial authority or changes a held journal. */
 export interface MetaMaskNativeReadObservation {
     readonly stage: "not_requested" | "input" | "before_guard" | "watch" | "after_guard" | "complete";
+    /** Request reads bracket the watch with the session project only (`project_before`, `project_after`); other steps are kept for old outputs. */
     readonly guard_step: "project_before" | "address_before" | "trading_mode" | "vendor_policy" | "address_after" | "project_after" | null;
     readonly request_id: string | null;
     readonly watch_returned: boolean;
@@ -75,6 +75,10 @@ type RequestHint = {
 export type MetaMaskNativeRequestObservation = RequestHint & {
     readonly readObservation?: MetaMaskNativeReadObservation;
 };
-/** Normal status READ only. Owner supplies RID/project hash from its authentic journal; a service hint is not chain evidence. */
-export declare function readFixedMetaMaskNativeRequest(requestId: string, vendorProjectHash: string, expectedPayer?: string): Promise<MetaMaskNativeRequestObservation>;
+/**
+ * Normal status READ only (three vendor processes): the session project before, the watch, the project after. The owner
+ * supplies the request id and project hash from its authentic journal; a service hint is never chain evidence, so no
+ * policy is read around it.
+ */
+export declare function readMetaMaskNativeRequest(requestId: string, vendorProjectHash: string): Promise<MetaMaskNativeRequestObservation>;
 export {};

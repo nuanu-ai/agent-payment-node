@@ -801,7 +801,7 @@ apn wallet permission list --profile <profile>
 apn wallet permission sync --profile <profile> --expected-revision <positive-integer>
 apn wallet permission disable --profile <profile> --expected-revision <positive-integer>
 apn wallet permission forget --profile <profile> --expected-revision <positive-integer>
-apn wallet metamask native-transfer [--profile <profile>] --chain <chain> --idempotency-key <key>
+apn wallet metamask native-transfer --profile <profile> --chain <chain> --recipient <address> --amount-atomic <usdc> --idempotency-key <key>
 apn wallet metamask native-transfer-status --operation <id>
 apn wallet metamask native-transfer-observe --operation <id>
 apn wallet status [--profile <profile>]
