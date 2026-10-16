@@ -11,7 +11,9 @@ const SENDER = getAddress("0x4444444444444444444444444444444444444444"), RECIPIE
 const topic = (address: string) => `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
 class Wire {
   quote?: MetaMaskNativeFeeQuote;
-  pending = false; missingFee = false; missingL1 = false; oracleFail = false;
+  pending = false; missingFee = false; missingL1 = false; archive = true;
+  /** OP receipt fee fields; operatorFeeConstant 5 gives the operator fee the oracle quoted, so totals are unchanged. */
+  operatorFields: Record<string, string> = { operatorFeeScalar: "0x0", operatorFeeConstant: "0x5" };
   wrongChain = false; reorg = false; unsafe = false; gasPrice = "0x2";
   mutateTx: Record<string, unknown> = {}; duplicate = false;
   methods: string[] = [];
@@ -23,7 +25,8 @@ class Wire {
     const log = { address: q.token, topics: ["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef", topic(q.sender), topic(transfer.recipient)],
       data: toHex(BigInt(transfer.amountAtomic), { size: 32 }), transactionHash: HASH, blockHash: BLOCKHASH, blockNumber: "0x2", removed: false };
     return { transactionHash: HASH, blockHash: BLOCKHASH, blockNumber: "0x2", status: "0x1", logs: this.duplicate ? [log,log] : [log],
-      gasUsed: "0x32", ...this.missingFee ? {} : { effectiveGasPrice: this.gasPrice }, ...this.missingL1 ? {} : { l1Fee: "0x5" } };
+      gasUsed: "0x32", ...this.missingFee ? {} : { effectiveGasPrice: this.gasPrice },
+      ...this.chainId !== 10 ? {} : { ...this.missingL1 ? {} : { l1Fee: "0x5" }, ...this.operatorFields } };
   }
   call = async (method: string, params: readonly unknown[]) => {
     this.methods.push(method);
@@ -39,7 +42,8 @@ class Wire {
         const data = (params[0] as { data: string }).data;
         if (data === "0x313ce567") return toHex(6n, { size: 32 });
         if (data.startsWith("0x70a08231")) return toHex(5000n, { size: 32 });
-        if (this.oracleFail) throw new Error("unavailable");
+        // A pruned node refuses state at a past block; only the prepare-time oracle reads at the head are served.
+        if (!this.archive) throw new Error("missing trie node");
         return toHex(5n, { size: 32 });
       }
       case "eth_getTransactionReceipt": return this.receipt();
@@ -68,9 +72,8 @@ for (const chainId of [1,10,143,59144,1329] as const) test(`version 2 quote and 
     assert.equal(r.receipt.transferAccepted,true); assert.equal(r.receipt.nativeFeeAtomic,chainId === 143 ? "200" : chainId === 10 ? "110" : "100");
     assert.equal(r.evidence.effectiveGasPriceAtomic,"2"); assert.equal(r.evidence.gasUsedAtomic,"50"); assert.equal(r.evidence.rpcOrigin, ORIGIN);
   }
-  // PROV-12: chain id, receipt, its block, the finality head and the transaction once each (+ OP operator fee); was 13 (14).
-  assert.deepEqual(w.methods, ["eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_getBlockByNumber", "eth_getTransactionByHash",
-    ...(chainId === 10 ? ["eth_call"] : [])]);
+  // PROV-12: chain id, receipt, its block, the finality head and the transaction once each; was 13 (14 on OP).
+  assert.deepEqual(w.methods, ["eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_getBlockByNumber", "eth_getTransactionByHash"]);
   assert.ok(w.methods.every(m=>!m.includes("send") && !m.includes("sign")));
 });
 test("funding reads balances and the pending nonce on one endpoint with one chain-id proof", async () => {
@@ -83,9 +86,25 @@ test("wrong chain and ceiling refuse before accepted quote", async () => {
   const x=new Wire(1);await assert.rejects(prepareWithRpc(x.rpc(),{chainId:1,maximumNativeFeeWei:"299",sender:SENDER,recipient:RECIPIENT,amountAtomic:"2500"}),{code:"APN_STATE_CORRUPT"});
 });
 test("pending and missing execution or OP data never complete payment", async () => {
-  for (const condition of ["pending","missingFee","missingL1","oracleFail"] as const) {
-    const w=new Wire(condition === "missingL1" || condition === "oracleFail" ? 10 : 1);await w.prepare();w[condition]=true;
+  for (const condition of ["pending","missingFee","missingL1"] as const) {
+    const w=new Wire(condition === "missingL1" ? 10 : 1);await w.prepare();w[condition]=true;
     const r=await w.observe();assert.equal(r.kind, condition === "pending" ? "pending" : "inconclusive");assert.equal("receipt" in r,false);
+  }
+});
+test("the OP operator fee comes from the receipt's own fields, so a node without history proves the receipt", async () => {
+  const w=new Wire(10);await w.prepare();w.archive=false;w.methods=[];
+  const r=await w.observe();assert.equal(r.kind,"accepted");
+  if(r.kind==="accepted"){assert.equal(r.receipt.nativeFeeAtomic,"110");assert.deepEqual([r.evidence.opStackFeeComponents?.l1DataFeeAtomic,r.evidence.opStackFeeComponents?.operatorFeeAtomic],["5","5"]);}
+  assert.ok(!w.methods.includes("eth_call"));
+  // Absent operator fields are zero parameters (pre-Isthmus receipts).
+  const z=new Wire(10);await z.prepare();z.archive=false;z.operatorFields={};
+  const zr=await z.observe();assert.equal(zr.kind,"accepted");if(zr.kind==="accepted")assert.equal(zr.receipt.nativeFeeAtomic,"105");
+  // Jovian: gasUsed * scalar * 100 + constant; an operator fee above the quoted bound is refused, never settled.
+  const j=new Wire(10);await j.prepare();j.operatorFields={operatorFeeScalar:"0x1",operatorFeeConstant:"0x0"};
+  await assert.rejects(j.observe(),{code:"APN_STATE_CORRUPT"});
+  for (const operatorFields of [{operatorFeeScalar:"0x0"},{operatorFeeScalar:"0x0",operatorFeeConstant:"0x5",operatorFee:"0x6"},{operatorFeeScalar:"0x100000000",operatorFeeConstant:"0x0"}]) {
+    const b=new Wire(10);await b.prepare();b.operatorFields=operatorFields;
+    await assert.rejects(b.observe(),(error:unknown)=>(error as {details?:{reason?:string}}).details?.reason==="op_receipt_fee_fields");
   }
 });
 test("exact payload, transaction type, fee bounds and authorizations cannot drift",async()=>{
