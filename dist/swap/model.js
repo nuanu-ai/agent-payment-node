@@ -3,7 +3,7 @@ import { ApnError } from "../errors.js";
 import { validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { parseAtomic } from "../money.js";
 import { validateSwapQuote } from "./quote.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./orca-solana/stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
 export const SWAP_OPERATION_SCHEMA = "apn.swap-operation.v1";
 const HASH = /^[a-f0-9]{64}$/u, VERSION = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const MAX_UINT256 = (1n << 256n) - 1n;
@@ -64,7 +64,7 @@ function validateStateBindings(op) {
     if (["quoted", "prepared", "awaiting_approval"].includes(op.state) && op.usageLease !== null)
         corrupt("Swap operation usage lease phase is invalid.");
     const stableMarkedFailure = op.state === "failed_before_effect" &&
-        op.mechanismDigest === ORCA_STABLE_GUARDED_MECHANISM_DIGEST && op.submissionMarker !== null;
+        isOrcaStableGuardedMechanismDigest(op.mechanismDigest) && op.submissionMarker !== null;
     const exposed = ["submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state) || stableMarkedFailure;
     if (exposed !== (op.submissionMarker !== null))
         corrupt("Swap submission marker phase is invalid.");

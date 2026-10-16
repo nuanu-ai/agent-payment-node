@@ -4,7 +4,7 @@ import type { AssetUsageReservation } from "../asset-usage-ledger.js";
 import { validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { parseAtomic } from "../money.js";
 import { validateSwapQuote, type SwapQuoteSnapshot } from "./quote.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_DIGEST } from "./orca-solana/stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
 
 export const SWAP_OPERATION_SCHEMA = "apn.swap-operation.v1" as const;
 export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" |
@@ -91,7 +91,7 @@ function validateStateBindings(op: SwapOperationRecord): void {
   if (reserved && op.usageLease === null) corrupt("Swap operation usage lease phase is invalid.");
   if (["quoted", "prepared", "awaiting_approval"].includes(op.state) && op.usageLease !== null) corrupt("Swap operation usage lease phase is invalid.");
   const stableMarkedFailure = op.state === "failed_before_effect" &&
-    op.mechanismDigest === ORCA_STABLE_GUARDED_MECHANISM_DIGEST && op.submissionMarker !== null;
+    isOrcaStableGuardedMechanismDigest(op.mechanismDigest) && op.submissionMarker !== null;
   const exposed = ["submitting", "submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state) || stableMarkedFailure;
   if (exposed !== (op.submissionMarker !== null)) corrupt("Swap submission marker phase is invalid.");
   if (op.submissionMarker !== null) {
