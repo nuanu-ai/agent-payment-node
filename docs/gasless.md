@@ -587,6 +587,30 @@ finality tag, complete transaction/receipt membership and bounded log queries.
 APN checks protocol and USDC implementation code at preparation and settlement.
 Unichain and Avalanche belong to the local-wallet path above.
 
+### Tested keyless RPC endpoints
+
+APN has no per-chain default RPC (owner rule: no silent defaults); set the
+variable above explicitly. These keyless endpoints passed a read-only check on
+2026-10-17: JSON-RPC batches, the `safe` (Polygon: `finalized`) tag, state at
+that block pinned by hash, and a 2,000-block `eth_getLogs`. Public endpoints
+change without notice; a refusal is reported, never retried with another
+provider.
+
+| Chain | Endpoint | Notes |
+| --- | --- | --- |
+| Ethereum (1) | `https://ethereum-rpc.publicnode.com` | refuses 2,000-block logs; scans halve the window |
+| Optimism (10) | `https://mainnet.optimism.io`, `https://optimism-rpc.publicnode.com` | |
+| Polygon PoS (137) | `https://polygon-bor-rpc.publicnode.com` | no `safe` tag; Polygon uses `finalized` |
+| Monad (143) | `https://rpc.monad.xyz` | logs limited to 100 blocks; scans halve the window |
+| Sei (1329) | `https://evm-rpc.sei-apis.com` | |
+| Base (8453) | `https://base-rpc.publicnode.com` | `https://mainnet.base.org` answered "request limit reached" to 2,000-block logs |
+| Arbitrum One (42161) | `https://arb1.arbitrum.io/rpc` | publicnode refuses state at the safe head (about 3,000 blocks behind latest) |
+| Linea (59144) | `https://rpc.linea.build` | publicnode refuses 2,000-block logs |
+| Unichain (130, local wallet) | `https://mainnet.unichain.org`, `https://unichain-rpc.publicnode.com` | |
+
+`*.drpc.org` endpoints refuse JSON-RPC batches of more than three requests and
+do not fit these lanes.
+
 After dispatch, each resume first reads the delegation's one-use counter
 (`LimitedCallsEnforcer.callCounts` for the pinned DelegationManager) and the
 enforcer code at the finality block, pinned by block hash. The counter only
@@ -761,7 +785,7 @@ option appeared in next actions remain valid.
 
 Use an existing `metamask-smart-account` profile with its original Base owner,
 session key and active periodic USDC permission. Set `APN_BASE_RPC_URL` to an
-explicit public HTTPS Base RPC. The RPC must support numeric block reads,
+explicit public HTTPS Base RPC (see Tested keyless RPC endpoints above). The RPC must support numeric block reads,
 `safe` and `finalized` blocks, complete transaction receipts and bounded logs.
 APN checks the current permission nonce, available allowance, owner USDC balance,
 session state and pinned contract deployments before signing and disclosure.
