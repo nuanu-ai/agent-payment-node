@@ -157,6 +157,7 @@ for (const [label, m] of [["x402engine USDm merchant (X402-MERCHANT-001)", USDM_
     const signed = parseTransaction(f.chain.raw!);
     assert.equal(signed.to?.toLowerCase(), m.pin.token.toLowerCase());
     assert.match(f.consent(), new RegExp(`Merchant payee: ${m.payee}`, "u")); assert.match(f.consent(), new RegExp(`local payer: ${f.payer}`, "u"));
+    assert.match(f.consent(), /Merchant payment window: 600 seconds from each challenge read/u);
     assert.equal(f.proofs.length, 1);
     assert.deepEqual(JSON.parse(Buffer.from(f.proofs[0]!, "base64").toString()).payload, { txHash: keccak256(f.chain.raw!) });
     // The same request is idempotent; a second approve cannot pay again.

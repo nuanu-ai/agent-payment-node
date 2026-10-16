@@ -16,8 +16,11 @@ stored deployment pins (v1, the 0.5.41-0.5.43 USDm proxy `0xfdf85d18…5a90` and
 requirement's `extra` is preserved as merchant data and never used as a signing domain.
 
 **Challenge.** Exactly one `accepts` row must be `scheme: "exact"` on a pinned asset, with a canonical positive amount, a
-non-zero EVM `payTo` and `maxTimeoutSeconds` of at least 300 (APN's own local deadline); otherwise prepare refuses
-(`merchant_exact_requirement_missing_or_ambiguous`). Rows for other networks or assets are ignored. The URL must be a
+non-zero EVM `payTo` and a positive `maxTimeoutSeconds`; otherwise prepare refuses
+(`merchant_exact_requirement_missing_or_ambiguous`). `maxTimeoutSeconds` is the merchant's payment window (standard x402
+merchants use about 60 seconds): it runs from the challenge read APN acts on, is shown on the consent screen, and prepare
+or approval refuses (`merchant_payment_window_expired`) once it has passed since the latest read, before consent, before
+signing and before the send. Rows for other networks or assets are ignored. The URL must be a
 credential-free public HTTPS URL in canonical form; the transport pins DNS to public addresses, refuses redirects and
 bounds the body.
 

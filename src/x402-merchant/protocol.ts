@@ -72,8 +72,8 @@ export function checkMerchantChallenge(value: unknown): FrozenMerchantChallenge 
 }
 /**
  * Any merchant (OD-2): exactly one `exact` row whose network and asset name a pinned asset. Payee, amount and asset come
- * from that row; the owner's admission (asset, mechanism, caps, optional recipient pin) bounds them. A row whose payment
- * window is shorter than APN's own 300-second local deadline is not payable and never matches.
+ * from that row; the owner's admission (asset, mechanism, caps, optional recipient pin) bounds them. Any positive payment
+ * window (`maxTimeoutSeconds`) is accepted; it is shown on consent and enforced by `assertMerchantPaymentWindow`.
  */
 export function checkGenericMerchantChallenge(value: unknown, assets: readonly MerchantAssetPin[]): FrozenMerchantChallenge & { readonly asset: MerchantAssetPin } {
     challengeShape(value, false);
@@ -86,10 +86,20 @@ export function checkGenericMerchantChallenge(value: unknown, assets: readonly M
         try { payee = getAddress(String(r.payTo)); } catch { /* not an EVM payee */ }
         const amount = typeof r.amount === "string" && /^[1-9][0-9]{0,77}$/u.test(r.amount) && BigInt(r.amount) < 1n << 256n;
         return asset !== undefined && payee !== null && payee !== "0x0000000000000000000000000000000000000000" && amount &&
-            Number.isSafeInteger(r.maxTimeoutSeconds) && (r.maxTimeoutSeconds as number) >= 300 ? { row: r, asset } : null;
+            Number.isSafeInteger(r.maxTimeoutSeconds) && (r.maxTimeoutSeconds as number) >= 1 ? { row: r, asset } : null;
     }).filter((x): x is { row: Record<string, unknown>; asset: MerchantAssetPin } => x !== null);
     const frozen = freeze(value, rows.map((x) => x.row));
     return { ...frozen, asset: rows[0]!.asset };
+}
+/**
+ * The merchant's payment window runs `maxTimeoutSeconds` from the challenge read APN acts on. Prepare, and every challenge
+ * re-read during approval (before consent, before signing and before the send), refuse once it has passed.
+ */
+export function assertMerchantPaymentWindow(frozen: FrozenMerchantChallenge, observedAt: string, now: string): void {
+    const seconds = frozen.accepted.maxTimeoutSeconds;
+    if (!Number.isSafeInteger(seconds) || (seconds as number) < 1 || !Number.isFinite(Date.parse(observedAt)) ||
+        Date.parse(now) >= Date.parse(observedAt) + (seconds as number) * 1000)
+        refuse("merchant_payment_window_expired");
 }
 /** Re-derive the frozen challenge from its stored body under the operation's own context; never from the current registry. */
 export function checkChallengeFor(ctx: MerchantContext, value: unknown): FrozenMerchantChallenge {

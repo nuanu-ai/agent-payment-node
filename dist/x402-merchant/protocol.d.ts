@@ -27,12 +27,17 @@ export declare function checkMerchantObservation(o: HttpObservation, url?: strin
 export declare function checkMerchantChallenge(value: unknown): FrozenMerchantChallenge;
 /**
  * Any merchant (OD-2): exactly one `exact` row whose network and asset name a pinned asset. Payee, amount and asset come
- * from that row; the owner's admission (asset, mechanism, caps, optional recipient pin) bounds them. A row whose payment
- * window is shorter than APN's own 300-second local deadline is not payable and never matches.
+ * from that row; the owner's admission (asset, mechanism, caps, optional recipient pin) bounds them. Any positive payment
+ * window (`maxTimeoutSeconds`) is accepted; it is shown on consent and enforced by `assertMerchantPaymentWindow`.
  */
 export declare function checkGenericMerchantChallenge(value: unknown, assets: readonly MerchantAssetPin[]): FrozenMerchantChallenge & {
     readonly asset: MerchantAssetPin;
 };
+/**
+ * The merchant's payment window runs `maxTimeoutSeconds` from the challenge read APN acts on. Prepare, and every challenge
+ * re-read during approval (before consent, before signing and before the send), refuse once it has passed.
+ */
+export declare function assertMerchantPaymentWindow(frozen: FrozenMerchantChallenge, observedAt: string, now: string): void;
 /** Re-derive the frozen challenge from its stored body under the operation's own context; never from the current registry. */
 export declare function checkChallengeFor(ctx: MerchantContext, value: unknown): FrozenMerchantChallenge;
 /** The 402 challenge for the operation's URL; version 1 keeps the legacy reader. */
