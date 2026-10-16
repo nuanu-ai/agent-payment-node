@@ -14,7 +14,6 @@ import { MegaFundingJournal, publicMegaFunding, type MegaFundingRecord } from ".
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant, type MerchantOperation } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
-import { Permit2LegacyConflictRepository, type Permit2LegacyConflict } from "./x402-permit2/legacy-conflicts.js";
 import { ApnError } from "./errors.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
@@ -62,7 +61,6 @@ export type StoredMoneyOperation =
   | { readonly kind: "mega_gaszip"; readonly record: MegaFundingRecord }
   | { readonly kind: "merchant_x402"; readonly record: MerchantOperation }
   | { readonly kind: "permit2_production"; readonly record: Permit2ProductionRecord }
-  | { readonly kind: "permit2_legacy_conflict"; readonly record: Permit2LegacyConflict }
   | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
   | { readonly kind: "facilitator_gasless_transfer"; readonly record: FacilitatorOperationRecord }
   | { readonly kind: "smart_account_gasless_transfer"; readonly record: SmartAccountGaslessOperationRecord }
@@ -254,9 +252,6 @@ export class OperationService {
   private async permit2ProductionOperations(profileHash: string) {
     return this.state.root === undefined ? [] : new Permit2ProductionRepository(this.state.root).listOperations(profileHash);
   }
-  private async permit2LegacyOperations(profileHash: string) {
-    return this.state.root === undefined ? [] : new Permit2LegacyConflictRepository(this.state.root).listOperations(profileHash);
-  }
   private async profileOperations(profileHash: string): Promise<readonly StoredMoneyOperation[]> {
     return [
       ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip" as const, record })),
@@ -264,7 +259,6 @@ export class OperationService {
       ...(await this.megaFunding.listOperations(profileHash)).map(record => ({ kind: "mega_gaszip" as const, record })),
       ...(await this.merchantOperations(profileHash)).map(record => ({kind: "merchant_x402" as const, record})),
       ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production" as const, record })),
-      ...(await this.permit2LegacyOperations(profileHash)).map(record => ({ kind: "permit2_legacy_conflict" as const, record })),
       ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned" as const, record })),
       ...(await this.facilitatorGasless.listOperations(profileHash)).map((record) => ({ kind: "facilitator_gasless_transfer" as const, record })),
       ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer" as const, record })),
@@ -385,7 +379,6 @@ export class OperationService {
     if (operation.kind === "mega_gaszip") return publicMegaFunding(operation.record);
     if (operation.kind === "merchant_x402") return publicMerchant(operation.record);
     if (operation.kind === "permit2_production") return publicPermit2Production(operation.record);
-    if (operation.kind === "permit2_legacy_conflict") throw new ApnError("APN_OPERATION_BLOCKED", "Legacy Permit2 execution remains blocked.");
     if (operation.kind === "relay_unsigned") return this.relayStatus(operation.record);
     if (operation.kind === "direct_transfer") return publicOperation(operation.record);
     if (operation.kind === "rail_transfer") return publicRailOperation(operation.record);
