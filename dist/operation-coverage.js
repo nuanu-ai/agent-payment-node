@@ -9,7 +9,7 @@ export const GENERIC_OPERATION_KINDS = [
 ];
 /** Kinds `apn operation abandon` can close with owner consent (operation-abandon-service.ts). */
 export const ABANDON_OPERATION_KINDS = [
-    "direct_transfer", "rail_transfer", "x402_fetch", "gasless_transfer", "metamask_gasless_transfer", "facilitator_gasless_transfer",
+    "direct_transfer", "rail_transfer", "x402_fetch", "gasless_transfer", "metamask_gasless_transfer", "smart_account_gasless_transfer", "facilitator_gasless_transfer",
 ];
 /** Families with their own journals that the generic operation commands do not read yet, by state-store directory prefix. */
 const UNCOVERED_FAMILIES = [
