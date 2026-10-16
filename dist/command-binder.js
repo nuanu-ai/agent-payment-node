@@ -1,7 +1,6 @@
 import { coinbaseObservationPreset } from "./coinbase-gasless-observation-source.js";
-import { bindSeiFundingCommand } from "./lifi/sei-gaszip-command-catalog.js";
+import { bindGaszipFundingCommand } from "./lifi/gaszip-direct-command-catalog.js";
 import { bindCircleEvmCommand } from "./circle-v2-evm/command-catalog.js";
-import { bindMegaFundingCommand } from "./lifi/mega-gaszip-command-catalog.js";
 import { isPlainRecord } from "./canonical.js";
 import { parseCatalogArgv, parseCatalogInput, } from "./command-catalog.js";
 import { ApnError } from "./errors.js";
@@ -166,11 +165,11 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path[0] === "oneclick")
         return { request: bindOneClickCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "sei")
-        return { request: bindSeiFundingCommand(parsed.command.path.join(" "), options) };
+        return { request: bindGaszipFundingCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path.slice(0, 2).join(" ") === "circle evm")
         return { request: bindCircleEvmCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "mega")
-        return { request: bindMegaFundingCommand(parsed.command.path.join(" "), options) };
+        return { request: bindGaszipFundingCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "circle")
         return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
     switch (parsed.command.path.join(" ")) {

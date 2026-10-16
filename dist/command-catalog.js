@@ -1,5 +1,4 @@
-import { MEGA_FUNDING_COMMANDS } from "./lifi/mega-gaszip-command-catalog.js";
-import { SEI_FUNDING_COMMANDS } from "./lifi/sei-gaszip-command-catalog.js";
+import { MEGA_FUNDING_COMMANDS, SEI_FUNDING_COMMANDS } from "./lifi/gaszip-direct-command-catalog.js";
 import { CIRCLE_EVM_COMMANDS, CIRCLE_EVM_GROUPS } from "./circle-v2-evm/command-catalog.js";
 import { MERCHANT_COMMANDS } from "./x402-merchant/command-catalog.js";
 import { PERMIT2_COMMANDS } from "./x402-permit2/command-catalog.js";
@@ -77,7 +76,7 @@ export const COMMAND_GROUPS = [
     ...SUNSWAP_COMMAND_GROUPS, ...JUPITER_COMMAND_GROUPS, ...ORCA_COMMAND_GROUPS,
     { path: ["relay"], summary: "Prepare finite Relay quotes; execute only admitted Ethereum USDC source routes.", kind: "group" },
     { path: ["mega"], summary: "Finite Mega native funding.", kind: "group" },
-    { path: ["mega", "funding"], summary: "GasZip direct Base ETH to Mega ETH for the default owner.", kind: "group" },
+    { path: ["mega", "funding"], summary: "GasZip direct Base ETH to Mega ETH, self only.", kind: "group" },
     { path: ["sei"], summary: "Finite Sei native funding.", kind: "group" },
     { path: ["sei", "funding"], summary: "GasZip direct Base ETH to Sei SEI, self only.", kind: "group" },
     { path: ["stargate"], summary: "Execute the pinned Stargate V2 Ethereum ETH to Unichain ETH lane.", kind: "group" },
