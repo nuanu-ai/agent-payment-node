@@ -46,10 +46,11 @@ export class CircleSourceProofStore extends SecureStateStore {
   }
 }
 
-/** The payer's claim ends with the signing window, or earlier once the burn's finalized receipt is recorded. */
-export async function circleSourceTerminal(root: string, journal: NonEvmSourceJournal): Promise<boolean> {
-  return pastUnstartedDeadline(Date.parse(journal.createdAt) + CIRCLE_V2_SOURCE_TTL_MS) ||
-    typeof journal.transactionHash === "string" && await new CircleSourceProofStore(root).load(journal) !== null;
+/** The payer's claim ends with the signing window, or earlier once the burn's finalized receipt is recorded (read only then). */
+export function circleSourceTerminal(root: string, journal: NonEvmSourceJournal): boolean | Promise<boolean> {
+  if (pastUnstartedDeadline(Date.parse(journal.createdAt) + CIRCLE_V2_SOURCE_TTL_MS)) return true;
+  if (typeof journal.transactionHash !== "string") return false;
+  return new CircleSourceProofStore(root).load(journal).then(proof => proof !== null);
 }
 
 export interface CircleSourceStatus {
