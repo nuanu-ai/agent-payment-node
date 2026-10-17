@@ -14,7 +14,8 @@ import { SUNSWAP_V2_KEYLESS_MECHANISM_PIN, SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY 
 import { SunSwapOutcomeObserver } from "./outcome.js";
 import { SunSwapPreparedMaterialStore } from "./prepared.js";
 import { SunSwapProtectedExecutionAdapter } from "./signer.js";
-import { TtySunSwapApproval } from "./tty.js";
+import { sunSwapApprovalScreen } from "./tty.js";
+import { TtyGuardedSwapApproval } from "../tty-consent.js";
 export function createSunSwapKeylessRuntime(options) {
     const { state, clock, rpc, accounts } = options, root = state.root;
     const store = new SunSwapPreparedMaterialStore(root), operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root);
@@ -23,7 +24,7 @@ export function createSunSwapKeylessRuntime(options) {
     const execution = new SunSwapTronExecutionDriver({ core: new GuardedSwapService(operations, usage),
         protocolRegistry: SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY, admission, guard: new SunSwapExecutionGuard(rpc, clock),
         bindings: new SunSwapExecutionBindingStore(root), signing, observer, clock });
-    const foregroundApproval = options.foreground === "tty" ? new TtySunSwapApproval(store, clock, options.tty) : options.foreground;
+    const foregroundApproval = options.foreground === "tty" ? new TtyGuardedSwapApproval("sunswap", intent => sunSwapApprovalScreen(store, intent), clock, options.tty) : options.foreground;
     return new GuardedSwapRuntime({ chain: SUNSWAP_TRON_CHAIN,
         builder: new SunSwapRuntimeBuilder(new SunSwapKeylessQuoteBuilder(rpc, store)), policy: options.policy, clock,
         protocolRegistry: SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY, usage, operations, ownerAdmission: admission, foregroundApproval, execution,

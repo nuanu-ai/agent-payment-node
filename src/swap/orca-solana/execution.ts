@@ -8,7 +8,7 @@ import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
 import type { SwapUnlandedProof } from "../unlanded.js";
-import { assertInjectedProtocol } from "../uniswap-ethereum/execution/binding.js";
+import { assertOperationProtocolRegistry } from "../family-guards.js";
 import type { OrcaLocalOwnerAdmission } from "./admission.js";
 import { latestLifetime, orcaMessageFee, requireOrcaFunds } from "./builder.js";
 import { createOrcaExecutionBinding, type OrcaExecutionBinding, type OrcaExecutionBindingStore, type OrcaExecutionFreshness,
@@ -85,7 +85,7 @@ export class OrcaSolanaExecutionDriver implements GuardedSwapExecutionDriver {
     const material = validateOrcaKeylessMaterial(input.material);
     let admission, freshness: OrcaExecutionFreshness;
     try {
-      assertInjectedProtocol(operation, this.d.protocolRegistry);
+      assertOperationProtocolRegistry(operation, this.d.protocolRegistry, "orca");
       admission = await this.d.admission.assert(operation);
       freshness = await this.d.guard.inspect(operation, material);
       if (freshness.checkedAt >= operation.quote.expiresAt) blocked("The approval window closed before signing.", "orca_deadline");

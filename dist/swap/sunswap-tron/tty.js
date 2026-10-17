@@ -1,44 +1,16 @@
-import { canonicalJson, domainHash } from "../../canonical.js";
-import { approvalCode } from "../../approval-code.js";
 import { chainDisplay } from "../../chain-policy.js";
 import { ApnError } from "../../errors.js";
-import { exactChainConsent } from "../../tty-approval.js";
-import { sealGuardedSwapApproval } from "../runtime.js";
+import { assertSwapMaterialMatchesIntent, requiredDisplay as required } from "../tty-consent.js";
 import { SUNSWAP_V2_ROUTER, SUNSWAP_V2_WTRX_USDT_PAIR } from "./catalog.js";
 /** TRON accepts a transaction only while its reference block is among the last 65536 blocks (TAPOS). */
 const TAPOS_WINDOW_BLOCKS = 65536n;
-/** The exact foreground screen for one guarded SunSwap swap. The owner types a short code bound to every line. */
-export class TtySunSwapApproval {
-    store;
-    clock;
-    options;
-    constructor(store, clock, options = {}) {
-        this.store = store;
-        this.clock = clock;
-        this.options = options;
-    }
-    async approve(intent) {
-        const lines = await sunSwapApprovalScreen(this.store, intent);
-        const code = sunSwapApprovalCode(intent, lines);
-        await exactChainConsent(lines, code, intent.deadline, this.options);
-        // Consent time is read after the human answered, never the command start time.
-        return sealGuardedSwapApproval(intent, this.clock.now(), domainHash("apn.sunswap-tty-consent.v1", canonicalJson({ lines, code })));
-    }
-}
-export function sunSwapApprovalCode(intent, lines) {
-    return approvalCode("swap", intent.operationId, domainHash("apn.sunswap-approval-screen.v1", canonicalJson({ intent, lines })));
-}
+/** The exact foreground screen for one guarded SunSwap swap (consent: TtyGuardedSwapApproval "sunswap"). */
 export async function sunSwapApprovalScreen(store, intent) {
     const material = await store.load(intent.quoteHash);
     if (material === null)
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Prepared swap quote was not found.");
-    const quote = material.quote, { intent: frozen, market, pricing } = material.execution;
-    if (quote.quoteHash !== intent.quoteHash || quote.inputAmountAtomic !== intent.inputAmountAtomic ||
-        quote.expectedOutputAtomic !== intent.expectedOutputAtomic || quote.minimumOutputAtomic !== intent.minimumOutputAtomic ||
-        quote.slippageBps !== intent.slippageBps || quote.account !== intent.account || quote.recipient !== intent.recipient ||
-        quote.expiresAt !== intent.deadline || canonicalJson(material.gasOrEnergy) !== canonicalJson(intent.gasOrEnergy)) {
-        throw new ApnError("APN_OPERATION_BLOCKED", "Prepared swap material does not match the approval intent.", { reason: "swap_material_drift" });
-    }
+    const { intent: frozen, market, pricing } = material.execution;
+    assertSwapMaterialMatchesIntent(material, intent, { deadline: true });
     const r = intent.gasOrEnergy, trx = (key) => `${chainDisplay(required(r, key), 6)} TRX (${required(r, key)} SUN)`;
     const reference = BigInt(market.referenceBlock.number);
     return [
@@ -61,11 +33,5 @@ export async function sunSwapApprovalScreen(store, intent) {
         `Quote: ${intent.quoteHash}`, `Policy: ${intent.policyDigest}`, `Mechanism: ${intent.mechanismDigest}`,
         "APN signs locally and broadcasts exactly once. After that attempt, status only observes this exact transaction.",
     ];
-}
-function required(record, key) {
-    const value = record[key];
-    if (value === undefined)
-        throw new ApnError("APN_STATE_CORRUPT", `Guarded swap display lacks ${key}.`);
-    return value;
 }
 //# sourceMappingURL=tty.js.map
