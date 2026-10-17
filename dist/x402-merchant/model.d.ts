@@ -12,7 +12,10 @@ export interface MerchantEnvelope {
     readonly maximumNativeFee: string;
     readonly nativeFeeReserveWei?: string;
 }
-export type MerchantPhase = "prepared" | "signing_started" | "submission_started" | "unknown_finality" | "payment_finalized" | "delivery_unknown" | "delivered" | "reverted" | "retired_unsent";
+/** Every phase a merchant payment may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export declare const MERCHANT_PHASES: readonly ["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent"];
+export declare const MERCHANT_TERMINAL_PHASES: readonly MerchantPhase[];
+export type MerchantPhase = typeof MERCHANT_PHASES[number];
 export interface MerchantReceipt {
     readonly transactionHash: Hex;
     readonly blockNumber: string;
@@ -144,7 +147,7 @@ export declare function publicMerchant(o: MerchantOperation): {
     feeRule?: "apn.merchant-mega-fee.v1" | "apn.merchant-mega-fee.v2";
     kind: "merchant_x402";
     operationId: string;
-    state: MerchantPhase;
+    state: "prepared" | "signing_started" | "submission_started" | "reverted" | "unknown_finality" | "payment_finalized" | "delivery_unknown" | "delivered" | "retired_unsent";
     terminal: boolean;
     mechanism: string;
     provider: {

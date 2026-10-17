@@ -64,6 +64,11 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     super(root); if (preparation.records.root !== this.root) blocked();
     this.state = new StateStore(root); this.usage = new AssetUsageLedger(root);
   }
+  /**
+   * R4 exit of an authorization never exposed: once its deadline has passed (by the family clock), the family's own
+   * expiry release proves it unsigned, frees its usage hold and ends it `released_unsubmitted`; before that it refuses.
+   */
+  async releaseUnexposedExpired(id: string): Promise<Permit2ProductionRecord> { return await this.preparation.releaseExpired(id); }
   #now(): Date {
     const at = this.clock();
     if (!(at instanceof Date) || !Number.isSafeInteger(at.getTime()) || at.getTime() < 0) blocked();

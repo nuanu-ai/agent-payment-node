@@ -77,6 +77,8 @@ export type ArbitrumEffectEvent = {
     readonly role: ArbitrumEffectRole;
     readonly proofDigest: string;
 };
+/** Every phase of an Arbitrum source effect. */
+export declare const ARBITRUM_EFFECT_PHASES: readonly ArbitrumEffectPhase[];
 export declare function validateArbitrumSourceEffectJournal(value: unknown, op: RelayUnsignedOperation): Promise<ArbitrumSourceEffectJournal>;
 export declare function createArbitrumSourceEffectJournal(op: RelayUnsignedOperation, createdAt: string): Promise<ArbitrumSourceEffectJournal>;
 export declare function advanceArbitrumSourceEffectJournal(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation, event: ArbitrumEffectEvent): Promise<ArbitrumSourceEffectJournal>;

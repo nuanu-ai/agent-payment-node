@@ -51,8 +51,21 @@ export class Permit2ProductionResults {
             return this.#result(record, "terminal");
         if (mode !== "settlement" && mode !== "expired_unused")
             return this.#result(record, "invalid_mode");
+        // Never exposed: past its deadline the family's expiry release ends it (R4); before that it is only not exposed.
+        if (record.exposureAt === null) {
+            try {
+                return this.#result(await Permit2ProductionJournal.prototype.releaseUnexposedExpired.call(this.#journal, id), "terminal");
+            }
+            catch {
+                try {
+                    record = await Permit2ProductionRepository.findOwnedOperation(this.#records, id) ?? record;
+                }
+                catch { /* Keep the last validated safe status. */ }
+                return this.#result(record, "not_exposed");
+            }
+        }
         const j = record.exposureJournal;
-        if (j === undefined || !j.holdConfirmed || record.exposureAt === null)
+        if (j === undefined || !j.holdConfirmed)
             return this.#result(record, "not_exposed");
         let locator = null;
         if (candidate !== undefined) {

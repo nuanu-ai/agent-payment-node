@@ -37,6 +37,11 @@ export declare class Permit2ProductionJournal extends Permit2ProductionRepositor
     private readonly state;
     private readonly usage;
     constructor(root: string, preparation: Permit2ProductionPreparation, clock?: () => Date);
+    /**
+     * R4 exit of an authorization never exposed: once its deadline has passed (by the family clock), the family's own
+     * expiry release proves it unsigned, frees its usage hold and ends it `released_unsubmitted`; before that it refuses.
+     */
+    releaseUnexposedExpired(id: string): Promise<Permit2ProductionRecord>;
     /** Initial admission checks current owner. Replays can only reconcile the existing durable hold. */
     markSignatureRisk(id: string): Promise<Permit2ProductionRecord>;
     /**

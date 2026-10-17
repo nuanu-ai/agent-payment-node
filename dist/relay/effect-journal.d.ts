@@ -3,6 +3,9 @@ import { SecureStateStore } from "../secure-state-store.js";
 import type { RelayQuoteTransaction } from "./quote.js";
 export type RelayEffectRole = "approval" | "deposit";
 export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "abandoned_unsent";
+/** Every phase of a token-lane effect, and the observed ones no transition leaves (a confirmed approval is followed by its deposit). */
+export declare const RELAY_EFFECT_PHASES: readonly RelayEffectPhase[];
+export declare const RELAY_EFFECT_OBSERVED_PHASES: readonly RelayEffectPhase[];
 export interface RelayEffect {
     readonly role: RelayEffectRole;
     readonly phase: RelayEffectPhase;
