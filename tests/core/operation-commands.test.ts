@@ -114,8 +114,9 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
   // A prepared Stargate journal: observe refuses an unattempted operation, and there is no receipt before observation.
   stargate_native: async t => ({ ...await WP2_FAMILY_RECORDS.stargate_native(t), cli: true, status: "ok", resume: { code: "APN_OPERATION_BLOCKED" },
     abandon: EXIT_BY_FAMILY, receipt: { code: "APN_OPERATION_BLOCKED", reason: "receipt_not_observed" } }),
+  // Its owner exit (R4, last resort) refuses before the prepare expiry.
   stargate_token: async t => ({ ...await WP2_FAMILY_RECORDS.stargate_token(t), cli: true, status: "ok", resume: { code: "APN_OPERATION_BLOCKED" },
-    abandon: EXIT_BY_FAMILY, receipt: { code: "APN_OPERATION_BLOCKED", reason: "receipt_not_observed" } }),
+    abandon: { code: "APN_OPERATION_BLOCKED", reason: "stargate_token_abandon_not_eligible" }, receipt: { code: "APN_OPERATION_BLOCKED", reason: "receipt_not_observed" } }),
   gasless_usdt: async t => ({ ...await WP2_FAMILY_RECORDS.gasless_usdt(t), cli: true, status: "ok", resume: "ok", abandon: TERMINAL,
     receipt: NO_RECEIPT }),
   oneclick_source: async t => ({ ...await WP2_FAMILY_RECORDS.oneclick_source(t), cli: true, status: "ok", resume: TERMINAL,
