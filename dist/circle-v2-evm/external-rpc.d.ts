@@ -18,6 +18,7 @@ export declare class CircleExternalRpcBudget {
     assert(): void;
     post(endpoint: string, chain: number, id: number, method: string, params: readonly unknown[]): Promise<unknown>;
 }
+/** Lean observation and configuration at the latest head (P1/P2); every request goes through the shared budget. */
 export declare class CircleExternalRpc extends CircleRpc {
     private readonly budget;
     private id;

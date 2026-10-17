@@ -1,3 +1,4 @@
+import { type CircleExternalMintNotice, type CircleFundingCommandResult } from "./funding-external-mint.js";
 import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { BridgeHttps } from "../lifi/https.js";
@@ -34,6 +35,7 @@ export declare class CircleFundingEvmService {
     prepare(input: CircleFundingPrepareInput): Promise<CircleFundingOperationV2>;
     status(id: string): Promise<{
         next_actions: string[];
+        external_mint?: CircleExternalMintNotice;
         external_fulfillment?: import("./funding-external-proof.js").CircleFundingExternalFulfillment;
         proof_class?: string;
         controlled_destination_native_atomic?: string;
@@ -61,12 +63,13 @@ export declare class CircleFundingEvmService {
         usage_finalized: boolean;
         integrity_hash: string;
     }>;
-    approveSource(id: string): Promise<CircleFundingOperationV2>;
-    approveMint(id: string): Promise<CircleFundingOperationV2>;
-    observe(id: string): Promise<CircleFundingOperationV2>;
-    refreshAttestation(id: string): Promise<CircleFundingOperationV2>;
-    cleanup(id: string): Promise<CircleFundingOperationV2>;
+    approveSource(id: string): Promise<CircleFundingCommandResult>;
+    approveMint(id: string): Promise<CircleFundingCommandResult>;
+    observe(id: string): Promise<CircleFundingCommandResult>;
+    refreshAttestation(id: string): Promise<CircleFundingCommandResult>;
+    cleanup(id: string): Promise<CircleFundingCommandResult>;
     private required;
+    /** A mint someone else relayed, found during the command, is adopted after its locks are released (adoption takes its own). */
     private run;
     private preflightDeployments;
     private preflightAttesters;

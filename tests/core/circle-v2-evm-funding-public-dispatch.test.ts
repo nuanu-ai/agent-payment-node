@@ -28,7 +28,7 @@ import { join } from "node:path";
 const actions = ["approve-source", "approve-mint", "observe", "refresh-attestation", "cleanup", "status"] as const;
 test("v2 ordinary public commands select the funding service only",async t=>{
  const tmp=await temporaryState();t.after(tmp.cleanup);const state=new StateStore(tmp.root),op=funding(tmp.root);await new CircleRepository(tmp.root).saveFunding(op);
- const calls:string[]=[];const service=Object.fromEntries(["approveSource","approveMint","observe","refreshAttestation","cleanup","status"].map(method=>[method,async()=>{calls.push(method);return method==="status"?publicKnownCircle(op):op;}]));
+ const calls:string[]=[];const service=Object.fromEntries(["approveSource","approveMint","observe","refreshAttestation","cleanup","status"].map(method=>[method,async()=>{calls.push(method);return method==="status"?publicKnownCircle(op):{operation:op,externalMint:null};}]));
  const context={state,circleFundingEvm:service} as unknown as RuntimeContext;
  for(const action of actions)await executeCircleCommand({command:`circle.evm.${action}`,operationId:op.operationId} as Extract<CommandRequest,{command:`circle.${string}`}>,context);
  assert.equal(calls.length,actions.length);

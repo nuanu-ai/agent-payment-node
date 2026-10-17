@@ -20,7 +20,13 @@ export interface CircleRoute {
     readonly destinationNativeCap: string;
     readonly rpcEnvironment: string;
     readonly rpcDefault: string;
+    /** Blocks one `eth_getLogs` window covers (fromBlock..toBlock inclusive) when finding an external mint. Measured on the
+     * default endpoint 2026-10-17: evm-rpc.sei-apis.com allows 2000 blocks, rpc.linea.build a span of 10000, rpc.monad.xyz a
+     * span of 100. An endpoint set through `rpcEnvironment` must accept the same window. */
+    readonly logRange: number;
 }
+/** Linea uses rpc.linea.build: linea-rpc.publicnode.com refuses transmitter logs older than about 128 blocks ("archive
+ * requests require a personal token"), so an external mint could not be found there. */
 export declare const CIRCLE_ROUTES: Readonly<Record<CircleDestinationChain, CircleRoute>>;
 export declare function isCircleDestinationChain(chain: unknown): chain is CircleDestinationChain;
 export declare function circleRoute(chain: CircleDestinationChain): CircleRoute;

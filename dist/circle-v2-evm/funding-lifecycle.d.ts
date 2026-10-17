@@ -42,6 +42,9 @@ export interface CircleFundingLifecyclePorts {
     }>;
     /** Whether the destination already consumed the issuer message nonce (MessageTransmitter `usedNonces`). */
     messageNonceUsed?(op: CircleFundingOperationV2): Promise<boolean>;
+    /** The issuer message is used and no owned mint can land: find the transaction someone else relayed, read-only. The
+     * runtime adopts what it finds (no signing, no consent) once the command's locks are released. */
+    externalMint?(op: CircleFundingOperationV2): Promise<void>;
 }
 type Consent = () => void;
 export declare function approveCircleFundingSource(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;

@@ -1,5 +1,5 @@
 import { types } from "node:util";
-import { advanceCircleFundingOperation as advanceCircle, validateCircleFundingOperation as validateCircle, type CircleFundingOperationV2 } from "./funding-operation.js";
+import { advanceCircleFundingOperation as advanceCircle, validateCircleFundingOperation as validateCircle, CIRCLE_MINT_CLOSED_EXTERNAL_USE, type CircleFundingOperationV2 } from "./funding-operation.js";
 import { hashObject } from "../canonical.js";
 import type { EvmAmbiguousSendOutcome, EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 import type { Hex } from "viem";
@@ -58,6 +58,9 @@ export interface CircleFundingLifecyclePorts {
     discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void> }>;
   /** Whether the destination already consumed the issuer message nonce (MessageTransmitter `usedNonces`). */
   messageNonceUsed?(op: CircleFundingOperationV2): Promise<boolean>;
+  /** The issuer message is used and no owned mint can land: find the transaction someone else relayed, read-only. The
+   * runtime adopts what it finds (no signing, no consent) once the command's locks are released. */
+  externalMint?(op: CircleFundingOperationV2): Promise<void>;
 }
 type Consent = () => void;
 /** Phases whose signed bytes, if any, never crossed the submission fence: resumable with fresh consent (R3). */
@@ -171,17 +174,19 @@ export async function executeCircleFundingEffect(input: CircleFundingOperationV2
   } finally { effectGuards.delete(guard); authority.active = null; }
 }
 export async function approveCircleFundingMint(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
-  let op = await observeCircleFunding(input, ports); if (op.terminal) return op;
+  const observed = await observe(input, ports); let op = observed.op; if (op.terminal) return op;
   const existing = op.effects.find(e => e.role === "mint"), rearm = existing?.phase === "abandoned_unsent";
   if (existing !== undefined && !rearm && existing.phase !== "prepared" && !UNSENT_SIGNING.includes(existing.phase)) return op;
+  // Someone else minted this message: observation closed any owned attempt and handed the mint to external adoption.
+  // Nothing is signed and no consent is asked.
+  if (observed.messageUsed === true) return op;
   if (op.source === null || op.attestation === null || op.residualAllowanceAtomic !== "0") circleBlocked("verified_source_attestation_and_zero_allowance_required");
   assertCircleAttestation(op.source, op.attestation, op.funding);
   await ports.assertOwnerPolicyAndConflicts(op, "mint");
   if (rearm) {
     // R4: the previous mint can never land (another transaction took its nonce). A fresh envelope is signed only while
-    // the issuer message is still unused on the destination; a used message was minted by someone else: adopt it.
-    if (ports.messageNonceUsed === undefined) circleBlocked("mint_message_state_unavailable");
-    if (await ports.messageNonceUsed(op)) circleBlocked("mint_message_used_external_adoption_required");
+    // the issuer message is still unused on the destination, which this observation just read.
+    if (observed.messageUsed !== false) circleBlocked("mint_message_state_unavailable");
     op = await rearmEffect(op, "mint", await ports.mintEnvelope(op), ports);
   } else if (existing === undefined) {
     const envelope = await ports.mintEnvelope(op);
@@ -191,8 +196,13 @@ export async function approveCircleFundingMint(input: CircleFundingOperationV2, 
   op = await executeCircleFundingEffect(op, "mint", ports, token); return observeCircleFunding(op, ports);
 }
 export async function observeCircleFunding(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
-  let op = snapshotCircleFundingOperation(input); if (op.terminal) return op;
-  op = await abandonNeverLanding(op, ports); if (op.terminal) return op;
+  return (await observe(input, ports)).op;
+}
+/** `messageUsed` is what this observation read of MessageTransmitter `usedNonces`, or null when it did not read it. */
+interface Observed { readonly op: CircleFundingOperationV2; readonly messageUsed: boolean | null; }
+async function observe(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<Observed> {
+  let op = snapshotCircleFundingOperation(input); if (op.terminal) return { op, messageUsed: null };
+  op = await abandonNeverLanding(op, ports); if (op.terminal) return { op, messageUsed: null };
   let burnJustObserved: CircleSourceProof | null = null;
   for (const initial of op.effects) {
     let effect = op.effects.find(e => e.role === initial.role)!;
@@ -205,7 +215,7 @@ export async function observeCircleFunding(input: CircleFundingOperationV2, port
     }
     if (effect.transactionHash === null || ["prepared", "sealed", "abandoned_unsent", "confirmed", "reverted"].includes(effect.phase)) continue;
     const proof = await ports.observeEffect(op, effect);
-    if (proof === null) { if (effect.role === "approval" || effect.role === "burn") { op = await sentNeverLanded(op, effect.role, ports); if (op.terminal) return op; } else op = await ambiguousOwnedSend(op, effect.role, ports); continue; }
+    if (proof === null) { if (effect.role === "approval" || effect.role === "burn") { op = await sentNeverLanded(op, effect.role, ports); if (op.terminal) return { op, messageUsed: null }; } else op = await ambiguousOwnedSend(op, effect.role, ports); continue; }
     if (proof.outcome === "reverted") {
       op = await persist(op, { effects: updateEffect(op, effect.role, { phase: "reverted", proof }), state: "cleanup_required" }, `${effect.role}_finalized_revert_requires_explicit_cleanup`, ports);
       continue;
@@ -246,7 +256,7 @@ export async function observeCircleFunding(input: CircleFundingOperationV2, port
     const usage = await ports.usage(op, "finalized");
     op = await persist(op, { usage, usageFinalized: true, state: "completed", terminal: true }, "independent_finality_and_usage_closed", ports);
   }
-  return op;
+  return externalMint(op, ports);
 }
 export async function refreshCircleFundingAttestation(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
   const op = snapshotCircleFundingOperation(input); if (op.source === null || op.attestation === null || op.effects.some(e => e.role === "mint" && e.phase !== "prepared")) circleBlocked("refresh_requires_same_unminted_burn");
@@ -349,11 +359,17 @@ async function sentNeverLanded(input: CircleFundingOperationV2, role: "approval"
  * its transaction nor a receipt and the signer's latest nonce has not passed the effect's nonce, the identical sealed
  * bytes are sent again, once per command, never re-signed (same hash and nonce: at most one inclusion). If the safe nonce
  * is past it, another transaction took the nonce and the bytes can never land: the effect is abandoned, its bytes
- * discarded, and approve-mint (or cleanup) may re-arm a fresh envelope under fresh foreground consent. Otherwise observe. */
+ * discarded, and approve-mint (or cleanup) may re-arm a fresh envelope under fresh foreground consent. A mint the node
+ * does not know whose issuer message the destination already consumed can only revert: it is closed (see externalMint),
+ * never sent again. Otherwise observe. */
 async function ambiguousOwnedSend(input: CircleFundingOperationV2, role: "mint" | "cleanup", ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
   let op = input; const effect = op.effects.find(e => e.role === role)!;
   if (op.terminal || ports.unsent?.ambiguous === undefined || effect.transactionHash === null || !["submission_started", "submitted", "unknown"].includes(effect.phase)) return op;
   const outcome = await ports.unsent.ambiguous(op, effect);
+  if (role === "mint" && (outcome === "resend_identical" || outcome === "other_transaction_pending")) {
+    if (ports.messageNonceUsed === undefined) return op;
+    if (await ports.messageNonceUsed(op)) return closeOwnedMint(op, ports);
+  }
   if (outcome === "resend_identical") {
     if (ports.unsent.resend === undefined) return op;
     const material = await ports.loadMaterial(op, effect); if (material === null || material.transactionHash !== effect.transactionHash) circleCorrupt("sealed_material_missing");
@@ -362,6 +378,31 @@ async function ambiguousOwnedSend(input: CircleFundingOperationV2, role: "mint" 
   if (outcome !== "never_lands") return op;
   op = await persist(op, { effects: updateEffect(op, role, { phase: "abandoned_unsent" }), ...(role === "mint" ? { state: "awaiting_mint" as const } : {}) }, `${role}_sent_bytes_never_land`, ports);
   if (effect.materialHash !== null) await ports.unsent.discard(op, op.effects.find(e => e.role === role)!);
+  return op;
+}
+/** Owned mint phases holding no bytes the network may know: unsigned, signing without saved bytes, sealed but never past
+ * the submission fence, or already proven never to land. */
+const OWNED_MINT_UNSENT: readonly string[] = ["prepared", ...UNSENT_SIGNING, "abandoned_unsent"];
+/** R4 for an issuer message the destination consumed although no owned mint landed. CCTP V2 lets anyone relay a burn whose
+ * destinationCaller is zero, and public relayers usually do within seconds, so this is the common outcome. An owned mint
+ * that never left this node can no longer mint: it is closed and its bytes discarded, and the external transaction is
+ * handed to adoption, which has no financial effect. A possibly-sent owned mint is closed by ambiguousOwnedSend only while
+ * the node knows neither its transaction nor a receipt; a known one keeps being observed and is never adopted over. */
+async function externalMint(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<Observed> {
+  let op = input; const mint = op.effects.find(e => e.role === "mint");
+  if (op.terminal || op.source === null || op.attestation === null || op.destination !== null || ports.messageNonceUsed === undefined ||
+    mint !== undefined && !OWNED_MINT_UNSENT.includes(mint.phase)) return { op, messageUsed: null };
+  if (!await ports.messageNonceUsed(op)) return { op, messageUsed: false };
+  if (mint !== undefined && UNSENT_SIGNING.includes(mint.phase)) op = await closeOwnedMint(op, ports);
+  await ports.externalMint?.(op);
+  return { op, messageUsed: true };
+}
+/** The owned mint can never mint (its message is used): abandoned, its bytes discarded before anything else; its
+ * permanent sign and send claims stay. The journal names the external use. */
+async function closeOwnedMint(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
+  const op = await persist(input, { effects: updateEffect(input, "mint", { phase: "abandoned_unsent" }), state: "awaiting_mint" }, CIRCLE_MINT_CLOSED_EXTERNAL_USE, ports);
+  const mint = op.effects.find(e => e.role === "mint")!;
+  if (mint.materialHash !== null) { if (ports.unsent === undefined) circleBlocked("never_landed_discard_unavailable"); await ports.unsent.discard(op, mint); }
   return op;
 }
 /** Replaces an abandoned mint or cleanup with a fresh prepared envelope; the transition names the abandoned hash. */
