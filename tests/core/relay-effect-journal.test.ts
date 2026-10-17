@@ -6,7 +6,7 @@ import { hashObject } from "../../src/canonical.js";
 import { OperationService } from "../../src/operation-service.js";
 import { StateStore } from "../../src/state.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
-import { advanceRelayEffectJournal, createRelayEffectJournal, relayRecoveryClass,
+import { advanceRelayEffectJournal, createRelayEffectJournal,
   RelayEffectJournalRepository, validateRelayEffectJournal } from "../../src/relay/effect-journal.js";
 import { validateRelayQuote } from "../../src/relay/quote.js";
 import { temporaryState } from "./helpers.js";
@@ -41,7 +41,6 @@ test("Relay journal binds exact quote and envelope, and rejects changed binding 
   assert.equal(journal.orderId, op.quote!.orderId);
   assert.deepEqual(journal.approvalEnvelope, op.quote!.approval);
   assert.deepEqual(journal.depositEnvelope, op.quote!.deposit);
-  assert.equal(relayRecoveryClass(journal, op), "not_started");
   for (const change of [{ quoteDigest: "0".repeat(64) }, { orderId: "0xwrong" },
     { sourceOwner: recipient }, { approvalEnvelope: { ...journal.approvalEnvelope, gas: "1" } },
     { depositEnvelope: { ...journal.depositEnvelope, to: recipient } }]) {
@@ -61,31 +60,33 @@ test("Relay journal is create only, durable after reopen, and preserves one subm
   await assert.rejects(repo.create(op.profileHash, op.operationId, at), { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(await new RelayEffectJournalRepository(temp.root).load(op.profileHash, op.operationId), journal);
   journal = await repo.transition(op.profileHash, op.operationId, journal.integrityHash,
-    { kind: "mark_submission", role: "approval", marker, at });
-  assert.equal(relayRecoveryClass(journal, op), "observation_only");
+    { kind: "mark_signing", role: "approval", marker, at });
   await assert.rejects(operations.assertProfileAvailable(op.profileHash), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(repo.transition(op.profileHash, op.operationId, journal.integrityHash,
-    { kind: "mark_submission", role: "approval", marker: "c".repeat(64), at }), { code: "APN_OPERATION_BLOCKED" });
+    { kind: "mark_signing", role: "approval", marker: "c".repeat(64), at }), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(repo.transition(op.profileHash, op.operationId, journal.integrityHash,
-    { kind: "mark_submission", role: "deposit", marker, at }), { code: "APN_OPERATION_BLOCKED" });
+    { kind: "mark_signing", role: "deposit", marker, at }), { code: "APN_OPERATION_BLOCKED" });
   const reopened = new RelayEffectJournalRepository(temp.root);
   assert.deepEqual(await reopened.load(op.profileHash, op.operationId), journal);
   const oldHash = journal.integrityHash;
   journal = await reopened.transition(op.profileHash, op.operationId, oldHash,
-    { kind: "record_transaction", role: "approval", transactionHash: tx });
+    { kind: "seal_signed", role: "approval", transactionHash: tx });
   await assert.rejects(repo.transition(op.profileHash, op.operationId, oldHash,
-    { kind: "observe", role: "approval", outcome: "confirmed", at: later }), { code: "APN_OPERATION_BLOCKED" });
+    { kind: "mark_submitting", role: "approval", at }), { code: "APN_OPERATION_BLOCKED" });
+  journal = await repo.transition(op.profileHash, op.operationId, journal.integrityHash,
+    { kind: "mark_submitting", role: "approval", at });
   journal = await repo.transition(op.profileHash, op.operationId, journal.integrityHash,
     { kind: "observe", role: "approval", outcome: "confirmed", at: later });
-  assert.equal(relayRecoveryClass(journal, op), "approval_confirmed");
   journal = await repo.transition(op.profileHash, op.operationId, journal.integrityHash,
-    { kind: "mark_submission", role: "deposit", marker: "d".repeat(64), at: later });
-  assert.equal(relayRecoveryClass(journal, op), "observation_only");
+    { kind: "mark_signing", role: "deposit", marker: "d".repeat(64), at: later });
   assert.throws(() => advanceRelayEffectJournal(journal, op,
-    { kind: "mark_submission", role: "deposit", marker: "e".repeat(64), at: later }), { code: "APN_OPERATION_BLOCKED" });
+    { kind: "mark_signing", role: "deposit", marker: "e".repeat(64), at: later }), { code: "APN_OPERATION_BLOCKED" });
+  journal = await repo.transition(op.profileHash, op.operationId, journal.integrityHash,
+    { kind: "seal_signed", role: "deposit", transactionHash: `0x${"c".repeat(64)}` });
+  journal = await repo.transition(op.profileHash, op.operationId, journal.integrityHash,
+    { kind: "mark_submitting", role: "deposit", at: later });
   journal = await repo.transition(op.profileHash, op.operationId, journal.integrityHash,
     { kind: "observe", role: "deposit", outcome: "confirmed", at: later });
-  assert.equal(relayRecoveryClass(journal, op), "completed");
   assert.deepEqual(await new RelayEffectJournalRepository(temp.root).load(op.profileHash, op.operationId), journal);
   await operations.assertProfileAvailable(op.profileHash);
   const status = await operations.relayStatus(op);
@@ -96,7 +97,7 @@ test("Relay journal is create only, durable after reopen, and preserves one subm
   assert.equal("paidAcceptance" in status, false); assert.equal("destinationProof" in status, false);
   assert.equal("statusLocator" in status, false);
   await assert.rejects(repo.transition(op.profileHash, op.operationId, journal.integrityHash,
-    { kind: "mark_submission", role: "deposit", marker: "e".repeat(64), at: later }),
+    { kind: "mark_signing", role: "deposit", marker: "e".repeat(64), at: later }),
   { code: "APN_OPERATION_BLOCKED" });
   const { quoteDigest: _digest, ...quoteFields } = op.quote!;
   const baseFields = { ...quoteFields, routeReference: "ethereum-usdc-base-eth-v1" as const,
@@ -124,12 +125,15 @@ test("Relay effect phases reject skips and failures never permit another attempt
   assert.throws(() => advanceRelayEffectJournal(journal, op,
     { kind: "observe", role: "approval", outcome: "confirmed", at }), { code: "APN_OPERATION_BLOCKED" });
   assert.throws(() => advanceRelayEffectJournal(journal, op,
-    { kind: "record_transaction", role: "approval", transactionHash: tx }), { code: "APN_OPERATION_BLOCKED" });
-  journal = advanceRelayEffectJournal(journal, op, { kind: "mark_submission", role: "approval", marker, at });
+    { kind: "seal_signed", role: "approval", transactionHash: tx }), { code: "APN_OPERATION_BLOCKED" });
+  journal = advanceRelayEffectJournal(journal, op, { kind: "mark_signing", role: "approval", marker, at });
+  assert.throws(() => advanceRelayEffectJournal(journal, op,
+    { kind: "observe", role: "approval", outcome: "confirmed", at: later }), { code: "APN_OPERATION_BLOCKED" });
+  journal = advanceRelayEffectJournal(journal, op, { kind: "seal_signed", role: "approval", transactionHash: tx });
+  journal = advanceRelayEffectJournal(journal, op, { kind: "mark_submitting", role: "approval", at });
   journal = advanceRelayEffectJournal(journal, op, { kind: "observe", role: "approval", outcome: "failed", at: later });
-  assert.equal(relayRecoveryClass(journal, op), "failed");
   assert.throws(() => advanceRelayEffectJournal(journal, op,
-    { kind: "mark_submission", role: "approval", marker: "c".repeat(64), at: later }), { code: "APN_OPERATION_BLOCKED" });
+    { kind: "mark_signing", role: "approval", marker: "c".repeat(64), at: later }), { code: "APN_OPERATION_BLOCKED" });
   assert.throws(() => advanceRelayEffectJournal(journal, op,
-    { kind: "mark_submission", role: "deposit", marker: "c".repeat(64), at: later }), { code: "APN_OPERATION_BLOCKED" });
+    { kind: "mark_signing", role: "deposit", marker: "c".repeat(64), at: later }), { code: "APN_OPERATION_BLOCKED" });
 });
