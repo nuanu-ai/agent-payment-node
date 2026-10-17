@@ -420,7 +420,6 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
         }
         return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly, request.coinbaseObservationRpc));
       }
-      case "operation.repair-deployment": return dataOutcome(await this.bridges.repairDeployment(request.operationId), "local_journal_migration");
       case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
       case "operation.recover-provider-request": return operationOutcome(
         await this.transfer.recoverProviderRequest(request.operationId, request.providerRequestId),

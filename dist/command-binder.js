@@ -347,7 +347,6 @@ function bindParsedCatalog(parsed) {
             ...(options["--rpc-url"] === undefined ? {} : { rpcUrl: options["--rpc-url"] }),
         };
         case "operation status": return { request: { command: "operation.status", operationId: value(options, "--operation") } };
-        case "operation repair-deployment": return { request: { command: "operation.repair-deployment", operationId: value(options, "--operation") } };
         case "operation abandon": return { request: { command: "operation.abandon", operationId: value(options, "--operation") } };
         case "operation resume": {
             if (options["--observe-only"] !== undefined && options["--observe-only"] !== "true") {

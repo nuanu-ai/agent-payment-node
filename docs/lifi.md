@@ -349,8 +349,7 @@ call traces use the archive reader when the owner names one, otherwise the
 primary, which serves recent blocks; `requireCanonical: true` still makes the
 node refuse a non-canonical hash. APN never infers an archive URL. Missing
 historical data on a pruned primary surfaces as an RPC failure of that read.
-Only the frozen historical migration proofs of `operation repair-deployment`
-still require the archive reader (three-item chunks). Observation diagnostics
+Observation diagnostics
 keep `explicit_archive_RPC_required`, `distinct_archive_RPC_required` and
 `historical_receipt_unavailable` for old journals without exposing provider bodies or URLs.
 
@@ -1298,9 +1297,6 @@ Other routes: Ethereum USDC → Arbitrum continuation after a paid approval 35 �
 WBTC Ethereum ↔ Arbitrum continuation 32/33 → 6; Base USDC → Arbitrum send step
 24 → 3; captured mainnet Base native Across observation 13 → 4; Linea native fill
 destination observation 11 → 7; a Circle approval state read about 25 → 1.
-
-`operation repair-deployment` keeps its frozen archive proofs unchanged for the
-two recognized historical migrations.
 
 GasZip (Sei, Mega): a payout is proved from the chain alone (exact signed payout,
 successful receipt with empty input and no logs at or below the safe head, block
