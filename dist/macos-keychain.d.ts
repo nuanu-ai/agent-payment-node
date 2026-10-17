@@ -29,6 +29,7 @@ export declare class MacOSLoginKeychainSecret implements WrappingSecretPort {
     load(): Promise<Buffer | null>;
     private remember;
     create(): Promise<Buffer>;
+    private findArgs;
 }
 export declare function loginKeychainPath(homedir: string): string;
 export {};
