@@ -62,10 +62,11 @@ export function validateFundingExternalFulfillment(p: CircleFundingExternalFulfi
   if(p.claimDigest!==fundingExternalClaimKey(op))circleFail("external_claim_digest");
 }
 
-/** Both full proofs are validated before comparing identity. Only advancing finality witnesses and their
- * derived digests are excluded; included transactions, receipts, events, economics and pins stay exact. */
+/** Both full proofs are validated before comparing identity. Only advancing current-head witnesses (finality heads and
+ * the deployment check, kept under its historical field name) and their derived digests are excluded; included
+ * transactions, receipts, events and economics stay exact. */
 export function fundingExternalStableIdentity(p:CircleFundingExternalFulfillment):unknown {
- const {proofHash:_proof,evidenceHash:_evidence,sourceFinality,destinationReceipt,...identity}=p;
+ const {proofHash:_proof,evidenceHash:_evidence,historicalDeploymentDigest:_deployment,sourceFinality,destinationReceipt,...identity}=p;
  const {finalityBlockHash:_sourceHead,finalityBlockNumberAtomic:_sourceHeight,integrityHash:_sourceDigest,...source}=sourceFinality;
  const {finalityBlockHash:_destinationHead,finalityBlockNumberAtomic:_destinationHeight,...destination}=destinationReceipt;
  return {...identity,sourceFinality:source,destinationReceipt:destination};

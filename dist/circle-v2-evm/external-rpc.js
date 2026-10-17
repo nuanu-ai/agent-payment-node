@@ -51,13 +51,14 @@ export class CircleExternalRpcBudget {
         }
     }
 }
+/** Lean observation and configuration at the latest head (P1/P2); every request goes through the shared budget. */
 export class CircleExternalRpc extends CircleRpc {
     budget;
     id = 0;
     count = 0;
     publicEndpoint;
     constructor(url, chain, budget) {
-        super(url, chain);
+        super(url, chain, undefined, undefined, "lean");
         this.budget = budget;
         const p = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "External Circle RPC", 2048);
         if (p.search !== "" || p.hash !== "")

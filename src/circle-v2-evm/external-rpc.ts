@@ -22,9 +22,10 @@ export class CircleExternalRpcBudget {
     }finally{const next=this.waiters.shift();if(next===undefined)this.inFlight--;else next();}
   }
 }
+/** Lean observation and configuration at the latest head (P1/P2); every request goes through the shared budget. */
 export class CircleExternalRpc extends CircleRpc {
   private id=0;private count=0;private readonly publicEndpoint:string;
-  constructor(url:string,chain:number,private readonly budget:CircleExternalRpcBudget){super(url,chain);const p=parsePublicHttpsUrl(url,"APN_RPC_CONFIG","External Circle RPC",2048);if(p.search!==""||p.hash!=="")circleBlocked("external_rpc_url");this.publicEndpoint=p.toString();}
+  constructor(url:string,chain:number,private readonly budget:CircleExternalRpcBudget){super(url,chain,undefined,undefined,"lean");const p=parsePublicHttpsUrl(url,"APN_RPC_CONFIG","External Circle RPC",2048);if(p.search!==""||p.hash!=="")circleBlocked("external_rpc_url");this.publicEndpoint=p.toString();}
   override async call(method:string,params:readonly unknown[],beforeSend?:()=>void):Promise<unknown>{
     if(beforeSend!==undefined||++this.count>128)circleBlocked("external_rpc_financial_or_origin_budget");
     if(method==="eth_getLogs"){const q=circleRecord(params[0]);if(params.length!==1||typeof q.blockHash!=="string"||q.fromBlock!==undefined||q.toBlock!==undefined)circleBlocked("external_logs_exact_block_required");}
