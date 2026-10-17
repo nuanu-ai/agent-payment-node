@@ -5,10 +5,10 @@ import { validateSwapOperation } from "../model.js";
 import { assertOperationProtocolRegistry } from "../family-guards.js";
 import { latestLifetime, orcaMessageFee, requireOrcaFunds } from "./builder.js";
 import { createOrcaExecutionBinding } from "./effects.js";
-import { compileOrcaSwap } from "./instructions.js";
-import { readOrcaMarket } from "./market.js";
-import { validateOrcaKeylessMaterial } from "./material.js";
-import { simulateOrcaSwap } from "./simulation.js";
+import { compileOrcaSwap, orcaPlanSides } from "./instructions.js";
+import { readOrcaMarket, readOrcaTokenMarket } from "./market.js";
+import { ORCA_TOKEN_EXECUTION_SCHEMA, validateOrcaKeylessMaterial } from "./material.js";
+import { simulateOrcaSwap, simulateOrcaTokenSwap } from "./simulation.js";
 /**
  * Pre-signing guard, run after the owner approved: program pins unchanged, the pool re-read at a fresh slot with the
  * same tick arrays and a local output still at or above the minimum, a fresh blockhash, the exact bytes rebuilt and
@@ -25,9 +25,14 @@ export class OrcaExecutionGuard {
     }
     async inspect(operationValue, materialValue) {
         const operation = validateSwapOperation(operationValue), material = validateOrcaKeylessMaterial(materialValue);
-        const execution = material.execution, plan = execution.plan;
         await assertSolanaNetwork(this.rpc);
         await this.verifyPins(this.rpc);
+        const execution = material.execution;
+        return execution.schemaVersion === ORCA_TOKEN_EXECUTION_SCHEMA ? await this.inspectToken(operation, execution)
+            : await this.inspectNative(operation, execution);
+    }
+    async inspectNative(operation, execution) {
+        const plan = execution.plan;
         const market = await readOrcaMarket(this.rpc, plan.owner, BigInt(plan.amountInLamports));
         if (market.tickArrays.some((row, index) => row.address !== plan.tickArrays[index]) || market.oracle !== plan.oracle ||
             market.wsolAccount !== plan.wsolAccount || market.usdcAccount !== plan.usdcAccount) {
@@ -50,6 +55,33 @@ export class OrcaExecutionGuard {
         const simulation = await simulateOrcaSwap(this.rpc, compiled.unsignedPayload, { owner: plan.owner, wsolAccount: plan.wsolAccount,
             usdcAccount: plan.usdcAccount, before: market.owner, minimumOutputAtomic: plan.minimumOutputAtomic,
             maximumSolSpendLamports: execution.maximumSolSpendLamports, computeUnitLimit: plan.computeUnitLimit, wsolKept: market.wsol }, false, market.slot.toString());
+        return await this.fresh(lifetime, compiled, fee, simulation);
+    }
+    /** Token-input pools: the same re-read, rebuild, fee, funds and exact-bytes simulation; the input never leaves as SOL. */
+    async inspectToken(operation, execution) {
+        const plan = execution.plan, pool = orcaPlanSides(plan).pool;
+        const market = await readOrcaTokenMarket(this.rpc, pool, plan.owner, BigInt(plan.amountInAtomic));
+        if (market.tickArrays.some((row, index) => row.address !== plan.tickArrays[index]) || market.oracle !== plan.oracle ||
+            market.sourceAccount !== plan.sourceAccount || market.destinationAccount !== plan.destinationAccount) {
+            blocked("The pool moved away from the approved tick arrays; quote again.", "orca_tick_array_moved");
+        }
+        if (BigInt(market.swap.amountOutAtomic) < BigInt(operation.quote.minimumOutputAtomic)) {
+            blocked("The pool no longer yields the approved minimum output.", "orca_output_below_minimum");
+        }
+        const rent = market.owner.destinationAccountExists ? 0n : market.tokenAccountRentLamports;
+        if (rent > BigInt(execution.destinationAccountRentLamports))
+            blocked("The destination account rent is no longer covered by the approval.", "orca_rent_drift");
+        const lifetime = await latestLifetime(this.rpc), compiled = compileOrcaSwap(plan, lifetime);
+        const fee = await orcaMessageFee(this.rpc, compiled.messageBase64);
+        if (fee > BigInt(execution.networkFeeLamports))
+            blocked("The network fee exceeds the approved fee.", "orca_fee_drift");
+        requireOrcaFunds(market.owner.ownerLamports, fee + rent);
+        const simulation = await simulateOrcaTokenSwap(this.rpc, compiled.unsignedPayload, { pool, owner: plan.owner, sourceAccount: plan.sourceAccount,
+            destinationAccount: plan.destinationAccount, before: market.owner, amountInAtomic: plan.amountInAtomic, minimumOutputAtomic: plan.minimumOutputAtomic,
+            maximumSolSpendLamports: execution.maximumSolSpendLamports, computeUnitLimit: plan.computeUnitLimit }, false, market.slot.toString());
+        return await this.fresh(lifetime, compiled, fee, simulation);
+    }
+    async fresh(lifetime, compiled, fee, simulation) {
         const height = rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "confirmed" }]));
         if (height > BigInt(lifetime.lastValidBlockHeight))
             blocked("The fresh blockhash expired before signing.", "orca_lifetime_expired");

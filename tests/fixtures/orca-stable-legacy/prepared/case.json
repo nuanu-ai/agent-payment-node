@@ -1,0 +1,18 @@
+{
+ "writtenBy": "0.5.45",
+ "operationId": "316c7976aa0b492b0e1aa356ae61f6b41b5bfa5ae54b6a3a8a34300b5af08844",
+ "state": "prepared",
+ "account": {
+  "provider": "local",
+  "custody": "local_software",
+  "address": "4MfyR4G3NWfVRDWo6iNAHDBZqWMgwZX6FNtMqEW3a9JT",
+  "profile": "stable-candidate",
+  "schemaVersion": "apn.chain-account.v1",
+  "profileHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "rail": "solana",
+  "network": "mainnet",
+  "createdAt": "2026-09-28T12:00:00.000Z",
+  "identityHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+ },
+ "effect": null
+}

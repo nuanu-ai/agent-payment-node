@@ -10,17 +10,18 @@ import { solanaSignature, type SolanaRpcPort } from "../../solana/rpc.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
 import { orcaAccountBindingHash, type OrcaOwnerAdmission } from "./admission.js";
 import { compileOrcaSwap, type OrcaSwapLifetime } from "./instructions.js";
-import { validateOrcaKeylessMaterial, type OrcaKeylessMaterial } from "./material.js";
+import { orcaSimulatedOutput, validateOrcaKeylessMaterial, type OrcaKeylessMaterial } from "./material.js";
 import { sha256Hex } from "./pins.js";
-import type { OrcaSimulationEvidence } from "./simulation.js";
+import type { OrcaSimulationEvidence, OrcaTokenSimulationEvidence } from "./simulation.js";
 
 const BINDING_VERSION = "apn.orca-whirlpool-execution-binding.v1" as const;
-const HASH = /^[a-f0-9]{64}$/u;
+const HASH = /^[a-f0-9]{64}$/u, UINT = /^(?:0|[1-9][0-9]{0,19})$/u;
 
 /** Post-approval facts taken at the send boundary: a fresh lifetime and the exact-bytes simulation. */
 export interface OrcaExecutionFreshness {
   readonly lifetime: OrcaSwapLifetime; readonly unsignedPayload: string; readonly messageHash: string;
-  readonly networkFeeLamports: string; readonly simulation: OrcaSimulationEvidence; readonly blockHeight: string; readonly checkedAt: string;
+  readonly networkFeeLamports: string; readonly simulation: OrcaSimulationEvidence | OrcaTokenSimulationEvidence; readonly blockHeight: string;
+  readonly checkedAt: string;
 }
 export interface OrcaExecutionBinding extends OrcaExecutionFreshness {
   readonly schemaVersion: typeof BINDING_VERSION; readonly operationId: string; readonly operationIntegrityHash: string;
@@ -49,6 +50,8 @@ export function validateOrcaExecutionBinding(value: unknown, operationValue: Swa
     "lifetime", "unsignedPayload", "messageHash", "networkFeeLamports", "simulation", "blockHeight", "checkedAt", "bindingHash"]) ||
       value.schemaVersion !== BINDING_VERSION || !isPlainRecord(value.lifetime) || !isPlainRecord(value.simulation)) corrupt("Orca execution binding schema is invalid.");
   const binding = value as unknown as OrcaExecutionBinding, { bindingHash, ...body } = binding;
+  const received = orcaSimulatedOutput(binding.simulation), spent = binding.simulation.solSpentLamports;
+  if (typeof received !== "string" || !UINT.test(received) || typeof spent !== "string" || !UINT.test(spent)) corrupt("Orca execution binding schema is invalid.");
   let compiled: ReturnType<typeof compileOrcaSwap>;
   try { compiled = compileOrcaSwap(material.execution.plan, binding.lifetime); } catch { return corrupt("Orca execution bytes do not rebuild from the plan."); }
   if (typeof bindingHash !== "string" || bindingHash !== domainHash(BINDING_VERSION, canonicalJson(body)) || operation.submissionMarker === null ||
@@ -59,8 +62,7 @@ export function validateOrcaExecutionBinding(value: unknown, operationValue: Swa
       !HASH.test(binding.accountBindingHash) || !HASH.test(binding.ownerAdmissionHash) || compiled.unsignedPayload !== binding.unsignedPayload ||
       compiled.messageHash !== binding.messageHash || binding.simulation.replaceRecentBlockhash !== false ||
       BigInt(binding.networkFeeLamports) > BigInt(material.execution.networkFeeLamports) ||
-      BigInt(binding.simulation.usdcReceivedAtomic) < BigInt(operation.quote.minimumOutputAtomic) ||
-      BigInt(binding.simulation.solSpentLamports) > BigInt(material.execution.maximumSolSpendLamports) ||
+      BigInt(received) < BigInt(operation.quote.minimumOutputAtomic) || BigInt(spent) > BigInt(material.execution.maximumSolSpendLamports) ||
       !/^[1-9][0-9]{0,19}$/u.test(binding.blockHeight) || BigInt(binding.blockHeight) > BigInt(binding.lifetime.lastValidBlockHeight) ||
       !canonicalInstant(binding.checkedAt) || binding.checkedAt < operation.submissionMarker.markedAt || binding.checkedAt >= operation.quote.expiresAt) {
     corrupt("Orca execution binding integrity failed.");

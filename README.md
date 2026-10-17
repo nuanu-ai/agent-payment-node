@@ -409,17 +409,12 @@ apn swap solana jupiter prepare --profile <profile> --quote <string> --idempoten
 apn swap solana jupiter status --operation <operation_id>
 apn swap solana jupiter approve --operation <operation_id>
 apn swap solana jupiter execute --operation <operation_id>
-apn swap solana orca stable-inventory
-apn swap solana orca stable-quote --amount <atomic_usdc> --slippage-bps <string> --maximum-price-impact-bps <string>
-apn swap solana orca stable-prepare --profile <profile> --policy-revision <string> --owner <string> --amount <atomic_usdc> --slippage-bps <string> --maximum-price-impact-bps <string> --compute-unit-limit <string> --compute-unit-price <string> --create-usdt-ata <string> --maximum-ata-rent <string> --maximum-total-fee <string> --idempotency-key <idempotency_key>
 apn swap solana orca stable-status --operation <operation_id>
-apn swap solana orca stable-approve --operation <operation_id>
-apn swap solana orca stable-execute --operation <operation_id>
 apn swap solana orca stable-release --operation <operation_id>
 apn swap solana orca stable-recover-no-send --operation <operation_id>
 apn swap solana orca stable-observe --operation <operation_id>
 apn swap solana orca inventory
-apn swap solana orca quote --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
+apn swap solana orca quote --pool <string> --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
 apn swap solana orca prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
 apn swap solana orca status --operation <operation_id>
 apn swap solana orca approve --operation <operation_id>

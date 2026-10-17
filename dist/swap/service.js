@@ -7,7 +7,7 @@ import { admittedSwapProtocol, swapAdmissionMechanisms } from "./route-admission
 import { createSwapQuote } from "./quote.js";
 import { newSwapOperation, SWAP_TERMINAL_STATES, validateSwapOperation, validateSwapReceiptProof } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
-import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 import { swapUnlandedProofHash, validateSwapUnlandedProof } from "./unlanded.js";
 export class GuardedSwapService {
     operations;

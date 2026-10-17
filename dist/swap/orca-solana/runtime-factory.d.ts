@@ -6,6 +6,7 @@ import type { TtyTransferApprovalOptions } from "../../tty-approval.js";
 import { GuardedSwapRuntime, type GuardedSwapForegroundApprovalPort, type GuardedSwapPolicyResolver } from "../runtime.js";
 import { type OrcaKeylessQuoteRequest } from "./builder.js";
 import { type OrcaProgramPinVerifier } from "./pins.js";
+import type { OrcaPoolConfig } from "./pools.js";
 export interface OrcaKeylessRuntimeOptions {
     readonly state: StateStore;
     readonly clock: ClockPort;
@@ -18,5 +19,11 @@ export interface OrcaKeylessRuntimeOptions {
     readonly accounts: Pick<ChainWalletStoragePort, "account" | "withSeed" | "effect" | "saveEffect">;
     /** Program byte verifier. Production passes verifyOrcaProgramPins. */
     readonly verifyPins: OrcaProgramPinVerifier;
+    /** The one pinned pool this runtime quotes, approves, signs and observes; its lane registry binds every operation. */
+    readonly pool: OrcaPoolConfig;
 }
+/** The runtime of one pool, built on first use within a command. */
+export type OrcaRuntimeSelector = (pool: OrcaPoolConfig) => GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
 export declare function createOrcaKeylessRuntime(options: OrcaKeylessRuntimeOptions): GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
+/** Builds each pool's runtime once per command: a pool selects exactly its own lane registry and builder. */
+export declare function orcaRuntimeSelector(build: OrcaRuntimeSelector): OrcaRuntimeSelector;

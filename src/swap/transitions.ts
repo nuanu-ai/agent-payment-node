@@ -3,8 +3,9 @@ import { ApnError } from "../errors.js";
 import type { AssetUsageReservation } from "../asset-usage-ledger.js";
 import { SWAP_OPERATION_SCHEMA, validateSwapOperation, type SwapOperationRecord, type SwapOperationState,
   type SwapReceiptProof, type SwapSubmissionMarker } from "./model.js";
-import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
-import { validateOrcaStableNoSendProof, type OrcaStableNoSendProof } from "./orca-solana/stable-no-send-proof.js";
+// Readers of stable USDC to USDT records a released version wrote (SWAP-10): only the frozen no-send recovery reaches them.
+import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
+import { validateOrcaStableNoSendProof, type OrcaStableNoSendProof } from "../legacy/orca-stable/no-send-proof.js";
 
 export type SwapTransitionEvidence = {
   readonly usageLease?: AssetUsageReservation;

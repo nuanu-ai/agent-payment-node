@@ -6,10 +6,10 @@ import { solanaSignature } from "../../solana/rpc.js";
 import { validateSwapOperation } from "../model.js";
 import { orcaAccountBindingHash } from "./admission.js";
 import { compileOrcaSwap } from "./instructions.js";
-import { validateOrcaKeylessMaterial } from "./material.js";
+import { orcaSimulatedOutput, validateOrcaKeylessMaterial } from "./material.js";
 import { sha256Hex } from "./pins.js";
 const BINDING_VERSION = "apn.orca-whirlpool-execution-binding.v1";
-const HASH = /^[a-f0-9]{64}$/u;
+const HASH = /^[a-f0-9]{64}$/u, UINT = /^(?:0|[1-9][0-9]{0,19})$/u;
 export function createOrcaExecutionBinding(input) {
     const operation = validateSwapOperation(input.operation);
     if (operation.state !== "submitting" || operation.submissionMarker === null)
@@ -30,6 +30,9 @@ export function validateOrcaExecutionBinding(value, operationValue, materialValu
         value.schemaVersion !== BINDING_VERSION || !isPlainRecord(value.lifetime) || !isPlainRecord(value.simulation))
         corrupt("Orca execution binding schema is invalid.");
     const binding = value, { bindingHash, ...body } = binding;
+    const received = orcaSimulatedOutput(binding.simulation), spent = binding.simulation.solSpentLamports;
+    if (typeof received !== "string" || !UINT.test(received) || typeof spent !== "string" || !UINT.test(spent))
+        corrupt("Orca execution binding schema is invalid.");
     let compiled;
     try {
         compiled = compileOrcaSwap(material.execution.plan, binding.lifetime);
@@ -45,8 +48,7 @@ export function validateOrcaExecutionBinding(value, operationValue, materialValu
         !HASH.test(binding.accountBindingHash) || !HASH.test(binding.ownerAdmissionHash) || compiled.unsignedPayload !== binding.unsignedPayload ||
         compiled.messageHash !== binding.messageHash || binding.simulation.replaceRecentBlockhash !== false ||
         BigInt(binding.networkFeeLamports) > BigInt(material.execution.networkFeeLamports) ||
-        BigInt(binding.simulation.usdcReceivedAtomic) < BigInt(operation.quote.minimumOutputAtomic) ||
-        BigInt(binding.simulation.solSpentLamports) > BigInt(material.execution.maximumSolSpendLamports) ||
+        BigInt(received) < BigInt(operation.quote.minimumOutputAtomic) || BigInt(spent) > BigInt(material.execution.maximumSolSpendLamports) ||
         !/^[1-9][0-9]{0,19}$/u.test(binding.blockHeight) || BigInt(binding.blockHeight) > BigInt(binding.lifetime.lastValidBlockHeight) ||
         !canonicalInstant(binding.checkedAt) || binding.checkedAt < operation.submissionMarker.markedAt || binding.checkedAt >= operation.quote.expiresAt) {
         corrupt("Orca execution binding integrity failed.");

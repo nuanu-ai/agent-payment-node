@@ -24,14 +24,8 @@ export class RuntimeContext {
     uniswapTokenRuntime;
     sunswapRuntime;
     orcaRuntime;
-    orcaStableQuote;
-    orcaStablePrepare;
-    orcaStableStatus;
-    orcaStableApprove;
-    orcaStableExecute;
-    orcaStableRecoverNoSend;
-    orcaStableRelease;
-    orcaStableObserve;
+    /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
+    orcaStableLegacy;
     jupiterV1Runtime;
     facilitatorGasless;
     smartAccountGasless;
@@ -115,22 +109,8 @@ export class RuntimeContext {
             this.sunswapRuntime = dependencies.sunswapRuntime;
         if (dependencies.orcaRuntime !== undefined)
             this.orcaRuntime = dependencies.orcaRuntime;
-        if (dependencies.orcaStableQuote !== undefined)
-            this.orcaStableQuote = dependencies.orcaStableQuote;
-        if (dependencies.orcaStablePrepare !== undefined)
-            this.orcaStablePrepare = dependencies.orcaStablePrepare;
-        if (dependencies.orcaStableStatus !== undefined)
-            this.orcaStableStatus = dependencies.orcaStableStatus;
-        if (dependencies.orcaStableApprove !== undefined)
-            this.orcaStableApprove = dependencies.orcaStableApprove;
-        if (dependencies.orcaStableExecute !== undefined)
-            this.orcaStableExecute = dependencies.orcaStableExecute;
-        if (dependencies.orcaStableRecoverNoSend !== undefined)
-            this.orcaStableRecoverNoSend = dependencies.orcaStableRecoverNoSend;
-        if (dependencies.orcaStableRelease !== undefined)
-            this.orcaStableRelease = dependencies.orcaStableRelease;
-        if (dependencies.orcaStableObserve !== undefined)
-            this.orcaStableObserve = dependencies.orcaStableObserve;
+        if (dependencies.orcaStableLegacy !== undefined)
+            this.orcaStableLegacy = dependencies.orcaStableLegacy;
         if (dependencies.jupiterV1Runtime !== undefined)
             this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
         if (dependencies.facilitatorGasless !== undefined)
