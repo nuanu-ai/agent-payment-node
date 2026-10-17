@@ -11,6 +11,9 @@ import { bridgeOwner } from "./owner.js";
 import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
+/** Every phase of a Circle Base USDC approval, and its outcomes (a safe receipt either way, or proven never sent). */
+export const CIRCLE_APPROVAL_PHASES = ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect"];
+export const CIRCLE_APPROVAL_RESOLVED_PHASES = ["completed", "confirmed_revert", "failed_before_effect"];
 export function publicCircleApproval(record) {
     const { rawTransaction: _raw, ...publicRecord } = record;
     return publicRecord;
@@ -295,7 +298,7 @@ export class CircleV2ApprovalExecutor {
         return r;
     }
     async observe(r) {
-        if (r.phase === "completed" || r.phase === "confirmed_revert" || r.phase === "failed_before_effect" || r.phase === "prepared")
+        if (CIRCLE_APPROVAL_RESOLVED_PHASES.includes(r.phase) || r.phase === "prepared")
             return r;
         if (r.submissionAttempts === 0 || r.transactionHash === null || r.rawTransaction === null)
             return await this.unknown(r, "no_submission_marker");

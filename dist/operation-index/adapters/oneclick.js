@@ -1,4 +1,4 @@
-import { OneClickSourceJournal, oneClickRecordLane } from "../../lifi/near-oneclick-source-journal.js";
+import { ONECLICK_SOURCE_EDGES, OneClickSourceJournal, oneClickRecordLane } from "../../lifi/near-oneclick-source-journal.js";
 import { field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord } from "../adapter.js";
 import { dataOutcome } from "../../core-outcome.js";
 import { evmClaim, pastUnstartedDeadline } from "./family-claims.js";
@@ -18,7 +18,7 @@ export const oneClickSourceAdapter = {
     // The operation ID derives from lane, profile and key, so replay is by ID.
     identity: record => ({ profileHash: record.profileHash, operationId: record.operationId, idempotencyHash: null, requestHash: null }),
     claims: record => readableClaims(() => [evmClaim(oneClickRecordLane(record).origin.chainId, record.payer)]),
-    terminal: record => record.phase === "source_observed" || pastUnstartedDeadline(record.effectiveDeadline),
+    terminal: record => ONECLICK_SOURCE_EDGES[record.phase]?.length === 0 || pastUnstartedDeadline(record.effectiveDeadline),
     state: record => record.phase,
     // A record whose lane cannot be read names no chain; its profile is quarantined instead.
     salvage: raw => salvageRecord(raw, value => [salvageEvm(oneClickRecordLane(value).origin.chainId, field(value, "payer"))]),

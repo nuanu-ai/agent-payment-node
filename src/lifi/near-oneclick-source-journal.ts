@@ -103,6 +103,13 @@ function nonceReservationPath(chainId: number, profileHash: string, payer: strin
 function nonceReservation(record: OneClickSourceRecord): string {
   return nonceReservationPath(oneClickRecordLane(record).origin.chainId, record.profileHash, record.payer, record.sourceCall.nonce);
 }
+/** Where each phase may go next; `source_observed` (a safe source receipt, success or revert) is the only outcome. */
+export const ONECLICK_SOURCE_EDGES: Readonly<Record<OneClickSourceRecord["phase"], readonly OneClickSourceRecord["phase"][]>> = {
+  prepared: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
+  submitting: ["submitted_pending", "unknown_finality", "source_observed"],
+  submitted_pending: ["unknown_finality", "source_observed"],
+  unknown_finality: ["source_observed"], source_observed: [] };
+
 export class OneClickSourceJournal extends SecureStateStore {
   private path(id: string): string { stateIdentifier(id, "operation ID"); return `oneclick-source/${id}.json`; }
   async load(id: string): Promise<OneClickSourceRecord | null> {
@@ -159,12 +166,7 @@ export class OneClickSourceJournal extends SecureStateStore {
     await this.initialize();
     return this.withLocks([`oneclick:${id}`, `oneclick-nonces`], async () => {
       const prior = await this.load(id); if (prior === null || prior.integrityHash !== expectedHash) blocked();
-      const edges: Record<OneClickSourceRecord["phase"], readonly OneClickSourceRecord["phase"][]> = {
-        prepared: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
-        submitting: ["submitted_pending", "unknown_finality", "source_observed"],
-        submitted_pending: ["unknown_finality", "source_observed"],
-        unknown_finality: ["source_observed"], source_observed: [] };
-      if (!edges[prior.phase].includes(phase)) blocked();
+      if (!ONECLICK_SOURCE_EDGES[prior.phase].includes(phase)) blocked();
       const { integrityHash: _old, ...body } = prior;
       const next = { ...body, ...changes, phase, updatedAt: new Date().toISOString() };
       // Validate the exact sealed transaction before reserving its nonce, so a rejected seal leaves no reservation.

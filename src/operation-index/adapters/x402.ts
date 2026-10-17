@@ -4,13 +4,14 @@ import { abandonProviderX402 } from "../../operation-abandon-provider.js";
 import { assertResumeOptions } from "../../operation-command-options.js";
 import { evmConflictDomain, sharedEvmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { localX402Outcome, providerX402Outcome, x402ReceiptOutcome } from "../../operation-x402-outcome.js";
-import { publicProviderX402Operation, type ProviderX402OperationRecord } from "../../provider-x402-model.js";
+import { PROVIDER_X402_TERMINAL_STATES, publicProviderX402Operation, type ProviderX402OperationRecord } from "../../provider-x402-model.js";
 import { ProviderX402Repository } from "../../provider-x402-repository.js";
 import type { RuntimeContext } from "../../runtime.js";
 import { StateStore } from "../../state.js";
 import { X402AbandonService } from "../../x402-abandon.js";
 import { X402Service } from "../../x402-service.js";
 import { publicX402Operation, type X402OperationRecord, type X402SettlementWaitProjection } from "../../x402-state-integrity.js";
+import { STATE_SHAPE } from "../../x402-state-shape.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
 import { providerClaims, UNREADABLE_PROVIDER_CLAIM } from "../types.js";
@@ -35,6 +36,11 @@ export function x402Domains(operation: X402StoredOperation): readonly MoneyConfl
     : evmConflictDomain(8453, operation.record.provider.payer)];
 }
 
+export function x402Terminal(operation: { readonly strategy: X402StoredOperation["strategy"]; readonly record: { readonly state: string } }): boolean {
+  return operation.strategy === "local" ? Object.hasOwn(STATE_SHAPE, operation.record.state) && STATE_SHAPE[operation.record.state as keyof typeof STATE_SHAPE].terminal
+    : (PROVIDER_X402_TERMINAL_STATES as readonly string[]).includes(operation.record.state);
+}
+
 export const x402Adapter: OperationFamilyAdapter<X402StoredOperation> = {
   family: "x402_fetch",
   stores: [STORE],
@@ -51,7 +57,8 @@ export const x402Adapter: OperationFamilyAdapter<X402StoredOperation> = {
     ...(operation.strategy === "local" ? [] : providerClaims(operation.record.provider.providerId,
       operation.record.provider.accountBindingHash, operation.record.provider.payer)),
   ]),
-  terminal: operation => operation.record.terminal,
+  // The family's own outcome tables, which its validators tie each record's `terminal` flag to.
+  terminal: x402Terminal,
   state: operation => operation.record.state,
   salvage: raw => salvageRecord(raw, value => {
     const schema = field(value, "schemaVersion");

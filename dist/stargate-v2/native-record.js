@@ -56,6 +56,10 @@ export function seal(value) {
     const { integrityHash: _old, ...body } = value;
     return Object.freeze({ ...body, integrityHash: hashObject(body) });
 }
+/** Every phase of a native Stargate journal; `observed` and `failed_confirmed_revert` are its outcomes (nothing signs or lands after them). */
+export const STARGATE_NATIVE_PHASES = ["prepared", "approved", "submission_started", "submitted", "unknown_finality",
+    "observed", "failed_confirmed_revert"];
+export const STARGATE_NATIVE_TERMINAL_PHASES = ["observed", "failed_confirmed_revert"];
 export function validateRecord(value) {
     if (!isPlainRecord(value) || !STARGATE_NATIVE_SCHEMAS.includes(String(value.schemaVersion)))
         fail("APN_STATE_CORRUPT", "schema");

@@ -4,6 +4,9 @@ import { type CircleAttestation } from "./protocol.js";
 import { type CircleOperationV1, type CircleRole, type CircleEnvelope } from "./operation-model.js";
 import { type CircleFundingBindingV2, type CircleFundingFeeV2 } from "./funding-binding.js";
 import type { CircleExternalMintNotice } from "./funding-external-mint.js";
+/** Every state a v2 (funding) Circle route may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export declare const CIRCLE_V2_STATES: readonly string[];
+export declare const CIRCLE_V2_TERMINAL_STATES: readonly string[];
 export interface CircleFundingOperationV2 extends Omit<CircleOperationV1, "schemaVersion" | "externalFulfillment" | "nonceRetirement" | "state"> {
     readonly schemaVersion: "apn.circle-v2-evm-operation.v2";
     readonly funding: CircleFundingBindingV2;

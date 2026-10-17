@@ -3,7 +3,7 @@ import { type EvmAsset } from "./evm-asset.js";
 import { type DirectEvmChainId } from "./evm-direct-networks.js";
 import { type DirectEvmStep } from "./evm-direct-reads.js";
 import type { EvmBalanceSnapshot, EvmDirectReads, EvmFeeQuote, EvmRpcPort, EvmTransactionInput } from "./evm-ports.js";
-import type { Address, Economics, OperationRecord } from "./model.js";
+import { type Address, type Economics, type OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import { type EvmNativeCustody } from "./evm-native-custody.js";
 import { type Cleanup85NativeBinding } from "./legacy/cleanup85-native-records.js";

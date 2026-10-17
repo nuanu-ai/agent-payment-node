@@ -1,8 +1,8 @@
-import type { FacilitatorOperationRecord } from "../../facilitator-gasless/operation-model.js";
-import type { GaslessOperationRecord } from "../../gasless/operation-model.js";
-import type { MetaMaskGaslessOperationRecord } from "../../metamask-gasless/operation-model.js";
+import { type FacilitatorOperationRecord } from "../../facilitator-gasless/operation-model.js";
+import { type GaslessOperationRecord } from "../../gasless/operation-model.js";
+import { type MetaMaskGaslessOperationRecord } from "../../metamask-gasless/operation-model.js";
 import { type MoneyConflictDomain } from "../../operation-conflict-domain.js";
-import type { SmartAccountGaslessOperationRecord } from "../../smart-account-gasless/operation-model.js";
+import { type SmartAccountGaslessOperationRecord } from "../../smart-account-gasless/operation-model.js";
 import { type OperationFamilyAdapter } from "../adapter.js";
 export declare const gaslessDomains: (record: GaslessOperationRecord) => readonly MoneyConflictDomain[];
 export declare const metaMaskGaslessDomains: (record: MetaMaskGaslessOperationRecord) => readonly MoneyConflictDomain[];

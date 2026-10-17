@@ -6,6 +6,10 @@ import { validateEvmNativeCustody } from "../evm-native-custody.js";
 import { validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleLegacyRoute } from "./catalog.js";
 import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, encodeCircleBurn, encodeCircleMint } from "./protocol.js";
+/** Every state a v1 Circle route may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export const CIRCLE_V1_STATES = ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required",
+    "completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"];
+export const CIRCLE_V1_TERMINAL_STATES = ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"];
 export function circleBlocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", `Circle EVM operation blocked: ${reason}.`, { reason }); }
 export function circleCorrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Circle EVM journal is invalid: ${reason}.`, { reason }); }
 export function circleEnvelope(input) { return { ...input, envelopeHash: hashObject(input) }; }
@@ -36,7 +40,7 @@ export function validateCircle(value) {
     validateEvmNativeCustody(op.destinationCustody);
     if (op.profile !== "evm-live-buyer" || op.destinationProfile !== route.gasPayerProfile || op.sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || op.destinationCustody.walletAddress !== route.gasPayer ||
         op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > 100n ||
-        !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"].includes(op.state) ||
+        !CIRCLE_V1_STATES.includes(op.state) || op.terminal !== CIRCLE_V1_TERMINAL_STATES.includes(op.state) ||
         !Number.isFinite(Date.parse(op.preparedAt)) || !Number.isFinite(Date.parse(op.expiresAt)) || Date.parse(op.expiresAt) <= Date.parse(op.preparedAt) ||
         !/^(?:0|40100)$/u.test(op.residualAllowanceAtomic) || typeof op.usageFinalized !== "boolean" || !Array.isArray(op.usage) || !Array.isArray(op.policies))
         circleCorrupt("intent");
