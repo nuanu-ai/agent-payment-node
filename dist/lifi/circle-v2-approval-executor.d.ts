@@ -5,11 +5,12 @@ import { type CircleV2ApprovalLimits, type CircleV2ApprovalPreparation, type Cir
 import type { BridgeProtocolReceipt } from "./model.js";
 import type { BridgeRpcPort } from "./ports.js";
 import { type EvmBatchRead, type EvmUnlandedEvidence } from "../evm-unlanded-proof.js";
+import type { OperationAbandonApprovalPort } from "../operation-abandon-approval.js";
 /**
  * Every phase of a Circle Base USDC approval, and its outcomes: a safe receipt either way, proven never sent, or proven
  * never to land (another transaction took its nonce at finality while the node knows neither it nor a receipt).
  */
-export declare const CIRCLE_APPROVAL_PHASES: readonly ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect", "failed_proven_superseded"];
+export declare const CIRCLE_APPROVAL_PHASES: readonly ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect", "failed_proven_superseded", "abandoned_unknown"];
 export type CircleApprovalPhase = typeof CIRCLE_APPROVAL_PHASES[number];
 export declare const CIRCLE_APPROVAL_RESOLVED_PHASES: readonly CircleApprovalPhase[];
 export interface CircleApprovalRecord {
@@ -126,3 +127,9 @@ export declare class CircleV2ApprovalExecutor {
     private unknown;
     private observe;
 }
+/**
+ * The owner exit (R4 exit 3) of an approval whose send may have left APN and that no proof decides yet: once its
+ * preparation expired, TTY consent ends it `abandoned_unknown`. Nothing is signed or sent; the transaction may still land
+ * and set the allowance. Reads only the state root, as `apn operation abandon` does; status remains the proof path.
+ */
+export declare function abandonCircleApproval(state: StateStore, id: string, consent: OperationAbandonApprovalPort, now: () => number): Promise<CircleApprovalRecord>;

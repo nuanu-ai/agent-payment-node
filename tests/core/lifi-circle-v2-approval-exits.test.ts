@@ -9,6 +9,7 @@ import test from "node:test";
 import { keccak256, pad, toHex, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { runCli } from "../../src/cli.js";
+import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { readEvmUnlandedEvidence } from "../../src/evm-unlanded-proof.js";
 import { CircleV2ApprovalExecutor, circleApprovalProofBatch, type CircleApprovalRecord, type CircleApprovalRpc } from "../../src/lifi/circle-v2-approval-executor.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
@@ -48,7 +49,7 @@ async function setup(t: test.TestContext) {
     return result.data as CircleApprovalRecord & { allowance: Record<string, unknown> };
   };
   const indexState = async () => { const index = new OperationIndex(state); await index.settle(record.id); return (await index.find(record.id))?.state; };
-  return { id: record.id, chain, sent, execute: () => circleApproval.execute(record.id, async () => true), status, indexState };
+  return { id: record.id, root: temp.root, chain, sent, execute: () => circleApproval.execute(record.id, async () => true), status, indexState };
 }
 
 test("an ambiguous approval without a receipt stays open while the finalized nonce is not past or the node knows it, then ends superseded", async t => {
@@ -89,4 +90,20 @@ test("the production proof reads one batch on APN_BASE_RPC_URL at the finalized 
   assert.deepEqual(posts, [{ url: "https://base.example/rpc", rows: [["eth_chainId", []], ["eth_getTransactionCount", [account.address, "finalized"]],
     ["eth_getTransactionReceipt", [hash]], ["eth_getTransactionByHash", [hash]]] }]);
   assert.throws(() => circleApprovalProofBatch({})(), { code: "APN_RPC_CONFIG" });
+});
+
+test("owner abandon of an ambiguous approval: refused before expiry, TTY consent after it ends abandoned_unknown; a replay asks nothing", async t => {
+  const f = await setup(t), calls: OperationAbandonIntent[] = [], approval: OperationAbandonApprovalPort = { approve: async intent => { calls.push(intent); } };
+  assert.equal((await f.execute()).phase, "unknown_finality");
+  const abandon = (at: number) => runCli(["operation", "abandon", "--operation", f.id], {}, { stateRoot: f.root, clock: { now: () => new Date(at) },
+    operationAbandonApproval: approval } as never);
+  assert.equal((await abandon(now())).error?.details?.reason, "circle_approval_abandon_before_expiry");
+  const done = await abandon(now() + 120_000);
+  assert.equal(done.ok, true, JSON.stringify(done.error));
+  assert.match(JSON.stringify(done.operation ?? done.data), /"phase":"abandoned_unknown".*"effect":"unknown_may_still_land"/u);
+  assert.deepEqual([calls.length, calls[0]!.recipient, calls[0]!.amountAtomic], [1, spender, "430000"]);
+  assert.match(calls[0]!.outcomeNote, /UNKNOWN/u);
+  assert.equal(await f.indexState(), "terminal");
+  assert.equal((await abandon(now() + 180_000)).ok, true);
+  assert.deepEqual([calls.length, f.sent.length], [1, 1]);
 });
