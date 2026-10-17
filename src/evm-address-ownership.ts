@@ -66,22 +66,6 @@ async function assertExclusiveEvmOwnerWithProfileFilter(
   }
 }
 
-/** Execution-only Relay owner check. Call immediately before signing and again
- * before first submission. No network operation belongs in this critical section. */
-export async function assertExclusiveRelayExecutionOwner(
-  state: StateStore,
-  permissions: Pick<EncryptedSmartAccountPermissionStore, "listAll">,
-  address: string,
-  ownProfileHash: string,
-): Promise<void> {
-  if (!ADDRESS.test(address) || !PROFILE_HASH.test(ownProfileHash)) {
-    throw new ApnError("APN_INVALID_INPUT", "Relay execution ownership identity is invalid.");
-  }
-  await state.withLocks([evmAddressLock(address)], async () => {
-    await assertExclusiveEvmOwnerIncludingGrants(state, permissions, address, ownProfileHash);
-  });
-}
-
 /** Caller holds evmAddressLock(address), including through the effect boundary. */
 export async function assertExclusiveEvmOwnerIncludingGrants(
   state: StateStore,

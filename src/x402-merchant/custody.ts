@@ -1,9 +1,9 @@
 import { MerchantClaims } from "./claims.js";
 import { assertMerchantAuthority, type MerchantAuthority } from "./authority.js";
-import { createCipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { parseTransaction, recoverTransactionAddress, keccak256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { sealEnvelope, type EnvelopeSpec } from "../custody-envelope.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -29,6 +29,9 @@ export async function verifyMerchantRaw(o: MerchantOperation, raw: Hex) {
         refuse("merchant_signed_transaction_binding");
     return keccak256(raw);
 }
+type MaterialBinding = { readonly schemaVersion: "apn.merchant-material.v1"; readonly operationId: string; readonly profileHash: string; readonly fingerprint: string; readonly txHash: Hex };
+/** Seal-only: the binding is both the HKDF info and the AAD; the plaintext is the raw transaction's ASCII. */
+const MATERIAL: Pick<EnvelopeSpec<MaterialBinding>, "info" | "aad"> = { info: binding => canonicalJson(binding), aad: binding => binding };
 export class MerchantCustody extends SecureStateStore implements MerchantCustodyPort {
     private readonly wallets: EncryptedWalletStore;
     constructor(private readonly state: StateStore, private readonly wrapping: WrappingSecretPort, private readonly now: () => Date) { super(state.root); this.wallets = new EncryptedWalletStore(state, wrapping); }
@@ -67,23 +70,15 @@ export class MerchantCustody extends SecureStateStore implements MerchantCustody
         const txHash = await verifyMerchantRaw(o, raw), secret = await this.wrapping.load();
         if (secret === null)
             refuse("merchant_wrapping_secret_missing");
-        const salt = randomBytes(32), nonce = randomBytes(12), binding = { schemaVersion: "apn.merchant-material.v1", operationId: o.operationId, profileHash: o.profileHash, fingerprint: o.fingerprint, txHash };
-        const key = Buffer.from(hkdfSync("sha256", secret, salt, Buffer.from(canonicalJson(binding)), 32)), plain = Buffer.from(raw, "ascii");
+        const binding: MaterialBinding = { schemaVersion: "apn.merchant-material.v1", operationId: o.operationId, profileHash: o.profileHash, fingerprint: o.fingerprint, txHash };
         try {
-            const cipher = createCipheriv("aes-256-gcm", key, nonce);
-            cipher.setAAD(Buffer.from(canonicalJson(binding)));
-            const encrypted = Buffer.concat([cipher.update(plain), cipher.final()]);
+            const { header: _binding, ...sealed } = sealEnvelope(secret, MATERIAL, () => binding, Buffer.from(raw, "ascii"));
             await this.initialize();
             await this.ensureDirectory("merchant-material");
-            await this.writeJson(`merchant-material/${o.operationId}.json`, { ...binding, salt: salt.toString("base64"), nonce: nonce.toString("base64"), ciphertext: encrypted.toString("base64"), tag: cipher.getAuthTag().toString("base64"), materialHash: hashObject({ txHash, fingerprint: o.fingerprint }) }, true);
-            encrypted.fill(0);
+            await this.writeJson(`merchant-material/${o.operationId}.json`, { ...binding, ...sealed, materialHash: hashObject({ txHash, fingerprint: o.fingerprint }) }, true);
         }
         finally {
             secret.fill(0);
-            salt.fill(0);
-            nonce.fill(0);
-            key.fill(0);
-            plain.fill(0);
         }
     }
 }

@@ -7,6 +7,7 @@ import { ApnError } from "./errors.js";
 const SECURITY = "/usr/bin/security";
 const SERVICE = "ai.nuanu.apn.wrapping-secret.v1";
 const ACCOUNT = "default";
+const LABEL = "Nuanu APN wrapping secret";
 const MAX_OUTPUT_BYTES = 4 * 1024;
 const SECURITY_TIMEOUT_MS = 15_000;
 
@@ -58,9 +59,7 @@ export class MacOSLoginKeychainSecret implements WrappingSecretPort {
 
   async load(): Promise<Buffer | null> {
     if (this.cached !== undefined) return privateCopy(this.cached);
-    const result = await this.security([
-      "find-generic-password", "-a", ACCOUNT, "-s", SERVICE, "-w", this.loginKeychain,
-    ]);
+    const result = await this.security(this.findArgs());
     try {
       if (result.code === 44) return null;
       if (result.code !== 0) throw keychainUnavailable();
@@ -92,29 +91,45 @@ export class MacOSLoginKeychainSecret implements WrappingSecretPort {
     const current = await this.load();
     if (current !== null) return current;
 
+    // The new secret reaches security(1) only on stdin, never its argv, where any same-user `ps` would see it. The
+    // same interactive session reads the item back: only a read-back equal to the generated secret proves the add.
     const generated = randomBytes(32);
     const encoded = generated.toString("base64");
-    let result: SecurityResult;
+    let script: Buffer | undefined, result: SecurityResult;
     try {
-      result = await this.security([
-        "add-generic-password", "-a", ACCOUNT, "-s", SERVICE,
-        "-l", "Nuanu APN wrapping secret", "-w", encoded, this.loginKeychain,
-      ]);
+      script = Buffer.from(`${securityLine(["add-generic-password", "-a", ACCOUNT, "-s", SERVICE, "-l", LABEL, "-w", encoded,
+        this.loginKeychain])}\n${securityLine(this.findArgs())}\n`, "utf8");
+      result = await this.security(["-i"], script);
     } catch (error) {
       generated.fill(0);
       throw error;
-    }
+    } finally { script?.fill(0); }
+    const stored = result.stdout.toString("utf8").trim() === encoded;
     result.stdout.fill(0);
-    if (result.code === 0) {
+    if (stored) {
       this.remember(generated);
       return generated;
     }
 
+    // Another process created the item first, or the add failed: the Keychain decides.
     generated.fill(0);
     const raced = await this.load();
     if (raced !== null) return raced;
     throw keychainUnavailable();
   }
+
+  private findArgs(): readonly string[] {
+    return ["find-generic-password", "-a", ACCOUNT, "-s", SERVICE, "-w", this.loginKeychain];
+  }
+}
+
+/** One `security -i` command line. Arguments are bare or double-quoted; anything that would need escaping is refused. */
+function securityLine(args: readonly string[]): string {
+  return args.map((arg) => {
+    if (/^[A-Za-z0-9._/+=:@-]+$/u.test(arg)) return arg;
+    if (/^[^"'\\\x00-\x1f\x7f]+$/u.test(arg)) return `"${arg}"`;
+    throw keychainUnavailable();
+  }).join(" ");
 }
 
 export function loginKeychainPath(homedir: string): string {

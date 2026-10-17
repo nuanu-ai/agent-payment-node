@@ -1,12 +1,12 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
+import { openEnvelope, sealCanonicalJson, type EnvelopeSpec } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import type { ChainAccount, ChainWalletStoragePort, DirectRailName, RailSignedEffect } from "./direct-rail-ports.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { canonicalProfile } from "./wallet-policy.js";
 
-const ENVELOPE = "apn.chain-wallet-envelope.v1";
+const ENVELOPE = "apn.chain-wallet-envelope.v1" as const;
 const SECRET = "apn.chain-wallet-secret.v1";
 const HASH = /^[a-f0-9]{64}$/u;
 interface SecretState { readonly version: typeof SECRET; readonly seedHex: string; readonly effects: Record<string, RailSignedEffect> }
@@ -18,6 +18,15 @@ interface Envelope {
   readonly ciphertext: string;
   readonly tag: string;
 }
+
+type Header = Omit<Envelope, "ciphertext" | "tag">;
+/** The header is the AAD. One error for every failure, as the store has always reported. */
+const SEAL: EnvelopeSpec<Header> = {
+  info: header => `apn.chain-wallet.v1\0${header.account.rail}\0${header.account.profile}\0${header.account.identityHash}`,
+  aad: header => header,
+  maxFieldBytes: null,
+  fail: () => corrupt(),
+};
 
 /** Call mutations while holding the common profile lock. No private data is projected. */
 export class ChainAccountStore extends SecureStateStore implements ChainWalletStoragePort {
@@ -182,36 +191,23 @@ export class ChainAccountStore extends SecureStateStore implements ChainWalletSt
     return wrapping;
   }
 
+  /** The stored plaintext is parsed as JSON without a canonical-bytes check, as every release has read it. */
   private async decrypt(envelope: Envelope): Promise<SecretState> {
     const wrapping = await this.requiredWrapping();
-    const key = deriveKey(wrapping, decode(envelope.salt, 32), envelope.account);
-    let plaintext: Buffer | undefined;
     try {
-      const decipher = createDecipheriv("aes-256-gcm", key, decode(envelope.nonce, 12), { authTagLength: 16 });
-      decipher.setAAD(Buffer.from(canonicalJson(header(envelope)), "utf8"));
-      decipher.setAuthTag(decode(envelope.tag, 16));
-      plaintext = Buffer.concat([decipher.update(decode(envelope.ciphertext)), decipher.final()]);
-      return validateSecret(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext)) as unknown);
+      const { ciphertext: _ciphertext, tag: _tag, ...header } = envelope;
+      return await openEnvelope(wrapping, SEAL, header, envelope,
+        plaintext => validateSecret(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(plaintext)) as unknown));
     } catch { return corrupt(); }
-    finally { plaintext?.fill(0); key.fill(0); wrapping.fill(0); }
+    finally { wrapping.fill(0); }
   }
 
   private async saveEncrypted(account: ChainAccount, secret: SecretState, wrapping: Buffer): Promise<void> {
     validateChainAccount(account); validateSecret(secret);
     if (wrapping.length !== 32) corrupt();
-    const salt = randomBytes(32); const nonce = randomBytes(12);
-    const key = deriveKey(wrapping, salt, account);
-    const envelopeHeader = { schemaVersion: ENVELOPE, account, salt: salt.toString("base64"), nonce: nonce.toString("base64") } as const;
-    const plaintext = Buffer.from(canonicalJson(secret), "utf8");
-    try {
-      const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      cipher.setAAD(Buffer.from(canonicalJson(envelopeHeader), "utf8"));
-      const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-      await this.ensureDirectory(`chain-wallets/${account.rail}`);
-      await this.writeJson(this.walletPath(account.profile, account.rail), {
-        ...envelopeHeader, ciphertext: ciphertext.toString("base64"), tag: cipher.getAuthTag().toString("base64"),
-      });
-    } finally { plaintext.fill(0); key.fill(0); }
+    const sealed = sealCanonicalJson(wrapping, SEAL, (salt, nonce) => ({ schemaVersion: ENVELOPE, account, salt, nonce }), secret);
+    await this.ensureDirectory(`chain-wallets/${account.rail}`);
+    await this.writeJson(this.walletPath(account.profile, account.rail), { ...sealed.header, ciphertext: sealed.ciphertext, tag: sealed.tag });
   }
 
   private async saveAccount(account: ChainAccount): Promise<void> {
@@ -268,10 +264,6 @@ function parseEnvelope(value: unknown): Envelope {
   const envelope = value as unknown as Envelope;
   decode(envelope.salt, 32); decode(envelope.nonce, 12); decode(envelope.tag, 16); decode(envelope.ciphertext);
   return envelope;
-}
-function header(envelope: Envelope) { const { ciphertext: _ciphertext, tag: _tag, ...value } = envelope; return value; }
-function deriveKey(wrapping: Buffer, salt: Buffer, account: ChainAccount): Buffer {
-  return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(`apn.chain-wallet.v1\0${account.rail}\0${account.profile}\0${account.identityHash}`, "utf8"), 32));
 }
 function decode(value: string, length?: number): Buffer {
   if (typeof value !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)) corrupt();

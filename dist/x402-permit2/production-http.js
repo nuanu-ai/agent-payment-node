@@ -3,7 +3,6 @@ import { isIP } from "node:net";
 import { rootCertificates } from "node:tls";
 import { canonicalJson, domainHash, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { LocalWalletNative } from "../local-wallet-native.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, unbracket } from "../network-policy.js";
 import { decodePermit2PaymentSignatureHeader, encodePermit2PaymentSignatureHeader } from "../x402-codec.js";
 import { decodeX402RequestBody, normalizeX402HttpRequest } from "../x402-http-request.js";
@@ -11,10 +10,11 @@ const MAX_HEADER_PAIRS = 64, MAX_HEADER_NAME_BYTES = 256, MAX_CONTROL_VALUE_BYTE
 const MAX_AGGREGATE_HEADER_BYTES = 96 * 1024, MAX_BODY_BYTES = 256 * 1024;
 const PAYMENT_RESPONSE_HEADERS = new Set(["payment-response", "x-payment-response"]);
 const CONTROL_HEADERS = new Set(["payment-required", "payment-signature", ...PAYMENT_RESPONSE_HEADERS]);
-/** Concrete single-attempt transport. Only the actual native's private dispatch execution admits it. */
+/** Concrete single-attempt transport for one attempt that sendPermit2Production admitted. */
 export class Permit2ProductionHttps {
-    async submit(execution) {
-        const { record, signal } = LocalWalletNative.permit2HttpMaterial(execution, this);
+    async submit(attempt) {
+        attempt.assertCurrent();
+        const { record, signal } = attempt;
         const request = normalizeX402HttpRequest(record.material.checked.request), signed = record.exposureJournal?.signed;
         if (signed === undefined || signed === null || record.exposureJournal?.request?.attempt !== 1 ||
             record.exposureJournal.request.requestHash !== record.material.checked.requestHash ||
@@ -28,7 +28,7 @@ export class Permit2ProductionHttps {
         const endpoint = parsePublicHttpsUrl(request.url, "APN_HTTP_CONFIG", "Seller URL", 2048);
         const pending = new Set();
         const track = (job) => { pending.add(job); void job.then(() => pending.delete(job), () => pending.delete(job)); return job; };
-        const owner = () => track(LocalWalletNative.assertPermit2HttpOwner(execution, this));
+        const owner = () => track(attempt.owner());
         try {
             await owner();
             const addresses = await track(resolvePublicAddresses(endpoint, "APN_HTTP_CONFIG", "Seller URL"));
@@ -57,7 +57,7 @@ export class Permit2ProductionHttps {
                         throw refused();
                 };
                 try {
-                    LocalWalletNative.consumePermit2HttpStep(execution, this, "construct");
+                    attempt.step("construct");
                     wire = httpsRequest(endpoint, { method: request.method, agent: false, maxHeaderSize: 128 * 1024,
                         family: selected.family, rejectUnauthorized: true, ca: [...rootCertificates],
                         ...(isIP(hostname) === 0 ? { servername: hostname } : {}), headers,
@@ -120,7 +120,7 @@ export class Permit2ProductionHttps {
                                     if (settled)
                                         return;
                                     tls(incoming.socket);
-                                    LocalWalletNative.permit2HttpMaterial(execution, this);
+                                    attempt.assertCurrent();
                                     settled = true;
                                     signal.removeEventListener("abort", fail);
                                     resolve({ status, rawHeaderPairs: pairs, bodyBytes: Buffer.concat(chunks, total), finalUrl: request.url,
@@ -145,7 +145,7 @@ export class Permit2ProductionHttps {
                                     if (settled)
                                         return;
                                     tls(socket);
-                                    LocalWalletNative.consumePermit2HttpStep(execution, this, "end");
+                                    attempt.step("end");
                                     ended = true;
                                     wire.end(body);
                                 }

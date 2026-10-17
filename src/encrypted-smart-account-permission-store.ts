@@ -1,8 +1,7 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { TextDecoder } from "node:util";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
+import { openNested, sealNested, type EnvelopeSpec, type NestedHeader } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import {
@@ -34,6 +33,14 @@ interface PermissionEnvelope {
   };
 }
 
+const ENVELOPE: EnvelopeSpec<{ readonly schema_version: typeof ENVELOPE_VERSION; readonly profile_hash: string } & NestedHeader> = {
+  info: header => `${ENVELOPE_VERSION}\0${header.profile_hash}`,
+  aad: header => header,
+  maxFieldBytes: null,
+  fail: failure => corrupt(failure === "authentication" ? "Smart Account permission authentication or decryption failed."
+    : failure === "canonical_plaintext" ? "Smart Account permission plaintext is not canonical." : "Smart Account permission envelope encoding is invalid."),
+};
+
 export interface SmartAccountPermissionStorePort {
   load(profileHash: string): Promise<SmartAccountPermissionRecord | null>;
   save(record: SmartAccountPermissionRecord): Promise<void>;
@@ -58,7 +65,7 @@ export class EncryptedSmartAccountPermissionStore implements SmartAccountPermiss
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) corrupt("The Smart Account wrapping secret is missing.");
     try {
-      const record = decrypt(envelope, wrapping);
+      const record = await openNested(wrapping, ENVELOPE, envelope, validateProtectedRecord);
       if (record.profile_hash !== profileHash) corrupt("Smart Account permission path binding is invalid.");
       return record;
     }
@@ -88,37 +95,10 @@ export class EncryptedSmartAccountPermissionStore implements SmartAccountPermiss
 
   private async writeProtected(record: SmartAccountPermissionRecord): Promise<void> {
     const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
-    const salt = randomBytes(32);
-    const nonce = randomBytes(12);
-    const key = deriveKey(wrapping, salt, record.profile_hash);
-    const header = {
-      schema_version: ENVELOPE_VERSION,
-      profile_hash: record.profile_hash,
-      kdf: { name: "HKDF-SHA-256", salt: salt.toString("base64") },
-      cipher: { name: "AES-256-GCM", nonce: nonce.toString("base64") },
-    } as const;
-    const plaintext = Buffer.from(canonicalJson(record), "utf8");
     try {
-      const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      cipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-      const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-      try {
-        await this.files.write(record.profile_hash, {
-          ...header,
-          cipher: {
-            ...header.cipher,
-            ciphertext: ciphertext.toString("base64"),
-            tag: cipher.getAuthTag().toString("base64"),
-          },
-        });
-      } finally { ciphertext.fill(0); }
-    } finally {
-      plaintext.fill(0);
-      key.fill(0);
-      salt.fill(0);
-      nonce.fill(0);
-      wrapping.fill(0);
-    }
+      await this.files.write(record.profile_hash,
+        sealNested(wrapping, ENVELOPE, { schema_version: ENVELOPE_VERSION, profile_hash: record.profile_hash }, record));
+    } finally { wrapping.fill(0); }
   }
 
   async remove(profileHash: string): Promise<void> {
@@ -170,36 +150,6 @@ class PermissionEnvelopeState extends SecureStateStore {
   }
 }
 
-function decrypt(envelope: PermissionEnvelope, wrapping: Buffer): SmartAccountPermissionRecord {
-  const salt = decodeBase64(envelope.kdf.salt, 32);
-  const nonce = decodeBase64(envelope.cipher.nonce, 12);
-  const ciphertext = decodeBase64(envelope.cipher.ciphertext);
-  const tag = decodeBase64(envelope.cipher.tag, 16);
-  const key = deriveKey(wrapping, salt, envelope.profile_hash);
-  const header = {
-    schema_version: envelope.schema_version,
-    profile_hash: envelope.profile_hash,
-    kdf: envelope.kdf,
-    cipher: { name: envelope.cipher.name, nonce: envelope.cipher.nonce },
-  };
-  let plaintext = Buffer.alloc(0);
-  try {
-    const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-    decipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-    decipher.setAuthTag(tag);
-    plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
-    const value = JSON.parse(text) as unknown;
-    if (canonicalJson(value) !== text) corrupt("Smart Account permission plaintext is not canonical.");
-    return validateProtectedRecord(value);
-  } catch (error) {
-    if (error instanceof ApnError) throw error;
-    corrupt("Smart Account permission authentication or decryption failed.");
-  } finally {
-    salt.fill(0); nonce.fill(0); ciphertext.fill(0); tag.fill(0); key.fill(0); plaintext.fill(0);
-  }
-}
-
 function validateProtectedRecord(value: unknown): SmartAccountPermissionRecord {
   const record = validateSmartAccountPermissionRecord(value);
   try {
@@ -245,19 +195,6 @@ function parseEnvelope(value: unknown, profileHash: string): PermissionEnvelope 
     value.cipher.name !== "AES-256-GCM" || typeof value.cipher.nonce !== "string" ||
     typeof value.cipher.ciphertext !== "string" || typeof value.cipher.tag !== "string") corrupt("Smart Account permission envelope is invalid.");
   return value as unknown as PermissionEnvelope;
-}
-
-function deriveKey(wrapping: Buffer, salt: Buffer, profileHash: string): Buffer {
-  return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(`${ENVELOPE_VERSION}\0${profileHash}`), 32));
-}
-
-function decodeBase64(value: string, length?: number): Buffer {
-  const decoded = Buffer.from(value, "base64");
-  if (decoded.toString("base64") !== value || decoded.length === 0 || (length !== undefined && decoded.length !== length)) {
-    decoded.fill(0);
-    corrupt("Smart Account permission envelope encoding is invalid.");
-  }
-  return decoded;
 }
 
 function corrupt(message: string): never {

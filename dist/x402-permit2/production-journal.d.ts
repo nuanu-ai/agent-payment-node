@@ -1,43 +1,49 @@
-import type { Permit2NativeRequestExecution, Permit2NativeSigningExecution } from "./production-native-capability.js";
-import { type Permit2ForegroundApprovalProof, type Permit2ApprovalBinding } from "./production-approval-provenance.js";
-export interface Permit2SigningContinuation {
-    readonly kind: "permit2-private-signing-continuation";
-}
-interface FirstRequestProof {
-    readonly kind: "permit2-private-first-request-proof";
-}
 import { type AssetUsageReservation } from "../asset-usage-ledger.js";
 import { Permit2ProductionPreparation } from "./production-prepare.js";
 import { Permit2ProductionRepository, type Permit2ProductionRecord } from "./production-repository.js";
 import { type Permit2ProductionSigned } from "./production-signed.js";
 import { type Permit2ObservationProof, type Permit2ObservationMode } from "./production-observer.js";
+import { type Permit2ForegroundApproval } from "./production-approval-provenance.js";
+import { type Permit2SavedIdentity } from "./production-signing-owner.js";
+/**
+ * What an approved first exposure hands to the one signer: the owner's approval and the identity of the saved record
+ * and lease it was written under. Plain values with no private material: the signer re-reads both and signs only while
+ * they are unchanged.
+ */
+export interface Permit2SigningContinuation {
+    readonly approval: Permit2ForegroundApproval;
+    readonly saved: Permit2SavedIdentity;
+}
+/** A saved signed bundle under the owner's approval: the signed hash one request may send, and its lease. */
+export interface Permit2SignedOrigin {
+    readonly approval: Permit2ForegroundApproval;
+    readonly signedHash: string;
+    readonly leaseDigest: string;
+    readonly walletHash: string;
+}
 /** Storage/accounting only. No key, signing, transport or execution permission is returned. */
 export declare class Permit2ProductionJournal extends Permit2ProductionRepository {
     #private;
     private readonly preparation;
     private readonly clock;
-    static markNativeRequestPending(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeRequestExecution): Promise<{
+    /**
+     * Writes attempt 1, the single durable request marker, for the saved signed bundle the origin names, while its paid
+     * approval is current. `first` is true only for the call that wrote it: only that call may send.
+     */
+    markFirstRequest(origin: Permit2SignedOrigin, clock: () => Date): Promise<{
         readonly record: Permit2ProductionRecord;
-        readonly proof: FirstRequestProof | null;
+        readonly first: boolean;
     }>;
-    static consumeNativeFirstRequestProof(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeRequestExecution, proof: FirstRequestProof): Permit2ProductionRecord;
-    static claimNativeSigningContinuation(journal: Permit2ProductionJournal, id: string, continuation: Permit2SigningContinuation, execution: Permit2NativeSigningExecution): Promise<Permit2ProductionRecord>;
-    static assertNativeSigningContinuation(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution): Promise<Permit2ProductionRecord>;
-    static nativeSigningSecond(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution, capturedAt?: number): number;
-    static nativeOriginBinding(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution): Readonly<{
-        binding: Permit2ApprovalBinding;
-        record: Permit2ProductionRecord;
-        lease: AssetUsageReservation;
-    }>;
-    static releaseNativeSigningContinuation(journal: Permit2ProductionJournal, execution: Permit2NativeSigningExecution): void;
-    static storeNativeSigned(journal: Permit2ProductionJournal, id: string, value: Permit2ProductionSigned): Promise<Permit2ProductionRecord>;
     private readonly state;
     private readonly usage;
     constructor(root: string, preparation: Permit2ProductionPreparation, clock?: () => Date);
     /** Initial admission checks current owner. Replays can only reconcile the existing durable hold. */
     markSignatureRisk(id: string): Promise<Permit2ProductionRecord>;
-    /** Genuine UI + atomic first insertion only. No key/sign/HTTP permission is conveyed. */
-    markApprovedSignatureRisk(id: string, proof: Permit2ForegroundApprovalProof): Promise<{
+    /**
+     * The first exposure under the owner's current foreground approval. Only the call that writes it receives a signing
+     * continuation; every replay, and any exposure written without an approval, gets status only.
+     */
+    markApprovedSignatureRisk(id: string, approval: Permit2ForegroundApproval): Promise<{
         readonly record: Permit2ProductionRecord;
         readonly continuation: Permit2SigningContinuation | null;
     }>;
@@ -51,4 +57,5 @@ export declare class Permit2ProductionJournal extends Permit2ProductionRepositor
     /** Persisted intent is sufficient ONLY to match an already-terminal ledger, never to decide a new transition. */
     reconcileTerminal(id: string): Promise<Permit2ProductionRecord>;
 }
-export {};
+/** The saved record still carries the origin's signed bundle under the same lease and wallet binding. */
+export declare function assertSignedOrigin(origin: Permit2SignedOrigin, record: Permit2ProductionRecord, lease: AssetUsageReservation): void;
