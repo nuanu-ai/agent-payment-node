@@ -188,7 +188,6 @@ export type CommandRequest =
     /** Owner tip per gas; replaces the RPC suggestion. */
     readonly priorityFeeWei?: string;
     /** Explicit Linea native, Unichain native or USDC, or Polygon USDC prepare read batching; default is scalar RPC. */
-    readonly batchRpcReads?: true;
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
   | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number;

@@ -184,22 +184,22 @@ test(`${networkName} CLI/MCP policy and x402 share one encrypted state and exact
   context.after(async () => { await client.close(); await server.close(); });
   const invoke = async (name: string, input: Record<string, string>) => (await client.callTool({ name, arguments: input })).structuredContent as unknown as OutputEnvelope;
   const setInput = { profile: "default", chain: network, max_balance_usdc_atomic: NETWORK_LIMITS.maxBalanceUsdcAtomic, max_x402_amount_atomic: NETWORK_LIMITS.maxX402AmountAtomic };
-  const handoff = await invoke("apn_wallet_policy_set_network", setInput);
+  const handoff = await invoke("apn_wallet_policy_set", setInput);
   assert.equal(handoff.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED", JSON.stringify(handoff));
-  assert.match(JSON.stringify(handoff.error?.details), /set-network/); assert.ok(JSON.stringify(handoff.error?.details).includes(network));
-  const configured = await runCli(["wallet", "policy", "set-network", ...Object.entries(setInput).flatMap(([key, value]) => [`--${key.replaceAll("_", "-")}`, value])], {}, {
+  assert.match(JSON.stringify(handoff.error?.details), /wallet policy set --profile default --chain/); assert.ok(JSON.stringify(handoff.error?.details).includes(network));
+  const configured = await runCli(["wallet", "policy", "set", ...Object.entries(setInput).flatMap(([key, value]) => [`--${key.replaceAll("_", "-")}`, value])], {}, {
     ...options, policyApproval: { approve: async (intent) => { fixture.policyApprovals.push(intent); } },
   });
   assert.equal(configured.ok, true, JSON.stringify(configured)); assert.equal(fixture.policyApprovals[0]?.x402Network?.chainId, chainId);
-  const shown = await invoke("apn_wallet_policy_show_network", { profile: "default", chain: network });
+  const shown = await invoke("apn_wallet_policy_show", { profile: "default", chain: network });
   assert.deepEqual(shown.data, configured.data);
-  const base = await invoke("apn_wallet_policy_show_network", { profile: "default", chain: "eip155:8453" });
+  const base = await invoke("apn_wallet_policy_show", { profile: "default", chain: "eip155:8453" });
   assert.equal((base.data as { configured: boolean }).configured, false);
   const input = { profile: "default", chain: network, url: X402_URL, idempotency_key: REQUEST.idempotencyKey, rpc_url: "https://rpc.example", method: "POST", body_base64: "" };
-  const prepared = await invoke("apn_x402_fetch_prepare_network", input);
+  const prepared = await invoke("apn_x402_fetch_prepare", input);
   assert.equal(prepared.ok, true, JSON.stringify(prepared));
   const operationId = (prepared.operation as { operationId: string }).operationId;
-  const cliReplay = await runCli(["x402", "fetch", "prepare-network", ...Object.entries(input).flatMap(([key, value]) => [`--${key.replaceAll("_", "-")}`, value])], {}, options);
+  const cliReplay = await runCli(["x402", "fetch", "prepare", ...Object.entries(input).flatMap(([key, value]) => [`--${key.replaceAll("_", "-")}`, value])], {}, options);
   assert.deepEqual(cliReplay.operation, prepared.operation); assert.equal(fixture.http.calls.length, 1);
   const approved = await invoke("apn_x402_fetch_approve", { operation: operationId, rpc_url: input.rpc_url });
   assert.equal(approved.ok, true, JSON.stringify(approved));

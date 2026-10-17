@@ -8,7 +8,7 @@ export type { ApprovalClass, CommandDefinition, CommandGroup, CommandOption, Eff
 export declare const COMMAND_GROUPS: readonly CommandGroup[];
 export declare const COMMANDS: readonly CommandDefinition[];
 export declare const COMMAND_MANIFEST: {
-    readonly schema_version: "apn.command-manifest.v1";
+    readonly schema_version: "apn.command-manifest.v2";
     readonly product: "agent-payment-node";
     readonly product_version: "0.5.44";
     readonly cli_envelope_version: "apn.cli.v1";
@@ -32,4 +32,5 @@ export declare const COMMAND_MANIFEST: {
     };
     readonly groups: readonly CommandGroup[];
     readonly commands: readonly CommandDefinition[];
+    readonly removed_v1_commands: readonly import("./command-manifest-migration.js").RemovedV1Command[];
 };

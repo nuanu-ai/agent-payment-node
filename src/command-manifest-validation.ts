@@ -12,6 +12,8 @@ const scalarTypes = new Set<ScalarType>(["boolean", "string", "base64", "profile
 const effectClasses = new Set<EffectClass>(["none", "local_read", "network_read", "network_request", "local_write", "payment_prepare", "payment_submit", "recovery"]);
 const approvalClasses = new Set<ApprovalClass>(["none", "foreground_tty", "prior_profile_policy", "prior_operation_authorization"]);
 const sensitivities = new Set<CommandOption["sensitivity"]>(["public", "operator_input", "sensitive_input"]);
+/** v2 removed and merged v1 commands; `removed_v1_commands` names each replacement. */
+export const COMMAND_MANIFEST_SCHEMA = "apn.command-manifest.v2";
 const protectedExampleContent = /private[-_ ]?key|mnemonic|wrapping[-_ ]?secret|raw[-_ ]?signed[-_ ]?transaction|payment[-_ ]?header|reusable[-_ ]?authorization/iu;
 
 export function validateCommandManifest(value: unknown): void {
@@ -21,9 +23,10 @@ export function validateCommandManifest(value: unknown): void {
 function validateCommandManifestShape(value: unknown, installedProductVersion?: string): void {
   if (!isPlainRecord(value) || !hasRequiredKeys(value, [
     "schema_version", "product", "product_version", "cli_envelope_version", "compatibility", "discovery", "groups", "commands",
+    "removed_v1_commands",
   ])) manifestInvalid();
   if (
-    value.schema_version !== "apn.command-manifest.v1" || value.product !== "agent-payment-node" ||
+    value.schema_version !== COMMAND_MANIFEST_SCHEMA || value.product !== "agent-payment-node" ||
     !isSemanticVersion(value.product_version) ||
     (installedProductVersion !== undefined && value.product_version !== installedProductVersion) ||
     value.cli_envelope_version !== OUTPUT_VERSION
@@ -94,6 +97,16 @@ function validateCommandManifestShape(value: unknown, installedProductVersion?: 
     if (commandValue.examples.some((example) => /0x[0-9a-fA-F]{40}/u.test(String(example)) || protectedExampleContent.test(String(example)))) manifestInvalid();
   }
   if (recoveryTargets.some((target) => !commandPaths.has(target))) manifestInvalid();
+  if (!Array.isArray(value.removed_v1_commands)) manifestInvalid();
+  const removedPaths = new Set<string>();
+  for (const rawRemoved of value.removed_v1_commands) {
+    const removed = recordWithKeys(rawRemoved, ["path", "replacement"]);
+    const path = manifestPath(removed.path);
+    // A removed path is gone for good, and its replacement must name a current command.
+    if (knownPaths.has(path) || commandPaths.has(path) || removedPaths.has(path) || !nonempty(removed.replacement) ||
+      ![...commandPaths].some((current) => `${removed.replacement} `.startsWith(`apn ${current} `))) manifestInvalid();
+    removedPaths.add(path);
+  }
 }
 
 export function assertCompatibleManifestEvolution(previous: unknown, next: unknown): void {
@@ -120,6 +133,11 @@ export function assertCompatibleManifestEvolution(previous: unknown, next: unkno
     for (const nextOption of nextOptions.values()) {
       if (!previousOptions.some((item) => item.name === nextOption.name) && nextOption.required === true) manifestInvalid();
     }
+  }
+  const afterRemoved = new Set((next as { readonly removed_v1_commands: readonly { readonly path: readonly string[] }[] }).removed_v1_commands
+    .map((entry) => manifestPath(entry.path)));
+  for (const entry of (previous as { readonly removed_v1_commands: readonly { readonly path: readonly string[] }[] }).removed_v1_commands) {
+    if (!afterRemoved.has(manifestPath(entry.path))) manifestInvalid();
   }
   for (const requiredMarker of before.compatibility.breaking_change_requires_new_schema) {
     if (!after.compatibility.breaking_change_requires_new_schema.includes(requiredMarker)) manifestInvalid();
