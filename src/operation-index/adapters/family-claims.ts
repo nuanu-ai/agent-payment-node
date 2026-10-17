@@ -6,18 +6,7 @@ import { canonicalProfile } from "../../wallet-policy.js";
 import { field, salvageEvm, salvageRail, salvageRecord, type SalvagedRecord } from "../adapter.js";
 import { profileClaim, type OperationClaim } from "../types.js";
 
-/**
- * An effect its family never started cannot start once this long has passed after the family's own signing deadline
- * (every family below refuses to sign past that deadline). It is the bound of the admission lease, so a process that
- * stalls between its deadline check and its effect marker is covered as long as an orphaned admission would be.
- */
-export const UNSTARTED_DEADLINE_MARGIN_MS = 10 * 60_000;
-
-/** True once `deadline` (ISO time or epoch milliseconds) plus the margin has passed; an unreadable deadline never passes. */
-export function pastUnstartedDeadline(deadline: string | number, now = Date.now()): boolean {
-  const at = typeof deadline === "number" ? deadline : Date.parse(deadline);
-  return Number.isFinite(at) && now >= at + UNSTARTED_DEADLINE_MARGIN_MS;
-}
+export { pastUnstartedDeadline, UNSTARTED_DEADLINE_MARGIN_MS } from "../../unstarted-deadline.js";
 
 /** A CAIP-2 chain (`eip155:<id>`, `solana:<genesis>`, `tron:<genesis>`) and its signing account as a conflict domain. */
 export function chainDomain(chain: string, account: string): MoneyConflictDomain {
