@@ -547,5 +547,17 @@
    "ledger:bridge:plain:unknown_finality",
    "sei-gaszip:submitted"
   ]
+ },
+ {
+  "name": "60-v0544-circle-cleanup85-retirement-terminal",
+  "writtenBy": "0.5.44",
+  "origin": "circle-cleanup85-frozen-repair",
+  "kinds": [
+   "circle-sidecar:v1:retirement-authority",
+   "circle-sidecar:v1:retirement-claim:sign",
+   "circle-sidecar:v1:retirement-intent:apn.circle-consumed-burn-retirement.v1",
+   "circle:apn.circle-v2-evm-operation.v1:1329:nonce_retired",
+   "ledger:bridge:consumedAtomic:failed_confirmed_revert"
+  ]
  }
 ]
