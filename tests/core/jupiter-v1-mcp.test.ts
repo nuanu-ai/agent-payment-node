@@ -8,7 +8,7 @@ test("V1 MCP approval and execution return the exact real CLI handoff without co
  const temp=await temporaryState();t.after(temp.cleanup);let secretReads=0,rpcReads=0;
  const server=createMcpServer({stateRoot:temp.root,wrappingSecret:{async load(){secretReads++;throw new Error();},async create(){throw new Error();}},solanaRpcFetch:async()=>{rpcReads++;throw new Error();}});
  const [ct,st]=InMemoryTransport.createLinkedPair();await server.connect(st);const client=new Client({name:"jupiter-v1-boundary",version:"1.0.0"});await client.connect(ct);t.after(async()=>{await client.close();await server.close();});
- for(const action of ["approve","execute"]){const result=await client.callTool({name:`apn_swap_solana_jupiter_${action}`,arguments:{operation:"d".repeat(64)}}),content=result.content[0];assert.ok(content?.type==="text");const envelope=JSON.parse(content.text) as OutputEnvelope;
+ for(const action of ["approve","execute"]){const result=await client.callTool({name:"apn_foreground_handoff",arguments:{command:`swap solana jupiter ${action}`,arguments:{operation:"d".repeat(64)}}}),content=result.content[0];assert.ok(content?.type==="text");const envelope=JSON.parse(content.text) as OutputEnvelope;
   assert.equal(envelope.ok,false);assert.equal(envelope.error?.code,"APN_FOREGROUND_APPROVAL_REQUIRED");assert.equal(envelope.error?.details?.cli_handoff,`apn swap solana jupiter ${action} --operation ${"d".repeat(64)}`);assert.equal(envelope.error?.details?.foreground_auth,true);
  }assert.equal(secretReads,0);assert.equal(rpcReads,0);
 });

@@ -31,13 +31,14 @@ test("Base request pins Ethereum USDC, native Base ETH, amount and recipient", (
   assert.equal(request.destinationCurrency, "0x0000000000000000000000000000000000000000");
   assert.equal(request.amount, "2500000"); assert.equal(request.recipient, recipient);
   assert.equal(request.usePermit, false); assert.equal(request.useDepositAddress, false);
-  assert.equal(bindArgv(["relay", "base", "prepare", "--profile", "default", "--recipient", recipient,
+  assert.equal(bindArgv(["relay", "prepare", "--profile", "default", "--source-chain", "eip155:1", "--asset", "usdc",
+    "--destination-chain", "eip155:8453", "--recipient", recipient,
     "--amount-atomic", "2500000", "--min-output-atomic", "891439003839815",
     "--max-approval-network-fee-wei", "100000000000000", "--max-deposit-network-fee-wei", "100000000000000",
     "--idempotency-key", "relay-base-test-01"]).request.command, "relay.base.prepare");
-  assert.equal(bindArgv(["relay", "base", "observe", "--profile", "default", "--operation", "a".repeat(64),
-    "--rpc-url", "https://base.example", "--ethereum-rpc-url", "https://ethereum.example"]).ethereumRpcUrl,
-  "https://ethereum.example");
+  assert.equal(bindArgv(["relay", "observe", "--profile", "default", "--operation", "a".repeat(64),
+    "--rpc-url", "https://ethereum.example", "--destination-rpc-url", "https://base.example"]).destinationRpcUrl,
+  "https://base.example");
 });
 
 test("BNB quote and route mismatches cannot validate as Base", async () => {
@@ -172,8 +173,8 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   assert.equal(statusCalls, 1); assert.equal(rpcCalls, 1);
   const routedService = new RelayBaseObserveService(state, () => ({ ...ports }),
     new RelayKeylessStatusService(state, fetcher));
-  const core = createApnCore(bindArgv(["relay", "base", "observe", "--profile", "default", "--operation", op.operationId,
-    "--rpc-url", "https://base.example"]), { stateRoot: temporary.root, relayBaseObserve: routedService });
+  const core = createApnCore({ request: { command: "relay.base.observe", profile: "default", operationId: op.operationId },
+    rpcUrl: "https://base.example" }, { stateRoot: temporary.root, relayBaseObserve: routedService });
   const routed = await core.execute({ command: "relay.base.observe", profile: "default", operationId: op.operationId });
   assert.equal(routed.ok, true, JSON.stringify(routed));
   assert.equal(core.context.relayBaseObserve, routedService);

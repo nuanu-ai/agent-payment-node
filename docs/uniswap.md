@@ -99,8 +99,8 @@ that exact pin.
   `status`, never hidden behind an unchanged `submitted`.
 
 MCP serves `inventory`, `quote`, `prepare` and `status`. `approve` and
-`execute` return `APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI
-handoff.
+`execute` are reachable only through `apn_foreground_handoff`, which returns
+`APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI command.
 
 Any refusal before the submission marker releases the reservation as
 `failed_before_effect`. After the marker, APN never sends again.

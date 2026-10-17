@@ -79,7 +79,7 @@ export interface SelectedAssetFunding {
   readonly x402Token: boolean;
 }
 
-/** `wallet balance-asset` advice: the selected asset follows its posture; a token read also applies the rule to native gas. */
+/** `wallet balance --chain --asset` advice: the selected asset follows its posture; a token read also applies the rule to native gas. */
 export function selectedAssetFundingGuidance(input: SelectedAssetFunding): WalletFundingGuidance {
   const chain = `eip155:${input.chainId}`;
   const gas = assetAdvice(input.nativeAtomic, input.nativeLimit, {

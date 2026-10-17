@@ -11,7 +11,6 @@ import { activeAssetPolicyFromState, type ActiveAssetPolicy } from "../../src/al
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
-import { bindArgv } from "../../src/command-binder.js";
 import { ApnError } from "../../src/errors.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { freezeRelayUnsignedOperation, type RelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
@@ -149,9 +148,6 @@ async function lease(state: StateStore, op: RelayUnsignedOperation) {
 
 test("verified skip permits one pinned deposit; replay is observation only and lease is counted once", async t => {
   const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
-  const bound = bindArgv(["relay", "arbitrum", "deposit-dispatch", "--profile", "default",
-    "--operation", op.operationId, "--rpc-url", "https://arb-rpc.example"]);
-  assert.equal(bound.request.command, "relay.arbitrum.deposit-dispatch");
   const h = harness(state, op, await skippedJournal(op));
   const first = await h.service.execute("default", op.operationId);
   assert.equal(first.state, "deposit_submitted");

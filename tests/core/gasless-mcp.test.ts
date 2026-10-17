@@ -14,7 +14,7 @@ import type { GaslessCustodyPort } from "../../src/gasless/ports.js";
 import type { GaslessDependencies } from "../../src/gasless/service.js";
 import { TtyGaslessApproval } from "../../src/gasless/tty.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
-import { projectMcpTools, type ProjectedMcpTool } from "../../src/mcp-projection.js";
+import { projectMcpForegroundHandoff, projectMcpTools, type ProjectedMcpTool } from "../../src/mcp-projection.js";
 import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js";
 import { GASLESS_TEST_RECIPIENT, gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -27,8 +27,6 @@ const GASLESS_TOOL_NAMES = [
   "apn_gasless_balance",
   "apn_gasless_transfer_quote",
   "apn_gasless_transfer_prepare",
-  "apn_gasless_transfer_approve",
-  "apn_gasless_transfer_approve_sealed",
 ] as const;
 const OPERATION_ID = "a".repeat(64);
 
@@ -39,15 +37,16 @@ test("CLI and MCP discovery expose the terminal permission-invalidation recovery
   const tools = projectMcpTools();
   for (const path of ["gasless transfer prepare", "gasless transfer approve", "operation resume", "operation status", "receipt get"]) {
     const cli = manifest.commands.find((command) => command.path.join(" ") === path);
-    const mcp = tools.find((tool) => tool.command.path.join(" ") === path);
+    const mcp = tools.find((tool) => tool.command.path.join(" ") === path)?.command ??
+      projectMcpForegroundHandoff().commands.find((command) => command.path.join(" ") === path);
     assert.ok(cli && mcp, path);
     assert.equal(cli.states.terminal.includes("failed_permissions_invalidated"), true, path);
     assert.equal(cli.states.non_terminal.includes("failed_permissions_invalidated"), false, path);
-    assert.deepEqual(mcp.command.states, cli.states, path);
+    assert.deepEqual(mcp.states, cli.states, path);
   }
 });
 
-test("gasless CLI and MCP project the same nine strict tools and canonical inputs", () => {
+test("gasless CLI and MCP project the same seven strict tools and canonical inputs", () => {
   const tools = projectMcpTools().filter((item) => item.name.startsWith("apn_gasless_"));
   assert.deepEqual(tools.map((item) => item.name), GASLESS_TOOL_NAMES);
   assert.deepEqual(tools.map((item) => ({
@@ -66,12 +65,11 @@ test("gasless CLI and MCP project the same nine strict tools and canonical input
       required: ["profile", "chain", "owner", "to", "amount", "max_fee", "min_received", "rpc_url"], additionalProperties: false },
     { name: "apn_gasless_transfer_prepare", properties: ["profile", "chain", "to", "amount", "max_fee", "min_received", "net_amount_atomic", "max_gross_atomic", "max_fee_atomic", "idempotency_key"],
       required: ["profile", "chain", "to", "idempotency_key"], additionalProperties: false },
-    { name: "apn_gasless_transfer_approve", properties: ["operation"], required: ["operation"], additionalProperties: false },
-    { name: "apn_gasless_transfer_approve_sealed", properties: ["operation"], required: ["operation"], additionalProperties: false },
   ]);
   assert.equal((requiredTool(tools, "apn_gasless_usdt_status").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
   assert.equal((requiredTool(tools, "apn_gasless_usdt_resume").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
-  assert.match(requiredTool(tools, "apn_gasless_transfer_approve").description, /MCP always returns a CLI handoff/u);
+  assert.deepEqual(projectMcpForegroundHandoff().commands.filter((command) => command.path[0] === "gasless").map((command) => command.path.join(" ")),
+    ["gasless transfer approve", "gasless transfer approve-sealed"]);
 
   const input = prepareInput({ max_fee: "0", min_received: "10" });
   const cli = parseArgv(prepareArgv(input));
@@ -127,14 +125,15 @@ test("live MCP gasless approval returns only the exact foreground CLI handoff", 
   t.after(connection.close);
 
   const envelope = decode(await connection.client.callTool({
-    name: "apn_gasless_transfer_approve",
-    arguments: { operation: OPERATION_ID },
+    name: "apn_foreground_handoff",
+    arguments: { command: "gasless transfer approve", arguments: { operation: OPERATION_ID } },
   }));
   const handoff = `apn gasless transfer approve --operation ${OPERATION_ID}`;
   assert.equal(envelope.command, "gasless.transfer.approve");
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.deepEqual(envelope.error?.details, {
+    approval_boundary: "foreground_tty",
     cli_handoff: handoff,
     cli_handoff_argv: ["apn", "gasless", "transfer", "approve", "--operation", OPERATION_ID],
     foreground_auth: true,
@@ -154,14 +153,15 @@ test("live MCP sealed first-send approval returns only the exact foreground CLI 
   t.after(connection.close);
 
   const envelope = decode(await connection.client.callTool({
-    name: "apn_gasless_transfer_approve_sealed",
-    arguments: { operation: OPERATION_ID },
+    name: "apn_foreground_handoff",
+    arguments: { command: "gasless transfer approve-sealed", arguments: { operation: OPERATION_ID } },
   }));
   const handoff = `apn gasless transfer approve-sealed --operation ${OPERATION_ID}`;
   assert.equal(envelope.command, "gasless.transfer.approve-sealed");
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.deepEqual(envelope.error?.details, {
+    approval_boundary: "foreground_tty",
     cli_handoff: handoff,
     cli_handoff_argv: ["apn", "gasless", "transfer", "approve-sealed", "--operation", OPERATION_ID],
     foreground_auth: true,

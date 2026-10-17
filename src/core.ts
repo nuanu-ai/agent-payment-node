@@ -112,11 +112,8 @@ export class ApnCore {
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native prepare runtime is unavailable.");
         return operationOutcome(await service.prepareNative(request));
       }
-      case "relay.preflight": {
-        const service = this.context.relayPreflight;
-        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay preflight runtime is unavailable.");
-        return dataOutcome(await service.preflight(request), "read_only_rpc_observation");
-      }
+      case "relay.route":
+        throw new ApnError("APN_INTERNAL", "A Relay route request must be resolved before the core runs.");
       case "relay.execute": {
         canonicalOperationId(request.operationId);
         const service = this.context.relayExecute;

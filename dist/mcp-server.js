@@ -2,26 +2,26 @@ import { randomUUID } from "node:crypto";
 import { ProtocolError, ProtocolErrorCode, Server } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { bindMcpInput } from "./command-binder.js";
-import { cliHandoffDetails, createCliHandoff } from "./cli-handoff.js";
 import { PRODUCT_VERSION } from "./constants.js";
-import { chainPolicyHandoff, RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
-import { MCP_TOOLS } from "./mcp-projection.js";
-import { genericTransferHandoff, RejectingMcpRailApproval, RejectingMcpTransferApproval } from "./mcp-transfer-approval.js";
-import { oneClickSubmitHandoff } from "./lifi/near-oneclick-command-catalog.js";
+import { foregroundHandoffEnvelope } from "./mcp-foreground-handoff.js";
+import { RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
+import { MCP_FOREGROUND_HANDOFF, MCP_TOOLS } from "./mcp-projection.js";
 import { failureEnvelope } from "./output.js";
-import { createApnCore, executeBoundCommand } from "./runtime-factory.js";
-import { ApnError } from "./errors.js";
+import { executeBoundCommand } from "./runtime-factory.js";
 export function createMcpServer(options = {}) {
     const server = new Server({ name: "agent-payment-node", version: PRODUCT_VERSION }, { capabilities: { tools: {} } });
     const toolsByName = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
     server.setRequestHandler("tools/list", async () => ({
-        tools: MCP_TOOLS.map((tool) => ({
+        tools: [...MCP_TOOLS, MCP_FOREGROUND_HANDOFF].map((tool) => ({
             name: tool.name,
             description: tool.description,
             inputSchema: tool.inputSchema,
         })),
     }));
     server.setRequestHandler("tools/call", async (request) => {
+        if (request.params.name === MCP_FOREGROUND_HANDOFF.name) {
+            return server.projectCallToolResult(mcpResult(foregroundHandoffEnvelope(MCP_FOREGROUND_HANDOFF, request.params.arguments ?? {})), undefined);
+        }
         const tool = toolsByName.get(request.params.name);
         if (tool === undefined) {
             throw new ProtocolError(ProtocolErrorCode.MethodNotFound, "Unknown APN MCP tool.");
@@ -34,96 +34,13 @@ export function createMcpServer(options = {}) {
 export async function serveMcpStdio() {
     await createMcpServer().connect(new StdioServerTransport());
 }
+/** Projection admits no foreground command except a policy set, whose consent path is refused with a CLI handoff. */
 async function callTool(tool, input, options) {
     try {
         const bound = bindMcpInput(tool.command, input);
-        if (bound.request.command === "circle.evm.approve-source" || bound.request.command === "circle.evm.approve-mint" || bound.request.command === "circle.evm.cleanup") {
-            const action = bound.request.command.slice("circle.evm.".length);
-            const handoff = createCliHandoff(["apn", "circle", "evm", action, "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Confirm the exact Circle financial effect and both owners in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "x402.merchant.approve") {
-            const handoff = createCliHandoff(["apn", "x402", "merchant", "approve", "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve the frozen USDm transfer in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "operation.abandon") {
-            const handoff = createCliHandoff(["apn", "operation", "abandon", "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review the unresolved financial risk and confirm abandonment in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "gasless.transfer.approve" || bound.request.command === "gasless.transfer.approve-sealed") {
-            const handoff = createCliHandoff(["apn", "gasless", "transfer", bound.request.command === "gasless.transfer.approve-sealed" ? "approve-sealed" : "approve", "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review the USDC fee budget and provider-specific permission, including Smart Account child expiry, in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "allowlist.policy.activate" || bound.request.command === "allowlist.policy.revoke") {
-            const action = bound.request.command === "allowlist.policy.activate" ? "activate" : "revoke";
-            const handoff = createCliHandoff(["apn", "allowlist", "policy", action, "--profile", bound.request.profile,
-                "--revision", String(bound.request.revision)]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", `Review every admission, cap and pin and ${action} this allowlist revision in the foreground CLI.`, { ...cliHandoffDetails(handoff), foreground_auth: true, approval_boundary: "foreground_tty" }));
-        }
-        if (bound.request.command === "bridge.approve") {
-            const handoff = createCliHandoff(["apn", "bridge", "approve", "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review and approve this bridge intent in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "swap.uniswap.approve" || bound.request.command === "swap.uniswap.execute" ||
-            bound.request.command === "swap.uniswap-token.approve" || bound.request.command === "swap.uniswap-token.execute" ||
-            bound.request.command === "swap.uniswap-token.cleanup" ||
-            bound.request.command === "swap.sunswap.approve" || bound.request.command === "swap.sunswap.execute") {
-            const uniswap = bound.request.command.startsWith("swap.uniswap."), token = bound.request.command.startsWith("swap.uniswap-token."), action = bound.request.command.endsWith(".approve") ? "approve" : bound.request.command.endsWith(".cleanup") ? "cleanup" : "execute";
-            const handoff = createCliHandoff(["apn", "swap", uniswap || token ? "ethereum" : "tron", token ? "uniswap-token" : uniswap ? "uniswap" : "sunswap",
-                action, "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Guarded swap approval and execution must continue in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute") {
-            const action = bound.request.command.endsWith(".approve") ? "approve" : "execute";
-            const handoff = createCliHandoff(["apn", "swap", "solana", "jupiter", action, "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Guarded swap approval and execution must continue in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "swap.orca.stable-approve" || bound.request.command === "swap.orca.stable-execute" ||
-            bound.request.command === "swap.orca.stable-recover-no-send") {
-            const action = bound.request.command.slice("swap.orca.".length);
-            const handoff = createCliHandoff(["apn", "swap", "solana", "orca", action, "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Stable reservation, execution and no-send recovery require separate foreground CLI consent.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "swap.orca.approve" || bound.request.command === "swap.orca.execute") {
-            const handoff = createCliHandoff(["apn", "swap", "solana", "orca", bound.request.command === "swap.orca.approve" ? "approve" : "execute",
-                "--operation", bound.request.operationId]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Guarded swap approval and execution must continue in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "oneclick.source.submit") {
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Review and approve this exact 1Click deposit in the foreground CLI.", { ...cliHandoffDetails(oneClickSubmitHandoff(bound.request)), foreground_auth: true }));
-        }
-        if (bound.request.command === "wallet.connect") {
-            const handoff = walletConnectHandoff(bound.request);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "Wallet provider authentication must continue in the foreground CLI.", { ...cliHandoffDetails(handoff), foreground_auth: true }));
-        }
-        if (bound.request.command === "wallet.permission.sync") {
-            const handoff = createCliHandoff([
-                "apn", "wallet", "permission", "sync",
-                "--profile", bound.request.profile,
-                "--expected-revision", String(bound.request.expectedRevision),
-            ]);
-            return failureEnvelope(bound.request.command, randomUUID(), new ApnError("APN_FOREGROUND_AUTH_REQUIRED", "MetaMask permission sync must continue in the foreground CLI.", {
-                ...cliHandoffDetails(handoff),
-                foreground_auth: true,
-            }));
-        }
         const policyApproval = bound.request.command === "wallet.policy.set"
             ? new RejectingMcpPolicyApproval(bound.request)
             : undefined;
-        if (bound.request.command === "policy.admit-solana" || bound.request.command === "policy.admit-tron")
-            chainPolicyHandoff(bound.request);
-        if (bound.request.command === "transfer.approve") {
-            const { native: _injectedNative, approval: _injectedApproval, railApproval: _injectedRailApproval, ...sharedOptions } = options;
-            const approval = new RejectingMcpTransferApproval(bound.request, bound.rpcUrl);
-            const core = createApnCore(bound, { ...sharedOptions, approval, railApproval: new RejectingMcpRailApproval() });
-            try {
-                await genericTransferHandoff(core, bound.request, approval);
-            }
-            catch (error) {
-                return failureEnvelope(bound.request.command, randomUUID(), error);
-            }
-            return await core.execute(bound.request);
-        }
         return await executeBoundCommand(bound, {
             ...options,
             ...(policyApproval === undefined ? {} : { policyApproval }),
@@ -132,22 +49,6 @@ async function callTool(tool, input, options) {
     catch (error) {
         return failureEnvelope("invalid", randomUUID(), error);
     }
-}
-function walletConnectHandoff(request) {
-    const argv = ["apn", "wallet", "connect", "--profile", request.profile, "--provider", request.providerId];
-    if (request.authenticationMethod !== undefined)
-        argv.push("--auth-method", request.authenticationMethod);
-    if (request.expectedRevision !== undefined)
-        argv.push("--expected-revision", String(request.expectedRevision));
-    if (request.permissionCapUsdcAtomic !== undefined) {
-        argv.push("--permission-cap-usdc-atomic", request.permissionCapUsdcAtomic);
-    }
-    if (request.permissionExpiresAt !== undefined) {
-        argv.push("--permission-expires-at", String(request.permissionExpiresAt));
-    }
-    if (request.idempotencyKey !== undefined)
-        argv.push("--idempotency-key", "<same-idempotency-key>");
-    return createCliHandoff(argv);
 }
 function mcpResult(envelope) {
     return {

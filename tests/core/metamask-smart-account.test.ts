@@ -804,15 +804,15 @@ test("actual CLI and MCP surfaces share lifecycle state while foreground consent
     await client.connect(clientTransport);
     try {
       const handoff = mcpEnvelope(await client.callTool({
-        name: "apn_wallet_connect",
-        arguments: {
+        name: "apn_foreground_handoff",
+        arguments: { command: "wallet connect", arguments: {
           profile: PROFILE,
           provider: METAMASK_SMART_ACCOUNT_PROVIDER_ID,
           auth_method: "browser",
           permission_cap_usdc_atomic: CAP,
           permission_expires_at: String(EXPIRY),
           idempotency_key: IDEMPOTENCY_KEY,
-        },
+        } },
       }));
       assert.equal(handoff.error?.code, "APN_FOREGROUND_AUTH_REQUIRED");
       assert.match(String(handoff.error?.details?.cli_handoff), /--idempotency-key '<same-idempotency-key>'$/u);
@@ -826,7 +826,7 @@ test("actual CLI and MCP surfaces share lifecycle state while foreground consent
       assert.deepEqual(listed.data, cliListed.data);
 
       const syncHandoff = mcpEnvelope(await client.callTool({
-        name: "apn_wallet_permission_sync", arguments: { profile: PROFILE, expected_revision: "1" },
+        name: "apn_foreground_handoff", arguments: { command: "wallet permission sync", arguments: { profile: PROFILE, expected_revision: "1" } },
       }));
       assert.equal(syncHandoff.error?.code, "APN_FOREGROUND_AUTH_REQUIRED");
       assert.deepEqual(syncHandoff.error?.details?.cli_handoff_argv, [
@@ -1414,8 +1414,8 @@ test("common CLI and MCP direct surfaces preserve one Smart Account operation an
     await client.connect(clientTransport);
     try {
       const handoff = mcpEnvelope(await client.callTool({
-        name: "apn_pay_transfer_approve",
-        arguments: { operation: operationId, rpc_url: rpcUrl },
+        name: "apn_foreground_handoff",
+        arguments: { command: "pay transfer approve", arguments: { operation: operationId, rpc_url: rpcUrl } },
       }));
       assert.equal(handoff.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
       assert.match(String(handoff.error?.details?.cli_handoff), new RegExp(operationId));

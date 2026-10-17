@@ -262,7 +262,7 @@ test("installed ordinary prepare, real TTY, SDK, encrypted material and RPC-only
       to: "0x4444444444444444444444444444444444444444", amount: "0.01", max_fee: "0", min_received: "0.01", idempotency_key: "installed-one" });
     assert.equal(prepared.ok, true, JSON.stringify(prepared)); id = prepared.operation.operation_id;
     const trace = await s.trace(); assert.deepEqual((await s.cli(s.prepareArgs("installed-one"))).operation, prepared.operation);
-    const handoff = await connection.call("apn_gasless_transfer_approve", { operation: id });
+    const handoff = await connection.call("apn_foreground_handoff", { command: "gasless transfer approve", arguments: { operation: id } });
     assert.equal(handoff.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.deepEqual(await s.trace(), trace);
     assert.equal((await s.cli(["gasless", "transfer", "approve", "--operation", id])).error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.equal((await approval(s, id)).code, 0);

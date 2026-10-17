@@ -6,12 +6,12 @@ import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../../src/canonical.js";
 import { parseCatalogArgv } from "../../src/command-catalog.js";
 import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
-import { projectMcpTools } from "../../src/mcp-projection.js";
+import { projectMcpForegroundHandoff, projectMcpTools } from "../../src/mcp-projection.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
-import { bindOneClickCommand, oneClickSubmitHandoff } from "../../src/lifi/near-oneclick-command-catalog.js";
+import { bindOneClickCommand } from "../../src/lifi/near-oneclick-command-catalog.js";
 import { assertOneClickNativePostApproval, planOneClickNative, type OneClickNativeObservation } from "../../src/lifi/near-oneclick-evm-source.js";
 import { ONECLICK_LANE_IDS, ONECLICK_LANES, oneClickLane, oneClickRecipient } from "../../src/lifi/near-oneclick-lanes.js";
 import { OneClickSourceJournal, oneClickRecordLane, oneClickSourceCall } from "../../src/lifi/near-oneclick-source-journal.js";
@@ -57,16 +57,14 @@ test("recipients must be canonical for the destination chain", () => {
   if (bound.command === "oneclick.source.submit") { assert.equal(bound.lane, "ethereum-eth-to-solana-sol"); assert.equal(bound.recipient, SOL); }
 });
 
-test("MCP projects the same catalog and hands money approval to the exact foreground command", () => {
-  const tool = projectMcpTools().find(entry => entry.name === "apn_oneclick_source_submit")!;
+test("MCP binds the same catalog and hands money approval to the exact foreground command", () => {
+  const command = projectMcpForegroundHandoff().commands.find(entry => entry.path.join(" ") === "oneclick source submit")!;
   const input = Object.fromEntries(Object.entries(submit("ethereum-eth-to-tron-trx", TRON)).map(([key, value]) => [key.slice(2).replaceAll("-", "_"), value]));
-  const bound = bindMcpInput(tool.command, input).request;
+  const bound = bindMcpInput(command, input).request;
   assert.equal(bound.command, "oneclick.source.submit");
-  if (bound.command !== "oneclick.source.submit") return;
-  const handoff = oneClickSubmitHandoff(bound);
-  assert.deepEqual(handoff.argv, ["apn", "oneclick", "source", "submit", ...Object.entries(submit("ethereum-eth-to-tron-trx", TRON)).flat()]);
-  assert.deepEqual(bindArgv(handoff.argv.slice(1)).request, bound);
-  assert.equal(tool.command.approval.class, "foreground_tty");
+  assert.deepEqual(bindArgv(["oneclick", "source", "submit", ...Object.entries(submit("ethereum-eth-to-tron-trx", TRON)).flat()]).request, bound);
+  assert.equal(command.approval.class, "foreground_tty");
+  assert.equal(projectMcpTools().some(entry => entry.name === "apn_oneclick_source_submit"), false);
 });
 
 test("the MCP submit tool returns the foreground handoff before any quote, RPC or state access", async (t) => {
@@ -76,11 +74,12 @@ test("the MCP submit tool returns the foreground handoff before any quote, RPC o
   await server.connect(serverTransport); await client.connect(clientTransport);
   t.after(async () => { await client.close(); await server.close(); });
   const args = Object.fromEntries(Object.entries(submit("ethereum-eth-to-solana-sol", SOL)).map(([key, value]) => [key.slice(2).replaceAll("-", "_"), value]));
-  const result = await client.callTool({ name: "apn_oneclick_source_submit", arguments: args });
+  const result = await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "oneclick source submit", arguments: args } });
   const envelope = result.structuredContent as unknown as OutputEnvelope;
   assert.equal(envelope.ok, false); assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.deepEqual(envelope.error?.details?.cli_handoff_argv, ["apn", "oneclick", "source", "submit", ...Object.entries(submit("ethereum-eth-to-solana-sol", SOL)).flat()]);
-  const unlisted = await client.callTool({ name: "apn_oneclick_source_submit", arguments: { ...args, lane: "ethereum-eth-to-base-usdc" } });
+  assert.deepEqual(bindArgv((envelope.error?.details?.cli_handoff_argv as string[]).slice(1)).request, bindArgv(["oneclick", "source", "submit", ...Object.entries(submit("ethereum-eth-to-solana-sol", SOL)).flat()]).request);
+  const unlisted = await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "oneclick source submit", arguments: { ...args, lane: "ethereum-eth-to-base-usdc" } } });
   assert.equal((unlisted.structuredContent as unknown as OutputEnvelope).error?.code, "APN_INVALID_INPUT");
 });
 

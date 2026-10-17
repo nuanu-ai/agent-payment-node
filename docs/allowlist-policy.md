@@ -81,7 +81,7 @@ The owner types the six-character code printed under the screen. APN then append
 
 Activation is refused if the revision is already active or has already expired. It is also refused if another decision or revision changed the state after the screen was shown (`APN_PROFILE_REVISION_CONFLICT`). A wrong code, a timeout or a missing terminal writes nothing. Activating another revision replaces the active one, and the screen says so.
 
-Over MCP, `apn_allowlist_policy_activate` and `apn_allowlist_policy_revoke` never decide anything. They return `APN_FOREGROUND_APPROVAL_REQUIRED` with the exact `cli_handoff` command.
+Activate and revoke are not MCP tools. Over MCP, `apn_foreground_handoff` with `command: "allowlist policy activate"` (or `revoke`) decides nothing: it returns `APN_FOREGROUND_APPROVAL_REQUIRED` with the exact `cli_handoff` command.
 
 ## 4. Status
 

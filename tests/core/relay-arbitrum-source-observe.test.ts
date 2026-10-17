@@ -5,7 +5,6 @@ import test from "node:test";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Hex } from "viem";
 import { hashObject, sha256 } from "../../src/canonical.js";
-import { bindArgv } from "../../src/command-binder.js";
 import { ApnCore } from "../../src/core.js";
 import { RelayUnsignedOperationRepository, freezeRelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
 import { advanceArbitrumSourceEffectJournal, createArbitrumSourceEffectJournal,
@@ -15,7 +14,7 @@ import { RELAY_ETHEREUM_USDC_RECIPIENT } from "./relay-legacy-accounts.js";
 import { RelayArbitrumSourceObserveService } from "../../src/relay/arbitrum-source-observe.js";
 import type { RelayArbitrumExpectedEffect, RelayArbitrumSourceProof } from "../../src/relay/arbitrum-source-finality.js";
 import { ETHEREUM_USDC, relayStatusLocator } from "../../src/relay/quote.js";
-import { createApnCore } from "../../src/runtime-factory.js";
+import { runCli } from "../../src/cli.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 
@@ -98,9 +97,7 @@ test("saved hash-bound uncertain send observes approval then joint deposit, with
       return journal;
     } };
   const service = new RelayArbitrumSourceObserveService(new StateStore(temp.root), observer, ports);
-  const command = bindArgv(["relay", "arbitrum", "observe", "--profile", "default", "--operation", op.operationId,
-    "--rpc-url", "https://arb-rpc.example"]);
-  assert.deepEqual(command.request, { command: "relay.arbitrum.observe", profile: "default", operationId: op.operationId });
+  const command = { request: { command: "relay.arbitrum.observe", profile: "default", operationId: op.operationId } } as const;
   const core = new ApnCore({ state: new StateStore(temp.root), relayArbitrumObserve: service });
   const first = await core.execute(command.request);
   assert.equal(first.ok, true, JSON.stringify(first.error));
@@ -239,11 +236,9 @@ for (const outcome of ["never_lands", "nonce_not_consumed", "own_transaction_kno
 test("installed command refuses absent saved operation before any RPC", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   let posts = 0;
-  const bound = bindArgv(["relay", "arbitrum", "observe", "--profile", "relay-any-user", "--operation", "a".repeat(64),
-    "--rpc-url", "https://arb-rpc.example"]);
-  const core = createApnCore(bound, { stateRoot: temp.root, relayArbitrumObserveRpc: {
+  const outcome = await runCli(["relay", "observe", "--profile", "relay-any-user", "--operation", "a".repeat(64),
+    "--rpc-url", "https://arb-rpc.example"], {}, { stateRoot: temp.root, relayArbitrumObserveRpc: {
     batchCall: async () => { posts++; throw new Error("unexpected network"); } } as any });
-  const outcome = await core.execute(bound.request);
   assert.equal(outcome.ok, false);
   assert.equal(outcome.error?.code, "APN_OPERATION_NOT_FOUND");
   assert.equal(posts, 0);

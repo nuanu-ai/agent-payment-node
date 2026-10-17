@@ -5,6 +5,8 @@ export interface BoundCommand {
     readonly rpcUrl?: string;
     readonly bnbRpcUrl?: string;
     readonly ethereumRpcUrl?: string;
+    /** `relay observe` only: the destination RPC, placed by the saved route (relay/command-route.ts). */
+    readonly destinationRpcUrl?: string;
 }
 export declare function bindArgv(argv: readonly string[]): BoundCommand;
 export declare function bindMcpInput(command: CommandDefinition, input: unknown): BoundCommand;

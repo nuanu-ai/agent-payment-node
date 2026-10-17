@@ -22,7 +22,7 @@ test("MCP serves read and preparation surfaces but hands approve and execute to 
   const inventory = await call("apn_swap_ethereum_uniswap_inventory", {});
   assert.equal(inventory.ok, true); assert.equal((inventory.data as any).keyless.mechanismPin.constructorKind, "sdk");
   for (const action of ["approve", "execute"]) {
-    const refused = await call(`apn_swap_ethereum_uniswap_${action}`, { operation: OPERATION });
+    const refused = await call("apn_foreground_handoff", { command: `swap ethereum uniswap ${action}`, arguments: { operation: OPERATION } });
     assert.equal(refused.ok, false); assert.equal(refused.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.equal(refused.error?.details?.cli_handoff, `apn swap ethereum uniswap ${action} --operation ${OPERATION}`);
   }
