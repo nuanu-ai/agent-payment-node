@@ -7,6 +7,7 @@ import { SA_MATERIAL_DOMAINS, saMaterialHash, saPolicyHash, saRequirementsHash }
 import { createErc20TokenAllowanceCaveats } from "@metamask/7715-permission-types";
 import type { SmartAccountGaslessOperationRecord } from "../../src/smart-account-gasless/operation-model.js";
 import type { SmartAccountGaslessObserveInput } from "../../src/smart-account-gasless/ports.js";
+import type { SmartAccountGaslessCursor } from "../../src/smart-account-gasless/model.js";
 
 export const SA_TEST_OWNER = `0x${"11".repeat(20)}` as Address;
 export const SA_TEST_SESSION = `0x${"22".repeat(20)}` as Address;
@@ -87,4 +88,12 @@ export function saStructuralUnused(input: SmartAccountGaslessObserveInput, obser
       finalityBlock: { numberAtomic: "50000200", hash: hexHash("b"), timestampAtomic: String(input.intent.beforeUnix + 100) },
       childDelegationHash: input.material.childDelegationHash, childSpentAtomic: "0", childScanHash: "a".repeat(64),
       transferScanHash: "b".repeat(64), anchorsHash: "c".repeat(64), protocolHash: "d".repeat(64) } };
+}
+
+/** The cursor a fresh observation starts from: the preparation block, nothing scanned yet. */
+export function initialSmartAccountGaslessCursor(intent: SmartAccountGaslessIntent): SmartAccountGaslessCursor {
+  return { startBlock: intent.initialSnapshot.preparationBlock,
+    nextBlockAtomic: intent.initialSnapshot.preparationBlock.numberAtomic, previousEndBlock: null,
+    expiryBlock: null, candidateHashes: [], transferAnomalies: [], childScanComplete: false,
+    transferScanComplete: false };
 }

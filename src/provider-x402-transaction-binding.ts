@@ -61,13 +61,6 @@ export function validateTransactionReservation(value: unknown): ProviderX402Tran
   return reservation;
 }
 
-export function sameReservation(
-  left: ProviderX402TransactionReservation,
-  right: ProviderX402TransactionReservation,
-): boolean {
-  return canonicalJson(left) === canonicalJson(right);
-}
-
 export function sealTransactionReservationIndex(
   reservations: readonly ProviderX402TransactionReservation[],
 ): ProviderX402TransactionReservationIndex {

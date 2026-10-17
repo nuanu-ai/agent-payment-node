@@ -1,6 +1,6 @@
-import { concat, encodeFunctionData, hashTypedData, numberToHex, padHex, parseAbi } from "viem";
+import { concat, hashTypedData, numberToHex, padHex } from "viem";
 import { USDT_GASLESS, usdtFailure } from "./model.js";
-export const USDT_7702_FACTORY_MARKER = "0x7702";
+const USDT_7702_FACTORY_MARKER = "0x7702";
 export function usdtUserOperation(plan, input) {
     if (input.authorization !== null && (input.authorization.address !== USDT_GASLESS.delegate || input.authorization.chainId !== "0x1")) {
         usdtFailure("APN_STATE_CORRUPT", "gasless_usdt_authorization_identity");

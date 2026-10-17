@@ -20,13 +20,6 @@ export interface SmartAccountScanResult {
   readonly evidenceHash: string;
 }
 
-export function initialSmartAccountGaslessCursor(intent: SmartAccountGaslessIntent): SmartAccountGaslessCursor {
-  return { startBlock: intent.initialSnapshot.preparationBlock,
-    nextBlockAtomic: intent.initialSnapshot.preparationBlock.numberAtomic, previousEndBlock: null,
-    expiryBlock: null, candidateHashes: [], transferAnomalies: [], childScanComplete: false,
-    transferScanComplete: false };
-}
-
 export function validateSmartAccountGaslessCursor(intent: SmartAccountGaslessIntent,
   cursor: SmartAccountGaslessCursor): SmartAccountGaslessCursor {
   const start = saBlock(cursor.startBlock), expected = intent.initialSnapshot.preparationBlock;

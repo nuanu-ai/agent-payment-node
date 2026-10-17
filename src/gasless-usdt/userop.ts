@@ -1,8 +1,8 @@
-import { concat, encodeFunctionData, hashTypedData, numberToHex, padHex, parseAbi } from "viem";
+import { concat, hashTypedData, numberToHex, padHex } from "viem";
 import type { Address, Hex } from "../model.js";
 import { USDT_GASLESS, usdtFailure, type UsdtTransferPlan } from "./model.js";
 
-export const USDT_7702_FACTORY_MARKER = "0x7702" as const;
+const USDT_7702_FACTORY_MARKER = "0x7702" as const;
 
 /** The signed EIP-7702 tuple for a first use; a delegated account sends none. */
 export interface UsdtAuthorization {

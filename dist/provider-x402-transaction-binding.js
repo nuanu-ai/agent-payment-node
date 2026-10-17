@@ -32,9 +32,6 @@ export function validateTransactionReservation(value) {
         corrupt();
     return reservation;
 }
-export function sameReservation(left, right) {
-    return canonicalJson(left) === canonicalJson(right);
-}
 export function sealTransactionReservationIndex(reservations) {
     const value = {
         schemaVersion: "apn.provider-x402.transaction-reservation-index.v1",

@@ -12,7 +12,6 @@ export declare function assertMetaMaskGaslessObservable(operation: MetaMaskGasle
  * still abandon. The byte reserve keeps the terminal transition inside the file limit.
  */
 export declare function metaMaskGaslessObservationRoom(operation: MetaMaskGaslessOperationRecord): boolean;
-export declare function assertMetaMaskGaslessObservationCapacity(operation: MetaMaskGaslessOperationRecord): void;
 /**
  * A re-observation that differs only in when it was taken is not a new transition: the read times and, outside a
  * proof phase, the evidence digest of the same unchanged result. State, reason, cursor, candidate, provider status

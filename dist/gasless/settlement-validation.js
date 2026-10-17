@@ -1,4 +1,3 @@
-import { hashObject } from "../canonical.js";
 import { settlementSchema } from "./schema.js";
 import { gaslessFailure, gaslessSame, gaslessUint } from "./validation.js";
 export function validateGaslessSettlement(i, userOperationHash, value) {
@@ -49,5 +48,4 @@ export function assertGaslessSettlementContinuation(previous, next) {
         gaslessFailure("APN_STATE_CORRUPT", "gasless_safe_proof_changed");
     }
 }
-export function gaslessSettlementHash(p) { return hashObject(p); }
 //# sourceMappingURL=settlement-validation.js.map

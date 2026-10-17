@@ -32,7 +32,6 @@ type AwalCommand =
   | { readonly kind: "status" }
   | { readonly kind: "login"; readonly identity: string }
   | { readonly kind: "verify"; readonly challenge: string }
-  | { readonly kind: "logout" }
   | { readonly kind: "balance" }
   | { readonly kind: "address" };
 
@@ -206,7 +205,6 @@ export class AwalProcessAdapter implements ProviderLifecyclePort, ProviderWallet
       reads: this,
       direct: this.direct,
       x402: this.x402,
-      evidence: { owner: "apn" },
     };
   }
 
@@ -216,10 +214,6 @@ export class AwalProcessAdapter implements ProviderLifecyclePort, ProviderWallet
     if (disposition === "already_authenticated") return;
     const challenge = await foreground.readChallengeResponse();
     await this.runSensitive({ kind: "verify", challenge });
-  }
-
-  async logout(): Promise<void> {
-    await this.runSensitive({ kind: "logout" });
   }
 
   async observeBalance(): Promise<ProviderBalanceObservation> {
@@ -307,7 +301,6 @@ function argv(command: AwalCommand): readonly string[] {
     case "status": return ["status", "--json"];
     case "login": return ["auth", "login", command.identity, "--json"];
     case "verify": return ["auth", "verify", command.challenge, "--json"];
-    case "logout": return ["auth", "logout", "--json"];
     case "balance": return ["balance", "--chain", "base", "--asset", "usdc", "--json"];
     case "address": return ["address", "--chain", "base"];
   }

@@ -26,7 +26,6 @@ export function localGaslessMechanism(chainId: GaslessChainId) {
   return { provider: "local" as const,
     reference: `${chain}:${gaslessDeployment(chainId).paymaster}` };
 }
-export const baseLocalGaslessMechanism = () => localGaslessMechanism(8453);
 
 /** The usage identity of a saved intent comes from its own token, never from a later registry row (rule R2). */
 const identity = (intent: Pick<GaslessIntent, "owner" | "request" | "token">): AssetUsageIdentity => {

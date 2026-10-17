@@ -14,12 +14,6 @@ export function mmUint(value: unknown, positive = false, reason: MetaMaskGasless
   if (parsed > MM_MAX_UINT || (positive && parsed === 0n)) mmFail(reason);
   return parsed;
 }
-export function mmDecimal(value: unknown, positive = false): string {
-  if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,71})(?:\.[0-9]{1,6})?$/u.test(value)) mmFail("mm_gasless_input");
-  const [whole, fraction = ""] = value.split(".");
-  const result = BigInt(whole!) * 1_000_000n + BigInt(fraction.padEnd(6, "0"));
-  return mmUint(result.toString(), positive).toString();
-}
 export function mmFormat(value: string): string {
   const n = mmUint(value), fraction = (n % 1_000_000n).toString().padStart(6, "0").replace(/0+$/u, "");
   return `${n / 1_000_000n}${fraction ? `.${fraction}` : ""}`;
