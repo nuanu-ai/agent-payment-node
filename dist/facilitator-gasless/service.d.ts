@@ -49,7 +49,7 @@ export declare class FacilitatorGaslessService {
         custody: "local_software";
         route: "x402_exact_eip3009_public_facilitator";
         fingerprint: string;
-        state: "completed" | "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+        state: "completed" | "failed_before_effect" | "abandoned_unknown" | "awaiting_approval" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
         terminal: boolean;
         proof_class: string;
         reason: string;
@@ -139,7 +139,7 @@ export declare class FacilitatorGaslessService {
         custody: "local_software";
         route: "x402_exact_eip3009_public_facilitator";
         fingerprint: string;
-        state: "completed" | "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+        state: "completed" | "failed_before_effect" | "abandoned_unknown" | "awaiting_approval" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
         terminal: boolean;
         proof_class: string;
         reason: string;
@@ -229,7 +229,7 @@ export declare class FacilitatorGaslessService {
         custody: "local_software";
         route: "x402_exact_eip3009_public_facilitator";
         fingerprint: string;
-        state: "completed" | "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+        state: "completed" | "failed_before_effect" | "abandoned_unknown" | "awaiting_approval" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
         terminal: boolean;
         proof_class: string;
         reason: string;
@@ -319,7 +319,7 @@ export declare class FacilitatorGaslessService {
         custody: "local_software";
         route: "x402_exact_eip3009_public_facilitator";
         fingerprint: string;
-        state: "completed" | "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+        state: "completed" | "failed_before_effect" | "abandoned_unknown" | "awaiting_approval" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
         terminal: boolean;
         proof_class: string;
         reason: string;
@@ -411,7 +411,7 @@ export declare class FacilitatorGaslessService {
         custody: "local_software";
         route: "x402_exact_eip3009_public_facilitator";
         fingerprint: string;
-        state: "completed" | "failed_before_effect" | "awaiting_approval" | "abandoned_unknown" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
+        state: "completed" | "failed_before_effect" | "abandoned_unknown" | "awaiting_approval" | "expired_unused" | "approved" | "verify_started" | "settle_started" | "settle_submitted";
         terminal: boolean;
         proof_class: string;
         reason: string;
