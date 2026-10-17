@@ -20,6 +20,5 @@ export declare class JupiterV1ReadOnlyProvider {
     buildExactIn(request: JupiterV1ExactInRequest, quote: JupiterV1QuoteResponse): Promise<JupiterV1RawBuildResponse>;
     private read;
 }
-export declare function validateJupiterV1Request(request: JupiterV1ExactInRequest): void;
 /** Production transport pins the validated public DNS result and uses built-in TLS roots. */
 export declare const jupiterV1HttpsFetch: typeof fetch;

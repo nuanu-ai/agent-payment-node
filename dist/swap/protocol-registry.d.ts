@@ -11,12 +11,9 @@ export interface SwapProtocolRegistry {
     readonly registryDigest: string;
 }
 /** The shipped registry is intentionally empty until owners supply official immutable pins. */
-export declare const EMPTY_SWAP_PROTOCOL_REGISTRY: SwapProtocolRegistry;
 export declare function compileSwapProtocolRegistry(input: {
     readonly registryVersion: string;
     readonly pins: readonly unknown[];
 }): SwapProtocolRegistry;
 export declare function validateSwapProtocolRegistry(value: unknown): SwapProtocolRegistry;
 export declare function requireSwapProtocol(registryValue: unknown, mechanismDigest: string): SwapProtocolRecord;
-/** A legacy family/chain lookup may select only when the identity is unambiguous. */
-export declare function requireUnambiguousSwapProtocol(registryValue: unknown, chain: string, protocolFamily: string): SwapProtocolRecord;

@@ -20,8 +20,6 @@ export function tokenChain(value) {
 export function tokenQuantity(value) { evmRpcQuantity(value); return value; }
 export function tokenHex(bytes) { return (value) => { evmRpcHex(value, bytes); return value; }; }
 export function tokenBlock(value) { const record = evmRpcRecord(value); evmRpcQuantity(record.number); evmRpcHex(record.hash, 32); return value; }
-export function tokenNullableRecord(value) { if (value !== null)
-    evmRpcRecord(value); return value; }
 export function createTokenRpc(input) {
     if (input.environment.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === undefined || input.environment.APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS === "") {
         return createLegacyTokenRpc(input);
