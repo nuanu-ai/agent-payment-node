@@ -1,7 +1,5 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
-import { TextDecoder } from "node:util";
-import { canonicalJson, hashObject } from "../canonical.js";
-import { ApnError } from "../errors.js";
+import { hashObject } from "../canonical.js";
+import { openNested, sealNested, type EnvelopeSpec } from "../custody-envelope.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import type { GaslessOperationRecord, GaslessRole } from "./operation-model.js";
@@ -25,6 +23,14 @@ interface Header {
 interface Envelope extends Omit<Header, "cipher"> {
   readonly cipher: Header["cipher"] & { readonly ciphertext: string; readonly tag: string };
 }
+const ENVELOPE: EnvelopeSpec<Header> = {
+  info: header => [VERSION, "gasless-effects", header.profileHash, header.operationId, header.fingerprint,
+    header.role, header.envelopeHash, header.bootstrapMaterialHash ?? "", header.estimateHash ?? ""].join("\0"),
+  aad: header => header,
+  maxFieldBytes: 64 * 1024,
+  fail: failure => failure === "authentication" ? unavailable("gasless_effect_authentication")
+    : corrupt(failure === "canonical_plaintext" ? "gasless_effect_canonical_plaintext" : "gasless_effect_encoding"),
+};
 
 export class GaslessEffectStore extends SecureStateStore {
   constructor(root: string, private readonly wrappingSecret: WrappingSecretPort) { super(root); }
@@ -55,53 +61,22 @@ export class GaslessEffectStore extends SecureStateStore {
     }
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) unavailable("gasless_wrapping_secret_missing");
-    const salt = randomBytes(32), nonce = randomBytes(12);
-    const header = headerFor(operation, valid, salt, nonce);
-    const key = deriveKey(wrapping, salt, header);
-    const plaintext = Buffer.from(canonicalJson(valid), "utf8");
-    let ciphertext = Buffer.alloc(0);
     try {
-      const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      cipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-      ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const envelope = sealNested(wrapping, ENVELOPE, headerFor(operation, valid), valid);
       await this.initialize();
       await this.ensureDirectory(`gasless-effects/${operation.profileHash}`);
-      await this.writeJson(this.path(operation, material.role), {
-        ...header,
-        cipher: {
-          ...header.cipher,
-          ciphertext: ciphertext.toString("base64"),
-          tag: cipher.getAuthTag().toString("base64"),
-        },
-      });
+      await this.writeJson(this.path(operation, material.role), envelope);
       return valid;
     } finally {
-      wrapping.fill(0); salt.fill(0); nonce.fill(0); key.fill(0); plaintext.fill(0); ciphertext.fill(0);
+      wrapping.fill(0);
     }
   }
 
   private async decrypt(envelope: Envelope): Promise<unknown> {
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) unavailable("gasless_wrapping_secret_missing");
-    const salt = base64(envelope.kdf.salt, 32), nonce = base64(envelope.cipher.nonce, 12);
-    const tag = base64(envelope.cipher.tag, 16), ciphertext = base64(envelope.cipher.ciphertext);
-    const key = deriveKey(wrapping, salt, headerOf(envelope));
-    let plaintext = Buffer.alloc(0);
-    try {
-      const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      decipher.setAAD(Buffer.from(canonicalJson(headerOf(envelope)), "utf8"));
-      decipher.setAuthTag(tag);
-      plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
-      const value: unknown = JSON.parse(text);
-      if (canonicalJson(value) !== text) corrupt("gasless_effect_canonical_plaintext");
-      return value;
-    } catch (error) {
-      if (error instanceof ApnError) throw error;
-      return unavailable("gasless_effect_authentication");
-    } finally {
-      wrapping.fill(0); salt.fill(0); nonce.fill(0); tag.fill(0); ciphertext.fill(0); key.fill(0); plaintext.fill(0);
-    }
+    try { return await openNested(wrapping, ENVELOPE, envelope, value => value); }
+    finally { wrapping.fill(0); }
   }
 
   private path(operation: GaslessOperationRecord, role: GaslessRole): string {
@@ -112,12 +87,7 @@ export class GaslessEffectStore extends SecureStateStore {
   }
 }
 
-function headerFor(
-  operation: GaslessOperationRecord,
-  material: GaslessSealedMaterial,
-  salt: Buffer,
-  nonce: Buffer,
-): Header {
+function headerFor(operation: GaslessOperationRecord, material: GaslessSealedMaterial): Omit<Header, "kdf" | "cipher"> {
   const final = material.role === "user_operation" ? material : null;
   return {
     schemaVersion: VERSION,
@@ -128,8 +98,6 @@ function headerFor(
     envelopeHash: operation.intent.unsignedEnvelopeHash,
     bootstrapMaterialHash: final?.bootstrapMaterialHash ?? null,
     estimateHash: final?.estimateHash ?? null,
-    kdf: { name: "HKDF-SHA-256", salt: salt.toString("base64") },
-    cipher: { name: "AES-256-GCM", nonce: nonce.toString("base64") },
   };
 }
 
@@ -157,25 +125,6 @@ function parseEnvelope(value: unknown, operation: GaslessOperationRecord, role: 
     corrupt("gasless_final_effect_prerequisite");
   }
   return record as unknown as Envelope;
-}
-
-function headerOf(envelope: Envelope): Header {
-  return { ...envelope, cipher: { name: envelope.cipher.name, nonce: envelope.cipher.nonce } };
-}
-
-function deriveKey(wrapping: Buffer, salt: Buffer, header: Header): Buffer {
-  const info = [VERSION, "gasless-effects", header.profileHash, header.operationId, header.fingerprint,
-    header.role, header.envelopeHash, header.bootstrapMaterialHash ?? "", header.estimateHash ?? ""].join("\0");
-  return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(info, "utf8"), 32));
-}
-
-function base64(value: string, length?: number): Buffer {
-  const decoded = Buffer.from(value, "base64");
-  if (decoded.length === 0 || decoded.length > 64 * 1024 || decoded.toString("base64") !== value ||
-    (length !== undefined && decoded.length !== length)) {
-    decoded.fill(0); corrupt("gasless_effect_encoding");
-  }
-  return decoded;
 }
 
 function corrupt(reason: string): never { return gaslessFailure("APN_STATE_CORRUPT", reason); }

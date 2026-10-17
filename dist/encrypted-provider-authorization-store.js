@@ -1,7 +1,6 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
-import { TextDecoder } from "node:util";
 import { join } from "node:path";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
+import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 const ENVELOPE_VERSION = "apn.provider-authorization-envelope.v1";
@@ -10,6 +9,13 @@ const KDF_NAME = "HKDF-SHA-256";
 const CIPHER_NAME = "AES-256-GCM";
 const HASH = /^[a-f0-9]{64}$/u;
 const SIGNATURE = /^0x[0-9a-f]{130}$/u;
+const ENVELOPE = {
+    info: header => `${ENVELOPE_VERSION}\0${header.binding.profileHash}\0${header.binding.operationId}`,
+    aad: header => header,
+    maxFieldBytes: null,
+    fail: (failure, field) => corrupt(failure === "authentication" ? "Provider authorization authentication or decryption failed."
+        : failure === "canonical_plaintext" ? "Provider authorization plaintext is not canonical." : `Provider authorization ${field} encoding is invalid.`),
+};
 export class EncryptedProviderAuthorizationStore {
     wrappingSecret;
     envelopes;
@@ -26,7 +32,7 @@ export class EncryptedProviderAuthorizationStore {
         if (wrapping === null)
             corrupt("The provider authorization wrapping secret is missing.");
         try {
-            return decryptEnvelope(envelope, wrapping);
+            return await openNested(wrapping, ENVELOPE, envelope, validateRecord);
         }
         finally {
             wrapping.fill(0);
@@ -38,36 +44,11 @@ export class EncryptedProviderAuthorizationStore {
         if (previous !== null)
             validateAdvance(previous, record);
         const wrapping = await this.loadOrCreateWrappingSecret();
-        const salt = randomBytes(32);
-        const nonce = randomBytes(12);
-        const key = deriveKey(wrapping, salt, binding);
-        const header = {
-            schemaVersion: ENVELOPE_VERSION,
-            binding,
-            kdf: { name: KDF_NAME, salt: salt.toString("base64") },
-            cipher: { name: CIPHER_NAME, nonce: nonce.toString("base64") },
-        };
-        const plaintext = Buffer.from(canonicalJson(record), "utf8");
         try {
-            const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-            cipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-            const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-            const envelope = {
-                ...header,
-                cipher: {
-                    ...header.cipher,
-                    ciphertext: ciphertext.toString("base64"),
-                    tag: cipher.getAuthTag().toString("base64"),
-                },
-            };
+            const envelope = sealNested(wrapping, ENVELOPE, { schemaVersion: ENVELOPE_VERSION, binding }, record);
             await this.envelopes.write(binding.profileHash, binding.operationId, envelope);
-            ciphertext.fill(0);
         }
         finally {
-            plaintext.fill(0);
-            key.fill(0);
-            salt.fill(0);
-            nonce.fill(0);
             wrapping.fill(0);
         }
     }
@@ -87,44 +68,6 @@ class ProviderAuthorizationEnvelopeState extends SecureStateStore {
         stateIdentifier(operationId, "provider authorization operation ID");
         await this.ensureDirectory(join("provider-authorizations", profileHash));
         await this.writeJson(join("provider-authorizations", profileHash, `${operationId}.json`), envelope);
-    }
-}
-function decryptEnvelope(envelope, wrapping) {
-    const salt = decodeBase64(envelope.kdf.salt, 32, "salt");
-    const nonce = decodeBase64(envelope.cipher.nonce, 12, "nonce");
-    const ciphertext = decodeBase64(envelope.cipher.ciphertext, undefined, "ciphertext");
-    const tag = decodeBase64(envelope.cipher.tag, 16, "tag");
-    const key = deriveKey(wrapping, salt, envelope.binding);
-    const header = {
-        schemaVersion: envelope.schemaVersion,
-        binding: envelope.binding,
-        kdf: envelope.kdf,
-        cipher: { name: envelope.cipher.name, nonce: envelope.cipher.nonce },
-    };
-    let plaintext = Buffer.alloc(0);
-    try {
-        const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-        decipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-        decipher.setAuthTag(tag);
-        plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-        const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
-        const value = JSON.parse(text);
-        if (canonicalJson(value) !== text)
-            corrupt("Provider authorization plaintext is not canonical.");
-        return validateRecord(value);
-    }
-    catch (error) {
-        if (error instanceof ApnError)
-            throw error;
-        corrupt("Provider authorization authentication or decryption failed.");
-    }
-    finally {
-        salt.fill(0);
-        nonce.fill(0);
-        ciphertext.fill(0);
-        tag.fill(0);
-        key.fill(0);
-        plaintext.fill(0);
     }
 }
 function parseEnvelope(value, binding) {
@@ -207,17 +150,6 @@ function validateAdvance(previous, next) {
     if (previous.phase === "pending" && next.phase === "pending" && previous.recoveryToken !== next.recoveryToken) {
         corrupt("Provider authorization recovery token changed.");
     }
-}
-function deriveKey(wrapping, salt, binding) {
-    return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(`${ENVELOPE_VERSION}\0${binding.profileHash}\0${binding.operationId}`, "utf8"), 32));
-}
-function decodeBase64(value, expectedLength, label) {
-    const decoded = Buffer.from(value, "base64");
-    if (decoded.toString("base64") !== value || (expectedLength === undefined ? decoded.length === 0 : decoded.length !== expectedLength)) {
-        decoded.fill(0);
-        corrupt(`Provider authorization ${label} encoding is invalid.`);
-    }
-    return decoded;
 }
 function canonicalTimestamp(value) {
     const parsed = Date.parse(value);

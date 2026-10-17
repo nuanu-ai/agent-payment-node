@@ -4,10 +4,10 @@ import { lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { validateCircleFundingOperation as validateCircle, type CircleFundingOperationV2 } from "./funding-operation.js";
 import { assertCircleFundingEffectGuard, snapshotCircleFundingOperation, snapshotCircleFundingEffect } from "./funding-lifecycle.js";
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, serializeTransaction, type Hex, type TransactionSerialized } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
+import { exactKeys, hashObject, isPlainRecord } from "../canonical.js";
+import { openCanonicalJson, sealCanonicalJson, type EnvelopeSpec } from "../custody-envelope.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -20,6 +20,11 @@ const VERSION = "apn.circle-v2-evm-effect-envelope.v2";
 interface Header { readonly schemaVersion: typeof VERSION; readonly operationId: string; readonly role: CircleRole; readonly fingerprint: string;
   readonly envelopeHash: string; readonly salt: string; readonly nonce: string; }
 interface EncryptedMaterial extends Header { readonly ciphertext: string; readonly tag: string; }
+/** The whole header is the AAD. A decryption error propagates unchanged, as it always has. */
+const SEAL: EnvelopeSpec<Header> = {
+  info: h => `${VERSION}\0${h.operationId}\0${h.role}\0${h.fingerprint}\0${h.envelopeHash}`, aad: h => h, maxFieldBytes: 65536,
+  fail: (failure, _field, cause) => { if (failure === "authentication") throw cause; return circleCorrupt(failure === "canonical_plaintext" ? "material_plaintext" : "material_encoding"); },
+};
 export class CircleFundingEffectStore extends SecureStateStore {
   constructor(root: string, private readonly wrapping: WrappingSecretPort) { super(root); }
   private path(op: CircleFundingOperationV2, role: CircleRole) { validateCircle(op); return `circle-v2-evm-funding-effects/${op.operationId}-${role}.json`; }
@@ -42,15 +47,14 @@ export class CircleFundingEffectStore extends SecureStateStore {
     if (e.schemaVersion !== VERSION || e.operationId !== op.operationId || e.role !== effect.role || e.fingerprint !== op.fingerprint || e.envelopeHash !== effect.envelope.envelopeHash) circleCorrupt("material_binding");
     const snapshot = await this.snapshot(op, effect); await this.sameSnapshot(op, effect, snapshot, value);
     guard?.(); const wrapping = await this.wrapping.load(); if (wrapping === null) circleBlocked("wrapping_secret_missing");
-    let salt = Buffer.alloc(0), nonce = Buffer.alloc(0), ciphertext = Buffer.alloc(0), tag = Buffer.alloc(0), key = Buffer.alloc(0), plaintext = Buffer.alloc(0);
     try {
       guard?.(); await this.sameSnapshot(op, effect, snapshot, value);
-      salt = base64(e.salt, 32); nonce = base64(e.nonce, 12); ciphertext = base64(e.ciphertext); tag = base64(e.tag, 16); key = derive(wrapping, salt, e);
-      const { ciphertext: _cipher, tag: _tag, ...header } = e, decipher = createDecipheriv("aes-256-gcm", key, nonce);
-      decipher.setAAD(Buffer.from(canonicalJson(header))); decipher.setAuthTag(tag); plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext), material: unknown = JSON.parse(text);
-      if (canonicalJson(material) !== text) circleCorrupt("material_plaintext"); await this.sameSnapshot(op, effect, snapshot, value); const verified = await verifyCircleFundingMaterial(op, effect, material); await this.sameSnapshot(op, effect, snapshot, value); return verified;
-    } finally { wrapping.fill(0); salt.fill(0); nonce.fill(0); ciphertext.fill(0); tag.fill(0); key.fill(0); plaintext.fill(0); }
+      const { ciphertext: _cipher, tag: _tag, ...header } = e;
+      return await openCanonicalJson(wrapping, SEAL, header, e, async material => {
+        await this.sameSnapshot(op, effect, snapshot, value); const verified = await verifyCircleFundingMaterial(op, effect, material);
+        await this.sameSnapshot(op, effect, snapshot, value); return verified;
+      });
+    } finally { wrapping.fill(0); }
   }
   async claim(op: CircleFundingOperationV2, effect: CircleEffect, kind: "sign" | "send", guard: () => void): Promise<void> {
     validateCircle(op); guard(); if (effect.role === "mint" || effect.role === "cleanup") await new CircleFundingExternalStore(this.root).assertOwnedMintAvailable(op); guard(); await this.initialize(); await this.ensureDirectory("circle-v2-evm-funding-effects"); guard();
@@ -77,15 +81,13 @@ export class CircleFundingEffectStore extends SecureStateStore {
     await verifyCircleFundingMaterial(op, effect, material); const existing = await this.load(op, effect, guard);
     if (existing !== null) { if (!circleSame(existing, material)) circleCorrupt("material_replacement"); return existing; }
     guard?.(); const wrapping = await this.wrapping.load(); if (wrapping === null) circleBlocked("wrapping_secret_missing");
-    const salt = randomBytes(32), nonce = randomBytes(12), header: Header = { schemaVersion: VERSION, operationId: op.operationId, role: effect.role,
-      fingerprint: op.fingerprint, envelopeHash: effect.envelope.envelopeHash, salt: salt.toString("base64"), nonce: nonce.toString("base64") }, key = derive(wrapping, salt, header), plaintext = Buffer.from(canonicalJson(material));
-    let ciphertext = Buffer.alloc(0);
     try {
-      guard?.(); const cipher = createCipheriv("aes-256-gcm", key, nonce); cipher.setAAD(Buffer.from(canonicalJson(header)));
-      ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]); await this.initialize(); await this.ensureDirectory("circle-v2-evm-funding-effects");
-      guard?.(); await this.writeJson(this.path(op, effect.role), { ...header, ciphertext: ciphertext.toString("base64"), tag: cipher.getAuthTag().toString("base64") }, true);
+      guard?.(); const sealed = sealCanonicalJson(wrapping, SEAL, (salt, nonce): Header => ({ schemaVersion: VERSION, operationId: op.operationId,
+        role: effect.role, fingerprint: op.fingerprint, envelopeHash: effect.envelope.envelopeHash, salt, nonce }), material);
+      await this.initialize(); await this.ensureDirectory("circle-v2-evm-funding-effects");
+      guard?.(); await this.writeJson(this.path(op, effect.role), { ...sealed.header, ciphertext: sealed.ciphertext, tag: sealed.tag }, true);
       return material;
-    } finally { wrapping.fill(0); salt.fill(0); nonce.fill(0); key.fill(0); plaintext.fill(0); ciphertext.fill(0); }
+    } finally { wrapping.fill(0); }
   }
 }
 export class LocalCircleFundingCustody {
@@ -134,5 +136,3 @@ export async function verifyCircleFundingMaterial(op: CircleFundingOperationV2, 
     (t.yParity !== 0 && t.yParity !== 1) || serializeTransaction(t, { r: t.r, s: t.s, yParity: t.yParity }) !== material.rawTransaction) circleCorrupt("signed_transaction");
   return material;
 }
-function derive(wrapping: Buffer, salt: Buffer, h: Header) { return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(`${VERSION}\0${h.operationId}\0${h.role}\0${h.fingerprint}\0${h.envelopeHash}`), 32)); }
-function base64(input: string, length?: number) { if (typeof input !== "string") circleCorrupt("material_encoding"); const b = Buffer.from(input, "base64"); if (b.length === 0 || b.length > 65536 || b.toString("base64") !== input || length !== undefined && b.length !== length) circleCorrupt("material_encoding"); return b; }

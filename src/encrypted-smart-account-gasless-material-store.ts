@@ -1,9 +1,8 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { TextDecoder } from "node:util";
 import { hashDelegation } from "./metamask-smart-account-vendor.js";
 import { decodeDelegations, encodeDelegations, toDelegationStruct } from "./metamask-smart-account-vendor.js";
 import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
+import { openCanonicalJson, sealCanonicalJson, type EnvelopeSpec } from "./custody-envelope.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { Address, Hex } from "./model.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
@@ -54,7 +53,7 @@ export class EncryptedSmartAccountGaslessMaterialStore implements SmartAccountGa
     const envelope = envelopeRecord(value, operationId);
     const secret = await this.wrapping.load();
     if (secret === null) saFail("sa_gasless_material_unavailable");
-    try { return decrypt(envelope, secret); }
+    try { return await decrypt(envelope, secret); }
     finally { secret.fill(0); }
   }
 
@@ -89,19 +88,10 @@ export class EncryptedSmartAccountGaslessMaterialStore implements SmartAccountGa
   }
 
   private async write(record: SmartAccountGaslessMaterialRecord, secret: Buffer): Promise<void> {
-    const salt = randomBytes(32), iv = randomBytes(12), key = derive(secret, salt, record.operation_id);
-    const header = { schema_version: ENVELOPE_VERSION, operation_id: record.operation_id,
-      kdf: { name: "HKDF-SHA-256", salt: salt.toString("base64") },
-      cipher: { name: "AES-256-GCM", iv: iv.toString("base64") } } as const;
-    const plaintext = Buffer.from(canonicalJson(record), "utf8");
-    try {
-      const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: 16 });
-      cipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-      const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-      try { await this.files.write(record.operation_id, { ...header, cipher: { ...header.cipher,
-        ciphertext: ciphertext.toString("base64"), tag: cipher.getAuthTag().toString("base64") } }); }
-      finally { ciphertext.fill(0); }
-    } finally { salt.fill(0); iv.fill(0); key.fill(0); plaintext.fill(0); }
+    const sealed = sealCanonicalJson(secret, ENVELOPE, (salt, iv) => ({ schema_version: ENVELOPE_VERSION, operation_id: record.operation_id,
+      kdf: { name: "HKDF-SHA-256" as const, salt }, cipher: { name: "AES-256-GCM" as const, iv } }), record);
+    await this.files.write(record.operation_id, { ...sealed.header, cipher: { ...sealed.header.cipher,
+      ciphertext: sealed.ciphertext, tag: sealed.tag } });
   }
 }
 
@@ -124,21 +114,20 @@ interface Envelope {
   readonly cipher: { readonly name: "AES-256-GCM"; readonly iv: string; readonly ciphertext: string; readonly tag: string };
 }
 
-function decrypt(envelope: Envelope, secret: Buffer): SmartAccountGaslessMaterialRecord {
-  const salt = base64(envelope.kdf.salt, 32), iv = base64(envelope.cipher.iv, 12);
-  const ciphertext = base64(envelope.cipher.ciphertext), tag = base64(envelope.cipher.tag, 16);
-  const key = derive(secret, salt, envelope.operation_id); let plaintext = Buffer.alloc(0);
+type Header = Omit<Envelope, "cipher"> & { readonly cipher: { readonly name: "AES-256-GCM"; readonly iv: string } };
+/** The only envelope that names its nonce `iv`. Every failure, inside decryption or validation, is one state fault. */
+const ENVELOPE: EnvelopeSpec<Header> = {
+  info: header => `${ENVELOPE_VERSION}\0${header.operation_id}`,
+  aad: header => header,
+  maxFieldBytes: null,
+  fail: () => saFail("sa_gasless_state_corrupt"),
+};
+
+async function decrypt(envelope: Envelope, secret: Buffer): Promise<SmartAccountGaslessMaterialRecord> {
   try {
-    const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: 16 });
-    decipher.setAAD(Buffer.from(canonicalJson({ schema_version: envelope.schema_version, operation_id: envelope.operation_id,
-      kdf: envelope.kdf, cipher: { name: envelope.cipher.name, iv: envelope.cipher.iv } }), "utf8"));
-    decipher.setAuthTag(tag); plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
-    const value = JSON.parse(text) as unknown;
-    if (canonicalJson(value) !== text) saFail("sa_gasless_state_corrupt");
-    return materialRecord(value);
+    return await openCanonicalJson(secret, ENVELOPE, { ...envelope, cipher: { name: envelope.cipher.name, iv: envelope.cipher.iv } },
+      { salt: envelope.kdf.salt, nonce: envelope.cipher.iv, ciphertext: envelope.cipher.ciphertext, tag: envelope.cipher.tag }, materialRecord);
   } catch { return saFail("sa_gasless_state_corrupt"); }
-  finally { salt.fill(0); iv.fill(0); ciphertext.fill(0); tag.fill(0); key.fill(0); plaintext.fill(0); }
 }
 
 function materialRecord(value: unknown): SmartAccountGaslessMaterialRecord {
@@ -194,9 +183,6 @@ function envelopeRecord(value: unknown, operationId: string): Envelope {
   return value as unknown as Envelope;
 }
 
-function derive(secret: Buffer, salt: Buffer, operationId: string): Buffer {
-  return Buffer.from(hkdfSync("sha256", secret, salt, Buffer.from(`${ENVELOPE_VERSION}\0${operationId}`), 32));
-}
 function sealedIdentity(record: SmartAccountGaslessMaterialRecord): string {
   return hashObject({ schema_version: record.schema_version, operation_id: record.operation_id,
     profile_hash: record.profile_hash, fingerprint: record.fingerprint, request_hash: record.request_hash,
@@ -209,13 +195,6 @@ function sealedIdentity(record: SmartAccountGaslessMaterialRecord): string {
     root_context: record.root_context, encoded_child: record.encoded_child,
     permission_context: record.permission_context, payment_payload_canonical_json: record.payment_payload_canonical_json,
     sealed_at: record.sealed_at });
-}
-function base64(value: string, length?: number): Buffer {
-  const decoded = Buffer.from(value, "base64");
-  if (decoded.length === 0 || decoded.toString("base64") !== value || (length !== undefined && decoded.length !== length)) {
-    decoded.fill(0); saFail("sa_gasless_state_corrupt");
-  }
-  return decoded;
 }
 function hashes(...values: readonly string[]): boolean { return values.every(value => /^[a-f0-9]{64}$/u.test(value)); }
 function lowerAddress(value: string): boolean { return /^0x[0-9a-f]{40}$/u.test(value); }
