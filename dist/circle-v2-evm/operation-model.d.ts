@@ -91,7 +91,7 @@ export declare function publicCircle(op: CircleOperationV1): {
     cleanup_retirement_receipt?: CircleNonceRetirementProof;
     operation_id: string;
     kind: string;
-    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
+    state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;

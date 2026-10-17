@@ -47,7 +47,7 @@ export type CommandRequest = {
     readonly idempotencyKey: string;
     readonly funding: CircleFundingParameters;
 } | {
-    readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.cleanup85-prepare" | "circle.evm.cleanup85-cancel" | "circle.evm.cleanup86-approve" | "circle.evm.status";
+    readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.status";
     readonly operationId: string;
 } | {
     readonly command: "mega.funding.approve" | "mega.funding.status";

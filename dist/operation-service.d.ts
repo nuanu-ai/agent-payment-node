@@ -1,8 +1,6 @@
 import { type CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
-import { type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
-import { type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { GaszipFundingJournal, type GaszipFundingRecord } from "./lifi/gaszip-direct-journal.js";
-import { type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operation-model.js";
+import type { CircleRole } from "./circle-v2-evm/operation-model.js";
 import { type MerchantOperation } from "./x402-merchant/model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import type { CommandOutcome } from "./commands.js";
@@ -106,8 +104,6 @@ export declare class OperationService {
     assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
     /** The account check of one saved operation, excluding only that operation's own claim; its owner holds the account locks. */
     assertEvmAccountAvailableExcept(profileHash: string, chainId: number | string, account: string, exceptOperationId: string): Promise<void>;
-    assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void>;
-    assertCleanup85NativeAccountAvailable(proof: VerifiedCleanup85RecoveryAdmission, request: Cleanup85CancellationRequest, exceptOperation?: OperationRecord): Promise<void>;
     /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */
     assertPermit2AccountAvailable(record: Permit2ProductionRecord): Promise<void>;
     /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */
@@ -116,8 +112,6 @@ export declare class OperationService {
     private permit2ProductionOperations;
     private profileOperations;
     private circleOperations;
-    /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */
-    assertCleanup85PreparationAccountsAvailable(record: CircleOperationV1, now: number): Promise<void>;
     /** Both Circle signing accounts are held under their existing profile locks. */
     assertCircleAccountsAvailable(record: CircleKnownOperation, exceptSaved?: boolean, effectRole?: CircleRole): Promise<void>;
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;

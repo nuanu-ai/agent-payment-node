@@ -1,7 +1,4 @@
-import { assertConsumedCleanup } from "./consumed-burn-proof.js";
-import { assertConsumedBurnEvidence } from "./consumed-burn-rpc.js";
-import { isConsumedBurnRetirement, isSealedBurnRetirement, sealedBurnBinding, assertSealedBurnReplacement } from "./burn-retirement.js";
-import { assertSealedBurnEvidence } from "./burn-retirement-proof.js";
+import { assertConsumedBurnEvidence, assertConsumedCleanup, assertSealedBurnEvidence, assertSealedBurnReplacement, isConsumedBurnRetirement, isSealedBurnRetirement, sealedBurnBinding } from "../legacy/circle-sealed-burn-retirement.js";
 import { CircleRetirementAuthorityStore } from "./nonce-retirement-authority.js";
 import { hashObject, exactKeys, isPlainRecord } from "../canonical.js";
 import { SecureStateStore } from "../secure-state-store.js";
@@ -42,24 +39,19 @@ export class CircleNonceRetirementStore extends SecureStateStore {
         }
         return intent;
     }
-    async start(op, cleanupEnvelope, sealedBurn, consumedBurn) {
+    /** Writes only the generic intent; the historical sealed/consumed-burn variants are read-only (src/legacy). */
+    async start(op, cleanupEnvelope) {
         const previous = await this.intent(op);
         if (previous !== null)
             return previous;
-        const body = { version: isConsumedBurnRetirement(op) ? "apn.circle-consumed-burn-retirement.v1" : isSealedBurnRetirement(op) ? "apn.circle-burn-nonce-retirement.v1" : "apn.circle-nonce-retirement.v1", ...(sealedBurn === undefined ? {} : { sealedBurn }), ...(consumedBurn === undefined ? {} : { consumedBurn }), operationId: op.operationId, binding: circleRetirementBinding(op),
+        if (isSealedBurnRetirement(op))
+            circleBlocked("historical_sealed_burn_retirement_read_only");
+        const body = { version: "apn.circle-nonce-retirement.v1", operationId: op.operationId, binding: circleRetirementBinding(op),
             prefix: op.transitions.map(x => x.snapshotHash), cleanupEnvelope };
         const intent = { ...body, intentHash: hashObject(body) };
         validateCircleEnvelope(cleanupEnvelope, "cleanup", op.destinationChain, null, op.destinationProfile);
-        if (cleanupEnvelope.nonceAtomic !== (isConsumedBurnRetirement(op) ? "85" : op.effects[isSealedBurnRetirement(op) ? 1 : 0].envelope.nonceAtomic))
+        if (cleanupEnvelope.nonceAtomic !== op.effects[0].envelope.nonceAtomic)
             circleBlocked("retirement_exact_original_nonce_required");
-        if (isConsumedBurnRetirement(op)) {
-            assertConsumedCleanup(op, cleanupEnvelope);
-            assertConsumedBurnEvidence(intent.consumedBurn, op);
-        }
-        else if (isSealedBurnRetirement(op)) {
-            assertSealedBurnReplacement(op, cleanupEnvelope);
-            assertSealedBurnEvidence(intent.sealedBurn, op);
-        }
         await this.initialize();
         await this.ensureDirectory(ROOT);
         await this.writeJson(this.path(op.operationId), intent, true);

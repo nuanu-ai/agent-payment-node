@@ -182,7 +182,7 @@ export class CircleFundingEvmService {
     preflightAttesters(destination, digest) { return readCircleAttesters(destination, digest); }
     remotes(chain) {
         const route = circleRoute(chain), sourceUrl = this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
-        return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "0", undefined, "lean"), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "0", undefined, "lean") };
+        return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean"), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean") };
     }
     async api(path) {
         const response = await this.https.request(`https://iris-api.circle.com${path}`, "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");

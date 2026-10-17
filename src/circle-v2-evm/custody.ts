@@ -1,5 +1,4 @@
 import { assertCircleEffectGuard } from "./lifecycle.js";
-import { isSealedBurnRetirement } from "./burn-retirement.js";
 import { CircleNonceRetirementStore } from "./nonce-retirement-store.js";
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, serializeTransaction, type Hex, type TransactionSerialized } from "viem";
@@ -20,28 +19,9 @@ interface EncryptedMaterial extends Header { readonly ciphertext: string; readon
 export class CircleEffectStore extends SecureStateStore {
   constructor(root: string, private readonly wrapping: WrappingSecretPort) { super(root); }
   private path(op: CircleOperationV1, role: CircleRole) { validateCircle(op); return `circle-v2-evm-effects/${op.operationId}-${role}.json`; }
-  /** Public historical verification only: returns headers, never ciphertext, tag or plaintext. */
-  async historicalPaidHeaders(op: CircleOperationV1, includeMint = false): Promise<readonly { readonly schemaVersion: string; readonly operationId: string; readonly role: CircleRole; readonly fingerprint: string; readonly envelopeHash: string; readonly salt: string; readonly nonce: string }[]> {
-    validateCircle(op); const result = [];
-    for (const effect of op.effects.filter(e => includeMint || e.role !== "mint")) {
-      const value = await this.readJson(this.path(op, effect.role));
-      if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) || value.schemaVersion !== VERSION || value.operationId !== op.operationId || value.role !== effect.role || value.fingerprint !== op.fingerprint || value.envelopeHash !== effect.envelope.envelopeHash || typeof value.ciphertext !== "string" || value.ciphertext.length === 0 || typeof value.salt !== "string" || typeof value.nonce !== "string" || typeof value.tag !== "string") circleBlocked("historical_paid_material_header_required");
-      const salt = base64(value.salt, 32), nonce = base64(value.nonce, 12), tag = base64(value.tag, 16); salt.fill(0); nonce.fill(0); tag.fill(0);
-      result.push(Object.freeze({ schemaVersion: VERSION, operationId: op.operationId, role: effect.role, fingerprint: op.fingerprint, envelopeHash: effect.envelope.envelopeHash, salt: String(value.salt), nonce: String(value.nonce) }));
-    }
-    return Object.freeze(result);
-  }
   async assertExternalAbsent(op: CircleOperationV1): Promise<void> { validateCircle(op); const entries=await this.readDirectory("circle-v2-evm-effects"); for (const role of ["mint", "cleanup"] as const) if (entries.some(entry=>entry.name===`${op.operationId}-${role}.json`)) circleBlocked("external_owned_material_present"); }
   async assertCleanupAbsent(op: CircleOperationV1): Promise<void> { if (await this.readJson(this.path(op, "cleanup")) !== null) circleBlocked("retirement_unclaimed_cleanup_material_present"); }
   async assertRetirementHeaders(op: CircleOperationV1): Promise<void> {
-    if (isSealedBurnRetirement(op)) {
-      for (const effect of op.effects.slice(0, 2)) {
-        const e = await this.readJson(this.path(op, effect.role));
-        if (!isPlainRecord(e) || !exactKeys(e, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) || e.schemaVersion !== VERSION ||
-          e.operationId !== op.operationId || e.role !== effect.role || e.fingerprint !== op.fingerprint || e.envelopeHash !== effect.envelope.envelopeHash || typeof e.ciphertext !== "string" || e.ciphertext.length === 0) circleBlocked("retirement_burn_material_header_required");
-      }
-      return;
-    }
     const approval = op.effects[0]!, burn = op.effects[1]!;
     const value = await this.readJson(this.path(op, "approval"));
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "role", "fingerprint", "envelopeHash", "salt", "nonce", "ciphertext", "tag"]) ||

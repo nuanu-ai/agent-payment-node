@@ -7,10 +7,7 @@ export declare class CircleRepository extends SecureStateStore {
     /** Legacy callers cannot adopt, recover or execute a funding-v2 ID. */
     load(operationId: string): Promise<CircleOperationV1 | null>;
     listAllAny(): Promise<readonly CircleKnownOperation[]>;
-    /** Historical enumeration only. Generic identity and financial inventory must use all known schemas. */
-    listAllOperations(): Promise<readonly CircleOperationV1[]>;
     listAny(profileHash: string): Promise<readonly CircleKnownOperation[]>;
-    listOperations(profileHash: string): Promise<readonly CircleOperationV1[]>;
     save(input: CircleOperationV1): Promise<void>;
     saveFunding(input: CircleFundingOperationV2): Promise<void>;
 }

@@ -1,4 +1,3 @@
-import { type Cleanup85RecoveryDependencies } from "./cleanup85-recovery-runtime.js";
 import { type Hex } from "viem";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { BridgeHttps } from "../lifi/https.js";
@@ -19,25 +18,8 @@ export declare class CircleEvmService {
     private readonly custody;
     private readonly operations;
     private readonly retirements;
-    private readonly cleanup85Recovery;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number, ttyOptions?: TtyTransferApprovalOptions, https?: Pick<BridgeHttps, "request">, cleanup85Dependencies?: Cleanup85RecoveryDependencies);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number, ttyOptions?: TtyTransferApprovalOptions, https?: Pick<BridgeHttps, "request">);
     status(id: string): Promise<{
-        cleanup85_recovery?: {
-            cleanup86?: {
-                intentHash: string;
-                envelopeHash: string;
-                effect: import("./cleanup86-store.js").Cleanup86Effect | null;
-                signClaimed: boolean;
-                sendClaimed: boolean;
-                materialMetadata: {
-                    transactionHash: Hex;
-                    materialHash: string;
-                } | null;
-                firstPublicFailure: unknown;
-            };
-            recoveryBinding: string;
-            windowEndsAt: string | null;
-        };
         first_public_effect_failure?: {} | undefined;
         next_actions: string[];
         external_fulfillment?: import("./external-proof.js").CircleExternalFulfillment;
@@ -50,7 +32,7 @@ export declare class CircleEvmService {
         cleanup_retirement_receipt?: import("./nonce-retirement-proof.js").CircleNonceRetirementProof;
         operation_id: string;
         kind: string;
-        state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
+        state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
         terminal: boolean;
         source_profile: string;
         destination_profile: string;
@@ -70,9 +52,6 @@ export declare class CircleEvmService {
         usage_finalized: boolean;
         integrity_hash: string;
     }>;
-    prepareCleanup85Recovery(id: string): Promise<import("../circle-cleanup85-cancellation-contract.js").Cleanup85CancellationRequest>;
-    cancelCleanup85(id: string): Promise<import("../circle-cleanup85-cancellation-contract.js").Cleanup85CancellationStatus>;
-    approveCleanup86(id: string): Promise<CircleOperationV1>;
     approveSource(id: string): Promise<CircleOperationV1>;
     adoptExternalMint(id: string, transactionHash: Hex): Promise<CircleOperationV1>;
     approveMint(id: string): Promise<CircleOperationV1>;

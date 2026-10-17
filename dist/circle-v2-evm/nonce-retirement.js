@@ -1,17 +1,7 @@
-import { isConsumedBurnRetirement, assertConsumedBurnIdentity, isSealedBurnRetirement, assertSealedBurnRetirement } from "./burn-retirement.js";
 import { validateCircleNonceRetirementProof } from "./nonce-retirement-proof.js";
 import { advanceCircle, circleBlocked, validateCircle } from "./operation-model.js";
 import { executeCircleCleanupWithConsent } from "./lifecycle.js";
 export function assertCircleNonceRetirementCase(op, now) {
-    if (isSealedBurnRetirement(op)) {
-        if (isConsumedBurnRetirement(op))
-            assertConsumedBurnIdentity(op);
-        else
-            assertSealedBurnRetirement(op);
-        if (op.terminal || op.usageFinalized || op.residualAllowanceAtomic !== "40100")
-            circleBlocked("sealed_burn_holds_or_allowance_changed");
-        return;
-    }
     const approval = op.effects[0], burn = op.effects[1];
     // Shape-based for every destination (OWNR-14): an expired operation whose approval is sealed and unknown and whose burn
     // was never signed. The replacement takes the approval's own nonce, so the original can never land after it.
