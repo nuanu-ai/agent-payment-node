@@ -41,9 +41,25 @@ test("a refused generic approval names the exact re-prepare command with stored 
   assert.match((offline.operation as { next_actions: string[] }).next_actions[0] ?? "", /--idempotency-key retry-[0-9a-f]{16} --rpc-url <https-url>$/u);
 });
 
-test("default next actions no longer send every RPC configuration failure to a Base --rpc-url", async () => {
+test("default next actions name the RPC variable the failure names, else the generic RPC setting", async () => {
   const config = failureEnvelope("x", "r", new ApnError("APN_RPC_CONFIG", "APN_TRON_RPC_URL is required."));
-  assert.doesNotMatch(config.next_actions.join(" "), /Base/u);
-  assert.match(config.next_actions[0] ?? "", /RPC setting named in the error \(its --rpc-url or APN_\*_RPC_URL\)/u);
+  assert.deepEqual(config.next_actions, ["Set APN_TRON_RPC_URL to a public HTTPS RPC endpoint of that chain, then rerun the same command."]);
+  const bridge = failureEnvelope("x", "r", new ApnError("APN_RPC_CONFIG", "Bridge RPC is not configured.", { reason: "missing_APN_LINEA_RPC_URL" }));
+  assert.deepEqual(bridge.next_actions, ["Set APN_LINEA_RPC_URL to a public HTTPS RPC endpoint of that chain, then rerun the same command."]);
+  const generic = failureEnvelope("x", "r", new ApnError("APN_RPC_CONFIG", "RPC endpoint must be public HTTPS."));
+  assert.match(generic.next_actions[0] ?? "", /RPC setting named in the error \(its --rpc-url or APN_\*_RPC_URL\)/u);
   assert.match(failureEnvelope("x", "r", new ApnError("APN_REPREPARE_REQUIRED", "swap quote expired")).next_actions[0] ?? "", /^Prepare a new operation/u);
+});
+
+test("a 429 reaches the caller as a rate limit and an unexpected exception carries only its class", () => {
+  const limited = failureEnvelope("x", "r", new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status.", { rpcMethod: "eth_call", httpStatus: 429 }));
+  assert.equal(limited.error?.code, "APN_RPC_RATE_LIMITED");
+  assert.match(limited.next_actions[0] ?? "", /rate-limit window/u);
+  const other = failureEnvelope("x", "r", new ApnError("APN_RPC_PROTOCOL", "RPC returned an unsuccessful HTTP status.", { httpStatus: 503 }));
+  assert.equal(other.error?.code, "APN_RPC_PROTOCOL");
+  const internal = failureEnvelope("x", "r", new TypeError("SECRET_CANARY cannot read properties"));
+  assert.equal(internal.error?.code, "APN_INTERNAL");
+  assert.deepEqual(internal.error?.details, { internal_class: "TypeError" });
+  assert.equal(JSON.stringify(internal).includes("SECRET_CANARY"), false);
+  assert.deepEqual(failureEnvelope("x", "r", "plain string").error?.details, { internal_class: "string" });
 });
