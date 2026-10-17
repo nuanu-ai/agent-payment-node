@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  EMPTY_SWAP_PROTOCOL_REGISTRY, SWAP_MECHANISM_PIN_SCHEMA, compileAllowlistPolicyOverlay,
+  SWAP_MECHANISM_PIN_SCHEMA, compileAllowlistPolicyOverlay,
   compileSwapProtocolRegistry, createSwapQuote, evaluateAssetPolicy, loadAllowlistInventory,
   swapMechanismDigest, validateSwapProtocolRegistry, validateSwapQuote, type AllowlistPolicyOverlayInput,
   type SwapMechanismPin, type SwapQuoteInput,
@@ -40,7 +40,6 @@ function quote(overrides: Partial<SwapQuoteInput> = {}): SwapQuoteInput {
 }
 
 test("swap overlay requires an exact immutable pin and stays independently dormant by default", () => {
-  assert.equal(EMPTY_SWAP_PROTOCOL_REGISTRY.records.length, 0);
   const compiled = compileAllowlistPolicyOverlay(overlay());
   const asset = compiled.registry.chains[0]!.assets[0]!;
   assert.equal(asset.rails.swap, true); assert.deepEqual(asset.mechanismPins?.swap, pin());

@@ -4,9 +4,9 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   SUNSWAP_USDT, SUNSWAP_V2_CODE_HASHES, SUNSWAP_V2_ROUTER, SUNSWAP_WTRX, SunSwapKeylessQuoteBuilder,
-  SunSwapPreparedMaterialStore, buildSunSwapUnsignedTransaction, encodeSunSwapCalldata, observeSunSwapFinality,
+  SunSwapPreparedMaterialStore, buildSunSwapUnsignedTransaction, encodeSunSwapCalldata, validateSunSwapReceipt,
   parseSunSwapV2SwapCall, priceSunSwapV2Market, readSunSwapV2Market, sunSwapMaximumBandwidthBytes, validateSunSwapPreparedMaterial,
-  validateSunSwapV2Market, type SunSwapKeylessQuoteRequest, type SunSwapObservationRpcPort, type SunSwapReadOnlyQuoteBuilder,
+  validateSunSwapV2Market, type SunSwapKeylessQuoteRequest, type SunSwapObservationRpcPort,
 } from "../../src/core.js";
 import { TronRpc, type TronMethod } from "../../src/tron/rpc.js";
 import { tronHex } from "../../src/tron/codec.js";
@@ -55,9 +55,16 @@ test("the production TRON RPC now serves the observer's full-node and solidified
     if (path.endsWith("/gettransactioninfobyid")) return Response.json({ ...receipt.info, blockNumber: 123, fee: 12345 });
     return Response.json({ blockID: blockId(124n), block_header: { raw_data: { number: 124, timestamp: 1 } } });
   };
-  const port: SunSwapObservationRpcPort = new TronRpc("https://rpc.example", fetcher);
-  const proof = await observeSunSwapFinality(port, { transactionHash: tx.txID, recipient: OWNER, inputAmountAtomic: "5000000",
-    minimumOutputAtomic: "1663220", unsignedRawDataHex: tx.raw_data_hex, maximumFeeSun: "30000000", maximumBandwidthFeeSun: "512000" });
+  const port: SunSwapObservationRpcPort = new TronRpc("https://rpc.example", fetcher), byId = { value: tx.txID };
+  // The five reads SunSwapOutcomeObserver makes: full-node and solidified transaction and info, then the solidified head.
+  const [fullTx, fullInfo, solidTx, solidInfo, head] = await Promise.all([port.call("wallet/gettransactionbyid", byId),
+    port.call("wallet/gettransactioninfobyid", byId), port.call("walletsolidity/gettransactionbyid", byId),
+    port.call("walletsolidity/gettransactioninfobyid", byId), port.call("walletsolidity/getnowblock", {})]);
+  const expected = { transactionHash: tx.txID, recipient: OWNER, inputAmountAtomic: "5000000",
+    minimumOutputAtomic: "1663220", unsignedRawDataHex: tx.raw_data_hex, maximumFeeSun: "30000000", maximumBandwidthFeeSun: "512000" };
+  const solid = String((head as { block_header: { raw_data: { number: number } } }).block_header.raw_data.number);
+  const proof = validateSunSwapReceipt(solidTx, solidInfo, solid, expected);
+  assert.equal(validateSunSwapReceipt(fullTx, fullInfo, solid, expected).receiptHash, proof.receiptHash);
   assert.equal(proof.outputAmountAtomic, "1671577"); assert.equal(proof.trxDebitSun, "5012345"); assert.equal(proof.solidifiedHeadNumber, "124");
   assert.deepEqual(paths.sort(), ["/wallet/gettransactionbyid", "/wallet/gettransactioninfobyid", "/walletsolidity/getnowblock",
     "/walletsolidity/gettransactionbyid", "/walletsolidity/gettransactioninfobyid"]);
@@ -194,9 +201,6 @@ test("owner economics refuse before any material exists: unactivated, underfunde
   const legacy: any = { ...request() }; delete legacy.feeLimitSun; delete legacy.deadline;
   await assert.rejects(new SunSwapKeylessQuoteBuilder(funded(new FakeSunSwapRpc()), new SunSwapPreparedMaterialStore(temp.root)).quote(legacy),
     { code: "APN_INVALID_INPUT", message: /feeLimitSun, deadline and now; fee_limit and deadline have no default/u });
-  // The CLI quote now carries the owner's fee_limit and deadline, so the keyless builder fits the injected quote port exactly.
-  const port: SunSwapReadOnlyQuoteBuilder = new SunSwapKeylessQuoteBuilder(new FakeSunSwapRpc(), new SunSwapPreparedMaterialStore(temp.root));
-  void port;
   const extra: any = { ...request(), feeLimit: "30000000" };
   await assert.rejects(new SunSwapKeylessQuoteBuilder(funded(new FakeSunSwapRpc()), new SunSwapPreparedMaterialStore(temp.root)).quote(extra), { code: "APN_INVALID_INPUT" });
   assert.deepEqual(await readdir(join(temp.root, "sunswap-tron-prepared")).catch(() => []), []);

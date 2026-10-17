@@ -1,6 +1,6 @@
 import type { ClockPort } from "../../ports.js";
 import { type SwapOperationRecord } from "../model.js";
-import { type SwapProtocolRegistry } from "../protocol-registry.js";
+import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
 import type { SwapUnlandedProof } from "../unlanded.js";

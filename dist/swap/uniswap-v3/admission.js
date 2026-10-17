@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
-import { validateAssetPolicyRegistry } from "../../asset-policy-registry.js";
 import { ApnError } from "../../errors.js";
 import { bridgeOwner } from "../../lifi/owner.js";
+import { assertActiveSwapPolicyUnchanged } from "../family-guards.js";
 import { validateSwapOperation } from "../model.js";
 /**
  * Owner admission for the local non-custodial wallet: the profile's active sealed policy must still be the one the
@@ -16,13 +16,7 @@ export class UniswapLocalOwnerAdmission {
     }
     async assert(operationValue) {
         const operation = validateSwapOperation(operationValue);
-        const active = await this.policy(operation.quote.profile);
-        if (active === null)
-            blocked("No active owner swap admission is installed for this profile.", "swap_owner_admission_required");
-        const registry = validateAssetPolicyRegistry(active);
-        if (registry.policyDigest !== operation.policyDigest || registry.registryVersion !== operation.policyVersion) {
-            blocked("The active owner policy changed after preparation.", "swap_policy_drift");
-        }
+        await assertActiveSwapPolicyUnchanged(this.policy, operation);
         const { owner } = await bridgeOwner(this.state, operation.quote.profile);
         if (owner.profile !== operation.quote.profile || owner.address !== operation.quote.account) {
             blocked("The profile's local wallet is not the quoted swap account.", "swap_owner_account");

@@ -39,9 +39,6 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
-import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
-import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
-import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
@@ -97,11 +94,8 @@ export interface RuntimeFactoryOptions {
         readonly command: "swap.sunswap.quote";
     }>>;
     readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
-    readonly uniswap?: UniswapGuardedSwapBuilder;
     /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
     readonly swapPolicy?: GuardedSwapPolicyResolver;
-    readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-    readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;
     readonly smartAccountGasless?: SmartAccountGaslessDependencies;
     readonly metaMaskGasless?: MetaMaskGaslessDependencies;

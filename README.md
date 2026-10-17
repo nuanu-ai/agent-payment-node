@@ -590,9 +590,7 @@ USDC lanes through the installed runtime and anonymous Solana RPC default
 below. It requires an owned local account and profile, funds, and an active
 owner policy admitting both assets and the exact mechanism; quotes verify the
 full runtime and account pins and simulate the exact unsigned message before
-genuine foreground approval can sign and send once. The dormant V2 Quantum
-prototype requires an explicitly injected read-only builder and remains
-`signable: false`, with approval and execution refused. Registered support and
+genuine foreground approval can sign and send once. Registered support and
 source tests do not establish each lane's finalized paid acceptance; see
 `docs/jupiter.md` for those proof boundaries.
 

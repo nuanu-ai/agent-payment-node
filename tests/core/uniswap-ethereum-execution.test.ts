@@ -14,8 +14,9 @@ import { StateStore } from "../../src/state.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { GuardedSwapService } from "../../src/swap/service.js";
 import { compileSwapProtocolRegistry } from "../../src/swap/protocol-registry.js";
-import { UNISWAP_CHAIN, UNISWAP_MECHANISM_PIN, UNISWAP_ROUTER, UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
-import { decodeUniswapRouterCalldata } from "../../src/swap/uniswap-router.js";
+import { UNISWAP_CHAIN, UNISWAP_ROUTER, UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
+import { UNISWAP_V3_KEYLESS_MECHANISM_PIN as UNISWAP_MECHANISM_PIN } from "../../src/swap/uniswap-v3/pins.js";
+import { decodeUniswapRouterCalldataFor } from "../../src/swap/uniswap-router.js";
 import { canonicalJson, domainHash, sha256 } from "../../src/canonical.js";
 import { temporaryState } from "./helpers.js";
 import { EncryptedUniswapExecutionEffectStore, LocalUniswapEthereumSigner, UniswapBalanceEvidenceStore,
@@ -67,8 +68,8 @@ async function fixture(root: string) {
     chains: compiled.chains.map(chain => ({ ...chain, assets: chain.assets.map(asset =>
       ({ ...asset, rails: { ...asset.rails, direct: true } })) })) });
   const protocols = compileSwapProtocolRegistry({ registryVersion: "uniswap-exec.1", pins: [UNISWAP_MECHANISM_PIN] });
-  const e = envelope(), route = decodeUniswapRouterCalldata(e.data, { recipient: RECIPIENT, inputAmountAtomic: inputAmount,
-    minimumOutputAtomic: minimumOutput, deadline });
+  const e = envelope(), route = decodeUniswapRouterCalldataFor(e.data, { recipient: RECIPIENT, inputAmountAtomic: inputAmount,
+    minimumOutputAtomic: minimumOutput, deadline, outputToken: UNISWAP_USDC });
   const quote = { profile: "uniswap-exec", account: ACCOUNT, recipient: RECIPIENT,
     sourceAsset: { chain: UNISWAP_CHAIN, kind: "native", identifier: null }, destinationAsset: { chain: UNISWAP_CHAIN, kind: "token", identifier: UNISWAP_USDC },
     inputAmountAtomic: inputAmount, expectedOutputAtomic: expectedOutput, minimumOutputAtomic: minimumOutput, slippageBps: 100,

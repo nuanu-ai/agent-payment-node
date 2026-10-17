@@ -26,7 +26,6 @@ export declare function tokenChain(value: unknown): unknown;
 export declare function tokenQuantity(value: unknown): unknown;
 export declare function tokenHex(bytes?: number): (value: unknown) => unknown;
 export declare function tokenBlock(value: unknown): unknown;
-export declare function tokenNullableRecord(value: unknown): unknown;
 export declare function createTokenRpc(input: {
     readonly environment: Readonly<Record<string, string | undefined>>;
     readonly state: StateStore;

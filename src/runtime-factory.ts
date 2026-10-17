@@ -233,7 +233,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ? new StargateTokenService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
   // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
   // MCP intercepts approve/execute with a CLI handoff before this factory runs.
-  const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
+  const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.")
     ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, verifySendPins: verifyUniswapV3MutablePins, clock,
       // The owner's activated allowlist revision; none active means preparation refuses with swap_owner_admission_required.
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
@@ -246,7 +246,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         isUniswapTokenCleanup(bound.request.command) ? "cleanup" : "refuse" })
     : undefined);
   // Keyless SunSwap likewise, over APN_TRON_RPC_URL and the profile's encrypted local TRON wallet.
-  const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.") && options.sunswap === undefined
+  const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.")
     ? createSunSwapKeylessRuntime({ state, rpc: tronRpc, accounts: chainAccounts, clock,
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
@@ -258,7 +258,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
-  const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.") && options.jupiter === undefined
+  const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.")
     ? createJupiterV1Runtime({ state, clock, rpc: solanaRpc, wrappingSecret,
       foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" }) : undefined);
   const stablePorts = () => ({ state, clock, accounts: chainAccounts, rpc: solanaRpc, verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
@@ -343,9 +343,6 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)),
         new SavedOrcaStableMaterialStore(state.root), operationId, clock.now()),
     } : {}),
-    ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
-    ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
-    ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
     ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
       circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state,
         circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)),

@@ -26,7 +26,7 @@ import { UniswapTokenExecution, type TokenEffectKind } from "../../src/swap/unis
 import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js";
 import { occupiedUniswapTokenNonces } from "../../src/swap/uniswap-v3/token-nonce-ownership.js";
 import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
-import { createUniswapTokenRoute, UNISWAP_TOKEN_MECHANISM_PIN, verifyUniswapTokenUsdtState } from "../../src/swap/uniswap-v3/token-route.js";
+import { assertUsdtSafety, createUniswapTokenRoute, UNISWAP_TOKEN_MECHANISM_PIN } from "../../src/swap/uniswap-v3/token-route.js";
 import { InstalledUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime.js";
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
 import { UniswapTokenUsage } from "../../src/swap/uniswap-v3/token-usage.js";
@@ -841,8 +841,9 @@ test("persisted native effect response loss dispatches the same sealed bytes onc
 
 test("token USDT behavior pins reject deprecated and fee-bearing state", async () => {
   const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
-  const verify = async (values: readonly bigint[]) => { let index = 0;
-    await verifyUniswapTokenUsdtState(async (method) => { assert.equal(method, "eth_call"); return word(values[index++]!); }, "0x64"); };
+  // The live check every token-route read of the three USDT flags runs (the unused eth_call loop copy is gone).
+  const verify = async (values: readonly bigint[]) => { (["deprecated", "basisPointsRate", "maximumFee"] as const)
+    .forEach((functionName, index) => assertUsdtSafety(functionName, word(values[index]!))); };
   await verify([0n, 0n, 0n]);
   for (const values of [[1n, 0n, 0n], [0n, 1n, 0n], [0n, 0n, 1n]] as const) {
     await assert.rejects(verify(values), (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "uniswap_code_pin_drift");

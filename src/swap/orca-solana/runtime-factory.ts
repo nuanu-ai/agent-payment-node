@@ -15,7 +15,8 @@ import { OrcaExecutionGuard, OrcaSolanaExecutionDriver } from "./execution.js";
 import { SavedOrcaQuoteStore } from "./material.js";
 import { ORCA_KEYLESS_PROTOCOL_REGISTRY, ORCA_SOLANA_CHAIN, type OrcaProgramPinVerifier } from "./pins.js";
 import { OrcaReceiptObserver } from "./receipt.js";
-import { TtyOrcaSwapApproval } from "./tty.js";
+import { orcaApprovalScreen } from "./tty.js";
+import { TtyGuardedSwapApproval } from "../tty-consent.js";
 
 export interface OrcaKeylessRuntimeOptions {
   readonly state: StateStore;
@@ -39,7 +40,7 @@ export function createOrcaKeylessRuntime(options: OrcaKeylessRuntimeOptions): Gu
   const execution = new OrcaSolanaExecutionDriver({ core: new GuardedSwapService(operations, usage), protocolRegistry: ORCA_KEYLESS_PROTOCOL_REGISTRY,
     admission, guard: new OrcaExecutionGuard(rpc, clock, options.verifyPins), bindings: new OrcaExecutionBindingStore(root), signer, sender,
     observer, effects: accounts, clock });
-  const foregroundApproval = options.foreground === "tty" ? new TtyOrcaSwapApproval(quotes, clock, options.tty) : options.foreground;
+  const foregroundApproval = options.foreground === "tty" ? new TtyGuardedSwapApproval("orca", intent => orcaApprovalScreen(quotes, intent), clock, options.tty) : options.foreground;
   return new GuardedSwapRuntime<OrcaKeylessQuoteRequest>({ chain: ORCA_SOLANA_CHAIN, builder: new KeylessOrcaQuoteBuilder(rpc, quotes, options.verifyPins),
     policy: options.policy, clock, protocolRegistry: ORCA_KEYLESS_PROTOCOL_REGISTRY, usage, operations, ownerAdmission: admission,
     foregroundApproval, execution, approvals: new GuardedSwapApprovalRepository(root), rpc, effectStore: accounts, signer, sender,

@@ -33,7 +33,6 @@ export function tokenChain(value: unknown): unknown { if (evmRpcQuantity(value) 
 export function tokenQuantity(value: unknown): unknown { evmRpcQuantity(value); return value; }
 export function tokenHex(bytes?: number): (value: unknown) => unknown { return (value) => { evmRpcHex(value, bytes); return value; }; }
 export function tokenBlock(value: unknown): unknown { const record = evmRpcRecord(value); evmRpcQuantity(record.number); evmRpcHex(record.hash, 32); return value; }
-export function tokenNullableRecord(value: unknown): unknown { if (value !== null) evmRpcRecord(value); return value; }
 
 export function createTokenRpc(input: { readonly environment: Readonly<Record<string, string | undefined>>; readonly state: StateStore;
   readonly now: () => number; readonly maxHttpRequests: number; readonly deadlineMs: number;

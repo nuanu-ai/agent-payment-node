@@ -1,8 +1,11 @@
 import { type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
-import type { SunSwapObservationRpcPort } from "./observer.js";
 import { type SunSwapPreparedMaterial } from "./prepared.js";
 import { type SunSwapReceiptExpectation } from "./receipt.js";
 import { type SwapUnlandedProof } from "../unlanded.js";
+export type SunSwapObservationMethod = "wallet/gettransactionbyid" | "wallet/gettransactioninfobyid" | "walletsolidity/gettransactionbyid" | "walletsolidity/gettransactioninfobyid" | "walletsolidity/getnowblock";
+export interface SunSwapObservationRpcPort {
+    call(method: SunSwapObservationMethod, body: Readonly<Record<string, unknown>>): Promise<unknown>;
+}
 export type SunSwapObservedOutcome = {
     readonly outcome: "succeeded" | "reverted";
     readonly proof: SwapReceiptProof;

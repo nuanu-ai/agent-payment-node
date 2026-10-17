@@ -6,7 +6,7 @@ import { keccak256, type Hex } from "viem";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { createApnCore } from "../../src/runtime-factory.js";
-import { decodeUniswapRouterCalldata } from "../../src/swap/uniswap-router.js";
+import { decodeUniswapRouterCalldataFor } from "../../src/swap/uniswap-router.js";
 import { UNISWAP_ROUTER, UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { validateSwapMechanismPin } from "../../src/swap/pin.js";
 import { KeylessUniswapQuoteBuilder } from "../../src/swap/uniswap-v3/builder.js";
@@ -55,10 +55,10 @@ test("code-pin verification fails closed on changed code, missing code, and a sw
 
 test("the local encoder is the exact inverse of the strict Universal Router decoder", () => {
   const encoded = encodeUniswapV3ExactInput({ recipient: ACCOUNT, inputAmountAtomic: AMOUNT_IN, minimumOutputAtomic: "2456738", deadline: DEADLINE, pair });
-  const decoded = decodeUniswapRouterCalldata(encoded.data, { recipient: ACCOUNT, inputAmountAtomic: AMOUNT_IN, minimumOutputAtomic: "2456738", deadline: DEADLINE });
+  const decoded = decodeUniswapRouterCalldataFor(encoded.data, { recipient: ACCOUNT, inputAmountAtomic: AMOUNT_IN, minimumOutputAtomic: "2456738", deadline: DEADLINE, outputToken: pair.outputToken });
   assert.deepEqual(decoded, encoded.route); assert.equal(decoded.command, "V3_SWAP_EXACT_IN"); assert.equal(decoded.minimumOutputAtomic, "2456738");
   assert.ok(encoded.data.startsWith("0x3593564c")); assert.ok(encoded.data.includes("0b00"));
-  assert.throws(() => decodeUniswapRouterCalldata(encoded.data, { recipient: ACCOUNT, inputAmountAtomic: AMOUNT_IN, minimumOutputAtomic: "2456739", deadline: DEADLINE }),
+  assert.throws(() => decodeUniswapRouterCalldataFor(encoded.data, { recipient: ACCOUNT, inputAmountAtomic: AMOUNT_IN, minimumOutputAtomic: "2456739", deadline: DEADLINE, outputToken: pair.outputToken }),
     { code: "APN_PROVIDER_PROTOCOL" });
   assert.throws(() => encodeUniswapV3ExactInput({ recipient: ACCOUNT.toLowerCase(), inputAmountAtomic: AMOUNT_IN, minimumOutputAtomic: "1", deadline: DEADLINE, pair }),
     { code: "APN_INVALID_INPUT" });
@@ -140,7 +140,7 @@ test("confirmed revert is terminal in the shared ledger and releases the princip
 test("createApnCore builds the keyless runtime and the activated allowlist gates preparation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const quote = createApnCore(bindArgv(["swap", "ethereum", "uniswap", "status", "--operation", H("c")]), { stateRoot: temporary.root });
-  assert.ok(quote.context.uniswapRuntime); assert.equal(quote.context.uniswap, undefined);
+  assert.ok(quote.context.uniswapRuntime);
   const prepare = await createApnCore(bindArgv(["swap", "ethereum", "uniswap", "prepare", "--profile", PROFILE, "--quote", H("a"),
     "--idempotency-key", "keyless-core-0001"]), { stateRoot: temporary.root }).execute({ command: "swap.uniswap.prepare", profile: PROFILE,
     quoteHash: H("a"), idempotencyKey: "keyless-core-0001" });

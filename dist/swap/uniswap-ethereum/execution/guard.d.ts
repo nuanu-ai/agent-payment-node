@@ -1,7 +1,7 @@
 import type { EvmRpcCall } from "../../../evm-ports.js";
 import type { ClockPort } from "../../../ports.js";
 import { type SwapOperationRecord } from "../../model.js";
-import type { UniswapTransactionEnvelope } from "../../uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "../../uniswap-v3/envelope.js";
 import type { UniswapV3PinVerifier } from "../../uniswap-v3/pins.js";
 import type { UniswapExecutionFreshness, UniswapExecutionGuardPort } from "./types.js";
 /**

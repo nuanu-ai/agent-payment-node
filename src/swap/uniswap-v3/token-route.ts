@@ -9,7 +9,6 @@ import { ETHEREUM_USDT, UNISWAP_V3_FACTORY, UNISWAP_V3_CODE_PINS, USDC_IMPLEMENT
 import { UNISWAP_USDC } from "../uniswap-pin.js";
 import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin } from "../pin.js";
 import { tokenBatch, tokenChain, tokenHex, type TokenRpcCall } from "./token-rpc.js";
-import { compileSwapProtocolRegistry } from "../protocol-registry.js";
 export const UNISWAP_V3_SWAP_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564" as const;
 export const UNISWAP_V3_USDC_USDT_100 = "0x3416cF6C708Da44DB2624D63ea0AAef7113527C6" as const;
 export const UNISWAP_V3_SWAP_ROUTER_CODE_HASH = "0xbb90113d2f9a5e9b7feb15a1d1fff06c1ee1575b3f9b1181778ffd0cf633e7ea" as const;
@@ -25,7 +24,6 @@ export const UNISWAP_TOKEN_MECHANISM_PIN = validateSwapMechanismPin({ schemaVers
     routerProgramIdentity: UNISWAP_V3_SWAP_ROUTER, auxiliaryContractProgramIdentities: [UNISWAP_V3_FACTORY, UNISWAP_V3_USDC_USDT_100],
     quoteSchemaVersion: "quoter-v2.quote-exact-input-single.1", transactionSchemaVersion: UNISWAP_TOKEN_ROUTE_SCHEMA,
     validationPolicyIdentity: "apn.uniswap.ethereum-token-v3-exact", validationPolicyVersion: "1.0.0" });
-export const UNISWAP_TOKEN_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "uniswap-v3-token.2026-09-22", pins: [UNISWAP_TOKEN_MECHANISM_PIN] });
 export interface UniswapTokenRoute {
     readonly schemaVersion: typeof UNISWAP_TOKEN_ROUTE_SCHEMA;
     readonly inputToken: string;
@@ -155,19 +153,13 @@ export async function verifyUniswapTokenRoutePins(call: EvmRpcCall, tag: Hex): P
         throw new ApnError("APN_STATE_CORRUPT", "Uniswap factory pin changed.");
 }
 function code(value: unknown, expected: Hex) { if (keccak256(evmRpcHex(value)) !== expected) blocked("Uniswap token route code pin changed.", "uniswap_code_pin_drift"); }
-function assertUsdtSafety(functionName: "deprecated" | "basisPointsRate" | "maximumFee", value: unknown) {
+/** USDT must stay non-deprecated and fee-free; every token-route read of its flags goes through this check. */
+export function assertUsdtSafety(functionName: "deprecated" | "basisPointsRate" | "maximumFee", value: unknown) {
   const result = decodeFunctionResult({ abi: USDT_SAFETY, functionName, data: evmRpcHex(value, 32) });
   if (result !== false && result !== 0n) blocked("USDT safety state changed from zero/non-deprecated.", "uniswap_code_pin_drift");
 }
 function usdtDecoder(functionName: "deprecated" | "basisPointsRate" | "maximumFee") { return (value: unknown) => {
   decodeFunctionResult({ abi: USDT_SAFETY, functionName, data: evmRpcHex(value, 32) }); return value; }; }
-export async function verifyUniswapTokenUsdtState(call: EvmRpcCall, tag: Hex): Promise<void> {
-  for (const functionName of ["deprecated", "basisPointsRate", "maximumFee"] as const) {
-    const result = decodeFunctionResult({ abi: USDT_SAFETY, functionName,
-      data: evmRpcHex(await call("eth_call", [{ to: ETHEREUM_USDT, data: encodeFunctionData({ abi: USDT_SAFETY, functionName }) }, tag]), 32) });
-    if (result !== false && result !== 0n) blocked("USDT safety state changed from zero/non-deprecated.", "uniswap_code_pin_drift");
-  }
-}
 function token(value: string) { const v = address(value); if (v !== UNISWAP_USDC && v !== ETHEREUM_USDT)
     invalid("Only canonical Ethereum USDC and USDT are admitted."); return v; }
 function address(value: string) { try {

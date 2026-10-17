@@ -7,6 +7,11 @@ import {
   compileAllowlistPolicyOverlay, compileSwapProtocolRegistry, loadAllowlistInventory, sealAssetPolicyRegistry, type AllowlistPolicyOverlayInput,
   type SwapMechanismPin, type SwapQuoteInput,
 } from "../../src/core.js";
+import { approvalCode } from "../../src/approval-code.js";
+import { canonicalJson, domainHash } from "../../src/canonical.js";
+import { assertActiveSwapPolicyUnchanged, assertOperationProtocolRegistry } from "../../src/swap/family-guards.js";
+import type { GuardedSwapApprovalIntent } from "../../src/swap/runtime.js";
+import { guardedSwapApprovalCode } from "../../src/swap/tty-consent.js";
 import { temporaryState } from "./helpers.js";
 
 const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1", RECIPIENT = "0x2222222222222222222222222222222222222222";
@@ -121,4 +126,23 @@ test("operation ownership, concurrency and durable tamper checks fail closed", a
   const stored = JSON.parse(await readFile(path, "utf8")); stored.quote.routeHash = H("f");
   await writeFile(path, `${JSON.stringify(stored)}\n`); await chmod(path, 0o600);
   await assert.rejects(operations.load(op.ownerProfileHash, op.operationId), { code: "APN_STATE_CORRUPT" });
+});
+
+test("shared keyless family guards keep each family's refusal reasons and consent hash domains", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const { policy, protocols, op } = await fixture(temporary.root);
+  assert.equal(assertOperationProtocolRegistry(op, protocols, "orca").registryDigest, op.protocolRegistryDigest);
+  const other = compileSwapProtocolRegistry({ registryVersion: "other.1", pins: [pin] });
+  for (const family of ["uniswap", "sunswap", "orca"] as const) {
+    assert.throws(() => assertOperationProtocolRegistry(op, other, family), { code: "APN_OPERATION_BLOCKED", details: { reason: `${family}_protocol_registry_drift` } });
+  }
+  await assertActiveSwapPolicyUnchanged(async () => policy, op);
+  await assert.rejects(assertActiveSwapPolicyUnchanged(async () => null, op), { details: { reason: "swap_owner_admission_required" } });
+  const restaged = compileAllowlistPolicyOverlay({ ...overlay, overlayVersion: "swap-owner.2" }).registry;
+  await assert.rejects(assertActiveSwapPolicyUnchanged(async () => restaged, op), { details: { reason: "swap_policy_drift" } });
+  // The shared consent keeps the bytes each family hashed before: an approval screen shown by 0.5.44 yields the same code.
+  const intent = { operationId: op.operationId, quoteHash: op.quote.quoteHash } as unknown as GuardedSwapApprovalIntent, lines = ["line 1", "line 2"];
+  for (const [family, domain] of [["uniswap", "apn.uniswap-approval-screen.v1"], ["sunswap", "apn.sunswap-approval-screen.v1"],
+    ["orca", "apn.orca-approval-screen.v1"]] as const) {
+    assert.equal(guardedSwapApprovalCode(family, intent, lines), approvalCode("swap", op.operationId, domainHash(domain, canonicalJson({ intent, lines }))));
+  }
 });

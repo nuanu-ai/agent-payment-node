@@ -1,9 +1,7 @@
 import { type Hex } from "viem";
 import { type SwapOperationRecord } from "../../model.js";
-import { type SwapProtocolRegistry } from "../../protocol-registry.js";
-import type { UniswapTransactionEnvelope } from "../../uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "../../uniswap-v3/envelope.js";
 import type { UniswapExecutionApprovalRequest, UniswapExecutionBinding, UniswapExecutionFreshness, UniswapOwnerAdmission } from "./types.js";
-export declare function assertInjectedProtocol(operationValue: unknown, registryValue: unknown): SwapProtocolRegistry;
 export declare function createUniswapApprovalRequest(operationValue: unknown, envelope: UniswapTransactionEnvelope, freshness: UniswapExecutionFreshness, now: Date): UniswapExecutionApprovalRequest;
 export declare function createUniswapExecutionBinding(input: {
     readonly operation: SwapOperationRecord;

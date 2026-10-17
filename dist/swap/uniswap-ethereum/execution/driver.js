@@ -1,8 +1,9 @@
 import { canonicalJson, domainHash } from "../../../canonical.js";
 import { ApnError } from "../../../errors.js";
+import { assertOperationProtocolRegistry } from "../../family-guards.js";
 import { validateSwapOperation } from "../../model.js";
 import { validateUniswapKeylessMaterial } from "../../uniswap-v3/material.js";
-import { assertInjectedProtocol, createUniswapApprovalRequest, createUniswapExecutionBinding, validateFreshness } from "./binding.js";
+import { createUniswapApprovalRequest, createUniswapExecutionBinding, validateFreshness } from "./binding.js";
 /**
  * GuardedSwapExecutionDriver for the approved Uniswap reservation. Before the marker every refusal releases the
  * reservation with a bound proof. The marker, then the execution binding, are durable before signing; the sender
@@ -20,7 +21,7 @@ export class UniswapEthereumExecutionDriver {
         const envelope = validateUniswapKeylessMaterial(input.material).execution.envelope;
         let admission, freshness, approvalHash;
         try {
-            assertInjectedProtocol(operation, this.d.protocolRegistry);
+            assertOperationProtocolRegistry(operation, this.d.protocolRegistry, "uniswap");
             admission = await this.d.admission.assert(operation);
             freshness = await this.d.guard.inspect(operation, envelope);
             const checked = this.d.clock.now();
