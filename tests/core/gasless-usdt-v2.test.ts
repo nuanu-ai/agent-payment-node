@@ -8,7 +8,6 @@ import { EncryptedWalletStore, walletCustodyLock } from "../../src/encrypted-wal
 import { preparePolicyBoundUsdtV2 } from "../../src/gasless-usdt/policy-prepare-v2.js";
 import { preparePolicyBoundUsdt } from "../../src/gasless-usdt/policy-prepare.js";
 import { UsdtBoundOperationRepository, validateUsdtAnyBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
-import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
 import { GaslessUsdtCommandPrepare, UsdtCommandReadBudget } from "../../src/gasless-usdt/command-prepare.js";
 import { GaslessUsdtCommandExecute } from "../../src/gasless-usdt/command-execute.js";
@@ -67,7 +66,7 @@ test("prepare refuses authentic overflow, malformed quote, unavailable auth and 
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const f = v2Fixture("expected"); mutate(f);
     const state = new StateStore(temporary.root); await state.initialize(); const service = new GaslessUsdtCommandPrepare(state, { now: f.now },
-      new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), { preparePort: f.prepare, sponsorPort: f.sponsor });
+      new GaslessUsdtOperationService(state.root), { preparePort: f.prepare, sponsorPort: f.sponsor });
     await assert.rejects(service.prepare({ command: "gasless.usdt.prepare", profile: "owner", recipient: V2_RECIPIENT,
       grossAtomic: "1000000", maxFeeAtomic: "999999", minReceivedAtomic: "1", idempotencyKey: "fail-001" }));
     assert.equal((await readdir(temporary.root)).includes("gasless-usdt-bound-operations"), false);
@@ -92,7 +91,7 @@ test("legacy first claim replays byte-for-byte under defaultv2 with no auth back
   f.prepare.activePolicy = async () => { throw new Error("no fresh read"); };
   f.prepare.sponsorAuth = async () => { throw new Error("no auth backfill"); };
   const service = new GaslessUsdtCommandPrepare(new StateStore(temporary.root), { now: f.now },
-    new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root)), { preparePort: f.prepare, sponsorPort: f.sponsor });
+    new GaslessUsdtOperationService(temporary.root), { preparePort: f.prepare, sponsorPort: f.sponsor });
   const replay = await service.prepare({ command: "gasless.usdt.prepare", profile: "owner", recipient: V2_RECIPIENT,
     grossAtomic: "1000000", maxFeeAtomic: "999999", minReceivedAtomic: "1", idempotencyKey: "shared-001" });
   assert.deepEqual(replay, original); assert.equal(f.state.reads.length, 0);

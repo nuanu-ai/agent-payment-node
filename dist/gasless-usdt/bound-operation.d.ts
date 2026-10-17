@@ -1,5 +1,5 @@
 import type { Address } from "../model.js";
-import { type UsdtPolicyPrepared, type UsdtPreparePort } from "./policy-prepare.js";
+import { type UsdtPolicyPrepared } from "./policy-prepare.js";
 import { type UsdtBoundOperationV2 } from "./bound-v2-codec.js";
 import { type UsdtPolicyPreparedV2 } from "./policy-prepare-v2.js";
 export type UsdtAnyBoundOperation = UsdtBoundOperation | UsdtBoundOperationV2;
@@ -20,14 +20,6 @@ export interface UsdtBoundOperation {
     readonly usageReservation: "disabled";
     readonly integrityHash: string;
 }
-export type UsdtBoundRecovery = {
-    readonly state: "prepared";
-    readonly operation: UsdtAnyBoundOperation;
-} | {
-    readonly state: "capability_unavailable" | "recovery_required";
-    readonly reason: string;
-    readonly operation: UsdtAnyBoundOperation;
-};
 export interface UsdtBoundReplayIntent {
     readonly profile: string;
     readonly recipient: Address;
@@ -62,6 +54,4 @@ export declare class UsdtBoundOperationRepository {
     create(profileHash: string, binding: UsdtPolicyPreparedV2, idempotencyKey: string, now: Date): Promise<UsdtBoundOperationV2>;
     create(profileHash: string, binding: UsdtPolicyPrepared | UsdtPolicyPreparedV2, idempotencyKey: string, now: Date): Promise<UsdtAnyBoundOperation>;
 }
-/** Classification reads only. Drift or revocation never advances the operation or authorizes an effect. */
-export declare function classifyUsdtBoundRecovery(operation: UsdtAnyBoundOperation, port: UsdtPreparePort): Promise<UsdtBoundRecovery>;
 export {};

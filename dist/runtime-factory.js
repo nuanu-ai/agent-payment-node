@@ -52,7 +52,6 @@ import { TtyBridgeApproval } from "./lifi/tty.js";
 import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
 import { GaslessUsdtCommandPrepare } from "./gasless-usdt/command-prepare.js";
 import { GaslessUsdtCommandExecute } from "./gasless-usdt/command-execute.js";
-import { UsdtOperationRepository } from "./gasless-usdt/operation.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
 import { gaslessObservationRpcFactory } from "./gasless/observation-rpc.js";
@@ -318,10 +317,10 @@ export function createApnCore(bound, options = {}) {
             custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
             ...(["gasless.transfer.approve", "gasless.transfer.approve-sealed"].includes(bound.request.command) ? { approval: new TtyGaslessApproval() } : {}) },
         ...(bound.request.command.startsWith("gasless.usdt.") || options.gaslessUsdt !== undefined ? {
-            gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)),
+            gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(state.root),
         } : {}),
         ...(bound.request.command === "gasless.usdt.prepare" || options.gaslessUsdtPrepare !== undefined ? {
-            gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock, options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), options.gaslessUsdtPrepareOptions),
+            gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock, options.gaslessUsdt ?? new GaslessUsdtOperationService(state.root), options.gaslessUsdtPrepareOptions),
         } : {}),
         ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe", "gasless.usdt.resume"].includes(bound.request.command) ||
             options.gaslessUsdtExecute !== undefined ? {

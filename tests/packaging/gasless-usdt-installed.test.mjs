@@ -122,15 +122,6 @@ test("packed APN installs and prepares one synthetic policy bound USDT without m
   const countBeforeReplay = readPortCalls;
   assert.deepEqual((await runCli(argv, {}, options)).operation, publicOperation);
   assert.equal(readPortCalls, countBeforeReplay);
-  active = null;
-  const { GaslessUsdtOperationService } = await moduleAt("gasless-usdt/service.js");
-  const { UsdtOperationRepository } = await moduleAt("gasless-usdt/operation.js");
-  const service = new GaslessUsdtOperationService(new UsdtOperationRepository(stateRoot)).forProfile(operation.profileHash);
-  const revoked = await service.resumeBound(operation.operationId, preparePort);
-  assert.deepEqual({ state: revoked.state, reason: revoked.reason },
-    { state: "capability_unavailable", reason: "policy_revoked_or_changed" });
-  active = policy;
-  assert.equal((await service.resumeBound(operation.operationId, preparePort)).state, "prepared");
   const { UsdtExecutionJournal, usdtExecutionIntent } = await moduleAt("gasless-usdt/execution-journal.js");
   const { AssetUsageLedger } = await moduleAt("asset-usage-ledger.js");
   const execution = new UsdtExecutionJournal(stateRoot);
