@@ -11,7 +11,7 @@ import { swapMechanismDigest } from "./pin.js";
 import { JUPITER_V1_KNOWN_ROUTES } from "./jupiter-solana/v1-route-config.js";
 import { OrcaExecutionBindingStore } from "./orca-solana/effects.js";
 import { SavedOrcaQuoteStore } from "./orca-solana/material.js";
-import { isOrcaKeylessMechanismDigest } from "./orca-solana/pins.js";
+import { isOrcaKeylessMechanismDigest } from "./orca-solana/pools.js";
 import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
 
 export interface SwapAbandonContext {

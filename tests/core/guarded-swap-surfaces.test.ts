@@ -137,6 +137,7 @@ test("status performs only a durable read and returns a stable missing-operation
 
 function sample(option: string, chain: string): string {
   if (option === "--profile") return "swap-test";
+  if (option === "--pool") return "usdc-usdt";
   if (option === "--account" || option === "--to") return chain === "tron" ? TRON_OWNER : chain === "solana" ? SOLANA_OWNER :
     "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1";
   if (option === "--owner") return SOLANA_OWNER;

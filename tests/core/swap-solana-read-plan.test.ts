@@ -8,6 +8,7 @@ import { readRawAccounts } from "../../src/swap/orca-solana/accounts.js";
 import { readOrcaMarket } from "../../src/swap/orca-solana/market.js";
 import { SolanaRpc, SolanaRpcBudget } from "../../src/solana/rpc.js";
 import { KeylessOrcaQuoteBuilder } from "../../src/swap/orca-solana/builder.js";
+import { ORCA_POOLS } from "../../src/swap/orca-solana/pools.js";
 import { SavedOrcaQuoteStore } from "../../src/swap/orca-solana/material.js";
 import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM, TOKEN_PROGRAMDATA, verifyOrcaProgramPins, WHIRLPOOL_PROGRAM,
   WHIRLPOOL_PROGRAMDATA } from "../../src/swap/orca-solana/pins.js";
@@ -44,7 +45,7 @@ test("an Orca keyless quote with the production program verifier sends exactly i
       return { data: [data.toString("base64"), "base64"], executable: p.executable, lamports: 1, owner: p.owner, rentEpoch: 0, space: p.data.length }; }) };
     return await fake.call(method, params);
   } };
-  await new KeylessOrcaQuoteBuilder(rpc, new SavedOrcaQuoteStore(temporary.root), verifyOrcaProgramPins).quote({ profile: PROFILE, account: o.address,
+  await new KeylessOrcaQuoteBuilder(rpc, new SavedOrcaQuoteStore(temporary.root), verifyOrcaProgramPins, ORCA_POOLS["sol-usdc"]).quote({ profile: PROFILE, account: o.address,
     amountAtomic: AMOUNT_IN.toString(), slippageBps: 50, ownerSlippageCapBps: 100, computeUnitLimit: 200_000, computeUnitPriceMicroLamports: "1000", now: new Date() });
   assert.equal(posts, solanaSwapCommandRequests("swap.orca.quote")! - SOLANA_SWAP_PLAN_HEADROOM_REQUESTS);
 });

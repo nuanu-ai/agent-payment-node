@@ -8,6 +8,7 @@ import type { TtyTransferApprovalOptions } from "../../src/tty-approval.js";
 import { abandonSwapOperation } from "../../src/swap/abandon.js";
 import { ORCA_SOLANA_CHAIN } from "../../src/swap/orca-solana/pins.js";
 import { createOrcaKeylessRuntime } from "../../src/swap/orca-solana/runtime-factory.js";
+import { ORCA_POOLS } from "../../src/swap/orca-solana/pools.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { AMOUNT_IN, FakeOrcaRpc, orcaOwner, orcaPolicy, PROFILE } from "./orca-solana-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -22,6 +23,7 @@ async function marked(root: string, options: { readonly send: boolean }) {
   const terminal: NonNullable<TtyTransferApprovalOptions["openTerminal"]> = async () => ({ fd: 11, write: async (text: string) => { printed += text; },
     read: async function* () { yield Buffer.from(`${/Type ([0-9a-f]{6}) and press Enter/u.exec(printed)?.[1] ?? ""}\n`); }, close: async () => undefined });
   const runtime = createOrcaKeylessRuntime({ state: owner.state, clock, rpc, accounts: owner.accounts, verifyPins: async () => [], foreground: "tty",
+    pool: ORCA_POOLS["sol-usdc"],
     policy: async () => policy, tty: { isTerminal: () => true, openTerminal: terminal } });
   const quoted = await runtime.quote({ profile: PROFILE, account: owner.address, amountAtomic: AMOUNT_IN.toString(), slippageBps: 50,
     ownerSlippageCapBps: 50, computeUnitLimit: 200_000, computeUnitPriceMicroLamports: "1000" }, clock.now()) as { quoteHash: string };

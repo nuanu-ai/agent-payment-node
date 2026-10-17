@@ -1,4 +1,5 @@
 export * from "./pins.js";
+export * from "./pools.js";
 export * from "./accounts.js";
 export * from "./math.js";
 export * from "./instructions.js";

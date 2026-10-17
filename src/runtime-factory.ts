@@ -79,7 +79,7 @@ import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins, verifyUniswapV3MutablePins } from "./swap/uniswap-v3/pins.js";
 import { createSunSwapKeylessRuntime } from "./swap/sunswap-tron/runtime-factory.js";
 import { createJupiterV1Runtime } from "./swap/jupiter-solana/v1-runtime-factory.js";
-import { createOrcaKeylessRuntime } from "./swap/orca-solana/runtime-factory.js";
+import { createOrcaKeylessRuntime, orcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
 import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 import { quoteOrcaStableReadOnly } from "./swap/orca-solana/stable-readonly.js";
 import { prepareOrcaStableGuardedCandidate } from "./swap/orca-solana/stable-candidate.js";
@@ -251,13 +251,13 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
-  // Keyless Orca uses the anonymous-default or owner-overridden Solana rail client and the encrypted local Solana wallet.
+  // Keyless Orca uses the anonymous-default or owner-overridden Solana rail client and the encrypted local Solana wallet;
+  // the command's pool (named by the quote, the saved quote or the operation's lane) selects one runtime per command.
   const orcaRuntime = options.orcaRuntime ?? (bound.request.command.startsWith("swap.orca.") &&
-    !bound.request.command.startsWith("swap.orca.stable-")
-    ? createOrcaKeylessRuntime({ state, clock, rpc: solanaRpc, accounts: chainAccounts, verifyPins: verifyOrcaProgramPins,
+    !bound.request.command.startsWith("swap.orca.stable-") ? orcaRuntimeSelector((pool) => createOrcaKeylessRuntime({ state, clock,
+      rpc: solanaRpc, accounts: chainAccounts, verifyPins: verifyOrcaProgramPins, pool,
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
-      foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
-    : undefined);
+      foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })) : undefined);
   const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.")
     ? createJupiterV1Runtime({ state, clock, rpc: solanaRpc, wrappingSecret,
       foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" }) : undefined);

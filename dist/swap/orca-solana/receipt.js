@@ -4,11 +4,13 @@ import { ApnError } from "../../errors.js";
 import { rpcArray, rpcAtomic, rpcRecord, solanaSignature } from "../../solana/rpc.js";
 import { validateSwapOperation } from "../model.js";
 import { proveSolanaUnlanded } from "../unlanded.js";
-import { sha256Hex, USDC_MINT } from "./pins.js";
+import { isOrcaTokenPlan, orcaPlanSides } from "./instructions.js";
+import { sha256Hex } from "./pins.js";
 /**
  * Observe-only receipt reader. A finalized success must carry the exact signature and message, a fee within the
- * approved fee, a SOL spend within the approved maximum, and a USDC delta on the owner's account of at least the
- * minimum. A finalized failure proves every instruction reverted and only the fee was spent.
+ * approved fee, a SOL spend within the approved maximum, and a delta of the pool's output token on the owner's
+ * destination account of at least the minimum; for a token-input pool the owner's source account must also have lost
+ * exactly the input. A finalized failure proves every instruction reverted and only the fee was spent.
  */
 export class OrcaReceiptObserver {
     rpc;
@@ -77,15 +79,24 @@ export class OrcaReceiptObserver {
         const spent = pre[0] - post[0];
         if (spent < fee || spent > BigInt(material.execution.maximumSolSpendLamports))
             conflict();
-        const usdcIndex = accountIndex(new Uint8Array(wire.messageBytes), material.execution.plan.usdcAccount);
-        const before = usdcBalance(meta.preTokenBalances, usdcIndex, operation.quote.account, true);
-        const after = usdcBalance(meta.postTokenBalances, usdcIndex, operation.quote.account, false);
-        const received = after - before;
+        const plan = material.execution.plan, sides = orcaPlanSides(plan), messageBytes = new Uint8Array(wire.messageBytes);
+        const outputIndex = accountIndex(messageBytes, sides.destination), owner = operation.quote.account;
+        const received = tokenBalance(meta.postTokenBalances, outputIndex, sides.pool.mintB, sides.pool.decimalsB, owner, false) -
+            tokenBalance(meta.preTokenBalances, outputIndex, sides.pool.mintB, sides.pool.decimalsB, owner, true);
         if (received < BigInt(operation.quote.minimumOutputAtomic))
             conflict();
+        let debited;
+        if (isOrcaTokenPlan(plan)) {
+            const inputIndex = accountIndex(messageBytes, sides.source);
+            debited = tokenBalance(meta.preTokenBalances, inputIndex, sides.pool.mintA, sides.pool.decimalsA, owner, false) -
+                tokenBalance(meta.postTokenBalances, inputIndex, sides.pool.mintA, sides.pool.decimalsA, owner, false);
+            if (debited !== BigInt(sides.amountIn))
+                conflict();
+        }
+        const amounts = debited === undefined ? { usdcReceivedAtomic: received.toString() }
+            : { sourceDebitedAtomic: debited.toString(), outputReceivedAtomic: received.toString() };
         const receiptHash = domainHash("apn.orca-finalized-receipt.v1", canonicalJson({ signature, slot: slot.toString(), fee: fee.toString(),
-            solSpentLamports: spent.toString(), usdcReceivedAtomic: received.toString(), messageHash: binding.messageHash,
-            bindingHash: binding.bindingHash, observedAt }));
+            solSpentLamports: spent.toString(), ...amounts, messageHash: binding.messageHash, bindingHash: binding.bindingHash, observedAt }));
         return { outcome: "succeeded", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true } };
     }
 }
@@ -102,14 +113,14 @@ function accountIndex(messageBytes, key) {
         conflict();
     return index;
 }
-function usdcBalance(value, index, owner, allowMissing) {
+function tokenBalance(value, index, mint, decimals, owner, allowMissing) {
     let found;
     for (const item of rpcArray(value ?? [], 64)) {
         const balance = rpcRecord(item);
         if (Number(rpcAtomic(balance.accountIndex)) !== index)
             continue;
         const amount = rpcRecord(balance.uiTokenAmount);
-        if (balance.mint !== USDC_MINT || balance.owner !== owner || rpcAtomic(amount.decimals) !== 6n || typeof amount.amount !== "string" ||
+        if (balance.mint !== mint || balance.owner !== owner || rpcAtomic(amount.decimals) !== BigInt(decimals) || typeof amount.amount !== "string" ||
             !/^(?:0|[1-9][0-9]{0,19})$/u.test(amount.amount) || found !== undefined)
             conflict();
         found = BigInt(amount.amount);

@@ -7,13 +7,14 @@ import { getTransferSolInstruction } from "@solana-program/system";
 import { getCloseAccountInstruction, getCreateAssociatedTokenIdempotentInstruction, getSyncNativeInstruction } from "@solana-program/token";
 import { ApnError } from "../../errors.js";
 import { solanaAddress } from "../../solana/rpc.js";
-import {
-  ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT, sha256Hex, SYSTEM_PROGRAM, TOKEN_PROGRAM,
-  USDC_MINT, WHIRLPOOL_PROGRAM, WHIRLPOOL_SWAP_DISCRIMINATOR, WSOL_MINT,
-} from "./pins.js";
+import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, sha256Hex, SYSTEM_PROGRAM, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM, WHIRLPOOL_SWAP_DISCRIMINATOR } from "./pins.js";
+import { ORCA_POOLS, type OrcaPoolConfig } from "./pools.js";
 
-/** Everything the transaction depends on besides its lifetime. The quote hash binds it through the payload hash. */
-export interface OrcaSwapPlan {
+/**
+ * Everything a native SOL to USDC transaction depends on besides its lifetime (the sol-usdc pool), in the shape every
+ * APN release wrote it. The quote hash binds it through the payload hash.
+ */
+export interface OrcaNativeSwapPlan {
   readonly owner: string;
   readonly wsolAccount: string;
   readonly usdcAccount: string;
@@ -26,6 +27,21 @@ export interface OrcaSwapPlan {
   /** The owner's wSOL account existed at quote: it is reused and kept (never closed), so its own balance never unwraps. */
   readonly wsolAccountKept?: true;
 }
+/** A token-input pool: the owner's classic token account of mint A is debited, its account of mint B is credited. */
+export interface OrcaTokenSwapPlan {
+  readonly pool: OrcaTokenPoolId;
+  readonly owner: string;
+  readonly sourceAccount: string;
+  readonly destinationAccount: string;
+  readonly amountInAtomic: string;
+  readonly minimumOutputAtomic: string;
+  readonly computeUnitLimit: number;
+  readonly computeUnitPriceMicroLamports: string;
+  readonly tickArrays: readonly string[];
+  readonly oracle: string;
+}
+export type OrcaTokenPoolId = "usdc-usdt";
+export type OrcaSwapPlan = OrcaNativeSwapPlan | OrcaTokenSwapPlan;
 export interface OrcaSwapLifetime { readonly blockhash: string; readonly lastValidBlockHeight: string }
 export interface CompiledOrcaSwap {
   readonly transaction: ReturnType<typeof compileTransaction>;
@@ -35,37 +51,53 @@ export interface CompiledOrcaSwap {
 }
 interface ExpectedAccount { readonly address: string; readonly writable: boolean; readonly signer: boolean }
 interface ExpectedInstruction { readonly program: string; readonly accounts: readonly ExpectedAccount[]; readonly data: string }
+/** The pool and the owner accounts on its A (debited) and B (credited) sides, whatever the plan shape. */
+export interface OrcaPlanSides { readonly pool: OrcaPoolConfig; readonly source: string; readonly destination: string; readonly amountIn: string }
 
 export const ORCA_ALLOWED_PROGRAMS: readonly string[] = [COMPUTE_BUDGET_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM];
 const U64_MAX = (1n << 64n) - 1n;
 export const ORCA_MAX_COMPUTE_UNITS = 1_400_000;
 
+export function isOrcaTokenPlan(plan: OrcaSwapPlan): plan is OrcaTokenSwapPlan { return Object.hasOwn(plan, "pool"); }
+export function orcaPlanSides(plan: OrcaSwapPlan): OrcaPlanSides {
+  if (!isOrcaTokenPlan(plan)) return { pool: ORCA_POOLS["sol-usdc"], source: plan.wsolAccount, destination: plan.usdcAccount, amountIn: plan.amountInLamports };
+  const pool = typeof plan.pool === "string" && Object.hasOwn(ORCA_POOLS, plan.pool) ? ORCA_POOLS[plan.pool] : undefined;
+  if (pool === undefined || pool.nativeWrap !== null) invalid("Orca swap plan names no token-input pool.");
+  return { pool, source: plan.sourceAccount, destination: plan.destinationAccount, amountIn: plan.amountInAtomic };
+}
+
 /**
- * The only instruction list APN signs for this swap: compute budget (owner-capped limit and price), idempotent wSOL
- * and USDC associated accounts, wrap exactly the input, sync, Whirlpool `swap` (exact input, A to B, no price limit,
- * minimum output as `other_amount_threshold`), and close the wSOL account back to the owner.
+ * The only instruction list APN signs for one swap: compute budget (owner-capped limit and price), then for sol-usdc the
+ * idempotent wSOL and USDC accounts, the wrap of exactly the input and its sync, and for a token pool the idempotent
+ * destination account; then Whirlpool `swap` (exact input, A to B, no price limit, minimum output as
+ * `other_amount_threshold`), and for sol-usdc the close of the wSOL account back to the owner.
  */
 export function orcaSwapInstructions(planValue: OrcaSwapPlan): readonly Instruction[] {
-  const plan = validatePlan(planValue), owner = createNoopSigner(address(plan.owner));
-  const wsol = address(plan.wsolAccount), usdc = address(plan.usdcAccount), amount = BigInt(plan.amountInLamports);
+  const plan = validatePlan(planValue), sides = orcaPlanSides(plan), pool = sides.pool, owner = createNoopSigner(address(plan.owner));
+  const source = address(sides.source), destination = address(sides.destination), amount = BigInt(sides.amountIn);
   const limit = Buffer.alloc(5); limit[0] = 2; limit.writeUInt32LE(plan.computeUnitLimit, 1);
   const price = Buffer.alloc(9); price[0] = 3; price.writeBigUInt64LE(BigInt(plan.computeUnitPriceMicroLamports), 1);
   const swap = Buffer.alloc(42); Buffer.from(WHIRLPOOL_SWAP_DISCRIMINATOR, "hex").copy(swap, 0);
   swap.writeBigUInt64LE(amount, 8); swap.writeBigUInt64LE(BigInt(plan.minimumOutputAtomic), 16); swap[40] = 1; swap[41] = 1;
   const writable = (value: string) => ({ address: address(value), role: AccountRole.WRITABLE });
+  const budget = [{ programAddress: address(COMPUTE_BUDGET_PROGRAM), accounts: [], data: new Uint8Array(limit) },
+    { programAddress: address(COMPUTE_BUDGET_PROGRAM), accounts: [], data: new Uint8Array(price) }];
+  const createDestination = getCreateAssociatedTokenIdempotentInstruction({ payer: owner, ata: destination, owner: address(plan.owner),
+    mint: address(pool.mintB) });
+  const whirlpoolSwap: Instruction = { programAddress: address(WHIRLPOOL_PROGRAM), data: new Uint8Array(swap), accounts: [
+    { address: address(TOKEN_PROGRAM), role: AccountRole.READONLY },
+    { address: address(plan.owner), role: AccountRole.READONLY_SIGNER },
+    writable(pool.pool), writable(sides.source), writable(pool.vaultA), writable(sides.destination), writable(pool.vaultB),
+    writable(plan.tickArrays[0]!), writable(plan.tickArrays[1]!), writable(plan.tickArrays[2]!), writable(plan.oracle)] };
+  if (isOrcaTokenPlan(plan)) return [...budget, createDestination, whirlpoolSwap];
   return [
-    { programAddress: address(COMPUTE_BUDGET_PROGRAM), accounts: [], data: new Uint8Array(limit) },
-    { programAddress: address(COMPUTE_BUDGET_PROGRAM), accounts: [], data: new Uint8Array(price) },
-    getCreateAssociatedTokenIdempotentInstruction({ payer: owner, ata: wsol, owner: address(plan.owner), mint: address(WSOL_MINT) }),
-    getCreateAssociatedTokenIdempotentInstruction({ payer: owner, ata: usdc, owner: address(plan.owner), mint: address(USDC_MINT) }),
-    getTransferSolInstruction({ source: owner, destination: wsol, amount }),
-    getSyncNativeInstruction({ account: wsol }),
-    { programAddress: address(WHIRLPOOL_PROGRAM), data: new Uint8Array(swap), accounts: [
-      { address: address(TOKEN_PROGRAM), role: AccountRole.READONLY },
-      { address: address(plan.owner), role: AccountRole.READONLY_SIGNER },
-      writable(ORCA_SOL_USDC_POOL), writable(plan.wsolAccount), writable(ORCA_SOL_VAULT), writable(plan.usdcAccount), writable(ORCA_USDC_VAULT),
-      writable(plan.tickArrays[0]!), writable(plan.tickArrays[1]!), writable(plan.tickArrays[2]!), writable(plan.oracle)] },
-    ...(plan.wsolAccountKept === true ? [] : [getCloseAccountInstruction({ account: wsol, destination: address(plan.owner), owner })]),
+    ...budget,
+    getCreateAssociatedTokenIdempotentInstruction({ payer: owner, ata: source, owner: address(plan.owner), mint: address(pool.mintA) }),
+    createDestination,
+    getTransferSolInstruction({ source: owner, destination: source, amount }),
+    getSyncNativeInstruction({ account: source }),
+    whirlpoolSwap,
+    ...(plan.wsolAccountKept === true ? [] : [getCloseAccountInstruction({ account: source, destination: address(plan.owner), owner })]),
   ];
 }
 
@@ -83,8 +115,8 @@ export function compileOrcaSwap(plan: OrcaSwapPlan, lifetime: OrcaSwapLifetime):
 
 /**
  * Strict decoder-side validation of the compiled bytes: v0 without lookup tables, the owner as the only signer and
- * fee payer, only the five allowed programs, exactly the eight expected instructions with exact accounts, roles and
- * data, and no writable account beyond the owner, its two token accounts, and the pool's swap accounts.
+ * fee payer, only the five allowed programs, exactly the expected instructions with exact accounts, roles and data, and
+ * no writable account beyond the owner, its two token accounts, and the pool's swap accounts.
  */
 export function validateOrcaSwapMessage(messageBytes: Uint8Array, planValue: OrcaSwapPlan, expectedBlockhash: string): void {
   const plan = validatePlan(planValue);
@@ -98,8 +130,7 @@ export function validateOrcaSwapMessage(messageBytes: Uint8Array, planValue: Orc
       new Set(staticAccounts).size !== total || header.numReadonlyNonSignerAccounts >= total) refuse("Orca swap has a signer other than the owner.", "orca_instruction_signer");
   const writableAt = (index: number) => index < header.numSignerAccounts - header.numReadonlySignerAccounts ||
     (index >= header.numSignerAccounts && index < total - header.numReadonlyNonSignerAccounts);
-  const allowedWritable = new Set([plan.owner, plan.wsolAccount, plan.usdcAccount, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT,
-    ...plan.tickArrays, plan.oracle]);
+  const allowedWritable = new Set(writableKeys(plan));
   staticAccounts.forEach((key, index) => {
     if (writableAt(index) && !allowedWritable.has(key)) refuse("Orca swap marks an unexpected account writable.", "orca_instruction_writable");
   });
@@ -122,24 +153,26 @@ export function validateOrcaSwapMessage(messageBytes: Uint8Array, planValue: Orc
 }
 
 function expectedInstructions(plan: OrcaSwapPlan): readonly ExpectedInstruction[] {
+  // A key is writable or signing in the compiled message if any instruction marks it so; mirror that merge.
+  const writable = new Set(writableKeys(plan));
   return orcaSwapInstructions(plan).map((instruction) => ({ program: instruction.programAddress,
     data: Buffer.from(instruction.data ?? new Uint8Array()).toString("hex"),
-    accounts: (instruction.accounts ?? []).map((account) => ({ address: account.address,
-      // A key is writable or signing in the compiled message if any instruction marks it so; mirror that merge.
-      writable: mergedRole(plan, account.address).writable, signer: account.address === plan.owner })) }));
+    accounts: (instruction.accounts ?? []).map((account) => ({ address: account.address, writable: writable.has(account.address),
+      signer: account.address === plan.owner })) }));
 }
-function mergedRole(plan: OrcaSwapPlan, key: string): { readonly writable: boolean } {
-  return { writable: [plan.owner, plan.wsolAccount, plan.usdcAccount, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT,
-    ...plan.tickArrays, plan.oracle].includes(key) };
+function writableKeys(plan: OrcaSwapPlan): readonly string[] {
+  const sides = orcaPlanSides(plan);
+  return [plan.owner, sides.source, sides.destination, sides.pool.pool, sides.pool.vaultA, sides.pool.vaultB, ...plan.tickArrays, plan.oracle];
 }
 
 export function validatePlan(plan: OrcaSwapPlan): OrcaSwapPlan {
   if (typeof plan !== "object" || plan === null || !Array.isArray(plan.tickArrays) || plan.tickArrays.length !== 3 ||
-      (plan.wsolAccountKept !== undefined && plan.wsolAccountKept !== true)) invalid("Orca swap plan is invalid.");
-  [plan.owner, plan.wsolAccount, plan.usdcAccount, plan.oracle, ...plan.tickArrays].forEach(solanaAddress);
-  const keys = [plan.owner, plan.wsolAccount, plan.usdcAccount, plan.oracle, ...plan.tickArrays, ORCA_SOL_USDC_POOL, ORCA_SOL_VAULT, ORCA_USDC_VAULT];
+      (!isOrcaTokenPlan(plan) && plan.wsolAccountKept !== undefined && plan.wsolAccountKept !== true)) invalid("Orca swap plan is invalid.");
+  const sides = orcaPlanSides(plan);
+  [plan.owner, sides.source, sides.destination, plan.oracle, ...plan.tickArrays].forEach(solanaAddress);
+  const keys = [plan.owner, sides.source, sides.destination, plan.oracle, ...plan.tickArrays, sides.pool.pool, sides.pool.vaultA, sides.pool.vaultB];
   if (new Set(keys).size !== keys.length || ORCA_ALLOWED_PROGRAMS.includes(plan.owner)) invalid("Orca swap plan accounts must be distinct.");
-  const amount = unsigned(plan.amountInLamports, true), minimum = unsigned(plan.minimumOutputAtomic, true);
+  const amount = unsigned(sides.amountIn, true), minimum = unsigned(plan.minimumOutputAtomic, true);
   unsigned(plan.computeUnitPriceMicroLamports, false);
   if (amount > U64_MAX || minimum > U64_MAX || !Number.isSafeInteger(plan.computeUnitLimit) || plan.computeUnitLimit < 1 ||
       plan.computeUnitLimit > ORCA_MAX_COMPUTE_UNITS || BigInt(plan.computeUnitPriceMicroLamports) > U64_MAX) invalid("Orca swap plan bounds are invalid.");

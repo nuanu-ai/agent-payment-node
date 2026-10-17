@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { SOLANA_USDC } from "../../chain-policy.js";
-import { SWAP_MECHANISM_PIN_SCHEMA, swapMechanismDigest, validateSwapMechanismPin } from "../pin.js";
+import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin } from "../pin.js";
 import { compileSwapProtocolRegistry } from "../protocol-registry.js";
 import { BPF_LOADER_2, NATIVE_LOADER, PROGRAM_HEADER_SLICE, PROGRAMDATA_HEADER_BYTES, programAuthorityReadKeys, UPGRADEABLE_LOADER, verifyProgramAuthorities } from "../solana-program-authority.js";
 import { readRawAccounts } from "./accounts.js";
@@ -73,10 +73,6 @@ export const ORCA_KEYLESS_MECHANISM_PIN = validateSwapMechanismPin({
 export const ORCA_KEYLESS_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({
     registryVersion: "orca-whirlpool-keyless.2026-10-17", pins: [ORCA_KEYLESS_MECHANISM_PIN],
 });
-const ORCA_KEYLESS_MECHANISM_DIGESTS = Object.freeze([ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_MECHANISM_PIN_SLOT_457152296,
-    ORCA_KEYLESS_MECHANISM_PIN_SLOT_440170207].map((pin) => swapMechanismDigest(pin)));
-/** Any registered keyless generation: existing operations stay readable and observable after a program upgrade. */
-export function isOrcaKeylessMechanismDigest(digest) { return ORCA_KEYLESS_MECHANISM_DIGESTS.includes(digest); }
 /** One `getMultipleAccounts` of seven 45-byte slices: each Program account and the two ProgramData headers. */
 export const verifyOrcaProgramPins = async (rpc) => {
     const keys = programAuthorityReadKeys(ORCA_PROGRAM_AUTHORITIES);

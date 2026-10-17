@@ -16,7 +16,7 @@ const profile = option("--profile", "profile", ["existing_profile_name"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
 
 export const ORCA_COMMAND_GROUPS: readonly CommandGroup[] = [
-  { path: ["swap", "solana", "orca"], summary: "Keyless Orca Whirlpool native SOL to USDC exact input against the pinned SOL/USDC pool.", kind: "group" },
+  { path: ["swap", "solana", "orca"], summary: "Keyless Orca Whirlpool exact input against pinned pools: native SOL to USDC (sol-usdc) and USDC to USDT (usdc-usdt).", kind: "group" },
 ];
 
 export const ORCA_COMMANDS: readonly CommandDefinition[] = [
@@ -43,16 +43,17 @@ export const ORCA_COMMANDS: readonly CommandDefinition[] = [
   command("stable-recover-no-send", [operation], "Prove a marked stable operation has neither send claim nor signed effect, then release only its exact principal lease.", "local_write",
     { class: "foreground_tty", when: "A marked no-send recovery requires separate exact owner consent; MCP returns the CLI handoff only." }),
   command("stable-observe", [operation], "Read a claimed stable signature; durably record possible send, finalized proof and principal lease outcome. Never signs or sends.", "local_write"),
-  command("inventory", [], "Read the pinned Whirlpool program, pool and keyless mechanism pin without admitting them.", "none"),
-  command("quote", [profile, option("--account", "string", ["canonical_32_byte_base58_solana_address_of_the_profile"]),
-    option("--amount", "wei", ["positive_native_lamports"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
+  command("inventory", [], "Read the pinned Whirlpool program, every pinned pool and its keyless mechanism pin and route without admitting them.", "none"),
+  command("quote", [option("--pool", "string", ["sol-usdc_or_usdc-usdt"]), profile,
+    option("--account", "string", ["canonical_32_byte_base58_solana_address_of_the_profile"]),
+    option("--amount", "wei", ["positive_atomic_units_of_the_pool_input_lamports_or_usdc"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
     option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"]),
     option("--compute-unit-limit", "string", ["integer_1_through_1400000"]),
     option("--compute-unit-price", "string", ["micro_lamports_per_compute_unit"])],
-    "Quote from the pinned pool's on-chain state, build the instructions locally, and simulate the exact unsigned transaction. Uses APN_SOLANA_RPC_URL.",
+    "Quote from the named pinned pool's on-chain state, build the instructions locally, and simulate the exact unsigned transaction. Uses APN_SOLANA_RPC_URL.",
     "network_read"),
   command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"])],
-    "Prepare only after separate owner admission of SOL and USDC with the exact keyless mechanism.", "payment_prepare"),
+    "Prepare the saved quote of either pool, only after owner admission of both of its assets with that pool's keyless route.", "payment_prepare"),
   command("status", [operation], "Read one durable guarded swap operation and observe its exact signature without resending.", "local_read"),
   command("approve", [operation], "Show the exact swap screen, take the typed approval code, re-simulate with a fresh blockhash, sign locally and send once.",
     "payment_submit", { class: "foreground_tty", when: "Every guarded swap; MCP returns the exact CLI handoff only." }),
@@ -107,13 +108,15 @@ export function bindOrcaCommand(path: string, options: Readonly<Record<string, s
     return { command: "swap.orca.prepare", profile: options["--profile"]!, quoteHash: hash(options["--quote"]), idempotencyKey: options["--idempotency-key"]! };
   }
   if (action !== "quote") invalid("Unsupported Orca action.");
-  exact(options, ["--profile", "--account", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--compute-unit-limit", "--compute-unit-price"]);
+  exact(options, ["--pool", "--profile", "--account", "--amount", "--slippage-bps", "--owner-slippage-cap-bps", "--compute-unit-limit", "--compute-unit-price"]);
+  const pool = options["--pool"];
+  if (pool !== "sol-usdc" && pool !== "usdc-usdt") invalid("Orca pool must be sol-usdc or usdc-usdt.");
   const slippageBps = integer(options["--slippage-bps"], 10_000), ownerSlippageCapBps = integer(options["--owner-slippage-cap-bps"], 10_000);
   if (slippageBps > ownerSlippageCapBps) slippageAboveCap("Orca", slippageBps, ownerSlippageCapBps);
   const amount = options["--amount"], price = options["--compute-unit-price"];
-  if (amount === undefined || !/^[1-9][0-9]{0,19}$/u.test(amount)) invalid("Orca amount must be positive canonical lamports.");
+  if (amount === undefined || !/^[1-9][0-9]{0,19}$/u.test(amount)) invalid("Orca amount must be positive canonical atomic units of the pool input.");
   if (price === undefined || !/^(?:0|[1-9][0-9]{0,15})$/u.test(price)) invalid("Orca compute unit price must be canonical micro-lamports.");
-  return { command: "swap.orca.quote", profile: options["--profile"]!, account: canonicalAccount(options["--account"]), amountAtomic: amount,
+  return { command: "swap.orca.quote", pool, profile: options["--profile"]!, account: canonicalAccount(options["--account"]), amountAtomic: amount,
     slippageBps, ownerSlippageCapBps, computeUnitLimit: integer(options["--compute-unit-limit"], 1_400_000), computeUnitPriceMicroLamports: price };
 }
 

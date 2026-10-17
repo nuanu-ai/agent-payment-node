@@ -419,7 +419,7 @@ apn swap solana orca stable-release --operation <operation_id>
 apn swap solana orca stable-recover-no-send --operation <operation_id>
 apn swap solana orca stable-observe --operation <operation_id>
 apn swap solana orca inventory
-apn swap solana orca quote --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
+apn swap solana orca quote --pool <string> --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
 apn swap solana orca prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
 apn swap solana orca status --operation <operation_id>
 apn swap solana orca approve --operation <operation_id>
