@@ -1,8 +1,7 @@
-import { ApnError } from "../errors.js";
 import { isPlainRecord, exactKeys, hashObject } from "../canonical.js";
 import { SecureStateStore } from "../secure-state-store.js";
-import { circleBlocked } from "./operation-model.js";
-export function sanitizedCircleFailure(details) {
+import { circleBlocked, publicCircle } from "../circle-v2-evm/operation-model.js";
+function sanitizedCircleFailure(details) {
     const metadata = {};
     if (!isPlainRecord(details))
         return metadata;
@@ -22,7 +21,8 @@ export function sanitizedCircleFailure(details) {
         metadata.stage = details.stage;
     return metadata;
 }
-/** First public classified failure only: never request bodies, RPC params, key or material bytes. */
+/** Frozen reader of the first public classified failure the deleted v1 runtime recorded (never request bodies, RPC params,
+ * key or material bytes). Nothing writes it any more. */
 export class CirclePublicFailureStore extends SecureStateStore {
     path(op) { return `circle-public-failures/${op.operationId}.json`; }
     async read(op) {
@@ -36,14 +36,10 @@ export class CirclePublicFailureStore extends SecureStateStore {
             circleBlocked("circle_public_failure_binding");
         return v;
     }
-    async record(op, role, error) {
-        if (!(error instanceof ApnError) || await this.read(op) !== null)
-            return;
-        const metadata = sanitizedCircleFailure(error.details);
-        const body = { version: "apn.circle-public-first-failure.v1", operationId: op.operationId, fingerprint: op.fingerprint, role, code: error.code, metadata };
-        await this.initialize();
-        await this.ensureDirectory("circle-public-failures");
-        await this.writeJson(this.path(op), { ...body, failureHash: hashObject(body) }, true);
-    }
 }
-//# sourceMappingURL=public-failure-store.js.map
+/** Status of a read-only v1 operation (`apn.circle-v2-evm-operation.v1`): the checked journal and its recorded failure. */
+export async function circleV1Status(root, op) {
+    const failure = await new CirclePublicFailureStore(root).read(op);
+    return { ...publicCircle(op), ...(failure === null ? {} : { first_public_effect_failure: failure }) };
+}
+//# sourceMappingURL=circle-v1-public-failure.js.map

@@ -33,11 +33,6 @@ function assertBurnRetirementIdentity(op: CircleOperationV1, maxFee: string): vo
     op.source !== null || op.attestation !== null || op.destination !== null || op.effects.some(e => e.role === "mint") || op.usage.length !== 5 ||
     !op.transitions.some(t => t.reason === "burn_material_sealed") || op.transitions.some(t => /^burn_(?:submission|submitted)/u.test(t.reason))) circleBlocked("exact_sealed_sei_burn_retirement_required");
 }
-export function sealedBurnBinding(op: CircleOperationV1): string {
-  return hashObject({ version: "sealed-burn.v1", operationId: op.operationId, fingerprint: op.fingerprint, sourceCustody: op.sourceCustody,
-    destinationCustody: op.destinationCustody, policies: op.policies, deploymentDigest: op.deploymentDigest, expiresAt: op.expiresAt,
-    effects: op.effects.slice(0, 2).map(e => ({ envelope: e.envelope, transactionHash: e.transactionHash, materialHash: e.materialHash, proof: e.proof })) });
-}
 const bump = (n: bigint) => (n * 9n + 7n) / 8n;
 export function assertSealedBurnReplacement(op: CircleOperationV1, e: CircleEnvelope): void {
   const old = op.effects[1]!.envelope;

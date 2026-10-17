@@ -3,7 +3,6 @@ import test from "node:test";
 import { getAddress } from "viem";
 import { hashObject } from "../../src/canonical.js";
 import { circleRoute } from "../../src/circle-v2-evm/catalog.js";
-import { quoteCircleFastFee } from "../../src/circle-v2-evm/preflight.js";
 import { assertCircleFundingFee, circleFundingBinding, deriveCircleFundingParameters,
   quoteCircleFundingFee, validateCircleFundingBinding } from "../../src/circle-v2-evm/funding-binding.js";
 const now = Date.parse("2026-10-11T06:00:00.000Z");
@@ -61,11 +60,9 @@ test("fresh fee binds tuple, exact rational ceiling, cap and original 30 second 
   assert.throws(() => assertCircleFundingFee(b, { ...body, quotedFeeAtomic: "123", integrityHash: hashObject({ ...body, quotedFeeAtomic: "123" }) }, now));
   assert.throws(() => assertCircleFundingFee(circleFundingBinding(1329, id, { ...p, recipient: getAddress(`0x${"66".repeat(20)}`) }), f, now));
 });
-test("legacy fee quote serialization remains exact and new schema is separate", () => {
-  const legacy = quoteCircleFastFee(1329, [{ finalityThreshold: 1000, minimumFee: 1 }], now, now);
+test("a v1 fee quote (the deleted v1 writer's exact serialization) is refused by the v2 fee check", () => {
   const body = { schemaVersion: "apn.circle-fast-fee.v1", sourceDomain: 3, destinationDomain: 16, minimumFeeBps: "1", quotedFeeAtomic: "5",
     amountAtomic: "40100", maxFeeAtomic: "100", minMintAtomic: "40000", fetchedAtMs: now, expiresAtMs: now + 30_000,
-    responseHash: hashObject([{ finalityThreshold: 1000, minimumFee: 1 }]) };
-  assert.deepEqual(legacy, { ...body, integrityHash: hashObject(body) });
+    responseHash: hashObject([{ finalityThreshold: 1000, minimumFee: 1 }]) }, legacy = { ...body, integrityHash: hashObject(body) };
   assert.throws(() => assertCircleFundingFee(binding(), legacy, now));
 });

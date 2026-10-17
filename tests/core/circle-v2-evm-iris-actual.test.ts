@@ -2,22 +2,28 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { StateStore } from "../../src/state.js";
-import { CircleEvmService } from "../../src/circle-v2-evm/runtime.js";
+import { CircleFundingEvmService } from "../../src/circle-v2-evm/funding-runtime.js";
 import { CircleRpc } from "../../src/circle-v2-evm/rpc.js";
-import type { CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
-import { CIRCLE_SOURCE_OWNER } from "../../src/circle-v2-evm/catalog.js";
-import type { CircleLifecyclePorts } from "../../src/circle-v2-evm/lifecycle.js";
+import type { CircleFundingOperationV2 } from "../../src/circle-v2-evm/funding-operation.js";
+import { circleFundingBinding } from "../../src/circle-v2-evm/funding-binding.js";
+import { CIRCLE_RECIPIENT, CIRCLE_SOURCE_OWNER, circleLegacyRoute } from "../../src/circle-v2-evm/catalog.js";
+import type { CircleFundingLifecyclePorts } from "../../src/circle-v2-evm/funding-lifecycle.js";
 import type { CircleAttesterSnapshot, CircleSourceProof } from "../../src/circle-v2-evm/protocol.js";
 
 test("full actual Iris COMPLETE response passes runtime API parsing and real enabled-attester signatures", async t => {
   const original = JSON.parse(await readFile("docs/evidence/circle-v2-evm-iris-v2-actual-response-20261009.json", "utf8"));
   const context = JSON.parse(await readFile("docs/evidence/circle-v2-evm-iris-v2-actual-source-context-20261009.json", "utf8")) as { source: CircleSourceProof; attesters: CircleAttesterSnapshot };
-  const op = { source: context.source, destinationChain: 59144, destinationProfile: "evm-live-buyer", sourceCustody: { walletAddress: CIRCLE_SOURCE_OWNER }, destinationCustody: { walletAddress: CIRCLE_SOURCE_OWNER } } as CircleOperationV1;
+  // The real burn moved 40100 atomic USDC to the fixed recipient: a funding binding with exactly those economics.
+  const gasPayer = circleLegacyRoute(59144, "evm-live-buyer").gasPayer;
+  const funding = circleFundingBinding(59144, { sourceProfile: "evm-live-buyer", sourceOwner: CIRCLE_SOURCE_OWNER, destinationProfile: "evm-live-buyer", gasPayer },
+    { recipient: CIRCLE_RECIPIENT, amountAtomic: "40100", maxFeeAtomic: "100", minMintAtomic: "40000" });
+  const op = { schemaVersion: "apn.circle-v2-evm-operation.v2", funding, source: context.source, destinationChain: 59144, destinationProfile: "evm-live-buyer",
+    sourceCustody: { walletAddress: CIRCLE_SOURCE_OWNER }, destinationCustody: { walletAddress: gasPayer } } as unknown as CircleFundingOperationV2;
   let response = structuredClone(original), apiCalls = 0, deploymentCalls = 0;
-  const service = new CircleEvmService(new StateStore("/tmp/circle-actual-iris-no-effects"), { load: async () => { throw new Error("private_material_forbidden"); } } as never, {}, Date.now, {}, {
+  const service = new CircleFundingEvmService(new StateStore("/tmp/circle-actual-iris-no-effects"), { load: async () => { throw new Error("private_material_forbidden"); } } as never, {}, Date.now, {}, {
     request: async (url: string, method: string) => { assert.equal(url, `https://iris-api.circle.com/v2/messages/3?transactionHash=${context.source.transactionHash}`); assert.equal(method, "GET"); apiCalls++; return { status: 200, body: JSON.stringify(response), headers: {} }; },
   } as never);
-  const internal = service as unknown as { preflightDeployments(source: CircleRpc, destination: CircleRpc, chain: number): Promise<{ digest: string }>; ports(op: CircleOperationV1): CircleLifecyclePorts };
+  const internal = service as unknown as { preflightDeployments(source: CircleRpc, destination: CircleRpc, chain: number): Promise<{ digest: string }>; ports(op: CircleFundingOperationV2): CircleFundingLifecyclePorts };
   t.mock.method(internal, "preflightDeployments", async (source: CircleRpc, destination: CircleRpc, chain: number) => { assert.equal(source.chainId, 42161); assert.equal(destination.chainId, 59144); assert.equal(chain, 59144); deploymentCalls++; return { digest: context.attesters.deploymentDigest }; });
   t.mock.method(CircleRpc.prototype, "identity", async () => {});
   t.mock.method(CircleRpc.prototype, "block", async () => ({ number: `0x${BigInt(context.attesters.blockNumberAtomic).toString(16)}`, hash: context.attesters.blockHash }));

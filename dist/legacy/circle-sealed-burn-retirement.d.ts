@@ -17,7 +17,6 @@ export declare function isSealedBurnRetirement(op: CircleOperationV1): boolean;
 export declare function assertSealedBurnRetirement(op: CircleOperationV1): void;
 export declare function assertConsumedBurnIdentity(op: CircleOperationV1): void;
 export declare function isConsumedBurnRetirement(op: CircleOperationV1): boolean;
-export declare function sealedBurnBinding(op: CircleOperationV1): string;
 export declare function assertSealedBurnReplacement(op: CircleOperationV1, e: CircleEnvelope): void;
 export interface SealedBurnEvidence {
     readonly approvalProof: CircleReceiptProof;

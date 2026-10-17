@@ -6,7 +6,7 @@ import type { CommandRequest, CommandOutcome } from "./commands.js";
 import type { RuntimeContext } from "./runtime.js";
 import { ApnError } from "./errors.js";
 import { dataOutcome, operationOutcome } from "./core-outcome.js";
-import { publicCircle } from "./circle-v2-evm/operation-model.js";
+import { circleV1Status } from "./legacy/circle-v1-public-failure.js";
 import { bridgeOwner } from "./lifi/owner.js";
 import { publicCircleApproval } from "./lifi/circle-v2-approval-executor.js";
 import { confirmCircleApproval } from "./lifi/circle-v2-approval-tty.js";
@@ -15,7 +15,12 @@ import { confirmCircleApproval } from "./lifi/circle-v2-approval-tty.js";
 export async function executeCircleCommand(request: Extract<CommandRequest, { command: `circle.${string}` }>,
   context: RuntimeContext): Promise<CommandOutcome> {
   switch (request.command) {
-      case "circle.evm.adopt-external-mint": {if ((await checkedOperation(context, request.operationId)).schemaVersion === "apn.circle-v2-evm-operation.v2") { const service=context.circleFundingEvm;if(service===undefined)unavailable();const op=await service.adoptExternalMint(request.operationId,request.transactionHash);return {...operationOutcome(publicCircleFundingOperation(op)),proofClass:"circle_funding_external_mint_fulfillment",receipt:op.externalFulfillment??null}; }const service=context.circleEvm;if(service===undefined)throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE","Circle EVM runtime unavailable.");const op=await service.adoptExternalMint(request.operationId,request.transactionHash);return {...operationOutcome(publicCircle(op)),proofClass:"circle_external_mint_fulfillment",receipt:op.externalFulfillment??null};}
+      case "circle.evm.adopt-external-mint": {
+        if ((await checkedOperation(context, request.operationId)).schemaVersion !== "apn.circle-v2-evm-operation.v2") legacyReadOnly();
+        const service = context.circleFundingEvm; if (service === undefined) unavailable();
+        const op = await service.adoptExternalMint(request.operationId, request.transactionHash);
+        return { ...operationOutcome(publicCircleFundingOperation(op)), proofClass: "circle_funding_external_mint_fulfillment", receipt: op.externalFulfillment ?? null };
+      }
       case "circle.evm.prepare": {
         // One route: every new operation is v2 with all four economic inputs; the fixed v1 shape is read-only.
         if (!isPlainRecord(request) || !exactKeys(request, ["command", "profile", "destinationProfile", "destinationChain", "idempotencyKey", "funding"])) throw new ApnError("APN_INVALID_INPUT", "Circle prepare requires --profile, --destination-profile, --destination-chain, --idempotency-key, --beneficiary, --gross-atomic, --max-issuer-fee-atomic and --min-mint-atomic.");
@@ -24,13 +29,18 @@ export async function executeCircleCommand(request: Extract<CommandRequest, { co
         const service = context.circleFundingEvm; if (service === undefined) unavailable();
         return operationOutcome(publicKnownCircle(validateKnownCircle(await service.prepare({ profile: request.profile, destinationProfile: request.destinationProfile, destinationChain: request.destinationChain, idempotencyKey: request.idempotencyKey, funding }))));
       }
-      case "circle.evm.approve-source": case "circle.evm.approve-mint": case "circle.evm.observe": case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.cleanup-nonce": case "circle.evm.status": {
+      case "circle.evm.approve-source": case "circle.evm.approve-mint": case "circle.evm.observe": case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.status": {
         const op = await checkedOperation(context, request.operationId);
-        if (op.schemaVersion === "apn.circle-v2-evm-operation.v2" && request.command === "circle.evm.cleanup-nonce") legacyOnly();
-        const service = op.schemaVersion === "apn.circle-v2-evm-operation.v1" ? context.circleEvm : context.circleFundingEvm;
+        if (op.schemaVersion === "apn.circle-v2-evm-operation.v1") {
+          // The v1 executing runtime is deleted: a v1 journal answers status, and observe only once it is terminal.
+          if (request.command === "circle.evm.status") return operationOutcome(await circleV1Status(context.state.root, op));
+          if (request.command === "circle.evm.observe" && op.terminal) return operationOutcome(publicKnownCircle(op));
+          legacyReadOnly();
+        }
+        const service = context.circleFundingEvm;
         if (service === undefined) unavailable();
         if (request.command === "circle.evm.status") return operationOutcome(await service.status(request.operationId));
-        const result = request.command === "circle.evm.approve-source" ? await service.approveSource(request.operationId) : request.command === "circle.evm.approve-mint" ? await service.approveMint(request.operationId) : request.command === "circle.evm.refresh-attestation" ? await service.refreshAttestation(request.operationId) : request.command === "circle.evm.cleanup-nonce" ? await context.circleEvm!.cleanupNonce(request.operationId) : request.command === "circle.evm.cleanup" ? await service.cleanup(request.operationId) : await service.observe(request.operationId);
+        const result = request.command === "circle.evm.approve-source" ? await service.approveSource(request.operationId) : request.command === "circle.evm.approve-mint" ? await service.approveMint(request.operationId) : request.command === "circle.evm.refresh-attestation" ? await service.refreshAttestation(request.operationId) : request.command === "circle.evm.cleanup" ? await service.cleanup(request.operationId) : await service.observe(request.operationId);
         return operationOutcome(publicKnownCircle(validateKnownCircle(result)));
       }
       case "circle.approval.prepare": {
@@ -65,4 +75,4 @@ async function checkedOperation(context: RuntimeContext, id: string) {
   return op;
 }
 function unavailable(): never { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Selected Circle EVM runtime unavailable."); }
-function legacyOnly(): never { throw new ApnError("APN_OPERATION_BLOCKED", "This Circle command requires a legacy V1 operation."); }
+function legacyReadOnly(): never { throw new ApnError("APN_OPERATION_BLOCKED", "Circle V1 operations are read-only: status, and observe once terminal."); }

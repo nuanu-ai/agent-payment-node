@@ -47,8 +47,6 @@ export interface CircleFeeQuote {
     readonly integrityHash: string;
 }
 /** Ceil exact rational basis points. JSON floating values are accepted only as finite ordinary decimal numbers. */
-export declare function quoteCircleFastFee(chain: CircleDestinationChain, value: unknown, fetchedAtMs: number, nowMs: number): CircleFeeQuote;
-export declare function assertCircleFeeQuote(quote: CircleFeeQuote, chain: CircleDestinationChain, nowMs: number): void;
 export interface CircleAccountPreflight {
     readonly chainId: number;
     readonly address: Address;

@@ -1,4 +1,5 @@
 import { sealOperation, sealWallet } from "../../src/state-integrity.js";
+import { advanceCircle } from "./circle-v1-journal.js";
 import { evmDirectFingerprint } from "../../src/evm-direct.js";
 import { DirectPublicEffectJournal } from "../../src/direct-public-effect.js";
 import assert from "node:assert/strict";
@@ -13,7 +14,7 @@ import { evmNativeCustody } from "../../src/evm-native-custody.js";
 import { circleNativeSourceIdentity } from "../../src/circle-native-admission.js";
 import type { CircleNativeAdmission } from "../../src/legacy/circle-native-admission-rider.js";
 import { OperationService } from "../../src/operation-service.js";
-import { sealCircle, advanceCircle } from "../../src/circle-v2-evm/operation-model.js";
+
 import { sourceReady } from "./circle-native-admission-fixture.js";
 import { source, observation, event } from "./circle-v2-evm-runtime-fixtures.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER } from "../../src/circle-v2-evm/catalog.js";

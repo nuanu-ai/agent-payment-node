@@ -19,7 +19,6 @@ export const CIRCLE_EVM_COMMANDS = [
     command("observe", [operation], "Observe canonical source, issuer signature, destination mint and independent finality without signing or resending.", "network_read"),
     command("refresh-attestation", [operation], "Read-only issuer refresh for the same burn and nonce before mint; never reburn.", "network_read"),
     command("cleanup", [operation], "Explicit foreground approve-zero cleanup after confirmed approval/revert, or cancellation before private entry.", "payment_submit"),
-    command("cleanup-nonce", [operation], "Foreground-confirm one exact approve-zero at the nonce of an expired unknown v1 approval (any destination); finalized canonical retirement proof closes unused holds.", "payment_submit"),
     command("status", [operation], "Read the checked durable local Circle operation with both signing profiles.", "local_read"),
 ];
 function command(action, options, summary, effect) {
@@ -50,7 +49,7 @@ export function bindCircleEvmCommand(path, input) {
             invalid();
         return { command: "circle.evm.prepare", profile: input["--profile"], destinationProfile: input["--destination-profile"], destinationChain: chain, idempotencyKey: input["--idempotency-key"], funding };
     }
-    if (!["approve-source", "approve-mint", "observe", "refresh-attestation", "cleanup", "cleanup-nonce", "status"].includes(action) || !exactKeys(input, ["--operation"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]))
+    if (!["approve-source", "approve-mint", "observe", "refresh-attestation", "cleanup", "status"].includes(action) || !exactKeys(input, ["--operation"]) || !/^[a-f0-9]{64}$/u.test(input["--operation"]))
         invalid();
     return { command: `circle.evm.${action}`, operationId: input["--operation"] };
 }

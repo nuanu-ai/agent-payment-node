@@ -8,10 +8,7 @@ import { StateStore } from "../../src/state.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
 import { relaySourceTerminal } from "../../src/relay/lifecycle.js";
 import { CircleRepository } from "../../src/circle-v2-evm/repository.js";
-import { CircleExternalStore } from "../../src/circle-v2-evm/external-store.js";
 import { CircleFundingExternalStore } from "../../src/circle-v2-evm/funding-external-store.js";
-import { CircleNonceRetirementStore } from "../../src/circle-v2-evm/nonce-retirement-store.js";
-import { CircleRetirementAuthorityStore } from "../../src/circle-v2-evm/nonce-retirement-authority.js";
 import type { CircleKnownOperation } from "../../src/circle-v2-evm/funding-operation.js";
 import { MerchantRepository } from "../../src/x402-merchant/repository.js";
 import { GASZIP_DIRECT_ROUTES, gaszipCodec, inspectGaszipDelivery, inspectGaszipFundingQuote, type GaszipCorrelatedDelivery } from "../../src/lifi/gaszip-direct-route.js";
@@ -105,28 +102,16 @@ export async function readEveryLegacyRecord(root: string, at: Date): Promise<Rea
   return kinds;
 }
 
-/** External fulfilment claims and evidence, and nonce-retirement intent, authority and claims, through their own stores. */
+/** V2 external fulfilment claims and evidence, through their own store. The v1 sidecars (external claims and evidence,
+ * nonce-retirement intent, authority and claims) have no reader since the v1 executing runtime was deleted; they stay
+ * on disk, and the digest check proves no reader touches them. */
 async function readCircleSidecars(root: string, op: CircleKnownOperation): Promise<readonly string[]> {
   const kinds: string[] = [];
-  if (op.schemaVersion === "apn.circle-v2-evm-operation.v2") {
-    const external = new CircleFundingExternalStore(root);
-    if (await external.readClaim(op) !== null) kinds.push("circle-sidecar:v2:external-claim");
-    if (op.externalFulfillment !== undefined && await hasEvidence(root, op.externalFulfillment.evidenceHash)) {
-      await external.evidence(op.externalFulfillment); kinds.push("circle-sidecar:v2:external-evidence");
-    }
-    return kinds;
-  }
-  const external = new CircleExternalStore(root);
-  if (await external.readClaim(op) !== null) kinds.push("circle-sidecar:v1:external-claim");
+  if (op.schemaVersion !== "apn.circle-v2-evm-operation.v2") return kinds;
+  const external = new CircleFundingExternalStore(root);
+  if (await external.readClaim(op) !== null) kinds.push("circle-sidecar:v2:external-claim");
   if (op.externalFulfillment !== undefined && await hasEvidence(root, op.externalFulfillment.evidenceHash)) {
-    await external.evidence(op.externalFulfillment); kinds.push("circle-sidecar:v1:external-evidence");
-  }
-  const retirements = new CircleNonceRetirementStore(root), intent = await retirements.intent(op);
-  if (intent !== null) kinds.push(`circle-sidecar:v1:retirement-intent:${intent.version}`);
-  if ((await jsonNames(root, "circle-v2-nonce-retirements", `${op.operationId}-authority.json`)).length > 0) {
-    assert.notEqual(await new CircleRetirementAuthorityStore(root).load(op), null);
-    kinds.push("circle-sidecar:v1:retirement-authority");
-    for (const boundary of ["sign", "send"] as const) if (await retirements.hasClaim(op, boundary)) kinds.push(`circle-sidecar:v1:retirement-claim:${boundary}`);
+    await external.evidence(op.externalFulfillment); kinds.push("circle-sidecar:v2:external-evidence");
   }
   return kinds;
 }

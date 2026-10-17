@@ -1,7 +1,6 @@
 import { CircleFundingExternalStore } from "./funding-external-store.js";
 import { validateCircleFundingBinding } from "./funding-binding.js";
 import { CircleRepository } from "./repository.js";
-import { CircleExternalStore } from "./external-store.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
@@ -10,21 +9,21 @@ import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-re
 import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger, assetUsageReservationId, validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { CIRCLE_RECIPIENT, CIRCLE_SOURCE_TOKEN, circleRoute } from "./catalog.js";
+import { CIRCLE_SOURCE_TOKEN, circleRoute } from "./catalog.js";
 import { circleBlocked, circleCorrupt } from "./operation-model.js";
-export const circleMechanism = (chain) => ({ provider: "circle-cctp-v2", reference: `circle-v2-evm-fast-42161-${chain}.v1` });
-const ordinaryMechanism = (op) => op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? validateCircleFundingBinding(op.funding).mechanism : circleMechanism(op.destinationChain);
+// Only funding-v2 operations execute; v1 journals are read-only and never reach usage admission or settlement.
+const ordinaryMechanism = (op) => validateCircleFundingBinding(op.funding).mechanism;
 /** The burned USDC is the asset that reaches the beneficiary; the native holds only pay the signers' own gas. */
-const beneficiary = (op) => op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? validateCircleFundingBinding(op.funding).recipient : CIRCLE_RECIPIENT;
+const beneficiary = (op) => validateCircleFundingBinding(op.funding).recipient;
 /** OD-1: an owner recipient pin on the source USDC bridge admission must list the beneficiary. */
 function assertBeneficiaryAdmitted(op, lease, admission) {
     if (lease.key === "usdc")
         assertRecipientAdmitted({ admission, mechanism: ordinaryMechanism(op), recipient: beneficiary(op) });
 }
-const ordinaryNamespace = (op) => op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? "circle-v2-evm.v2" : "circle-v2-evm.v1";
+const ordinaryNamespace = "circle-v2-evm.v2";
 function leases(op) {
     const source = op.sourceCustody.walletAddress, destination = op.destinationCustody.walletAddress;
-    return [{ key: "usdc", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "token", identifier: CIRCLE_SOURCE_TOKEN } }, amount: op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? validateCircleFundingBinding(op.funding).amountAtomic : "40100" },
+    return [{ key: "usdc", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "token", identifier: CIRCLE_SOURCE_TOKEN } }, amount: validateCircleFundingBinding(op.funding).amountAtomic },
         { key: "approval-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "30000000000000" },
         { key: "burn-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "30000000000000" },
         { key: "cleanup-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "15000000000000" },
@@ -84,16 +83,6 @@ export class CircleUsage {
         }
         return result;
     }
-    /** Capture new cleanup authority without reserving or counting historical holds twice. */
-    async retirementPolicies(op) {
-        const result = [];
-        for (const profile of [op.profile, op.destinationProfile]) {
-            const account = profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
-            const active = await this.active(profile, account);
-            result.push({ profile, profileHash: this.state.profileHash(profile), policyDigest: active.digest, revision: active.revision, activationDigest: active.activationDigest });
-        }
-        return result;
-    }
     /** Readonly authority window from both exact owner activations while their locks remain held. */
     async authorizationDeadline(op, policies = op.policies) {
         let end = Infinity;
@@ -150,33 +139,10 @@ export class CircleUsage {
                     amountAtomic: lease.amount, dailyUsageAtomic: "0", asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() }));
             }
             const reservation = await this.ledger.reserve({ ...lease.identity, registry: active.registry, rail: "bridge", mechanism: ordinaryMechanism(op), amountAtomic: lease.amount,
-                idempotencyKey: `${ordinaryNamespace(op)}:${op.operationId}:${lease.key}`, now: new Date(this.now()) });
+                idempotencyKey: `${ordinaryNamespace}:${op.operationId}:${lease.key}`, now: new Date(this.now()) });
             if (reservation.state !== "reserved")
                 circleBlocked("reserve_replay_already_exposed");
             result.push(reservation);
-        }
-        return result;
-    }
-    async followExternalFulfillment(op) {
-        if (op.externalFulfillment === undefined || op.source?.finalityTag !== "finalized" || op.residualAllowanceAtomic !== "0" || op.usage.length !== 5)
-            circleBlocked("external_settlement_proof_required");
-        const durable = await new CircleRepository(this.state.root).load(op.operationId), claim = await new CircleExternalStore(this.state.root).readClaim(op);
-        if (durable?.externalFulfillment === undefined || claim === null || hashObject(durable.externalFulfillment) !== hashObject(op.externalFulfillment) || hashObject(claim) !== hashObject(op.externalFulfillment))
-            circleBlocked("external_durable_settlement_binding");
-        const result = [];
-        for (const [index, row] of op.usage.entries()) {
-            const current = await this.ledger.load(row, row.reservationId);
-            if (current === null)
-                circleCorrupt("external_usage_missing");
-            const state = index < 3 ? "finalized" : "released_unsubmitted";
-            const outcomeDigest = hashObject({ kind: "circle_external_mint_fulfillment", operationId: op.operationId, fingerprint: op.fingerprint, proofHash: op.externalFulfillment.proofHash, reservationId: row.reservationId, index, state });
-            if (current.state === state) {
-                if (current.outcomeDigest !== outcomeDigest || current.consumedAtomic !== undefined)
-                    circleBlocked("external_usage_outcome_changed");
-                result.push(current);
-                continue;
-            }
-            result.push(await this.ledger.transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state, now: new Date(this.now()), outcomeDigest, expectedCurrentStates: index < 3 ? ["reserved", "submitted", "unknown_finality"] : ["reserved", "unknown_finality"] }));
         }
         return result;
     }
@@ -218,7 +184,7 @@ export class CircleUsage {
         if (target === "failed_before_effect" && rows.length === 0) {
             const existing = [];
             for (const lease of leases(op)) {
-                const saved = await this.ledger.load(lease.identity, assetUsageReservationId(lease.identity, `${ordinaryNamespace(op)}:${op.operationId}:${lease.key}`));
+                const saved = await this.ledger.load(lease.identity, assetUsageReservationId(lease.identity, `${ordinaryNamespace}:${op.operationId}:${lease.key}`));
                 if (saved === null)
                     break;
                 const policy = op.policies.find(p => p.profile === lease.profile);

@@ -6,7 +6,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { StateStore,sealWallet } from "../../src/state.js";import { canonicalJson,hashObject } from "../../src/canonical.js";
 import { projectLegacyLocalProfile } from "../../src/provider-profile.js";import { evmNativeCustody } from "../../src/evm-native-custody.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
-import { CircleUsage,circleMechanism } from "../../src/circle-v2-evm/usage.js";import { CircleRepository } from "../../src/circle-v2-evm/repository.js";
+import { CircleUsage } from "../../src/circle-v2-evm/usage.js";import { CircleRepository } from "../../src/circle-v2-evm/repository.js";
 import { CircleFundingEvmService } from "../../src/circle-v2-evm/funding-runtime.js";import { CIRCLE_RPC_ABI } from "../../src/circle-v2-evm/rpc.js";
 import { CIRCLE_DEPLOYMENT_PINS,CIRCLE_SOURCE_OWNER,CIRCLE_SOURCE_TOKEN,CIRCLE_MESSENGER,CIRCLE_MINTER,CIRCLE_TRANSMITTER,circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { advanceCircleFundingOperation as advanceCircle, sealCircleFundingOperation as sealCircle, circleFundingFingerprint, type CircleFundingOperationV2 } from "../../src/circle-v2-evm/funding-operation.js";
