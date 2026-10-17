@@ -27,7 +27,8 @@ export interface OneClickSourceRecord {
   readonly sourceBlockHash: string;
   readonly sourceCall: { readonly to: string; readonly data: Hex; readonly value?: string; readonly nonce: string; readonly gas: string;
     readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string; readonly maxNativeDebitWei: string };
-  readonly phase: "prepared" | "signing_started" | "sealed" | "submitting" | "submitted_pending" | "unknown_finality" | "source_observed";
+  readonly phase: "prepared" | "signing_started" | "sealed" | "submitting" | "submitted_pending" | "unknown_finality" | "source_observed" |
+    "failed_proven_superseded";
   readonly rawTransaction: Hex | null;
   readonly transactionHash: Hex | null;
   readonly submissionAttempts: 0 | 1;
@@ -35,6 +36,11 @@ export interface OneClickSourceRecord {
   readonly sourceReceiptHash: string | null;
   /** The finalized destination proof once status proved it after a successful safe source receipt; it ends the operation. */
   readonly destinationStatus: OneClickDestinationProof | null;
+  /**
+   * `failed_proven_superseded` only: the payer's nonce at the `finalized` tag when status proved the signed source can never
+   * land (past the source nonce, while the node knew neither the transaction nor a receipt).
+   */
+  readonly finalizedNonceAtomic?: string;
   readonly updatedAt: string;
   readonly integrityHash: string;
 }
@@ -89,8 +95,11 @@ function validate(value: unknown): OneClickSourceRecord {
       tx.gas?.toString() !== r.sourceCall.gas || tx.maxFeePerGas?.toString() !== r.sourceCall.maxFeePerGas ||
       tx.maxPriorityFeePerGas?.toString() !== r.sourceCall.maxPriorityFeePerGas || (tx.accessList ?? []).length !== 0 ||
       tx.r === undefined || tx.s === undefined) fail();
-    if ((r.phase === "sealed") !== (r.submissionAttempts === 0)) fail();
+    // A sealed source was never sent; a superseded one may or may not have been; every other signed phase was sent once.
+    if (r.phase === "sealed" ? r.submissionAttempts !== 0 : r.phase !== "failed_proven_superseded" && r.submissionAttempts !== 1) fail();
   }
+  if ((r.phase === "failed_proven_superseded") !== (r.finalizedNonceAtomic !== undefined) || r.finalizedNonceAtomic !== undefined &&
+    (!/^(?:0|[1-9][0-9]*)$/u.test(r.finalizedNonceAtomic) || BigInt(r.finalizedNonceAtomic) <= BigInt(r.sourceCall.nonce))) fail();
   if ((r.phase === "source_observed") !== (r.sourceReceiptStatus !== null && r.sourceReceiptHash !== null)) fail();
   return r;
 }
@@ -103,12 +112,15 @@ function nonceReservationPath(chainId: number, profileHash: string, payer: strin
 function nonceReservation(record: OneClickSourceRecord): string {
   return nonceReservationPath(oneClickRecordLane(record).origin.chainId, record.profileHash, record.payer, record.sourceCall.nonce);
 }
-/** Where each phase may go next; `source_observed` (a safe source receipt, success or revert) is the only outcome. */
+/**
+ * Where each phase may go next. The outcomes: `source_observed` (a safe source receipt, success or revert) and
+ * `failed_proven_superseded` (another transaction took the source nonce at finality; this one can never land).
+ */
 export const ONECLICK_SOURCE_EDGES: Readonly<Record<OneClickSourceRecord["phase"], readonly OneClickSourceRecord["phase"][]>> = {
-  prepared: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
-  submitting: ["submitted_pending", "unknown_finality", "source_observed"],
-  submitted_pending: ["unknown_finality", "source_observed"],
-  unknown_finality: ["source_observed"], source_observed: [] };
+  prepared: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting", "failed_proven_superseded"],
+  submitting: ["submitted_pending", "unknown_finality", "source_observed", "failed_proven_superseded"],
+  submitted_pending: ["unknown_finality", "source_observed", "failed_proven_superseded"],
+  unknown_finality: ["source_observed", "failed_proven_superseded"], source_observed: [], failed_proven_superseded: [] };
 
 export class OneClickSourceJournal extends SecureStateStore {
   private path(id: string): string { stateIdentifier(id, "operation ID"); return `oneclick-source/${id}.json`; }
