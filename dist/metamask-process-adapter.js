@@ -31,7 +31,6 @@ export class MetaMaskProcessAdapter {
             reads: this,
             direct: this.direct,
             x402Signer: this.x402Signer,
-            evidence: { owner: "apn" },
         };
     }
     async connect(_foreground, options = {}) {
@@ -70,17 +69,6 @@ export class MetaMaskProcessAdapter {
             const status = await this.doctor();
             if (!status.authenticated || !status.initialized)
                 throw sessionFailure();
-        });
-    }
-    async logout() {
-        await this.exclusive(async () => {
-            const result = await this.runner.runJson(["logout", "--json"]);
-            try {
-                requireSuccess(result.exitCode, result.stdout);
-            }
-            finally {
-                result.stdout.fill(0);
-            }
         });
     }
     async observeBalance() {

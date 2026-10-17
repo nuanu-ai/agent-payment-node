@@ -5,8 +5,8 @@ import { SaRpcBudgetError, SaRpcRangeError, SaRpcReorgError } from
   "../../src/smart-account-gasless/chain/abi.js";
 import { observeSmartAccountGasless, type SmartAccountObservationContext } from
   "../../src/smart-account-gasless/chain/observation.js";
-import { advanceSmartAccountGaslessScan, initialSmartAccountGaslessCursor } from
-  "../../src/smart-account-gasless/chain/scan.js";
+import { advanceSmartAccountGaslessScan } from "../../src/smart-account-gasless/chain/scan.js";
+import { initialSmartAccountGaslessCursor } from "./smart-account-gasless-fixtures.js";
 import type { SmartAccountGaslessBlock, SmartAccountGaslessIntent } from
   "../../src/smart-account-gasless/model.js";
 import type { SmartAccountGaslessObserveInput } from "../../src/smart-account-gasless/ports.js";

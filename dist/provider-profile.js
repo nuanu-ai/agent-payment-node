@@ -67,9 +67,6 @@ export function coinbaseDirectCapabilitySnapshot() {
         evidence: { available: true, owner: "apn" },
     };
 }
-export function metamaskReadOnlyCapabilitySnapshot() {
-    return lifecycleReadOnlyCapabilitySnapshot();
-}
 export function metamaskDirectCapabilitySnapshot() {
     const snapshot = lifecycleReadOnlyCapabilitySnapshot();
     return {

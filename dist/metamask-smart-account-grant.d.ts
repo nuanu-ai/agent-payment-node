@@ -23,7 +23,6 @@ export interface ValidatedSmartAccountGrant {
     readonly permissionResponse: Readonly<Record<string, unknown>>;
 }
 export declare const BASE_CHAIN_HEX: "0x2105";
-export declare const UINT256_MAX_HEX: Hex;
 export declare function smartAccountEnvironment(): import("@metamask/smart-accounts-kit").SmartAccountsEnvironment;
 export declare function validateSmartAccountObservation(value: unknown, request: SmartAccountPermissionRequestShape): ValidatedSmartAccountGrant;
 export declare function assertSmartAccountPreflight(value: unknown): SmartAccountProviderObservation;

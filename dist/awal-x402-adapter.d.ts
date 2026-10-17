@@ -2,8 +2,6 @@ import type { X402ExecutionPort } from "./provider-ports.js";
 import { assertAwalHttpRequest } from "./provider-x402-http-request.js";
 import { type X402HttpRequestV1 } from "./x402-http-request.js";
 export declare const AWAL_X402_PROCESS_TIMEOUT_MS = 210000;
-export declare const AWAL_X402_INTERNAL_TIMEOUT_MS = 180000;
-export declare const AWAL_X402_SHUTDOWN_MARGIN_MS = 30000;
 interface AwalX402Stream {
     on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
     removeListener(event: "data", listener: (chunk: Buffer | string) => void): unknown;

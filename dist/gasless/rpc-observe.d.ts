@@ -1,13 +1,10 @@
-import type { Address } from "../model.js";
-import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessIntent, GaslessObservation, GaslessSnapshot } from "./model.js";
+import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessIntent, GaslessObservation } from "./model.js";
 import { type GaslessRpcCall } from "./rpc-codec.js";
 export interface GaslessObservationContext {
     readonly chainId: GaslessChainId;
     readonly rpcOrigin: string;
     readonly rpc: GaslessRpcCall;
     readonly bundler?: GaslessRpcCall;
-    /** Retained for existing callers; canonical observation never uses an execution snapshot. */
-    readonly snapshot?: (owner: Address) => Promise<GaslessSnapshot>;
 }
 /**
  * Archive-free observation. Effects are proven by the authenticated receipt logs and header membership; a settlement

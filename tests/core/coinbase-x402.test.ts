@@ -9,7 +9,6 @@ import test, { type TestContext } from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import {
   AWAL_X402_PROCESS_TIMEOUT_MS,
-  AWAL_X402_SHUTDOWN_MARGIN_MS,
   AwalX402Adapter,
   type AwalX402LaunchPort,
 } from "../../src/awal-x402-adapter.js";
@@ -353,7 +352,6 @@ async function setup(t: TestContext, input: {
     lifecycle: reads,
     reads,
     x402: effect,
-    evidence: { owner: "apn" },
   };
   const registry = new ProviderRegistry([{ provider_id: AWAL_PROVIDER_ID, create: () => bundle }]);
   const clock = input.clock ?? new TestClock();
@@ -508,7 +506,6 @@ async function executeAwalEnvelope(value: unknown) {
 
 test("AWAL x402 uses exact Node argv, exact deadline and normalized bounded JSON", async () => {
   assert.equal(AWAL_X402_PROCESS_TIMEOUT_MS, 210_000);
-  assert.equal(AWAL_X402_SHUTDOWN_MARGIN_MS, 30_000);
   const launches: Array<{ executable: string; args: readonly string[]; options: unknown }> = [];
   const launch: AwalX402LaunchPort = (executable, args, options) => {
     launches.push({ executable, args: [...args], options });

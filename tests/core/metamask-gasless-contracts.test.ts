@@ -7,9 +7,11 @@ import { TypedDataEncoder } from "ethers";
 import { hashObject, sha256 } from "../../src/canonical.js";
 import { mmBinding, mmPrivateHash, mmWalletIdentityHash } from "../../src/metamask-gasless/identity.js";
 import { mmEconomics, mmQuote, mmQuoteHash } from "../../src/metamask-gasless/economics.js";
-import { MM_CHAINS, MM_DEPLOYMENT_INPUT_SHA, mmRegistry } from "../../src/metamask-gasless/registry.js";
+import { MM_CHAINS, mmRegistry } from "../../src/metamask-gasless/registry.js";
+
+const MM_DEPLOYMENT_INPUT_SHA = "136babcbb5f856292e1519d19a8ee78070ec06188fe3f7f245fe59c38b14ad38";
 import { MM_REASON_CODES, mmError } from "../../src/metamask-gasless/reasons.js";
-import { mmAddress, mmDecimal, mmRequest, mmUint } from "../../src/metamask-gasless/validation.js";
+import { mmAddress, mmRequest, mmUint } from "../../src/metamask-gasless/validation.js";
 import { MM_ANY_BENEFICIARY, MM_BATCH_MODE, MM_ROOT_AUTHORITY, mmValidateUnsigned } from "../../src/metamask-gasless/unsigned.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessExecution, MetaMaskGaslessUnsignedDelegation } from "../../src/metamask-gasless/model.js";
 import type { Hex } from "../../src/model.js";
@@ -30,10 +32,7 @@ function executions(net: string, fee: string): readonly [MetaMaskGaslessExecutio
     unknown as readonly [MetaMaskGaslessExecution, MetaMaskGaslessExecution];
 }
 
-test("MM amounts preserve exact six-decimal uint256 boundaries and reject alternate representations", () => {
-  assert.equal(mmDecimal("10"), "10000000"); assert.equal(mmDecimal("0.000001"), "1");
-  for (const input of ["01", "+1", "-1", "1e2", "1,000", " 1", "1.", "1.0000001", "NaN"])
-    assert.throws(() => mmDecimal(input), { code: "APN_INVALID_INPUT" });
+test("MM amounts preserve exact uint256 boundaries and reject alternate representations", () => {
   const max = (1n << 256n) - 1n;
   assert.equal(mmUint(max.toString()), max);
   for (const input of [(max + 1n).toString(), "00", "01", "-1", 1]) assert.throws(() => mmUint(input));

@@ -22,6 +22,5 @@ export declare function recoveryMaterialDigest(input: {
 }): string;
 export declare function sealTransactionReservation(value: Omit<ProviderX402TransactionReservation, "integrityHash">): ProviderX402TransactionReservation;
 export declare function validateTransactionReservation(value: unknown): ProviderX402TransactionReservation;
-export declare function sameReservation(left: ProviderX402TransactionReservation, right: ProviderX402TransactionReservation): boolean;
 export declare function sealTransactionReservationIndex(reservations: readonly ProviderX402TransactionReservation[]): ProviderX402TransactionReservationIndex;
 export declare function validateTransactionReservationIndex(value: unknown): ProviderX402TransactionReservationIndex;

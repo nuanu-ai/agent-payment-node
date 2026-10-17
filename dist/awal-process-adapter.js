@@ -158,7 +158,6 @@ export class AwalProcessAdapter {
             reads: this,
             direct: this.direct,
             x402: this.x402,
-            evidence: { owner: "apn" },
         };
     }
     async connect(foreground) {
@@ -168,9 +167,6 @@ export class AwalProcessAdapter {
             return;
         const challenge = await foreground.readChallengeResponse();
         await this.runSensitive({ kind: "verify", challenge });
-    }
-    async logout() {
-        await this.runSensitive({ kind: "logout" });
     }
     async observeBalance() {
         const result = await this.runner.run(argv({ kind: "balance" }), false);
@@ -254,7 +250,6 @@ function argv(command) {
         case "status": return ["status", "--json"];
         case "login": return ["auth", "login", command.identity, "--json"];
         case "verify": return ["auth", "verify", command.challenge, "--json"];
-        case "logout": return ["auth", "logout", "--json"];
         case "balance": return ["balance", "--chain", "base", "--asset", "usdc", "--json"];
         case "address": return ["address", "--chain", "base"];
     }

@@ -7,15 +7,6 @@ export const MM_TRANSFER_TOPIC = toEventSelector("Transfer(address,address,uint2
 export const MM_APPROVAL_TOPIC = toEventSelector("Approval(address,address,uint256)");
 export const MM_INCREASED_COUNT_TOPIC = toEventSelector("IncreasedCount(address,address,bytes32,uint256,uint256)");
 export const MM_REDEEM_SELECTOR = toFunctionSelector("redeemDelegations(bytes[],bytes32[],bytes[])");
-export const MM_DECIMALS_CALL = toFunctionSelector("decimals()");
-export const MM_EXECUTION_PARAMETER = {
-    type: "tuple[]",
-    components: [
-        { name: "target", type: "address" },
-        { name: "value", type: "uint256" },
-        { name: "callData", type: "bytes" },
-    ],
-};
 export const MM_DELEGATION_PARAMETER = {
     type: "tuple[]",
     components: [

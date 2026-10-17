@@ -12,7 +12,7 @@ import { MetaMaskGaslessOperationRepository } from "../../src/metamask-gasless/j
 import { metaMaskGaslessReceipt, publicMetaMaskGaslessOperation,
   validateMetaMaskGaslessReceipt } from "../../src/metamask-gasless/journal/receipt.js";
 import { advanceMetaMaskGaslessOperation, assertMetaMaskGaslessDispatchCapacity,
-  assertMetaMaskGaslessObservationCapacity, metaMaskGaslessObservationRoom,
+  metaMaskGaslessObservationRoom,
   metaMaskGaslessObservationUnchanged } from "../../src/metamask-gasless/journal/transitions.js";
 import { validateMetaMaskGaslessContinuity,
   validateMetaMaskGaslessOperation } from "../../src/metamask-gasless/journal/validation.js";
@@ -65,7 +65,7 @@ test("strict replay retains the irreversible marker and accepts authenticated co
   const marked = mark(approve(initial));
   assert.equal(marked.submissionAttempts, 1);
   assert.equal(marked.dispatchStartedAt, DISPATCHED);
-  assertMetaMaskGaslessObservationCapacity(marked);
+  assert.equal(metaMaskGaslessObservationRoom(marked), true);
   const guarded = unknown(marked), completed = complete(guarded, "2026-09-09T00:10:00.000Z");
   assert.ok(Date.parse(completed.updatedAt) > Date.parse(EXPIRES));
   assert.equal(completed.state, "completed");
@@ -236,7 +236,6 @@ test("history keeps its last slot for the terminal transition and a legacy full 
   }
   assert.equal(operation.transitions.length, 95);
   assert.equal(metaMaskGaslessObservationRoom(operation), false);
-  assert.throws(() => assertMetaMaskGaslessObservationCapacity(operation), capacity);
   assert.throws(() => unknown(operation, iso(millis + 1_000)), capacity);
   const completed = complete(operation, iso(millis + 2_000));
   assert.equal(completed.transitions.length, 96); assert.equal(completed.terminal, true);

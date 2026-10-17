@@ -219,7 +219,7 @@ async function buildLocalGasless(s, m) {
       accounts: { evm: getAddress(s.fixture().owner) }, effectiveAt: new Date(NOW.getTime() - 1_000).toISOString(),
       admissions: [{ chain: "eip155:8453", kind: "token", identifier: m.gaslessDeployment(8453).token,
         rail: "gasless", maximumPerTransferAtomic: "10000000", dailyLimitAtomic: "20000000",
-        mechanism: m.baseLocalGaslessMechanism(), recipient: "0x4444444444444444444444444444444444444444" }] } });
+        mechanism: m.localGaslessMechanism(8453), recipient: "0x4444444444444444444444444444444444444444" }] } });
   await policy.appendDecision(s.profile, null, { status: "active", revision: record.revision,
     stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest,
     registry: record.registry, approvalFingerprint: m.hashObject("retained-local-gasless-policy"),
