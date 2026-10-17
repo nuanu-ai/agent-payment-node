@@ -1,4 +1,5 @@
 export { FileStargateNativeJournal } from "./native-journal.js";
+import type { StargateAdmission } from "./token-model.js";
 export { stargateV2NativeCanonicalReceipt } from "./native-record.js";
 export type { StargateNativeCanonicalReceipt } from "./native-record.js";
 import { type Hex } from "viem";
@@ -191,6 +192,8 @@ export interface StargateNativeJournal {
     withLock<T>(operationId: string, work: () => Promise<T>): Promise<T>;
     /** The kernel per-account EVM lock (`evmAddressLock`) every EVM writer holds around its nonce check and send. */
     withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
+    /** Writes a new operation's owner claim to the operation index before `work` (its prepare body) reads anything. */
+    admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T>;
 }
 export declare class LocalStargateNativeSigner {
     private readonly state;

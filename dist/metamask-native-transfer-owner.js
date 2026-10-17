@@ -1,6 +1,8 @@
 import { nativeContextDeadline, validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { takeMetaMaskNativeProcessFailureDiagnostic } from "./metamask-process-runner.js";
 import { OperationService } from "./operation-service.js";
+import { admitOperation } from "./operation-index/admission.js";
+import { evmClaim } from "./operation-index/adapters/family-claims.js";
 import { evmAddressLock } from "./evm-address-ownership.js";
 import { listLocalWallets, listEncryptedWalletEnvelopes } from "./wallet-import-collision.js";
 import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
@@ -25,7 +27,7 @@ import { MetaMaskNativeHandoffNotStarted, readMetaMaskNativeVendorPolicy, readMe
 import { prepareMetaMaskNativeQuote, readMetaMaskNativeFunding, observeMetaMaskNativeTransfer } from "./metamask-native-transfer-rpc.js";
 import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeRequestHash, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation } from "./metamask-native-journal.js";
 /** Journal readers, also reachable here for callers that name the command module. */
-export { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease, assertMetaMaskNativeConflictDomainAvailable, metaMaskNativeOperationExists } from "./metamask-native-journal.js";
+export { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease, metaMaskNativeOperationExists } from "./metamask-native-journal.js";
 const scopes = new WeakMap();
 function blocked(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
 function entry(scope, context) {
@@ -175,98 +177,103 @@ export async function runMetaMaskNativeTransfer(stateRoot, input) {
         const existing = await journal.read(id);
         if (existing !== null)
             return replay(existing);
-        await assertAccountAvailable(state, journal, chainId, profileName, payer, id);
-        const owner = await loadMetaMaskNativeOwner(state, profileName), ledger = new AssetUsageLedger(stateRoot), now = new Date(), day = now.toISOString().slice(0, 10);
-        if (owner.profile.public_address.toLowerCase() !== payer || owner.profile.account_binding_hash !== initial.profile.account_binding_hash || owner.profile.revision !== initial.profile.revision)
-            blocked("MetaMask profile changed before acquiring custody locks.");
-        const sender = getAddress(payer), chainName = `eip155:${chainId}`, tokenAsset = { kind: "token", identifier: metaMaskNativeUsdc(chainId) };
-        // Direct-rail admission of the exact amount and the owner's recipient pin (OD-1) come before any vendor or RPC read.
-        const tokenAdmission = evaluateAssetPolicy(owner.policy.registry, { chain: chainName, asset: tokenAsset, rail: "direct", amountAtomic,
-            dailyUsageAtomic: (await ledger.usage({ account: sender, chain: chainName, asset: tokenAsset }, now)).amountAtomic, asOfDate: day, asOf: now.toISOString() });
-        assertRecipientAdmitted({ admission: tokenAdmission, recipient });
-        const identity = { account: sender, chain: chainName, asset: { kind: "native", identifier: null } };
-        const usage = await ledger.usage(identity, now);
-        const admission = evaluateAssetPolicy(owner.policy.registry, { chain: identity.chain, asset: identity.asset, rail: "direct", amountAtomic: "1", dailyUsageAtomic: usage.amountAtomic, asOfDate: day, asOf: now.toISOString() });
-        const cap = BigInt(admission.caps.maximumPerTransferAtomic) < BigInt(admission.dailyRemainingAtomic) ? admission.caps.maximumPerTransferAtomic : admission.dailyRemainingAtomic;
-        const vendor = await readMetaMaskNativeVendorPolicy(chainId, sender, recipient);
-        if (vendor.selectedAddress.toLowerCase() !== payer || vendor.tradingMode !== "guard" || !/^[a-f0-9]{64}$/.test(vendor.vendorProjectHash))
-            blocked("MetaMask vendor wallet or Guard mode differs from the paying profile.");
-        const prepared = await prepareMetaMaskNativeQuote({ chainId, maximumNativeFeeWei: cap, sender, recipient, amountAtomic });
-        const quote = freeze(structuredClone(validateMetaMaskNativeFeeQuote(prepared.quote, new Date()))), transfer = metaMaskNativeQuoteTransfer(quote);
-        if (quote.sender.toLowerCase() !== payer || quote.nativeFeeCapAtomic !== cap || transfer.recipient !== recipient || transfer.amountAtomic !== amountAtomic)
-            blocked("MetaMask native quote differs from the requested transfer or the current policy ceiling.");
-        if (!fundsCover(prepared.funding.balances, quote, amountAtomic))
-            blocked("MetaMask physical native/USDC balance is insufficient or stale.");
-        const expires = new Date(Math.min(Date.now() + 60_000, Date.parse(quote.expiresAt))).toISOString();
-        const context = freeze({ profile: profileName, profileHash: owner.profile.profile_hash, accountBindingHash: owner.profile.account_binding_hash,
-            capabilityHash: owner.profile.capability_hash, profileRevision: owner.profile.revision, policyDigest: owner.policy.digest, policyRevision: owner.policy.revision,
-            activationDigest: owner.policy.activationDigest, vendorPolicyHash: vendor.vendorPolicyHash, vendorProjectHash: vendor.vendorProjectHash, quote, operationId: id, consentExpiresAt: expires, issuedDay: day });
-        const reservations = [];
-        let op, scope;
-        try {
-            op = await journal.persist({ schemaVersion: METAMASK_NATIVE_OPERATION_SCHEMA, operationId: id, requestHash, context, reservations: [], state: "prepared", effectAttempts: 0,
-                transactionHash: null, providerRequestId: null, receiptEvidence: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-            for (const kind of ["native", "token"])
-                reservations.push(await ledger.reserveMetaMaskNative(id, kind, new Date()));
-            if (reservations.some(r => r.state !== "reserved"))
-                blocked("Native transfer usage replay cannot invoke a private effect.");
-            op = await journal.persist(patch(op, { reservations }));
-            if (process.stdin.isTTY !== true || process.stderr.isTTY !== true || !isatty(0) || !isatty(2))
-                blocked("A genuine foreground stdin/stderr terminal is required.");
-            const limits = Object.entries(vendor.outflowLimitsUsd).map(([name, value]) => `${name} ${value} USD`).join(", ");
-            await exactChainConsent(["Agent Payment Node — MetaMask Agent Wallet USDC transfer, network fee paid in the native coin", `Profile: ${context.profile}; sender: ${quote.sender}`,
-                `Chain: eip155:${chainId}; token: ${quote.token}`, `Recipient: ${recipient}`, `Amount: ${amountAtomic} atomic USDC (${formatAtomic(amountAtomic, 6)} USDC)`,
-                `Maximum FULL native fee: ${quote.feeQuote.totalQuoteWei} atomic`, `MetaMask Guard: recipient allowlisted on eip155:${chainId}; outflow limit ${limits}`,
-                `Quote: ${quote.quoteHash}`, `Operation: ${id}`], approvalCode("transfer", id, quote.quoteHash), expires, {});
-            if (new Date().toISOString().slice(0, 10) !== day || Date.now() >= Date.parse(expires))
-                blocked("Native transfer consent expired.");
-            const fresh = await loadMetaMaskNativeOwner(state, profileName);
-            if (fresh.policy.activationDigest !== owner.policy.activationDigest || fresh.profile.revision !== owner.profile.revision || fresh.profile.account_binding_hash !== owner.profile.account_binding_hash)
-                blocked("Native transfer owner changed during consent.");
+        // The account claim is written before any vendor, RPC or ledger read: every family's prepare on this account and chain
+        // waits for it from here, and this transfer waits for theirs.
+        return await admitOperation(state, { family: "metamask_native", profileHash: state.profileHash(profileName), operationId: id,
+            idempotencyHash: null, requestHash }, [evmClaim(chainId, payer)], async () => {
             await assertAccountAvailable(state, journal, chainId, profileName, payer, id);
-            if (Date.now() >= Date.parse(expires) || new Date().toISOString().slice(0, 10) !== day)
-                blocked("Native transfer consent expired during account conflict recheck.");
-            op = await journal.persist(patch(op, { state: "effect_started", effectAttempts: 1 }));
-            scope = Object.freeze({});
-            scopes.set(scope, { root: stateRoot, context, journal, reservations, state: "issued", lockActive: true, monotonicDeadline: performance.now() + Math.min(60000, Date.parse(expires) - Date.now()), lastNow: Date.now(), guardStage: "sdk_resolver", startedAt: performance.now() });
-            const result = await submitOwnedMetaMaskNative(scope, context);
-            op = await journal.persist(patch(op, { ...(result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic }), ...(result.disposition === "acknowledged" ? { state: "acknowledged", transactionHash: result.transactionHash } : { state: "unknown", transactionHash: "transactionHash" in result ? result.transactionHash ?? null : null, providerRequestId: result.requestId ?? null }) }));
-            for (const r of reservations)
-                await ledger.transition({ ...transitionIdentity(r), state: result.disposition === "acknowledged" ? "submitted" : "unknown_finality", now: new Date() });
-            return publicOperation(op);
-        }
-        catch (error) {
-            if (op !== undefined) {
-                if (op.effectAttempts === 1 && op.state === "effect_started" && error instanceof MetaMaskNativeHandoffNotStarted) {
-                    // Proven no handoff: the vendor child never started, so the marker closes as failed before effect.
-                    op = await journal.persist(patch(op, { state: "failed_before_effect" }));
-                    for (const r of reservations)
-                        await ledger.transition({ ...transitionIdentity(r), state: "failed_before_effect", now: new Date(), outcomeDigest: hashObject({ id, kind: "failed_before_effect" }), expectedCurrentStates: ["reserved"] });
-                    throw error.causeError;
-                }
-                if (op.effectAttempts === 1) {
-                    if (op.state === "effect_started")
-                        op = await journal.persist(patch(op, { state: "unknown", diagnostic: failureDiagnostic(error, context, scope) }));
-                    for (const r of reservations)
-                        await ledger.transition({ ...transitionIdentity(r), state: "unknown_finality", now: new Date() });
-                    return publicOperation(op);
-                }
-                op = await journal.persist(patch(op, { state: "failed_before_effect", reservations }));
+            const owner = await loadMetaMaskNativeOwner(state, profileName), ledger = new AssetUsageLedger(stateRoot), now = new Date(), day = now.toISOString().slice(0, 10);
+            if (owner.profile.public_address.toLowerCase() !== payer || owner.profile.account_binding_hash !== initial.profile.account_binding_hash || owner.profile.revision !== initial.profile.revision)
+                blocked("MetaMask profile changed before acquiring custody locks.");
+            const sender = getAddress(payer), chainName = `eip155:${chainId}`, tokenAsset = { kind: "token", identifier: metaMaskNativeUsdc(chainId) };
+            // Direct-rail admission of the exact amount and the owner's recipient pin (OD-1) come before any vendor or RPC read.
+            const tokenAdmission = evaluateAssetPolicy(owner.policy.registry, { chain: chainName, asset: tokenAsset, rail: "direct", amountAtomic,
+                dailyUsageAtomic: (await ledger.usage({ account: sender, chain: chainName, asset: tokenAsset }, now)).amountAtomic, asOfDate: day, asOf: now.toISOString() });
+            assertRecipientAdmitted({ admission: tokenAdmission, recipient });
+            const identity = { account: sender, chain: chainName, asset: { kind: "native", identifier: null } };
+            const usage = await ledger.usage(identity, now);
+            const admission = evaluateAssetPolicy(owner.policy.registry, { chain: identity.chain, asset: identity.asset, rail: "direct", amountAtomic: "1", dailyUsageAtomic: usage.amountAtomic, asOfDate: day, asOf: now.toISOString() });
+            const cap = BigInt(admission.caps.maximumPerTransferAtomic) < BigInt(admission.dailyRemainingAtomic) ? admission.caps.maximumPerTransferAtomic : admission.dailyRemainingAtomic;
+            const vendor = await readMetaMaskNativeVendorPolicy(chainId, sender, recipient);
+            if (vendor.selectedAddress.toLowerCase() !== payer || vendor.tradingMode !== "guard" || !/^[a-f0-9]{64}$/.test(vendor.vendorProjectHash))
+                blocked("MetaMask vendor wallet or Guard mode differs from the paying profile.");
+            const prepared = await prepareMetaMaskNativeQuote({ chainId, maximumNativeFeeWei: cap, sender, recipient, amountAtomic });
+            const quote = freeze(structuredClone(validateMetaMaskNativeFeeQuote(prepared.quote, new Date()))), transfer = metaMaskNativeQuoteTransfer(quote);
+            if (quote.sender.toLowerCase() !== payer || quote.nativeFeeCapAtomic !== cap || transfer.recipient !== recipient || transfer.amountAtomic !== amountAtomic)
+                blocked("MetaMask native quote differs from the requested transfer or the current policy ceiling.");
+            if (!fundsCover(prepared.funding.balances, quote, amountAtomic))
+                blocked("MetaMask physical native/USDC balance is insufficient or stale.");
+            const expires = new Date(Math.min(Date.now() + 60_000, Date.parse(quote.expiresAt))).toISOString();
+            const context = freeze({ profile: profileName, profileHash: owner.profile.profile_hash, accountBindingHash: owner.profile.account_binding_hash,
+                capabilityHash: owner.profile.capability_hash, profileRevision: owner.profile.revision, policyDigest: owner.policy.digest, policyRevision: owner.policy.revision,
+                activationDigest: owner.policy.activationDigest, vendorPolicyHash: vendor.vendorPolicyHash, vendorProjectHash: vendor.vendorProjectHash, quote, operationId: id, consentExpiresAt: expires, issuedDay: day });
+            const reservations = [];
+            let op, scope;
+            try {
+                op = await journal.persist({ schemaVersion: METAMASK_NATIVE_OPERATION_SCHEMA, operationId: id, requestHash, context, reservations: [], state: "prepared", effectAttempts: 0,
+                    transactionHash: null, providerRequestId: null, receiptEvidence: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+                for (const kind of ["native", "token"])
+                    reservations.push(await ledger.reserveMetaMaskNative(id, kind, new Date()));
+                if (reservations.some(r => r.state !== "reserved"))
+                    blocked("Native transfer usage replay cannot invoke a private effect.");
+                op = await journal.persist(patch(op, { reservations }));
+                if (process.stdin.isTTY !== true || process.stderr.isTTY !== true || !isatty(0) || !isatty(2))
+                    blocked("A genuine foreground stdin/stderr terminal is required.");
+                const limits = Object.entries(vendor.outflowLimitsUsd).map(([name, value]) => `${name} ${value} USD`).join(", ");
+                await exactChainConsent(["Agent Payment Node — MetaMask Agent Wallet USDC transfer, network fee paid in the native coin", `Profile: ${context.profile}; sender: ${quote.sender}`,
+                    `Chain: eip155:${chainId}; token: ${quote.token}`, `Recipient: ${recipient}`, `Amount: ${amountAtomic} atomic USDC (${formatAtomic(amountAtomic, 6)} USDC)`,
+                    `Maximum FULL native fee: ${quote.feeQuote.totalQuoteWei} atomic`, `MetaMask Guard: recipient allowlisted on eip155:${chainId}; outflow limit ${limits}`,
+                    `Quote: ${quote.quoteHash}`, `Operation: ${id}`], approvalCode("transfer", id, quote.quoteHash), expires, {});
+                if (new Date().toISOString().slice(0, 10) !== day || Date.now() >= Date.parse(expires))
+                    blocked("Native transfer consent expired.");
+                const fresh = await loadMetaMaskNativeOwner(state, profileName);
+                if (fresh.policy.activationDigest !== owner.policy.activationDigest || fresh.profile.revision !== owner.profile.revision || fresh.profile.account_binding_hash !== owner.profile.account_binding_hash)
+                    blocked("Native transfer owner changed during consent.");
+                await assertAccountAvailable(state, journal, chainId, profileName, payer, id);
+                if (Date.now() >= Date.parse(expires) || new Date().toISOString().slice(0, 10) !== day)
+                    blocked("Native transfer consent expired during account conflict recheck.");
+                op = await journal.persist(patch(op, { state: "effect_started", effectAttempts: 1 }));
+                scope = Object.freeze({});
+                scopes.set(scope, { root: stateRoot, context, journal, reservations, state: "issued", lockActive: true, monotonicDeadline: performance.now() + Math.min(60000, Date.parse(expires) - Date.now()), lastNow: Date.now(), guardStage: "sdk_resolver", startedAt: performance.now() });
+                const result = await submitOwnedMetaMaskNative(scope, context);
+                op = await journal.persist(patch(op, { ...(result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic }), ...(result.disposition === "acknowledged" ? { state: "acknowledged", transactionHash: result.transactionHash } : { state: "unknown", transactionHash: "transactionHash" in result ? result.transactionHash ?? null : null, providerRequestId: result.requestId ?? null }) }));
+                for (const r of reservations)
+                    await ledger.transition({ ...transitionIdentity(r), state: result.disposition === "acknowledged" ? "submitted" : "unknown_finality", now: new Date() });
+                return publicOperation(op);
             }
-            for (const r of reservations)
-                await ledger.transition({ ...transitionIdentity(r), state: "failed_before_effect", now: new Date(), outcomeDigest: hashObject({ id, kind: "failed_before_effect" }), expectedCurrentStates: ["reserved"] });
-            throw error;
-        }
-        finally {
-            if (scope !== undefined) {
-                const e = scopes.get(scope);
-                if (e !== undefined) {
-                    e.state = "invalid";
-                    e.lockActive = false;
+            catch (error) {
+                if (op !== undefined) {
+                    if (op.effectAttempts === 1 && op.state === "effect_started" && error instanceof MetaMaskNativeHandoffNotStarted) {
+                        // Proven no handoff: the vendor child never started, so the marker closes as failed before effect.
+                        op = await journal.persist(patch(op, { state: "failed_before_effect" }));
+                        for (const r of reservations)
+                            await ledger.transition({ ...transitionIdentity(r), state: "failed_before_effect", now: new Date(), outcomeDigest: hashObject({ id, kind: "failed_before_effect" }), expectedCurrentStates: ["reserved"] });
+                        throw error.causeError;
+                    }
+                    if (op.effectAttempts === 1) {
+                        if (op.state === "effect_started")
+                            op = await journal.persist(patch(op, { state: "unknown", diagnostic: failureDiagnostic(error, context, scope) }));
+                        for (const r of reservations)
+                            await ledger.transition({ ...transitionIdentity(r), state: "unknown_finality", now: new Date() });
+                        return publicOperation(op);
+                    }
+                    op = await journal.persist(patch(op, { state: "failed_before_effect", reservations }));
                 }
-                scopes.delete(scope);
+                for (const r of reservations)
+                    await ledger.transition({ ...transitionIdentity(r), state: "failed_before_effect", now: new Date(), outcomeDigest: hashObject({ id, kind: "failed_before_effect" }), expectedCurrentStates: ["reserved"] });
+                throw error;
             }
-        }
+            finally {
+                if (scope !== undefined) {
+                    const e = scopes.get(scope);
+                    if (e !== undefined) {
+                        e.state = "invalid";
+                        e.lockActive = false;
+                    }
+                    scopes.delete(scope);
+                }
+            }
+        });
     });
 }
 function transitionIdentity(r) { return { account: r.account, chain: r.chain, asset: r.asset, reservationId: r.reservationId, policyDigest: r.policyDigest }; }

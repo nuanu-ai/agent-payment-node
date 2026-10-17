@@ -1,6 +1,7 @@
 import { evmAccountProfileHashes } from "../evm-account-aliases.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import type { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import type { ClockPort, IdPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
@@ -53,6 +54,9 @@ export class MetaMaskGaslessPreparation {
         for (const hash of await evmAccountProfileHashes(state, owner.address, profileHash)) {
           await this.o.operations.assertEvmAccountAvailable(hash, request.chainId, owner.address);
         }
+        // The account claim is written before any provider or RPC read, and dropped if no operation is written.
+        return await this.o.operations.admit({ kind: "metamask_gasless_transfer", profileHash, operationId, idempotencyHash, requestHash },
+          { domains: () => [evmConflictDomain(request.chainId, owner.address)] }, async () => {
         if ([MM_ZERO_ADDRESS, owner.address, row.token, ...Object.values(row.protocol).map(p => p.address)].includes(request.recipient)) {
           mmFail("mm_gasless_input");
         }
@@ -78,6 +82,7 @@ export class MetaMaskGaslessPreparation {
           clock.check(operation);
           await this.o.records.persist(operation);
           return operation;
+        });
         });
       });
     });

@@ -128,8 +128,15 @@ test("per-operation and daily caps come from the owner policy and the shared usa
   await assert.rejects(prepare(small, "sunswap-runtime-0011"), { code: "APN_OPERATION_BLOCKED" });
   const other = await temporaryState(); t.after(other.cleanup);
   const daily = await sunSwapFlow(other.root, { caps: { trx: AMOUNT, trxDaily: AMOUNT } });
-  const first = await prepare(daily, "sunswap-runtime-0012"), second = await prepare(daily, "sunswap-runtime-0013");
+  const first = await prepare(daily, "sunswap-runtime-0012");
+  // Phase 4b: an unresolved swap holds its account, so a second one is refused at prepare until the first is terminal.
+  await assert.rejects(prepare(daily, "sunswap-runtime-0013"), { code: "APN_OPERATION_BLOCKED",
+    message: "Another money operation for this network and account is not terminal." });
   assert.equal((await daily.runtime.approveAndExecute(first.operationId, daily.clock.now())).state, "submitted");
+  daily.rpc.outcome = "success";
+  assert.equal((await daily.runtime.status(first.operationId, daily.clock.now())).state, "finalized");
+  // The daily cap still refuses the next swap at consent, from the shared usage ledger.
+  const second = await prepare(daily, "sunswap-runtime-0013");
   await assert.rejects(daily.runtime.approveAndExecute(second.operationId, daily.clock.now()), { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await new SwapOperationRepository(other.root).loadAny(second.operationId))?.state, "awaiting_approval");
   assert.equal(daily.rpc.broadcasts.length, 1); assert.equal(await daily.usage(), AMOUNT);

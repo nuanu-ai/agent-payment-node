@@ -7,6 +7,7 @@ import { ApnError } from "../errors.js";
 import { evmAddressLock, assertExclusiveEvmOwner } from "../evm-address-ownership.js";
 import { StateStore } from "../state.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { validatePermit2CheckedChallenge } from "./checked-challenge.js";
@@ -63,31 +64,34 @@ export class Permit2ProductionPreparation {
                 return existing;
             }
             await assertExclusiveEvmOwner(this.state, wallet.account, profileHash);
-            await this.operations.assertEvmAccountAvailable(profileHash, asset.chainId, wallet.account);
-            const selection = selectPermit2Offer(checked.challenge.accepts, wallet.account);
-            if (input.expected.index !== selection.index || input.expected.challengeHash !== checked.challengeHash ||
-                canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement))
-                blocked("Merchant terms changed.");
-            const now = this.now(), signingSecond = Math.floor(now.getTime() / 1000);
-            const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
-            const read = createPermit2ProductionReadPort({ profile, stateRoot: this.state.root,
-                localAccount: async () => (await permit2WalletBinding(this.state, profile)).account,
-                usage: { usage: (identity, at) => this.usage.usageReadOnly(identity, at) }, rpc: this.ports.rpc, now: () => this.now() });
-            const observed = await read.readChecked({ payer: wallet.account, chainId: 43114, token: asset.token,
-                challengeHash: checked.challengeHash, offerHash: selection.offerHash, amountAtomic: selection.amountAtomic,
-                nowSeconds: signingSecond, nonceBitmapWordIndex: (nonce >> 8n).toString(), payTo: selection.payTo });
-            if (canonicalJson(wallet) !== canonicalJson(await permit2WalletBinding(this.state, profile)))
-                blocked("Wallet binding changed during preparation.");
-            const material = createPermit2ProductionMaterial({ checked, wallet, checkpoint: observed.checkpoint,
-                owner: observed.owner, evidence: observed.evidence, signingSecond, nonce: nonce.toString() });
-            const identity = { account: wallet.account, chain: asset.chain, asset: { kind: "token", identifier: asset.token } };
-            const record = sealPermit2ProductionRecord({ schemaVersion: PERMIT2_PRODUCTION_SCHEMA, operationId, profileHash,
-                idempotencyHash: sha256(`idempotency\0x402-permit2-production.v2\0${key}`), requestHash, material,
-                createdAt: now.toISOString(), updatedAt: now.toISOString(), state: "prepared", terminal: false, reservationStarted: false,
-                usageReservationId: assetUsageReservationId(identity, productionUsageKey(operationId)), usageReservationDigest: null,
-                exposureAt: null, releaseDigest: null });
-            await this.records.persistPreparedLocked(record, { now: () => this.now() });
-            return record;
+            // The account claim is written before any RPC read, and dropped if no operation is written.
+            const idempotencyHash = sha256(`idempotency\0x402-permit2-production.v2\0${key}`);
+            return await this.operations.admit({ kind: "permit2_production", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(asset.chainId, wallet.account)] }, async () => {
+                const selection = selectPermit2Offer(checked.challenge.accepts, wallet.account);
+                if (input.expected.index !== selection.index || input.expected.challengeHash !== checked.challengeHash ||
+                    canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement))
+                    blocked("Merchant terms changed.");
+                const now = this.now(), signingSecond = Math.floor(now.getTime() / 1000);
+                const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
+                const read = createPermit2ProductionReadPort({ profile, stateRoot: this.state.root,
+                    localAccount: async () => (await permit2WalletBinding(this.state, profile)).account,
+                    usage: { usage: (identity, at) => this.usage.usageReadOnly(identity, at) }, rpc: this.ports.rpc, now: () => this.now() });
+                const observed = await read.readChecked({ payer: wallet.account, chainId: 43114, token: asset.token,
+                    challengeHash: checked.challengeHash, offerHash: selection.offerHash, amountAtomic: selection.amountAtomic,
+                    nowSeconds: signingSecond, nonceBitmapWordIndex: (nonce >> 8n).toString(), payTo: selection.payTo });
+                if (canonicalJson(wallet) !== canonicalJson(await permit2WalletBinding(this.state, profile)))
+                    blocked("Wallet binding changed during preparation.");
+                const material = createPermit2ProductionMaterial({ checked, wallet, checkpoint: observed.checkpoint,
+                    owner: observed.owner, evidence: observed.evidence, signingSecond, nonce: nonce.toString() });
+                const identity = { account: wallet.account, chain: asset.chain, asset: { kind: "token", identifier: asset.token } };
+                const record = sealPermit2ProductionRecord({ schemaVersion: PERMIT2_PRODUCTION_SCHEMA, operationId, profileHash,
+                    idempotencyHash, requestHash, material,
+                    createdAt: now.toISOString(), updatedAt: now.toISOString(), state: "prepared", terminal: false, reservationStarted: false,
+                    usageReservationId: assetUsageReservationId(identity, productionUsageKey(operationId)), usageReservationDigest: null,
+                    exposureAt: null, releaseDigest: null });
+                await this.records.persistPreparedLocked(record, { now: () => this.now() });
+                return record;
+            });
         });
     }
     async required(id) {

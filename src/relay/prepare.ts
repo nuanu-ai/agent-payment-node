@@ -11,6 +11,7 @@ import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-re
 import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
@@ -119,7 +120,9 @@ export class RelayUnsignedPrepareService {
     const checkOwner = async () => await this.state.withLocks([evmAddressLock(payer)],
       async () => await assertExclusiveEvmOwner(this.state, payer, profileHash));
     await checkOwner();
-    await this.operations.assertProfileAvailable(profileHash);
+    // The profile and the source account are claimed before the quote, and dropped if no operation is written.
+    return await this.operations.admit({ kind: "relay_unsigned", profileHash, operationId, idempotencyHash, requestHash },
+      { profileWide: true, domains: () => [evmConflictDomain(1, payer)] }, async () => {
     const intent: RelayQuoteIntent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
       minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000),
       ...(route === "base" ? { destinationChainId: 8453 as const } : {}) };
@@ -144,6 +147,7 @@ export class RelayUnsignedPrepareService {
       amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
       createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
     return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+    });
   }
 
   async prepareBase(input: RelayPrepareInput) { return this.prepare(input, "base"); }
@@ -183,7 +187,9 @@ export class RelayUnsignedPrepareService {
     }, now).then(value => value.amountAtomic));
     await this.state.initialize();
     await this.state.withLocks([evmAddressLock(owner)], async () => assertExclusiveEvmOwner(this.state, owner, profileHash));
-    await this.operations.assertProfileAvailable(profileHash);
+    // The profile and the source account are claimed before the quote, and dropped if no operation is written.
+    return await this.operations.admit({ kind: "relay_unsigned", profileHash, operationId, idempotencyHash, requestHash },
+      { profileWide: true, domains: () => [evmConflictDomain(42161, owner)] }, async () => {
     const rawQuote = await (this.ports.arbitrumQuoteFile?.(input.quoteFile) ?? (async () => {
       const file = await open(input.quoteFile, constants.O_RDONLY | constants.O_NOFOLLOW)
         .catch(() => { throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file cannot be opened."); });
@@ -213,6 +219,7 @@ export class RelayUnsignedPrepareService {
       amountAtomic: draft.amountAtomic, minOutputAtomic: draft.minimumOutputAtomic,
       createdAt: draft.createdAt, deadline: draft.deadline });
     return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+    });
   }
 
   async prepareNative(input: RelayNativePrepareInput) {
@@ -263,7 +270,9 @@ export class RelayUnsignedPrepareService {
     const checkOwner = async () => this.state.withLocks([evmAddressLock(payer)],
       async () => assertExclusiveEvmOwner(this.state, payer, profileHash));
     await checkOwner();
-    await this.operations.assertProfileAvailable(profileHash);
+    // The profile and the source account are claimed before the quote, and dropped if no operation is written.
+    return await this.operations.admit({ kind: "relay_unsigned", profileHash, operationId, idempotencyHash, requestHash },
+      { profileWide: true, domains: () => [evmConflictDomain(route.sourceChainId, payer)] }, async () => {
     const intent: RelayNativeQuoteIntent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
       minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000), routeReference: route.reference,
       maximumNetworkFeeWei: input.maxDepositNetworkFeeWei };
@@ -298,5 +307,6 @@ export class RelayUnsignedPrepareService {
       amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
       createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
     return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+    });
   }
 }

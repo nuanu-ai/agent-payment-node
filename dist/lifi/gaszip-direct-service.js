@@ -15,6 +15,7 @@ import { ApnError } from "../errors.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../encrypted-wallet-store.js";
 import { assertExclusiveEvmOwner, assertExclusiveEvmOwnerIncludingGrants, evmAddressLock } from "../evm-address-ownership.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { exactChainConsent } from "../tty-approval.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -99,39 +100,40 @@ export class GaszipFundingService {
             return this.publicRecord(prior.record);
         }
         const p = await this.policy({ profile, owner: bound.owner, amountAtomic: amount.toString() });
-        const url = new URL(`${ORIGIN}/v2/quotes/${route.sourceChain}/${amount}/${route.destinationChain}`);
-        url.searchParams.set("from", bound.owner.address);
-        url.searchParams.set("to", bound.owner.address);
-        const response = await this.https.request(url.toString(), "GET", null, 64 * 1024, "APN_HTTP_CONFIG");
-        if (response.status !== 200)
-            this.c.fail("quote_http");
-        const quote = inspectGaszipFundingQuote(route, this.c.json(response.body), this.now());
-        if (BigInt(quote.expectedAtomic) < floor)
-            this.c.fail("quote_owner_floor");
-        const plan = await readGaszipFundingPlan(route, this.rpc("source"), bound.owner.address, amount.toString(), fee.toString());
-        if (Date.parse(quote.expiresAt) - this.now() < 30_000)
-            this.c.fail("prepare_quote_expired");
-        const record = this.seal({ schemaVersion: route.schemaVersion, operationId, profileHash: bound.owner.profileHash, idempotencyHash, requestHash, profile, ...bound,
-            amountAtomic: amount.toString(), minimumOutputAtomic: floor.toString(), maximumFeeAtomic: fee.toString(), quoteDigest: quote.digest, quoteExpectedAtomic: quote.expectedAtomic,
-            expiresAt: quote.expiresAt, policyDigest: p.digest, policyRevision: p.revision, activationDigest: p.activationDigest, plan, state: "prepared", terminal: false, rawTransaction: null, transactionHash: null,
-            submissionAttempts: 0, usageReservationId: assetUsageReservationId({ account: bound.owner.address, chain: "eip155:8453", asset: { kind: "native", identifier: null } }, `${route.lane}-gaszip:${operationId}`), outcomeDigest: null, sourceProof: null, destinationProof: null });
-        await this.state.initialize();
-        return this.state.withLocks([...this.locks(record), `operation:idempotency:${idempotencyHash}`], async () => this.state.withLocks([`profile:${allowlistProfileHash(profile)}`], async () => {
-            const found = await ops.resolvePrepare({ kind, profileHash: record.profileHash, operationId, idempotencyHash, requestHash });
-            if (found !== null) {
-                if (found.kind !== kind)
-                    this.c.fail("idempotency_kind");
-                return this.publicRecord(found.record);
-            }
-            await ops.assertEvmAccountAvailable(record.profileHash, route.sourceChain, record.owner.address);
-            if (route.holdsDestinationAccount)
-                await ops.assertEvmAccountAvailable(record.profileHash, route.destinationChain, record.owner.address);
-            await assertExclusiveEvmOwner(this.state, record.owner.address, record.profileHash);
-            await assertBridgeOwner(this.state, record);
-            await this.policy(record, record, true);
-            await this.journal.saveLocked(record, true);
-            return this.publicRecord(record);
-        }));
+        // The owner's accounts are claimed before the quote and every RPC read, and the claims are dropped if no record is written.
+        const domains = () => [evmConflictDomain(route.sourceChain, bound.owner.address), ...(route.holdsDestinationAccount ? [evmConflictDomain(route.destinationChain, bound.owner.address)] : [])];
+        return await ops.admit({ kind, profileHash: bound.owner.profileHash, operationId, idempotencyHash, requestHash }, { domains }, async () => {
+            const url = new URL(`${ORIGIN}/v2/quotes/${route.sourceChain}/${amount}/${route.destinationChain}`);
+            url.searchParams.set("from", bound.owner.address);
+            url.searchParams.set("to", bound.owner.address);
+            const response = await this.https.request(url.toString(), "GET", null, 64 * 1024, "APN_HTTP_CONFIG");
+            if (response.status !== 200)
+                this.c.fail("quote_http");
+            const quote = inspectGaszipFundingQuote(route, this.c.json(response.body), this.now());
+            if (BigInt(quote.expectedAtomic) < floor)
+                this.c.fail("quote_owner_floor");
+            const plan = await readGaszipFundingPlan(route, this.rpc("source"), bound.owner.address, amount.toString(), fee.toString());
+            if (Date.parse(quote.expiresAt) - this.now() < 30_000)
+                this.c.fail("prepare_quote_expired");
+            const record = this.seal({ schemaVersion: route.schemaVersion, operationId, profileHash: bound.owner.profileHash, idempotencyHash, requestHash, profile, ...bound,
+                amountAtomic: amount.toString(), minimumOutputAtomic: floor.toString(), maximumFeeAtomic: fee.toString(), quoteDigest: quote.digest, quoteExpectedAtomic: quote.expectedAtomic,
+                expiresAt: quote.expiresAt, policyDigest: p.digest, policyRevision: p.revision, activationDigest: p.activationDigest, plan, state: "prepared", terminal: false, rawTransaction: null, transactionHash: null,
+                submissionAttempts: 0, usageReservationId: assetUsageReservationId({ account: bound.owner.address, chain: "eip155:8453", asset: { kind: "native", identifier: null } }, `${route.lane}-gaszip:${operationId}`), outcomeDigest: null, sourceProof: null, destinationProof: null });
+            await this.state.initialize();
+            return this.state.withLocks([...this.locks(record), `operation:idempotency:${idempotencyHash}`], async () => this.state.withLocks([`profile:${allowlistProfileHash(profile)}`], async () => {
+                const found = await ops.resolvePrepare({ kind, profileHash: record.profileHash, operationId, idempotencyHash, requestHash });
+                if (found !== null) {
+                    if (found.kind !== kind)
+                        this.c.fail("idempotency_kind");
+                    return this.publicRecord(found.record);
+                }
+                await assertExclusiveEvmOwner(this.state, record.owner.address, record.profileHash);
+                await assertBridgeOwner(this.state, record);
+                await this.policy(record, record, true);
+                await this.journal.saveLocked(record, true);
+                return this.publicRecord(record);
+            }));
+        });
     }
     async approve(id) {
         const route = this.route;

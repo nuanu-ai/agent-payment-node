@@ -1,5 +1,4 @@
 import type { CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
-import { assertMetaMaskNativeConflictDomainAvailable } from "./metamask-native-journal.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
 import type { GaszipFundingRecord } from "./lifi/gaszip-direct-journal.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
@@ -11,7 +10,7 @@ import { ApnError } from "./errors.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
-import { assertUsdtConflictDomainsAvailable, conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys,
+import { conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys,
   sharedEvmConflictDomain, type MoneyConflictDomain } from "./operation-conflict-domain.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import type { X402SettlementWaitProjection, X402OperationRecord } from "./x402-state-integrity.js";
@@ -28,7 +27,8 @@ import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership
 import { OperationIndex } from "./operation-index/index.js";
 import { relayStatus } from "./operation-index/adapters/relay.js";
 import { x402StoredOutcome, x402StoredReceiptOutcome, type X402StoredOperation } from "./operation-index/adapters/x402.js";
-import { profileClaim, providerClaims, UNREADABLE_PROVIDER_CLAIM, type OperationIndexEntry, type WantedTag } from "./operation-index/types.js";
+import { profileClaim, providerClaims, UNREADABLE_PROVIDER_CLAIM, unreadableProfileClaim, type OperationClaim, type OperationIndexEntry,
+  type WantedTag } from "./operation-index/types.js";
 export type StoredMoneyOperation =
   | { readonly kind: "sei_gaszip"; readonly record: GaszipFundingRecord }
   | { readonly kind: "circle_route"; readonly record: CircleKnownOperation }
@@ -45,6 +45,26 @@ export type StoredMoneyOperation =
   | { readonly kind: "direct_transfer"; readonly record: OperationRecord }
   | { readonly kind: "x402_fetch"; readonly strategy: "local"; readonly record: X402OperationRecord }
   | { readonly kind: "x402_fetch"; readonly strategy: "provider_atomic"; readonly record: ProviderX402OperationRecord };
+/** What a new operation of a facade family is admitted with: the identity its record will carry. */
+export interface FacadePrepareIdentity {
+  readonly kind: StoredMoneyOperation["kind"];
+  readonly profileHash: string;
+  readonly operationId: string;
+  readonly idempotencyHash: string;
+  readonly requestHash: string;
+}
+/** The accounts a new operation signs with, and what else it holds or waits for. */
+export interface FacadeAdmission {
+  /** The networks and accounts it signs on; an unreadable list makes the admission profile-wide. */
+  readonly domains: () => readonly MoneyConflictDomain[];
+  /** A provider operation also holds its provider account and payer across profiles. */
+  readonly provider?: { readonly providerId: string; readonly accountBindingHash: string; readonly payer: string };
+  /** A profile-wide admission (Relay) also waits for every unresolved operation of the profile. */
+  readonly profileWide?: true;
+  /** Another profile the operation signs for (a Circle route's destination): held, and its quarantine waited for. */
+  readonly otherProfiles?: readonly string[];
+  readonly tag?: WantedTag;
+}
 const FACADE_KINDS: ReadonlySet<string> = new Set<StoredMoneyOperation["kind"]>(["sei_gaszip", "circle_route", "mega_gaszip", "merchant_x402",
   "permit2_production", "relay_unsigned", "facilitator_gasless_transfer", "smart_account_gasless_transfer", "metamask_gasless_transfer",
   "gasless_transfer", "bridge_route", "rail_transfer", "direct_transfer", "x402_fetch"]);
@@ -86,7 +106,9 @@ export class OperationService {
       } catch (error) {
         if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_NOT_FOUND") throw error;
       }
-      await this.assertProfileAvailable(operation.profileHash);
+      // Its prepare admitted this operation's own claims; every other unresolved operation of the profile still blocks it.
+      await this.index.assertAvailable({ family: null, profileHash: operation.profileHash, claims: [profileClaim(operation.profileHash)],
+        except: operation.operationId });
       await assertExclusiveEvmOwner(this.state, operation.sourceAccount, operation.profileHash);
       await new RelayUnsignedOperationRepository(this.state.root).persistLocked(operation);
       return operation;
@@ -114,6 +136,25 @@ export class OperationService {
     // An operation of a family this facade does not model still owns the key.
     if (!FACADE_KINDS.has(entry.family)) throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to another operation family.");
     return await this.stored(entry);
+  }
+  /**
+   * Admits a new operation: its claims are checked and written to the operation index as one step under the index lock,
+   * before `work` (the family's prepare body: RPC reads, signing material, the durable record) runs. When `work` fails
+   * or writes no record, the claims are removed. Any other prepare on the same account, of any family, is refused from
+   * that moment, and this one is refused while another holds the account. The caller holds its family locks and has
+   * already answered a replay of the same identity.
+   */
+  async admit<T>(identity: FacadePrepareIdentity, admission: FacadeAdmission, work: () => Promise<T>): Promise<T> {
+    const claims: OperationClaim[] = [...admission.profileWide === true ? [profileClaim(identity.profileHash)] : [],
+      ...this.domainClaims(identity.profileHash, admission.domains)];
+    if (admission.provider !== undefined) {
+      claims.push(...providerClaims(admission.provider.providerId, admission.provider.accountBindingHash, admission.provider.payer));
+    }
+    const others = admission.otherProfiles ?? [];
+    return await this.index.admit({ family: identity.kind, profileHash: identity.profileHash, operationId: identity.operationId,
+      idempotencyHash: identity.idempotencyHash, requestHash: identity.requestHash },
+    { family: null, profileHash: identity.profileHash, claims, holds: others.map(profileClaim), waits: others.map(unreadableProfileClaim),
+      ...(admission.tag === undefined ? {} : { tag: admission.tag }) }, work);
   }
   async assertProfileAvailable(profileHash: string): Promise<void> {
     await this.index.assertAvailable({ family: null, profileHash, claims: [profileClaim(profileHash)] });
@@ -151,20 +192,13 @@ export class OperationService {
 
   private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string,
     tag?: WantedTag): Promise<void> {
-    const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
-    if (this.state.root !== undefined) await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
-    if(this.state.root!==undefined) {
-      for(const wantedKey of wanted) {
-        const [family,network,account]=wantedKey.split(":");
-        if(family!=="evm"||network===undefined||account===undefined)continue;
-        await assertMetaMaskNativeConflictDomainAvailable(this.state.root,network,account,exceptOperationId);
-      }
-    }
-    // An unreadable network or account on the caller's side waits for every unresolved operation of the profile.
-    const claims = wanted.size === 0 ? [profileClaim(profileHash)]
-      : [...wanted].map(key => coexisting.has(key) ? { key, shared: true as const } : { key });
-    await this.index.assertAvailable({ family: null, profileHash, claims,
+    await this.index.assertAvailable({ family: null, profileHash, claims: this.domainClaims(profileHash, domains),
       ...(exceptOperationId === undefined ? {} : { except: exceptOperationId }), ...(tag === undefined ? {} : { tag }) });
+  }
+  /** An unreadable network or account on the caller's side waits for every unresolved operation of the profile. */
+  private domainClaims(profileHash: string, domains: () => readonly MoneyConflictDomain[]): readonly OperationClaim[] {
+    const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
+    return wanted.size === 0 ? [profileClaim(profileHash)] : [...wanted].map(key => coexisting.has(key) ? { key, shared: true as const } : { key });
   }
 
   /** Both Circle signing accounts are held under their existing profile locks. */

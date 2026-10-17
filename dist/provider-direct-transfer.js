@@ -20,6 +20,7 @@ import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfi
 import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 import { resolveProviderPrepare } from "./provider-prepare-identity.js";
+import { evmConflictDomain } from "./operation-conflict-domain.js";
 const DIRECT_POLICY = {
     identity: "apn.direct.foreground-approval.v1",
     verdict: "foreground_approval_required",
@@ -89,82 +90,84 @@ export class ProviderDirectTransferService {
             }, hashObject({ ...materialRequest, rpcBindingHash }));
             if (existing !== null)
                 return publicOperation(existing.record);
-            await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, bound.public_address);
-            await this.operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
-            const rpcIdentity = await this.context.requireRpc().assertBaseChain();
-            const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
-            const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
-            const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
-            const commonBinding = {
-                schemaVersion: "apn.provider-direct.v1",
-                providerId: bound.provider_id,
-                profileRevision: bound.revision,
-                capabilityHash: bound.capability_hash,
-                accountBindingHash: bound.account_binding_hash,
-                rpcBindingHash,
-                rpcOriginHash: sha256(`direct-rpc-origin\0${rpcIdentity.rpcOrigin}`),
-                policy: DIRECT_POLICY,
-            };
-            let providerDirect;
-            if (bound.capability_snapshot.direct.mode === "delegated_session_transaction") {
-                if (adapter.direct?.mode !== "delegated_session_transaction" || adapter.direct.prepare === undefined) {
-                    throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The bound delegated direct effect is unavailable.");
+            // The account and provider claims are written before any RPC or provider read and dropped if no operation is written.
+            return await this.operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(CHAIN_ID, bound.public_address)],
+                provider: { providerId: bound.provider_id, accountBindingHash: bound.account_binding_hash, payer: bound.public_address } }, async () => {
+                const rpcIdentity = await this.context.requireRpc().assertBaseChain();
+                const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
+                const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
+                const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
+                const commonBinding = {
+                    schemaVersion: "apn.provider-direct.v1",
+                    providerId: bound.provider_id,
+                    profileRevision: bound.revision,
+                    capabilityHash: bound.capability_hash,
+                    accountBindingHash: bound.account_binding_hash,
+                    rpcBindingHash,
+                    rpcOriginHash: sha256(`direct-rpc-origin\0${rpcIdentity.rpcOrigin}`),
+                    policy: DIRECT_POLICY,
+                };
+                let providerDirect;
+                if (bound.capability_snapshot.direct.mode === "delegated_session_transaction") {
+                    if (adapter.direct?.mode !== "delegated_session_transaction" || adapter.direct.prepare === undefined) {
+                        throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The bound delegated direct effect is unavailable.");
+                    }
+                    const delegated = await adapter.direct.prepare({
+                        operationId, profileHash, profileRevision: bound.revision, sender: bound.public_address,
+                        recipient, amountAtomic: amount.atomic, amountDecimal, rpcUrl: this.context.requireRpcUrl(),
+                        preparedAt: preparedAt.toISOString(), expiresAt: expiresAt.toISOString(),
+                    });
+                    providerDirect = {
+                        ...commonBinding,
+                        executionMode: "delegated_session_transaction",
+                        executionOwner: "apn",
+                        retryOwner: "apn_operation_state",
+                        ...delegated,
+                    };
                 }
-                const delegated = await adapter.direct.prepare({
-                    operationId, profileHash, profileRevision: bound.revision, sender: bound.public_address,
-                    recipient, amountAtomic: amount.atomic, amountDecimal, rpcUrl: this.context.requireRpcUrl(),
-                    preparedAt: preparedAt.toISOString(), expiresAt: expiresAt.toISOString(),
+                else {
+                    providerDirect = {
+                        ...commonBinding,
+                        executionMode: "provider_atomic_send",
+                        executionOwner: "provider",
+                        retryOwner: "apn_outer_no_replay_journal",
+                    };
+                }
+                const fingerprint = hashObject({ ...materialRequest, operationId, idempotencyHash, providerDirect });
+                const initial = {
+                    at: preparedAt.toISOString(),
+                    state: "awaiting_approval",
+                    terminal: false,
+                    reason: providerDirect.executionMode === "provider_atomic_send"
+                        ? "prepared_provider_atomic_send" : "prepared_delegated_session_transaction",
+                    proofClass: "durable_provider_intent",
+                };
+                const operation = sealOperation({
+                    schemaVersion: STATE_VERSION,
+                    operationId,
+                    idempotencyHash,
+                    profile,
+                    profileHash,
+                    requestHash,
+                    fingerprint,
+                    walletAddress: bound.public_address,
+                    recipient,
+                    amountAtomic: amount.atomic,
+                    amountDecimal,
+                    chainId: CHAIN_ID,
+                    token: BASE_USDC,
+                    providerDirect,
+                    preparedAt: preparedAt.toISOString(),
+                    expiresAt: expiresAt.toISOString(),
+                    state: initial.state,
+                    terminal: initial.terminal,
+                    reason: initial.reason,
+                    proofClass: initial.proofClass,
+                    transitions: appendTransition([], initial),
                 });
-                providerDirect = {
-                    ...commonBinding,
-                    executionMode: "delegated_session_transaction",
-                    executionOwner: "apn",
-                    retryOwner: "apn_operation_state",
-                    ...delegated,
-                };
-            }
-            else {
-                providerDirect = {
-                    ...commonBinding,
-                    executionMode: "provider_atomic_send",
-                    executionOwner: "provider",
-                    retryOwner: "apn_outer_no_replay_journal",
-                };
-            }
-            const fingerprint = hashObject({ ...materialRequest, operationId, idempotencyHash, providerDirect });
-            const initial = {
-                at: preparedAt.toISOString(),
-                state: "awaiting_approval",
-                terminal: false,
-                reason: providerDirect.executionMode === "provider_atomic_send"
-                    ? "prepared_provider_atomic_send" : "prepared_delegated_session_transaction",
-                proofClass: "durable_provider_intent",
-            };
-            const operation = sealOperation({
-                schemaVersion: STATE_VERSION,
-                operationId,
-                idempotencyHash,
-                profile,
-                profileHash,
-                requestHash,
-                fingerprint,
-                walletAddress: bound.public_address,
-                recipient,
-                amountAtomic: amount.atomic,
-                amountDecimal,
-                chainId: CHAIN_ID,
-                token: BASE_USDC,
-                providerDirect,
-                preparedAt: preparedAt.toISOString(),
-                expiresAt: expiresAt.toISOString(),
-                state: initial.state,
-                terminal: initial.terminal,
-                reason: initial.reason,
-                proofClass: initial.proofClass,
-                transitions: appendTransition([], initial),
+                await this.durable.persist(operation);
+                return publicOperation(operation);
             });
-            await this.durable.persist(operation);
-            return publicOperation(operation);
         });
     }
     async prepareCoinbaseGasless(request) {

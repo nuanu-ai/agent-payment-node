@@ -6,14 +6,13 @@ import type { SecureStateStore } from "../secure-state-store.js";
 import { parseRecordPath, type OperationFamilyAdapter } from "./adapter.js";
 import { entryOf, OperationIndexReconciler } from "./reconcile.js";
 import { operationRegistry, type OperationRegistry } from "./registry.js";
-import { OPERATION_INDEX_DIRECTORY, OperationIndexDamage, OperationIndexStore, type StoredRecordName } from "./store.js";
-import { collidingClaims, normalizeClaims, OPERATION_FAMILIES, profileClaim, unreadableFamilyClaim, unreadableProfileClaim,
-  type OperationClaim, type OperationIndexEntry, type PrepareIdentity, type WantedClaims } from "./types.js";
+import { OPERATION_INDEX_DIRECTORY, OPERATION_INDEX_LOCK, OperationIndexDamage, OperationIndexStore, type StoredRecordName } from "./store.js";
+import { collidingClaims, normalizeClaims, OPERATION_FAMILIES, profileClaim, UNREADABLE_PROVIDER_CLAIM, unreadableFamilyClaim,
+  unreadableProfileClaim, type OperationClaim, type OperationIndexEntry, type PrepareIdentity, type WantedClaims } from "./types.js";
 
 /** Same bound as ORPHAN_TEMPORARY_AGE_MS: an admission without a record older than this belongs to a crashed prepare. */
 export const ADMISSION_LEASE_MS = 10 * 60_000;
-/** The one leaf lock: held only around index file operations, always innermost, never around another acquisition. */
-export const OPERATION_INDEX_LOCK = "operation-index";
+export { OPERATION_INDEX_LOCK } from "./store.js";
 const GC_PER_CHECK = 2;
 const ACCOUNT_KEY = /^(evm|solana|tron):([^:]+):([^:]+)$/u;
 
@@ -51,10 +50,15 @@ export class OperationIndex {
     return await this.repairing(async () => await this.byIdempotency(idempotencyHash));
   }
 
-  /** Null for a new identity; the existing entry for an exact replay; APN_IDEMPOTENCY_CONFLICT on any mismatch. */
+  /**
+   * Null for a new identity; the existing entry for an exact replay; APN_IDEMPOTENCY_CONFLICT on any mismatch. An
+   * identity without an idempotency hash (its operation ID is derived from profile and key) is resolved by its ID.
+   */
   async resolvePrepare(identity: PrepareIdentity): Promise<OperationIndexEntry | null> {
     return await this.repairing(async () => {
-      const entry = await this.byIdempotency(identity.idempotencyHash);
+      const entry = identity.idempotencyHash === null
+        ? await this.store.entry(identity.operationId) ?? await this.afterReconcile(() => this.store.entry(identity.operationId))
+        : await this.byIdempotency(identity.idempotencyHash);
       if (entry === null) {
         if (await this.store.entry(identity.operationId) !== null) throw idempotencyConflict("Operation ID is already bound to another money operation.");
         return null;
@@ -63,7 +67,9 @@ export class OperationIndex {
         throw new ApnError("APN_STATE_CORRUPT", "The operation bound to this idempotency key cannot be read.", { operationId: entry.operationId });
       }
       if (entry.family !== identity.family || entry.profileHash !== identity.profileHash || entry.operationId !== identity.operationId ||
-        entry.requestHash !== identity.requestHash) throw idempotencyConflict("Idempotency key is already bound to different operation inputs.");
+        entry.idempotencyHash !== identity.idempotencyHash || entry.requestHash !== identity.requestHash) {
+        throw idempotencyConflict("Idempotency key is already bound to different operation inputs.");
+      }
       return entry;
     });
   }
@@ -90,14 +96,15 @@ export class OperationIndex {
       }
       const admitted = entryOf({ operationId: identity.operationId, family: identity.family, profileHash: identity.profileHash,
         idempotencyHash: identity.idempotencyHash, requestHash: identity.requestHash, recordPath: existing?.recordPath ?? this.recordPathFor(identity),
-        // It holds what it wants plus its profile; the quarantine keys it also waits for are never held.
-        claims: normalizeClaims([profileClaim(identity.profileHash), ...wanted.claims]), state: "admitted", admittedAt: new Date(this.now()).toISOString() });
+        // It holds what it wants, its profile and its other names; the quarantine keys it also waits for are never held.
+        claims: normalizeClaims([profileClaim(identity.profileHash), ...wanted.claims, ...wanted.holds ?? []]), state: "admitted",
+        admittedAt: new Date(this.now()).toISOString() });
       await this.claimUnderLock(own, async () => {
-        const bound = async () => await this.store.pointer(identity.idempotencyHash);
+        const hash = identity.idempotencyHash;
         const current = await this.store.entry(identity.operationId);
         if (current !== null && current.state !== "admitted") throw idempotencyConflict("Operation ID is already bound to another money operation.");
-        if (!await this.store.putPointer(identity.idempotencyHash, [identity.operationId], true) &&
-          canonicalJson(await bound()) !== canonicalJson([identity.operationId])) {
+        if (hash !== null && !await this.store.putPointer(hash, [identity.operationId], true) &&
+          canonicalJson(await this.store.pointer(hash)) !== canonicalJson([identity.operationId])) {
           throw idempotencyConflict("Idempotency key is already bound to different operation inputs.");
         }
         await this.store.putOpen(admitted);
@@ -199,10 +206,14 @@ export class OperationIndex {
 
   private async afterReconcile<T>(read: () => Promise<T>): Promise<T> { await this.reconciler.reconcile(); return await read(); }
 
-  /** Every claim this admission wants: its own, its profile's quarantine and its family's (every family's when unstated). */
+  /**
+   * Every claim this admission wants: its own, its profile's quarantine and its family's (every family's when unstated),
+   * and the provider quarantine when it wants a provider account.
+   */
   private wantedClaims(wanted: WantedClaims): readonly OperationClaim[] {
-    return normalizeClaims([...wanted.claims, ...wanted.profileHash === null ? [] : [unreadableProfileClaim(wanted.profileHash)],
-      ...(wanted.family === null ? OPERATION_FAMILIES : [wanted.family]).map(unreadableFamilyClaim)]);
+    const provider = wanted.claims.some(claim => claim.key.startsWith("provider:") || claim.key.startsWith("provider-payer:"));
+    return normalizeClaims([...wanted.claims, ...wanted.waits ?? [], ...wanted.profileHash === null ? [] : [unreadableProfileClaim(wanted.profileHash)],
+      ...(wanted.family === null ? OPERATION_FAMILIES : [wanted.family]).map(unreadableFamilyClaim), ...provider ? [UNREADABLE_PROVIDER_CLAIM] : []]);
   }
 
   /** Verifies every colliding open entry against its record; returns those that do not block. */
@@ -228,6 +239,7 @@ export class OperationIndex {
   /** Writes under the leaf lock only when the colliding set did not grow since it was verified (one retry). */
   private async claimUnderLock(wanted: WantedClaims, write: () => Promise<void>): Promise<void> {
     const all = this.wantedClaims(wanted);
+    await this.store.ensureLockDirectory();
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const clear = await this.check(wanted);
       const done = await this.state.withLocks([OPERATION_INDEX_LOCK], async () => {

@@ -57,9 +57,12 @@ test("normal central EVM guard reads existing native journals only and cannot hi
     await assert.rejects(()=>operations.assertEvmAccountAvailableExcept(profileHash,1,payer,"not-an-operation-id"),{code:"APN_INVALID_INPUT"});
     await mkdir(join(root,"metamask-native-operations"),{mode:0o700});
     await writeFile(join(root,"metamask-native-operations",`${"a".repeat(64)}.json`),JSON.stringify({schemaVersion:"forged"}),{mode:0o600});
-    await assert.rejects(()=>operations.assertEvmAccountAvailable(profileHash,1,payer),{code:"APN_STATE_CORRUPT"});
-    await assert.rejects(()=>operations.assertEvmAccountAvailable(profileHash,59144,payer),{code:"APN_STATE_CORRUPT"});
-    assert.deepEqual(await readdir(root),["metamask-native-operations"]);
+    // Phase 4b: a native journal that names no account or profile is quarantined in the operation index; it blocks every
+    // EVM admission (it may hold any account) without wedging lookups, until its owner releases it.
+    const quarantined={code:"APN_OPERATION_BLOCKED",details:{blockingOperationId:"a".repeat(64),blockingReason:"blocking_record_unreadable"}};
+    await assert.rejects(()=>operations.assertEvmAccountAvailable(profileHash,1,payer),quarantined);
+    await assert.rejects(()=>operations.assertEvmAccountAvailable(profileHash,59144,payer),quarantined);
+    assert.deepEqual((await readdir(root)).sort(),["metamask-native-operations","operation-index"]);
   } finally {await rm(root,{recursive:true,force:true});}
 });
 

@@ -28,7 +28,6 @@ export declare function conflictDomainKey(domain: MoneyConflictDomain): string;
 export declare function conflictDomainKeys(domains: () => readonly MoneyConflictDomain[]): ReadonlySet<string>;
 /** Keys the caller claims as shared; an unreadable list yields none, so every held claim stays exclusive to it. */
 export declare function sharedConflictDomainKeys(domains: () => readonly MoneyConflictDomain[]): ReadonlySet<string>;
-export { assertUsdtConflictDomainsAvailable } from "./gasless-usdt/account-conflict.js";
 /**
  * Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. Each family's
  * domains live in its operation-index adapter (src/operation-index/adapters), which the guard reads through.

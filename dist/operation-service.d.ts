@@ -6,6 +6,7 @@ import { type Permit2ProductionRecord } from "./x402-permit2/production-reposito
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
+import { type MoneyConflictDomain } from "./operation-conflict-domain.js";
 import type { X402SettlementWaitProjection, X402OperationRecord } from "./x402-state-integrity.js";
 import type { ProviderX402OperationRecord } from "./provider-x402-model.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
@@ -16,6 +17,7 @@ import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operatio
 import type { SmartAccountGaslessOperationRecord } from "./smart-account-gasless/operation-model.js";
 import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation-model.js";
 import { type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
+import { type WantedTag } from "./operation-index/types.js";
 export type StoredMoneyOperation = {
     readonly kind: "sei_gaszip";
     readonly record: GaszipFundingRecord;
@@ -64,6 +66,30 @@ export type StoredMoneyOperation = {
     readonly strategy: "provider_atomic";
     readonly record: ProviderX402OperationRecord;
 };
+/** What a new operation of a facade family is admitted with: the identity its record will carry. */
+export interface FacadePrepareIdentity {
+    readonly kind: StoredMoneyOperation["kind"];
+    readonly profileHash: string;
+    readonly operationId: string;
+    readonly idempotencyHash: string;
+    readonly requestHash: string;
+}
+/** The accounts a new operation signs with, and what else it holds or waits for. */
+export interface FacadeAdmission {
+    /** The networks and accounts it signs on; an unreadable list makes the admission profile-wide. */
+    readonly domains: () => readonly MoneyConflictDomain[];
+    /** A provider operation also holds its provider account and payer across profiles. */
+    readonly provider?: {
+        readonly providerId: string;
+        readonly accountBindingHash: string;
+        readonly payer: string;
+    };
+    /** A profile-wide admission (Relay) also waits for every unresolved operation of the profile. */
+    readonly profileWide?: true;
+    /** Another profile the operation signs for (a Circle route's destination): held, and its quarantine waited for. */
+    readonly otherProfiles?: readonly string[];
+    readonly tag?: WantedTag;
+}
 /**
  * The money-operation facade over the operation index (src/operation-index): idempotency, lookup and the
  * one-operation-per-account guard read one index entry and at most the blocking records, never every store.
@@ -86,6 +112,14 @@ export declare class OperationService {
     }): Promise<StoredMoneyOperation | null>;
     /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
     findIdempotency(idempotencyHash: string): Promise<StoredMoneyOperation | null>;
+    /**
+     * Admits a new operation: its claims are checked and written to the operation index as one step under the index lock,
+     * before `work` (the family's prepare body: RPC reads, signing material, the durable record) runs. When `work` fails
+     * or writes no record, the claims are removed. Any other prepare on the same account, of any family, is refused from
+     * that moment, and this one is refused while another holds the account. The caller holds its family locks and has
+     * already answered a replay of the same identity.
+     */
+    admit<T>(identity: FacadePrepareIdentity, admission: FacadeAdmission, work: () => Promise<T>): Promise<T>;
     assertProfileAvailable(profileHash: string): Promise<void>;
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
@@ -100,6 +134,8 @@ export declare class OperationService {
     /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */
     assertRailAccountAvailable(profileHash: string, rail: "solana" | "tron", account: string): Promise<void>;
     private assertConflictDomainsAvailable;
+    /** An unreadable network or account on the caller's side waits for every unresolved operation of the profile. */
+    private domainClaims;
     /** Both Circle signing accounts are held under their existing profile locks. */
     assertCircleAccountsAvailable(record: CircleKnownOperation, exceptSaved?: boolean, effectRole?: CircleRole): Promise<void>;
     /** The provider account and payer are held across profiles by provider direct and provider x402 operations. */

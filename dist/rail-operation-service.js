@@ -3,6 +3,7 @@ import { chainAsset, chainDecimal } from "./chain-policy.js";
 import { ChainPolicyService } from "./chain-policy-service.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
+import { railConflictDomain } from "./operation-conflict-domain.js";
 import { newRailOperation, publicRailOperation, validateRailPrepared } from "./rail-operation-model.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { railSendReason } from "./rail-send-binding.js";
@@ -58,19 +59,21 @@ export class RailOperationService {
                     corrupt();
                 return publicRailOperation(existing.record);
             }
-            await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
-            const policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
-            // Owner amount caps: the active allowlist policy and the shared usage ledger, then the chain policy, before any RPC call.
-            const allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic, recipient } }));
-            await this.policies.assertPrincipal(policy, operationId, amountAtomic);
-            const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
-            validateRailPrepared(prepared, account);
-            if (prepared.recipient !== recipient || prepared.amountAtomic !== amountAtomic || prepared.maximumFeeAtomic !== maximumFeeAtomic || canonicalJson(prepared.asset) !== canonicalJson(asset) || prepared.networkIdentity !== policy.networkIdentity)
-                corrupt();
-            const operation = newRailOperation({ schemaVersion: "apn.rail-operation.v1", kind: "rail_transfer", operationId,
-                profile, profileHash, idempotencyHash, requestHash, account, prepared, policyHash: policy.policyHash, allowlist });
-            await this.records.persist(operation);
-            return publicRailOperation(operation);
+            // The account claim is written before any RPC read and dropped if no operation is written.
+            return await this.operations.admit({ kind: "rail_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [railConflictDomain(account.rail, account.address)] }, async () => {
+                const policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
+                // Owner amount caps: the active allowlist policy and the shared usage ledger, then the chain policy, before any RPC call.
+                const allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic, recipient } }));
+                await this.policies.assertPrincipal(policy, operationId, amountAtomic);
+                const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
+                validateRailPrepared(prepared, account);
+                if (prepared.recipient !== recipient || prepared.amountAtomic !== amountAtomic || prepared.maximumFeeAtomic !== maximumFeeAtomic || canonicalJson(prepared.asset) !== canonicalJson(asset) || prepared.networkIdentity !== policy.networkIdentity)
+                    corrupt();
+                const operation = newRailOperation({ schemaVersion: "apn.rail-operation.v1", kind: "rail_transfer", operationId,
+                    profile, profileHash, idempotencyHash, requestHash, account, prepared, policyHash: policy.policyHash, allowlist });
+                await this.records.persist(operation);
+                return publicRailOperation(operation);
+            });
         });
     }
     /** A durable, key-scoped claim survives a crash; only its short commit phases hold money-operation locks. */
@@ -147,48 +150,50 @@ export class RailOperationService {
             if ("existing" in staged)
                 return staged.existing;
             const { account, adapter, recipient, requestHash, policy, allowlist, claim } = staged;
-            try {
-                const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
-                validateRailPrepared(prepared, account);
-                if (prepared.recipient !== recipient || prepared.amountAtomic !== amountAtomic || prepared.maximumFeeAtomic !== maximumFeeAtomic ||
-                    canonicalJson(prepared.asset) !== canonicalJson(asset) || prepared.networkIdentity !== policy.networkIdentity)
-                    corrupt();
-                return await state.withLocks(locks, async () => {
-                    const existing = await this.operations.resolvePrepare({ kind: "rail_transfer", profileHash, operationId, idempotencyHash, requestHash });
-                    if (existing !== null) {
-                        if (existing.kind !== "rail_transfer")
+            // The account claim is written before the RPC reads and held through the commit; it is dropped if no operation is written.
+            return await this.operations.admit({ kind: "rail_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [railConflictDomain(account.rail, account.address)] }, async () => {
+                try {
+                    const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
+                    validateRailPrepared(prepared, account);
+                    if (prepared.recipient !== recipient || prepared.amountAtomic !== amountAtomic || prepared.maximumFeeAtomic !== maximumFeeAtomic ||
+                        canonicalJson(prepared.asset) !== canonicalJson(asset) || prepared.networkIdentity !== policy.networkIdentity)
+                        corrupt();
+                    return await state.withLocks(locks, async () => {
+                        const existing = await this.operations.resolvePrepare({ kind: "rail_transfer", profileHash, operationId, idempotencyHash, requestHash });
+                        if (existing !== null) {
+                            if (existing.kind !== "rail_transfer")
+                                corrupt();
+                            await claims.removeIfMatches(claim);
+                            return publicRailOperation(existing.record);
+                        }
+                        const currentClaim = await claims.load(idempotencyHash);
+                        if (currentClaim?.integrityHash !== claim.integrityHash)
                             corrupt();
+                        const currentAccount = await this.policies.account(profile, "solana");
+                        if (canonicalJson(currentAccount) !== canonicalJson(account))
+                            throw new ApnError("APN_PROFILE_DRIFT", "The Solana account changed during preparation.");
+                        const currentPolicy = await this.policies.authorize(currentAccount, input.asset, maximumFeeAtomic);
+                        if (currentPolicy.policyHash !== policy.policyHash)
+                            throw new ApnError("APN_PROFILE_DRIFT", "The Solana chain policy changed during preparation.");
+                        const currentAllowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account: currentAccount, prepared: { asset, amountAtomic, recipient } }));
+                        if (canonicalJson(currentAllowlist) !== canonicalJson(allowlist))
+                            throw new ApnError("APN_PROFILE_DRIFT", "The owner allowlist changed during preparation.");
+                        if (await this.records.loadOperation(profileHash, operationId) !== null)
+                            corrupt();
+                        const operation = newRailOperation({ schemaVersion: "apn.rail-operation.v1", kind: "rail_transfer", operationId,
+                            profile, profileHash, idempotencyHash, requestHash, account, prepared, policyHash: policy.policyHash, allowlist });
+                        await this.records.persist(operation);
                         await claims.removeIfMatches(claim);
-                        return publicRailOperation(existing.record);
-                    }
-                    const currentClaim = await claims.load(idempotencyHash);
-                    if (currentClaim?.integrityHash !== claim.integrityHash)
-                        corrupt();
-                    const currentAccount = await this.policies.account(profile, "solana");
-                    if (canonicalJson(currentAccount) !== canonicalJson(account))
-                        throw new ApnError("APN_PROFILE_DRIFT", "The Solana account changed during preparation.");
-                    await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
-                    const currentPolicy = await this.policies.authorize(currentAccount, input.asset, maximumFeeAtomic);
-                    if (currentPolicy.policyHash !== policy.policyHash)
-                        throw new ApnError("APN_PROFILE_DRIFT", "The Solana chain policy changed during preparation.");
-                    const currentAllowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account: currentAccount, prepared: { asset, amountAtomic, recipient } }));
-                    if (canonicalJson(currentAllowlist) !== canonicalJson(allowlist))
-                        throw new ApnError("APN_PROFILE_DRIFT", "The owner allowlist changed during preparation.");
-                    if (await this.records.loadOperation(profileHash, operationId) !== null)
-                        corrupt();
-                    const operation = newRailOperation({ schemaVersion: "apn.rail-operation.v1", kind: "rail_transfer", operationId,
-                        profile, profileHash, idempotencyHash, requestHash, account, prepared, policyHash: policy.policyHash, allowlist });
-                    await this.records.persist(operation);
-                    await claims.removeIfMatches(claim);
-                    return publicRailOperation(operation);
-                });
-            }
-            catch (error) {
-                // An incomplete RPC read has no effect and no operation. An actual process crash leaves
-                // the claim for the next same-key caller, which reacquires this claim lock and retries.
-                await state.withLocks(locks, async () => { await claims.removeIfMatches(claim); });
-                throw error;
-            }
+                        return publicRailOperation(operation);
+                    });
+                }
+                catch (error) {
+                    // An incomplete RPC read has no effect and no operation. An actual process crash leaves
+                    // the claim for the next same-key caller, which reacquires this claim lock and retries.
+                    await state.withLocks(locks, async () => { await claims.removeIfMatches(claim); });
+                    throw error;
+                }
+            });
         }, { waitMs: 300_000 });
     }
     async approve(operationId) { return await reportingRateLimits(() => this.approveOperation(operationId)); }

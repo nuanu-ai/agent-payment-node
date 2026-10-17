@@ -5,6 +5,8 @@ import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim, namedProfileHash } from "../operation-index/adapters/family-claims.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
 import { assertStargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import {
@@ -13,7 +15,7 @@ import {
   STARGATE_TOKEN_SOURCE_POOL, UINT, address, fail,
 } from "./token-codec.js";
 import type {
-  StargateTokenJournal, StargateTokenOperation, StargateTokenPhase, StargateTokenPostApprovalQuote,
+  StargateAdmission, StargateTokenJournal, StargateTokenOperation, StargateTokenPhase, StargateTokenPostApprovalQuote,
   StargateTokenUsageState,
 } from "./token-model.js";
 import { assertLane } from "./token-rpc.js";
@@ -26,6 +28,11 @@ export class FileStargateTokenJournal implements StargateTokenJournal {
   /** The same per-account lock every other EVM writer holds, so no other family can race this nonce. */
   async withOwnerLock<T>(owner: Address, work: () => Promise<T>) { await this.locks.initialize();
     return await this.locks.withLocks([evmAddressLock(address(owner))], work, { waitMs: 30_000 }); }
+  async admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T> {
+    const state = new StateStore(this.root); await state.initialize();
+    return await admitOperation(state, { family: "stargate_token", profileHash: namedProfileHash(operation.profile), operationId: operation.operationId,
+      idempotencyHash: null, requestHash: null }, [evmClaim(STARGATE_TOKEN_SOURCE_CHAIN, address(operation.owner))], work);
+  }
   async load(id: string) { try { const path = this.path(id); await secureDirectory(dirname(path), false); const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0) fail("APN_STATE_CORRUPT", "journal_file_mode");
     return validateRecord(JSON.parse(await readFile(path, "utf8"))); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; } }

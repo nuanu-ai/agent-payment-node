@@ -52,6 +52,8 @@ class MemoryJournal implements StargateTokenJournal { value: StargateTokenOperat
     this.value = structuredClone(op); this.history.push(structuredClone(op)); if (this.failPhaseOnce === op.phase && !this.failed) { this.failed=true; throw new Error("journal crash"); } }
   async withLock<T>(_id: string, work: () => Promise<T>) { const prior = this.tail; let release!:()=>void; this.tail = new Promise<void>(r=>release=r); await prior; try { return await work(); } finally { release(); } }
   async withOwnerLock<T>(_owner: `0x${string}`, work: () => Promise<T>) { return await work(); }
+  /** The in-memory journal has no operation index; the file journal's admission is covered by operation-index-families. */
+  async admit<T>(_operation: unknown, work: () => Promise<T>) { return await work(); }
 }
 function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErrorAt?: number; legacy?: boolean; bridgeRevert?: boolean;
   residualAfterBridge?: boolean; advanceNonceOnSend?: boolean; preflightNonceDrift?: boolean; reserveError?: boolean; signErrorOnce?: boolean;
@@ -433,7 +435,13 @@ test("distinct operations for one owner serialize through preflight and only one
   const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root); await state.initialize();
   const journal = new FileStargateTokenJournal(temporary.root, state), s = setup({ allowance: AMOUNT, advanceNonceOnSend: true });
   const first = await prepareStargateV2Token(request({ idempotencyKey: "same-owner-race-one" }), s.ports, journal);
-  const second = await prepareStargateV2Token(request({ idempotencyKey: "same-owner-race-two" }), s.ports, journal);
+  // Phase 4b: the owner's claim refuses a second unresolved operation at prepare, before any read.
+  await assert.rejects(prepareStargateV2Token(request({ idempotencyKey: "same-owner-race-two" }), s.ports, journal),
+    { code: "APN_OPERATION_BLOCKED", details: { blockingOperationId: first.operationId, blockingState: "prepared", blockingNetwork: "evm:10",
+      blockingAccount: OWNER.toLowerCase() } });
+  // Two journals a released version prepared before the upgrade still serialize at execution through the owner lock.
+  class ReleasedVersionJournal extends FileStargateTokenJournal { override async admit<T>(_operation: unknown, work: () => Promise<T>) { return await work(); } }
+  const second = await prepareStargateV2Token(request({ idempotencyKey: "same-owner-race-two" }), s.ports, new ReleasedVersionJournal(temporary.root, state));
   const [a, b] = await Promise.all([executeStargateV2Token(first.operationId, s.ports, journal), executeStargateV2Token(second.operationId, s.ports, journal)]);
   assert.equal([a.phase, b.phase].includes("observed"), true); assert.equal(s.counts().signs, 1); assert.equal(s.counts().sends, 1);
   assert.equal([a.phase, b.phase].some(phase => phase === "cleaned" || phase === "cleanup_required"), true);

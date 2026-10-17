@@ -5,8 +5,7 @@ import { type OperationRegistry } from "./registry.js";
 import { type OperationIndexEntry, type PrepareIdentity, type WantedClaims } from "./types.js";
 /** Same bound as ORPHAN_TEMPORARY_AGE_MS: an admission without a record older than this belongs to a crashed prepare. */
 export declare const ADMISSION_LEASE_MS: number;
-/** The one leaf lock: held only around index file operations, always innermost, never around another acquisition. */
-export declare const OPERATION_INDEX_LOCK = "operation-index";
+export { OPERATION_INDEX_LOCK } from "./store.js";
 /**
  * The operation index over the family journals: O(1) lookup by operation ID and idempotency hash, and one account
  * claim mechanism for every family. The journals stay the only source of truth; this is a derived cache.
@@ -25,7 +24,10 @@ export declare class OperationIndex {
     find(operationId: string): Promise<OperationIndexEntry | null>;
     /** The entry bound to this idempotency hash; a hash bound to two operations is corrupt state. */
     findByIdempotency(idempotencyHash: string): Promise<OperationIndexEntry | null>;
-    /** Null for a new identity; the existing entry for an exact replay; APN_IDEMPOTENCY_CONFLICT on any mismatch. */
+    /**
+     * Null for a new identity; the existing entry for an exact replay; APN_IDEMPOTENCY_CONFLICT on any mismatch. An
+     * identity without an idempotency hash (its operation ID is derived from profile and key) is resolved by its ID.
+     */
     resolvePrepare(identity: PrepareIdentity): Promise<OperationIndexEntry | null>;
     /** APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. */
     assertAvailable(wanted: WantedClaims): Promise<void>;
@@ -53,7 +55,10 @@ export declare class OperationIndex {
     adapter(entry: Pick<OperationIndexEntry, "family">): OperationFamilyAdapter | undefined;
     private byIdempotency;
     private afterReconcile;
-    /** Every claim this admission wants: its own, its profile's quarantine and its family's (every family's when unstated). */
+    /**
+     * Every claim this admission wants: its own, its profile's quarantine and its family's (every family's when unstated),
+     * and the provider quarantine when it wants a provider account.
+     */
     private wantedClaims;
     /** Verifies every colliding open entry against its record; returns those that do not block. */
     private check;

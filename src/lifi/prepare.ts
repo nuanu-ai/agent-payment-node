@@ -3,6 +3,7 @@ import { walletCustodyLock } from "../encrypted-wallet-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { hashObject } from "../canonical.js";
 import { OperationService } from "../operation-service.js";
+import { bridgeConflictDomain } from "../operation-conflict-domain.js";
 import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -62,7 +63,10 @@ export class BridgePreparation {
       }
       const quote = await this.o.quotes.load(profileHash, quoteHash);
       if (quote === null) bridgeFailure("APN_INVALID_INPUT", "quote_not_owned_by_profile");
-      await this.o.operations.assertEvmAccountAvailable(profileHash, quote.request.fromChainId, quote.owner.address);
+      // The source account claim (the one the stored bridge holds) is written before any provider or RPC read, and dropped
+      // if no operation is written.
+      return await this.o.operations.admit({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [bridgeConflictDomain(quote.request.fromChainId, quote.owner.address)] }, async () => {
       await assertBridgeOwner(state, quote);
       await assertExclusiveEvmRawSigner(state, quote.owner.address, profileHash);
       const selected = parseBridgeRoutes({ status: 200, body: quote.rawResponse }, quote.request, quote.owner.address).find((r) => r.choice.routeId === routeId);
@@ -103,6 +107,7 @@ export class BridgePreparation {
           implicitProtocolFeeAtomic: parsed.implicitProtocolFeeAtomic, allowlist },
         effects: envelopes.map(newBridgeEffect) });
       await this.o.records.persist(operation); return operation;
+      });
     }));
   }
 }

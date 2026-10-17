@@ -7,6 +7,7 @@ import { ApnError } from "../errors.js";
 import { evmAddressLock, assertExclusiveEvmOwner } from "../evm-address-ownership.js";
 import { StateStore } from "../state.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { validatePermit2CheckedChallenge, type Permit2CheckedChallenge } from "./checked-challenge.js";
@@ -67,7 +68,10 @@ export class Permit2ProductionPreparation {
         return existing;
       }
       await assertExclusiveEvmOwner(this.state, wallet.account, profileHash);
-      await this.operations.assertEvmAccountAvailable(profileHash, asset.chainId, wallet.account);
+      // The account claim is written before any RPC read, and dropped if no operation is written.
+      const idempotencyHash = sha256(`idempotency\0x402-permit2-production.v2\0${key}`);
+      return await this.operations.admit({ kind: "permit2_production", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [evmConflictDomain(asset.chainId, wallet.account)] }, async () => {
       const selection = selectPermit2Offer(checked.challenge.accepts, wallet.account);
       if (input.expected.index !== selection.index || input.expected.challengeHash !== checked.challengeHash ||
           canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) blocked("Merchant terms changed.");
@@ -84,11 +88,12 @@ export class Permit2ProductionPreparation {
         owner: observed.owner, evidence: observed.evidence, signingSecond, nonce: nonce.toString() });
       const identity = { account: wallet.account, chain: asset.chain, asset: { kind: "token" as const, identifier: asset.token } };
       const record = sealPermit2ProductionRecord({ schemaVersion: PERMIT2_PRODUCTION_SCHEMA, operationId, profileHash,
-        idempotencyHash: sha256(`idempotency\0x402-permit2-production.v2\0${key}`), requestHash, material,
+        idempotencyHash, requestHash, material,
         createdAt: now.toISOString(), updatedAt: now.toISOString(), state: "prepared", terminal: false, reservationStarted: false,
         usageReservationId: assetUsageReservationId(identity, productionUsageKey(operationId)), usageReservationDigest: null,
         exposureAt: null, releaseDigest: null });
       await this.records.persistPreparedLocked(record, { now: () => this.now() }); return record;
+      });
     });
   }
   private async required(id: string): Promise<Permit2ProductionRecord> {

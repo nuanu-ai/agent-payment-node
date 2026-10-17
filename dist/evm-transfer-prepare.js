@@ -13,7 +13,7 @@ import { canonicalIdempotencyKey, publicOperation, validateEconomics } from "./t
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
 import { walletCustodyLock } from "./encrypted-wallet-store.js";
-import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
+import { evmConflictDomain } from "./operation-conflict-domain.js";
 import { listLocalWallets } from "./wallet-import-collision.js";
 /** The shared networks keep their existing profile rule; a direct-only network is local-wallet only. */
 export async function assertDirectEvmProfile(context, profile, chainId) {
@@ -58,59 +58,55 @@ export async function prepareEvmTransfer(context, operations, request, persist, 
             if (wallet === null)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
             await retireExpired(profileHash, selection.chainId, wallet.address);
-            // Every direct EVM transfer waits for unresolved operations on its own chain and account only; no other profile is locked.
+            // Every direct EVM transfer claims its own chain and account only, before any RPC read; no other profile is locked.
             // R8 (OWNR-16): native Arbitrum ETH to the wallet of any local custody profile need not wait for a Circle route of this
             // account whose source burn is final; that route never signs on Arbitrum again. Any other recipient waits for it.
-            if (selection.chainId === 42161 && selection.token === "native" && await localCustodyRecipient(state, recipient))
-                await operations.assertEvmNativeAccountAvailableBesideSettledCircle(profileHash, wallet.address);
-            else
-                await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
-            const amount = evmAmount(request.amount, listed.decimals);
-            // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.
-            const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
-                chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic, recipient,
-                asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
-            const rpcPort = context.requireRpc();
-            armDirectEvmStep(rpcPort, selection.chainId, "prepare");
-            const reads = requireDirectEvmReads(rpcPort, selection.chainId);
-            const balance = await reads.balance(wallet.address, { ...selection, decimals: listed.decimals });
-            if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||
-                (selection.token === "native" ? balance.asset.kind !== "native" : balance.asset.address !== selection.token)) {
-                throw new ApnError("APN_ASSET_MISMATCH", "Balance does not belong to the exact selected wallet, network and asset.");
-            }
-            // An amount above the balance is an economic refusal before any gas estimate, which would fail on the same shortfall.
-            if (evmUint(balance.assetAtomic) < BigInt(amount.atomic))
-                throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
-            const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
-            const { nonce: rpcNonce, estimated } = await reads.nonceEstimate(wallet.address, transaction);
-            let nonce = BigInt(rpcNonce);
-            if (selection.chainId === 1) {
-                const owned = new Set((await occupiedUniswapTokenNonces(state.root, wallet.address)).map(String));
-                while (owned.has(nonce.toString()))
-                    nonce += 1n;
-            }
-            const economics = validateEconomics(nonce.toString(), priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
-            const quote = await reads.feeQuote(economics);
-            requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
-            const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000).toISOString();
-            const expiresAt = new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString();
-            const binding = {
-                schemaVersion: "apn.evm-direct.v1", asset: balance.asset, transactionTo: transaction.to,
-                valueAtomic: transaction.valueAtomic, maxFeeWei: maximumFeeWei, feeQuote: quote, nativeCustody: await evmNativeCustody(state, profile),
-            };
-            const frozen = {
-                operationId, profile, chainId: selection.chainId, token: balance.asset.address, walletAddress: wallet.address,
-                recipient, amountAtomic: amount.atomic, transactionData: transaction.data, economics, preparedAt, expiresAt, evm: binding, allowlist,
-            };
-            const initial = { at: preparedAt, state: "awaiting_approval", terminal: false, reason: "prepared_and_frozen", proofClass: "durable_pre_effect" };
-            const operation = sealOperation({
-                schemaVersion: STATE_VERSION, ...frozen, profileHash, idempotencyHash, requestHash, fingerprint: evmDirectFingerprint(frozen),
-                amountDecimal: amount.decimal, preparedBlockNumberAtomic: balance.blockNumberAtomic,
-                state: initial.state, terminal: false, reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial),
+            const besideSettledCircle = selection.chainId === 42161 && selection.token === "native" && await localCustodyRecipient(state, recipient);
+            return await operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(selection.chainId, wallet.address)],
+                ...(besideSettledCircle ? { tag: { kind: "native_beside_settled_circle", account: wallet.address } } : {}) }, async () => {
+                const amount = evmAmount(request.amount, listed.decimals);
+                // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.
+                const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
+                    chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic, recipient,
+                    asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
+                const rpcPort = context.requireRpc();
+                armDirectEvmStep(rpcPort, selection.chainId, "prepare");
+                const reads = requireDirectEvmReads(rpcPort, selection.chainId);
+                const balance = await reads.balance(wallet.address, { ...selection, decimals: listed.decimals });
+                if (balance.address !== wallet.address || balance.asset.chainId !== selection.chainId || balance.asset.decimals !== listed.decimals ||
+                    (selection.token === "native" ? balance.asset.kind !== "native" : balance.asset.address !== selection.token)) {
+                    throw new ApnError("APN_ASSET_MISMATCH", "Balance does not belong to the exact selected wallet, network and asset.");
+                }
+                // An amount above the balance is an economic refusal before any gas estimate, which would fail on the same shortfall.
+                if (evmUint(balance.assetAtomic) < BigInt(amount.atomic))
+                    throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
+                const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
+                const { nonce: rpcNonce, estimated } = await reads.nonceEstimate(wallet.address, transaction);
+                // A Uniswap token swap of this account holds the same claim, so the pending nonce is never one it may still use.
+                const nonce = BigInt(rpcNonce);
+                const economics = validateEconomics(nonce.toString(), priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
+                const quote = await reads.feeQuote(economics);
+                requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
+                const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000).toISOString();
+                const expiresAt = new Date(Date.parse(preparedAt) + APPROVAL_WINDOW_MS).toISOString();
+                const binding = {
+                    schemaVersion: "apn.evm-direct.v1", asset: balance.asset, transactionTo: transaction.to,
+                    valueAtomic: transaction.valueAtomic, maxFeeWei: maximumFeeWei, feeQuote: quote, nativeCustody: await evmNativeCustody(state, profile),
+                };
+                const frozen = {
+                    operationId, profile, chainId: selection.chainId, token: balance.asset.address, walletAddress: wallet.address,
+                    recipient, amountAtomic: amount.atomic, transactionData: transaction.data, economics, preparedAt, expiresAt, evm: binding, allowlist,
+                };
+                const initial = { at: preparedAt, state: "awaiting_approval", terminal: false, reason: "prepared_and_frozen", proofClass: "durable_pre_effect" };
+                const operation = sealOperation({
+                    schemaVersion: STATE_VERSION, ...frozen, profileHash, idempotencyHash, requestHash, fingerprint: evmDirectFingerprint(frozen),
+                    amountDecimal: amount.decimal, preparedBlockNumberAtomic: balance.blockNumberAtomic,
+                    state: initial.state, terminal: false, reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial),
+                });
+                await persist(operation);
+                await new DirectPublicEffectJournal(context.state).prepare(operation);
+                return publicOperation(operation);
             });
-            await persist(operation);
-            await new DirectPublicEffectJournal(context.state).prepare(operation);
-            return publicOperation(operation);
         });
     });
 }

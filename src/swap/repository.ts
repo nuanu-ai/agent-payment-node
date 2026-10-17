@@ -3,10 +3,20 @@ import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { validateSwapOperation, type SwapOperationRecord, type SwapOperationState } from "./model.js";
 import { transitionSwapOperation, type SwapTransitionEvidence } from "./transitions.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { namedProfileClaim } from "../operation-index/adapters/family-claims.js";
+import { swapClaims } from "../operation-index/adapters/swap.js";
 
 export class SwapOperationRepository extends SecureStateStore {
   private initialized: Promise<void> | undefined;
 
+  /**
+   * The operation ID is derived from the profile and the idempotency key, so a replay finds its record by ID. A new
+   * swap is admitted through the operation index before its record is written (a swap prepare reads no RPC; its quote
+   * was read by the quote command): the index refuses an ID bound to any other operation and an account another money
+   * operation of any family holds, and the swap holds its source account (and its profile under the state's name) until
+   * it is terminal.
+   */
   async create(operationValue: unknown): Promise<SwapOperationRecord> {
     const operation = validateSwapOperation(operationValue); await this.ready();
     return await this.withLocks([`profile:${operation.ownerProfileHash}`, `operation:${operation.operationId}`], async () => {
@@ -15,11 +25,12 @@ export class SwapOperationRepository extends SecureStateStore {
         if (sameImmutable(existing, operation)) return existing;
         blocked("Swap operation identity is already owned by different immutable input.");
       }
-      const collision = await this.findByIdempotency(operation.ownerProfileHash, operation.idempotencyHash);
-      if (collision !== null) blocked("Swap idempotency key is already owned by a different operation.");
-      await this.ensureDirectory(`swap-operations/${operation.ownerProfileHash}`);
-      await this.writeJson(this.path(operation.ownerProfileHash, operation.operationId), operation, true);
-      return operation;
+      return await admitOperation(this, { family: "swap", profileHash: operation.ownerProfileHash, operationId: operation.operationId,
+        idempotencyHash: null, requestHash: null }, swapClaims(operation), async () => {
+        await this.ensureDirectory(`swap-operations/${operation.ownerProfileHash}`);
+        await this.writeJson(this.path(operation.ownerProfileHash, operation.operationId), operation, true);
+        return operation;
+      }, [namedProfileClaim(operation.quote.profile)]);
     });
   }
 
@@ -27,6 +38,12 @@ export class SwapOperationRepository extends SecureStateStore {
     stateIdentifier(ownerProfileHash, "swap profile hash"); stateIdentifier(operationId, "swap operation id"); await this.ready();
     return await this.withLocks([`profile:${ownerProfileHash}`, `operation:${operationId}`],
       async () => await this.readBound(ownerProfileHash, operationId));
+  }
+
+  /** Lock-free read of one record (the operation index's reader). */
+  async read(ownerProfileHash: string, operationId: string): Promise<SwapOperationRecord | null> {
+    stateIdentifier(ownerProfileHash, "swap profile hash"); stateIdentifier(operationId, "swap operation id");
+    return await this.readBound(ownerProfileHash, operationId);
   }
 
   async loadAny(operationId: string): Promise<SwapOperationRecord | null> {
@@ -54,15 +71,6 @@ export class SwapOperationRepository extends SecureStateStore {
     });
   }
 
-  private async findByIdempotency(profileHash: string, idempotencyHash: string): Promise<SwapOperationRecord | null> {
-    const entries = await this.readDirectory(`swap-operations/${profileHash}`); let match: SwapOperationRecord | null = null;
-    for (const entry of entries) {
-      if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) corrupt();
-      const operation = await this.readBound(profileHash, entry.name.slice(0, -5));
-      if (operation?.idempotencyHash === idempotencyHash) { if (match !== null) corrupt(); match = operation; }
-    }
-    return match;
-  }
   private async readBound(profileHash: string, operationId: string): Promise<SwapOperationRecord | null> {
     const value = await this.readJson(this.path(profileHash, operationId)); if (value === null) return null;
     const operation = validateSwapOperation(value);
