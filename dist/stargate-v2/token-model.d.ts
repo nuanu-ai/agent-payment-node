@@ -121,7 +121,7 @@ export interface StargateTokenPostApprovalQuote {
     readonly snapshotHash: string;
 }
 export interface StargateTokenOperation {
-    readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2" | "apn.stargate-v2-token-operation.v3" | "apn.stargate-v2-token-operation.v4" | "apn.stargate-v2-token-operation.v5";
+    readonly schemaVersion: "apn.stargate-v2-token-operation.v5";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;

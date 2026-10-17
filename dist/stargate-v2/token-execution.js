@@ -6,10 +6,10 @@ import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
 import { assertStargateV2RouteFinalityPolicy, stargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
-import { LAYERZERO_ENDPOINT_V2, MAX_TTL_MS, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_EID, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EID, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, address, encodeStargateNativeDrop, fail, hex32, quantity, uint, } from "./token-codec.js";
+import { MAX_TTL_MS, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, address, encodeStargateNativeDrop, fail, quantity, uint, } from "./token-codec.js";
 import { seal, transition } from "./token-journal.js";
 import { assertLane, readAllowance, readExecutorCap, readPoolConfig, readPoolFunctional, readTokenBalance, requoteSend, rpcEnvelope, sourceReceipt, validateDestination, verifySignedEnvelope, } from "./token-rpc.js";
-export { LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_EID, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EID, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, encodeStargateNativeDrop, } from "./token-codec.js";
+export { LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_EID, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EID, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, encodeStargateNativeDrop, } from "./token-codec.js";
 export { FileStargateTokenJournal, stargateV2TokenCanonicalReceipt } from "./token-journal.js";
 export async function prepareStargateV2Token(request, ports, journal) {
     const now = ports.now ?? Date.now, profile = canonicalProfile(request.profile), owner = address(request.owner), recipient = address(request.recipient);
@@ -161,15 +161,6 @@ async function executeLocked(id, ports, journal) {
     if (op === null)
         fail("APN_OPERATION_BLOCKED", "operation_missing");
     const now = ports.now ?? Date.now;
-    if (op.finalityPolicyProvenance === "derived_legacy_v1") {
-        if (["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted"].includes(op.phase))
-            return await observeAllowance(op, ports, journal);
-        if (["submission_started", "unknown_finality", "submitted"].includes(op.phase))
-            return await observeBridge(op, ports, journal);
-        if (op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required")
-            return op;
-        fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
-    }
     op = await reconcileUsageOrCleanup(op, ports, journal);
     if (op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required")
         return op;
@@ -183,8 +174,8 @@ async function executeLocked(id, ports, journal) {
     }
     if (["submission_started", "unknown_finality", "submitted"].includes(op.phase))
         return await observeBridge(op, ports, journal);
-    if (Date.parse(op.expiresAt) <= now() && !(op.schemaVersion === "apn.stargate-v2-token-operation.v5" &&
-        op.allowanceRequired && ["allowance_observed", "post_approval_quote_bound"].includes(op.phase))) {
+    if (Date.parse(op.expiresAt) <= now() &&
+        !(op.allowanceRequired && ["allowance_observed", "post_approval_quote_bound"].includes(op.phase))) {
         if (op.phase === "allowance_observed")
             return await requireCleanup(op, ports, journal, "expired_after_allowance");
         fail("APN_REPREPARE_REQUIRED", "expired");
@@ -207,7 +198,7 @@ async function executeLocked(id, ports, journal) {
         const approvalFinalityDeadline = new Date(markerAt + (op.approvalFinalityWindowMs ?? 0)).toISOString();
         const hash = keccak256(raw);
         op = transition({ ...op, approvalTransactionHash: hash,
-            ...(op.schemaVersion === "apn.stargate-v2-token-operation.v5" ? { approvalSubmissionStartedAt: new Date(markerAt).toISOString(), approvalFinalityDeadline } : {}) }, "allowance_submission_started", "approval_attempt_marked_before_send", markerAt);
+            approvalSubmissionStartedAt: new Date(markerAt).toISOString(), approvalFinalityDeadline }, "allowance_submission_started", "approval_attempt_marked_before_send", markerAt);
         await journal.save(op);
         try {
             if ((await ports.sendRawTransaction(raw)).toLowerCase() !== hash.toLowerCase())
@@ -227,7 +218,7 @@ async function executeLocked(id, ports, journal) {
     // A quote bound in this invocation already re-proved cap, pools, allowance, balances, exact fee, nonce, fee rule and
     // simulation moments ago under the held locks, so the send does not repeat that preflight (BRDG-32).
     let boundNow = false;
-    if (op.schemaVersion === "apn.stargate-v2-token-operation.v5" && op.allowanceRequired) {
+    if (op.allowanceRequired) {
         if (op.approvalFinalityDeadline === undefined || now() >= Date.parse(op.approvalFinalityDeadline))
             return await requireCleanup(op, ports, journal, "approval_finality_deadline_passed", true);
         if (op.phase === "allowance_observed" && op.postApprovalQuote === undefined) {
@@ -319,8 +310,7 @@ async function observeAllowance(op, ports, journal) {
     const receipt = await ports.waitSourceReceipt(op.approvalTransactionHash, op.finalityPolicy.source.blockTag);
     const now = (ports.now ?? Date.now)();
     if (receipt === null) {
-        if (op.schemaVersion === "apn.stargate-v2-token-operation.v5" &&
-            (op.approvalFinalityDeadline === undefined || now >= Date.parse(op.approvalFinalityDeadline)))
+        if (op.approvalFinalityDeadline === undefined || now >= Date.parse(op.approvalFinalityDeadline))
             return await requireCleanup(op, ports, journal, "approval_finality_deadline_passed", true);
         if (op.phase !== "allowance_unknown_finality") {
             op = transition(op, "allowance_unknown_finality", "approval_receipt_not_safe", now);
@@ -332,8 +322,7 @@ async function observeAllowance(op, ports, journal) {
         return await requireCleanup(op, ports, journal, "approval_receipt_mismatched", true);
     if (receipt.status !== "success")
         return await requireCleanup(op, ports, journal, "approval_confirmed_revert", false);
-    if (op.schemaVersion === "apn.stargate-v2-token-operation.v5" &&
-        (op.approvalFinalityDeadline === undefined || now >= Date.parse(op.approvalFinalityDeadline)))
+    if (op.approvalFinalityDeadline === undefined || now >= Date.parse(op.approvalFinalityDeadline))
         return await requireCleanup(op, ports, journal, "approval_safe_after_finality_deadline", true);
     const allowance = await readAllowance(ports.sourceCall, op.owner, op.finalityPolicy.source.blockTag);
     if (allowance !== BigInt(op.amountAtomic))
@@ -421,8 +410,6 @@ export async function cleanupStargateV2Token(id, ports, journal) {
             return op;
         if (op.phase !== "cleanup_required")
             fail("APN_OPERATION_BLOCKED", "cleanup_not_required");
-        if (op.finalityPolicyProvenance === "derived_legacy_v1" && op.residualAllowanceAtomic !== op.amountAtomic)
-            fail("APN_OPERATION_BLOCKED", "legacy_cleanup_not_proven");
         const allowance = await readAllowance(ports.sourceCall, op.owner, "pending");
         const forceApprovalZero = op.cleanupReason === "approval_finality_deadline_passed" || op.cleanupReason === "approval_safe_after_finality_deadline" || op.cleanupReason === "approval_receipt_mismatched";
         if (allowance === 0n && !forceApprovalZero)
@@ -533,7 +520,7 @@ export async function reconcileStargateV2TokenUsage(id, ports, journal) {
 }
 async function createPostApprovalQuote(op, ports) {
     const now = ports.now ?? Date.now;
-    if (op.schemaVersion !== "apn.stargate-v2-token-operation.v5" || op.phase !== "allowance_observed" ||
+    if (op.phase !== "allowance_observed" ||
         op.postApprovalQuote !== undefined || op.approvalFinalityDeadline === undefined)
         fail("APN_STATE_CORRUPT", "post_approval_quote_state");
     if (now() >= Date.parse(op.approvalFinalityDeadline))

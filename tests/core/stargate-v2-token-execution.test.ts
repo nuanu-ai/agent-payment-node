@@ -22,24 +22,24 @@ const BLOCK = `0x${"ab".repeat(32)}` as Hex, DEST_BLOCK = `0x${"cd".repeat(32)}`
 const AMOUNT = 100_000n, DROP = 50_000_000_000_000_000n, FEE = 1000n, NATIVE_CAP = 100_000_000_000_000_000n;
 const PACKET_NONCE = 7n;
 const packetPayload = (mutation?: "sender"|"receiver"|"guid") => (`0x01${PACKET_NONCE.toString(16).padStart(16,"0")}${(30111).toString(16).padStart(8,"0")}${(mutation==="sender"?OWNER:STARGATE_TOKEN_SOURCE_MESSAGING).slice(2).toLowerCase().padStart(64,"0")}${(30109).toString(16).padStart(8,"0")}${(mutation==="receiver"?OWNER:STARGATE_TOKEN_DESTINATION_MESSAGING).slice(2).toLowerCase().padStart(64,"0")}${(mutation==="guid"?BLOCK:GUID).slice(2)}00`) as Hex;
-function legacyTokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
+function unreleasedV1TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
   const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, bridgeSimulation: _simulation, feeApproval: _fees,
     approvalFinalityWindowMs: _window, approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline,
     postApprovalQuote: _post, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v1" as const };
-  return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
+  return { ...body, integrityHash: hashObject(body) } as unknown as StargateTokenOperation;
 }
-function currentV2TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
+function unreleasedV2TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
   const { integrityHash: _integrity, bridgeSimulation: _simulation, feeApproval: _fees, approvalFinalityWindowMs: _window,
     approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline, postApprovalQuote: _post, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v2" as const };
-  return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
+  return { ...body, integrityHash: hashObject(body) } as unknown as StargateTokenOperation;
 }
-function currentV3TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
+function unreleasedV3TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
   const { integrityHash: _integrity, feeApproval: _fees, approvalFinalityWindowMs: _window,
     approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline, postApprovalQuote: _post, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v3" as const };
-  return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
+  return { ...body, integrityHash: hashObject(body) } as unknown as StargateTokenOperation;
 }
 async function seedTokenFixture(root: string, operation: StargateTokenOperation): Promise<void> {
   const directory = join(root, "stargate-v2-token"); await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -131,44 +131,18 @@ const request = (changes: Partial<Parameters<typeof prepareStargateV2Token>[0]> 
 
 test("Type-3 native-drop bytes and pinned contracts are exact", () => { const encoded = encodeStargateNativeDrop(DROP.toString(), OWNER); assert.equal(encoded, `0x000301003102${DROP.toString(16).padStart(32,"0")}${OWNER.slice(2).toLowerCase().padStart(64,"0")}`); assert.equal(STARGATE_TOKEN_SOURCE_EXECUTOR, getAddress("0x2D2ea0697bdbede3F01553D2Ae4B8d0c486B666e")); });
 test("prepare freezes staged simulation and a budget-bounded gas ceiling without simulating sendToken at zero allowance", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.schemaVersion,"apn.stargate-v2-token-operation.v5"); assert.equal(op.approvalFinalityWindowMs,1_800_000); assert.deepEqual(op.feeApproval,{provenance:"exact_snapshot",quotedMaxFeePerGasWei:"2",quotedMaxPriorityFeePerGasWei:"1",approvedMaxFeePerGasWei:"2",approvedMaxPriorityFeePerGasWei:"1"}); assert.equal(op.finalityPolicyProvenance,"pinned_v2"); assert.equal(op.allowanceRequired,true); assert.deepEqual(op.bridgeSimulation,{mode:"pending_post_approval",prepareStatus:"pending_post_approval",gasCeilingAtomic:op.sendEnvelope.gasLimitAtomic}); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); assert.deepEqual(op.finalityPolicy,{version:"apn.stargate-v2-finality.v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"finalized"}}); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:0,bridgeCalls:0}); assert.ok(BigInt(op.maximumDebitAtomic)<=BigInt(op.maxNativeDebitAtomic)); assert.equal(s.counts().sends,0); });
-test("legacy v1 prepared token fixture loads locally with the historical all-safe policy", async (t) => {
+test("token schemas no release wrote (v1-v4) are refused as corrupt before any effect", async (t) => {
   const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
-  const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"legacy-token-prepared"}),s.ports,s.journal);
-  await seedTokenFixture(temporary.root,legacyTokenFixture(prepared)); const loaded=await new FileStargateTokenJournal(temporary.root,state).load(prepared.operationId);
-  assert.equal(loaded?.schemaVersion,"apn.stargate-v2-token-operation.v1"); assert.equal(loaded?.finalityPolicyProvenance,"derived_legacy_v1");
-  assert.deepEqual(loaded?.finalityPolicy,{version:"apn.stargate-v2-finality.legacy-safe-v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"safe"}});
   const journal=new FileStargateTokenJournal(temporary.root,state);
-  await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,journal),(e:any)=>e.code==="APN_OPERATION_BLOCKED"&&e.details.reason==="legacy_operation_nonresumable");
-  await assert.rejects(cleanupStargateV2Token(prepared.operationId,s.ports,journal),(e:any)=>e.code==="APN_OPERATION_BLOCKED"&&e.details.reason==="cleanup_not_required");
-  assert.deepEqual(s.counts(),{sends:0,signs:0,approvals:0});
+  for (const [index, fixture] of [unreleasedV1TokenFixture, unreleasedV2TokenFixture, unreleasedV3TokenFixture].entries()) {
+    const s=setup({allowance:AMOUNT}), prepared=await prepareStargateV2Token(request({idempotencyKey:`unreleased-token-schema-${index}`}),s.ports,s.journal);
+    await seedTokenFixture(temporary.root,fixture(prepared));
+    await assert.rejects(journal.load(prepared.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT"&&e.details.reason==="schema");
+    await assert.rejects(executeStargateV2Token(prepared.operationId,s.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
+    assert.deepEqual(s.counts(),{sends:0,signs:0,approvals:0});
+  }
 });
-test("legacy v1 token unknown finality remains safe-only observation with no resend", async (t) => {
-  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
-  const s=setup({allowance:AMOUNT,sendErrorAt:1}),prepared=await prepareStargateV2Token(request({idempotencyKey:"legacy-token-unknown"}),s.ports,s.journal);
-  const unknown=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(unknown.phase,"unknown_finality"); const before=s.counts();
-  await seedTokenFixture(temporary.root,legacyTokenFixture(unknown)); const observed=await observeStargateV2Token(prepared.operationId,s.ports,new FileStargateTokenJournal(temporary.root,state));
-  assert.equal(observed.phase,"observed"); assert.equal(observed.destinationEvidence?.finality,"safe"); assert.deepEqual(s.counts(),before);
-});
-test("legacy v1 token cleanup remains recoverable without resending the bridge", async (t) => {
-  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
-  const s=setup({allowance:AMOUNT,bridgeRevert:true}),prepared=await prepareStargateV2Token(request({idempotencyKey:"legacy-token-cleanup"}),s.ports,s.journal);
-  const required=await executeStargateV2Token(prepared.operationId,s.ports,s.journal); assert.equal(required.phase,"cleanup_required"); const before=s.counts();
-  await seedTokenFixture(temporary.root,legacyTokenFixture(required)); const cleaned=await cleanupStargateV2Token(prepared.operationId,s.ports,new FileStargateTokenJournal(temporary.root,state));
-  assert.equal(cleaned.phase,"cleaned"); assert.equal(s.counts().sends,before.sends+1); assert.equal(s.counts().signs,before.signs+1);
-});
-test("current v2 exact-allowance journal remains executable without the v3 simulation field", async (t) => {
-  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
-  const s=setup({allowance:AMOUNT}), prepared=await prepareStargateV2Token(request({idempotencyKey:"v2-current-compatible"}),s.ports,s.journal);
-  await seedTokenFixture(temporary.root,currentV2TokenFixture(prepared)); const journal=new FileStargateTokenJournal(temporary.root,state);
-  const observed=await executeStargateV2Token(prepared.operationId,s.ports,journal); assert.equal(observed.phase,"observed"); assert.equal(observed.schemaVersion,"apn.stargate-v2-token-operation.v2"); assert.equal(observed.bridgeSimulation,undefined);
-});
-test("current v3 staged journal remains executable with derived exact fee ceilings", async (t) => {
-  const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize();
-  const s=setup(), prepared=await prepareStargateV2Token(request({idempotencyKey:"v3-current-compatible"}),s.ports,s.journal);
-  await seedTokenFixture(temporary.root,currentV3TokenFixture(prepared)); const journal=new FileStargateTokenJournal(temporary.root,state);
-  const observed=await executeStargateV2Token(prepared.operationId,s.ports,journal); assert.equal(observed.phase,"observed"); assert.equal(observed.schemaVersion,"apn.stargate-v2-token-operation.v3"); assert.equal(observed.feeApproval,undefined);
-});
-test("v2 token missing policy, policy drift, and ambiguous legacy lanes are corrupt before effects", async (t) => {
+test("v5 token missing policy and policy drift are corrupt before effects", async (t) => {
   const temporary=await temporaryState(); t.after(temporary.cleanup); const state=new StateStore(temporary.root); await state.initialize(); const journal=new FileStargateTokenJournal(temporary.root,state);
   const missingSetup=setup(),missing=await prepareStargateV2Token(request({idempotencyKey:"v2-token-missing-policy"}),missingSetup.ports,missingSetup.journal);
   const {integrityHash:_i,finalityPolicy:_p,finalityPolicyProvenance:_fp,...missingBody}=missing; await seedTokenFixture(temporary.root,{...missingBody,integrityHash:hashObject(missingBody)} as StargateTokenOperation);
@@ -176,15 +150,6 @@ test("v2 token missing policy, policy drift, and ambiguous legacy lanes are corr
   const driftSetup=setup(),driftOp=await prepareStargateV2Token(request({idempotencyKey:"v2-token-policy-drift"}),driftSetup.ports,driftSetup.journal);
   const {integrityHash:_di,...driftBody}={...driftOp,finalityPolicy:{...driftOp.finalityPolicy,destination:{chainId:137 as const,blockTag:"safe" as const}}}; await seedTokenFixture(temporary.root,{...driftBody,integrityHash:hashObject(driftBody)} as StargateTokenOperation);
   await assert.rejects(journal.load(driftOp.operationId),(e:any)=>e.code==="APN_STATE_CORRUPT");
-  const laneSetup=setup(),laneOp=legacyTokenFixture(await prepareStargateV2Token(request({idempotencyKey:"legacy-token-lane-drift"}),laneSetup.ports,laneSetup.journal));
-  const {integrityHash:_li,...laneBody}=structuredClone(laneOp),badLane={...laneBody,quote:{...laneBody.quote,route:{...laneBody.quote.route,destinationChainId:130}}}; await seedTokenFixture(temporary.root,{...badLane,integrityHash:hashObject(badLane)} as StargateTokenOperation);
-  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
-  const {integrityHash:_ei,...executorBody}=laneOp,badExecutor={...executorBody,executor:STARGATE_TOKEN_DESTINATION_EXECUTOR}; await seedTokenFixture(temporary.root,{...badExecutor,integrityHash:hashObject(badExecutor)} as StargateTokenOperation);
-  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
-  const {integrityHash:_ti,...targetBody}=laneOp,badTarget={...targetBody,sendEnvelope:{...targetBody.sendEnvelope,to:STARGATE_TOKEN_DESTINATION_POOL}}; await seedTokenFixture(temporary.root,{...badTarget,integrityHash:hashObject(badTarget)} as StargateTokenOperation);
-  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT");
-  const {integrityHash:_ri,...recipientBody}=laneOp,badRecipient={...recipientBody,recipient:STARGATE_TOKEN_DESTINATION_POOL}; await seedTokenFixture(temporary.root,{...badRecipient,integrityHash:hashObject(badRecipient)} as StargateTokenOperation);
-  await assert.rejects(executeStargateV2Token(laneOp.operationId,laneSetup.ports,journal),(e:any)=>e.code==="APN_STATE_CORRUPT"); assert.deepEqual(laneSetup.counts(),{sends:0,signs:0,approvals:0});
 });
 test("zero native drop emits no options and remains cap checked", async () => { const s=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request({idempotencyKey:"token-only-route",nativeDropAtomic:"0"}),s.ports,s.journal); assert.equal(op.options,"0x"); assert.equal(op.nativeDropAtomic,"0"); });
 test("existing exact allowance keeps exact prepare simulation while residual or cap overflow fail closed", async () => { const exact=setup({allowance:AMOUNT}), op=await prepareStargateV2Token(request(),exact.ports,exact.journal); assert.equal(op.allowanceRequired,false); assert.equal(op.approvalEnvelope,undefined); assert.deepEqual(op.bridgeSimulation,{mode:"exact_at_prepare",prepareStatus:"succeeded",gasCeilingAtomic:"100000"}); assert.deepEqual(exact.simulations(),{preparedApprovals:0,preparedBridges:1,bridgeEstimates:0,bridgeCalls:0}); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"residual-allowance"}),setup({allowance:1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="residual_allowance_cleanup_required"); await assert.rejects(prepareStargateV2Token(request({idempotencyKey:"native-cap-over"}),setup({nativeCap:DROP-1n}).ports,new MemoryJournal()), (e:any)=>e.details?.reason==="native_drop_cap_exceeded"); });

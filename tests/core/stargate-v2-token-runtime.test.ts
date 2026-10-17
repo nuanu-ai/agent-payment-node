@@ -5,8 +5,8 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { StateStore } from "../../src/state.js";
 import { LAYERZERO_ENDPOINT_V2_ABI, LAYERZERO_EXECUTOR_ABI, STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "../../src/stargate-v2/abi.js";
 import { LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN,
-  STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_MESSAGING,
-  STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "../../src/stargate-v2/token-execution.js";
+  STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_MESSAGING,
+  STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN } from "../../src/stargate-v2/token-execution.js";
 import { confirmedStargateTokenSourceReceipt, observeStargateTokenDestination, StargateTokenService } from "../../src/stargate-v2/token-runtime.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -19,8 +19,6 @@ const DROP = 50_000n;
 test("token source receipt does not re-read TokenMessaging code after the send (BRDG-31)",async()=>{
   const topics=encodeEventTopics({abi:LAYERZERO_ENDPOINT_V2_ABI,eventName:"PacketSent"}),data=encodeAbiParameters(parseAbiParameters("bytes encodedPayload,bytes options,address sendLibrary"),["0x01","0x",OWNER]);
   const methods:string[]=[]; const source={call:async(method:string)=>{methods.push(method);if(method==="eth_getTransactionReceipt")return{transactionHash:TX,status:"0x1",blockNumber:"0xa",blockHash:EVENT_BLOCK,logs:[{address:LAYERZERO_ENDPOINT_V2,topics,data}]};if(method==="eth_getBlockByNumber")return{number:"0xa",hash:EVENT_BLOCK};throw new Error(method);}};
-  assert.equal(STARGATE_TOKEN_SOURCE_MESSAGING_CODE_HASH,"0x40eefa854ab4e4564009d7d4c08b0e2d341f6b6a354c201c326096468b300827");
-  assert.equal(STARGATE_TOKEN_DESTINATION_MESSAGING_CODE_HASH,"0xae66157283b0894d904b84d87efe27ea850e5eae61351827f4fcf7c3c04d593f");
   assert.ok(await confirmedStargateTokenSourceReceipt(source as any,TX,"safe"));
   assert.equal(methods.includes("eth_getCode"),false);
 });

@@ -1,28 +1,3 @@
-export declare const STARGATE_SEND_PARAM: readonly [{
-    readonly type: "tuple";
-    readonly components: readonly [{
-        readonly type: "uint32";
-        readonly name: "dstEid";
-    }, {
-        readonly type: "bytes32";
-        readonly name: "to";
-    }, {
-        readonly type: "uint256";
-        readonly name: "amountLD";
-    }, {
-        readonly type: "uint256";
-        readonly name: "minAmountLD";
-    }, {
-        readonly type: "bytes";
-        readonly name: "extraOptions";
-    }, {
-        readonly type: "bytes";
-        readonly name: "composeMsg";
-    }, {
-        readonly type: "bytes";
-        readonly name: "oftCmd";
-    }];
-}];
 export declare const STARGATE_QUOTE_OFT_OUTPUT: readonly [{
     readonly type: "tuple";
     readonly components: readonly [{

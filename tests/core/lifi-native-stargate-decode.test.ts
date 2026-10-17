@@ -106,7 +106,7 @@ function sourceReceipt(m: BridgeMaterialization): BridgeProtocolReceipt {
 }
 
 test("native Stargate source accepts the exact pool OFTSent without Across wrap or ERC20 transfers", () => {
-  const official = JSON.parse(readFileSync(new URL("../../../data/stargate/2026-09-20/official-registry-and-abi.json", import.meta.url), "utf8"));
+  const official = JSON.parse(readFileSync("tests/core/stargate-v2-fixtures/official-registry-and-abi-20260920.json", "utf8"));
   assert.equal(official.sources[0].commit, "ce598b8d16472cd76ee47d30b8a40bc5c1b667bb");
   assert.equal(official.deployments.find((row: { chainId: number; asset: string }) => row.chainId === 1 && row.asset === "ETH").pool, NATIVE_POOL);
   const m = fixture(), d = decodeBridgeCall(m), receipt = sourceReceipt(m);

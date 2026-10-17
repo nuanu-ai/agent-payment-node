@@ -12,7 +12,6 @@ import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
-import { ApnError } from "../errors.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
@@ -35,7 +34,7 @@ export interface StargateNativeEnvelope {
   readonly maxPriorityFeePerGasAtomic: string;
 }
 export interface StargateNativeOperation {
-  readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2" | "apn.stargate-v2-native-operation.v3";
+  readonly schemaVersion: "apn.stargate-v2-native-operation.v2" | "apn.stargate-v2-native-operation.v3";
   readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string;
   readonly owner: Address; readonly recipient: Address; readonly amountAtomic: string; readonly maxNativeDebitAtomic: string;
   readonly finalityPolicy: StargateV2RouteFinalityPolicy;
@@ -214,7 +213,6 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   let operation = await journal.load(operationId); if (operation === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
   if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase)) return await observeOnly(operation, ports, journal);
   if (operation.phase === "observed" || operation.phase === "failed_confirmed_revert") return await followPhaseUsage(operation, ports);
-  if (operation.finalityPolicyProvenance === "derived_legacy_v1") fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
   if (operation.policy === undefined) fail("APN_REPREPARE_REQUIRED", "owner_policy_binding_required");
   const now = ports.now ?? Date.now;
   // Nothing was marked for sending, so an expired operation releases any hold an interrupted earlier run took.

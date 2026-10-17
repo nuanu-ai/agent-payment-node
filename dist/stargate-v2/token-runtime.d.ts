@@ -31,52 +31,7 @@ export declare class StargateTokenService {
     status(id: string): Promise<StargateTokenOperation>;
     receipt(id: string): Promise<Readonly<{
         evidenceHash: string;
-        feeApproval: Readonly<{
-            readonly provenance: "exact_snapshot" | "owner_ceiling";
-            readonly quotedMaxFeePerGasWei: string;
-            readonly quotedMaxPriorityFeePerGasWei: string;
-            readonly approvedMaxFeePerGasWei: string;
-            readonly approvedMaxPriorityFeePerGasWei: string;
-        }> | {
-            provenance: "legacy_exact_snapshot";
-            quotedMaxFeePerGasWei: string;
-            quotedMaxPriorityFeePerGasWei: string;
-            approvedMaxFeePerGasWei: string;
-            approvedMaxPriorityFeePerGasWei: string;
-        };
-        bridgeSimulation: Readonly<{
-            readonly mode: "exact_at_prepare" | "pending_post_approval";
-            readonly prepareStatus: "succeeded" | "pending_post_approval";
-            readonly gasCeilingAtomic: string;
-        }> | {
-            mode: "legacy_exact_at_prepare";
-            prepareStatus: "legacy_succeeded";
-            gasCeilingAtomic: string;
-        };
-        approvalTransactionHash: `0x${string}` | null;
-        residualAllowanceAtomic: string;
-        source: import("./token-model.js").StargateTokenSourceReceipt;
-        destination: StargateTokenDestinationEvidence;
-        quoteLifecycle?: {
-            ownerApprovedMinimumOutputAtomic: string;
-            ownerApprovedMaximumQuoteLossAtomic: string;
-            initialQuotedOutputAtomic: string;
-            initialQuotedNativeMessageFeeAtomic: string;
-            prepareQuoteHash: string;
-            prepareExpiresAt: string;
-            approvalFinalityWindowMs: number;
-            approvalSubmissionStartedAt: string | null;
-            approvalFinalityDeadline: string | null;
-            postApprovalQuoteHash: string | null;
-            postApprovalQuoteBlock: Readonly<{
-                readonly numberAtomic: string;
-                readonly hash: Hex;
-            }> | null;
-            postApprovalQuoteExpiresAt: string | null;
-            postApprovalQuotedOutputAtomic: string | null;
-            postApprovalQuotedNativeMessageFeeAtomic: string | null;
-        };
-        schemaVersion: "apn.stargate-v2-token-receipt.v2" | "apn.stargate-v2-token-receipt.v1";
+        schemaVersion: "apn.stargate-v2-token-receipt.v2";
         operationId: string;
         profile: string;
         route: {
@@ -102,6 +57,41 @@ export declare class StargateTokenService {
         policy: import("./token-model.js").StargateTokenPolicyBinding;
         finalityPolicy: import("./finality-policy.js").StargateV2RouteFinalityPolicy;
         quoteHash: string;
+        quoteLifecycle: {
+            ownerApprovedMinimumOutputAtomic: string;
+            ownerApprovedMaximumQuoteLossAtomic: string;
+            initialQuotedOutputAtomic: string;
+            initialQuotedNativeMessageFeeAtomic: string;
+            prepareQuoteHash: string;
+            prepareExpiresAt: string;
+            approvalFinalityWindowMs: number;
+            approvalSubmissionStartedAt: string | null;
+            approvalFinalityDeadline: string | null;
+            postApprovalQuoteHash: string | null;
+            postApprovalQuoteBlock: Readonly<{
+                readonly numberAtomic: string;
+                readonly hash: Hex;
+            }> | null;
+            postApprovalQuoteExpiresAt: string | null;
+            postApprovalQuotedOutputAtomic: string | null;
+            postApprovalQuotedNativeMessageFeeAtomic: string | null;
+        };
+        feeApproval: Readonly<{
+            readonly provenance: "exact_snapshot" | "owner_ceiling";
+            readonly quotedMaxFeePerGasWei: string;
+            readonly quotedMaxPriorityFeePerGasWei: string;
+            readonly approvedMaxFeePerGasWei: string;
+            readonly approvedMaxPriorityFeePerGasWei: string;
+        }>;
+        bridgeSimulation: Readonly<{
+            readonly mode: "exact_at_prepare" | "pending_post_approval";
+            readonly prepareStatus: "succeeded" | "pending_post_approval";
+            readonly gasCeilingAtomic: string;
+        }>;
+        approvalTransactionHash: `0x${string}` | null;
+        residualAllowanceAtomic: string;
+        source: import("./token-model.js").StargateTokenSourceReceipt;
+        destination: StargateTokenDestinationEvidence;
     }>>;
     private required;
     private ports;
