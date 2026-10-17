@@ -27,7 +27,7 @@ Keep these proof layers separate:
 The original 19 Sep report recorded `1/9` and `8/9` remaining. Its priority-fee
 status is historical; current direct closure is supported by the receipt matrix
 below. The separately completed Base priority-fee row is tracked as C2-11 in the
-[sprint checkpoint](sprint-remaining-2026-09-23.md).
+[sprint checkpoint](../reports/sprint-remaining-2026-09-23.md).
 
 ## Eleven-network acceptance matrix
 

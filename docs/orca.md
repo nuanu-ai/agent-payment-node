@@ -243,7 +243,8 @@ to them. Without an active admission `prepare` refuses with
   spent. A lost send answer is `unknown_finality` and is only observed.
 
 MCP serves `inventory`, `quote`, `prepare` and `status`; `approve` and
-`execute` return `APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI handoff.
+`execute` are reachable only through `apn_foreground_handoff`, which returns
+`APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI command.
 
 ## Owner sequence for 0.01 SOL to USDC
 

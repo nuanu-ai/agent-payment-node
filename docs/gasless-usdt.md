@@ -12,7 +12,7 @@ After building the package, run the fixture with an explicit RPC URL:
 
 ```sh
 APN_ETHEREUM_RPC_URL=https://example.invalid node scripts/gasless-usdt-rehearsal.mjs \
-  --sender 0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7 \
+  --sender <your-ethereum-address> \
   --to 0x000000000000000000000000000000000000dEaD \
   --amount 1 --max-fee 0.5 --min-received 0.5
 ```

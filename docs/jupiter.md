@@ -293,7 +293,7 @@ The corrected source validator proved actual credit 107824 atomic USDC,
 input plus fee 1006400 lamports and fee 6400 at finalized slot 454604807.
 This read-only diagnostic did not mutate the operation or finalize its usage;
 the normal freshly installed CLI checkpoint is recorded separately in the
-[closure ledger](apn-closure-status-2026-10-08.md).
+[closure ledger](../reports/apn-closure-status-2026-10-08.md).
 
 ### Historical signed material authentication
 

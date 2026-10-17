@@ -532,7 +532,7 @@ At the verified `StargatePoolNative` implementation, `OFTReceived` follows a
 successful native outflow. A supplied native call trace or balance snapshot is
 validated, but neither is required: the recipient may spend in the same block.
 A cached failure without a successful event cannot prove delivery. The
-[paired safe-block pin record](lifi-stargate-native-pins-2026-09-25.md) covers both
+[paired safe-block pin record](../reports/lifi-stargate-native-pins-2026-09-25.md) covers both
 native pools, both LI.FI facets, code hashes, asset ID 13 mappings, address
 configuration, TokenMessaging links and the executable selector. Preparation
 and historical observation must verify fresh code/configuration at exact block
@@ -740,10 +740,10 @@ not a trustless light-client proof. The operation is authoritative: interrupted
 derived-receipt writes are repaired under the same locks. Raw calldata, signed
 bytes, wallet secrets and raw provider errors are omitted from public output.
 
-The five MCP tools are `apn_bridge_capabilities`, `apn_bridge_inventory`,
-`apn_bridge_routes`, `apn_bridge_prepare` and `apn_bridge_approve`. They use the
-same catalog and binder as the CLI. Approval through MCP returns only the exact
-foreground CLI command without reading state or entering custody. Generic
+The four MCP tools are `apn_bridge_capabilities`, `apn_bridge_inventory`,
+`apn_bridge_routes` and `apn_bridge_prepare`. They use the same catalog and
+binder as the CLI. Approval is not an MCP tool: `apn_foreground_handoff` returns
+only the exact foreground CLI command without reading state or entering custody. Generic
 status, resume and receipt tools handle the durable bridge operation.
 
 ## Evidence and remaining acceptance
@@ -1000,9 +1000,9 @@ foreground terminal, and the reads repeat: the nonce and deposit code class must
 be unchanged, gas may not grow, the approved max fee must still cover the fresh
 base fee plus the approved tip, and the balance must still cover the approved
 debit. The signed raw transaction is saved before the single send; an unknown
-send result is recorded as `unknown_finality` and never resent. MCP exposes
-`apn_oneclick_source_submit` only as an `APN_FOREGROUND_APPROVAL_REQUIRED`
-handoff carrying the exact CLI command, plus the read-only status tool.
+send result is recorded as `unknown_finality` and never resent. Over MCP, submit
+is reachable only through `apn_foreground_handoff`, which returns
+`APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI command; status is a read-only tool.
 
 `apn oneclick source status --operation <id>` keeps three observations apart:
 the safe source receipt, the provider's HTTPS status claim (bound to the saved
