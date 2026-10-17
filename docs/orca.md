@@ -53,11 +53,12 @@ generic finality, expiry and abandon exits. What differs:
   `orca-whirlpool-keyless-usdc-usdt.2026-10-17`
   (`7352c69fc65fc16ffb5d5e2a36e97b5811c5d7ddee2919d22dfdb343a95ff1f6`).
 
-Solana POSTs: quote 9, prepare 0, approve 13 (including the single send and
-its first observation), status 4, the same read plan as SOL to USDC. The
-former stable lane spent 12 to 13 on stable-prepare, 13 to 14 on the execution
-(a second full preparation-grade proof plus the send) and 3 on each
-stable-observe.
+Solana POSTs (budgeted read plan, the same as SOL to USDC): quote 9, prepare 0,
+approve 13 (including the single send and its first observation), status 4.
+Measured with a fake RPC, a USDC to USDT swap spends 9, 0, 12 and 2 (23 in
+all). The former stable lane spent 11 to 12 on stable-prepare, 12 to 13 on the
+execution (a second preparation-grade proof plus the send) and 3 on each
+stable-observe (26 to 28 in all).
 
 ```sh
 QUOTE=$(apn swap solana orca quote --pool usdc-usdt --profile solana-local --account GtZc9wfM98Peee7dJrL1dYE54sWU8zA8gYeo9VUfR9ki --amount 1000000 --slippage-bps 50 --owner-slippage-cap-bps 50 --compute-unit-limit 250000 --compute-unit-price 1000 | jq -r .data.quoteHash)
