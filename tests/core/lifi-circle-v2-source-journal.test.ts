@@ -65,18 +65,20 @@ test("maps an immutable Circle source envelope with deterministic untrusted prot
   assert.match(a.protocolInputHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(Object.keys(a.binding).sort(), ["admissionProof", "createdAt", "draftIntegrityHash", "maxSourceNativeDebitWei", "operationId", "profileHash", "route", "sourceCall"].sort());
 });
-test("Circle projection stages its exact protocol hash in v2", async t => {
+test("Circle projection stages its exact protocol hash under the live admission", async t => {
   const tmp = await temporaryState(); t.after(tmp.cleanup);
   const projected = bindCircleV2SourcePreparationToJournal(input(await fixture()));
   const repo = new NonEvmSourceJournalRepository(tmp.root);
-  const j = await repo.stageV2({ ...projected.binding,
-    schemaVersion: "apn.non-evm-source-journal.v2", protocolInputHash: projected.protocolInputHash });
+  const admissionProof = { kind: "circle_v2_live_transport_v1" as const, circleOrigin: "https://iris-api.circle.com" as const,
+    rpcOrigin: "https://base.example.org", quoteHash: "b".repeat(64), validationHash: "f".repeat(64),
+    sourceBlockHash: `0x${"c".repeat(64)}`, preparationDigest: "a".repeat(64), payer, recipientOwner: wallet,
+    recipientAta: await associatedUsdc(wallet), feeTotalAtomic: "20000" };
+  const j = await repo.stageLiveCircle({ ...projected.binding, admissionProof, protocolInputHash: projected.protocolInputHash });
   assert.equal(j.protocolInputHash, projected.protocolInputHash);
-  assert.equal(j.executionAdmitted, false);
+  assert.equal(j.executionAdmitted, true);
   const loaded = await new NonEvmSourceJournalRepository(tmp.root).load(j.profileHash, j.operationId);
-  assert.equal(loaded?.schemaVersion, "apn.non-evm-source-journal.v2");
-  if (loaded?.schemaVersion !== "apn.non-evm-source-journal.v2") throw new Error("missing v2");
-  assert.equal(loaded.protocolInputHash, projected.protocolInputHash);
+  assert.equal(loaded?.schemaVersion, "apn.non-evm-source-journal.v3");
+  assert.equal(loaded?.protocolInputHash, projected.protocolInputHash);
 });
 test("rejects altered digest, mutable preparation, wrong route payer draft and malformed hashes", async () => {
   const p = await fixture();
@@ -135,7 +137,7 @@ test("rejects re-digested call identity, native value, uint256 overflow and empt
 
 test("binding has no journal stage, signing, sealing or submission effect", async () => {
   const p = await fixture();
-  const methods = ["stage", "signingStarted", "seal", "committingSubmission"] as const;
+  const methods = ["stageLiveCircle", "signingStarted", "seal", "committingSubmission"] as const;
   const original = methods.map(method => NonEvmSourceJournalRepository.prototype[method]);
   let invoked = 0;
   try {

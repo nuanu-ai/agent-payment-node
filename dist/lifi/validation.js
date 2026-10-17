@@ -2,7 +2,6 @@ import { getAddress } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 export const BRIDGE_MAX_CALLDATA_BYTES = 12 * 1024;
-export const BRIDGE_MAX_SIGNED_BYTES = 16 * 1024;
 export const BRIDGE_MAX_GAS = 5000000n;
 export const BRIDGE_TTL_MS = 300_000;
 export const BRIDGE_MIN_REMAINING_MS = 15_000;

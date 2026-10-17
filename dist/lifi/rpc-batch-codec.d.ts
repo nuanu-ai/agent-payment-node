@@ -5,7 +5,6 @@ export declare function rpcQuantityValue(value: unknown): bigint;
 export declare function rpcExpectedChainValue(chainId: BridgeChainId): (value: unknown) => bigint;
 export declare function rpcWordValue(value: unknown): bigint;
 export declare function rpcHexValue(maximumBytes: number): (value: unknown) => Hex;
-export declare function rpcRecordValue(value: unknown): Record<string, unknown>;
 export declare function rpcBlockValue(value: unknown): Record<string, unknown>;
 export declare function rpcFeeBlockValue(value: unknown): Record<string, unknown>;
 export declare function rpcTransactionInput(transaction: BridgeTransaction): Readonly<Record<string, unknown>>;

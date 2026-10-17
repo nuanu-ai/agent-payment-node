@@ -7,7 +7,7 @@ import { requireListedDirectAsset } from "../../src/direct-allowlist-gate.js";
 import { listedEvmAsset } from "../../src/evm-direct-allowlist.js";
 import { directEvmListRows } from "../../src/evm-direct-networks.js";
 import { DIRECT_EVM_SUPPLEMENTAL_ASSETS } from "../../src/evm-direct-supplemental-assets.js";
-import { bridgeTokenRow } from "../../src/lifi/asset-registry.js";
+import { bridgeAssetRow } from "../../src/lifi/asset-registry.js";
 import { overlayV2, EVM_OWNER } from "./allowlist-policy-fixtures.js";
 import { EVM_REQUEST, evmCore } from "./evm-helpers.js";
 import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
@@ -55,7 +55,7 @@ test("owner may compile direct-only policy rows, while x402 and bridge policy ro
         { ...admission, rail, mechanism: { provider: "test", reference: "test" } },
       ] })), { code: "APN_ALLOWLIST_ASSET_NOT_FOUND" });
     }
-    assert.throws(() => bridgeTokenRow(chainId, identifier), /asset_not_on_frozen_list/u);
+    assert.throws(() => bridgeAssetRow(chainId, identifier), /asset_not_on_frozen_list/u);
   }
 });
 

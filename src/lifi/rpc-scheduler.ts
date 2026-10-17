@@ -121,7 +121,6 @@ function transientTransport(error: unknown): boolean {
     .includes(reason);
 }
 
-export function rpcOriginIdentity(origin: string): string { try { return new URL(origin).origin; } catch { return "invalid-origin"; } }
 export function rpcProviderFamily(origin: string): string {
   try {
     const hostname = new URL(origin).hostname.toLowerCase();

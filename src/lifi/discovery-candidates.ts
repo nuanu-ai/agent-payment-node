@@ -12,7 +12,7 @@ export const BASE_SOLANA_CIRCLE_V2_CANDIDATE = {
   executable: false,
 } as const;
 
-/** LI.FI inventory candidate; the separate captured Mayan evidence remains exploratory only. */
+/** LI.FI inventory candidate (discovery only). */
 export const BASE_SOLANA_USDC_CANDIDATE = {
   fromChainId: 8453,
   toChainId: 1151111081099710,
