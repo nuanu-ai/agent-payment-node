@@ -100,10 +100,6 @@ export function chainUsage(policy, operations, now, excluding) {
     }
     return { principalAtomic: principal.toString(), nativeFeeAtomic: nativeFees.toString() };
 }
-export function assertChainPolicy(policy, account, asset, amount, maximumFee, operations, now, excluding) {
-    assertChainFeePolicy(policy, account, asset, maximumFee);
-    assertChainPrincipal(policy, amount, operations, now, excluding);
-}
 /** The per-transfer and UTC-daily principal caps the owner approved on the admission screen; unresolved transfers stay charged. */
 export function assertChainPrincipal(policy, amount, operations, now, excluding) {
     validateChainPolicy(policy);

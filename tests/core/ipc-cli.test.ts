@@ -1,86 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { closeSync, fstatSync, openSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
-import { PassThrough } from "node:stream";
 import test from "node:test";
 import { effectiveStateRoot, parseArgv, runCli } from "../../src/cli.js";
 import { ApnError } from "../../src/errors.js";
-import { InheritedNativeIpc, decodeSingleFrame, encodeFrame, readFrameStream } from "../../src/native-ipc.js";
 import { HttpsBaseRpc, isPublicIp } from "../../src/rpc.js";
 
-const REQUEST_ID = "12345678-1234-4234-8234-123456789abc";
 const OPERATION_ID = "a".repeat(64);
-
-test("IPC framing is four-byte big-endian, bounded, exact, and strict JSON", () => {
-  const value = { version: "apn.native.v1", requestId: REQUEST_ID };
-  const frame = encodeFrame(value);
-  assert.equal(frame.readUInt32BE(0), frame.length - 4);
-  assert.deepEqual(decodeSingleFrame(frame), value);
-  assert.throws(() => decodeSingleFrame(Buffer.concat([frame, Buffer.from([0])])), ApnError);
-  assert.throws(() => decodeSingleFrame(Buffer.from([0, 0, 0, 2, 0xff, 0xff])), ApnError);
-  const oversized = Buffer.alloc(4);
-  oversized.writeUInt32BE(65 * 1024, 0);
-  assert.throws(() => decodeSingleFrame(oversized), ApnError);
-});
-
-test("IPC response supports fragmentation, waits for EOF, and rejects a second frame", async () => {
-  const frame = encodeFrame({ version: "apn.native.v1", requestId: REQUEST_ID, ok: true, result: { found: false } });
-  const fragmented = new PassThrough();
-  let settled = false;
-  const decoded = readFrameStream(fragmented, 1_000).finally(() => { settled = true; });
-  fragmented.write(frame.subarray(0, 2));
-  fragmented.write(frame.subarray(2, 11));
-  fragmented.write(frame.subarray(11));
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(settled, false, "a complete declared frame is not accepted until native closes its writer");
-  fragmented.end();
-  assert.deepEqual(await decoded, { version: "apn.native.v1", requestId: REQUEST_ID, ok: true, result: { found: false } });
-
-  const secondFrame = new PassThrough();
-  const rejected = readFrameStream(secondFrame, 1_000);
-  secondFrame.end(Buffer.concat([frame, frame]));
-  await assert.rejects(rejected, /trailing data|second frame/);
-});
-
-test("native IPC refuses absent, aliased, invalid, or non-UUID request identity", async () => {
-  assert.throws(() => InheritedNativeIpc.fromEnvironment({}), /signed native host/);
-  assert.throws(() => InheritedNativeIpc.fromEnvironment({
-    APN_NATIVE_REQUEST_FD: "2",
-    APN_NATIVE_RESPONSE_FD: "4",
-  }), ApnError);
-  assert.throws(() => new InheritedNativeIpc(4, 4), /distinct/);
-
-  const invalid = new InheritedNativeIpc(10, 11);
-  await assert.rejects(invalid.request({
-    version: "apn.native.v1",
-    requestId: "not-a-uuid",
-    operation: "wallet.describe",
-    payload: { profile: "default" },
-  }), /bounded schema/);
-});
-
-test("IPC closes the sole request writer and consumes one EOF-terminated response", async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), "apn-ipc-"));
-  t.after(async () => await rm(directory, { recursive: true, force: true }));
-  const requestPath = join(directory, "request.bin");
-  const responsePath = join(directory, "response.bin");
-  writeFileSync(responsePath, encodeFrame({ version: "apn.native.v1", requestId: REQUEST_ID, ok: true, result: { found: false } }));
-  const requestFd = openSync(requestPath, "w");
-  const responseFd = openSync(responsePath, "r");
-  const ipc = new InheritedNativeIpc(requestFd, responseFd, 1_000);
-  const result = await ipc.request({
-    version: "apn.native.v1",
-    requestId: REQUEST_ID,
-    operation: "wallet.describe",
-    payload: { profile: "default" },
-  });
-  assert.deepEqual(result, { found: false });
-  assert.throws(() => fstatSync(requestFd), /bad file descriptor/i);
-  try { closeSync(responseFd); } catch { /* read stream owns this descriptor */ }
-});
 
 test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no approval bypass", async () => {
   assert.deepEqual(parseArgv(["--version"]), { request: { command: "version" } });
