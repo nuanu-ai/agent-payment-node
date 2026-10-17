@@ -6,7 +6,7 @@ It has no command that prepares, approves, signs, journals, submits, or admits e
 
 ## Frozen official sources
 
-The recorded ABI, source versions, and per-network blockers are in `data/stargate/2026-09-20/official-registry-and-abi.json`.
+The recorded ABI, source versions, and per-network blockers are kept as a test fixture (`tests/core/stargate-v2-fixtures/official-registry-and-abi-20260920.json`) that pins the registry below; it is not shipped in the package.
 
 - Stargate V2 deployment/ABI repository: commit `ce598b8d16472cd76ee47d30b8a40bc5c1b667bb`.
 - LayerZero official address book: commit `7c800d680072ae6cc50edf95711fa601974a4a70`.

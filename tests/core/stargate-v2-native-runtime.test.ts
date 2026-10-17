@@ -86,7 +86,7 @@ test("StargateNativeService status is a true local read with no RPC call or jour
   const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root); await state.initialize();
   const service = new StargateNativeService(state, { load: async () => Buffer.alloc(32) } as any,
     { APN_ETHEREUM_RPC_URL: "https://ethereum.example", APN_UNICHAIN_RPC_URL: "https://unichain.example" });
-  const operation = { schemaVersion: "apn.stargate-v2-native-operation.v1", operationId: "a".repeat(64), phase: "prepared",
+  const operation = { schemaVersion: "apn.stargate-v2-native-operation.v3", operationId: "a".repeat(64), phase: "prepared",
     transitions: [{ phase: "prepared", at: "2026-01-01T00:00:00.000Z", reason: "fixture" }] } as any;
   // Use a test-local journal seam because this assertion targets service routing, not record validation.
   (service as any).journal = { load: async () => operation };

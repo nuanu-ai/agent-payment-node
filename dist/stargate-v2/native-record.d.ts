@@ -16,7 +16,8 @@ export declare const STARGATE_NATIVE_MECHANISM: Readonly<{
     provider: "stargate-v2";
     reference: `eip155:1:0x${string}/eip155:130:0x${string}`;
 }>;
-export declare const STARGATE_NATIVE_SCHEMAS: readonly ["apn.stargate-v2-native-operation.v1", "apn.stargate-v2-native-operation.v2", "apn.stargate-v2-native-operation.v3"];
+/** v2 (0.5.25..) and v3 (admission-bound) are the only native schemas any release wrote. */
+export declare const STARGATE_NATIVE_SCHEMAS: readonly ["apn.stargate-v2-native-operation.v2", "apn.stargate-v2-native-operation.v3"];
 export declare function fail(code: "APN_INVALID_INPUT" | "APN_OPERATION_BLOCKED" | "APN_RPC_PROTOCOL" | "APN_RPC_AMBIGUOUS" | "APN_CHAIN_MISMATCH" | "APN_REPREPARE_REQUIRED" | "APN_STATE_CORRUPT", reason: string): never;
 export declare function uint(value: unknown, positive?: boolean): bigint;
 export declare function address(value: unknown): Address;

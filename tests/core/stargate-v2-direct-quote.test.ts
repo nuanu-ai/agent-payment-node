@@ -47,7 +47,7 @@ async function rpc(overrides: { chainId?: string; oft?: `0x${string}`; fee?: `0x
 }
 
 test("official ABI fixture records only view quotes and finite source versions", async () => {
-  const recorded = JSON.parse(await readFile(resolve("data/stargate/2026-09-20/official-registry-and-abi.json"), "utf8")) as {
+  const recorded = JSON.parse(await readFile(resolve("tests/core/stargate-v2-fixtures/official-registry-and-abi-20260920.json"), "utf8")) as {
     abi: Abi; sources: { commit?: string }[]; blockers: { chainId: number; asset: string }[];
     finalityPolicy: { version: string; blockTags: Record<string, string>; rules: string[] };
     deployments: { chainId: number; eid: number; asset: string; token: string; pool: string; kind: string }[] };

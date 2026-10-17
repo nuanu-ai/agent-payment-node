@@ -12,4 +12,3 @@ export type { AssetPortfolio, AssetPortfolioInput, BatchBalanceAsset, BatchBalan
 export { DIRECT_ASSET_USAGE_LEASE_SCHEMA, DirectAssetUsageAdapter, validateDirectAssetUsageLease, } from "./direct-asset-usage.js";
 export type { DirectAssetUsageInput, DirectAssetUsageLease, } from "./direct-asset-usage.js";
 export * from "./swap/index.js";
-export * from "./stargate-v2/index.js";

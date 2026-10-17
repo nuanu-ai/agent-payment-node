@@ -46,7 +46,7 @@ export interface StargateTokenPostApprovalQuote {
   readonly maximumDebitAtomic: string; readonly snapshotHash: string;
 }
 export interface StargateTokenOperation {
-  readonly schemaVersion: "apn.stargate-v2-token-operation.v1" | "apn.stargate-v2-token-operation.v2" | "apn.stargate-v2-token-operation.v3" | "apn.stargate-v2-token-operation.v4" | "apn.stargate-v2-token-operation.v5"; readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string; readonly owner: Address; readonly recipient: Address;
+  readonly schemaVersion: "apn.stargate-v2-token-operation.v5"; readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string; readonly owner: Address; readonly recipient: Address;
   readonly finalityPolicy: StargateV2RouteFinalityPolicy; readonly finalityPolicyProvenance: StargateV2FinalityPolicyProvenance; readonly amountAtomic: string; readonly nativeDropAtomic: string; readonly maxNativeDebitAtomic: string; readonly minOutputAtomic: string;
   readonly sourceToken: Address; readonly destinationToken: Address; readonly sourcePool: Address; readonly destinationPool: Address;
   readonly sourceEid: 30111; readonly destinationEid: 30109; readonly executor: Address; readonly executorNativeCapAtomic: string;
