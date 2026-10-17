@@ -9,7 +9,9 @@ import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { walletCustodyLock } from "../../src/encrypted-wallet-store.js";
 import { evmAddressLock } from "../../src/evm-address-ownership.js";
 import { Permit2ProductionSigningFence, type Permit2MetadataLockScope, type Permit2SigningFact } from "../../src/x402-permit2/production-signing-fence.js";
-import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
+import type { ApnError } from "../../src/errors.js";
+import { OperationService } from "../../src/operation-service.js";
+import { foreignDirectTransfer, journalFixture } from "./x402-permit2-production-journal-fixture.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
 import { Permit2ProductionRepository, productionUsageIdentity, type Permit2ProductionRecord } from "../../src/x402-permit2/production-repository.js";
 import { Permit2MetadataLockOwner } from "../../src/x402-permit2/production-signing-scope.js";
@@ -103,18 +105,23 @@ test("actual competing wallet, operation, custody and allowlist writes wait for 
   assert.equal(ran.size, 4); assert.equal(staged.registry.policyDigest, f.record.material.owner.policyDigest);
 });
 for (const fault of ["wallet", "lease", "conflict", "clock"] as const) test(`scoped ${fault} drift across RPC denies the fact without broad self exclusion`, async t => {
-  const f = await setup(t);
+  const f = await setup(t); let foreign: string | undefined;
   f.wire.beforeBatch = async calls => {
     if (!calls.some(c => c.method === "eth_getCode")) return;
     if (fault === "wallet") { const envelope = await f.state.loadEncryptedWalletEnvelope("owner") as any;
       envelope.identity.chainId = 1; await f.state.writeEncryptedWalletEnvelope("owner", envelope); }
     if (fault === "lease") await f.usage.transition({ ...productionUsageIdentity(f.record), reservationId: f.record.usageReservationId,
       policyDigest: f.record.material.owner.policyDigest, state: "finalized", expectedCurrentStates: ["unknown_finality"], outcomeDigest: "d".repeat(64), now: f.now() });
-    if (fault === "conflict") t.mock.method(StateStore.prototype, "listOperations", async () => [{ operationId: "f".repeat(64), terminal: false,
-      state: "unknown_finality", chainId: 43114, walletAddress: f.record.material.wallet.account }] as never);
+    // A real foreign direct transfer on the same chain and account appears while the reads are in flight.
+    if (fault === "conflict") foreign = (await foreignDirectTransfer(f.state, "owner", f.record.material.wallet.account, f.now())).operation.operationId;
     if (fault === "clock") f.advance(60);
   };
   await f.fence.withScope(f.id, "exposed", async scope => assert.equal((await f.fence.checkScoped(scope, f.id, "exposed")).fact, null));
+  if (fault === "conflict") {
+    assert.ok(foreign, "the foreign direct transfer was written during the reads");
+    await assert.rejects(new OperationService(f.state).assertPermit2AccountAvailable((await f.journal.findOperation(f.id))!), (error: ApnError) =>
+      error.code === "APN_OPERATION_BLOCKED" && error.details?.blockingOperationId === foreign && error.details?.blockingState === "unknown_finality");
+  }
 });
 test("revoked policy refuses the owned scope before callback admission", async t => {
   const f = await setup(t); await f.revoke();

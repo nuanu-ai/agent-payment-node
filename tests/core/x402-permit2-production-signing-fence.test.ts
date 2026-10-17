@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { StateStore } from "../../src/state.js";
+import type { ApnError } from "../../src/errors.js";
+import { OperationService } from "../../src/operation-service.js";
 import { Permit2ProductionSigningFence } from "../../src/x402-permit2/production-signing-fence.js";
-import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
+import { foreignDirectTransfer, journalFixture } from "./x402-permit2-production-journal-fixture.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
 import { word } from "./x402-permit2-production-observer-fixture.js";
 async function setup(t: test.TestContext, sponsor = false) {
@@ -85,10 +87,17 @@ test("reserved observation cannot cross risk mutation and exposed exact self hol
 test("exact own exposed hold does not exclude a foreign direct-transfer conflict", async t => {
   const f = await setup(t), id = f.record.operationId;
   await f.journal.markSignatureRisk(id);
-  t.mock.method(StateStore.prototype, "listOperations", async () => [{ operationId: "e".repeat(64),
-    state: "unknown_finality", terminal: false, chainId: 43114, walletAddress: f.record.material.wallet.account }] as never);
+  const foreign = await foreignDirectTransfer(f.state, "owner", f.record.material.wallet.account, f.now());
   const result = await f.fence.check(id, "exposed");
   assert.equal(result.projection.outcome, "hold"); assert.equal(result.fact, null); assert.equal(f.batches.length, 0);
+  // The guard the fence calls names the foreign direct transfer itself, read from its record, not an unreadable one.
+  await assert.rejects(new OperationService(f.state).assertPermit2AccountAvailable((await f.journal.findOperation(id))!), (error: ApnError) =>
+    error.code === "APN_OPERATION_BLOCKED" && error.details?.blockingOperationId === foreign.operation.operationId &&
+    error.details?.blockingState === "unknown_finality" && error.details?.blockingNetwork === "evm:43114" &&
+    error.details?.blockingAccount === f.record.material.wallet.account.toLowerCase());
+  // Once the foreign transfer is final, the same exposed self hold is checked again: the hold came from the foreign record.
+  await foreign.settle();
+  assert.equal((await f.fence.check(id, "exposed")).projection.outcome, "checked");
 });
 for (const stage of ["before", "after"] as const) test(`whole signing fence deadline covers gated ${stage} metadata without late fact`, async t => {
   const f = await setup(t), id = f.record.operationId;
