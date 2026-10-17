@@ -18,7 +18,7 @@ const operation = option("--operation", "operation_id", ["64_lowercase_hex_chara
 
 export const JUPITER_COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["swap", "solana"], summary: "Solana guarded swaps.", kind: "group" },
-  { path: ["swap", "solana", "jupiter"], summary: "Jupiter V1 direct Whirlpool SOL to USDC; V2 Quantum remains blocked.", kind: "group" },
+  { path: ["swap", "solana", "jupiter"], summary: "Jupiter V1 direct Whirlpool SOL to USDC.", kind: "group" },
 ];
 
 export const JUPITER_COMMANDS: readonly CommandDefinition[] = [

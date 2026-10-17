@@ -1,5 +1,5 @@
 import type { SwapReceiptProof } from "./model.js";
-import type { UniswapTransactionEnvelope } from "./uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "./uniswap-v3/envelope.js";
 export interface UniswapReceiptEvidence {
     readonly transactionHash: `0x${string}`;
     readonly transaction: {

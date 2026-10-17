@@ -1,5 +1,5 @@
-import { JupiterHistoricalRetirementReader } from "./swap/jupiter-solana/historical-retirement-reader.js";
-import { historicalRetirementUsage } from "./swap/jupiter-solana/historical-retirement-record.js";
+import { JupiterHistoricalRetirementReader } from "./legacy/jupiter-historical-retirement/reader.js";
+import { historicalRetirementUsage } from "./legacy/jupiter-historical-retirement/record.js";
 import { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease } from "./metamask-native-journal.js";
 import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
 import { assertCleanup85GenericCapacityRelease, cleanup85NativeReservationMarker, sameCleanup85NativeMarker } from "./asset-usage-ledger-cleanup85-native.js";

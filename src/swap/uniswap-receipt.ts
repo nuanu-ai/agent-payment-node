@@ -2,7 +2,7 @@ import { encodeEventTopics, getAddress, parseAbi } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { SwapReceiptProof } from "./model.js";
-import type { UniswapTransactionEnvelope } from "./uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "./uniswap-v3/envelope.js";
 import { UNISWAP_ROUTER } from "./uniswap-pin.js";
 
 const TRANSFER = parseAbi(["event Transfer(address indexed from, address indexed to, uint256 value)"]);

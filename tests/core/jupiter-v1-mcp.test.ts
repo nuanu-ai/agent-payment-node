@@ -12,8 +12,8 @@ test("V1 MCP approval and execution return the exact real CLI handoff without co
   assert.equal(envelope.ok,false);assert.equal(envelope.error?.code,"APN_FOREGROUND_APPROVAL_REQUIRED");assert.equal(envelope.error?.details?.cli_handoff,`apn swap solana jupiter ${action} --operation ${"d".repeat(64)}`);assert.equal(envelope.error?.details?.foreground_auth,true);
  }assert.equal(secretReads,0);assert.equal(rpcReads,0);
 });
-test("V1 inventory reports its additive mechanism while retained V2 Quantum remains dormant",async t=>{
+test("V1 inventory reports the installed runtime and no V2 Quantum prototype",async t=>{
  const temp=await temporaryState();t.after(temp.cleanup);const server=createMcpServer({stateRoot:temp.root});const [ct,st]=InMemoryTransport.createLinkedPair();await server.connect(st);const client=new Client({name:"jupiter-v1-inventory",version:"1.0.0"});await client.connect(ct);t.after(async()=>{await client.close();await server.close();});
- const result=await client.callTool({name:"apn_swap_solana_jupiter_inventory",arguments:{}}),content=result.content[0];assert.ok(content?.type==="text");const envelope=JSON.parse(content.text) as OutputEnvelope;assert.equal(envelope.ok,true);const data=envelope.data as {ownerAdmission:{evaluated:boolean};execution:string;v1:{provenance:string;installed:boolean};v2Quantum:{signable:boolean;execution:string}};
- assert.equal(data.v1.provenance,"upgrade_authority");assert.equal(data.v1.installed,true);assert.equal(data.ownerAdmission.evaluated,false);assert.equal(data.execution,"foreground_cli_after_owner_admission");assert.equal(data.v2Quantum.signable,false);assert.equal(data.v2Quantum.execution,"dormant");
+ const result=await client.callTool({name:"apn_swap_solana_jupiter_inventory",arguments:{}}),content=result.content[0];assert.ok(content?.type==="text");const envelope=JSON.parse(content.text) as OutputEnvelope;assert.equal(envelope.ok,true);const data=envelope.data as {ownerAdmission:{evaluated:boolean};execution:string;v1:{provenance:string;installed:boolean}};
+ assert.equal(data.v1.provenance,"upgrade_authority");assert.equal(data.v1.installed,true);assert.equal(data.ownerAdmission.evaluated,false);assert.equal(data.execution,"foreground_cli_after_owner_admission");assert.equal(Object.hasOwn(data,"v2Quantum"),false);
 });

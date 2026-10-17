@@ -36,10 +36,7 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
-import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
-import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
-import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
@@ -104,9 +101,6 @@ export interface CoreDependencies {
     readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
     readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
     readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
-    readonly uniswap?: UniswapGuardedSwapBuilder;
-    readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-    readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.jupiter.quote";
     }>>;
@@ -187,9 +181,6 @@ export declare class RuntimeContext {
     readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
     readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
     readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
-    readonly uniswap?: UniswapGuardedSwapBuilder;
-    readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-    readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.jupiter.quote";
     }>>;
