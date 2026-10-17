@@ -1,4 +1,6 @@
 import { adoptCircleFundingExternalMint } from "./funding-external-adoption.js";
+import { findCircleFundingExternalMint, settleCircleFundingExternalMint, type CircleExternalMintNotice, type CircleFundingCommandResult } from "./funding-external-mint.js";
+import { CIRCLE_DISCOVERY_REQUEST_BUDGET } from "./external-discovery.js";
 import { CircleFundingExternalStore } from "./funding-external-store.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { types } from "node:util";
@@ -95,28 +97,32 @@ export class CircleFundingEvmService {
     }));
   }
   async status(id: string) { return publicCircle(await this.required(id)); }
-  async approveSource(id: string) { return this.run(id, approveCircleFundingSource); }
-  async approveMint(id: string) { return this.run(id, approveCircleFundingMint); }
-  async observe(id: string) { return this.run(id, observeCircleFunding); }
-  async refreshAttestation(id: string) { return this.run(id, refreshCircleFundingAttestation); }
-  async cleanup(id: string) { return this.run(id, cleanupCircleFunding); }
+  async approveSource(id: string): Promise<CircleFundingCommandResult> { return this.run(id, approveCircleFundingSource); }
+  async approveMint(id: string): Promise<CircleFundingCommandResult> { return this.run(id, approveCircleFundingMint); }
+  async observe(id: string): Promise<CircleFundingCommandResult> { return this.run(id, observeCircleFunding); }
+  async refreshAttestation(id: string): Promise<CircleFundingCommandResult> { return this.run(id, refreshCircleFundingAttestation); }
+  async cleanup(id: string): Promise<CircleFundingCommandResult> { return this.run(id, cleanupCircleFunding); }
   private async required(id: string) { const op = await this.repo.loadAny(id); if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Circle EVM operation was not found."); if (op.schemaVersion !== "apn.circle-v2-evm-operation.v2") circleBlocked("funding_operation_schema_required"); return snapshotCircleFundingOperation(op); }
-  private async run(id: string, action: (op: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts) => Promise<CircleFundingOperationV2>) {
-    const initial = await this.required(id); await this.state.initialize();
-    return this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
+  /** A mint someone else relayed, found during the command, is adopted after its locks are released (adoption takes its own). */
+  private async run(id: string, action: (op: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts) => Promise<CircleFundingOperationV2>): Promise<CircleFundingCommandResult> {
+    const initial = await this.required(id); await this.state.initialize(); const found: { notice: CircleExternalMintNotice | null } = { notice: null };
+    const result = await this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
       evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => this.usage.withPolicyLocks([initial.profile, initial.destinationProfile], async () => {
       let op = await this.required(id);
       if (action === approveCircleFundingMint || action === cleanupCircleFunding || action === refreshCircleFundingAttestation) await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op);
       if (action !== cleanupCircleFunding && op.usage.length === 0 && op.effects.every(e => e.phase === "prepared")) { op = advanceCircle(op, { usage: await this.usage.reserve(op) }, "interrupted_prepare_reserves_repaired", this.now()); await this.repo.saveFunding(op); }
       const scope: FundingRuntimeScope = { state: this.state, fingerprint: op.fingerprint, now: this.now, grants: new Map(), active: true };
-      return fundingRuntimeScope.run(scope, async () => { try { return await action(op, this.ports(op)); } finally { scope.active = false; scope.grants.clear(); } });
+      return fundingRuntimeScope.run(scope, async () => { try { return await action(op, this.ports(op, found)); } finally { scope.active = false; scope.grants.clear(); } });
     }));
+    return settleCircleFundingExternalMint(result, found.notice, hash => this.adoptExternalMint(id, hash));
   }
   private preflightDeployments(source: CircleRpc, destination: CircleRpc, chain: CircleDestinationChain) { return currentCircleDeployments(source, destination, chain); }
   private preflightAttesters(destination: CircleRpc, digest: string) { return readCircleAttesters(destination, digest); }
   private remotes(chain: CircleDestinationChain) {
     const route = circleRoute(chain), sourceUrl = this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
-    return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean"), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean") };
+    return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean"), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean"),
+      // External-mint discovery runs on its own client under its derived budget (P4), apart from the command's read plan.
+      discovery: () => new CircleRpc(destinationUrl, chain, this.https, CIRCLE_DISCOVERY_REQUEST_BUDGET, "lean") };
   }
   private async api(path: string) {
     const response = await this.https.request(`https://iris-api.circle.com${path}`, "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");
@@ -124,8 +130,8 @@ export class CircleFundingEvmService {
   }
   private async fee(funding: CircleFundingOperationV2["funding"]) { const value = await this.api(`/v2/burn/USDC/fees/3/${funding.destinationDomain}`); return quoteCircleFundingFee(funding, value, this.now(), this.now()); }
   private sourceAccount(a: import("./preflight.js").CircleAccountPreflight, owner: string, amount: string) { if (a.chainId !== 42161 || a.address !== owner || circleUint(a.usdcBalanceAtomic) < BigInt(amount) || circleUint(a.nativeBalanceAtomic) < 75_000_000_000_000n || circleUint(a.allowanceAtomic) !== 0n || circleUint(a.latestNonceAtomic) !== circleUint(a.pendingNonceAtomic)) circleBlocked("funding_source_account"); return { approvalRequired: true, nonceAtomic: circleUint(a.latestNonceAtomic).toString() }; }
-  private ports(initial: CircleFundingOperationV2): CircleFundingLifecyclePorts {
-    const { source, destination } = this.remotes(initial.destinationChain), route = circleRoute(initial.destinationChain);
+  private ports(initial: CircleFundingOperationV2, found: { notice: CircleExternalMintNotice | null }): CircleFundingLifecyclePorts {
+    const { source, destination, discovery } = this.remotes(initial.destinationChain), route = circleRoute(initial.destinationChain);
     // The operation's own signers; the validator binds them to `funding.sourceOwner` and `funding.gasPayer`.
     const owner = initial.sourceCustody.walletAddress, gasPayer = initial.destinationCustody.walletAddress;
     const rpc = (e: CircleEffect) => e.role === "mint" ? destination : source;
@@ -137,8 +143,11 @@ export class CircleFundingEvmService {
     // P1: a used CCTP nonce never becomes unused, so the current value plus the receipt's MessageReceived event proves consumption.
     const usedNonce = async (nonce: Hex) => String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [nonce], "latest"));
     // R4: the sealed bytes of an effect are sent at most once per command (a first broadcast counts).
-    const resent = new Set<string>();
-    return { now: this.now, messageNonceUsed: async op => { if (op.attestation === null) circleCorrupt("attestation_missing"); return await usedNonce(op.attestation.nonce) !== "0"; }, save: op => this.repo.saveFunding(op), authorizationDeadline: op => this.usage.authorizationDeadline(op),
+    const resent = new Set<string>(); let messageUsed = false;
+    return { now: this.now, save: op => this.repo.saveFunding(op), authorizationDeadline: op => this.usage.authorizationDeadline(op),
+      // P2: once seen used, the nonce is not read again in this command (it never becomes unused).
+      messageNonceUsed: async op => { if (op.attestation === null) circleCorrupt("attestation_missing"); return messageUsed ||= await usedNonce(op.attestation.nonce) !== "0"; },
+      externalMint: async op => { found.notice = await findCircleFundingExternalMint(snapshotCircleFundingOperation(op), source, discovery); },
       assertOwnerPolicyAndConflicts: async (op, role) => { await assertEvmNativeCustody(this.state, op.profile, op.sourceCustody); await assertEvmNativeCustody(this.state, op.destinationProfile, op.destinationCustody); await assertExclusiveEvmRawSigner(this.state, op.sourceCustody.walletAddress, op.profileHash); await assertExclusiveEvmRawSigner(this.state, op.destinationCustody.walletAddress, op.destinationProfileHash); await this.operations.assertCircleAccountsAvailable(op, true, role); await this.usage.confirm(op); },
       approve: async (input, role, deadline) => {
         const op = snapshotCircleFundingOperation(input);
@@ -185,9 +194,8 @@ export class CircleFundingEvmService {
         resend: async (input, effectInput, raw) => {
           const op = snapshotCircleFundingOperation(input), effect = snapshotCircleFundingEffect(op, effectInput), hash = effect.transactionHash;
           if (resent.has(effect.role) || hash === null || keccak256(raw) !== hash) return false; resent.add(effect.role);
+          // The lifecycle resends a mint only right after reading its issuer message unused in this command.
           await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op);
-          // A message someone else already minted would only revert this mint: leave it to external adoption.
-          if (effect.role === "mint" && (op.attestation === null || await usedNonce(op.attestation.nonce) !== "0")) return false;
           try { return circleHex(await rpc(effect).call("eth_sendRawTransaction", [raw], () => { if (keccak256(raw) !== hash) circleBlocked("sealed_broadcast_hash_changed"); }), 32) === hash; }
           catch (error) { if (error instanceof ApnError) return false; throw error; }
         },

@@ -3,6 +3,7 @@ import { type CircleDestinationChain } from "./catalog.js";
 import { type CircleAttestation } from "./protocol.js";
 import { type CircleOperationV1, type CircleRole, type CircleEnvelope } from "./operation-model.js";
 import { type CircleFundingBindingV2, type CircleFundingFeeV2 } from "./funding-binding.js";
+import type { CircleExternalMintNotice } from "./funding-external-mint.js";
 export interface CircleFundingOperationV2 extends Omit<CircleOperationV1, "schemaVersion" | "externalFulfillment" | "nonceRetirement" | "state"> {
     readonly schemaVersion: "apn.circle-v2-evm-operation.v2";
     readonly funding: CircleFundingBindingV2;
@@ -18,8 +19,13 @@ export declare function advanceCircleFundingOperation(op: CircleFundingOperation
  * both to the operation's own custody records. */
 export declare function validateCircleFundingEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, funding: CircleFundingBindingV2): void;
 export declare function validateCircleFundingOperation(value: unknown): CircleFundingOperationV2;
-export declare function publicCircleFundingOperation(op: CircleFundingOperationV2): {
+/** Journal reason of an owned mint closed because the destination consumed its issuer message without it. */
+export declare const CIRCLE_MINT_CLOSED_EXTERNAL_USE = "mint_closed_issuer_message_used_externally";
+/** `externalMint` is what this command learned about a mint someone else relayed. Not found by the bounded scan, the next
+ * action is the explicit adoption of a transaction the operator names; found or waiting for finality, observe again. */
+export declare function publicCircleFundingOperation(op: CircleFundingOperationV2, externalMint?: CircleExternalMintNotice | null): {
     next_actions: string[];
+    external_mint?: CircleExternalMintNotice;
     external_fulfillment?: CircleFundingExternalFulfillment;
     proof_class?: string;
     controlled_destination_native_atomic?: string;
@@ -83,6 +89,7 @@ export declare function publicKnownCircle(op: CircleKnownOperation): {
     integrity_hash: string;
 } | {
     next_actions: string[];
+    external_mint?: CircleExternalMintNotice;
     external_fulfillment?: CircleFundingExternalFulfillment;
     proof_class?: string;
     controlled_destination_native_atomic?: string;

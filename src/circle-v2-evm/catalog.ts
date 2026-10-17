@@ -13,11 +13,17 @@ export const CIRCLE_TOKEN_IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740b
  * `--beneficiary`, `--gross-atomic`, `--max-issuer-fee-atomic`, `--min-mint-atomic`). Adding a destination is table data. */
 export interface CircleRoute { readonly chainId: CircleDestinationChain; readonly domain: 16 | 11 | 15; readonly token: Address;
   /** `limit`: the chain bills the full signed gas limit (Monad); `used`: gas used. */
-  readonly gasBilling: "limit" | "used"; readonly destinationNativeCap: string; readonly rpcEnvironment: string; readonly rpcDefault: string; }
+  readonly gasBilling: "limit" | "used"; readonly destinationNativeCap: string; readonly rpcEnvironment: string; readonly rpcDefault: string;
+  /** Blocks one `eth_getLogs` window covers (fromBlock..toBlock inclusive) when finding an external mint. Measured on the
+   * default endpoint 2026-10-17: evm-rpc.sei-apis.com allows 2000 blocks, rpc.linea.build a span of 10000, rpc.monad.xyz a
+   * span of 100. An endpoint set through `rpcEnvironment` must accept the same window. */
+  readonly logRange: number; }
+/** Linea uses rpc.linea.build: linea-rpc.publicnode.com refuses transmitter logs older than about 128 blocks ("archive
+ * requests require a personal token"), so an external mint could not be found there. */
 export const CIRCLE_ROUTES: Readonly<Record<CircleDestinationChain, CircleRoute>> = Object.freeze({
-  1329: { chainId: 1329, domain: 16, token: getAddress("0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"), gasBilling: "used", destinationNativeCap: "50000000000000000", rpcEnvironment: "APN_SEI_RPC_URL", rpcDefault: "https://evm-rpc.sei-apis.com" },
-  59144: { chainId: 59144, domain: 11, token: getAddress("0x176211869cA2b568f2A7D4EE941E073a821EE1ff"), gasBilling: "used", destinationNativeCap: "100000000000000", rpcEnvironment: "APN_LINEA_RPC_URL", rpcDefault: "https://linea-rpc.publicnode.com" },
-  143: { chainId: 143, domain: 15, token: getAddress("0x754704Bc059F8C67012fEd69BC8A327a5aafb603"), gasBilling: "limit", destinationNativeCap: "100000000000000000", rpcEnvironment: "APN_MONAD_RPC_URL", rpcDefault: "https://rpc.monad.xyz" },
+  1329: { chainId: 1329, domain: 16, token: getAddress("0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"), gasBilling: "used", destinationNativeCap: "50000000000000000", rpcEnvironment: "APN_SEI_RPC_URL", rpcDefault: "https://evm-rpc.sei-apis.com", logRange: 2000 },
+  59144: { chainId: 59144, domain: 11, token: getAddress("0x176211869cA2b568f2A7D4EE941E073a821EE1ff"), gasBilling: "used", destinationNativeCap: "100000000000000", rpcEnvironment: "APN_LINEA_RPC_URL", rpcDefault: "https://rpc.linea.build", logRange: 10000 },
+  143: { chainId: 143, domain: 15, token: getAddress("0x754704Bc059F8C67012fEd69BC8A327a5aafb603"), gasBilling: "limit", destinationNativeCap: "100000000000000000", rpcEnvironment: "APN_MONAD_RPC_URL", rpcDefault: "https://rpc.monad.xyz", logRange: 100 },
 });
 export function isCircleDestinationChain(chain: unknown): chain is CircleDestinationChain {
   return typeof chain === "number" && Object.hasOwn(CIRCLE_ROUTES, String(chain));

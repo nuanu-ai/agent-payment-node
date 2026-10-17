@@ -147,7 +147,12 @@ export function validateCircleFundingOperation(value) {
         circleCorrupt("snapshot_binding");
     return op;
 }
-export function publicCircleFundingOperation(op) {
+/** Journal reason of an owned mint closed because the destination consumed its issuer message without it. */
+export const CIRCLE_MINT_CLOSED_EXTERNAL_USE = "mint_closed_issuer_message_used_externally";
+/** `externalMint` is what this command learned about a mint someone else relayed. Not found by the bounded scan, the next
+ * action is the explicit adoption of a transaction the operator names; found or waiting for finality, observe again. */
+export function publicCircleFundingOperation(op, externalMint) {
+    const usedExternally = externalMint !== undefined && externalMint !== null || op.transitions.some(t => t.reason === CIRCLE_MINT_CLOSED_EXTERNAL_USE);
     return { operation_id: op.operationId, kind: "circle_route", state: op.state, terminal: op.terminal,
         source_profile: op.profile, destination_profile: op.destinationProfile, destination_chain: op.destinationChain,
         amount_atomic: op.funding.amountAtomic, minimum_output_atomic: op.funding.minMintAtomic, maximum_issuer_fee_atomic: op.funding.maxFeeAtomic, recipient: op.funding.recipient,
@@ -155,9 +160,10 @@ export function publicCircleFundingOperation(op) {
         source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? op.externalFulfillment?.destinationReceipt.finalityTag ?? null,
         residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash,
         ...(op.externalFulfillment === undefined ? {} : { external_fulfillment: op.externalFulfillment, proof_class: "circle_funding_external_mint_fulfillment", controlled_destination_native_atomic: "0", external_destination_fee_payer: op.externalFulfillment.caller }),
-        next_actions: op.terminal ? [] : op.effects.some(e => e.role === "mint" && e.phase === "abandoned_unsent")
-            ? [`apn circle evm approve-mint --operation ${op.operationId}`]
-            : op.effects.some(e => e.role === "cleanup" && e.phase === "abandoned_unsent") ? [`apn circle evm cleanup --operation ${op.operationId}`] : [`apn circle evm observe --operation ${op.operationId}`] };
+        ...(externalMint === undefined || externalMint === null ? {} : { external_mint: externalMint }),
+        next_actions: op.terminal ? [] : externalMint?.status === "not_found" ? [`apn circle evm adopt-external-mint --operation ${op.operationId} --transaction-hash <transaction-hash>`]
+            : !usedExternally && op.effects.some(e => e.role === "mint" && e.phase === "abandoned_unsent") ? [`apn circle evm approve-mint --operation ${op.operationId}`]
+                : op.effects.some(e => e.role === "cleanup" && e.phase === "abandoned_unsent") ? [`apn circle evm cleanup --operation ${op.operationId}`] : [`apn circle evm observe --operation ${op.operationId}`] };
 }
 function shape(value, keys) { return isPlainRecord(value) && exactKeys(value, keys); }
 export function validateKnownCircle(value) {
