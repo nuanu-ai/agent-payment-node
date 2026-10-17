@@ -72,7 +72,7 @@ export class UniswapTokenUsage {
     if (current === null) corrupt("Uniswap token usage reservation is missing.");
     this.assert(op, current.reservationId, current.policyDigest, current.amountAtomic, current.rail);
     if (current.state === target || target === "submitted" && current.state === "unknown_finality") return { reservationId: expected, state: current.state };
-    if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state)) corrupt("Uniswap token usage reached a conflicting terminal state.");
+    if (["finalized", "failed_before_effect", "failed_confirmed_revert", "released_unsubmitted"].includes(current.state)) corrupt("Uniswap token usage reached a conflicting terminal state.");
     const move = async (state: Target, terminal = false) => {
       current = await this.ledger.transition({ ...identity, reservationId: expected, policyDigest: op.policyDigest, state, now: this.clock.now(),
         ...(terminal ? { outcomeDigest: domainHash("apn.uniswap-token-usage-outcome.v1", canonicalJson({ operationId: op.operationId,
@@ -80,6 +80,12 @@ export class UniswapTokenUsage {
     };
     if (target === "unknown_finality") { if (current.state === "reserved") await move("submitted"); if (current.state === "submitted") await move(target); }
     else if (target === "failed_confirmed_revert") { if (current.state === "reserved") await move("submitted"); await move(target, true); }
+    // A swap proven never to land (R4): its exposed hold is released as unsubmitted, nothing of it was spent.
+    else if (target === "released_unsubmitted") {
+      if (op.swapAttempt?.transactionHash == null || current.state === "reserved") corrupt("Uniswap token usage cannot release an unsent swap as unsubmitted.");
+      if (current.state === "submitted") await move("unknown_finality");
+      await move(target, true);
+    }
     else if (target === "failed_before_effect") {
       if (current.state !== "reserved" || op.swapAttempt !== null ||
           op.approvalAttempt?.transactionHash != null && (op.phase !== "cleaned" || op.cleanupEvidence?.kind !== "expired_approval_no_swap"))

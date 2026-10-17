@@ -20,8 +20,10 @@ export class UniswapTokenObserver {
     ]);
     if (evmRpcQuantity(primary[0]) !== 1n || evmRpcQuantity(receiptRows[0]) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token observer requires Ethereum chain 1.");
     const rawTx = primary[1], rawReceipt = receiptRows[1];
+    // Null means the node knows neither the transaction nor a receipt (the only case an R4 never-lands check reads on);
+    // a known transaction that is not yet in a safe block is pending.
     if (rawTx === null && rawReceipt === null) return null;
-    if (rawTx === null || rawReceipt === null) { if (rawReceipt === null) return null; blocked("Receipt exists without its transaction.", "uniswap_token_receipt_conflict"); }
+    if (rawTx === null || rawReceipt === null) { if (rawReceipt === null) return pending(transactionHash); blocked("Receipt exists without its transaction.", "uniswap_token_receipt_conflict"); }
     const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt), hash = evmRpcHex(transactionHash, 32), attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
     if (attempt === null) corrupt("Uniswap token observation has no attempt.");
     if (evmRpcHex(tx.hash, 32) !== hash || evmRpcHex(receipt.transactionHash, 32) !== hash) blocked("Transaction hash evidence conflicts.", "uniswap_token_transaction_conflict");
@@ -35,7 +37,7 @@ export class UniswapTokenObserver {
       { method: "eth_getBlockByNumber", params: ["safe", false], cachePolicy: "none", decoder: tokenBlock },
     ]), block = decodedBlock(rawBlock), safe = decodedBlock(rawSafe);
     if (block.hash !== blockHash) blocked("Receipt block is no longer canonical.", "uniswap_token_reorg_conflict");
-    if (BigInt(safe.number) < blockNumber) return null;
+    if (BigInt(safe.number) < blockNumber) return pending(hash);
     await recheck(rpc, block, safe);
     const status = evmRpcQuantity(receipt.status), gasUsed = evmRpcQuantity(receipt.gasUsed), effectivePrice = evmRpcQuantity(receipt.effectiveGasPrice),
       cap = kind === "approval" ? op.approvalGas : kind === "swap" ? op.swapGas : op.cleanupGas;
@@ -60,6 +62,9 @@ export class UniswapTokenObserver {
     return { status: "success", transactionHash: hash, gasDebitWei, allowanceAtomic: allowance.toString(),
       inputDebitAtomic: (inputBefore - inputAfter).toString(), outputCreditAtomic: (outputAfter - outputBefore).toString() };
   }
+}
+function pending(transactionHash: string): TokenEffectObservation {
+  return { status: "pending", transactionHash: evmRpcHex(transactionHash, 32), gasDebitWei: "0", allowanceAtomic: "0" };
 }
 function allowanceRequest(op: UniswapTokenOperation, tag: Hex) { const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account as Hex, op.route.router] });
   return { method: "eth_call", params: [{ to: op.route.inputToken, data }, tag], cachePolicy: "none" as const, decoder: allowanceDecoder }; }

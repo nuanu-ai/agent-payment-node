@@ -4,6 +4,8 @@ import { sanitizeUniswapTokenFailureField, tokenAttempt, transitionUniswapToken,
 export class UniswapTokenExecution {
     journal;
     ports;
+    /** Effects broadcast by this invocation: their nonce cannot be finalized past yet, so no never-lands read is spent on them. */
+    sentNow = new Set();
     constructor(journal, ports) {
         this.journal = journal;
         this.ports = ports;
@@ -20,7 +22,7 @@ export class UniswapTokenExecution {
     }
     async execute(id) {
         let op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id)));
-        if (["observed", "cleaned", "cleanup_required"].includes(op.phase))
+        if (["observed", "cleaned", "cleanup_required", "abandoned_unknown"].includes(op.phase))
             return op;
         if (expired(op, this.ports.now()) && !approvalActive(op.phase) && !swapActive(op.phase) && !cleanupActive(op.phase)) {
             if (op.phase === "approval_observed" && op.approvalAttempt?.transactionHash != null)
@@ -70,6 +72,14 @@ export class UniswapTokenExecution {
             blocked("Token swap cleanup is not required.", "uniswap_cleanup_phase");
         await this.ports.foregroundCleanup(op);
         if (await this.ports.currentAllowance(op) === "0") {
+            // Every attempt is a bound transaction that landed or was retired: the residual allowance is already gone.
+            const attempts = [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].filter((row) => row !== null);
+            if ((attempts.length > 0 || (op.retiredEffects ?? []).length > 0) && attempts.every((row) => row.transactionHash !== null)) {
+                return await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "zero_allowance_after_effect", cleanupEvidence: {
+                        schemaVersion: "apn.uniswap-token-zero-allowance-evidence.v1", kind: "zero_allowance_after_effect", observedAllowanceAtomic: "0",
+                        observedAt: this.ports.now().toISOString()
+                    }, ...usagePatch(await this.ports.currentUsage(op)) }, this.ports.now()));
+            }
             await this.assertNoEffect(op);
             op = await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: "zero_allowance_no_effect",
                 cleanupEvidence: cleanupEvidence("current_allowance", this.ports.now()) }, this.ports.now()));
@@ -136,6 +146,7 @@ export class UniswapTokenExecution {
     }
     async submit(op, kind) {
         this.ports.reserveSendCapacity?.();
+        this.sentNow.add(kind);
         let result;
         try {
             result = await this.ports.send(op, kind);
@@ -151,7 +162,9 @@ export class UniswapTokenExecution {
         if (hash === null || hash === undefined)
             return op;
         const result = await this.ports.observe(op, "approval", hash);
-        if (result === null || result.status === "pending")
+        if (result === null)
+            return await this.retireIfNeverLanded(op, "approval");
+        if (result.status === "pending")
             return op;
         const native = debit(op, result.gasDebitWei);
         if (result.status === "reverted" || result.allowanceAtomic !== op.route.amountIn)
@@ -182,7 +195,9 @@ export class UniswapTokenExecution {
         if (hash === null || hash === undefined)
             return op;
         const result = await this.ports.observe(op, "swap", hash);
-        if (result === null || result.status === "pending")
+        if (result === null)
+            return await this.retireIfNeverLanded(op, "swap");
+        if (result.status === "pending")
             return op;
         const nativeDebitWei = debit(op, result.gasDebitWei);
         if (result.status === "reverted") {
@@ -203,12 +218,55 @@ export class UniswapTokenExecution {
         if (hash === null || hash === undefined)
             return op;
         const result = await this.ports.observe(op, "cleanup", hash);
-        if (result === null || result.status === "pending")
+        if (result === null)
+            return await this.retireIfNeverLanded(op, "cleanup");
+        if (result.status === "pending")
             return op;
-        const native = debit(op, result.gasDebitWei);
-        if (result.status !== "success" || result.allowanceAtomic !== "0")
-            return await this.persist(transitionUniswapToken(op, "cleanup_unknown_finality", { accumulatedNativeDebitWei: native, cleanupReason: "cleanup_reverted_or_mismatch" }, this.ports.now()));
+        // A record a released version left in cleanup_unknown_finality already counted this landed cleanup's gas.
+        const native = op.cleanupReason === "cleanup_reverted_or_mismatch" ? op.accumulatedNativeDebitWei : debit(op, result.gasDebitWei);
+        if (result.status !== "success" || result.allowanceAtomic !== "0") {
+            const reverted = result.status !== "success";
+            return await this.rearmCleanup(op, this.retired(op, "cleanup", reverted ? "reverted" : "landed_allowance_nonzero", null), reverted ? "cleanup_reverted" : "cleanup_allowance_nonzero", native);
+        }
         return await this.cleaned(op, native);
+    }
+    /**
+     * R4 for a bound attempt the observer cannot find: once the finalized nonce passed it and the node knows neither its
+     * transaction nor a receipt, it can never land. An approval that never landed leaves the swap with no effect (cleaned
+     * when the allowance is still zero); a swap that never landed releases its hold as unsubmitted and keeps the approval
+     * for the owner's cleanup; a cleanup that never landed is re-armed for a fresh, consented one. Nothing is re-signed here.
+     */
+    async retireIfNeverLanded(op, kind) {
+        const attempt = attemptOf(op, kind);
+        if (attempt.transactionHash === null || this.ports.neverLands === undefined || this.sentNow.has(kind))
+            return op;
+        const check = await this.ports.neverLands(op, kind, attempt);
+        if (!check.neverLands)
+            return op;
+        const retired = this.retired(op, kind, "never_landed", check.finalizedNonce.toString()), now = this.ports.now();
+        if (kind === "cleanup")
+            return await this.rearmCleanup(op, retired, "cleanup_never_landed", op.accumulatedNativeDebitWei);
+        if (kind === "swap") {
+            const usage = await this.ports.followUsage(op, "released_unsubmitted");
+            return await this.persist(transitionUniswapToken(op, "cleanup_required", { swapAttempt: null, retiredEffects: retired, cleanupReason: "swap_never_landed",
+                ...usagePatch(usage) }, now));
+        }
+        const allowance = await this.ports.currentAllowance(op);
+        op = await this.persist(transitionUniswapToken(op, "cleanup_required", { approvalAttempt: null, retiredEffects: retired, cleanupReason: "approval_never_landed" }, now));
+        if (allowance !== "0" || effectHash(op))
+            return op;
+        op = await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: "zero_allowance_no_effect",
+            cleanupEvidence: cleanupEvidence("current_allowance", now) }, now));
+        return await this.cleaned(op);
+    }
+    /** The cleanup slot is freed for a new round; a landed cleanup's gas is counted and the cap grows by one more cleanup. */
+    async rearmCleanup(op, retiredEffects, reason, native) {
+        const needed = BigInt(native) + BigInt(op.cleanupGas.gasLimit) * BigInt(op.cleanupGas.maxFeePerGas);
+        return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupAttempt: null, retiredEffects, cleanupReason: reason,
+            accumulatedNativeDebitWei: native, maximumNativeDebitWei: needed > BigInt(op.maximumNativeDebitWei) ? needed.toString() : op.maximumNativeDebitWei }, this.ports.now()));
+    }
+    retired(op, kind, reason, finalizedNonceAtomic) {
+        return [...op.retiredEffects ?? [], { kind, attempt: attemptOf(op, kind), reason, finalizedNonceAtomic, observedAt: this.ports.now().toISOString() }];
     }
     async cleaned(op, native = op.accumulatedNativeDebitWei) {
         const noEffect = !effectHash(op);

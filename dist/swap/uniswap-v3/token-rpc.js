@@ -290,4 +290,11 @@ function capabilityResponse(body) {
         return false;
     }
 }
+/** The finalized-tag reads of an R4 proof through the token lane's own pool and budget: one read per batch, receipts on their route. */
+export function tokenFinalizedRead(call) {
+    return { async call(method, params) {
+            const [value] = await tokenBatch(call, method === "eth_getTransactionReceipt" ? "receipt" : "primary", [{ method, params, cachePolicy: method === "eth_chainId" ? "immutable" : "none", decoder: (row) => row }]);
+            return value;
+        } };
+}
 //# sourceMappingURL=token-rpc.js.map

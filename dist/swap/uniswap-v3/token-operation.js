@@ -34,7 +34,8 @@ export function validateUniswapTokenOperation(value) {
         "usageReservationId", "usageState", "createdAt", "updatedAt",
         "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"];
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
-        !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure"] : common))
+        !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
+            ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -44,7 +45,8 @@ export function validateUniswapTokenOperation(value) {
         corrupt("Uniswap token operation binding is invalid.");
     for (const gas of [op.approvalGas, op.swapGas, op.cleanupGas])
         validateGas(gas);
-    const usageStates = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
+    const usageStates = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert",
+        "released_unsubmitted"];
     if ((op.usageReservationId === null) !== (op.usageState === null) || op.usageReservationId !== null && !/^[a-f0-9]{64}$/u.test(op.usageReservationId) ||
         op.usageState !== null && !usageStates.includes(op.usageState) || op.phase !== "prepared" && op.usageReservationId === null &&
         !(op.phase === "cleaned" && op.cleanupEvidence?.kind === "zero_allowance_no_effect" && op.usageState === null &&
@@ -56,6 +58,8 @@ export function validateUniswapTokenOperation(value) {
     if (op.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA) {
         validateCleanupEvidence(op.cleanupEvidence);
         validateFailureDiagnostic(op.preSignFailure);
+        if (op.retiredEffects !== undefined)
+            validateRetired(op.retiredEffects, op.updatedAt);
     }
     const evidence = op.cleanupEvidence ?? null, failure = op.preSignFailure ?? null;
     const approvalStarted = ["approval_submission_started", "approval_submitted", "approval_unknown_finality"].includes(op.phase) || op.approvalAttempt !== null, swapStarted = ["submission_started", "submitted", "unknown_finality", "observed"].includes(op.phase), cleanupStarted = ["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase) || op.phase === "cleaned" && evidence === null;
@@ -72,7 +76,12 @@ export function validateUniswapTokenOperation(value) {
         evidence.observedAllowanceAtomic !== route.amountIn || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
         Date.parse(evidence.observedAt) < route.deadline * 1000 || evidence.observedAt > op.updatedAt))
         corrupt("Uniswap token expired approval evidence is invalid.");
-    if (failure !== null && op.phase !== "cleanup_required" && op.phase !== "cleaned")
+    if (evidence?.kind === "zero_allowance_after_effect" && (op.phase !== "cleaned" || op.cleanupReason !== "zero_allowance_after_effect" ||
+        !hashes && (op.retiredEffects ?? []).length === 0 || evidence.observedAt > op.updatedAt))
+        corrupt("Uniswap token zero allowance evidence is invalid.");
+    if (op.usageState === "released_unsubmitted" && !(op.retiredEffects ?? []).some((row) => row.kind === "swap" && row.reason === "never_landed"))
+        corrupt("Uniswap token usage release has no never-landed swap.");
+    if (failure !== null && op.phase !== "cleanup_required" && op.phase !== "cleaned" && op.phase !== "abandoned_unknown")
         corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
@@ -81,10 +90,14 @@ export function validateUniswapTokenOperation(value) {
     return op;
 }
 /** Every phase of a Uniswap token swap; `observed` and `cleaned` are its outcomes (nothing of it signs, sends or lands after them). */
-export const UNISWAP_TOKEN_TERMINAL_PHASES = ["observed", "cleaned"];
+export const UNISWAP_TOKEN_TERMINAL_PHASES = ["observed", "cleaned", "abandoned_unknown"];
 export const UNISWAP_TOKEN_PHASES = ["prepared", "approved", "approval_submission_started", "approval_submitted", "approval_unknown_finality",
     "approval_observed", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started",
-    "cleanup_submitted", "cleanup_unknown_finality", "cleaned"];
+    "cleanup_submitted", "cleanup_unknown_finality", "cleaned", "abandoned_unknown"];
+/** The round of an effect slot: how many attempts of that kind were retired before it. Round 0 keeps the original keys. */
+export function tokenEffectRound(op, kind) {
+    return (op.retiredEffects ?? []).filter((row) => row.kind === kind).length;
+}
 export class UniswapTokenJournal extends SecureStateStore {
     async save(value) {
         const op = validateUniswapTokenOperation(value);
@@ -129,9 +142,32 @@ function attempt(v) {
         corrupt("Uniswap token attempt is invalid.");
     uint(v.nonce);
 }
+function validateRetired(rows, updatedAt) {
+    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 8)
+        corrupt("Uniswap token retired effects are invalid.");
+    for (const value of rows) {
+        if (!isPlainRecord(value) || !exactKeys(value, ["kind", "attempt", "reason", "finalizedNonceAtomic", "observedAt"]))
+            corrupt("Uniswap token retired effect is invalid.");
+        const row = value;
+        if (!["approval", "swap", "cleanup"].includes(row.kind) || !["never_landed", "reverted", "landed_allowance_nonzero"].includes(row.reason) ||
+            !canonicalInstant(row.observedAt) || row.observedAt > updatedAt)
+            corrupt("Uniswap token retired effect is invalid.");
+        attempt(row.attempt);
+        if (row.attempt.transactionHash === null || (row.reason === "never_landed"
+            ? typeof row.finalizedNonceAtomic !== "string" || uint(row.finalizedNonceAtomic) <= uint(row.attempt.nonce)
+            : row.kind !== "cleanup" || row.finalizedNonceAtomic !== null))
+            corrupt("Uniswap token retired effect is invalid.");
+    }
+}
 function validateCleanupEvidence(v) {
     if (v === null)
         return;
+    if (isPlainRecord(v) && v.kind === "zero_allowance_after_effect") {
+        if (!exactKeys(v, ["schemaVersion", "kind", "observedAllowanceAtomic", "observedAt"]) || v.schemaVersion !== "apn.uniswap-token-zero-allowance-evidence.v1" ||
+            v.observedAllowanceAtomic !== "0" || !canonicalInstant(v.observedAt))
+            corrupt("Uniswap token zero allowance evidence is invalid.");
+        return;
+    }
     if (isPlainRecord(v) && v.kind === "expired_approval_no_swap") {
         if (!exactKeys(v, ["schemaVersion", "kind", "approvalTransactionHash", "observedAllowanceAtomic", "observedAt"]) ||
             v.schemaVersion !== "apn.uniswap-token-expired-approval-evidence.v1" || !/^0x[a-f0-9]{64}$/u.test(v.approvalTransactionHash) ||

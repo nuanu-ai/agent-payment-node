@@ -1,7 +1,7 @@
 import type { Hex } from "viem";
 import { SecureStateStore } from "../../secure-state-store.js";
 import type { TokenEffectKind } from "./token-execution.js";
-import type { UniswapTokenOperation } from "./token-operation.js";
+import { type UniswapTokenOperation } from "./token-operation.js";
 export type TokenEffectPhase = "sealed" | "send_started" | "send_accepted" | "send_ambiguous";
 export interface TokenSignedEffect {
     readonly schemaVersion: "apn.uniswap-token-effect.v1" | "apn.uniswap-token-effect.v2";
@@ -23,5 +23,6 @@ export declare class UniswapTokenEffectJournal extends SecureStateStore {
     markStarted(op: UniswapTokenOperation, kind: TokenEffectKind, now: Date): Promise<TokenSignedEffect>;
     markOutcome(op: UniswapTokenOperation, kind: TokenEffectKind, phase: "send_accepted" | "send_ambiguous", now: Date): Promise<TokenSignedEffect>;
     private move;
+    /** Round 0 keeps the original file; a re-armed cleanup (round n) seals its own effect beside it. */
     private path;
 }

@@ -25,7 +25,7 @@ async function fixture(root: string, kind: TokenEffectKind = "approval", hash: s
   const counts = { wrapping: 0, custody: 0, send: 0, sign: 0, nonce: 0, foreground: 0, finalized: 0, observations: 0 }, forbidden = async (): Promise<never> => { counts.custody++; throw new Error("custody forbidden"); };
   const wrapping = { load: async () => { counts.wrapping++; throw new Error("key forbidden"); }, create: async () => { counts.wrapping++; throw new Error("key forbidden"); } };
   const custody = new UniswapTokenCustody(new StateStore(root), wrapping, async () => { throw new Error("RPC forbidden in binding"); }, () => NOW);
-  let usage: "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert" = "reserved", success = false;
+  let usage: "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert" | "released_unsubmitted" = "reserved", success = false;
   const ports: UniswapTokenExecutionPorts = { now: () => NOW, foregroundApprove: async () => { counts.foreground++; throw new Error("foreground forbidden"); }, foregroundCleanup: forbidden,
     withAccountLock: forbidden, allocateNonce: async () => { counts.nonce++; throw new Error("nonce forbidden"); }, currentAllowance: forbidden, releaseNonce: forbidden, commitNonce: forbidden,
     guard: forbidden, revalidate: forbidden, reserveUsage: forbidden, currentUsage: async () => ({ reservationId: "d".repeat(64), state: usage }),
@@ -101,6 +101,8 @@ test("installed factory status binds public journal with zero wallet reads or wr
   const runtime = createUniswapTokenRuntime({ state: new StateStore(temp.root), clock: { now: () => NOW }, foreground: "refuse",
     wrapping: { load: async () => { wrappingLoads++; throw new Error("key forbidden"); }, create: async () => { throw new Error("key creation forbidden"); } },
     call: async (method, params) => { rpcReads++; if (method === "eth_chainId") return "0x1";
+      // An unknown transaction also reads the account's finalized nonce once (R4): not past, so the attempt stays open.
+      if (method === "eth_getTransactionCount") { assert.equal(params[1], "finalized"); return "0x0"; }
       assert.ok(["eth_getTransactionByHash", "eth_getTransactionReceipt"].includes(method)); assert.equal(params[0], HASH); return null; } });
   await runtime.status(f.op.operationId); await runtime.execute(f.op.operationId);
   assert.ok(rpcReads > 0); assert.equal(walletReads, 0); assert.equal(wrappingLoads, 0);
