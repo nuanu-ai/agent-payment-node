@@ -12,7 +12,8 @@ import { SavedUniswapQuoteStore } from "./material.js";
 import { scalarUniswapRpcCall } from "./native-rpc.js";
 import { ETHEREUM_WBTC, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_MECHANISM_PIN, verifyUniswapWbtcCodePins, verifyUniswapWbtcMutablePins, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY } from "./pins.js";
 import { swapMechanismDigest } from "../pin.js";
-import { TtyUniswapSwapApproval } from "./tty.js";
+import { uniswapApprovalScreen } from "./tty.js";
+import { TtyGuardedSwapApproval } from "../tty-consent.js";
 /** Only the foreground CLI approve command receives a terminal; every other surface refuses consent outright. */
 export const REFUSING_SWAP_APPROVAL = {
     async approve() {
@@ -46,7 +47,7 @@ function createRouteRuntime(options, wbtc = false) {
     const execution = new UniswapEthereumExecutionDriver({ core: new GuardedSwapService(operations, usage),
         protocolRegistry, admission, guard: new UniswapExecutionGuard(executionCall, clock, options.verifySendPins),
         bindings: new UniswapExecutionBindingStore(root), signer, sender, observer, effects, clock });
-    const foregroundApproval = options.foreground === "tty" ? new TtyUniswapSwapApproval(quotes, clock, options.tty) : options.foreground;
+    const foregroundApproval = options.foreground === "tty" ? new TtyGuardedSwapApproval("uniswap", intent => uniswapApprovalScreen(quotes, intent), clock, options.tty) : options.foreground;
     return new GuardedSwapRuntime({ chain: "eip155:1", builder: new KeylessUniswapQuoteBuilder(call, quotes, options.verifyPins),
         policy: options.policy, clock, protocolRegistry, usage, operations, ownerAdmission: admission,
         foregroundApproval, execution, approvals: new GuardedSwapApprovalRepository(root), rpc: { call }, effectStore: effects, signer, sender,
