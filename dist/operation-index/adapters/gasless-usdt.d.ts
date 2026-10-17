@@ -1,3 +1,4 @@
+import { ApnError } from "../../errors.js";
 import { type UsdtExecutionRecord } from "../../gasless-usdt/execution-journal.js";
 import { type OperationFamilyAdapter } from "../adapter.js";
 /** Gasless USDT signs on Ethereum with the owner's EOA, the shared EntryPoint and nonce key 0. */
@@ -8,3 +9,8 @@ export declare const GASLESS_USDT_CHAIN_ID = 1;
  * Its profile hash is the allowlist overlay's, as the execution journal stores it.
  */
 export declare const gaslessUsdtAdapter: OperationFamilyAdapter<UsdtExecutionRecord>;
+/**
+ * A bound preparation that never executed holds nothing and is not indexed (its execution takes the same ID). The
+ * generic commands answer it with its own status command, under the profile hash its bound journal is filed by.
+ */
+export declare function unexecutedUsdtPreparation(root: string, operationId: string): Promise<ApnError | null>;

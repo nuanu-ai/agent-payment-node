@@ -250,37 +250,6 @@ export class StateStore extends SecureStateStore {
         await this.ensureDirectory(join("x402-operations", operation.profileHash));
         await this.writeJson(path, operation);
     }
-    async listX402Operations(profileHash) {
-        stateIdentifier(profileHash, "x402 profile hash");
-        const directory = join("x402-operations", profileHash);
-        const entries = await this.readDirectory(directory);
-        const operations = [];
-        for (const entry of entries) {
-            if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
-                stateSecurity("x402 operations directory contains an unsafe entry.");
-            }
-            const value = await this.readJson(join(directory, entry.name));
-            if (value === null)
-                stateCorrupt("x402 operation disappeared during validation.");
-            if (PROVIDER_X402_OPERATION_SCHEMAS.has(storedSchema(value)))
-                continue;
-            const operation = validateX402Operation(value);
-            const operationId = entry.name.slice(0, -".json".length);
-            if (operation.profileHash !== profileHash || operation.operationId !== operationId) {
-                stateCorrupt("x402 operation path binding is invalid.");
-            }
-            await validateX402TerminalGraph((path) => this.readJson(path), operation);
-            operations.push(operation);
-        }
-        return operations;
-    }
-    async listAllX402Operations() {
-        const profiles = await this.operationProfiles("x402-operations");
-        const operations = [];
-        for (const profileHash of profiles)
-            operations.push(...await this.listX402Operations(profileHash));
-        return operations;
-    }
     async loadX402Result(profileHash, operationId) {
         stateIdentifier(profileHash, "x402 profile hash");
         stateIdentifier(operationId, "x402 operation ID");

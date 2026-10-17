@@ -6,7 +6,6 @@ export declare class RailOperationRepository extends SecureStateStore {
     loadOperation(profileHash: string, operationId: string): Promise<RailOperationRecord | null>;
     findOperation(operationId: string): Promise<RailOperationRecord | null>;
     listOperations(profileHash: string): Promise<readonly RailOperationRecord[]>;
-    listAllOperations(): Promise<readonly RailOperationRecord[]>;
     writeOperation(operation: RailOperationRecord): Promise<void>;
     /** The operation is the only record written; its receipt is derived from it on read. */
     persist(operation: RailOperationRecord): Promise<void>;

@@ -32,23 +32,31 @@ export const swapAdapter = {
     // A marked swap whose outcome no chain proof can settle has the owner exit (R4); the family refuses every other case.
     abandon: async (context, record) => await (await import("../../swap/abandon.js")).abandonSwapOperation(context, record.operationId),
     commands: { status: OPERATION_STATUS, resume: OPERATION_STATUS, exit: OPERATION_ABANDON },
+    runtimeCommand: laneStatusCommand,
 };
 /** The lane that owns a swap, chosen by its mechanism as `abandonSwapOperation` chooses it. */
-async function laneStatus(context, record) {
-    const operationId = record.operationId, digest = record.mechanismDigest, chain = record.quote.sourceAsset.chain;
-    if ((await import("../../legacy/orca-stable/mechanism.js")).isOrcaStableGuardedMechanismDigest(digest)) {
-        return await (await import("../../swap/orca-solana/command-service.js")).executeOrcaCommand({ command: "swap.orca.stable-status", operationId }, context);
-    }
-    if ((await import("../../swap/orca-solana/pools.js")).isOrcaKeylessMechanismDigest(digest)) {
-        return await (await import("../../swap/orca-solana/command-service.js")).executeOrcaCommand({ command: "swap.orca.status", operationId }, context);
-    }
+async function laneStatusCommand(record) {
+    const digest = record.mechanismDigest;
+    if ((await import("../../legacy/orca-stable/mechanism.js")).isOrcaStableGuardedMechanismDigest(digest))
+        return "swap.orca.stable-status";
+    if ((await import("../../swap/orca-solana/pools.js")).isOrcaKeylessMechanismDigest(digest))
+        return "swap.orca.status";
     const { swapMechanismDigest } = await import("../../swap/pin.js"), { JUPITER_V1_KNOWN_ROUTES } = await import("../../swap/jupiter-solana/v1-route-config.js");
-    if (JUPITER_V1_KNOWN_ROUTES.some(route => swapMechanismDigest(route.mechanismPin) === digest)) {
-        return await (await import("../../swap/jupiter-solana/command-service.js")).executeJupiterCommand({ command: "swap.jupiter.status", operationId }, context);
+    if (JUPITER_V1_KNOWN_ROUTES.some(route => swapMechanismDigest(route.mechanismPin) === digest))
+        return "swap.jupiter.status";
+    return record.quote.sourceAsset.chain.startsWith("tron:") ? "swap.sunswap.status" : "swap.uniswap.status";
+}
+async function laneStatus(context, record) {
+    const command = await laneStatusCommand(record), operationId = record.operationId;
+    if (command === "swap.orca.stable-status" || command === "swap.orca.status") {
+        return await (await import("../../swap/orca-solana/command-service.js")).executeOrcaCommand({ command, operationId }, context);
     }
-    if (chain.startsWith("tron:")) {
-        return await (await import("../../swap/sunswap-tron/command-service.js")).executeSunSwapCommand({ command: "swap.sunswap.status", operationId }, context);
+    if (command === "swap.jupiter.status") {
+        return await (await import("../../swap/jupiter-solana/command-service.js")).executeJupiterCommand({ command, operationId }, context);
     }
-    return await (await import("../../swap/uniswap-command-service.js")).executeUniswapCommand({ command: "swap.uniswap.status", operationId }, context);
+    if (command === "swap.sunswap.status") {
+        return await (await import("../../swap/sunswap-tron/command-service.js")).executeSunSwapCommand({ command, operationId }, context);
+    }
+    return await (await import("../../swap/uniswap-command-service.js")).executeUniswapCommand({ command, operationId }, context);
 }
 //# sourceMappingURL=swap.js.map

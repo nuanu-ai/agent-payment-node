@@ -2,7 +2,8 @@ import { METAMASK_NATIVE_RESOLVED_STATES, MetaMaskNativeJournal } from "../../me
 import { field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, STATE_HASH } from "../adapter.js";
 import { dataOutcome } from "../../core-outcome.js";
 import { evmClaim, pastUnstartedDeadline } from "./family-claims.js";
-import { assertNoResumeOptions, OPERATION_ABANDON, OPERATION_RESUME, OPERATION_STATUS } from "./family-commands.js";
+import { assertResumeOptions, oneObservationOnly } from "../../operation-command-options.js";
+import { OPERATION_ABANDON, OPERATION_RESUME, OPERATION_STATUS } from "./family-commands.js";
 const STORE = { directory: "metamask-native-operations", perProfile: false };
 /**
  * MetaMask Agent Wallet native-fee transfers. The account is held from admission until the outcome is resolved; a
@@ -27,7 +28,7 @@ export const metaMaskNativeAdapter = {
         .readMetaMaskNativeTransfer(context.state.root, record.operationId), "durable_public_state"),
     // Resume observes the stored request or transaction and settles the actual fee; it never sends again.
     async resume(context, record, options) {
-        assertNoResumeOptions(options, "MetaMask native transfer");
+        assertResumeOptions(options, { refuseWait: () => oneObservationOnly("MetaMask native transfer") });
         return dataOutcome(await (await import("../../metamask-native-transfer-owner.js"))
             .readMetaMaskNativeTransfer(context.state.root, record.operationId, true), "durable_public_state");
     },
