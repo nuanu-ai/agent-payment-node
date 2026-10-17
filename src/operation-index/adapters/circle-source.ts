@@ -1,16 +1,18 @@
-import { CIRCLE_V2_SOURCE_TTL_MS } from "../../lifi/circle-v2-source-service.js";
+import { operationOutcome } from "../../core-outcome.js";
+import { circleSourceStatus, circleSourceTerminal } from "../../lifi/circle-v2-source-proof.js";
 import { NonEvmSourceJournalRepository, type NonEvmSourceJournal } from "../../lifi/non-evm-source-journal.js";
 import { field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
-import { evmClaim, pastUnstartedDeadline } from "./family-claims.js";
+import { evmClaim } from "./family-claims.js";
 import { OPERATION_STATUS } from "./family-commands.js";
 
 const STORE: OperationStore = { directory: "non-evm-source-journals", perProfile: true };
 
 /**
  * CCTP V2 Base USDC to Solana source burns. The submit command signs only before its preparation expires, which is at
- * most CIRCLE_V2_SOURCE_TTL_MS after the journal was staged, and sends at most once in that same command. APN has no
- * observer of the source receipt for this route, so the payer is held for that window plus the unstarted margin in
- * every phase: after it, the burn either landed or its signed quote expired, and no APN path signs or sends it again.
+ * most CIRCLE_V2_SOURCE_TTL_MS after the journal was staged, and sends at most once in that same command. The payer is
+ * held for that window plus the unstarted margin in every phase: after it, the burn either landed or its signed quote
+ * expired, and no APN path signs or sends it again. `operation status` reads the burn's receipt at the finalized tag
+ * once and records it; a recorded receipt ends the claim at once (R4 exit 1: proof).
  */
 export const circleSourceAdapter: OperationFamilyAdapter<NonEvmSourceJournal> = {
   family: "circle_source",
@@ -21,10 +23,12 @@ export const circleSourceAdapter: OperationFamilyAdapter<NonEvmSourceJournal> = 
   },
   identity: record => ({ profileHash: record.profileHash, operationId: record.operationId, idempotencyHash: null, requestHash: null }),
   claims: record => readableClaims(() => [evmClaim(8453, record.sourceCall.from)]),
-  terminal: record => pastUnstartedDeadline(Date.parse(record.createdAt) + CIRCLE_V2_SOURCE_TTL_MS),
+  terminal: (record, root) => circleSourceTerminal(root, record),
   state: record => record.phase,
   salvage: raw => salvageRecord(raw, value => [salvageEvm(8453, field(value, "sourceCall", "from"))]),
   view: async record => record,
-  // The route has no status, observation or exit command of its own: the generic status shows the saved journal.
+  status: async (context, record) => operationOutcome(await circleSourceStatus(context.state.root, record, context.finalizedRead,
+    () => context.clock.now().getTime())),
+  // The route has no observation or exit command of its own: the generic status is its observer.
   commands: { status: OPERATION_STATUS },
 };
