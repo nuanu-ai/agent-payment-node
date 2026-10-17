@@ -13,6 +13,7 @@ import { userInfo } from "node:os";
 import { resolve } from "node:path";
 import { ApnCore } from "./core.js";
 import { operationRuntimeCommand } from "./operation-commands.js";
+import { refreshOperationIndex } from "./operation-index/refresh.js";
 import { EncryptedProfilePolicy } from "./encrypted-profile-policy.js";
 import { LocalWalletNative } from "./local-wallet-native.js";
 import { MacOSLoginKeychainSecret } from "./macos-keychain.js";
@@ -317,13 +318,27 @@ function uniswapTokenRpcBudget(command) {
         return { maxHttpRequests: 8 + overhead, deadlineMs: 45_000 };
     return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
 }
+/**
+ * Every command, CLI or MCP. A command that names an operation has just read (or closed) that operation's record, or
+ * at least looked it up to build its runtime, so its operation-index entry follows the record right after it, whatever
+ * the command answered and even when its runtime could not be built (best effort; the next admission re-verifies).
+ */
 export async function executeBoundCommand(bound, options = {}) {
+    const root = options.stateRoot ?? effectiveStateRoot();
+    try {
+        return await executeBound(bound, options, root);
+    }
+    finally {
+        await refreshOperationIndex(root, bound.request.operationId);
+    }
+}
+async function executeBound(bound, options, root) {
     if (bound.request.command.startsWith("x402.merchant."))
-        return executeMerchantCli(bound, options, options.stateRoot ?? effectiveStateRoot());
+        return executeMerchantCli(bound, options, root);
     if (bound.request.command === "relay.route")
-        return executeRelayRoute(bound, options.stateRoot ?? effectiveStateRoot(), (internal) => executeBoundCommand(internal, options));
+        return executeRelayRoute(bound, root, (internal) => executeBoundCommand(internal, options));
     if (bound.request.command === "x402.permit2.approve" || bound.request.command === "x402.permit2.observe")
-        return executePermit2ProductionCli(bound, options, options.stateRoot ?? effectiveStateRoot());
+        return executePermit2ProductionCli(bound, options, root);
     if (bound.request.command === "x402.permit2.preflight") {
         const requestId = randomUUID();
         try {
