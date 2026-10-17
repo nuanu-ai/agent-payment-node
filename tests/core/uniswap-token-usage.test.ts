@@ -637,7 +637,14 @@ test("legacy token effect v1 remains readable and upgrades only with an explicit
   assert.equal(upgraded?.primaryProviderId, providerId);
 });
 
-test("wallet-only hard crash keeps nonce occupied, repairs the journal, and sends once after restart", async (t) => {
+/** The refusal a native prepare meets while a token swap of the same Ethereum account is unresolved. */
+function blockedByToken(operationId: string, state: string | undefined, account: string) {
+  return (error: { code?: string; details?: Record<string, unknown> }) => error.code === "APN_OPERATION_BLOCKED" &&
+    error.details?.blockingOperationId === operationId && (state === undefined || error.details.blockingState === state) &&
+    error.details.blockingNetwork === "evm:1" && error.details.blockingAccount === account.toLowerCase();
+}
+
+test("wallet-only hard crash keeps nonce occupied, refuses a native prepare on the account, repairs the journal, and sends once after restart", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const native = evmCore(temporary.root), wallet = await ensureDirectWallet(native);
   native.rpc.chainId = 1; native.rpc.sender = wallet.address; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; native.rpc.nonceAtomic = "7";
   const s = await setup(temporary.root, "3000000", wallet.address), token = operation(s.policy.policyDigest, "4", wallet.address, "default"),
@@ -654,9 +661,10 @@ test("wallet-only hard crash keeps nonce occupied, repairs the journal, and send
   await assert.rejects(crashed.withAccountLock(started, async () => await crashed.seal(started, "approval", nonce)), /injected post-wallet-save failure/u);
   assert.equal(await new UniswapTokenEffectJournal(temporary.root).load(started, "approval"), null);
   assert.deepEqual(await occupiedUniswapTokenNonces(temporary.root, wallet.address), [7n]);
-  const restartedNative = evmCore(temporary.root, native.rpc, native.wrapping, native.approval), prepared = await restartedNative.core.transfer.prepare({ ...EVM_REQUEST,
-    asset: { chainId: 1, token: "native" }, amount: "0.000000000001", idempotencyKey: "wallet-only-crash-native-001" }) as { operation_id: string };
-  assert.equal((await restartedNative.state.loadOperation(restartedNative.state.profileHash("default"), prepared.operation_id))?.economics?.nonceAtomic, "8");
+  // Phase 4b: the unresolved token swap holds the account, so a native prepare is refused instead of skipping its nonce.
+  const restartedNative = evmCore(temporary.root, native.rpc, native.wrapping, native.approval);
+  await assert.rejects(restartedNative.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
+    idempotencyKey: "wallet-only-crash-native-001" }), blockedByToken(started.operationId, "approval_submission_started", wallet.address));
   const recovered = new UniswapTokenCustody(restartedNative.state, native.wrapping, call, () => NOW);
   await recovered.withAccountLock(started, async () => { assert.equal(await recovered.allocateNonce(started, "approval"), "7");
     assert.ok(await new UniswapTokenEffectJournal(temporary.root).load(started, "approval")); await recovered.commitNonce(started, "approval", "7"); });
@@ -664,7 +672,7 @@ test("wallet-only hard crash keeps nonce occupied, repairs the journal, and send
   await assert.rejects(recovered.send(started, "approval"), { code: "APN_OPERATION_BLOCKED" }); assert.equal(sends.length, 1);
 });
 
-test("token allocation and attempt persistence exclude a concurrent native prepare without deleting ownership", async (t) => {
+test("an unresolved token swap refuses a concurrent native prepare on its account without deleting nonce ownership", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const native = evmCore(temporary.root), wallet = await ensureDirectWallet(native);
   native.rpc.chainId = 1; native.rpc.sender = wallet.address; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; native.rpc.nonceAtomic = "7";
   const s = await setup(temporary.root, "3000000", wallet.address), token = operation(s.policy.policyDigest, "3", wallet.address, "default"), journal = new UniswapTokenJournal(temporary.root);
@@ -676,10 +684,11 @@ test("token allocation and attempt persistence exclude a concurrent native prepa
       approvalAttempt: tokenAttempt(token, "approval", nonce, NOW) }, NOW)); return nonce; });
   await allocatedReady; assert.deepEqual(await occupiedUniswapTokenNonces(temporary.root, wallet.address), [7n]);
   const nativeWork = native.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
-    idempotencyKey: "token-native-race-001" }) as Promise<{ operation_id: string }>;
-  persist(); assert.equal(await tokenWork, "7"); const prepared = await nativeWork;
+    idempotencyKey: "token-native-race-001" });
+  persist(); assert.equal(await tokenWork, "7");
+  // Phase 4b: the token operation holds the account claim, so the native prepare is refused before any RPC read.
+  await assert.rejects(nativeWork, blockedByToken(token.operationId, undefined, wallet.address));
   assert.deepEqual(await occupiedUniswapTokenNonces(temporary.root, wallet.address), [7n]);
-  assert.equal((await native.state.loadOperation(native.state.profileHash("default"), prepared.operation_id))?.economics?.nonceAtomic, "8");
 });
 
 test("token and native custody share nonce ownership and preserve both encrypted effects across restart", async (t) => {
@@ -702,7 +711,7 @@ test("token and native custody share nonce ownership and preserve both encrypted
   new EncryptedWalletStore(new StateStore(temporary.root), native.wrapping).clear(restarted.secret);
 });
 
-test("native prepare skips a sealed token nonce after restart and both effects survive", async (t) => {
+test("a native prepare beside a sealed token swap is refused after restart and the sealed effect survives", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const native = evmCore(temporary.root), wallet = await ensureDirectWallet(native);
   native.rpc.chainId = 1; native.rpc.sender = wallet.address; native.rpc.l1Fee = 0n; native.rpc.operatorFee = 0n; native.rpc.nonceAtomic = "7";
   const token = operation("a".repeat(64), "6", wallet.address, "default"), journal = new UniswapTokenJournal(temporary.root);
@@ -712,11 +721,12 @@ test("native prepare skips a sealed token nonce after restart and both effects s
   const started = await journal.save(transitionUniswapToken(token, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
     approvalAttempt: tokenAttempt(token, "approval", nonce, NOW) }, NOW));
   await custody.withAccountLock(started, async () => { await custody.seal(started, "approval", nonce); await custody.commitNonce(started, "approval", nonce); });
-  const restarted = evmCore(temporary.root, native.rpc, native.wrapping, native.approval), prepared = await restarted.core.transfer.prepare({ ...EVM_REQUEST,
-    asset: { chainId: 1, token: "native" }, amount: "0.000000000001", idempotencyKey: "token-owned-native-next-001" }) as { operation_id: string };
-  const record = await restarted.state.loadOperation(restarted.state.profileHash("default"), prepared.operation_id); assert.equal(record?.economics?.nonceAtomic, "8");
-  await restarted.core.transfer.approve(prepared.operation_id); const loaded = await new EncryptedWalletStore(restarted.state, native.wrapping).describe("default"); assert.ok(loaded);
-  assert.deepEqual(Object.values(loaded.secret.directEffects).map((effect) => Number(parseTransaction(effect.rawTransaction).nonce)).sort(), [7, 8]);
+  // Phase 4b: the sealed token swap holds the account until it resolves, so no native prepare reuses or skips its nonce.
+  const restarted = evmCore(temporary.root, native.rpc, native.wrapping, native.approval);
+  await assert.rejects(restarted.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: "native" }, amount: "0.000000000001",
+    idempotencyKey: "token-owned-native-next-001" }), blockedByToken(started.operationId, "approval_submission_started", wallet.address));
+  const loaded = await new EncryptedWalletStore(restarted.state, native.wrapping).describe("default"); assert.ok(loaded);
+  assert.deepEqual(Object.values(loaded.secret.directEffects).map((effect) => Number(parseTransaction(effect.rawTransaction).nonce)).sort(), [7]);
   new EncryptedWalletStore(restarted.state, native.wrapping).clear(loaded.secret);
 });
 

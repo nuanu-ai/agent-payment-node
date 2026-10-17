@@ -19,10 +19,6 @@ export class CircleRepository extends SecureStateStore {
     }
     return result;
   }
-  async listAny(profileHash: string): Promise<readonly CircleKnownOperation[]> {
-    stateIdentifier(profileHash, "Circle profile hash");
-    return (await this.listAllAny()).filter(op => op.profileHash === profileHash || op.destinationProfileHash === profileHash);
-  }
   async saveFunding(input: CircleFundingOperationV2): Promise<void> {
     const next = validateCircleFundingOperation(input), previous = await this.loadAny(next.operationId);
     if (previous !== null) {

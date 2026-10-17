@@ -1,5 +1,6 @@
 import { hashObject } from "../canonical.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { gaslessCalibratedGas, gaslessFee } from "./economics.js";
@@ -35,32 +36,34 @@ export class GaslessPreparation {
             const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);
             const allowlist = gaslessPolicyChain(request.chainId) !== null ? await this.o.policy.prepare({ profile, owner: binding.owner,
                 request, token: row.token }, operationId) : undefined;
-            await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, binding.owner.address);
-            if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {
-                gaslessFailure("APN_INVALID_INPUT", "gasless_recipient_alias");
-            }
-            const rpc = this.o.rpcFor(request.chainId);
-            const initialSnapshot = await rpc.snapshot(binding.owner.address), gas = gaslessCalibratedGas(initialSnapshot);
-            // Freeze the owner's whole fee limit so a paymaster price move before signing cannot cancel the approval.
-            const quoteAtomic = BigInt(gaslessFee(gas, initialSnapshot.feeConfiguration));
-            const gross = BigInt(request.grossAtomic), spendable = gross - BigInt(request.minReceivedAtomic);
-            const cap = BigInt(request.maxFeeAtomic) < spendable ? BigInt(request.maxFeeAtomic) : spendable, net = gross - cap;
-            if (quoteAtomic > cap || net < BigInt(request.minReceivedAtomic) || net <= 0n) {
-                gaslessFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_fee_budget");
-            }
-            const feeCapAtomic = cap.toString();
-            const preparedAt = new Date(this.o.now()).toISOString(), recipientAtomic = net.toString();
-            const unsigned = { wireVersion: "apn.gasless-wire.v4", profile, request, ...binding,
-                initialSnapshot, gas, token: row.token, tokenDomain: row.tokenDomain, paymaster: row.paymaster,
-                entryPoint: row.entryPoint, delegate: row.delegate, feeCapAtomic, recipientAtomic,
-                callData: gaslessBatch(row.token, request.recipient, recipientAtomic, row.paymaster), preparedAt,
-                expiresAt: new Date(Date.parse(preparedAt) + GASLESS_TTL_MS).toISOString(),
-                policyHash: hashObject({ identity: "apn.gasless.foreground-approval.v1", request }),
-                ...(allowlist === undefined ? {} : { allowlist }) };
-            const intent = { ...unsigned, unsignedEnvelopeHash: hashObject(gaslessEnvelopeBinding(unsigned)) };
-            const operation = newGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash, intent });
-            await this.o.records.persist(operation);
-            return operation;
+            // The account claim is written before any RPC or provider read, and dropped if no operation is written.
+            return await this.o.operations.admit({ kind: "gasless_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(request.chainId, binding.owner.address)] }, async () => {
+                if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {
+                    gaslessFailure("APN_INVALID_INPUT", "gasless_recipient_alias");
+                }
+                const rpc = this.o.rpcFor(request.chainId);
+                const initialSnapshot = await rpc.snapshot(binding.owner.address), gas = gaslessCalibratedGas(initialSnapshot);
+                // Freeze the owner's whole fee limit so a paymaster price move before signing cannot cancel the approval.
+                const quoteAtomic = BigInt(gaslessFee(gas, initialSnapshot.feeConfiguration));
+                const gross = BigInt(request.grossAtomic), spendable = gross - BigInt(request.minReceivedAtomic);
+                const cap = BigInt(request.maxFeeAtomic) < spendable ? BigInt(request.maxFeeAtomic) : spendable, net = gross - cap;
+                if (quoteAtomic > cap || net < BigInt(request.minReceivedAtomic) || net <= 0n) {
+                    gaslessFailure("APN_FEE_BUDGET_EXCEEDED", "gasless_fee_budget");
+                }
+                const feeCapAtomic = cap.toString();
+                const preparedAt = new Date(this.o.now()).toISOString(), recipientAtomic = net.toString();
+                const unsigned = { wireVersion: "apn.gasless-wire.v4", profile, request, ...binding,
+                    initialSnapshot, gas, token: row.token, tokenDomain: row.tokenDomain, paymaster: row.paymaster,
+                    entryPoint: row.entryPoint, delegate: row.delegate, feeCapAtomic, recipientAtomic,
+                    callData: gaslessBatch(row.token, request.recipient, recipientAtomic, row.paymaster), preparedAt,
+                    expiresAt: new Date(Date.parse(preparedAt) + GASLESS_TTL_MS).toISOString(),
+                    policyHash: hashObject({ identity: "apn.gasless.foreground-approval.v1", request }),
+                    ...(allowlist === undefined ? {} : { allowlist }) };
+                const intent = { ...unsigned, unsignedEnvelopeHash: hashObject(gaslessEnvelopeBinding(unsigned)) };
+                const operation = newGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash, intent });
+                await this.o.records.persist(operation);
+                return operation;
+            });
         }));
     }
 }

@@ -6,6 +6,8 @@ import { validateProviderProfile } from "./provider-profile.js";
 import { type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeReceiptEvidence } from "./metamask-native-fee-evidence.js";
 declare const V1 = "apn.metamask-native-operation.v1", V2 = "apn.metamask-native-operation.v2";
+/** Outcomes after which a native transfer can no longer sign, hand off or land. */
+export declare const METAMASK_NATIVE_RESOLVED_STATES: readonly string[];
 declare const STATES: readonly ["prepared", "failed_before_effect", "effect_started", "acknowledged", "unknown", "confirmed", "abandoned_unknown"];
 /**
  * The immutable owner context of one native transfer. Version 2 names no APN home path, so moving or renaming the home
@@ -54,8 +56,6 @@ export declare class MetaMaskNativeJournal extends SecureStateStore {
     private all;
     /** Any other unresolved native transfer of this account and chain, signed or not, holds a new one back. */
     assertAccountAvailable(chainId: number, account: string, exceptId: string): Promise<void>;
-    /** Every other family's EVM check on this account and chain waits for a native transfer that may have been handed off. */
-    assertSignedDomainAvailable(chainId: number | string, account: string, exceptId?: string): Promise<void>;
     matchingHold(reservation: AssetUsageReservation): Promise<MetaMaskNativeOperation | null>;
     persist(body: Omit<MetaMaskNativeOperation, "recordHash">): Promise<MetaMaskNativeOperation>;
 }
@@ -86,8 +86,6 @@ export declare function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation
     effect_attempts: 0 | 1;
     proof_class: string;
 };
-/** Read-only central conflict guard. `exceptOperationId` is passed only by the claimed owner of that exact operation. */
-export declare function assertMetaMaskNativeConflictDomainAvailable(stateRoot: string, chainId: number | string, account: string, exceptOperationId?: string): Promise<void>;
 export declare function metaMaskNativeOperationExists(stateRoot: string, id: string): Promise<boolean>;
 /** Durable, read-only proof extraction for the common ledger; accepts no DTO as permission. */
 export declare function readMetaMaskNativeSettlement(stateRoot: string, id: string): Promise<{

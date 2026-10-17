@@ -1,6 +1,6 @@
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
-import type { StargateTokenJournal, StargateTokenOperation, StargateTokenPhase } from "./token-model.js";
+import type { StargateAdmission, StargateTokenJournal, StargateTokenOperation, StargateTokenPhase } from "./token-model.js";
 export declare class FileStargateTokenJournal implements StargateTokenJournal {
     private readonly root;
     private readonly locks;
@@ -9,6 +9,7 @@ export declare class FileStargateTokenJournal implements StargateTokenJournal {
     withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
     /** The same per-account lock every other EVM writer holds, so no other family can race this nonce. */
     withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
+    admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T>;
     load(id: string): Promise<StargateTokenOperation | null>;
     save(nextInput: StargateTokenOperation): Promise<void>;
 }

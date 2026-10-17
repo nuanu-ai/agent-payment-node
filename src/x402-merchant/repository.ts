@@ -16,7 +16,6 @@ export class MerchantRepository extends SecureStateStore {
             refuse("merchant_directory_entry");
         out.push(o);
     } return out; }
-    async listOperations(profileHash: string) { return (await this.listAllOperations()).filter(o => o.profileHash === profileHash); }
     /** Caller holds profile/operation/idempotency/account locks. Append continuity forbids resets or resend. */
     async persist(o: MerchantOperation): Promise<void> {
         validateMerchant(o);

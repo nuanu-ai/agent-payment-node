@@ -68,7 +68,6 @@ export class GaszipFundingJournal extends SecureStateStore {
             gaszipCodec(this.route).fail("journal_missing");
         rows.push(r);
     } return rows; }
-    async listOperations(profileHash) { return (await this.listAllOperations()).filter(x => x.profileHash === profileHash); }
     async saveLocked(r, create = false) { validateGaszipFunding(this.route, r); await this.ensureDirectory(this.directory); await this.writeJson(this.path(r.operationId), r, create); }
     async sealTransaction(r, raw) {
         if (r.state !== "signing_started" || await recoverTransactionAddress({ serializedTransaction: raw }) !== r.owner.address)

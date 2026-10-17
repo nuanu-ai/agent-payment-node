@@ -13,6 +13,7 @@ import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 import { AWAL_VERSION } from "./awal-package.js";
 import { resolveProviderPrepare } from "./provider-prepare-identity.js";
+import { evmConflictDomain } from "./operation-conflict-domain.js";
 const DIRECT_POLICY = {
     identity: "apn.direct.foreground-approval.v1",
     verdict: "foreground_approval_required",
@@ -57,35 +58,37 @@ export async function prepareCoinbaseGasless(context, operations, durable, loadP
         }
         const allowlist = await policy.prepare({ profile, walletAddress: bound.public_address, recipient,
             amountAtomic: gross.toString(), operationId });
-        await operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, bound.public_address);
-        await operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
-        const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), bound.public_address);
-        if (BigInt(snapshot.balanceAtomic) < gross)
-            throw new ApnError("APN_INSUFFICIENT_USDC", "USDC balance is insufficient for the gross transfer.");
-        const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000);
-        const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
-        const providerDirect = { schemaVersion: "apn.provider-direct.v1", providerId: bound.provider_id,
-            profileRevision: bound.revision, capabilityHash: bound.capability_hash, accountBindingHash: bound.account_binding_hash,
-            rpcBindingHash, rpcOriginHash: sha256(`direct-rpc-origin\0${snapshot.rpcOrigin}`), policy: DIRECT_POLICY,
-            executionMode: "provider_atomic_send", executionOwner: "provider", retryOwner: "apn_outer_no_replay_journal",
-            coinbaseGasless: { schemaVersion: "apn.coinbase-gasless.v1", chainId: CHAIN_ID, token: BASE_USDC,
-                grossAtomic: gross.toString(), netAtomic: gross.toString(), feeAtomic: "0", maxFeeAtomic: maximumFee.toString(), allowlist,
-                minReceivedAtomic: minimum.toString(), senderNativeDebitWei: "0", sponsorship: "coinbase_cdp_paymaster",
-                exclusiveAccountUseRequired: true, awalPackage: "awal", awalVersion: AWAL_VERSION, awalCommand: "send_base_usdc",
-                rpcOrigin: snapshot.rpcOrigin, safeBlock: snapshot.safeBlock, entryPoint: COINBASE_ENTRY_POINT,
-                entryPointCodeHash: snapshot.entryPointCodeHash, accountCodeHash: snapshot.accountCodeHash,
-                accountImplementation: snapshot.accountImplementation, accountImplementationCodeHash: snapshot.accountImplementationCodeHash } };
-        const fingerprint = hashObject({ ...materialRequest, operationId, idempotencyHash, providerDirect });
-        const initial = { at: preparedAt.toISOString(), state: "awaiting_approval", terminal: false,
-            reason: "prepared_coinbase_gasless_provider_atomic_send", proofClass: "durable_coinbase_gasless_intent" };
-        const operation = sealOperation({ schemaVersion: STATE_VERSION, operationId, idempotencyHash, profile, profileHash,
-            requestHash, fingerprint, walletAddress: bound.public_address, recipient, amountAtomic: gross.toString(),
-            amountDecimal: formatAtomic(gross.toString(), USDC_DECIMALS), chainId: CHAIN_ID, token: BASE_USDC, providerDirect,
-            coinbaseGaslessCursor: { nextBlockAtomic: (BigInt(snapshot.safeBlock.numberAtomic) + 1n).toString(), previousEndBlock: null },
-            preparedAt: preparedAt.toISOString(), expiresAt: expiresAt.toISOString(), state: initial.state, terminal: false,
-            reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial) });
-        await durable.persist(operation);
-        return publicOperation(operation);
+        // The account and provider claims are written before any RPC read and dropped if no operation is written.
+        return await operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(CHAIN_ID, bound.public_address)],
+            provider: { providerId: bound.provider_id, accountBindingHash: bound.account_binding_hash, payer: bound.public_address } }, async () => {
+            const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), bound.public_address);
+            if (BigInt(snapshot.balanceAtomic) < gross)
+                throw new ApnError("APN_INSUFFICIENT_USDC", "USDC balance is insufficient for the gross transfer.");
+            const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000);
+            const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
+            const providerDirect = { schemaVersion: "apn.provider-direct.v1", providerId: bound.provider_id,
+                profileRevision: bound.revision, capabilityHash: bound.capability_hash, accountBindingHash: bound.account_binding_hash,
+                rpcBindingHash, rpcOriginHash: sha256(`direct-rpc-origin\0${snapshot.rpcOrigin}`), policy: DIRECT_POLICY,
+                executionMode: "provider_atomic_send", executionOwner: "provider", retryOwner: "apn_outer_no_replay_journal",
+                coinbaseGasless: { schemaVersion: "apn.coinbase-gasless.v1", chainId: CHAIN_ID, token: BASE_USDC,
+                    grossAtomic: gross.toString(), netAtomic: gross.toString(), feeAtomic: "0", maxFeeAtomic: maximumFee.toString(), allowlist,
+                    minReceivedAtomic: minimum.toString(), senderNativeDebitWei: "0", sponsorship: "coinbase_cdp_paymaster",
+                    exclusiveAccountUseRequired: true, awalPackage: "awal", awalVersion: AWAL_VERSION, awalCommand: "send_base_usdc",
+                    rpcOrigin: snapshot.rpcOrigin, safeBlock: snapshot.safeBlock, entryPoint: COINBASE_ENTRY_POINT,
+                    entryPointCodeHash: snapshot.entryPointCodeHash, accountCodeHash: snapshot.accountCodeHash,
+                    accountImplementation: snapshot.accountImplementation, accountImplementationCodeHash: snapshot.accountImplementationCodeHash } };
+            const fingerprint = hashObject({ ...materialRequest, operationId, idempotencyHash, providerDirect });
+            const initial = { at: preparedAt.toISOString(), state: "awaiting_approval", terminal: false,
+                reason: "prepared_coinbase_gasless_provider_atomic_send", proofClass: "durable_coinbase_gasless_intent" };
+            const operation = sealOperation({ schemaVersion: STATE_VERSION, operationId, idempotencyHash, profile, profileHash,
+                requestHash, fingerprint, walletAddress: bound.public_address, recipient, amountAtomic: gross.toString(),
+                amountDecimal: formatAtomic(gross.toString(), USDC_DECIMALS), chainId: CHAIN_ID, token: BASE_USDC, providerDirect,
+                coinbaseGaslessCursor: { nextBlockAtomic: (BigInt(snapshot.safeBlock.numberAtomic) + 1n).toString(), previousEndBlock: null },
+                preparedAt: preparedAt.toISOString(), expiresAt: expiresAt.toISOString(), state: initial.state, terminal: false,
+                reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial) });
+            await durable.persist(operation);
+            return publicOperation(operation);
+        });
     });
 }
 export async function coinbaseGaslessPreconditionsMatch(context, operation) {

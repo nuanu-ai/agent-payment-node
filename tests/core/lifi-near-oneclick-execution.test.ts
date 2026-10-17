@@ -6,6 +6,7 @@ import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { StateStore } from "../../src/state.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
 import { OneClickSourceService, TtyOneClickSourceApproval } from "../../src/lifi/near-oneclick-source-service.js";
+import { UNSTARTED_DEADLINE_MARGIN_MS } from "../../src/operation-index/adapters/family-claims.js";
 import { temporaryState } from "./helpers.js";
 
 const key = `0x${"1".repeat(64)}` as const;
@@ -125,11 +126,14 @@ test("safe Base source status rejects altered Transfer amount and block membersh
 test("one ambiguous send reserves its nonce only until its deadline passes and the chain does not know its hash", async t => {
   const h = await harness(t, true);
   const first = await h.service.submit(request) as any; assert.equal(first.sourceState, "unknown_finality"); assert.equal(h.sends(), 1);
-  // Before the old deadline the reservation refuses before staging, consent or signing.
-  await assert.rejects(h.service.submit({ ...request, idempotencyKey: "oneclick-second-try" }), /oneclick_source_nonce_reserved/u);
+  // Before the old deadline the payer's claim (phase 4b) refuses before the quote, staging, consent or signing.
+  await assert.rejects(h.service.submit({ ...request, idempotencyKey: "oneclick-second-try" }), { code: "APN_OPERATION_BLOCKED",
+    details: { blockingOperationId: first.operationId, blockingState: "unknown_finality", blockingNetwork: "evm:8453",
+      blockingAccount: request.expectedPayer.toLowerCase() } });
   assert.equal(h.approvals(), 1); assert.equal(h.sends(), 1);
-  // After it, the unknown old hash cannot block the wallet: at most one of the two signed transactions can use nonce 7.
-  h.advance(200_000);
+  // After it (and the claim's margin), the unknown old hash cannot block the wallet: at most one of the two signed
+  // transactions can use nonce 7, which the family's own reservation check still proves before staging.
+  h.advance(200_000 + UNSTARTED_DEADLINE_MARGIN_MS);
   const second = await h.service.submit({ ...request, idempotencyKey: "oneclick-third-try" }) as any;
   assert.equal(second.submissionAttempts, 1); assert.equal(h.approvals(), 2); assert.equal(h.sends(), 2);
 });

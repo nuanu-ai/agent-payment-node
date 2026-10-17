@@ -3,6 +3,7 @@ import { hashObject } from "../canonical.js";
 import { gaslessOwner } from "../gasless/owner.js";
 import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, validateGaslessRequest } from "../gasless/validation.js";
 import type { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -53,7 +54,9 @@ export class FacilitatorPreparation {
       const binding = await gaslessOwner(state, profile), owner = binding.owner.address;
       // Owner admission and caps come first: no policy means no transfer, as on every other money route.
       const allowlist = await this.o.policy.prepare({ profile, owner: binding.owner, request }, operationId);
-      await this.o.operations.assertEvmAccountAvailable(profileHash, R.chainId, owner);
+      // The account claim is written before any RPC or provider read, and dropped if no operation is written.
+      return await this.o.operations.admit({ kind: FACILITATOR_KIND, profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [evmConflictDomain(R.chainId, owner)] }, async () => {
       if ([GASLESS_ZERO_ADDRESS, owner, R.token].some((alias) => alias.toLowerCase() === request.recipient.toLowerCase())) {
         facilitatorFail("facilitator_gasless_input");
       }
@@ -73,6 +76,7 @@ export class FacilitatorPreparation {
         policyHash: hashObject({ identity: FACILITATOR_POLICY, request }), allowlist } });
       await this.o.records.persist(operation);
       return operation;
+      });
     }));
   }
 }

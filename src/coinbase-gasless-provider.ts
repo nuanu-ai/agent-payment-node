@@ -19,6 +19,7 @@ import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 import { AWAL_VERSION } from "./awal-package.js";
 import { resolveProviderPrepare } from "./provider-prepare-identity.js";
+import { evmConflictDomain } from "./operation-conflict-domain.js";
 
 const DIRECT_POLICY = {
   identity: "apn.direct.foreground-approval.v1",
@@ -69,8 +70,10 @@ export async function prepareCoinbaseGasless(
     }
     const allowlist = await policy.prepare({ profile, walletAddress: bound.public_address, recipient,
       amountAtomic: gross.toString(), operationId });
-    await operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, bound.public_address);
-    await operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
+    // The account and provider claims are written before any RPC read and dropped if no operation is written.
+    return await operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash },
+      { domains: () => [evmConflictDomain(CHAIN_ID, bound.public_address)],
+        provider: { providerId: bound.provider_id, accountBindingHash: bound.account_binding_hash, payer: bound.public_address } }, async () => {
     const snapshot = await coinbaseGaslessSnapshot(context.requireCoinbaseRpc(), bound.public_address);
     if (BigInt(snapshot.balanceAtomic) < gross) throw new ApnError("APN_INSUFFICIENT_USDC", "USDC balance is insufficient for the gross transfer.");
     const preparedAt = new Date(Math.floor(context.clock.now().getTime() / 1000) * 1000);
@@ -96,6 +99,7 @@ export async function prepareCoinbaseGasless(
       preparedAt: preparedAt.toISOString(), expiresAt: expiresAt.toISOString(), state: initial.state, terminal: false,
       reason: initial.reason, proofClass: initial.proofClass, transitions: appendTransition([], initial) });
     await durable.persist(operation); return publicOperation(operation);
+    });
   });
 }
 

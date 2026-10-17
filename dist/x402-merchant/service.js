@@ -7,6 +7,7 @@ import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { merchantFingerprint, merchantMove, merchantSnapshot, sealMerchant } from "./model.js";
@@ -53,26 +54,28 @@ export class MerchantService {
             }
             await assertEvmNativeCustody(this.state, profile, custody);
             await assertExclusiveEvmRawSigner(this.state, payer, profileHash);
-            await this.operations.assertEvmAccountAvailable(profileHash, 4326, payer);
-            // Only a profile whose active policy names its own wallet reaches the merchant; the challenge then names payee,
-            // amount and asset, which the owner's admission (asset, mechanism, caps, optional payee pin) must cover.
-            await this.owner.assertPayerPolicy(profile, payer);
-            const observation = await this.ports.http.get({ url }), selected = merchantGenericChallenge(observation, url, registry, chosen);
-            const { asset, ...frozen } = selected, terms = merchantPrepareTerms(payer, url, frozen, asset);
-            const policy = await this.owner.admit(profile, terms), current = await merchantCurrent(this.ports.rpc, terms, undefined, maximumNativeFee);
-            const createdAt = this.ports.now().toISOString();
-            if (Date.parse(createdAt) - Date.parse(observation.observedAt) > 30000 || Date.parse(createdAt) < Date.parse(observation.observedAt))
-                refuse("merchant_challenge_read_age");
-            assertMerchantPaymentWindow(frozen, observation.observedAt, createdAt);
-            const envelope = { nonce: current.nonce, gas: current.gas, maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas, maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) };
-            checkMerchantEnvelope(current, envelope, terms, current.feeContext);
-            if (BigInt(current.token) < BigInt(terms.amount))
-                refuse("merchant_token_balance");
-            const effectBinding = await this.owner.effectBinding(profile, terms, envelope.nativeFeeReserveWei ?? current.feeContext.admissionEstimatedUpper, new Date(Date.parse(createdAt) + 300000).toISOString());
-            const body = { feeContext: current.feeContext, effectBinding, schemaVersion: "apn.x402-merchant.v2", kind: "merchant_x402", operationId, profile, profileHash, idempotencyHash, requestHash, custody, frozen, url, asset, envelope, policy, createdAt, expiresAt: new Date(Date.parse(createdAt) + 300000).toISOString(), state: "prepared", terminal: false, signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [], events: [{ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }), eventHash: hashObject({ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }) }) }] };
-            const o = sealMerchant({ ...body, fingerprint: merchantFingerprint(body) });
-            await this.records.persist(o);
-            return o;
+            // The account claim is written before the merchant challenge and any RPC read, and dropped if no operation is written.
+            return await this.operations.admit({ kind: "merchant_x402", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(4326, payer)] }, async () => {
+                // Only a profile whose active policy names its own wallet reaches the merchant; the challenge then names payee,
+                // amount and asset, which the owner's admission (asset, mechanism, caps, optional payee pin) must cover.
+                await this.owner.assertPayerPolicy(profile, payer);
+                const observation = await this.ports.http.get({ url }), selected = merchantGenericChallenge(observation, url, registry, chosen);
+                const { asset, ...frozen } = selected, terms = merchantPrepareTerms(payer, url, frozen, asset);
+                const policy = await this.owner.admit(profile, terms), current = await merchantCurrent(this.ports.rpc, terms, undefined, maximumNativeFee);
+                const createdAt = this.ports.now().toISOString();
+                if (Date.parse(createdAt) - Date.parse(observation.observedAt) > 30000 || Date.parse(createdAt) < Date.parse(observation.observedAt))
+                    refuse("merchant_challenge_read_age");
+                assertMerchantPaymentWindow(frozen, observation.observedAt, createdAt);
+                const envelope = { nonce: current.nonce, gas: current.gas, maxFeePerGas: current.maxFeePerGas, maxPriorityFeePerGas: current.maxPriorityFeePerGas, maximumNativeFee, ...(input.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: input.nativeFeeReserveWei }) };
+                checkMerchantEnvelope(current, envelope, terms, current.feeContext);
+                if (BigInt(current.token) < BigInt(terms.amount))
+                    refuse("merchant_token_balance");
+                const effectBinding = await this.owner.effectBinding(profile, terms, envelope.nativeFeeReserveWei ?? current.feeContext.admissionEstimatedUpper, new Date(Date.parse(createdAt) + 300000).toISOString());
+                const body = { feeContext: current.feeContext, effectBinding, schemaVersion: "apn.x402-merchant.v2", kind: "merchant_x402", operationId, profile, profileHash, idempotencyHash, requestHash, custody, frozen, url, asset, envelope, policy, createdAt, expiresAt: new Date(Date.parse(createdAt) + 300000).toISOString(), state: "prepared", terminal: false, signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [], events: [{ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }), eventHash: hashObject({ at: createdAt, state: "prepared", previousHash: null, snapshotHash: merchantSnapshot({ state: "prepared", signingAttempts: 0, submissionAttempts: 0, txHash: null, receipt: null, deliveryAttempts: [] }) }) }] };
+                const o = sealMerchant({ ...body, fingerprint: merchantFingerprint(body) });
+                await this.records.persist(o);
+                return o;
+            });
         });
     }
     async approve(id) {

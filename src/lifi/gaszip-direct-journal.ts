@@ -53,7 +53,6 @@ export class GaszipFundingJournal extends SecureStateStore {
   private path(id:string):string {stateIdentifier(id,"GasZip operation");return `${this.directory}/${id}.json`;}
   async findOperation(id:string):Promise<GaszipFundingRecord|null>{const v=await this.readJson(this.path(id));return v===null?null:validateGaszipFunding(this.route,v);}
   async listAllOperations():Promise<readonly GaszipFundingRecord[]>{const rows: GaszipFundingRecord[]=[]; for(const e of await this.readDirectory(this.directory)){ if(!e.isFile() || e.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(e.name))gaszipCodec(this.route).fail("journal_entry");const r=await this.findOperation(e.name.slice(0,-5));if(r===null)gaszipCodec(this.route).fail("journal_missing");rows.push(r!);}return rows;}
-  async listOperations(profileHash:string):Promise<readonly GaszipFundingRecord[]>{return (await this.listAllOperations()).filter(x=>x.profileHash===profileHash);}
   async saveLocked(r:GaszipFundingRecord, create=false):Promise<void>{validateGaszipFunding(this.route,r);await this.ensureDirectory(this.directory);await this.writeJson(this.path(r.operationId),r,create);}
   async sealTransaction(r:GaszipFundingRecord,raw:Hex):Promise<GaszipFundingRecord>{
     if(r.state!=="signing_started" || await recoverTransactionAddress({serializedTransaction:raw as `0x02${string}`})!==r.owner.address) gaszipCodec(this.route).fail("signer_binding");

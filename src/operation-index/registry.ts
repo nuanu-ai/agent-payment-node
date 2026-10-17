@@ -9,6 +9,14 @@ import { permit2Adapter } from "./adapters/permit2.js";
 import { railAdapter } from "./adapters/rail.js";
 import { relayAdapter } from "./adapters/relay.js";
 import { x402Adapter } from "./adapters/x402.js";
+import { circleApprovalAdapter } from "./adapters/circle-approval.js";
+import { circleSourceAdapter } from "./adapters/circle-source.js";
+import { gaslessUsdtAdapter } from "./adapters/gasless-usdt.js";
+import { metaMaskNativeAdapter } from "./adapters/metamask-native.js";
+import { oneClickSourceAdapter } from "./adapters/oneclick.js";
+import { stargateNativeAdapter, stargateTokenAdapter } from "./adapters/stargate.js";
+import { swapAdapter } from "./adapters/swap.js";
+import { uniswapTokenAdapter } from "./adapters/uniswap-token.js";
 import type { OperationFamily } from "./types.js";
 
 export type OperationRegistry = ReadonlyMap<OperationFamily, OperationFamilyAdapter>;
@@ -17,14 +25,16 @@ export type OperationRegistry = ReadonlyMap<OperationFamily, OperationFamilyAdap
 let registry: OperationRegistry | undefined;
 
 /**
- * Every family the index covers, in the order the guard reports blockers (the order the former store scan used).
- * Phase 4b WP2 appends the swap, Uniswap-token, Stargate, USDT, 1Click, Circle-source, Circle-approval and
- * MetaMask-native adapters to this list.
+ * Every family the index covers, in the order the guard reports blockers (the order the former store scan used,
+ * then the families phase 4b WP2 added).
  */
 export function operationRegistry(): OperationRegistry {
   registry ??= new Map(([
     seiGaszipAdapter, circleAdapter, megaGaszipAdapter, merchantAdapter, permit2Adapter, relayAdapter, facilitatorGaslessAdapter,
     smartAccountGaslessAdapter, metaMaskGaslessAdapter, gaslessTransferAdapter, bridgeAdapter, railAdapter, directAdapter, x402Adapter,
+    // Phase 4b WP2: every other money family.
+    gaslessUsdtAdapter, metaMaskNativeAdapter, swapAdapter, uniswapTokenAdapter, stargateNativeAdapter, stargateTokenAdapter,
+    oneClickSourceAdapter, circleSourceAdapter, circleApprovalAdapter,
   ] as readonly unknown[] as readonly OperationFamilyAdapter[]).map(adapter => [adapter.family, adapter]));
   return registry;
 }

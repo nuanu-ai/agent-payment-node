@@ -31,7 +31,6 @@ export class MerchantRepository extends SecureStateStore {
         }
         return out;
     }
-    async listOperations(profileHash) { return (await this.listAllOperations()).filter(o => o.profileHash === profileHash); }
     /** Caller holds profile/operation/idempotency/account locks. Append continuity forbids resets or resend. */
     async persist(o) {
         validateMerchant(o);

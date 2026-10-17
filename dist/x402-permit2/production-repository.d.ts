@@ -42,8 +42,6 @@ export declare class Permit2ProductionRepository extends SecureStateStore {
     static findOwnedOperation(repository: Permit2ProductionRepository, id: string): Promise<Permit2ProductionRecord | null>;
     static persistOwnedExposure(repository: Permit2ProductionRepository, record: Permit2ProductionRecord): Promise<void>;
     findOperation(id: string): Promise<Permit2ProductionRecord | null>;
-    listAllOperations(): Promise<readonly Permit2ProductionRecord[]>;
-    listOperations(profileHash: string): Promise<readonly Permit2ProductionRecord[]>;
     /** Caller holds profile + operation locks. Only unsigned preparation/lease states can be written in P2. */
     persistLocked(record: Permit2ProductionRecord, createOnly?: boolean): Promise<void>;
     /** Only the dedicated exposure lifecycle subclass can publish append-only private risk material. */

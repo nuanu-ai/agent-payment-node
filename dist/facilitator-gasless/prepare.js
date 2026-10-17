@@ -2,6 +2,7 @@ import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { hashObject } from "../canonical.js";
 import { gaslessOwner } from "../gasless/owner.js";
 import { GASLESS_TTL_MS, GASLESS_ZERO_ADDRESS, validateGaslessRequest } from "../gasless/validation.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { facilitatorFail } from "./failure.js";
@@ -37,28 +38,30 @@ export class FacilitatorPreparation {
             const binding = await gaslessOwner(state, profile), owner = binding.owner.address;
             // Owner admission and caps come first: no policy means no transfer, as on every other money route.
             const allowlist = await this.o.policy.prepare({ profile, owner: binding.owner, request }, operationId);
-            await this.o.operations.assertEvmAccountAvailable(profileHash, R.chainId, owner);
-            if ([GASLESS_ZERO_ADDRESS, owner, R.token].some((alias) => alias.toLowerCase() === request.recipient.toLowerCase())) {
-                facilitatorFail("facilitator_gasless_input");
-            }
-            const requirement = facilitatorRequirement(request.recipient.toLowerCase(), request.grossAtomic);
-            const rpc = this.o.rpc();
-            await rpc.assertChain();
-            const block = await rpc.finalized(), balance = await rpc.usdcBalance(owner, block);
-            if (balance < BigInt(request.grossAtomic))
-                facilitatorFail("facilitator_gasless_balance");
-            const support = await this.o.facilitator.supported();
-            const preparedAt = new Date(this.o.now()).toISOString();
-            const operation = newFacilitatorOperation({ profileHash, operationId, idempotencyHash, requestHash, intent: {
-                    profile, request, ...binding, requirement, requirementHash: facilitatorRequirementHash(requirement),
-                    facilitator: { origin: support.endpointOrigin, endpointHash: support.endpointHash, signers: support.signers,
-                        supportedResponseHash: support.supportedResponseHash },
-                    initial: { block, balanceAtomic: balance.toString(), rpcOrigin: rpc.rpcOrigin, rpcEndpointHash: rpc.rpcEndpointHash },
-                    preparedAt, expiresAt: new Date(Date.parse(preparedAt) + GASLESS_TTL_MS).toISOString(),
-                    policyHash: hashObject({ identity: FACILITATOR_POLICY, request }), allowlist
-                } });
-            await this.o.records.persist(operation);
-            return operation;
+            // The account claim is written before any RPC or provider read, and dropped if no operation is written.
+            return await this.o.operations.admit({ kind: FACILITATOR_KIND, profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(R.chainId, owner)] }, async () => {
+                if ([GASLESS_ZERO_ADDRESS, owner, R.token].some((alias) => alias.toLowerCase() === request.recipient.toLowerCase())) {
+                    facilitatorFail("facilitator_gasless_input");
+                }
+                const requirement = facilitatorRequirement(request.recipient.toLowerCase(), request.grossAtomic);
+                const rpc = this.o.rpc();
+                await rpc.assertChain();
+                const block = await rpc.finalized(), balance = await rpc.usdcBalance(owner, block);
+                if (balance < BigInt(request.grossAtomic))
+                    facilitatorFail("facilitator_gasless_balance");
+                const support = await this.o.facilitator.supported();
+                const preparedAt = new Date(this.o.now()).toISOString();
+                const operation = newFacilitatorOperation({ profileHash, operationId, idempotencyHash, requestHash, intent: {
+                        profile, request, ...binding, requirement, requirementHash: facilitatorRequirementHash(requirement),
+                        facilitator: { origin: support.endpointOrigin, endpointHash: support.endpointHash, signers: support.signers,
+                            supportedResponseHash: support.supportedResponseHash },
+                        initial: { block, balanceAtomic: balance.toString(), rpcOrigin: rpc.rpcOrigin, rpcEndpointHash: rpc.rpcEndpointHash },
+                        preparedAt, expiresAt: new Date(Date.parse(preparedAt) + GASLESS_TTL_MS).toISOString(),
+                        policyHash: hashObject({ identity: FACILITATOR_POLICY, request }), allowlist
+                    } });
+                await this.o.records.persist(operation);
+                return operation;
+            });
         }));
     }
 }
