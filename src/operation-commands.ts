@@ -70,9 +70,9 @@ export class OperationCommands {
     const adapter = this.index.adapter(entry);
     if (record === null || adapter === undefined) throw notFound();
     const found = { entry, adapter, record };
-    // Nothing is left to abandon once the operation is terminal: no consent is asked and no family exit is named.
-    if (await this.terminal(found)) throw alreadyTerminal(found, "abandon");
-    if (adapter.abandon === undefined) throw byFamilyCommand(found, "exit");
+    // A family's own exit answers a terminal operation itself (an abandon replay returns its outcome, no consent);
+    // for any other family a terminal operation is answered as terminal, never with its exit command.
+    if (adapter.abandon === undefined) throw await this.terminal(found) ? alreadyTerminal(found, "abandon") : byFamilyCommand(found, "exit");
     return operationOutcome(await adapter.abandon(this.context, record));
   }
 

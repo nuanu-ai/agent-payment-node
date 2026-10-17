@@ -107,14 +107,20 @@ test("a crashed prepared transfer past its consent no longer holds back another 
 test("operation status closes it as failed before effect, releases its holds and drops its index claims at once", async (t) => {
   const { root, id, op } = await crashedPrepared(t), approval = new Approval();
   await staleOpenEntry(root, op);
-  // Terminal by the family's rule already: abandon names no exit and asks no consent.
-  const abandon = await runCli(["operation", "abandon", "--operation", id], {}, { stateRoot: root, operationAbandonApproval: approval, wrappingSecret: new NoSecret() });
-  assert.equal(abandon.error?.details?.reason, "operation_already_terminal", JSON.stringify(abandon.error));
-  assert.deepEqual(abandon.next_actions, [`apn operation status --operation ${id}`]);
-  assert.equal(approval.calls.length, 0);
   const status = await runCli(["operation", "status", "--operation", id], {}, { stateRoot: root, wrappingSecret: new NoSecret() });
   assert.equal(status.ok, true, JSON.stringify(status.error));
   assert.match(JSON.stringify(status.data), /failed_before_effect/u);
+  await assertClosed(root, op);
+  assert.equal(approval.calls.length, 0);
+});
+
+test("operation abandon closes it the same way, without asking the owner (nothing was signed)", async (t) => {
+  const { root, id, op } = await crashedPrepared(t), approval = new Approval();
+  await staleOpenEntry(root, op);
+  const abandon = await runCli(["operation", "abandon", "--operation", id], {}, { stateRoot: root, operationAbandonApproval: approval, wrappingSecret: new NoSecret() });
+  assert.equal(abandon.ok, true, JSON.stringify(abandon.error));
+  assert.match(JSON.stringify(abandon.operation), /failed_before_effect/u);
+  assert.equal(approval.calls.length, 0);
   await assertClosed(root, op);
 });
 

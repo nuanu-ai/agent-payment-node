@@ -313,7 +313,8 @@ export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string
 }
 /**
  * Owner release (R4) of a native transfer whose outcome stayed unknown after its quote expired. It observes once,
- * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed.
+ * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed. A transfer that
+ * never reached its effect marker and whose consent has passed is closed as failed before effect instead (no consent).
  */
 export async function abandonMetaMaskNativeTransfer(stateRoot:string,idInput:string,
   approve:(intent:OperationAbandonIntent)=>Promise<void>,now:()=>Date) {
@@ -321,6 +322,11 @@ export async function abandonMetaMaskNativeTransfer(stateRoot:string,idInput:str
   const initial=await journal.read(id);
   if(initial===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Native transfer operation does not exist.");
   if(initial.state==="abandoned_unknown")return publicOperation(initial);
+  // Nothing was handed off and its consent has passed: it closes as failed before effect, as its status closes it.
+  if(metaMaskNativeExpiredBeforeEffect(initial,now().getTime()))return journal.withLocks([`operation:${id}`],async()=>{
+    const op=await journal.read(id); if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Native transfer operation does not exist.");
+    return publicOperation(await closeExpiredBeforeEffect(stateRoot,journal,op,now()));
+  });
   const eligible=(o:NativeOperation)=>["effect_started","acknowledged","unknown"].includes(o.state)&&now().getTime()>=Date.parse(o.context.quote.expiresAt);
   if(!eligible(initial))blocked("Only a native transfer with an unknown outcome can be abandoned, and only after its quote expired.");
   try { await readMetaMaskNativeTransfer(stateRoot,id,true); } catch { /* Observation is best effort; consent decides. */ }
