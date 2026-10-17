@@ -1,5 +1,5 @@
 import { type CircleFundingOperationV2 } from "./funding-operation.js";
-import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
+import type { EvmAmbiguousSendOutcome, EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 import type { Hex } from "viem";
 import type { CircleFundingMaterial } from "./funding-custody.js";
 import { type CircleEffect, type CircleEnvelope, type CircleRole } from "./operation-model.js";
@@ -30,12 +30,18 @@ export interface CircleFundingLifecyclePorts {
     cleanupEnvelope(op: CircleFundingOperationV2): Promise<CircleEnvelope>;
     usage(op: CircleFundingOperationV2, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect" | "released_unsubmitted"): Promise<CircleFundingOperationV2["usage"]>;
     /** Never-lands proof and discard for signed-but-unsent bytes (`outcome`) and for possibly-sent bytes (`sentOutcome`, which
-     * also requires no receipt). Production runtimes always provide it; injected test ports may omit it. */
+     * also requires no receipt). Production runtimes always provide it; injected test ports may omit it. `ambiguous` and
+     * `resend` serve a possibly-sent mint or cleanup: the same proofs plus "send the identical sealed bytes again". */
     unsent?: Readonly<{
         outcome(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
         sentOutcome?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
+        ambiguous?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmAmbiguousSendOutcome>;
+        /** Sends exactly these sealed bytes once per command; false when nothing was sent (refused or not accepted). */
+        resend?(op: CircleFundingOperationV2, effect: CircleEffect, rawTransaction: Hex): Promise<boolean>;
         discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void>;
     }>;
+    /** Whether the destination already consumed the issuer message nonce (MessageTransmitter `usedNonces`). */
+    messageNonceUsed?(op: CircleFundingOperationV2): Promise<boolean>;
 }
 type Consent = () => void;
 export declare function approveCircleFundingSource(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
@@ -48,7 +54,6 @@ export declare function observeCircleFunding(input: CircleFundingOperationV2, po
 export declare function refreshCircleFundingAttestation(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
 export declare function cleanupCircleFunding(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
 /** Explicit fresh cleanup authority, never source authorization or expiry renewal. */
-export declare function executeCircleFundingCleanupWithConsent(op: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
 /** Production retirement custody accepts only the private controller's currently active exact guard. */
 export declare function assertCircleFundingEffectGuard(input: CircleFundingOperationV2, effectInput: CircleEffect, guard: () => void): void;
 export {};

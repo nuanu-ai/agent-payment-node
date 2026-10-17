@@ -91,7 +91,8 @@ export function validateCircleFundingOperation(value) {
         circleCorrupt("usage_finality");
     if (op.externalFulfillment !== undefined) {
         validateFundingExternalFulfillment(op.externalFulfillment, op);
-        if (op.destination !== null || op.effects.some(e => ["mint", "cleanup"].includes(e.role) && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)))
+        // An owned mint or cleanup is either untouched, or proven never to land (`abandoned_unsent`: no receipt, nonce taken).
+        if (op.destination !== null || op.effects.some(e => ["mint", "cleanup"].includes(e.role) && (e.phase === "abandoned_unsent" ? e.proof !== null : e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)))
             circleCorrupt("external_owned_effect");
     }
     if (op.state === "external_fulfilled" && (op.externalFulfillment === undefined || !op.usageFinalized || op.usage.length !== 5 || op.usage.some((u, i) => u.state !== (i < 3 ? "finalized" : "released_unsubmitted"))))
@@ -154,7 +155,9 @@ export function publicCircleFundingOperation(op) {
         source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? op.externalFulfillment?.destinationReceipt.finalityTag ?? null,
         residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash,
         ...(op.externalFulfillment === undefined ? {} : { external_fulfillment: op.externalFulfillment, proof_class: "circle_funding_external_mint_fulfillment", controlled_destination_native_atomic: "0", external_destination_fee_payer: op.externalFulfillment.caller }),
-        next_actions: op.terminal ? [] : [`apn circle evm observe --operation ${op.operationId}`] };
+        next_actions: op.terminal ? [] : op.effects.some(e => e.role === "mint" && e.phase === "abandoned_unsent")
+            ? [`apn circle evm approve-mint --operation ${op.operationId}`]
+            : op.effects.some(e => e.role === "cleanup" && e.phase === "abandoned_unsent") ? [`apn circle evm cleanup --operation ${op.operationId}`] : [`apn circle evm observe --operation ${op.operationId}`] };
 }
 function shape(value, keys) { return isPlainRecord(value) && exactKeys(value, keys); }
 export function validateKnownCircle(value) {

@@ -200,14 +200,23 @@ export async function approveCircleFundingMint(input, ports) {
     let op = await observeCircleFunding(input, ports);
     if (op.terminal)
         return op;
-    const existing = op.effects.find(e => e.role === "mint");
-    if (existing !== undefined && existing.phase !== "prepared" && !UNSENT_SIGNING.includes(existing.phase))
+    const existing = op.effects.find(e => e.role === "mint"), rearm = existing?.phase === "abandoned_unsent";
+    if (existing !== undefined && !rearm && existing.phase !== "prepared" && !UNSENT_SIGNING.includes(existing.phase))
         return op;
     if (op.source === null || op.attestation === null || op.residualAllowanceAtomic !== "0")
         circleBlocked("verified_source_attestation_and_zero_allowance_required");
     assertCircleAttestation(op.source, op.attestation, op.funding);
     await ports.assertOwnerPolicyAndConflicts(op, "mint");
-    if (existing === undefined) {
+    if (rearm) {
+        // R4: the previous mint can never land (another transaction took its nonce). A fresh envelope is signed only while
+        // the issuer message is still unused on the destination; a used message was minted by someone else: adopt it.
+        if (ports.messageNonceUsed === undefined)
+            circleBlocked("mint_message_state_unavailable");
+        if (await ports.messageNonceUsed(op))
+            circleBlocked("mint_message_used_external_adoption_required");
+        op = await rearmEffect(op, "mint", await ports.mintEnvelope(op), ports);
+    }
+    else if (existing === undefined) {
         const envelope = await ports.mintEnvelope(op);
         op = await persist(op, { effects: [...op.effects, { role: "mint", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "mint_envelope_frozen", ports);
     }
@@ -241,6 +250,8 @@ export async function observeCircleFunding(input, ports) {
                 if (op.terminal)
                     return op;
             }
+            else
+                op = await ambiguousOwnedSend(op, effect.role, ports);
             continue;
         }
         if (proof.outcome === "reverted") {
@@ -278,7 +289,7 @@ export async function observeCircleFunding(input, ports) {
             }
         }
     }
-    if (op.source !== null && op.attestation !== null && op.effects.some(e => e.role === "mint" && e.transactionHash !== null)) {
+    if (op.source !== null && op.attestation !== null && op.effects.some(e => e.role === "mint" && e.transactionHash !== null && e.phase !== "abandoned_unsent")) {
         const destination = await ports.observeDestination(op);
         if (destination !== null) {
             if (op.destination !== null && (destination.blockHash !== op.destination.blockHash || destination.receiptHash !== op.destination.receiptHash || destination.transactionHash !== op.destination.transactionHash))
@@ -343,6 +354,8 @@ export async function cleanupCircleFunding(input, ports) {
         const envelope = await ports.cleanupEnvelope(op);
         op = await persist(op, { state: "cleanup_required", effects: [...op.effects, { role: "cleanup", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "cleanup_envelope_frozen", ports);
     }
+    else if (cleanup.phase === "abandoned_unsent")
+        op = await rearmEffect(op, "cleanup", await ports.cleanupEnvelope(op), ports);
     cleanup = op.effects.find(e => e.role === "cleanup");
     if (["prepared", ...UNSENT_SIGNING].includes(cleanup.phase)) {
         await ports.assertOwnerPolicyAndConflicts(op);
@@ -360,16 +373,6 @@ export async function cleanupCircleFunding(input, ports) {
     return op;
 }
 /** Explicit fresh cleanup authority, never source authorization or expiry renewal. */
-export async function executeCircleFundingCleanupWithConsent(op, ports) {
-    await ports.assertOwnerPolicyAndConflicts(op);
-    const token = await consent(op, "cleanup", ports);
-    try {
-        return await executeCircleFundingEffect(op, "cleanup", ports, token);
-    }
-    finally {
-        authorities.delete(token);
-    }
-}
 /** Production retirement custody accepts only the private controller's currently active exact guard. */
 export function assertCircleFundingEffectGuard(input, effectInput, guard) {
     const op = snapshotCircleFundingOperation(input), effect = snapshotCircleFundingEffect(op, effectInput);
@@ -429,5 +432,42 @@ async function sentNeverLanded(input, role, ports) {
     // The submission fence exposed every hold (`unknown_finality`); released, not counted, is the ledger's terminal for them.
     const usage = await ports.usage(op, "released_unsubmitted");
     return persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "approval_never_landed_holds_released", ports);
+}
+/** R4 for a possibly-broadcast mint or cleanup (submission fence crossed) that no receipt proves. If the node knows neither
+ * its transaction nor a receipt and the signer's latest nonce has not passed the effect's nonce, the identical sealed
+ * bytes are sent again, once per command, never re-signed (same hash and nonce: at most one inclusion). If the safe nonce
+ * is past it, another transaction took the nonce and the bytes can never land: the effect is abandoned, its bytes
+ * discarded, and approve-mint (or cleanup) may re-arm a fresh envelope under fresh foreground consent. Otherwise observe. */
+async function ambiguousOwnedSend(input, role, ports) {
+    let op = input;
+    const effect = op.effects.find(e => e.role === role);
+    if (op.terminal || ports.unsent?.ambiguous === undefined || effect.transactionHash === null || !["submission_started", "submitted", "unknown"].includes(effect.phase))
+        return op;
+    const outcome = await ports.unsent.ambiguous(op, effect);
+    if (outcome === "resend_identical") {
+        if (ports.unsent.resend === undefined)
+            return op;
+        const material = await ports.loadMaterial(op, effect);
+        if (material === null || material.transactionHash !== effect.transactionHash)
+            circleCorrupt("sealed_material_missing");
+        return await ports.unsent.resend(op, effect, material.rawTransaction) ? persist(op, {}, `${role}_identical_sealed_bytes_rebroadcast`, ports) : op;
+    }
+    if (outcome !== "never_lands")
+        return op;
+    op = await persist(op, { effects: updateEffect(op, role, { phase: "abandoned_unsent" }), ...(role === "mint" ? { state: "awaiting_mint" } : {}) }, `${role}_sent_bytes_never_land`, ports);
+    if (effect.materialHash !== null)
+        await ports.unsent.discard(op, op.effects.find(e => e.role === role));
+    return op;
+}
+/** Replaces an abandoned mint or cleanup with a fresh prepared envelope; the transition names the abandoned hash. */
+async function rearmEffect(op, role, envelope, ports) {
+    const old = op.effects.find(e => e.role === role);
+    // The abandoned bytes are gone before anything new is signed (idempotent, also after a crash between abandon and discard).
+    if (old.materialHash !== null) {
+        if (ports.unsent === undefined)
+            circleBlocked("never_landed_discard_unavailable");
+        await ports.unsent.discard(op, old);
+    }
+    return persist(op, { effects: updateEffect(op, role, { phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }) }, `${role}_fresh_envelope_after_never_landed:${old.transactionHash ?? "none"}`, ports);
 }
 //# sourceMappingURL=funding-lifecycle.js.map

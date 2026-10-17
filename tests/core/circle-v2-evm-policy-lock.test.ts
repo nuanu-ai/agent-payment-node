@@ -6,9 +6,10 @@ import { StateStore } from "../../src/state.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { CircleUsage, circleMechanism } from "../../src/circle-v2-evm/usage.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, circleLegacyRoute as circleRoute, type CircleDestinationChain } from "../../src/circle-v2-evm/catalog.js";
-import type { CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
+import { CircleUsage } from "../../src/circle-v2-evm/usage.js";
+import { CIRCLE_RECIPIENT, CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, circleLegacyRoute as circleRoute, type CircleDestinationChain } from "../../src/circle-v2-evm/catalog.js";
+import { circleFundingBinding } from "../../src/circle-v2-evm/funding-binding.js";
+import type { CircleFundingOperationV2 } from "../../src/circle-v2-evm/funding-operation.js";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,15 +18,18 @@ const now = new Date("2026-10-09T01:00:00.000Z");
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 async function fixture(root: string, chain: CircleDestinationChain, expiresAt?: string | Readonly<Record<string, string>>, destinationProfile?: string) {
   const state = new StateStore(root), store = new AllowlistPolicyStore(root), route = circleRoute(chain, destinationProfile); await state.initialize();
-  const op = { profile: "evm-live-buyer", profileHash: state.profileHash("evm-live-buyer"), destinationProfile: route.gasPayerProfile,
+  // Only funding-v2 operations reach usage admission; the economics match the historical fixed route.
+  const funding = circleFundingBinding(chain, { sourceProfile: "evm-live-buyer", sourceOwner: CIRCLE_SOURCE_OWNER, destinationProfile: route.gasPayerProfile, gasPayer: route.gasPayer },
+    { recipient: CIRCLE_RECIPIENT, amountAtomic: "40100", maxFeeAtomic: "100", minMintAtomic: "40000" }), mechanism = funding.mechanism;
+  const op = { schemaVersion: "apn.circle-v2-evm-operation.v2", funding, profile: "evm-live-buyer", profileHash: state.profileHash("evm-live-buyer"), destinationProfile: route.gasPayerProfile,
     destinationProfileHash: state.profileHash(route.gasPayerProfile), destinationChain: chain,
-    sourceCustody: { walletAddress: CIRCLE_SOURCE_OWNER }, destinationCustody: { walletAddress: route.gasPayer }, policies: [], usage: [] } as unknown as CircleOperationV1;
+    sourceCustody: { walletAddress: CIRCLE_SOURCE_OWNER }, destinationCustody: { walletAddress: route.gasPayer }, policies: [], usage: [] } as unknown as CircleFundingOperationV2;
   const heads = new Map<string, Awaited<ReturnType<AllowlistPolicyStore["appendDecision"]>>>();
   for (const profile of [...new Set([op.profile, op.destinationProfile])]) {
     const account = profile === op.profile ? CIRCLE_SOURCE_OWNER : route.gasPayer;
-    const admissions = [{ chain: "eip155:42161", kind: "token" as const, identifier: CIRCLE_SOURCE_TOKEN, rail: "bridge" as const, maximumPerTransferAtomic: "100000", dailyLimitAtomic: "1000000", mechanism: circleMechanism(chain) },
-      { chain: "eip155:42161", kind: "native" as const, rail: "bridge" as const, maximumPerTransferAtomic: "75000000000000", dailyLimitAtomic: "1000000000000000", mechanism: circleMechanism(chain) },
-      { chain: `eip155:${chain}`, kind: "native" as const, rail: "bridge" as const, maximumPerTransferAtomic: route.destinationNativeCap, dailyLimitAtomic: (BigInt(route.destinationNativeCap) * 10n).toString(), mechanism: circleMechanism(chain) }];
+    const admissions = [{ chain: "eip155:42161", kind: "token" as const, identifier: CIRCLE_SOURCE_TOKEN, rail: "bridge" as const, maximumPerTransferAtomic: "100000", dailyLimitAtomic: "1000000", mechanism },
+      { chain: "eip155:42161", kind: "native" as const, rail: "bridge" as const, maximumPerTransferAtomic: "75000000000000", dailyLimitAtomic: "1000000000000000", mechanism },
+      { chain: `eip155:${chain}`, kind: "native" as const, rail: "bridge" as const, maximumPerTransferAtomic: route.destinationNativeCap, dailyLimitAtomic: (BigInt(route.destinationNativeCap) * 10n).toString(), mechanism }];
     const expiry = typeof expiresAt === "string" ? expiresAt : expiresAt?.[profile];
     const record = await store.stage({ profile, now, policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: "circle-lock-fixture.1", accounts: { evm: account }, effectiveAt: new Date(now.getTime() - 1000).toISOString(), ...(expiry === undefined ? {} : { expiresAt: expiry }), admissions } });
     const head = await store.appendDecision(profile, null, { status: "active", revision: record.revision, stagedRecordDigest: record.recordDigest,
@@ -123,40 +127,4 @@ test("expired owner policy can release only the existing proven-unspent reservat
     const released = await expired.follow(held, "failed_before_effect");
     assert.equal(released.length, 5); for (const row of released) { assert.equal(row.state, "failed_before_effect"); assert.equal(row.consumedAtomic, undefined); assert.equal((await new AssetUsageLedger(temporary.root).usageReadOnly(row, new Date(expires))).amountAtomic, "0"); }
   });
-});
-
-test("fresh compatible current cleanup activation admits historical holds without rebinding the parent", async t => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143, new Date(now.getTime() + 60000).toISOString());
-  const held = await f.usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => {
-    const policies = await f.usage.policies(f.op), op = { ...f.op, operationId: "d".repeat(64), policies }; return { ...op, usage: await f.usage.reserve(op) };
-  });
-  const parentBytes = JSON.stringify(held), head = f.heads.get(held.profile)!;
-  await f.store.appendDecision(held.profile, head.entryDigest, { status: "active", revision: head.revision, stagedRecordDigest: head.stagedRecordDigest, policyDigest: head.policyDigest, registry: head.registry!, approvalFingerprint: hashObject("fresh-cleanup"), decidedAt: now.toISOString() });
-  const frame = await f.usage.withPolicyLocks([held.profile, held.destinationProfile], async () => {
-    await assert.rejects(f.usage.confirm(held), /owner_policy_changed/);
-    const policies = await f.usage.retirementPolicies(held); await f.usage.confirm(held, policies);
-    assert.equal(await f.usage.authorizationDeadline(held, policies), new Date(now.getTime() + 60000).toISOString()); return policies;
-  });
-  assert.notEqual(frame[0]!.activationDigest, held.policies[0]!.activationDigest); assert.equal(JSON.stringify(held), parentBytes);
-  const state = await f.store.read(held.profile), current = state.entries.at(-1)!;
-  await f.store.appendDecision(held.profile, current.entryDigest, { status: "active", revision: current.revision, stagedRecordDigest: current.stagedRecordDigest, policyDigest: current.policyDigest, registry: current.registry!, approvalFingerprint: hashObject("changed-again"), decidedAt: now.toISOString() });
-  await assert.rejects(f.usage.withPolicyLocks([held.profile, held.destinationProfile], () => f.usage.confirm(held, frame)), /owner_policy_changed/);
-});
-
-for (const variant of ["missing_native", "wrong_owner", "closed_hold"] as const) test(`current cleanup authority refuses ${variant} with actual policy/ledger state`, async t => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143);
-  const held = await f.usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => {
-    const op = { ...f.op, operationId: "e".repeat(64), policies: await f.usage.policies(f.op) }; return { ...op, usage: await f.usage.reserve(op) };
-  });
-  if (variant === "wrong_owner") {
-    await assert.rejects(f.usage.withPolicyLocks([held.profile, held.destinationProfile], () => f.usage.retirementPolicies({ ...held, sourceCustody: { ...held.sourceCustody, walletAddress: circleRoute(143).gasPayer } })), /active_owner_asset_policy_required/); return;
-  }
-  if (variant === "closed_hold") {
-    const row = held.usage[3]!;
-    await new AssetUsageLedger(temporary.root).transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state: "failed_before_effect", outcomeDigest: hashObject("closed"), now });
-  } else {
-    const record = await f.store.stage({ profile: held.profile, expectedRevision: 1, now, policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: "fresh-cleanup-negative", accounts: { evm: CIRCLE_SOURCE_OWNER }, effectiveAt: now.toISOString(), admissions: [{ chain: "eip155:42161", kind: "token", identifier: CIRCLE_SOURCE_TOKEN, rail: "bridge", maximumPerTransferAtomic: "100000", dailyLimitAtomic: "1000000", mechanism: circleMechanism(143) }] } });
-    await f.store.appendDecision(held.profile, f.heads.get(held.profile)!.entryDigest, { status: "active", revision: record.revision, stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest, registry: record.registry, approvalFingerprint: hashObject(variant), decidedAt: now.toISOString() });
-  }
-  await assert.rejects(f.usage.withPolicyLocks([held.profile, held.destinationProfile], async () => f.usage.confirm(held, await f.usage.retirementPolicies(held))), variant === "closed_hold" ? /asset_usage_hold_changed/ : /asset is not listed for this network/);
 });

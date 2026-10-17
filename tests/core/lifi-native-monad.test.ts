@@ -25,24 +25,6 @@ async function renderApproval(summary: ReturnType<typeof publicBridgeOperation>,
   return printed;
 }
 
-test("immutable Monad RPC baseline pins safe finality, Across, WMON, implementation, buffers and trace capability", async () => {
-  const raw = await readFile(resolve("tests/core/lifi-fixtures/deployment-monad-rpc-20260920.json"), "utf8");
-  assert.equal(sha256(raw), "81823a83110faf31e1834af5bb420007b26fbcc261976a549749db6de1381ee3");
-  const capture = JSON.parse(raw) as any;
-  assert.equal(capture.mode, "public_read_only_no_signing_no_send");
-  assert.equal(capture.safeBlock.number, "0x658f460");
-  const values = new Map(capture.requests.map((row: any) => [canonicalJson([row.request.method, row.request.params]), row.response.result]));
-  const call: EvmRpcCall = async (method, params) => {
-    const key = canonicalJson([method, params]); assert.equal(values.has(key), true, key); return structuredClone(values.get(key));
-  };
-  const block = { numberAtomic: BigInt(capture.safeBlock.number).toString(), hash: capture.safeBlock.hash,
-    timestampAtomic: BigInt(capture.safeBlock.timestamp).toString() };
-  const proof = await new BridgeRpc(143, capture.rpcOrigin, call).deployment("across", 1, BRIDGE_ZERO_ADDRESS, block);
-  assert.deepEqual({ chainId: proof.chainId, peerChainId: proof.peerChainId, blockHash: proof.block.hash },
-    { chainId: 143, peerChainId: 1, blockHash: capture.safeBlock.hash });
-  // No trace capability probe on a fixed historical transaction (LIFI-13): the delivery's own trace fails closed instead.
-});
-
 test("Ethereum to Monad admits only the exact direct native Across self route and terminalizes usage", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root, "eth-monad");

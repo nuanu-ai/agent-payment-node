@@ -1,4 +1,3 @@
-import { type VerifiedCleanup85NativeReservation, type VerifiedCleanup85NativeSettlement } from "./circle-cleanup85-native-ledger-authority.js";
 import type { MerchantOperation, MerchantReceipt } from "./x402-merchant/model.js";
 import { SecureStateStore } from "./secure-state-store.js";
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, assetUsageReservationId, validateAssetUsageReservation } from "./asset-usage-ledger-record.js";
@@ -26,7 +25,6 @@ export declare class AssetUsageLedger extends SecureStateStore {
         readonly now: Date;
     }): Promise<AssetUsageReservation>;
     reserveMetaMaskNative(operationId: string, kind: "native" | "token", now: Date): Promise<AssetUsageReservation>;
-    reserveCleanup85Native(authority: VerifiedCleanup85NativeReservation, now: Date): Promise<AssetUsageReservation>;
     private reserveBound;
     /** Direct pre-private recovery: hold the exact reservation through its durable outcome and release.
      * The callback must not acquire this bucket lock. Its owning profile/operation/custody locks remain held. */
@@ -36,8 +34,6 @@ export declare class AssetUsageLedger extends SecureStateStore {
         outcomeDigest: string;
     }>): Promise<T>;
     transition(input: AssetUsageTransitionInput): Promise<AssetUsageReservation>;
-    /** Exact root-owned cleanup85 cancellation only; public projections are never authority. */
-    settleCleanup85Native(authority: VerifiedCleanup85NativeSettlement, now: Date): Promise<AssetUsageReservation>;
     /** Finite Mega merchant headroom only: metadata cannot mint this canonical receipt authority. */
     settleMerchantNativeActualFee(o: MerchantOperation, receipt: MerchantReceipt, now: Date): Promise<AssetUsageReservation>;
     /** Static normal-owner canonical proof; public DTOs cannot release capacity. */

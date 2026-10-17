@@ -1,7 +1,6 @@
-import { validateCleanup85RecoveryProof, type Cleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
-import { validateConsumedBurnProof, type ConsumedBurnRetirementProof } from "./consumed-burn-proof.js";
-import { validateSealedBurnProof, type SealedBurnRetirementProof } from "./burn-retirement-proof.js";
-import { isSealedBurnRetirement, isConsumedBurnRetirement } from "./burn-retirement.js";
+import { validateCleanup85RecoveryProof, type Cleanup85RecoveryProof } from "../legacy/circle-cleanup85-retirement-proof.js";
+import { isConsumedBurnRetirement, isSealedBurnRetirement, validateConsumedBurnProof, validateSealedBurnProof,
+  type ConsumedBurnRetirementProof, type SealedBurnRetirementProof } from "../legacy/circle-sealed-burn-retirement.js";
 import { exactKeys, isPlainRecord, hashObject } from "../canonical.js";
 import { circleBlocked, type CircleOperationV1 } from "./operation-model.js";
 export interface CircleNonceRetirementProof { readonly cleanup85Recovery?: Cleanup85RecoveryProof; readonly consumedBurn?: ConsumedBurnRetirementProof; readonly sealedBurn?: SealedBurnRetirementProof; readonly intentHash: string; readonly originalApprovalHash: string;

@@ -841,7 +841,6 @@ apn wallet capabilities-tron [--profile <profile>]
 apn policy admit-tron --profile <profile> --asset <trx-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-trx <decimal>
 apn pay transfer prepare-tron --profile <profile> --asset <trx-or-usdt> --to <tron-address> --amount <decimal> --max-fee-trx <decimal> --idempotency-key <key>
 apn wallet portfolio [--profile <profile>] [--refresh]
-apn operation repair-deployment --operation <operation-id>
 apn bridge capabilities [--profile <profile>]
 apn bridge inventory
 apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --from-token <address> --to-token <address> --amount <decimal> --to <address> --min-output <decimal> --max-native-debit-wei <uint> --max-route-fee <decimal> --slippage-bps <uint>
@@ -861,10 +860,6 @@ apn circle evm approve-mint --operation <operation_id>
 apn circle evm observe --operation <operation_id>
 apn circle evm refresh-attestation --operation <operation_id>
 apn circle evm cleanup --operation <operation_id>
-apn circle evm cleanup-nonce --operation <operation_id>
-apn circle evm cleanup85-prepare --operation <operation_id>
-apn circle evm cleanup85-cancel --operation <operation_id>
-apn circle evm cleanup86-approve --operation <operation_id>
 apn circle evm status --operation <operation_id>
 apn mega funding prepare --profile <profile> --expected-payer <address> --amount-atomic <wei> --minimum-output-atomic <mega-wei> --maximum-fee-atomic <wei> --idempotency-key <key>
 apn mega funding approve --operation <operation-id>

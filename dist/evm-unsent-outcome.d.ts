@@ -15,3 +15,18 @@ export declare function evmSentOutcome(read: (method: "eth_getTransactionCount" 
     nonce: bigint;
     transactionHash: string;
 }>): Promise<EvmUnsentOutcome>;
+export type EvmAmbiguousSendOutcome = "own_transaction_known" | "never_lands" | "resend_identical" | "other_transaction_pending";
+/**
+ * R4 for possibly-broadcast bytes that no receipt proves yet. The nonces are read first, then the hash, so a transaction
+ * included between the reads is seen as known rather than mistaken for another one:
+ * - the node knows the transaction or a receipt: observe only;
+ * - the safe nonce is past the signed nonce and the hash is unknown: another transaction took it, the bytes never land;
+ * - the latest nonce has not passed the signed nonce and the hash is unknown: the identical bytes may be sent again
+ *   (same hash, same nonce: at most one inclusion);
+ * - otherwise another transaction holds the nonce below safe depth: wait.
+ */
+export declare function evmAmbiguousSendOutcome(read: (method: "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt", params: readonly unknown[]) => Promise<unknown>, input: Readonly<{
+    account: string;
+    nonce: bigint;
+    transactionHash: string;
+}>): Promise<EvmAmbiguousSendOutcome>;

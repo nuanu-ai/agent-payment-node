@@ -8,6 +8,7 @@ import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { transitionBridge } from "../../src/lifi/transitions.js";
 import { BRIDGE_RPC_ENV, bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { BRIDGE_DIAMOND } from "../../src/lifi/validation.js";
+import { BRIDGE_FEE_RULE_HASH } from "../../src/lifi/rpc-fees.js";
 import { temporaryState } from "./helpers.js";
 import { addressWord, makeDestinationReceipt, makeSourceReceipt } from "./lifi-event-fixtures.js";
 import { LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpers.js";
@@ -76,9 +77,7 @@ test("an approval inclusion proved with the legacy Base oracle evidence finishes
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   let decoded: DecodedBridgeCall | undefined, amount = 0n;
   const env: Record<string, string> = {};
-  // The legacy re-proof reads the oracle on the archive role, as 0.5.42 did; the live path never does.
   for (const chainId of [8453, 42161] as const) env[BRIDGE_RPC_ENV[chainId]] = `https://rpc-${chainId}.example`;
-  env.APN_BASE_ARCHIVE_RPC_URL = "https://archive-8453.example";
   const setup = await lifiFixture(temporary.root, "base-arb"), request = setup.request;
   const chain = lifecycleDouble([[8453, 42161, "across", request.fromToken], [42161, 8453, "across", request.toToken]], code, {
     nowSeconds: BigInt(Math.floor(setup.now.getTime() / 1000)), owner: LIFI_SYNTHETIC_SENDER, nonce: 7n,
@@ -92,11 +91,16 @@ test("an approval inclusion proved with the legacy Base oracle evidence finishes
   decoded = operation.intent.decoded; amount = BigInt(operation.intent.materialization.request.amountAtomic);
   assert.equal((await f.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
   chain.mine(8453);
-  // Rewrite the approval's inclusion as 0.5.42 recorded it: same inclusion, legacy oracle-proven fee evidence.
+  // Rewrite the approval's inclusion as 0.5.42 recorded it: same inclusion, with the oracle-proven fee evidence that release
+  // wrote for a zero Jovian operator fee (GasPriceOracle getOperatorFee(gasUsed) returned 0 at the inclusion block).
   let op = (await f.core.bridges.records.findOperation(id))!;
   const approval = op.effects[0]!;
-  const legacy = await rpcFor(8453).observe(approval.transactionHash!, approval.envelope, undefined, { legacyBaseFees: true });
-  assert.ok(legacy); assert.notEqual(legacy.transaction.feeEvidence.baseOracle, null);
+  const observed = await rpcFor(8453).observe(approval.transactionHash!, approval.envelope);
+  assert.ok(observed); assert.equal(observed.transaction.operatorFeeWei, "0");
+  const p = observed.transaction, legacy = { transaction: { ...p, feeEvidence: { ...p.feeEvidence, ruleHash: BRIDGE_FEE_RULE_HASH, baseOracle: {
+    oracle: "0x420000000000000000000000000000000000000F" as Hex, from: "0x0000000000000000000000000000000000000000" as Hex,
+    callData: `0x275aedd2${BigInt(p.gasUsedAtomic).toString(16).padStart(64, "0")}` as Hex, rawReturn: `0x${"0".repeat(64)}` as Hex,
+    blockHash: p.block.hash, requireCanonical: true as const, version: "1.6.0" as const, regime: "jovian" as const, scalarAtomic: "0", constantWei: "0" } } } };
   op = transitionBridge(op, { effects: op.effects.map((effect) => effect.role === "approval"
     ? { ...effect, phase: "included_success" as const, includedProof: legacy.transaction } : effect) }, op.updatedAt);
   await f.core.bridges.records.persist(op);

@@ -4,28 +4,12 @@ import type { BridgeIntent } from "./operation-model.js";
 import { BridgeOperationRepository } from "./operation-repository.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcFactory, LifiProviderPort } from "./ports.js";
 import { BridgePreparation } from "./prepare.js";
-import { type StoredPublicBridgeOperation, type BridgeReceipt, type PublicBridgeOperation } from "./receipt.js";
-import type { BridgeDeploymentMigrationAudit } from "./deployment-migration.js";
-import { type BaseDeploymentMigrationAudit } from "./base-deployment-migration.js";
+import { type StoredPublicBridgeOperation, type BridgeReceipt } from "./receipt.js";
 export interface BridgeDependencies {
     readonly provider: LifiProviderPort;
     readonly rpcFor: BridgeRpcFactory;
     readonly custody: BridgeCustodyPort;
     readonly approval?: BridgeApprovalPort;
-}
-export interface BridgeDeploymentMigrationResult {
-    readonly schema_version: (BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit)["schemaVersion"];
-    readonly status: "migrated" | "already_current";
-    readonly proof_class: "local_journal_migration";
-    readonly operation: PublicBridgeOperation;
-    readonly audit: BridgeDeploymentMigrationAudit | BaseDeploymentMigrationAudit;
-    readonly next_actions: readonly string[];
-}
-export interface BridgeDeploymentMigrationPending {
-    readonly status: "pending";
-    readonly proof_class: "local_journal_migration";
-    readonly operation_id: string;
-    readonly next_actions: readonly string[];
 }
 export declare class BridgeService {
     private readonly context;
@@ -196,7 +180,7 @@ export declare class BridgeService {
             batch_count: number;
             max_batch_size: number;
             budget_rejected_before_transport: number;
-            attempts_by_endpoint_role: Readonly<Record<"primary" | "receipt" | "archive", number>>;
+            attempts_by_endpoint_role: Readonly<Record<"receipt" | "primary" | "archive", number>>;
             attempts_by_method_class: Readonly<Record<string, number>>;
         }[];
         rpc_origins: {
@@ -237,7 +221,7 @@ export declare class BridgeService {
         expires_at: string;
         next_actions: readonly string[];
         observation_rpc_failure?: {
-            endpoint_role?: "primary" | "receipt" | "archive";
+            endpoint_role?: "receipt" | "primary" | "archive";
             attempts?: number;
             http_status?: number;
             rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
@@ -424,7 +408,7 @@ export declare class BridgeService {
             batch_count: number;
             max_batch_size: number;
             budget_rejected_before_transport: number;
-            attempts_by_endpoint_role: Readonly<Record<"primary" | "receipt" | "archive", number>>;
+            attempts_by_endpoint_role: Readonly<Record<"receipt" | "primary" | "archive", number>>;
             attempts_by_method_class: Readonly<Record<string, number>>;
         }[];
         rpc_origins: {
@@ -465,7 +449,7 @@ export declare class BridgeService {
         expires_at: string;
         next_actions: readonly string[];
         observation_rpc_failure?: {
-            endpoint_role?: "primary" | "receipt" | "archive";
+            endpoint_role?: "receipt" | "primary" | "archive";
             attempts?: number;
             http_status?: number;
             rpc_method?: import("./operation-model.js").BridgeObservationRpcMethod;
@@ -642,17 +626,10 @@ export declare class BridgeService {
     }>;
     status(operationId: string): Promise<StoredPublicBridgeOperation>;
     receipt(operationId: string): Promise<BridgeReceipt | Record<string, unknown>>;
-    repairDeployment(operationId: string): Promise<BridgeDeploymentMigrationResult | {
-        status: "pending";
-        proof_class: "local_journal_migration";
-        operation_id: "0e3491acbe5a0b9687d0d18e7e4bc605199a9d8b9cb7ab5c8c9217e303eba189";
-        next_actions: string[];
-    }>;
     private dependencies;
     private preparation;
     private execution;
     private save;
     private followUsage;
     private locked;
-    private deploymentMigrationLocked;
 }

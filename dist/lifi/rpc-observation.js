@@ -80,7 +80,7 @@ export async function observeCanonical(c, hash, expected, nativeDelivery, includ
     if (evmRpcAddress(r.from) !== identity.from || evmRpcAddress(r.to) !== identity.to)
         bridgeFailure("APN_RPC_PROTOCOL", "receipt_sender_target");
     const logs = parseReceiptLogs(r.logs, hash, block, index);
-    const fees = !includeFees ? null : c.legacyFees !== undefined ? await c.legacyFees(r, block, safe) : bridgeActualFees(c.chainId, r);
+    const fees = !includeFees ? null : bridgeActualFees(c.chainId, r);
     if (fees !== null && (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) ||
         BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic)))
         bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
