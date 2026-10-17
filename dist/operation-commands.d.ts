@@ -17,11 +17,20 @@ export declare class OperationCommands {
     resume(request: ResumeRequest): Promise<CommandOutcome>;
     receipt(operationId: string): Promise<CommandOutcome>;
     abandon(operationIdInput: string): Promise<CommandOutcome>;
-    /** The family's saved record behind an ID; an ID the index does not hold may belong to a family without an adapter yet. */
+    /** The family's saved record behind an ID; the index holds every family's operations. */
     private found;
+    /** Every family's operations are indexed except a gasless USDT preparation that never executed, which has its own status. */
+    private notIndexed;
     /** The option combinations no family accepts, checked before any state is read (as before the index). */
     private assertResumeOptions;
 }
+/**
+ * The family command whose runtime a generic operation command delegates to, read before that runtime is built: the
+ * runtime factory builds a family runtime only for the commands that name it. Null for any other command, when the
+ * family answers this one without its runtime, and when the lookup refuses (an unknown ID, an unreadable record): the
+ * command repeats the same lookup and answers that refusal itself.
+ */
+export declare function operationRuntimeCommand(root: string, request: CommandRequest): Promise<CommandRequest["command"] | null>;
 /** The owner release of an index entry whose record cannot be read; the record file and any ledger hold stay as they are. */
 export declare const abandonCommand: (operationId: string) => string;
 export {};

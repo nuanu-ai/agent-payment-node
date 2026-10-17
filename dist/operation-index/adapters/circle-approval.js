@@ -22,5 +22,6 @@ export const circleApprovalAdapter = {
     // Status observes a sent approval and closes an unsent marker as failed_before_effect; it never signs or resends.
     status: async (context, record) => await (await import("../../circle-command-service.js")).executeCircleCommand({ command: "circle.approval.status", operationId: record.id }, context),
     commands: { status: OPERATION_STATUS, resume: OPERATION_STATUS },
+    runtimeCommand: async () => "circle.approval.status",
 };
 //# sourceMappingURL=circle-approval.js.map

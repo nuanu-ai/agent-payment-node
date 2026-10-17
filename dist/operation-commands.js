@@ -1,8 +1,9 @@
 import { operationOutcome } from "./core-outcome.js";
 import { ApnError } from "./errors.js";
 import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
+import { unexecutedUsdtPreparation } from "./operation-index/adapters/gasless-usdt.js";
 import { OperationIndex } from "./operation-index/index.js";
-import { pendingFamilyAbandon, pendingFamilyAnswer } from "./operation-pending-families.js";
+import { StateStore } from "./state.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 /**
  * `apn operation status|resume|abandon` and `apn receipt get` for every family: one operation-index lookup, then the
@@ -42,7 +43,7 @@ export class OperationCommands {
         await this.context.ready();
         let entry = await this.index.find(operationId);
         if (entry === null)
-            return operationOutcome(await pendingFamilyAbandon(this.context, this.index.registry, operationId));
+            throw await this.notIndexed(operationId);
         let record;
         try {
             record = entry.unreadableReason === "duplicate_operation_id" ? undefined : await this.index.loadRecord(entry);
@@ -70,13 +71,13 @@ export class OperationCommands {
             throw byFamilyCommand({ entry, adapter, record }, "exit");
         return operationOutcome(await adapter.abandon(this.context, record));
     }
-    /** The family's saved record behind an ID; an ID the index does not hold may belong to a family without an adapter yet. */
+    /** The family's saved record behind an ID; the index holds every family's operations. */
     async found(operationIdInput) {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const entry = await this.index.find(operationId);
         if (entry === null)
-            return await pendingFamilyAnswer(this.context.state.root, this.index.registry, operationId);
+            throw await this.notIndexed(operationId);
         const adapter = this.index.adapter(entry);
         if (adapter === undefined)
             throw notFound();
@@ -97,6 +98,10 @@ export class OperationCommands {
         }
         return { entry, adapter, record };
     }
+    /** Every family's operations are indexed except a gasless USDT preparation that never executed, which has its own status. */
+    async notIndexed(operationId) {
+        return await unexecutedUsdtPreparation(this.context.state.root, operationId) ?? notFound();
+    }
     /** The option combinations no family accepts, checked before any state is read (as before the index). */
     assertResumeOptions(options) {
         if (options.observeOnly !== undefined && options.observeOnly !== true)
@@ -109,6 +114,34 @@ export class OperationCommands {
             if (options.waitSeconds !== undefined || this.context.rpcUrl !== undefined)
                 throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery cannot be combined with --rpc-url or --wait-seconds.", { reason: "gasless_observation_rpc_options" });
         }
+    }
+}
+/** The generic commands that delegate to a family runtime; the owner exits (abandon) read only the state root. */
+const DELEGATED = { "operation.status": "status", "operation.resume": "resume", "receipt.get": "receipt" };
+/**
+ * The family command whose runtime a generic operation command delegates to, read before that runtime is built: the
+ * runtime factory builds a family runtime only for the commands that name it. Null for any other command, when the
+ * family answers this one without its runtime, and when the lookup refuses (an unknown ID, an unreadable record): the
+ * command repeats the same lookup and answers that refusal itself.
+ */
+export async function operationRuntimeCommand(root, request) {
+    const method = DELEGATED[request.command];
+    if (method === undefined)
+        return null;
+    try {
+        const state = new StateStore(root);
+        await state.initialize();
+        const index = new OperationIndex(state), entry = await index.find(canonicalOperationId(request.operationId));
+        const adapter = entry === null ? undefined : index.adapter(entry);
+        if (entry === null || adapter?.runtimeCommand === undefined || adapter[method] === undefined)
+            return null;
+        const record = await index.loadRecord(entry);
+        return record === null ? null : await adapter.runtimeCommand(record);
+    }
+    catch (error) {
+        if (error instanceof ApnError)
+            return null;
+        throw error;
     }
 }
 /** The owner release of an index entry whose record cannot be read; the record file and any ledger hold stay as they are. */

@@ -44,35 +44,7 @@ export class BridgeOperationRepository extends SecureStateStore {
     }
     async findStoredOperation(operationId) {
         stateIdentifier(operationId, "bridge operation ID");
-        const matches = (await this.listAllStoredOperations()).filter((op) => op.operationId === operationId);
-        if (matches.length > 1)
-            bridgeCorrupt();
-        return matches[0] ?? null;
-    }
-    async listStoredOperations(profileHash) {
-        stateIdentifier(profileHash, "bridge profile hash");
-        const directory = `bridge-operations/${profileHash}`;
-        const result = [];
-        for (const entry of await this.readDirectory(directory)) {
-            if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name))
-                bridgeCorrupt();
-            const op = await this.loadStoredOperation(profileHash, entry.name.slice(0, -5));
-            if (op === null)
-                bridgeCorrupt();
-            result.push(op);
-        }
-        return result;
-    }
-    async listAllStoredOperations() {
-        const result = [];
-        for (const entry of await this.readDirectory("bridge-operations")) {
-            if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name))
-                bridgeCorrupt();
-            result.push(...await this.listStoredOperations(entry.name));
-        }
-        if (new Set(result.map((op) => op.operationId)).size !== result.length)
-            bridgeCorrupt();
-        return result;
+        return await this.findInProfiles("bridge-operations", async (profileHash) => await this.loadStoredOperation(profileHash, operationId), bridgeCorrupt);
     }
     async findOperation(operationId) {
         const stored = await this.findStoredOperation(operationId);
@@ -81,12 +53,6 @@ export class BridgeOperationRepository extends SecureStateStore {
         if (isLegacyBridgeOperation(stored))
             bridgeCorrupt();
         return stored;
-    }
-    async listOperations(profileHash) {
-        return (await this.listStoredOperations(profileHash)).filter((op) => !isLegacyBridgeOperation(op));
-    }
-    async listAllOperations() {
-        return (await this.listAllStoredOperations()).filter((op) => !isLegacyBridgeOperation(op));
     }
     async writeOperation(op) {
         validateBridgeOperation(op);

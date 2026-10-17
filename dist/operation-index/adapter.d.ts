@@ -53,6 +53,11 @@ export interface OperationFamilyAdapter<R = unknown> {
         readonly resume?: string;
         readonly exit?: string;
     };
+    /**
+     * The family's own command whose runtime `status`, `resume` and `receipt` delegate to. The runtime factory builds a
+     * family runtime only for the commands that name it, so a generic operation command is built as this command is.
+     */
+    runtimeCommand?(record: R): Promise<CommandRequest["command"]>;
 }
 /** `<directory>[/<profileHash>]/<operationId>.json`, split back into its parts; null for any other shape. */
 export declare function parseRecordPath(recordPath: string): {
