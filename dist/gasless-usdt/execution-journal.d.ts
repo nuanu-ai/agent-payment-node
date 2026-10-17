@@ -35,6 +35,8 @@ export interface UsdtExecutionRecord extends UsdtExecutionIntent {
     readonly outcomeDigest?: string;
     readonly settlement?: UsdtSettlement | null;
 }
+/** Every state a gasless USDT execution may hold; those not in USDT_EXECUTION_OPEN_STATES are its outcomes. */
+export declare const USDT_EXECUTION_STATES: readonly UsdtExecutionState[];
 /**
  * Ethereum's safe head moves once per epoch, so execution takes a fresh safe snapshot instead of the prepared one. It must
  * be at or after the prepared block (the same block only with the same hash), keep the exact EntryPoint and EOA nonces and

@@ -1,8 +1,8 @@
-import { METAMASK_NATIVE_RESOLVED_STATES, MetaMaskNativeJournal, type MetaMaskNativeOperation } from "../../metamask-native-journal.js";
+import { MetaMaskNativeJournal, metaMaskNativeResolved, type MetaMaskNativeOperation } from "../../metamask-native-journal.js";
 import { field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, STATE_HASH, type OperationFamilyAdapter,
   type OperationStore } from "../adapter.js";
 import { dataOutcome } from "../../core-outcome.js";
-import { evmClaim, pastUnstartedDeadline } from "./family-claims.js";
+import { evmClaim } from "./family-claims.js";
 import { assertResumeOptions, oneObservationOnly } from "../../operation-command-options.js";
 import { OPERATION_ABANDON, OPERATION_RESUME, OPERATION_STATUS } from "./family-commands.js";
 
@@ -10,7 +10,8 @@ const STORE: OperationStore = { directory: "metamask-native-operations", perProf
 
 /**
  * MetaMask Agent Wallet native-fee transfers. The account is held from admission until the outcome is resolved; a
- * transfer that never reached its effect marker cannot reach it after its consent deadline (one foreground command).
+ * transfer that never reached its effect marker cannot reach it after its consent deadline (one foreground command),
+ * and its next status or a new transfer of the account closes it as failed before effect (the family's own rule).
  */
 export const metaMaskNativeAdapter: OperationFamilyAdapter<MetaMaskNativeOperation> = {
   family: "metamask_native",
@@ -18,8 +19,7 @@ export const metaMaskNativeAdapter: OperationFamilyAdapter<MetaMaskNativeOperati
   async load(root, recordPath) { return await new MetaMaskNativeJournal(root).read(requiredRecordPath(recordPath, STORE).operationId); },
   identity: record => ({ profileHash: record.context.profileHash, operationId: record.operationId, idempotencyHash: null, requestHash: record.requestHash }),
   claims: record => readableClaims(() => [evmClaim(record.context.quote.chainId, record.context.quote.sender)]),
-  terminal: record => METAMASK_NATIVE_RESOLVED_STATES.includes(record.state) ||
-    record.state === "prepared" && record.effectAttempts === 0 && pastUnstartedDeadline(record.context.consentExpiresAt),
+  terminal: record => metaMaskNativeResolved(record),
   state: record => record.state,
   salvage: raw => {
     const profileHash = field(raw, "context", "profileHash");

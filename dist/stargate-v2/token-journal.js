@@ -201,15 +201,7 @@ export function validateRecord(value) {
         fail("APN_STATE_CORRUPT", "cleanup_marker");
     if (record.phase === "cleaned" && record.residualAllowanceAtomic !== "0")
         fail("APN_STATE_CORRUPT", "cleanup_residual");
-    const allowed = {
-        prepared: ["approved"], approved: ["allowance_submission_started", "submission_started", "cleanup_required"],
-        allowance_submission_started: ["allowance_submitted", "allowance_unknown_finality", "cleanup_required"],
-        allowance_submitted: ["allowance_unknown_finality", "allowance_observed", "cleanup_required"], allowance_unknown_finality: ["allowance_observed", "cleanup_required"],
-        allowance_observed: ["post_approval_quote_bound", "submission_started", "cleanup_required"], post_approval_quote_bound: ["submission_started", "cleanup_required"], submission_started: ["submitted", "unknown_finality", "cleanup_required"],
-        submitted: ["unknown_finality", "observed", "cleanup_required"], unknown_finality: ["submitted", "observed", "cleanup_required"], observed: [],
-        cleanup_required: ["cleanup_submission_started", "cleaned", "observed"], cleanup_submission_started: ["cleanup_submitted", "cleanup_unknown_finality"],
-        cleanup_submitted: ["cleanup_unknown_finality", "cleaned", "observed"], cleanup_unknown_finality: ["cleaned", "observed"], cleaned: [],
-    };
+    const allowed = STARGATE_TOKEN_TRANSITIONS;
     if (record.transitions[0]?.phase !== "prepared")
         fail("APN_STATE_CORRUPT", "transition");
     for (let i = 1; i < record.transitions.length; i++)
@@ -217,6 +209,16 @@ export function validateRecord(value) {
             fail("APN_STATE_CORRUPT", "transition");
     return record;
 }
+/** Where each phase of a token Stargate journal may go next; a phase with nowhere to go (observed, cleaned) is its outcome. */
+export const STARGATE_TOKEN_TRANSITIONS = {
+    prepared: ["approved"], approved: ["allowance_submission_started", "submission_started", "cleanup_required"],
+    allowance_submission_started: ["allowance_submitted", "allowance_unknown_finality", "cleanup_required"],
+    allowance_submitted: ["allowance_unknown_finality", "allowance_observed", "cleanup_required"], allowance_unknown_finality: ["allowance_observed", "cleanup_required"],
+    allowance_observed: ["post_approval_quote_bound", "submission_started", "cleanup_required"], post_approval_quote_bound: ["submission_started", "cleanup_required"], submission_started: ["submitted", "unknown_finality", "cleanup_required"],
+    submitted: ["unknown_finality", "observed", "cleanup_required"], unknown_finality: ["submitted", "observed", "cleanup_required"], observed: [],
+    cleanup_required: ["cleanup_submission_started", "cleaned", "observed"], cleanup_submission_started: ["cleanup_submitted", "cleanup_unknown_finality"],
+    cleanup_submitted: ["cleanup_unknown_finality", "cleaned", "observed"], cleanup_unknown_finality: ["cleaned", "observed"], cleaned: [],
+};
 function validateAdvance(previous, next) {
     if (previous === null) {
         if (next.phase !== "prepared" || next.transitions.length !== 1)

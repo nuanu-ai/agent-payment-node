@@ -16,7 +16,10 @@ export interface MerchantEnvelope {
     readonly maximumNativeFee: string;
     readonly nativeFeeReserveWei?: string;
 }
-export type MerchantPhase = "prepared" | "signing_started" | "submission_started" | "unknown_finality" | "payment_finalized" | "delivery_unknown" | "delivered" | "reverted" | "retired_unsent";
+/** Every phase a merchant payment may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export const MERCHANT_PHASES = ["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent"] as const;
+export const MERCHANT_TERMINAL_PHASES: readonly MerchantPhase[] = ["delivered", "reverted", "retired_unsent"];
+export type MerchantPhase = typeof MERCHANT_PHASES[number];
 export interface MerchantReceipt {
     readonly transactionHash: Hex;
     readonly blockNumber: string;
@@ -109,17 +112,17 @@ export function merchantMove(o: MerchantOperation, state: MerchantPhase, at: str
     const base = { at, state, snapshotHash: merchantSnapshot({ ...o, ...changes, state }), previousHash: o.events.at(-1)?.eventHash ?? null };
     const event = { ...base, eventHash: hashObject(base) };
     const { integrityHash: _, ...body } = o;
-    return sealMerchant({ ...body, ...changes, state, terminal: state === "delivered" || state === "reverted" || state === "retired_unsent", events: [...o.events, event] });
+    return sealMerchant({ ...body, ...changes, state, terminal: MERCHANT_TERMINAL_PHASES.includes(state), events: [...o.events, event] });
 }
 export function validateMerchant(v: unknown): MerchantOperation {
     const v2 = isPlainRecord(v) && v.schemaVersion === "apn.x402-merchant.v2";
     if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", ...(v2 ? ["url", "asset"] : []), "envelope", "policy", ...(v.failures===undefined?[]:["failures"]), ...(v.retirementDigest===undefined?[]:["retirementDigest"]), ...(v.feeContext===undefined?[]:["feeContext"]), ...(v.effectBinding === undefined ? [] : ["effectBinding"]), "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"])]))
         refuse("merchant_state_schema");
     const o = v as unknown as MerchantOperation, { integrityHash, ...body } = o;
-    if (!["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent"].includes(o.state) || !exactKeys(o.policy as unknown as Record<string,unknown>, ["digest", "revision", "activationDigest"]) || o.schemaVersion !== "apn.x402-merchant.v1" && o.schemaVersion !== "apn.x402-merchant.v2" || o.kind !== "merchant_x402" || hashObject(body) !== integrityHash || merchantFingerprint(o) !== o.fingerprint ||
+    if (!(MERCHANT_PHASES as readonly string[]).includes(o.state) || !exactKeys(o.policy as unknown as Record<string,unknown>, ["digest", "revision", "activationDigest"]) || o.schemaVersion !== "apn.x402-merchant.v1" && o.schemaVersion !== "apn.x402-merchant.v2" || o.kind !== "merchant_x402" || hashObject(body) !== integrityHash || merchantFingerprint(o) !== o.fingerprint ||
         ![o.operationId, o.profileHash, o.idempotencyHash, o.requestHash, o.fingerprint, o.policy?.digest, o.policy?.activationDigest].every(h => /^[a-f0-9]{64}$/u.test(h)) ||
         !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(o.profile) || !Number.isSafeInteger(o.policy.revision) || o.policy.revision < 1 ||
-        o.terminal !== ["delivered", "reverted", "retired_unsent"].includes(o.state) || ![0, 1].includes(o.signingAttempts) || ![0, 1].includes(o.submissionAttempts) || o.submissionAttempts > o.signingAttempts)
+        o.terminal !== MERCHANT_TERMINAL_PHASES.includes(o.state) || ![0, 1].includes(o.signingAttempts) || ![0, 1].includes(o.submissionAttempts) || o.submissionAttempts > o.signingAttempts)
         refuse("merchant_state_integrity");
     validateEvmNativeCustody(o.custody);
     // v2 binds its own URL and asset pin (as frozen at prepare, never the current registry); v1 the frozen legacy table.

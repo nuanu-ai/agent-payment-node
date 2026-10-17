@@ -37,7 +37,7 @@ export function validateUniswapTokenOperation(value) {
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure"] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
-    if (!PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
+    if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
         !["0", route.amountIn].includes(op.allowanceAtPrepare) || uint(op.maximumNativeDebitWei) < maxGas(op.approvalGas) + maxGas(op.swapGas) + maxGas(op.cleanupGas) ||
         uint(op.accumulatedNativeDebitWei) > uint(op.maximumNativeDebitWei) ||
         integrityHash !== hashObject(body) || op.updatedAt < op.createdAt || !canonicalInstant(op.createdAt) || !canonicalInstant(op.updatedAt))
@@ -80,7 +80,9 @@ export function validateUniswapTokenOperation(value) {
         validateReceipt(op.receipt, op);
     return op;
 }
-const PHASES = ["prepared", "approved", "approval_submission_started", "approval_submitted", "approval_unknown_finality",
+/** Every phase of a Uniswap token swap; `observed` and `cleaned` are its outcomes (nothing of it signs, sends or lands after them). */
+export const UNISWAP_TOKEN_TERMINAL_PHASES = ["observed", "cleaned"];
+export const UNISWAP_TOKEN_PHASES = ["prepared", "approved", "approval_submission_started", "approval_submitted", "approval_unknown_finality",
     "approval_observed", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started",
     "cleanup_submitted", "cleanup_unknown_finality", "cleaned"];
 export class UniswapTokenJournal extends SecureStateStore {
@@ -146,7 +148,7 @@ function validateCleanupEvidence(v) {
 function validateFailureDiagnostic(v) {
     if (v === null)
         return;
-    if (!isPlainRecord(v) || !exactKeys(v, ["code", "reason", "rpcMethod", "endpointRole", "phase"]) || !PHASES.includes(v.phase) ||
+    if (!isPlainRecord(v) || !exactKeys(v, ["code", "reason", "rpcMethod", "endpointRole", "phase"]) || !UNISWAP_TOKEN_PHASES.includes(v.phase) ||
         ["code", "reason", "rpcMethod", "endpointRole"].some((field) => v[field] !== null && sanitizeUniswapTokenFailureField(field, v[field]) !== v[field]))
         corrupt("Uniswap token pre-sign diagnostic is invalid.");
 }

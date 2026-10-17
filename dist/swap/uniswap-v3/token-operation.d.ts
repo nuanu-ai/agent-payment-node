@@ -89,6 +89,9 @@ export declare function newUniswapTokenOperation(input: Omit<UniswapTokenOperati
     readonly now: Date;
 }): UniswapTokenOperation;
 export declare function validateUniswapTokenOperation(value: unknown): UniswapTokenOperation;
+/** Every phase of a Uniswap token swap; `observed` and `cleaned` are its outcomes (nothing of it signs, sends or lands after them). */
+export declare const UNISWAP_TOKEN_TERMINAL_PHASES: readonly UniswapTokenPhase[];
+export declare const UNISWAP_TOKEN_PHASES: readonly UniswapTokenPhase[];
 export declare class UniswapTokenJournal extends SecureStateStore {
     save(value: UniswapTokenOperation): Promise<UniswapTokenOperation>;
     load(id: string): Promise<UniswapTokenOperation | null>;

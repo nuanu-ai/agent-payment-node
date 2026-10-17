@@ -3,12 +3,13 @@ import { abandonProviderX402 } from "../../operation-abandon-provider.js";
 import { assertResumeOptions } from "../../operation-command-options.js";
 import { evmConflictDomain, sharedEvmConflictDomain } from "../../operation-conflict-domain.js";
 import { localX402Outcome, providerX402Outcome, x402ReceiptOutcome } from "../../operation-x402-outcome.js";
-import { publicProviderX402Operation } from "../../provider-x402-model.js";
+import { PROVIDER_X402_TERMINAL_STATES, publicProviderX402Operation } from "../../provider-x402-model.js";
 import { ProviderX402Repository } from "../../provider-x402-repository.js";
 import { StateStore } from "../../state.js";
 import { X402AbandonService } from "../../x402-abandon.js";
 import { X402Service } from "../../x402-service.js";
 import { publicX402Operation } from "../../x402-state-integrity.js";
+import { STATE_SHAPE } from "../../x402-state-shape.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity } from "../adapter.js";
 import { providerClaims, UNREADABLE_PROVIDER_CLAIM } from "../types.js";
 import { OperationService } from "../../operation-service.js";
@@ -24,6 +25,10 @@ export function x402Domains(operation) {
     // Provider-atomic x402 is Base-only; its record carries the network as CAIP-2 instead of a chain id.
     return [operation.strategy === "local" ? evmConflictDomain(operation.record.chainId, operation.record.wallet)
             : evmConflictDomain(8453, operation.record.provider.payer)];
+}
+export function x402Terminal(operation) {
+    return operation.strategy === "local" ? Object.hasOwn(STATE_SHAPE, operation.record.state) && STATE_SHAPE[operation.record.state].terminal
+        : PROVIDER_X402_TERMINAL_STATES.includes(operation.record.state);
 }
 export const x402Adapter = {
     family: "x402_fetch",
@@ -41,7 +46,8 @@ export const x402Adapter = {
         ...domainClaims(x402Domains(operation)),
         ...(operation.strategy === "local" ? [] : providerClaims(operation.record.provider.providerId, operation.record.provider.accountBindingHash, operation.record.provider.payer)),
     ]),
-    terminal: operation => operation.record.terminal,
+    // The family's own outcome tables, which its validators tie each record's `terminal` flag to.
+    terminal: x402Terminal,
     state: operation => operation.record.state,
     salvage: raw => salvageRecord(raw, value => {
         const schema = field(value, "schemaVersion");

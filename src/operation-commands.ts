@@ -33,7 +33,8 @@ export class OperationCommands {
     const { command: _command, operationId, ...options } = request;
     this.assertResumeOptions(options);
     const found = await this.found(operationId);
-    if (found.adapter.resume === undefined) throw byFamilyCommand(found, "resume");
+    // A family's own resume answers a terminal operation with its outcome; a family command is never named for one.
+    if (found.adapter.resume === undefined) throw await this.terminal(found) ? alreadyTerminal(found, "resume") : byFamilyCommand(found, "resume");
     return await found.adapter.resume(this.context, found.record, options);
   }
 
@@ -68,8 +69,17 @@ export class OperationCommands {
     }
     const adapter = this.index.adapter(entry);
     if (record === null || adapter === undefined) throw notFound();
-    if (adapter.abandon === undefined) throw byFamilyCommand({ entry, adapter, record }, "exit");
+    const found = { entry, adapter, record };
+    // A family's own exit answers a terminal operation itself (an abandon replay returns its outcome, no consent);
+    // for any other family a terminal operation is answered as terminal, never with its exit command.
+    if (adapter.abandon === undefined) throw await this.terminal(found) ? alreadyTerminal(found, "abandon") : byFamilyCommand(found, "exit");
     return operationOutcome(await adapter.abandon(this.context, record));
+  }
+
+  /** The family's own terminal rule on the record just read; a lifecycle that cannot be decided is not terminal. */
+  private async terminal(found: Found): Promise<boolean> {
+    try { return await found.adapter.terminal(found.record, this.context.state.root); }
+    catch (error) { if (error instanceof ApnError) return false; throw error; }
   }
 
   /** The family's saved record behind an ID; the index holds every family's operations. */
@@ -158,6 +168,14 @@ function familyActions(found: Found, use: "status" | "resume" | "exit"): readonl
   const template = use === "exit" ? commands?.exit ?? commands?.resume ?? commands?.status
     : use === "resume" ? commands?.resume ?? commands?.status : commands?.status;
   return template === undefined ? [] : [template.replaceAll("<operation-id>", id)];
+}
+
+/** A terminal operation: there is nothing to resume or abandon; its status (and its receipt, where the family has one) remain. */
+function alreadyTerminal(found: Found, use: "resume" | "abandon"): ApnError {
+  const id = found.entry.operationId;
+  return new ApnError("APN_OPERATION_BLOCKED", `The ${found.entry.family} operation is already terminal; there is nothing to ${use}.`, {
+    operationId: id, family: found.entry.family, state: found.adapter.state(found.record), reason: "operation_already_terminal",
+    nextActions: [`apn operation status --operation ${id}`, ...found.adapter.receipt === undefined ? [] : [`apn receipt get --operation ${id}`]] });
 }
 
 /** A family whose recovery or exit is its own command: blocked, with that command as the next action. */

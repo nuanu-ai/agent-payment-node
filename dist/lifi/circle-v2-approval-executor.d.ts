@@ -4,7 +4,10 @@ import { type Hex } from "viem";
 import { type CircleV2ApprovalLimits, type CircleV2ApprovalPreparation, type CircleV2ApprovalStateReader } from "./circle-v2-approval-preparation.js";
 import type { BridgeProtocolReceipt } from "./model.js";
 import type { BridgeRpcPort } from "./ports.js";
-export type CircleApprovalPhase = "prepared" | "signing_started" | "sealed" | "submitting" | "unknown_finality" | "completed" | "confirmed_revert" | "failed_before_effect";
+/** Every phase of a Circle Base USDC approval, and its outcomes (a safe receipt either way, or proven never sent). */
+export declare const CIRCLE_APPROVAL_PHASES: readonly ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect"];
+export type CircleApprovalPhase = typeof CIRCLE_APPROVAL_PHASES[number];
+export declare const CIRCLE_APPROVAL_RESOLVED_PHASES: readonly CircleApprovalPhase[];
 export interface CircleApprovalRecord {
     readonly schemaVersion: "apn.circle-v2-approval.v1";
     readonly id: string;

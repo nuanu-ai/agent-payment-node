@@ -47,4 +47,6 @@ export type NewSwapOperation = Omit<SwapOperationRecord, "schemaVersion" | "owne
 };
 export declare function newSwapOperation(input: NewSwapOperation): SwapOperationRecord;
 export declare function validateSwapOperation(value: unknown): SwapOperationRecord;
+/** Every state a guarded swap record may hold (its validator refuses any other). */
+export declare const SWAP_OPERATION_STATES: readonly SwapOperationState[];
 export declare function validateSwapReceiptProof(value: unknown, chain: string, earliestAt: string, latestAt: string, mode?: "input" | "stored"): SwapReceiptProof;

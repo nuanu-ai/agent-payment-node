@@ -6,6 +6,8 @@ import type { AssetUsageState } from "../asset-usage-ledger.js";
  */
 export type GaszipTerminalState = "completed" | "failed_before_effect" | "failed_confirmed_revert" | "destination_failed";
 export declare const GASZIP_TERMINAL_STATES: readonly string[];
+/** Every state a funding record may hold: its open states, then its outcomes (the record's `terminal` flag must equal membership). */
+export declare const GASZIP_STATES: readonly string[];
 /** A source effect that landed stays counted (finalized) even when the destination failed; an unsent one is released. */
 export declare function gaszipUsageState(state: GaszipTerminalState): Exclude<AssetUsageState, "reserved">;
 /**

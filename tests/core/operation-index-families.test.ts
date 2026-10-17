@@ -11,7 +11,9 @@ import { circleApprovalAdapter } from "../../src/operation-index/adapters/circle
 import { circleSourceAdapter } from "../../src/operation-index/adapters/circle-source.js";
 import { evmClaim, namedProfileClaim, UNSTARTED_DEADLINE_MARGIN_MS } from "../../src/operation-index/adapters/family-claims.js";
 import { GASLESS_USDT_CHAIN_ID, gaslessUsdtAdapter } from "../../src/operation-index/adapters/gasless-usdt.js";
+import { merchantAdapter } from "../../src/operation-index/adapters/merchant.js";
 import { metaMaskNativeAdapter } from "../../src/operation-index/adapters/metamask-native.js";
+import { permit2Adapter } from "../../src/operation-index/adapters/permit2.js";
 import { oneClickSourceAdapter } from "../../src/operation-index/adapters/oneclick.js";
 import { stargateNativeAdapter, stargateTokenAdapter } from "../../src/operation-index/adapters/stargate.js";
 import { swapAdapter, swapClaims } from "../../src/operation-index/adapters/swap.js";
@@ -25,6 +27,9 @@ import { FileStargateTokenJournal } from "../../src/stargate-v2/token-journal.js
 import { StateStore } from "../../src/state.js";
 import { TRON_GENESIS } from "../../src/tron/constants.js";
 import { temporaryState } from "./helpers.js";
+import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
+import { bindArgv } from "../../src/command-binder.js";
+import { executeBoundCommand } from "../../src/runtime-factory.js";
 
 /**
  * Phase 4b WP2: every money family claims through the operation index. The matrix runs each family's own admission
@@ -181,4 +186,24 @@ test("a family holds its account while it can still sign or land, and lets go on
   assert.equal(terminal(metaMaskNativeAdapter, { state: "prepared", effectAttempts: 0, context: context(PAST) }), true);
   assert.equal(terminal(metaMaskNativeAdapter, { state: "effect_started", effectAttempts: 1, context: context(PAST) }), false);
   assert.equal(terminal(metaMaskNativeAdapter, { state: "abandoned_unknown", effectAttempts: 1, context: context(RECENT) }), true);
+  // A merchant payment approve never signed (prepared, never approved) cannot sign past its local deadline.
+  assert.equal(terminal(merchantAdapter, { state: "prepared", expiresAt: PAST }), true);
+  assert.equal(terminal(merchantAdapter, { state: "prepared", expiresAt: RECENT }), false, "inside the margin");
+  assert.equal(terminal(merchantAdapter, { state: "signing_started", expiresAt: PAST }), false, "signed bytes may exist");
+});
+
+test("observe ends a Permit2 authorization never exposed once its deadline passed, frees its hold and its claims", async (t) => {
+  const f = await journalFixture(t), id = f.record.operationId, index = new OperationIndex(new StateStore(f.root));
+  const observe = async () => await executeBoundCommand(bindArgv(["x402", "permit2", "observe", "--operation", id, "--rpc-url", "https://avax.example"]),
+    { stateRoot: f.root, clock: { now: f.now } });
+  assert.deepEqual([f.reserved.state, f.reserved.exposureAt, (await index.find(id))?.state], ["reserved", null, "active"]);
+  const early = await observe();
+  assert.equal((early.data as { code: string }).code, "not_exposed", "the deadline still holds");
+  assert.equal((await f.journal.findOperation(id))?.state, "reserved");
+  f.advance(120);
+  const ended = await observe();
+  assert.deepEqual([(ended.data as { code: string }).code, (await f.journal.findOperation(id))?.state], ["terminal", "released_unsubmitted"]);
+  assert.equal((await f.lease()).state, "released_unsubmitted");
+  assert.deepEqual([(await index.find(id))?.state, (await index.find(id))?.claims], ["terminal", []]);
+  assert.equal(await permit2Adapter.terminal({ ...f.reserved, state: "exposure_unknown", exposureAt: f.reserved.updatedAt }, f.root), false);
 });

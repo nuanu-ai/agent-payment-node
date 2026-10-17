@@ -1,5 +1,5 @@
 import { hashObject } from "../canonical.js";
-import { GASZIP_TERMINAL_STATES } from "./gaszip-outcome.js";
+import { GASZIP_STATES, GASZIP_TERMINAL_STATES } from "./gaszip-outcome.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { keccak256, parseTransaction, recoverTransactionAddress } from "viem";
 import { gaszipCodec } from "./gaszip-direct-route.js";
@@ -31,7 +31,7 @@ export function validateGaszipFunding(route, value) {
         c.uint(r.plan.feeUpper) > c.uint(r.maximumFeeAtomic) || c.uint(r.plan.tip) > c.uint(r.plan.maxFee))
         c.fail("record_fee");
     const terminal = GASZIP_TERMINAL_STATES.includes(r.state);
-    if (terminal !== r.terminal || !["prepared", "signing_started", "sealed", "submitting", "submitted", "unknown_finality", ...GASZIP_TERMINAL_STATES].includes(r.state))
+    if (terminal !== r.terminal || !GASZIP_STATES.includes(r.state))
         c.fail("record_state");
     if (r.transactionHash === null ? r.rawTransaction !== null : r.rawTransaction === null || keccak256(r.rawTransaction) !== r.transactionHash)
         c.fail("record_transaction");

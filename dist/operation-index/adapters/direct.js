@@ -1,5 +1,6 @@
 import { assertCoinbaseObservationRequest } from "../../coinbase-gasless-observation-source.js";
 import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
+import { LOCAL_DIRECT_TERMINAL_STATES, PROVIDER_DIRECT_TERMINAL_STATES } from "../../model.js";
 import { abandonDirectTransfer } from "../../operation-abandon-service.js";
 import { refuseObservationRpc, refuseObserveOnly } from "../../operation-command-options.js";
 import { evmConflictDomain } from "../../operation-conflict-domain.js";
@@ -10,6 +11,13 @@ import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, sa
 import { providerClaims, UNREADABLE_PROVIDER_CLAIM } from "../types.js";
 const STORE = { directory: "operations", perProfile: true };
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+/**
+ * The family's own outcome list for its kind (local or provider): the same list each validator ties the record's
+ * `terminal` flag to. The Base USDC local record (no `evm` binding) has no such check on read, so its state decides.
+ */
+export function directTerminal(record) {
+    return (record.providerDirect === undefined ? LOCAL_DIRECT_TERMINAL_STATES : PROVIDER_DIRECT_TERMINAL_STATES).includes(record.state);
+}
 export function directDomains(record) {
     return [evmConflictDomain(record.chainId, record.walletAddress)];
 }
@@ -36,7 +44,7 @@ export const directAdapter = {
         ...domainClaims(directDomains(record)),
         ...(record.providerDirect === undefined ? [] : providerClaims(record.providerDirect.providerId, record.providerDirect.accountBindingHash, record.walletAddress)),
     ]),
-    terminal: record => record.terminal,
+    terminal: directTerminal,
     state: record => record.state,
     salvage: raw => salvageRecord(raw, value => [
         salvageEvm(field(value, "chainId"), field(value, "walletAddress")),

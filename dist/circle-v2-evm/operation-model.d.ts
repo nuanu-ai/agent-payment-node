@@ -34,6 +34,9 @@ export interface CirclePolicy {
     readonly revision: number;
     readonly activationDigest?: string;
 }
+/** Every state a v1 Circle route may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export declare const CIRCLE_V1_STATES: readonly ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"];
+export declare const CIRCLE_V1_TERMINAL_STATES: readonly string[];
 export interface CircleOperationV1 {
     readonly schemaVersion: "apn.circle-v2-evm-operation.v1";
     readonly operationId: string;
@@ -52,7 +55,7 @@ export interface CircleOperationV1 {
     readonly expiresAt: string;
     readonly deploymentDigest: string;
     readonly feeQuoteAtomic: string;
-    readonly state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
+    readonly state: typeof CIRCLE_V1_STATES[number];
     readonly terminal: boolean;
     readonly effects: readonly CircleEffect[];
     readonly source: CircleSourceProof | null;

@@ -24,16 +24,12 @@ export type { ProviderX402TransactionRecoveryBinding } from "./provider-x402-tra
 
 export const PROVIDER_X402_STATE_VERSION = "apn.provider-x402.state.v1" as const;
 export const PROVIDER_X402_HTTP_STATE_VERSION = "apn.provider-x402.state.v2" as const;
-export type ProviderX402State =
-  | "preparing"
-  | "awaiting_approval"
-  | "started"
-  | "settlement_pending"
-  | "ambiguous_effect"
-  | "completed"
-  | "failed_before_effect"
-  | "failed_settled_without_result"
-  | "abandoned_unknown";
+/** Every state a provider-atomic x402 record may hold. */
+export const PROVIDER_X402_STATES = ["preparing", "awaiting_approval", "started", "settlement_pending", "ambiguous_effect", "completed",
+  "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"] as const;
+export type ProviderX402State = typeof PROVIDER_X402_STATES[number];
+/** Its outcomes: the record's `terminal` flag, and a receipt's terminal state, are exactly these. */
+export const PROVIDER_X402_TERMINAL_STATES: readonly ProviderX402State[] = ["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"];
 
 export interface ProviderX402Transition {
   readonly sequence: string;
@@ -272,7 +268,7 @@ export function validateProviderX402Operation(value: unknown): ProviderX402Opera
     !Array.isArray(operation.transitions) || operation.transitions.length === 0 ||
     operation.transitions.at(-1)?.state !== operation.state || operation.transitions.at(-1)?.reason !== operation.reason ||
     operation.transitions.at(-1)?.proofClass !== operation.proofClass ||
-    operation.terminal !== ["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(operation.state)
+    operation.terminal !== PROVIDER_X402_TERMINAL_STATES.includes(operation.state)
   ) corrupt();
   validateProviderHttpRequest(operation.request);
   validateTransitions(operation.transitions);
@@ -320,7 +316,7 @@ export function validateProviderX402Receipt(value: unknown): ProviderX402Receipt
     receipt.schemaVersion !== "apn.provider-x402.receipt.v1" || receipt.kind !== "x402_fetch" ||
     !hash(receipt.operationId) || !hash(receipt.fingerprint) || !hash(receipt.requestDigest) ||
     !hash(receipt.requirementDigest) || receipt.integrityHash !== hashObject(without) ||
-    !["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(receipt.terminalState) ||
+    !(PROVIDER_X402_TERMINAL_STATES as readonly string[]).includes(receipt.terminalState) ||
     receipt.network !== CHAIN_CAIP2 || receipt.token !== BASE_USDC.toLowerCase()
   ) corrupt();
   if (receipt.result !== undefined && (

@@ -36,6 +36,8 @@ const CORPUS = join("tests", "fixtures", "legacy-corpus");
 const byFamily = (reason: string): Answer => ({ code: "APN_OPERATION_BLOCKED", reason, family: true });
 const RESUME_BY_FAMILY = byFamily("operation_resume_by_family_command"), EXIT_BY_FAMILY = byFamily("operation_exit_by_family_command");
 const NO_RECEIPT: Answer = { code: "APN_RECEIPT_NOT_FOUND", family: true };
+/** A terminal operation of a family without a generic resume or exit: no family command is named, only its status (and receipt). */
+const TERMINAL: Answer = { code: "APN_OPERATION_BLOCKED", reason: "operation_already_terminal", family: true };
 
 async function root(t: TestContext): Promise<string> {
   const temporary = await temporaryState(); t.after(temporary.cleanup); await new StateStore(temporary.root).initialize(); return temporary.root;
@@ -90,7 +92,7 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
   facilitator_gasless_transfer: async t => ({ ...await golden(t, "facilitator-gasless", "facilitator-gasless-operations"), status: "ok",
     resume: { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "facilitator_gasless_capability" }, abandon: { code: "APN_OPERATION_BLOCKED" }, receipt: "ok" }),
   circle_route: async t => ({ ...await corpus(t, "22-v0543-circle-v2-evm-funding-public-receipt", "circle-v2-evm"), status: "ok",
-    resume: RESUME_BY_FAMILY, abandon: EXIT_BY_FAMILY, receipt: "ok" }),
+    resume: TERMINAL, abandon: TERMINAL, receipt: "ok" }),
   merchant_x402: async t => ({ ...await corpus(t, "41-v0543-merchant-x402", "merchant-x402"), status: "ok", resume: RESUME_BY_FAMILY,
     abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
   permit2_production: async t => {
@@ -99,8 +101,8 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
   },
   relay_unsigned: async t => ({ ...await corpus(t, "55-v0543-relay-unsigned-operation", "relay-unsigned-operations"), status: "ok",
     resume: RESUME_BY_FAMILY, abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
-  sei_gaszip: async t => ({ ...await corpus(t, "02-v0538-sei-gaszip", "sei-gaszip"), status: "ok", resume: RESUME_BY_FAMILY,
-    abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
+  sei_gaszip: async t => ({ ...await corpus(t, "02-v0538-sei-gaszip", "sei-gaszip"), status: "ok", resume: TERMINAL,
+    abandon: TERMINAL, receipt: NO_RECEIPT }),
   mega_gaszip: async t => ({ ...await corpus(t, "33-v0543-mega-gaszip", "mega-gaszip"), status: "ok", resume: RESUME_BY_FAMILY,
     abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
   // An unmarked swap: its lane's status reads it, and its owner exit refuses because no outcome is unknown.
@@ -113,10 +115,10 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
     abandon: EXIT_BY_FAMILY, receipt: { code: "APN_OPERATION_BLOCKED", reason: "receipt_not_observed" } }),
   stargate_token: async t => ({ ...await WP2_FAMILY_RECORDS.stargate_token(t), cli: true, status: "ok", resume: { code: "APN_OPERATION_BLOCKED" },
     abandon: EXIT_BY_FAMILY, receipt: { code: "APN_OPERATION_BLOCKED", reason: "receipt_not_observed" } }),
-  gasless_usdt: async t => ({ ...await WP2_FAMILY_RECORDS.gasless_usdt(t), cli: true, status: "ok", resume: "ok", abandon: EXIT_BY_FAMILY,
+  gasless_usdt: async t => ({ ...await WP2_FAMILY_RECORDS.gasless_usdt(t), cli: true, status: "ok", resume: "ok", abandon: TERMINAL,
     receipt: NO_RECEIPT }),
-  oneclick_source: async t => ({ ...await WP2_FAMILY_RECORDS.oneclick_source(t), cli: true, status: "ok", resume: RESUME_BY_FAMILY,
-    abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
+  oneclick_source: async t => ({ ...await WP2_FAMILY_RECORDS.oneclick_source(t), cli: true, status: "ok", resume: TERMINAL,
+    abandon: TERMINAL, receipt: NO_RECEIPT }),
   circle_source: async t => ({ ...await WP2_FAMILY_RECORDS.circle_source(t), cli: true, status: "ok", resume: RESUME_BY_FAMILY,
     abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
   // The family's own status binds the saved RPC origin to the configured Base RPC, which this run does not name.

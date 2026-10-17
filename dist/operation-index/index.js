@@ -142,6 +142,19 @@ export class OperationIndex {
             });
         });
     }
+    /**
+     * After a command read or closed an operation's record: an entry that may still hold claims is verified against its
+     * record now (as an admission that meets it would), so a terminal record drops its claims at once. A terminal entry
+     * is left as it is. Never throws: a refresh that fails changes nothing, and the next admission still re-verifies.
+     */
+    async refresh(operationId) {
+        try {
+            const entry = await this.store.entry(operationId);
+            if (entry !== null && entry.state !== "terminal")
+                await this.inspect(entry, null);
+        }
+        catch { /* Best effort by contract. */ }
+    }
     /** Optional fast path after a terminal write: the claims go now instead of at the next check that meets them. */
     async settle(operationId) {
         await this.repairing(async () => {

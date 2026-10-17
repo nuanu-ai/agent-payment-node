@@ -25,7 +25,9 @@ import { formatAtomic } from "./money.js";
 import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, metaMaskNativeUsdc, validateMetaMaskNativeFeeQuote, validateMetaMaskNativeFeeReceipt } from "./metamask-native-fee-evidence.js";
 import { MetaMaskNativeHandoffNotStarted, readMetaMaskNativeVendorPolicy, readMetaMaskNativeRequest, submitOwnedMetaMaskNative } from "./metamask-native-transfer-adapter.js";
 import { prepareMetaMaskNativeQuote, readMetaMaskNativeFunding, observeMetaMaskNativeTransfer } from "./metamask-native-transfer-rpc.js";
-import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeRequestHash, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation } from "./metamask-native-journal.js";
+import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeExpiredBeforeEffect, metaMaskNativeRequestHash, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation } from "./metamask-native-journal.js";
+import { assetUsageReservationId } from "./asset-usage-ledger.js";
+import { refreshOperationIndex } from "./operation-index/refresh.js";
 /** Journal readers, also reachable here for callers that name the command module. */
 export { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease, metaMaskNativeOperationExists } from "./metamask-native-journal.js";
 const scopes = new WeakMap();
@@ -173,6 +175,7 @@ export async function runMetaMaskNativeTransfer(stateRoot, input) {
         return replay(saved);
     const initial = await state.withLocks([`profile:${allowlistProfileHash(profileName)}`, `profile:${state.profileHash(profileName)}`], () => loadMetaMaskNativeOwner(state, profileName));
     const payer = initial.profile.public_address.toLowerCase();
+    await closeExpiredNativeTransfersOf(stateRoot, chainId, payer);
     return state.withLocks([`profile:${allowlistProfileHash(profileName)}`, `profile:${state.profileHash(profileName)}`, `operation:${id}`, "provider-session:metamask-agent-wallet", evmAddressLock(payer), `account-chain-nonce:${payer}:${chainId}`], async () => {
         const existing = await journal.read(id);
         if (existing !== null)
@@ -277,6 +280,40 @@ export async function runMetaMaskNativeTransfer(stateRoot, input) {
     });
 }
 function transitionIdentity(r) { return { account: r.account, chain: r.chain, asset: r.asset, reservationId: r.reservationId, policyDigest: r.policyDigest }; }
+/**
+ * R4: a transfer whose foreground command ended before its effect marker (still `prepared`, nothing handed off or signed)
+ * and whose consent has passed can never start. It closes as failed before effect, as that command itself closes a
+ * transfer whose consent ran out, and the usage it held is released. The caller holds the operation lock.
+ */
+async function closeExpiredBeforeEffect(stateRoot, journal, op, now) {
+    if (!metaMaskNativeExpiredBeforeEffect(op, now.getTime()))
+        return op;
+    const closed = await journal.persist(patch(op, { state: "failed_before_effect" })), ledger = new AssetUsageLedger(stateRoot), q = closed.context.quote;
+    for (const asset of [{ kind: "native", identifier: null }, { kind: "token", identifier: q.token }]) {
+        const identity = { account: q.sender, chain: `eip155:${q.chainId}`, asset };
+        const held = await ledger.load(identity, assetUsageReservationId(identity, `apn.metamask-native:${op.operationId}:${asset.kind}`));
+        if (held?.state === "reserved" && held.metamaskNativeReservation?.operationId === op.operationId)
+            await ledger.transition({ ...transitionIdentity(held), state: "failed_before_effect",
+                now, outcomeDigest: hashObject({ id: op.operationId, kind: "failed_before_effect" }), expectedCurrentStates: ["reserved"] });
+    }
+    return closed;
+}
+/**
+ * Before a new transfer is admitted, every transfer of this account and chain that can never start is closed under its
+ * own operation lock. Best effort: one that cannot be closed now no longer blocks (the family's own rule reads it as
+ * resolved), and its next status closes it.
+ */
+export async function closeExpiredNativeTransfersOf(stateRoot, chainId, payer) {
+    const journal = new MetaMaskNativeJournal(stateRoot);
+    for (const stale of (await journal.forAccount(chainId, payer)).filter(op => metaMaskNativeExpiredBeforeEffect(op))) {
+        try {
+            await journal.withLocks([`operation:${stale.operationId}`], async () => { const op = await journal.read(stale.operationId); if (op !== null)
+                await closeExpiredBeforeEffect(stateRoot, journal, op, new Date()); });
+            await refreshOperationIndex(journal, stale.operationId);
+        }
+        catch { /* The next status closes it; meanwhile it no longer blocks. */ }
+    }
+}
 function failureDiagnostic(error, context, scope) {
     const e = scope === undefined ? undefined : scopes.get(scope), deadline = Date.parse(nativeContextDeadline(context));
     return takeMetaMaskNativeProcessFailureDiagnostic(error) ?? (error instanceof ApnError && "nativeDiagnostic" in error ? validateMetaMaskNativeDiagnostic(error.nativeDiagnostic) : undefined) ?? validateMetaMaskNativeDiagnostic({
@@ -293,6 +330,7 @@ export async function readMetaMaskNativeTransfer(stateRoot, idInput, observe = f
         let op = await journal.read(id);
         if (op === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Native transfer operation does not exist.");
+        op = await closeExpiredBeforeEffect(stateRoot, journal, op, new Date());
         let readObservation = observe ? Object.freeze({ stage: "not_requested", guard_step: null,
             request_id: op.providerRequestId, watch_returned: false, before_guard_verified: false, after_guard_verified: false,
             request_identity_verified: false, provider_status: null, transaction_hash: op.transactionHash, chain_id: op.context.quote.chainId,
@@ -322,7 +360,8 @@ export async function readMetaMaskNativeTransfer(stateRoot, idInput, observe = f
 }
 /**
  * Owner release (R4) of a native transfer whose outcome stayed unknown after its quote expired. It observes once,
- * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed.
+ * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed. A transfer that
+ * never reached its effect marker and whose consent has passed is closed as failed before effect instead (no consent).
  */
 export async function abandonMetaMaskNativeTransfer(stateRoot, idInput, approve, now) {
     const id = canonicalOperationId(idInput), journal = new MetaMaskNativeJournal(stateRoot);
@@ -331,6 +370,14 @@ export async function abandonMetaMaskNativeTransfer(stateRoot, idInput, approve,
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Native transfer operation does not exist.");
     if (initial.state === "abandoned_unknown")
         return publicOperation(initial);
+    // Nothing was handed off and its consent has passed: it closes as failed before effect, as its status closes it.
+    if (metaMaskNativeExpiredBeforeEffect(initial, now().getTime()))
+        return journal.withLocks([`operation:${id}`], async () => {
+            const op = await journal.read(id);
+            if (op === null)
+                throw new ApnError("APN_OPERATION_NOT_FOUND", "Native transfer operation does not exist.");
+            return publicOperation(await closeExpiredBeforeEffect(stateRoot, journal, op, now()));
+        });
     const eligible = (o) => ["effect_started", "acknowledged", "unknown"].includes(o.state) && now().getTime() >= Date.parse(o.context.quote.expiresAt);
     if (!eligible(initial))
         blocked("Only a native transfer with an unknown outcome can be abandoned, and only after its quote expired.");

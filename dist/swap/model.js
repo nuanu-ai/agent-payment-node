@@ -31,7 +31,7 @@ export function validateSwapOperation(value) {
         "revision", "createdAt", "updatedAt", "quote", "policyDigest", "policyVersion", "protocolRegistryDigest",
         "protocolRegistryVersion", "mechanismDigest", "usageLease",
         "approvalCapAtomic", "submissionMarker", "receiptProof", "failureProofHash", "previousIntegrityHash", "integrityHash"]) ||
-        value.schemaVersion !== SWAP_OPERATION_SCHEMA || !STATES.includes(value.state) ||
+        value.schemaVersion !== SWAP_OPERATION_SCHEMA || !SWAP_OPERATION_STATES.includes(value.state) ||
         typeof value.revision !== "number" || !Number.isSafeInteger(value.revision) || value.revision < 1)
         corrupt("Swap operation schema is invalid.");
     const quote = validateSwapQuote(value.quote);
@@ -59,7 +59,8 @@ export function validateSwapOperation(value) {
         corrupt("Swap operation integrity validation failed.");
     return value;
 }
-const STATES = ["quoted", "prepared", "awaiting_approval", "reserved", "submitting", "submitted",
+/** Every state a guarded swap record may hold (its validator refuses any other). */
+export const SWAP_OPERATION_STATES = ["quoted", "prepared", "awaiting_approval", "reserved", "submitting", "submitted",
     "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert", "expired_unlanded", "abandoned_unknown"];
 function validateStateBindings(op) {
     if (op.previousIntegrityHash !== null)

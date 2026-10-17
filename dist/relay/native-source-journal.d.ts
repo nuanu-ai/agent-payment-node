@@ -3,6 +3,9 @@ import type { RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore } from "../secure-state-store.js";
 /** `abandoned_unsent`: sealed bytes never sent whose nonce another transaction consumed at safe depth; they can never land. */
 export type RelayNativeSourcePhase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "failed_before_effect" | "abandoned_unsent";
+/** Where each phase may go next; a phase with nowhere to go is the attempt's outcome. */
+export declare const RELAY_NATIVE_SOURCE_EDGES: Readonly<Record<RelayNativeSourcePhase, readonly RelayNativeSourcePhase[]>>;
+export declare const RELAY_NATIVE_SOURCE_PHASES: readonly RelayNativeSourcePhase[];
 export interface RelayNativeSourceJournal {
     readonly schemaVersion: "apn.relay-native-source-journal.v1";
     readonly profileHash: string;

@@ -8,6 +8,7 @@ import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 import { evmUint } from "./evm-asset.js";
 import { validateCoinbaseGaslessAllowlist } from "./coinbase-gasless-policy.js";
 import { formatAtomic, parseAtomic } from "./money.js";
+import { PROVIDER_DIRECT_TERMINAL_STATES, } from "./model.js";
 const ZERO_HASH = "0".repeat(64);
 export function appendTransition(previous, input) {
     const last = previous.at(-1);
@@ -200,10 +201,7 @@ function validateProviderDirect(operation, binding) {
     ];
     if (!providerStates.includes(operation.state))
         stateCorrupt("Provider direct operation state is invalid.");
-    const terminalStates = [
-        "abandoned_unknown", "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
-    ];
-    if (operation.terminal !== terminalStates.includes(operation.state)) {
+    if (operation.terminal !== PROVIDER_DIRECT_TERMINAL_STATES.includes(operation.state)) {
         stateCorrupt("Provider direct terminal posture is invalid.");
     }
     if (["provider_acknowledged", "evidence_pending", "completed", "failed_confirmed_revert"]

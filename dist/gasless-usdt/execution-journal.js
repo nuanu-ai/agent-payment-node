@@ -16,7 +16,8 @@ export const USDT_EXECUTION_SCHEMA = "apn.gasless-usdt-execution.v1";
 export const USDT_EXECUTION_OPEN_STATES = ["planned", "reserved", "submitting", "submitted_pending", "unknown_finality"];
 const HASH = /^[a-f0-9]{64}$/u;
 const DECIMAL = /^(0|[1-9][0-9]*)$/u;
-const STATES = ["planned", "reserved", "failed_before_effect", "submitting", "submitted_pending", "unknown_finality", "finalized", "failed_confirmed_revert", "expired_never_landed"];
+/** Every state a gasless USDT execution may hold; those not in USDT_EXECUTION_OPEN_STATES are its outcomes. */
+export const USDT_EXECUTION_STATES = ["planned", "reserved", "failed_before_effect", "submitting", "submitted_pending", "unknown_finality", "finalized", "failed_confirmed_revert", "expired_never_landed"];
 function fail(reason, code = "APN_OPERATION_BLOCKED") {
     throw new ApnError(code, `Gasless USDT execution refused: ${reason}.`, { rail: "gasless_usdt", reason });
 }
@@ -81,7 +82,7 @@ export function validateUsdtExecutionRecord(value) {
         "paymasterValidUntil", "maxFeeAtomic"];
     const terminal = isPlainRecord(value) && (value.state === "finalized" || value.state === "failed_confirmed_revert" || value.state === "expired_never_landed");
     if (!isPlainRecord(value) || !exactKeys(value, terminal ? [...keys, "outcomeDigest", "settlement"] : keys) || value.schemaVersion !== USDT_EXECUTION_SCHEMA ||
-        !STATES.includes(value.state) ||
+        !USDT_EXECUTION_STATES.includes(value.state) ||
         [value.operationId, value.profileHash, value.bindingHash, value.policyDigest, value.activationDigest,
             value.quoteHash, value.integrityHash].some(v => typeof v !== "string" || !HASH.test(v)) ||
         typeof value.reservationId !== "string" || !HASH.test(value.reservationId) ||
