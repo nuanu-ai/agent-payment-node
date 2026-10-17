@@ -10,12 +10,13 @@ import { TRON_RECIPIENT, tronFixture } from "./tron-helpers.js";
 import { tronAddress, tronHex, TRON_GENESIS } from "../../src/tron/codec.js";
 import { validateTronEffect, validateTronChainTransaction } from "../../src/tron/transaction.js";
 import { validateRailPrepared } from "../../src/rail-operation-model.js";
+import { findStored } from "./stored-operations.js";
 
 for (const asset of ["trx", "usdt"] as const) test(`TRON ${asset} completes the integrated exact signed and solidified journey with bounded fees`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare(asset);
-  const initial = (await s.core.rails.records.findOperation(id))!;
+  const initial = (await findStored(s.core.rails.records, id))!;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
-  assert.equal(result.ok, true, result.error?.message); const record = (await s.core.rails.records.findOperation(id))!;
+  assert.equal(result.ok, true, result.error?.message); const record = (await findStored(s.core.rails.records, id))!;
   assert.equal(record.state, "completed"); assert.equal(s.rpc.submissions.length, 1); assert.equal(s.approval.calls.length, 1);
   assert.equal(record.evidence?.finality, "solidified"); assert.equal(record.evidence?.recipientEffectVerified, true);
   assert.equal(record.evidence?.resources?.balanceObservation.scope, "current_solidified_state");
@@ -64,11 +65,11 @@ test("TRON native activation cap covers both special creation and a recipient ac
     const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root);
     s.rpc.destinationExists = alreadyActive;
     const id = await s.prepare("trx", "tron-activation-0001", alreadyActive ? "0.4" : "1.1");
-    const prepared = (await s.core.rails.records.findOperation(id))!.prepared;
+    const prepared = (await findStored(s.core.rails.records, id))!.prepared;
     assert.equal(prepared.resources!.costRule, alreadyActive ? "ordinary_bandwidth" : "native_activation_or_bandwidth");
     if (!alreadyActive) { assert.equal(prepared.resources!.totalFeeMaximumAtomic, "1100000"); s.rpc.destinationExists = true; }
     const result = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-    const final = (await s.core.rails.records.findOperation(id))!; assert.equal(final.state, "completed");
+    const final = (await findStored(s.core.rails.records, id))!; assert.equal(final.state, "completed");
     assert.equal(final.evidence!.resources!.accountActivationFeeAtomic, "0");
     assert.ok(BigInt(final.evidence!.actualNetworkFeeAtomic) <= BigInt(prepared.resources!.totalFeeMaximumAtomic));
   }
@@ -79,7 +80,7 @@ for (const asset of ["trx", "usdt"] as const) test(`TRON ${asset} accepts protoc
   s.rpc.explicitDefaults = true; s.rpc.bandwidthResource = true;
   if (asset === "usdt") { s.rpc.energyStaked = 64_999n; s.rpc.originEnergy = 1n; }
   const id = await s.prepare(asset); const result = await s.core.execute({ command: "transfer.approve", operationId: id });
-  assert.equal(result.ok, true, result.error?.message); const record = (await s.core.rails.records.findOperation(id))!; assert.equal(record.state, "completed");
+  assert.equal(result.ok, true, result.error?.message); const record = (await findStored(s.core.rails.records, id))!; assert.equal(record.state, "completed");
   assert.equal(record.evidence!.actualNetworkFeeAtomic, asset === "trx" ? "1000000" : "0");
   assert.equal(record.evidence!.resources!.energyFeeAtomic, "0"); assert.equal(record.evidence!.resources!.bandwidthFeeAtomic, "0");
 });
@@ -99,7 +100,7 @@ test("TRON evidence refuses wrong body, signature, block, fees, recipient logs, 
   s.rpc.parentTimeOverride = undefined; s.rpc.inclusionTimeOverride = undefined;
   for (const result of ["DEFAULT", "OUT_OF_ENERGY", "UNKNOWN", "SUCESS"]) { s.rpc.badResult = result; await pending(); } s.rpc.badResult = undefined;
   const complete = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal((complete.operation as { state: string }).state, "completed"); assert.equal(s.rpc.submissions.length, 1);
-  const record = (await s.core.rails.records.findOperation(id))!; const tx = s.rpc.submissions[0]!;
+  const record = (await findStored(s.core.rails.records, id))!; const tx = s.rpc.submissions[0]!;
   assert.equal(validateTronChainTransaction({ ...tx, signature: [tx.signature![0]!.toUpperCase()] }, record.prepared).signature![0], tx.signature![0]);
   for (const change of [
     { ...tx, signature: [...tx.signature!, tx.signature![0]!] },
@@ -112,7 +113,7 @@ test("TRON evidence refuses wrong body, signature, block, fees, recipient logs, 
 test("TRON solidified USDT REVERT accounts for fees without asserting delivered principal", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare("usdt"); s.rpc.failed = true;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(result.ok, true);
-  const record = (await s.core.rails.records.findOperation(id))!; assert.equal(record.state, "failed_confirmed_revert");
+  const record = (await findStored(s.core.rails.records, id))!; assert.equal(record.state, "failed_confirmed_revert");
   assert.equal(record.evidence!.recipientEffectVerified, false); assert.equal(record.evidence!.senderEffectVerified, false); assert.equal(record.evidence!.resources!.contractResult, "REVERT");
   assert.ok(BigInt(record.evidence!.actualNetworkFeeAtomic) > 0n); await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(s.rpc.submissions.length, 1);
 });
@@ -120,7 +121,7 @@ test("TRON solidified USDT REVERT accounts for fees without asserting delivered 
 test("TRON finality binds the prior head expiry while accepting the first maintenance-crossing block after missed slots", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare("usdt");
   s.rpc.solidified = false; await s.core.execute({ command: "transfer.approve", operationId: id }); s.rpc.solidified = true;
-  const prepared = (await s.core.rails.records.findOperation(id))!.prepared;
+  const prepared = (await findStored(s.core.rails.records, id))!.prepared;
   const expiry = BigInt(prepared.resources!.expirationMsAtomic);
   s.rpc.parentTimeOverride = expiry - 1n; s.rpc.inclusionTimeOverride = s.rpc.maintenance + 3000n;
   s.rpc.headOffsetMs = 7_206_000; s.now.setTime(s.rpc.initialTime + 7_266_000);
@@ -149,7 +150,7 @@ test("TRON checksum normalization binds the equivalent 41hex address and rejects
   assert.throws(() => tronAddress(`0x${"11".repeat(20)}`), { code: "APN_INVALID_INPUT" });
   assert.throws(() => tronAddress(TRON_RECIPIENT.slice(0, -1) + (TRON_RECIPIENT.endsWith("1") ? "2" : "1")), { code: "APN_INVALID_INPUT" });
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare();
-  const prepared = (await s.core.rails.records.findOperation(id))!.prepared;
+  const prepared = (await findStored(s.core.rails.records, id))!.prepared;
   assert.throws(() => validateRailPrepared({ ...prepared, resources: { ...prepared.resources, bandwidthBytesAtomic: "1" } }, s.account), { code: "APN_STATE_CORRUPT" });
   const hex = await s.core.execute({ command: "transfer.prepare-tron", profile: s.account.profile, asset: "trx", recipient: tronHex(TRON_RECIPIENT), amount: "0.000001", maximumFee: "30", idempotencyKey: "tron-fixture-0001" });
   assert.equal(hex.ok, true); assert.equal((hex.operation as { operation_id: string }).operation_id, id);

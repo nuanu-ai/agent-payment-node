@@ -58,7 +58,7 @@ export class CircleExternalRpc extends CircleRpc {
     count = 0;
     publicEndpoint;
     constructor(url, chain, budget) {
-        super(url, chain, undefined, undefined, "lean");
+        super(url, chain);
         this.budget = budget;
         const p = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "External Circle RPC", 2048);
         if (p.search !== "" || p.hash !== "")

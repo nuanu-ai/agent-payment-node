@@ -4,6 +4,7 @@ import { getCompiledTransactionMessageDecoder, getTransactionDecoder } from "@so
 import { RAIL_PRESEND_ATTEMPTS, SOLANA_APPROVAL_WINDOW_MS } from "../../src/rail-send-binding.js";
 import { temporaryState } from "./helpers.js";
 import { SOL_BLOCKHASH, SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 /** A base58 32-byte value the fixture validator hands back instead of the prepared blockhash. */
 const REBOUND_BLOCKHASH = SOL_RECIPIENT;
@@ -14,7 +15,7 @@ const lifetime = (raw: string): unknown =>
 test("the time the owner spends reading the screen no longer consumes the sending window", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare("usdc");
-  const record = (await s.core.rails.records.findOperation(id))!;
+  const record = (await findStored(s.core.rails.records, id))!;
   // The approval deadline is the owner's reading time; the sending window opens after it.
   assert.equal(Date.parse(record.prepared.expiresAt) - Date.parse(record.prepared.preparedAt), SOLANA_APPROVAL_WINDOW_MS);
   assert.equal(record.prepared.blockReference, SOL_BLOCKHASH);
@@ -27,7 +28,7 @@ test("the time the owner spends reading the screen no longer consumes the sendin
   assert.equal(approved.ok, true, approved.error?.message);
   assert.equal((approved.operation as { state: string }).state, "completed");
 
-  const sent = (await s.core.rails.records.findOperation(id))!;
+  const sent = (await findStored(s.core.rails.records, id))!;
   assert.ok(sent.send, "the send guard must have taken a binding");
   assert.equal(sent.send.blockReference, REBOUND_BLOCKHASH);
   assert.notEqual(sent.send.blockReference, sent.prepared.blockReference);
@@ -84,7 +85,7 @@ test("the USDC journey batches rent with the fee after the account snapshot", as
 test("a frozen block reference that died while the owner read the screen is replaced, not refused", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare("usdc");
-  const frozen = (await s.core.rails.records.findOperation(id))!.prepared.lastValidBlockHeight;
+  const frozen = (await findStored(s.core.rails.records, id))!.prepared.lastValidBlockHeight;
   assert.equal(frozen, "200");
   s.rpc.reboundBlockhash = REBOUND_BLOCKHASH;
   // Mainnet reality: a blockhash lives about a minute, so a careful owner outlives the frozen reference.
@@ -94,7 +95,7 @@ test("a frozen block reference that died while the owner read the screen is repl
   };
   const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(approved.ok, true, approved.error?.message);
-  const sent = (await s.core.rails.records.findOperation(id))!;
+  const sent = (await findStored(s.core.rails.records, id))!;
   assert.equal(sent.state, "completed");
   assert.equal(sent.send?.blockReference, REBOUND_BLOCKHASH);
   assert.equal(sent.send?.lastValidBlockHeight, "500");
@@ -110,7 +111,7 @@ test("a frozen reference the network has forgotten is repriced by the send guard
   s.approval.onApprove = () => { s.advance(120_000); s.rpc.frozenFeeUnavailable = true; };
   const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(approved.ok, true, approved.error?.message);
-  const sent = (await s.core.rails.records.findOperation(id))!;
+  const sent = (await findStored(s.core.rails.records, id))!;
   assert.equal(sent.state, "completed");
   assert.equal(sent.send?.blockReference, REBOUND_BLOCKHASH);
   assert.equal(s.rpc.simulateCalls, 1);
@@ -123,7 +124,7 @@ test("reading past the approval deadline still refuses before anything is signed
   s.approval.onApprove = () => s.advance(SOLANA_APPROVAL_WINDOW_MS + 1_000);
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.error?.code, "APN_REPREPARE_REQUIRED");
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "failed_before_effect");
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "failed_before_effect");
   assert.equal(s.rpc.submissions.length, 0); assert.equal(s.rpc.simulateCalls, 0);
 });
 
@@ -134,7 +135,7 @@ test("a re-acquired window that is already closing is refused rather than signed
   s.rpc.blockHeight = 180n;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.error?.code, "APN_STATE_CORRUPT");
-  const record = (await s.core.rails.records.findOperation(id))!;
+  const record = (await findStored(s.core.rails.records, id))!;
   assert.equal(record.state, "failed_before_effect"); assert.equal(record.reason, "pre_send_guard_refused");
   assert.equal(record.send, undefined); assert.equal(s.rpc.submissions.length, 0);
 });
@@ -148,11 +149,11 @@ for (const [label, error, reason, code] of [
 ] as const) test(`simulation refusing with ${label} stops before any signature exists`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare("usdc");
-  const fingerprint = (await s.core.rails.records.findOperation(id))!.fingerprint;
+  const fingerprint = (await findStored(s.core.rails.records, id))!.fingerprint;
   s.rpc.simulateError = error;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.error?.code, code);
-  const record = (await s.core.rails.records.findOperation(id))!;
+  const record = (await findStored(s.core.rails.records, id))!;
   assert.equal(record.state, "failed_before_effect"); assert.equal(record.reason, reason);
   assert.equal(record.transactionId, null); assert.equal(record.rawPayloadHash, null); assert.equal(record.send, undefined);
   // The owner was asked, the validator was asked, and nothing was signed or sent.
@@ -168,7 +169,7 @@ test("a refusal that executed nothing still reads as the chain's own reason", as
   s.rpc.simulateError = "BlockhashNotFound"; s.rpc.simulateUnits = 0n;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.error?.code, "APN_REPREPARE_REQUIRED");
-  assert.equal((await s.core.rails.records.findOperation(id))!.reason, "solana_simulation_blockhash_not_found");
+  assert.equal((await findStored(s.core.rails.records, id))!.reason, "solana_simulation_blockhash_not_found");
   assert.equal(s.rpc.submissions.length, 0);
 });
 
@@ -178,7 +179,7 @@ test("a success claiming zero consumed units proves nothing and is refused", asy
   s.rpc.simulateUnits = 0n;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.error?.code, "APN_RPC_PROTOCOL");
-  assert.equal((await s.core.rails.records.findOperation(id))!.reason, "solana_simulation_protocol");
+  assert.equal((await findStored(s.core.rails.records, id))!.reason, "solana_simulation_protocol");
   assert.equal(s.rpc.submissions.length, 0);
 });
 
@@ -188,7 +189,7 @@ test("malformed simulation evidence is a protocol answer, not a chain refusal", 
   s.rpc.simulateMalformed = true;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.error?.code, "APN_RPC_PROTOCOL");
-  assert.equal((await s.core.rails.records.findOperation(id))!.reason, "solana_simulation_protocol");
+  assert.equal((await findStored(s.core.rails.records, id))!.reason, "solana_simulation_protocol");
   assert.equal(s.rpc.simulateCalls, 1); assert.equal(s.rpc.submissions.length, 0);
 });
 
@@ -207,11 +208,11 @@ test("a transport loss during simulation is waited out inside the approved windo
 test("a persistent transport loss ends before any effect and never reads as an unknown failure", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare();
-  const fingerprint = (await s.core.rails.records.findOperation(id))!.fingerprint;
+  const fingerprint = (await findStored(s.core.rails.records, id))!.fingerprint;
   s.rpc.simulateTransportLosses = 99;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.error?.code, "APN_RPC_PROTOCOL");
-  const record = (await s.core.rails.records.findOperation(id))!;
+  const record = (await findStored(s.core.rails.records, id))!;
   assert.equal(record.state, "failed_before_effect");
   assert.equal(record.reason, "solana_simulation_unavailable");
   assert.equal(s.rpc.simulateCalls, RAIL_PRESEND_ATTEMPTS);
@@ -229,7 +230,7 @@ test("a simulation provider cooldown stops patient bind after one attempt before
   assert.equal(s.rpc.simulateCalls, 1);
   assert.equal(s.wait.waits.length, 0);
   assert.equal(s.rpc.submissions.length, 0);
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "failed_before_effect");
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "failed_before_effect");
 });
 
 test("an interrupted wait stops retrying at once and still ends before any effect", async (t) => {
@@ -237,7 +238,7 @@ test("an interrupted wait stops retrying at once and still ends before any effec
   const id = await s.prepare();
   s.rpc.simulateTransportLosses = 99; s.wait.interrupt = true;
   assert.equal((await s.core.execute({ command: "transfer.approve", operationId: id })).error?.code, "APN_RPC_PROTOCOL");
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "failed_before_effect");
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "failed_before_effect");
   assert.equal(s.rpc.simulateCalls, 1); assert.equal(s.rpc.submissions.length, 0);
 });
 
@@ -247,7 +248,7 @@ test("the send binding is taken once and an interrupted send recovers the same b
   s.rpc.reboundBlockhash = REBOUND_BLOCKHASH; s.rpc.submissionTimeout = true;
   const first = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal((first.operation as { state: string }).state, "unknown_finality");
-  const interrupted = (await s.core.rails.records.findOperation(id))!;
+  const interrupted = (await findStored(s.core.rails.records, id))!;
   assert.ok(interrupted.send); assert.equal(interrupted.send.blockReference, REBOUND_BLOCKHASH);
   const simulations = s.rpc.simulateCalls;
 
@@ -256,7 +257,7 @@ test("the send binding is taken once and an interrupted send recovers the same b
   const restart = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
   const resumed = await restart.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(resumed.ok, true, resumed.error?.message);
-  const after = (await restart.core.rails.records.findOperation(id))!;
+  const after = (await findStored(restart.core.rails.records, id))!;
   assert.deepEqual(after.send, interrupted.send);
   assert.equal(s.rpc.simulateCalls, simulations);
   assert.equal(s.rpc.submissions.length, 1);

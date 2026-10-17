@@ -6,6 +6,7 @@ import { temporaryState } from "./helpers.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { bridgeRpcFactory, BridgeRpcPhysicalBudget, RpcReadSession } from "../../src/lifi/rpc.js";
+import { findStored } from "./stored-operations.js";
 
 const raw = await readFile("tests/core/lifi-fixtures/linea-native-fill-rpc-20260920.json", "utf8");
 assert.equal(sha256(raw), "ecc7d70307afd5d529965c5f37139df5380958408b28524b9e089917b1900b04");
@@ -131,7 +132,7 @@ test("Linea observation accepts proof read through another primary RPC endpoint 
   const { id } = await s.prepare("across", "linea-frozen-primary-origin-001");
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true);
-  const record = (await s.core.bridges.records.findOperation(id))!;
+  const record = (await findStored(s.core.bridges.records, id))!;
   assert.equal(record.state, "completed");
   assert.equal(record.destinationProof?.rpcOrigin, s.destination.origin);
   assert.equal(s.source.submissions.length, 1);

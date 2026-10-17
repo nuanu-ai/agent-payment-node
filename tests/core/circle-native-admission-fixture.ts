@@ -1,4 +1,3 @@
-import { circleRuntimeBytecode } from "../../src/circle-v2-evm/rpc.js";
 import { advanceCircle, sealCircle } from "./circle-v1-journal.js";
 import { verifyCircleFinalizedRevert } from "../../src/circle-v2-evm/revert-proof.js";
 import assert from "node:assert/strict";

@@ -13,6 +13,7 @@ import { TRON_GENESIS, TRON_TRANSFER_TOPIC, TRON_USDT_HEX, tronHex, tronWord } f
 import type { TronMethod, TronRpcPort } from "../../src/tron/rpc.js";
 import type { TronTransaction } from "../../src/tron/transaction.js";
 import { TRON_CHAIN, TRON_USDT, activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 export const TRON_RECIPIENT = utils.crypto.getBase58CheckAddress(utils.crypto.getAddressFromPriKey(Array(32).fill(48)));
 export const tronTestBlockId = (number: bigint) => number.toString(16).padStart(16, "0") + "ab".repeat(24);
@@ -163,7 +164,7 @@ export async function tronFixture(root: string, options: { rpc?: TronTestRpc; wr
     const result = await core.execute({ command: "transfer.prepare-tron", profile: account.profile, asset, recipient: TRON_RECIPIENT,
       amount: asset === "trx" ? "0.000001" : "1", maximumFee, idempotencyKey });
     assert.equal(result.ok, true, result.error?.message); const id = (result.operation as { operation_id: string }).operation_id;
-    rpc.prepared = (await core.rails.records.findOperation(id))!.prepared; return id;
+    rpc.prepared = (await findStored(core.rails.records, id))!.prepared; return id;
   };
   return { core, storage, wrapping, account, rpc, adapter, approval, now, prepare };
 }
