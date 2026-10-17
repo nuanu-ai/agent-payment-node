@@ -22,7 +22,7 @@
         "@solana/kit": "8.2.0",
         "@x402/core": "2.23.0",
         "@x402/evm": "2.23.0",
-        "awal": "2.12.1",
+        "awal": "2.12.2",
         "viem": "2.55.19",
         "zod": "4.4.3"
       },
@@ -9730,12 +9730,12 @@
       }
     },
     "node_modules/@signinwithethereum/siwe": {
-      "version": "4.2.0",
-      "resolved": "https://registry.npmjs.org/@signinwithethereum/siwe/-/siwe-4.2.0.tgz",
-      "integrity": "sha512-6W+oyKgMFUZRJI4o9P9mTMzrokkXfu3tq1/CfOJj9QrMqyPqujJqv1xnxUAqDQwWVyCA8TMg0Fxk/+gXrDg2Nw==",
+      "version": "4.2.1",
+      "resolved": "https://registry.npmjs.org/@signinwithethereum/siwe/-/siwe-4.2.1.tgz",
+      "integrity": "sha512-CQEQhCIgN9blil1YpaGR+wvGPdsBVK6zed5DBu03s1IdbSO3kA/n7Zp+SAkZGiHy3HY6OJm1Su0/Bd33vKK6nQ==",
       "license": "Apache-2.0",
       "dependencies": {
-        "@signinwithethereum/siwe-parser": "^4.2.0"
+        "@signinwithethereum/siwe-parser": "^4.2.1"
       },
       "peerDependencies": {
         "ethers": "^5.7.0 || ^6.13.0",
@@ -9751,9 +9751,9 @@
       }
     },
     "node_modules/@signinwithethereum/siwe-parser": {
-      "version": "4.2.0",
-      "resolved": "https://registry.npmjs.org/@signinwithethereum/siwe-parser/-/siwe-parser-4.2.0.tgz",
-      "integrity": "sha512-e3edh8XpZrEjbzVYc0BZ4ySFOa8RKTZOQTafSf1E6ejCB5XcBH93jEpYmjzry1EEocgMNq4KlB3YunsFNCXakQ==",
+      "version": "4.2.1",
+      "resolved": "https://registry.npmjs.org/@signinwithethereum/siwe-parser/-/siwe-parser-4.2.1.tgz",
+      "integrity": "sha512-GAdwNiBaRpUMTiFfPrbQ3e/RBhPbEhRRN1sZmDMLgLEZuKqKwO7V0ksVzCerE9l8HFKTNw5R/q3kPDCWJRz4zA==",
       "license": "Apache-2.0",
       "dependencies": {
         "@noble/hashes": "^1.7.0",
@@ -12043,28 +12043,19 @@
       }
     },
     "node_modules/@x402/extensions": {
-      "version": "2.24.0",
-      "resolved": "https://registry.npmjs.org/@x402/extensions/-/extensions-2.24.0.tgz",
-      "integrity": "sha512-OSPywa8o46a2xIrh+nJqpvXQrppIPNimuPwf5zGRhRZEdjXfBAoSydB+rFj15rKR6Fd0iVjjqsrwUE1FnOuMvg==",
+      "version": "2.23.0",
+      "resolved": "https://registry.npmjs.org/@x402/extensions/-/extensions-2.23.0.tgz",
+      "integrity": "sha512-K0hDWGNrQ5iU8CdDzM8RpYrMusfqs2rgZJbCfUnFXG61TjgFIYYyLExaP8jJ4y2ac0SGXYZC1MI+uJA6YP3TTw==",
       "license": "Apache-2.0",
       "dependencies": {
         "@noble/curves": "^1.9.0",
         "@scure/base": "^1.2.6",
         "@signinwithethereum/siwe": "^4.1.0",
-        "@x402/core": "~2.24.0",
+        "@x402/core": "~2.23.0",
         "ajv": "^8.17.1",
         "jose": "^5.9.6",
         "tweetnacl": "^1.0.3",
         "viem": "^2.48.11",
-        "zod": "^3.24.2"
-      }
-    },
-    "node_modules/@x402/extensions/node_modules/@x402/core": {
-      "version": "2.24.0",
-      "resolved": "https://registry.npmjs.org/@x402/core/-/core-2.24.0.tgz",
-      "integrity": "sha512-zKFbG+RgUhBXT9RcBQZGPW1cZXL9xpiTv68XSSuO1SMoobudmVvxYgP/bhoxJuAoqJjjEceeAhT4/EcA/wolrQ==",
-      "license": "Apache-2.0",
-      "dependencies": {
         "zod": "^3.24.2"
       }
     },
@@ -12331,13 +12322,13 @@
       }
     },
     "node_modules/awal": {
-      "version": "2.12.1",
-      "resolved": "https://registry.npmjs.org/awal/-/awal-2.12.1.tgz",
-      "integrity": "sha512-z4whchSMbUhDuhwoI/+7vZ1ArwG9e8C9yIX9Y3W+JXJkR3E95iIZ1vIBZ6nPWSzakCw21YuZhFvOpGKEXtN6kQ==",
+      "version": "2.12.2",
+      "resolved": "https://registry.npmjs.org/awal/-/awal-2.12.2.tgz",
+      "integrity": "sha512-y91O4Bn86oG0u6ZQfu1M/DF6Q0twgFxciwSMdijoRVSrYeX1pxbGlWIcoEd8sGCvEmV4qxzkZbSiIVAU0D0sUg==",
       "license": "Apache-2.0",
       "dependencies": {
-        "@x402/core": "^2.17.0",
-        "@x402/extensions": "^2.17.0",
+        "@x402/core": "~2.23.0",
+        "@x402/extensions": "~2.23.0",
         "chalk": "^5.3.0",
         "commander": "^12.0.0",
         "env-paths": "^3.0.0",
