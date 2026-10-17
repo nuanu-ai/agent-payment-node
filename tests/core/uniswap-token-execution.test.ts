@@ -212,12 +212,16 @@ test("successful swap with residual allowance requires explicit cleanup and a ze
   op = await f.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.equal(op.receipt, null);
   assert.deepEqual(f.sends, ["approval", "swap", "cleanup"]);
   f.observations.set(H("3"), { status: "success", transactionHash: H("3"), gasDebitWei: "50", allowanceAtomic: "1" });
-  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleanup_unknown_finality"); assert.equal(op.receipt, null);
+  // A cleanup that landed without zeroing the allowance (read at its own block) is retired and re-armed (R4).
+  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "cleanup_allowance_nonzero");
+  assert.equal(op.cleanupAttempt, null); assert.deepEqual(op.retiredEffects?.map((row) => [row.kind, row.reason]), [["cleanup", "landed_allowance_nonzero"]]);
+  assert.equal(op.accumulatedNativeDebitWei, "250"); assert.equal(op.receipt, null);
   assert.equal(f.sends.filter((kind) => kind === "swap").length, 1);
 
-  f.observations.set(H("3"), { status: "success", transactionHash: H("3"), gasDebitWei: "50", allowanceAtomic: "0" }); f.allowance("0");
-  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleaned"); assert.equal(op.receipt, null);
-  assert.equal(f.sends.filter((kind) => kind === "swap").length, 1);
+  // The owner's next, consented cleanup finds the allowance already zero: nothing is left to sign.
+  f.allowance("0"); op = await f.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleaned");
+  assert.equal(op.cleanupReason, "zero_allowance_after_effect"); assert.equal(op.receipt, null);
+  assert.deepEqual(f.sends, ["approval", "swap", "cleanup"]);
 });
 test("post-approval revalidation drift durably requires explicit cleanup and never signs the swap", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); let op = await f.runtime.approve(f.operation.operationId);
@@ -234,13 +238,14 @@ test("zero allowance cannot release a hashless marked attempt without public evi
   const saved = await f.journal.load(op.operationId); assert.equal(saved?.integrityHash, op.integrityHash);
   assert.equal(saved?.cleanupEvidence, null); assert.equal(saved?.usageState, "reserved"); assert.deepEqual(f.sends, []);
 });
-test("zero allowance cannot claim no-effect cleanup after an approval hash exists", async (t) => {
+test("zero allowance after a landed approval closes the swap without claiming no effect", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); let op = await f.runtime.approve(f.operation.operationId);
   f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" }); f.allowance("1000000");
   op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "approval_observed"); f.rejectRevalidation();
   op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); f.allowance("0");
-  await assert.rejects(f.runtime.cleanup(op.operationId), (error: any) => error.code === "APN_OPERATION_BLOCKED" && error.details?.reason === "uniswap_cleanup_effect_exists");
-  const persisted = await f.journal.load(op.operationId); assert.equal(persisted?.cleanupEvidence, null); assert.equal(persisted?.usageState, "reserved");
+  const persisted = await f.runtime.cleanup(op.operationId);
+  assert.deepEqual([persisted.phase, persisted.cleanupReason, persisted.cleanupEvidence?.kind], ["cleaned", "zero_allowance_after_effect", "zero_allowance_after_effect"]);
+  assert.equal(persisted.usageState, "reserved", "a landed approval never releases the hold as no effect");
   assert.deepEqual(f.sends, ["approval"]);
 });
 test("legacy terminal usage cannot prove no effect for a hashless marked attempt", async (t) => {
