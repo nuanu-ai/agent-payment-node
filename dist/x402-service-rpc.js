@@ -9,24 +9,29 @@ export function selectX402Rpc(rpc, chainId = 8453) {
     return rpc.forX402Network(chainId);
 }
 export async function assertX402RpcChain(rpc, chainId = 8453) {
-    const chain = rpc.assertX402Chain === undefined && chainId === 8453 ? await rpc.assertBaseChain() :
-        await rpc.assertX402Chain?.(chainId);
+    const chain = await rpc.assertX402Chain?.(chainId);
     if (chain === undefined || chain.chainId !== chainId || !chain.rpcOrigin) {
         throw new ApnError("APN_CHAIN_MISMATCH", "RPC does not prove the frozen x402 network.");
     }
     return chain;
 }
+/** The production RPC adapter always carries the x402 read surface; an adapter without it cannot observe x402. */
 export function x402ReadPort(rpc, chainId = 8453) {
     const value = selectX402Rpc(rpc, chainId);
-    return typeof value.getX402Head === "function" && typeof value.getX402Block === "function" &&
-        typeof value.getX402Receipt === "function" && typeof value.getX402AuthorizationState === "function" &&
-        typeof value.getX402AuthorizationUsedLogs === "function" ? value : null;
+    if (typeof value.getX402Head !== "function" || typeof value.getX402Block !== "function" ||
+        typeof value.getX402Receipt !== "function" || typeof value.getX402AuthorizationState !== "function" ||
+        typeof value.getX402AuthorizationUsedLogs !== "function")
+        missingX402ReadSurface();
+    return value;
 }
 export function boundedX402ReadPort(rpc, timeoutMs, chainId = 8453) {
     const port = x402ReadPort(rpc, chainId);
-    if (port === null || typeof port.withTotalTimeout !== "function")
-        return null;
+    if (typeof port.withTotalTimeout !== "function")
+        missingX402ReadSurface();
     return port.withTotalTimeout(timeoutMs);
+}
+function missingX402ReadSurface() {
+    throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
 }
 /**
  * A settlement wait first proves the endpoint's chain (read once per invocation and endpoint). The safe head is not

@@ -27,7 +27,7 @@ export class X402RpcReconciler {
         const chain = await assertX402RpcChain(this.rpc, x402Network(input.network).chainId);
         const state = await this.rpc.getX402AuthorizationState(input.wallet, input.authorization.nonce, { tag: "safe" });
         // A lagging endpoint whose safe head is behind the prepared block proves nothing about this authorization.
-        if (state.blockTag !== "safe" || state.rpcOrigin !== chain.rpcOrigin ||
+        if (state.blockTag !== "safe" ||
             BigInt(state.blockNumber) < BigInt(input.preparedBlock.number))
             return { operation: input, unusedAtSafe: false };
         if (state.value) {
