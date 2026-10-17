@@ -7,11 +7,6 @@ import { SwapOperationRepository } from "../repository.js";
 import { SUNSWAP_PINNED_CONTRACTS, SUNSWAP_V2_CODE_HASHES, loadSunSwapPinCatalog } from "./catalog.js";
 import { SUNSWAP_V2_KEYLESS_MECHANISM_PIN, SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY } from "./mechanism.js";
 
-/** A function-typed member keeps parameter checks strict, so a builder needing more input cannot be installed here. */
-export interface SunSwapReadOnlyQuoteBuilder {
-  readonly quote: (input: Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }> & { readonly now: Date }) => Promise<unknown>;
-}
-
 type Request = Extract<CommandRequest, { readonly command: `swap.sunswap.${string}` }>;
 export async function executeSunSwapCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
   if (request.command === "swap.sunswap.inventory") return data({ catalog: loadSunSwapPinCatalog(), ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION,
@@ -22,10 +17,9 @@ export async function executeSunSwapCommand(request: Request, context: RuntimeCo
       codePins: SUNSWAP_PINNED_CONTRACTS.map(({ role, address }) => ({ role, address, codeHash: SUNSWAP_V2_CODE_HASHES[role] })) } },
   "official_catalog_not_owner_admission");
   if (request.command === "swap.sunswap.quote") {
-    if (context.sunswapRuntime !== undefined) return data(await context.sunswapRuntime.quote(request, context.clock.now()), "unsigned_exact_simulated_swap_quote");
-    if (context.sunswap === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
-      "SunSwap quote requires an explicitly injected read-only builder.", { reason: "sunswap_runtime_unavailable" });
-    return data(await context.sunswap.quote({ ...request, now: context.clock.now() }), "unsigned_read_only_swap_quote");
+    if (context.sunswapRuntime === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+      "SunSwap quote requires the keyless TRON runtime.", { reason: "sunswap_runtime_unavailable" });
+    return data(await context.sunswapRuntime.quote(request, context.clock.now()), "unsigned_exact_simulated_swap_quote");
   }
   if (request.command === "swap.sunswap.prepare") {
     if (context.sunswapRuntime === undefined) throw new ApnError("APN_OPERATION_BLOCKED",

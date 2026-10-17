@@ -4,7 +4,6 @@ import { validateChainAccount } from "../../chain-account-store.js";
 import type { ChainAccount, ChainWalletStoragePort, RailSignedEffect } from "../../direct-rail-ports.js";
 import { ApnError } from "../../errors.js";
 import { tronAddress } from "../../tron/codec.js";
-import type { SwapChainSignerPort, SwapChainSenderPort } from "../ports.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
 import { SwapOperationRepository } from "../repository.js";
 import { SUNSWAP_MAX_HEAD_DRIFT_BLOCKS, SUNSWAP_TRON_CHAIN, SUNSWAP_USDT } from "./catalog.js";
@@ -31,7 +30,7 @@ export interface SunSwapBroadcastRpcPort {
  * A per-operation protected adapter. Signed bytes remain in ChainAccountStore's authenticated
  * encrypted envelope; the public swap journal receives only the opaque binding fingerprint.
  */
-export class SunSwapProtectedExecutionAdapter implements SwapChainSignerPort, SwapChainSenderPort {
+export class SunSwapProtectedExecutionAdapter {
   private readonly operation: SwapOperationRecord;
   private readonly fingerprint: string;
 

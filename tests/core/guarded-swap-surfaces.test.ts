@@ -83,7 +83,7 @@ test("chain binders reject excess fields, inherited objects, malformed integers,
 test("inventories expose frozen chain identities without admission and runtime factory installs no swap dependency", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const uniswap = createApnCore(bindArgv(["swap", "ethereum", "uniswap", "inventory"]), { stateRoot: temporary.root });
-  assert.equal(uniswap.context.sunswap, undefined);
+  assert.equal(uniswap.context.sunswapRuntime, undefined); assert.equal(uniswap.context.jupiterV1Runtime, undefined);
   const core = new ApnCore({ state: new StateStore(temporary.root) });
   const sun = await core.execute({ command: "swap.sunswap.inventory" });
   assert.equal(sun.ok, true); assert.equal((sun.data as any).ownerAdmission.evaluated, false); assert.equal((sun.data as any).execution, "dormant");
@@ -96,16 +96,15 @@ test("inventories expose frozen chain identities without admission and runtime f
   assert.equal((jupiter.data as any).catalog.outputToken, SOLANA_USDC_MINT);
 });
 
-test("SunSwap quote uses only an explicit read-only builder; Jupiter without its runtime and state-changing surfaces refuse without side effects", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); let sunQuotes = 0;
-  const core = new ApnCore({ state: new StateStore(temporary.root), clock: { now: () => new Date("2026-09-17T00:00:00.000Z") },
-    sunswap: { quote: async (request) => { sunQuotes++; return { family: "sunswap", request }; } } });
+test("without the installed keyless runtimes quote and every state-changing surface refuse without side effects", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  // No injectable read-only builder exists any more: the runtime factory installs the keyless runtime per command.
+  const core = new ApnCore({ state: new StateStore(temporary.root), clock: { now: () => new Date("2026-09-17T00:00:00.000Z") } });
   const sunQuote = await core.execute({ command: "swap.sunswap.quote", profile: "swap-test", account: TRON_OWNER,
     recipient: TRON_RECIPIENT, amountAtomic: "1000000", slippageBps: 100, ownerSlippageCapBps: 200, feeLimitSun: "30000000", deadline: 1790000600 });
   const jupiterQuote = await core.execute({ command: "swap.jupiter.quote", profile: "swap-test", account: SOLANA_OWNER,
     recipient: SOLANA_OWNER, amountAtomic: "1000000", slippageBps: 100, ownerSlippageCapBps: 200 });
-  assert.equal(sunQuote.ok, true); assert.equal(sunQuotes, 1);
-  // Jupiter has no injectable builder: without the installed V1 runtime every non-inventory command refuses.
+  assert.equal(sunQuote.ok, false); assert.equal(sunQuote.error?.details?.reason, "sunswap_runtime_unavailable");
   assert.equal(jupiterQuote.ok, false); assert.equal(jupiterQuote.error?.details?.reason, "jupiter_runtime_unavailable");
   for (const [command, reason] of [
     ["swap.sunswap.prepare", "sunswap_owner_admission_required"], ["swap.sunswap.approve", "sunswap_native_no_approval"],
@@ -117,20 +116,14 @@ test("SunSwap quote uses only an explicit read-only builder; Jupiter without its
     const result = await core.execute(request as never);
     assert.equal(result.ok, false); assert.equal(result.error?.details?.reason, reason);
   }
-  assert.equal(sunQuotes, 1);
-  const noRuntime = new ApnCore({ state: new StateStore(temporary.root) });
-  for (const command of ["swap.sunswap.quote", "swap.jupiter.quote"] as const) {
-    const result = await noRuntime.execute(command === "swap.sunswap.quote" ? { command, profile: "swap-test", account: TRON_OWNER,
-      recipient: TRON_RECIPIENT, amountAtomic: "1", slippageBps: 0, ownerSlippageCapBps: 0, feeLimitSun: "1", deadline: 1790000600 } : { command, profile: "swap-test",
-      account: SOLANA_OWNER, recipient: SOLANA_OWNER, amountAtomic: "1", slippageBps: 0, ownerSlippageCapBps: 0 });
-    assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-  }
+  for (const result of [sunQuote, jupiterQuote]) assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+  await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
 });
 
 test("status performs only a durable read and returns a stable missing-operation classification", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
-  const core = new ApnCore({ state: new StateStore(temporary.root), sunswap: { quote: async () => { throw new Error("quote canary"); } } });
+  const core = new ApnCore({ state: new StateStore(temporary.root) });
   for (const command of ["swap.uniswap.status", "swap.sunswap.status"] as const) {
     const result = await core.execute({ command, operationId: H("c") });
     assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_NOT_FOUND");
