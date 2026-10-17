@@ -10,9 +10,9 @@ export declare class MetaMaskGaslessOperationRepository extends SecureStateStore
     listOperations(profileHash: string): Promise<readonly MetaMaskGaslessOperationRecord[]>;
     listAllOperations(): Promise<readonly MetaMaskGaslessOperationRecord[]>;
     writeOperation(operationInput: MetaMaskGaslessOperationRecord): Promise<void>;
-    /** Caller holds the shared profile and operation locks. The operation is always authoritative. */
+    /** Caller holds the shared profile and operation locks. The operation is the only record; its receipt is derived. */
     persist(operation: MetaMaskGaslessOperationRecord): Promise<void>;
-    repairReceipt(operationInput: MetaMaskGaslessOperationRecord): Promise<void>;
+    /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
     loadReceipt(profileHash: string, operationId: string): Promise<MetaMaskGaslessReceipt>;
     private path;
 }

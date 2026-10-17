@@ -7,6 +7,7 @@ import { formatAtomic, parseDecimal } from "./money.js";
 import { OperationService } from "./operation-service.js";
 import { approvalCode } from "./approval-code.js";
 import { capabilityHash, LOCAL_PROVIDER_ID, markProviderProfileDrift } from "./provider-profile.js";
+import { assertDirectTerminalReceiptAuthority } from "./direct-terminal-receipt.js";
 import { providerDirectReceipt } from "./provider-direct-receipt.js";
 import { createProviderEffectReference, observeProviderDirectRequest, sameFrozenProviderProfile, } from "./provider-direct-recovery.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
@@ -329,6 +330,9 @@ export class ProviderDirectTransferService {
                 receipt = providerDirectReceipt(operation);
                 await this.context.state.writeReceipt(operation.profileHash, receipt);
             }
+            // A terminal provider transfer's receipt must prove its exact terminal state (checked here, not on every load).
+            if (operation.terminal)
+                assertDirectTerminalReceiptAuthority(operation, receipt);
             return publicReceipt(receipt);
         });
     }

@@ -25,7 +25,6 @@ export class SmartAccountGaslessPreparation {
             if (existing !== null) {
                 if (existing.kind !== "smart_account_gasless_transfer")
                     saFail("sa_gasless_state_corrupt");
-                await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
             const clock = new SmartAccountGaslessClock(this.o.clock);

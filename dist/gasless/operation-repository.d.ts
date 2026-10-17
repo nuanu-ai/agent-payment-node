@@ -9,9 +9,9 @@ export declare class GaslessOperationRepository extends SecureStateStore {
     listOperations(profileHash: string): Promise<readonly GaslessOperationRecord[]>;
     listAllOperations(): Promise<readonly GaslessOperationRecord[]>;
     writeOperation(op: GaslessOperationRecord): Promise<void>;
-    /** Caller holds the same profile/operation locks as all money families. */
+    /** Caller holds the same profile/operation locks as all money families. Its receipt is derived on read. */
     persist(op: GaslessOperationRecord): Promise<void>;
-    repairReceipt(op: GaslessOperationRecord): Promise<void>;
+    /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
     loadReceipt(profileHash: string, operationId: string): Promise<GaslessReceipt>;
     private path;
 }

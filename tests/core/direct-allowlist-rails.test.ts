@@ -163,7 +163,7 @@ test("a TRON record written before the gate still validates and reads; approving
   const legacy = newRailOperation({ schemaVersion: gated.schemaVersion, kind: gated.kind, operationId: gated.operationId, profile: gated.profile,
     profileHash: gated.profileHash, idempotencyHash: gated.idempotencyHash, requestHash: gated.requestHash, account: gated.account,
     prepared: gated.prepared, policyHash: gated.policyHash });
-  for (const directory of ["rail-operations", "rail-receipts"]) await unlink(join(temporary.root, directory, gated.profileHash, `${id}.json`));
+  await unlink(join(temporary.root, "rail-operations", gated.profileHash, `${id}.json`));
   await s.core.rails.records.persist(legacy);
   const status = await s.core.execute({ command: "operation.status", operationId: id });
   assert.equal(status.ok, true, status.error?.message); assert.equal("allowlist" in (status.operation as object), false);

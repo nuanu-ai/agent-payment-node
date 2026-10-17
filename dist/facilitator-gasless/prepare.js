@@ -31,7 +31,6 @@ export class FacilitatorPreparation {
             if (existing !== null) {
                 if (existing.kind !== FACILITATOR_KIND)
                     return facilitatorFail("facilitator_gasless_state_corrupt");
-                await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
             const binding = await gaslessOwner(state, profile), owner = binding.owner.address;

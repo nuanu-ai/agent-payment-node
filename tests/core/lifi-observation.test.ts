@@ -222,10 +222,10 @@ test("LI.FI unchanged polling does not grow history, including changed provider 
   assert.deepEqual(await s.core.bridges.records.findOperation(id), previous);
 });
 
-test("LI.FI interruption after durable destination evidence repairs its receipt and rechecks the same delivery", async (t) => {
+test("LI.FI interruption after durable destination evidence derives its receipt and rechecks the same delivery", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
-  const { id } = await s.prepare(); const repair = s.core.bridges.records.repairReceipt.bind(s.core.bridges.records);
-  s.core.bridges.records.repairReceipt = async (op) => { if (op.destinationProof !== null) throw new Error("synthetic derived receipt write failure"); await repair(op); };
+  const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
+  s.core.bridges.records.persist = async (op) => { await persist(op); if (op.destinationProof !== null) throw new Error("synthetic interruption after the durable write"); };
   const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, false);
   const previous = (await s.core.bridges.records.findOperation(id))!; assert.ok(previous.destinationProof); assert.equal(previous.terminal, false);
   const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
@@ -237,10 +237,10 @@ test("LI.FI interruption after durable destination evidence repairs its receipt 
 
 test("LI.FI validated safe destination proof resumes locally without destination or provider RPC", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
-  const { id } = await s.prepare(); const repair = s.core.bridges.records.repairReceipt.bind(s.core.bridges.records);
-  s.core.bridges.records.repairReceipt = async (op) => { if (op.destinationProof !== null) throw new Error("synthetic durable boundary"); await repair(op); };
+  const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
+  s.core.bridges.records.persist = async (op) => { await persist(op); if (op.destinationProof !== null) throw new Error("synthetic durable boundary"); };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false);
-  s.core.bridges.records.repairReceipt = repair; const previous = (await s.core.bridges.records.findOperation(id))!;
+  s.core.bridges.records.persist = persist; const previous = (await s.core.bridges.records.findOperation(id))!;
   const destinationCalls = s.destination.calls.length, providerCalls = s.provider.statusCalls;
   s.destination.changedBlock = true;
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);

@@ -129,7 +129,6 @@ export class MetaMaskGaslessService {
     return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${id}`], async () => {
       const current = await this.operations.required(id);
       if (current.kind !== "metamask_gasless_transfer") mmFail("mm_gasless_state_corrupt");
-      await this.records.repairReceipt(current.record);
       return await work(current.record);
     });
   }

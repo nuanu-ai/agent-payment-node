@@ -11,8 +11,9 @@ export declare class SmartAccountGaslessOperationRepository extends SecureStateS
     listAllOperations(): Promise<readonly SmartAccountGaslessOperationRecord[]>;
     /** Caller holds the existing profile/operation locks, plus global idempotency lock for preparation. */
     writeOperation(input: SmartAccountGaslessOperationRecord): Promise<void>;
+    /** The operation is the only record written; its receipt is derived from it on read. */
     persist(op: SmartAccountGaslessOperationRecord): Promise<void>;
-    repairReceipt(input: SmartAccountGaslessOperationRecord): Promise<void>;
+    /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
     loadReceipt(profileHash: string, operationId: string): Promise<SmartAccountGaslessReceipt>;
     private path;
 }

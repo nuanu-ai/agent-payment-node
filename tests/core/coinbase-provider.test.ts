@@ -1232,8 +1232,11 @@ test("store failures before started block provider spawn and an orphan terminal 
     sha256("profile\0provider-store-failure"),
     `${operationId}.json`,
   ));
+  // Phase 4b (CORE-13): a missing terminal receipt fails only this operation's own receipt get; its status and an
+  // idempotent replay still answer from the saved operation, and nothing is sent again.
   const missingReceiptStatus = await restarted.execute({ command: "operation.status", operationId });
-  assert.equal(missingReceiptStatus.error?.code, "APN_STATE_CORRUPT");
+  assert.equal((missingReceiptStatus.operation as Record<string, unknown>).state, "completed", JSON.stringify(missingReceiptStatus.error));
+  assert.equal((await restarted.execute({ command: "receipt.get", operationId })).error?.code, "APN_STATE_CORRUPT");
   const idempotentReplay = await restarted.execute({
     command: "transfer.prepare",
     profile: "provider-store-failure",
@@ -1241,7 +1244,7 @@ test("store failures before started block provider spawn and an orphan terminal 
     recipient: ADDRESS_B,
     amount: "1.25",
   });
-  assert.equal(idempotentReplay.error?.code, "APN_STATE_CORRUPT");
+  assert.equal((idempotentReplay.operation as Record<string, unknown> | null)?.state, "completed", JSON.stringify(idempotentReplay.error));
   assert.equal(direct.calls.length, 1);
   assert.equal(restartDirect.calls.length, 0);
 });

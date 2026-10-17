@@ -120,7 +120,6 @@ export class BridgeService {
                 bridgeFailure("APN_STATE_CORRUPT", "bridge_operation_kind_changed");
             if (isLegacyBridgeOperation(current.record))
                 bridgeFailure("APN_OPERATION_BLOCKED", "legacy_bridge_non_resumable");
-            await this.records.repairReceipt(current.record);
             await this.followUsage(current.record);
             return await work(current.record);
         }));
