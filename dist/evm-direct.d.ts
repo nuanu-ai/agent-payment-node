@@ -1,4 +1,4 @@
-import { type CircleNativeAdmission } from "./circle-native-admission.js";
+import { type CircleNativeAdmission } from "./legacy/circle-native-admission-rider.js";
 import { type EvmAsset } from "./evm-asset.js";
 import { type DirectEvmChainId } from "./evm-direct-networks.js";
 import { type DirectEvmStep } from "./evm-direct-reads.js";
@@ -6,7 +6,7 @@ import type { EvmBalanceSnapshot, EvmDirectReads, EvmFeeQuote, EvmRpcPort, EvmTr
 import type { Address, Economics, OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import { type EvmNativeCustody } from "./evm-native-custody.js";
-import { type Cleanup85NativeBinding } from "./circle-cleanup85-native-binding.js";
+import { type Cleanup85NativeBinding } from "./legacy/cleanup85-native-records.js";
 export interface EvmDirectBinding {
     readonly schemaVersion: "apn.evm-direct.v1";
     readonly asset: EvmAsset;

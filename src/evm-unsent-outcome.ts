@@ -37,3 +37,24 @@ export async function evmSentOutcome(read: (method: "eth_getTransactionCount" | 
   if (outcome !== "never_lands") return outcome;
   return await read("eth_getTransactionReceipt", [input.transactionHash]) === null ? "never_lands" : "own_transaction_known";
 }
+
+export type EvmAmbiguousSendOutcome = "own_transaction_known" | "never_lands" | "resend_identical" | "other_transaction_pending";
+/**
+ * R4 for possibly-broadcast bytes that no receipt proves yet. The nonces are read first, then the hash, so a transaction
+ * included between the reads is seen as known rather than mistaken for another one:
+ * - the node knows the transaction or a receipt: observe only;
+ * - the safe nonce is past the signed nonce and the hash is unknown: another transaction took it, the bytes never land;
+ * - the latest nonce has not passed the signed nonce and the hash is unknown: the identical bytes may be sent again
+ *   (same hash, same nonce: at most one inclusion);
+ * - otherwise another transaction holds the nonce below safe depth: wait.
+ */
+export async function evmAmbiguousSendOutcome(read: (method: "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt",
+  params: readonly unknown[]) => Promise<unknown>, input: Readonly<{ account: string; nonce: bigint; transactionHash: string }>): Promise<EvmAmbiguousSendOutcome> {
+  if (!/^0x[0-9a-fA-F]{40}$/u.test(input.account) || !/^0x[0-9a-fA-F]{64}$/u.test(input.transactionHash) || input.nonce < 0n)
+    throw new ApnError("APN_INVALID_INPUT", "Ambiguous EVM effect identity is invalid.");
+  const [safe, latest] = await Promise.all([read("eth_getTransactionCount", [input.account, "safe"]), read("eth_getTransactionCount", [input.account, "latest"])]);
+  const [transaction, receipt] = await Promise.all([read("eth_getTransactionByHash", [input.transactionHash]), read("eth_getTransactionReceipt", [input.transactionHash])]);
+  if (transaction !== null || receipt !== null) return "own_transaction_known";
+  if (quantity(safe) > input.nonce) return "never_lands";
+  return quantity(latest) <= input.nonce ? "resend_identical" : "other_transaction_pending";
+}

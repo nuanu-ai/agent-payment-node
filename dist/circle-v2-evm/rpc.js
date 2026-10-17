@@ -1,6 +1,5 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { archiveReadInterval, circleArchiveReadPacer } from "../circle-archive-read-pacing.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ApnError } from "../errors.js";
 import { BridgeHttps } from "../lifi/https.js";
@@ -25,11 +24,12 @@ const READ_METHODS = new Set([...METHODS].filter(method => method !== "eth_sendR
  * the attester set (head, threshold, count, at most 20 attesters); one account; one envelope (head, tip, estimate);
  * one effect preflight (two nonces, balance, allowance, estimate, simulation, mint head and used nonce); one
  * observation (transaction, receipt, finality head, canonical block). */
-export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23, account: 5, envelope: 3, preflight: 8, observation: 4, single: 1 };
+export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23, account: 5, envelope: 3, preflight: 8, observation: 4, single: 1, ambiguous: 4 };
 /** The longest live command: identity, configuration, attesters, two accounts, two envelopes, three effect preflights,
- * eight observations and four single reads (allowance, used nonce, cleanup nonce, mint head), each retried once. */
+ * eight observations, one ambiguous-send check (two nonces, transaction, receipt) and four single reads (allowance,
+ * used nonce, cleanup nonce, mint head), each retried once. */
 export const CIRCLE_COMMAND_REQUEST_BUDGET = 2 * (CIRCLE_READ_PLAN.identity + CIRCLE_READ_PLAN.configuration + CIRCLE_READ_PLAN.attesters +
-    2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + 4 * CIRCLE_READ_PLAN.single);
+    2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + CIRCLE_READ_PLAN.ambiguous + 4 * CIRCLE_READ_PLAN.single);
 const transient = (e) => e instanceof ApnError && typeof e.details?.status === "number" && [429, 500, 502, 503, 504].includes(e.details.status);
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
  * retry once; anchored observations restart wholly. Financial RPC is never retried.
@@ -40,23 +40,19 @@ export class CircleRpc {
     chainId;
     https;
     maxRequests;
-    archivePacer;
     mode;
     sequence = 0;
     requests = 0;
     posts = 0;
     endpoint;
-    archiveInterval;
     chainVerified = false;
     queued = [];
     scopes = new AsyncLocalStorage();
-    constructor(url, chainId, https = new BridgeHttps(), maxRequests = 256, archiveMinimumIntervalMs = process.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS, archivePacer = circleArchiveReadPacer, mode = "anchored") {
+    constructor(url, chainId, https = new BridgeHttps(), maxRequests = 256, mode = "anchored") {
         this.chainId = chainId;
         this.https = https;
         this.maxRequests = maxRequests;
-        this.archivePacer = archivePacer;
         this.mode = mode;
-        this.archiveInterval = archiveReadInterval(archiveMinimumIntervalMs);
         const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Circle RPC", 2048);
         if (parsed.search !== "" || parsed.hash !== "")
             circleBlocked("rpc_url");
@@ -65,9 +61,8 @@ export class CircleRpc {
     /** Read calls counted against the budget, and physical POSTs sent (a batch is one POST). */
     get requestCount() { return this.requests; }
     get postCount() { return this.posts; }
-    guarded(guard, action) { return this.scopes.run({ guard, retryRead: this.scopes.getStore()?.retryRead ?? true }, action); }
     async call(method, params, beforeSend) {
-        const guard = this.scopes.getStore()?.guard, gate = () => { guard?.(); beforeSend?.(); }, retry = READ_METHODS.has(method) && this.scopes.getStore()?.retryRead !== false;
+        const gate = () => { beforeSend?.(); }, retry = READ_METHODS.has(method) && this.scopes.getStore()?.retryRead !== false;
         for (let attempt = 0;; attempt++) {
             try {
                 return await this.physicalCall(method, params, gate, beforeSend !== undefined);
@@ -145,7 +140,7 @@ export class CircleRpc {
         let response;
         this.posts++;
         try {
-            response = await this.archivePacer.start(this.endpoint, method, this.archiveInterval, gate, () => this.https.request(this.endpoint, "POST", body, 1024 * 1024, "APN_RPC_CONFIG", gate));
+            response = await this.https.request(this.endpoint, "POST", body, 1024 * 1024, "APN_RPC_CONFIG", gate);
         }
         catch (error) {
             if (error instanceof ApnError)
@@ -192,14 +187,12 @@ export class CircleRpc {
     async observation(transactionHash, finalityTag) {
         for (let attempt = 0;; attempt++) {
             try {
-                return await this.scopes.run({ guard: this.scopes.getStore()?.guard, retryRead: false }, () => this.mode === "lean" ? this.leanObservation(transactionHash, finalityTag) : this.anchoredObservation(transactionHash, finalityTag));
+                return await this.scopes.run({ retryRead: false }, () => this.mode === "lean" ? this.leanObservation(transactionHash, finalityTag) : this.anchoredObservation(transactionHash, finalityTag));
             }
             catch (error) {
                 if (attempt >= 1 || !transient(error))
                     throw error;
-                this.scopes.getStore()?.guard?.();
                 await new Promise(resolve => setTimeout(resolve, 100));
-                this.scopes.getStore()?.guard?.();
             }
         }
     }

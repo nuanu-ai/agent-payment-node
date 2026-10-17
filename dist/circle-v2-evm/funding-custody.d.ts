@@ -18,8 +18,9 @@ export declare class CircleFundingEffectStore extends SecureStateStore {
     private readonly wrapping;
     constructor(root: string, wrapping: WrappingSecretPort);
     private path;
-    /** Presence-only refusal; this never decrypts material or loads a wrapping secret. */
-    assertExternalAbsent(op: CircleFundingOperationV2): Promise<void>;
+    /** Presence-only refusal; this never decrypts material or loads a wrapping secret. A role whose owned attempt is closed
+     * (proven never to land) keeps its permanent claims, but its signed bytes must be gone. */
+    assertExternalAbsent(op: CircleFundingOperationV2, closed?: ReadonlySet<CircleRole>): Promise<void>;
     /** Only for an effect already recorded `abandoned_unsent`; its permanent sign claim stays and refuses any re-signing. */
     discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void>;
     load(op: CircleFundingOperationV2, effect: CircleEffect, guard?: () => void): Promise<CircleFundingMaterial | null>;

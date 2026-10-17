@@ -1,14 +1,12 @@
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { Hex } from "../model.js";
 import type { BridgeChainId } from "./chains.js";
-import type { BridgeBlock, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTransactionProof } from "./model.js";
+import type { BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTransactionProof } from "./model.js";
 import type { BridgeObservationOptions, BridgeRpcPort } from "./ports.js";
-import { bridgeActualFees, type legacyBridgeActualFees } from "./rpc-fees.js";
 import type { RpcBatchReadItem } from "./rpc-session.js";
 type PlannedRead = Omit<RpcBatchReadItem, "batchAttempt">;
-export type BridgeBatchCall = (items: readonly PlannedRead[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>;
+export type BridgeBatchCall = (items: readonly PlannedRead[], route?: "primary" | "archive" | "receipt") => Promise<readonly unknown[]>;
 type NativeDelivery = Parameters<BridgeRpcPort["observe"]>[2];
-type Fees = ReturnType<typeof bridgeActualFees> | Awaited<ReturnType<typeof legacyBridgeActualFees>>;
 export interface BridgeObservationContext {
     readonly chainId: BridgeChainId;
     readonly origin: string;
@@ -19,8 +17,6 @@ export interface BridgeObservationContext {
         reader: boolean;
         fallback: boolean;
     }>;
-    /** Only the frozen historical migration proofs re-prove Base fees through the legacy pinned oracle. */
-    readonly legacyFees?: (receipt: Readonly<Record<string, unknown>>, block: BridgeBlock, safe: BridgeBlock) => Promise<Fees>;
 }
 /**
  * Clean POSTs of one canonical observation, in the order `observeCanonical` sends them: the batch of transaction, receipt,

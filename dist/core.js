@@ -209,10 +209,6 @@ export class ApnCore {
             case "circle.evm.adopt-external-mint":
             case "circle.evm.refresh-attestation":
             case "circle.evm.cleanup":
-            case "circle.evm.cleanup-nonce":
-            case "circle.evm.cleanup85-prepare":
-            case "circle.evm.cleanup85-cancel":
-            case "circle.evm.cleanup86-approve":
             case "circle.evm.status":
             case "circle.approval.prepare":
             case "circle.approval.execute":
@@ -539,7 +535,6 @@ export class ApnCore {
                 }
                 return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly, request.coinbaseObservationRpc));
             }
-            case "operation.repair-deployment": return dataOutcome(await this.bridges.repairDeployment(request.operationId), "local_journal_migration");
             case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
             case "operation.recover-provider-request": return operationOutcome(await this.transfer.recoverProviderRequest(request.operationId, request.providerRequestId));
             case "operation.recover-transaction-settlement": {

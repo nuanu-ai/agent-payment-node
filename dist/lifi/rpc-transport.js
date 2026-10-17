@@ -162,9 +162,7 @@ export function bridgeRpcCall(chainId, environment, options = {}) {
         const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
         return await withEndpointRole(route === "receipt"
             ? session.readReceiptBatch(target.toString(), chainId, bound, fallback.maxItemsPerRequest)
-            : route === "archive_deployment"
-                ? session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
-                : session.readBatch(target.toString(), chainId, bound, knownBatchItems(target)), role);
+            : session.readBatch(target.toString(), chainId, bound, knownBatchItems(target)), role);
     };
     const sessionArchiveReceipt = async (session, method, params) => {
         const values = await sessionBatchCall(session)([

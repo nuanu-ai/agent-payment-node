@@ -1,6 +1,5 @@
-import { type Cleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
-import { type ConsumedBurnRetirementProof } from "./consumed-burn-proof.js";
-import { type SealedBurnRetirementProof } from "./burn-retirement-proof.js";
+import { type Cleanup85RecoveryProof } from "../legacy/circle-cleanup85-retirement-proof.js";
+import { type ConsumedBurnRetirementProof, type SealedBurnRetirementProof } from "../legacy/circle-sealed-burn-retirement.js";
 import { type CircleOperationV1 } from "./operation-model.js";
 export interface CircleNonceRetirementProof {
     readonly cleanup85Recovery?: Cleanup85RecoveryProof;

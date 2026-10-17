@@ -8,8 +8,8 @@ import { CIRCLE_AMOUNT, CIRCLE_DEPLOYMENT_PINS, CIRCLE_MESSENGER, CIRCLE_MINTER,
 import { CIRCLE_ABI, CIRCLE_ZERO, bindCircleAttestation, circleWord, decodeCircleDestination, decodeCircleMessage, decodeCircleSource,
   encodeCircleApproval, encodeCircleBurn, encodeCircleMint, verifyCircleApproval, circleAttesterConfigurationHash, verifyCircleAttestationSigners, type CircleAttesterSnapshot,
   type CircleObservation, type CircleSourceProof } from "../../src/circle-v2-evm/protocol.js";
-import { quoteCircleFastFee, assertCircleFeeQuote, verifyCircleDeployments, verifyCircleGasEnvelope, verifyCircleMintPreflight,
-  verifyCircleSourceAccount, verifyCircleClosureFinality, type CircleDeploymentSnapshot } from "../../src/circle-v2-evm/preflight.js";
+import { verifyCircleDeployments, verifyCircleGasEnvelope, verifyCircleMintPreflight,
+  verifyCircleClosureFinality, type CircleDeploymentSnapshot } from "../../src/circle-v2-evm/preflight.js";
 const hash = `0x${"11".repeat(32)}` as Hex, blockHash = `0x${"22".repeat(32)}` as Hex, nonce = `0x${"33".repeat(32)}` as Hex;
 const n = (v: bigint, bytes: number) => v.toString(16).padStart(bytes * 2, "0"), q = (v: bigint) => `0x${v.toString(16)}`;
 export function message(chain: CircleDestinationChain, attested = false, fee = 6n, finality = 1000n, expiry = 1000n): Hex {

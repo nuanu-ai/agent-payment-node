@@ -1,5 +1,4 @@
 import { type Address, type Hex } from "viem";
-import { type CircleArchiveReadPacer } from "../circle-archive-read-pacing.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { type CircleDestinationChain } from "./catalog.js";
 import { type CircleAttesterSnapshot, type CircleObservation } from "./protocol.js";
@@ -161,9 +160,11 @@ export declare const CIRCLE_READ_PLAN: {
     readonly preflight: 8;
     readonly observation: 4;
     readonly single: 1;
+    readonly ambiguous: 4;
 };
 /** The longest live command: identity, configuration, attesters, two accounts, two envelopes, three effect preflights,
- * eight observations and four single reads (allowance, used nonce, cleanup nonce, mint head), each retried once. */
+ * eight observations, one ambiguous-send check (two nonces, transaction, receipt) and four single reads (allowance,
+ * used nonce, cleanup nonce, mint head), each retried once. */
 export declare const CIRCLE_COMMAND_REQUEST_BUDGET: number;
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
  * retry once; anchored observations restart wholly. Financial RPC is never retried.
@@ -174,21 +175,18 @@ export declare class CircleRpc {
     readonly chainId: number;
     private readonly https;
     private readonly maxRequests;
-    private readonly archivePacer;
     readonly mode: "lean" | "anchored";
     private sequence;
     private requests;
     private posts;
     private readonly endpoint;
-    private readonly archiveInterval;
     private chainVerified;
     private queued;
     private readonly scopes;
-    constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number, archiveMinimumIntervalMs?: string | undefined, archivePacer?: CircleArchiveReadPacer, mode?: "lean" | "anchored");
+    constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number, mode?: "lean" | "anchored");
     /** Read calls counted against the budget, and physical POSTs sent (a batch is one POST). */
     get requestCount(): number;
     get postCount(): number;
-    guarded<T>(guard: () => void, action: () => Promise<T>): Promise<T>;
     call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown>;
     private physicalCall;
     /** Reads queued in the same tick leave as one POST; a lone read keeps the plain single-call wire shape. */

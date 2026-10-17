@@ -1,4 +1,5 @@
 import { circleRuntimeBytecode } from "../../src/circle-v2-evm/rpc.js";
+import { advanceCircle, sealCircle } from "./circle-v1-journal.js";
 import { verifyCircleFinalizedRevert } from "../../src/circle-v2-evm/revert-proof.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -9,9 +10,7 @@ import { getAddress, type Hex } from "viem";
 import { StateStore } from "../../src/state.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { seal as sealUsage, reservationIdFor, idempotency } from "../../src/asset-usage-ledger-record.js";
-import { CircleRepository, validateCircleAdvance } from "../../src/circle-v2-evm/repository.js";
-import { advanceCircle, circleEnvelope, sealCircle, validateCircle, type CircleOperationV1, type CircleEffect, type CircleRole } from "../../src/circle-v2-evm/operation-model.js";
-import { approveCircleSource, approveCircleMint, executeCircleEffect, observeCircle, cleanupCircle, type CircleLifecyclePorts } from "../../src/circle-v2-evm/lifecycle.js";
+import { circleEnvelope, validateCircle, type CircleOperationV1, type CircleEffect, type CircleRole } from "../../src/circle-v2-evm/operation-model.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_RECIPIENT, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { decodeCircleSource, bindCircleAttestation, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, circleWord, circleHex } from "../../src/circle-v2-evm/protocol.js";
 import { OperationService } from "../../src/operation-service.js";

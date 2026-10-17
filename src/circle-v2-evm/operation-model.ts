@@ -1,6 +1,6 @@
 import { validateExternalFulfillment, type CircleExternalFulfillment } from "./external-proof.js";
 import { validateCircleNonceRetirementProof, type CircleNonceRetirementProof } from "./nonce-retirement-proof.js";
-import { getAddress, type Address, type Hex } from "viem";
+import type { Address, Hex } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { validateEvmNativeCustody, type EvmNativeCustody } from "../evm-native-custody.js";
@@ -29,14 +29,6 @@ export interface CircleOperationV1 { readonly schemaVersion: "apn.circle-v2-evm-
   readonly integrityHash: string; readonly externalFulfillment?: CircleExternalFulfillment; readonly nonceRetirement?: CircleNonceRetirementProof; }
 export function circleBlocked(reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", `Circle EVM operation blocked: ${reason}.`, { reason }); }
 export function circleCorrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT", `Circle EVM journal is invalid: ${reason}.`, { reason }); }
-export function sealCircle(input: Omit<CircleOperationV1, "integrityHash"> | CircleOperationV1): CircleOperationV1 {
-  const { integrityHash: _old, ...body } = input as CircleOperationV1; return { ...body, integrityHash: hashObject(body) };
-}
-export function advanceCircle(op: CircleOperationV1, patch: Partial<CircleOperationV1>, reason: string, now: number): CircleOperationV1 {
-  const { transitions, integrityHash: _old, ...body } = { ...op, ...patch };
-  const entry = { sequence: transitions.length, at: new Date(now).toISOString(), reason, previousHash: op.transitions.at(-1)?.snapshotHash ?? null, snapshotHash: hashObject(body) };
-  return sealCircle({ ...body, transitions: [...transitions, entry] });
-}
 export function circleEnvelope(input: Omit<CircleEnvelope, "envelopeHash">): CircleEnvelope { return { ...input, envelopeHash: hashObject(input) }; }
 export function validateCircleEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, destinationProfile?: string): void {
   if (!isPlainRecord(e) || !exactKeys(e, ["chainId", "from", "to", "data", "valueAtomic", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "envelopeHash"])) circleCorrupt("envelope_shape");

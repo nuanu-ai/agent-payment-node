@@ -1,4 +1,4 @@
-import { validateCleanup85NativeUsage } from "./asset-usage-ledger-cleanup85-native.js";
+import { validateCleanup85NativeUsage } from "./legacy/cleanup85-native-records.js";
 import { address as solanaAddress } from "@solana/kit";
 import { getAddress } from "viem";
 import { canonicalJson, hashObject, domainHash, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
