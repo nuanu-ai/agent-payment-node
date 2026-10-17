@@ -12,8 +12,9 @@ import { ApnError } from "./errors.js";
 import { userInfo } from "node:os";
 import { resolve } from "node:path";
 import type { BoundCommand } from "./command-binder.js";
-import type { OutputEnvelope } from "./commands.js";
+import type { CommandRequest, OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
+import { operationRuntimeCommand } from "./operation-commands.js";
 import { EncryptedProfilePolicy } from "./encrypted-profile-policy.js";
 import { LocalWalletNative } from "./local-wallet-native.js";
 import { MacOSLoginKeychainSecret } from "./macos-keychain.js";
@@ -92,7 +93,13 @@ import { StargateTokenService } from "./stargate-v2/token-runtime.js";
 import type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
 
 export type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
-export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {}): ApnCore {
+/**
+ * `runtimeCommand` selects the family runtimes and their RPC budgets: the request's own command, or for a generic
+ * operation command the family command it delegates to (operation-commands.ts). Foreground approvals always follow the
+ * request's own command.
+ */
+export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOptions = {},
+  runtimeCommand: CommandRequest["command"] = bound.request.command): ApnCore {
   const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
   const special = createSpecialApnCore(bound, options, state);
   if (special !== null) return special;
@@ -106,7 +113,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const chainAccounts = options.chainAccounts ?? new ChainAccountStore(state.root, wrappingSecret);
   // A fresh cap belongs to this command invocation; pacing persists by provider across processes.
   const solanaRpc = new SolanaRpc(options.solanaRpcUrl ?? (process.env.APN_SOLANA_RPC_URL || SOLANA_PUBLIC_RPC_URL), options.solanaRpcFetch,
-    new SolanaRpcBudget({ maxPhysicalRequests: solanaSwapCommandRequests(bound.request.command) ?? 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
+    new SolanaRpcBudget({ maxPhysicalRequests: solanaSwapCommandRequests(runtimeCommand) ?? 24, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
       wait: options.solanaRpcWait ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))) }),
     new SolanaRpcPacer(state, options.solanaRpcNow, options.solanaRpcWait));
   const tronRpc = new TronRpc(options.tronRpcUrl ?? process.env.APN_TRON_RPC_URL,
@@ -213,38 +220,38 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const relayNativeExecute = nativeRelayAuthorization === undefined ? undefined
     : createRelayNativeSourceRuntime(state, wrappingSecret, bound.rpcUrl ?? "",
       nativeRelayAuthorization.confirm.bind(nativeRelayAuthorization), clock, options.relayExecuteTransport);
-  const stargateNative = options.stargateNative ?? (bound.request.command.startsWith("stargate.native.")
+  const stargateNative = options.stargateNative ?? (runtimeCommand.startsWith("stargate.native.")
     ? new StargateNativeService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
-  const stargateToken = options.stargateToken ?? (bound.request.command.startsWith("stargate.token.")
+  const stargateToken = options.stargateToken ?? (runtimeCommand.startsWith("stargate.token.")
     ? new StargateTokenService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
   // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
   // MCP intercepts approve/execute with a CLI handoff before this factory runs.
-  const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.")
+  const uniswapRuntime = options.uniswapRuntime ?? (runtimeCommand.startsWith("swap.uniswap.")
     ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, verifySendPins: verifyUniswapV3MutablePins, clock,
       // The owner's activated allowlist revision; none active means preparation refuses with swap_owner_admission_required.
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.uniswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
-  const uniswapTokenRuntime = options.uniswapTokenRuntime ?? (bound.request.command.startsWith("swap.uniswap-token.")
+  const uniswapTokenRuntime = options.uniswapTokenRuntime ?? (runtimeCommand.startsWith("swap.uniswap-token.")
     ? createUniswapTokenRuntime({ state, wrapping: wrappingSecret, call: createTokenRpc({ environment: process.env, state,
-      now: () => clock.now().getTime(), ...uniswapTokenRpcBudget(bound.request.command) }), clock,
+      now: () => clock.now().getTime(), ...uniswapTokenRpcBudget(runtimeCommand) }), clock,
       foreground: bound.request.command === "swap.uniswap-token.approve" ? "approve" :
         isUniswapTokenCleanup(bound.request.command) ? "cleanup" : "refuse" })
     : undefined);
   // Keyless SunSwap likewise, over APN_TRON_RPC_URL and the profile's encrypted local TRON wallet.
-  const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.")
+  const sunswapRuntime = options.sunswapRuntime ?? (runtimeCommand.startsWith("swap.sunswap.")
     ? createSunSwapKeylessRuntime({ state, rpc: tronRpc, accounts: chainAccounts, clock,
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
   // Keyless Orca uses the anonymous-default or owner-overridden Solana rail client and the encrypted local Solana wallet;
   // the command's pool (named by the quote, the saved quote or the operation's lane) selects one runtime per command.
-  const orcaRuntime = options.orcaRuntime ?? (bound.request.command.startsWith("swap.orca.") &&
-    !bound.request.command.startsWith("swap.orca.stable-") ? orcaRuntimeSelector((pool) => createOrcaKeylessRuntime({ state, clock,
+  const orcaRuntime = options.orcaRuntime ?? (runtimeCommand.startsWith("swap.orca.") &&
+    !runtimeCommand.startsWith("swap.orca.stable-") ? orcaRuntimeSelector((pool) => createOrcaKeylessRuntime({ state, clock,
       rpc: solanaRpc, accounts: chainAccounts, verifyPins: verifyOrcaProgramPins, pool,
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })) : undefined);
-  const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.")
+  const jupiterV1Runtime = (runtimeCommand.startsWith("swap.jupiter.")
     ? createJupiterV1Runtime({ state, clock, rpc: solanaRpc, wrappingSecret,
       foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" }) : undefined);
   return new ApnCore({
@@ -270,16 +277,16 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
     ...(orcaRuntime === undefined ? {} : { orcaRuntime }),
     // Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10).
-    ...(bound.request.command.startsWith("swap.orca.stable-") ? { orcaStableLegacy: orcaStableLegacyFinisher({ root: state.root, clock,
+    ...(runtimeCommand.startsWith("swap.orca.stable-") ? { orcaStableLegacy: orcaStableLegacyFinisher({ root: state.root, clock,
       accounts: chainAccounts, rpc: solanaRpc, consent: options.orcaStableRecoveryConsent ?? new TtyOrcaStableConsent() }) } : {}),
-    ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
+    ...(runtimeCommand.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
       circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state,
         circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)),
         new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits,
         () => options.clock?.now().getTime() ?? Date.now()),
     } : {}),
     ...finiteFundingRuntime(bound.request.command, state, wrappingSecret, options, process.env, () => clock.now().getTime()),
-    ...(bound.request.command.startsWith("oneclick.source.") || options.oneClickSource !== undefined ? {
+    ...(runtimeCommand.startsWith("oneclick.source.") || options.oneClickSource !== undefined ? {
       oneClickSource: options.oneClickSource ?? new OneClickSourceService(state, wrappingSecret, process.env),
     } : {}),
     ...(bound.request.command === "circle.source.submit" || options.circleSource !== undefined ? {
@@ -301,14 +308,14 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       observationRpcFor: gaslessObservationRpcFactory(process.env),
       custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...(["gasless.transfer.approve", "gasless.transfer.approve-sealed"].includes(bound.request.command) ? { approval: new TtyGaslessApproval() } : {}) },
-    ...(bound.request.command.startsWith("gasless.usdt.") || options.gaslessUsdt !== undefined ? {
+    ...(runtimeCommand.startsWith("gasless.usdt.") || options.gaslessUsdt !== undefined ? {
       gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(state.root),
     } : {}),
     ...(bound.request.command === "gasless.usdt.prepare" || options.gaslessUsdtPrepare !== undefined ? {
       gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock,
         options.gaslessUsdt ?? new GaslessUsdtOperationService(state.root), options.gaslessUsdtPrepareOptions),
     } : {}),
-    ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe", "gasless.usdt.resume"].includes(bound.request.command) ||
+    ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe", "gasless.usdt.resume"].includes(runtimeCommand) ||
       options.gaslessUsdtExecute !== undefined ? {
       gaslessUsdtExecute: options.gaslessUsdtExecute ?? new GaslessUsdtCommandExecute(state, clock, wrappingSecret,
         options.gaslessUsdtExecuteOptions),
@@ -379,7 +386,8 @@ export async function executeBoundCommand(
         data, operation: null, receipt: null, nextActions: [] });
     } catch (error) { return failureEnvelope(bound.request.command, requestId, error); }
   }
-  return await createApnCore(bound, options).execute(bound.request);
+  const runtimeCommand = await operationRuntimeCommand(options.stateRoot ?? effectiveStateRoot(), bound.request);
+  return await createApnCore(bound, options, runtimeCommand ?? bound.request.command).execute(bound.request);
 }
 
 export function effectiveStateRoot(): string {

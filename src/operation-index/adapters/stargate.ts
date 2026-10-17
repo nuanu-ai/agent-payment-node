@@ -7,7 +7,8 @@ import type { OperationFamily } from "../types.js";
 import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
 import type { RuntimeContext } from "../../runtime.js";
 import { evmClaim, namedProfileHash, pastUnstartedDeadline, salvageNamedRecord } from "./family-claims.js";
-import { assertNoResumeOptions, installed, OPERATION_RESUME, OPERATION_STATUS } from "./family-commands.js";
+import { assertResumeOptions, oneObservationOnly } from "../../operation-command-options.js";
+import { installed, OPERATION_RESUME, OPERATION_STATUS } from "./family-commands.js";
 
 /** Native ETH from Ethereum (chain 1) and token USDC from Optimism (chain 10); the record's own envelope names the chain. */
 export const STARGATE_NATIVE_SOURCE_CHAIN = 1, STARGATE_TOKEN_SOURCE_CHAIN_ID = 10;
@@ -17,7 +18,8 @@ interface StargateRecord { readonly operationId: string; readonly profile: strin
 interface StargateService { status(id: string): Promise<unknown>; observe(id: string): Promise<unknown>; receipt(id: string): Promise<unknown> }
 function stargateAdapter<R extends StargateRecord>(family: OperationFamily, directory: string, chainId: number,
   read: (root: string, operationId: string) => Promise<R | null>, terminal: (record: R) => boolean,
-  service: (context: RuntimeContext) => StargateService, exit?: string): OperationFamilyAdapter<R> {
+  service: (context: RuntimeContext) => StargateService, runtimeCommand: "stargate.native.status" | "stargate.token.status",
+  exit?: string): OperationFamilyAdapter<R> {
   const store: OperationStore = { directory, perProfile: false };
   return {
     family,
@@ -32,11 +34,12 @@ function stargateAdapter<R extends StargateRecord>(family: OperationFamily, dire
     view: async record => record,
     status: async (context, record) => operationOutcome(await service(context).status(record.operationId)),
     async resume(context, record, options) {
-      assertNoResumeOptions(options, "Stargate");
+      assertResumeOptions(options, { refuseWait: () => oneObservationOnly("Stargate") });
       return operationOutcome(await service(context).observe(record.operationId));
     },
     receipt: async (context, record) => receiptOutcome(await service(context).receipt(record.operationId)),
     commands: { status: OPERATION_STATUS, resume: OPERATION_RESUME, ...(exit === undefined ? {} : { exit }) },
+    runtimeCommand: async () => runtimeCommand,
   };
 }
 
@@ -45,7 +48,7 @@ export const stargateNativeAdapter = stargateAdapter<StargateNativeOperation>("s
   async (root, id) => await new FileStargateNativeJournal(root).load(id),
   record => record.phase === "observed" || record.phase === "failed_confirmed_revert" ||
     (record.phase === "prepared" || record.phase === "approved") && record.transactionHash === undefined && pastUnstartedDeadline(record.expiresAt),
-  context => installed(context.stargateNative, "Stargate native runtime is unavailable."));
+  context => installed(context.stargateNative, "Stargate native runtime is unavailable."), "stargate.native.status");
 
 /** Neither an approval nor a send is signed past the prepare expiry; any signed approval, send or cleanup ends observed or cleaned. */
 export const stargateTokenAdapter = stargateAdapter<StargateTokenOperation>("stargate_token", "stargate-v2-token", STARGATE_TOKEN_SOURCE_CHAIN_ID,
@@ -53,4 +56,5 @@ export const stargateTokenAdapter = stargateAdapter<StargateTokenOperation>("sta
   record => record.phase === "observed" || record.phase === "cleaned" ||
     (record.phase === "prepared" || record.phase === "approved") && record.approvalTransactionHash === undefined &&
       record.transactionHash === undefined && pastUnstartedDeadline(record.expiresAt),
-  context => installed(context.stargateToken, "Stargate token runtime is unavailable."), "apn stargate token cleanup --operation <operation-id>");
+  context => installed(context.stargateToken, "Stargate token runtime is unavailable."), "stargate.token.status",
+  "apn stargate token cleanup --operation <operation-id>");

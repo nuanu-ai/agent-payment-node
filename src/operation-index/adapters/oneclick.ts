@@ -28,4 +28,5 @@ export const oneClickSourceAdapter: OperationFamilyAdapter<OneClickSourceRecord>
   status: async (context, record) => dataOutcome(await installed(context.oneClickSource, "1Click source runtime is unavailable.")
     .status(record.operationId), "oneclick_source_and_provider_observation_untrusted"),
   commands: { status: OPERATION_STATUS, resume: OPERATION_STATUS },
+  runtimeCommand: async () => "oneclick.source.status",
 };
