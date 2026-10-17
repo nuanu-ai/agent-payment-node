@@ -36,7 +36,7 @@ const CORPUS = join("tests", "fixtures", "legacy-corpus");
 const byFamily = (reason: string): Answer => ({ code: "APN_OPERATION_BLOCKED", reason, family: true });
 const RESUME_BY_FAMILY = byFamily("operation_resume_by_family_command"), EXIT_BY_FAMILY = byFamily("operation_exit_by_family_command");
 const NO_RECEIPT: Answer = { code: "APN_RECEIPT_NOT_FOUND", family: true };
-/** A terminal operation: no family command is named for its resume or exit, only its status (and receipt). */
+/** A terminal operation of a family without a generic resume or exit: no family command is named, only its status (and receipt). */
 const TERMINAL: Answer = { code: "APN_OPERATION_BLOCKED", reason: "operation_already_terminal", family: true };
 
 async function root(t: TestContext): Promise<string> {
@@ -124,9 +124,9 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
   // The family's own status binds the saved RPC origin to the configured Base RPC, which this run does not name.
   circle_approval: async t => ({ ...await WP2_FAMILY_RECORDS.circle_approval(t), cli: true, status: { code: "APN_RPC_CONFIG" }, resume: RESUME_BY_FAMILY,
     abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
-  // Closed before any effect: terminal, so abandon names no exit (its resume is a read of the outcome).
+  // Closed before any effect: its owner exit refuses (only an unknown outcome past its quote can be abandoned).
   metamask_native: async t => ({ ...await WP2_FAMILY_RECORDS.metamask_native(t), cli: true, status: "ok", resume: "ok",
-    abandon: TERMINAL, receipt: NO_RECEIPT }),
+    abandon: { code: "APN_OPERATION_BLOCKED", message: /unknown outcome/u }, receipt: NO_RECEIPT }),
 };
 
 function check(result: OutputEnvelope, expected: Answer, id: string, label: string): void {
