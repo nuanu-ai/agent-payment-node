@@ -71,6 +71,9 @@ type PublicOperation = { operation_id: string; state: string; terminal: boolean;
 for (const [chain, sameProfile] of [[1329, false], [59144, false], [143, false], [59144, true]] as const)
 test(`CCTP V2 Fast 42161 -> ${chain}${sameProfile ? " (one profile signs both chains)" : ""}: a non-owner profile prepares, burns, mints and completes to its beneficiary`, async t => {
   const f = await setup(t, chain, { sameProfile }); screens.length = 0;
+  // The owned mint lands: the command path never scans transmitter logs for someone else's mint.
+  let logScans = 0; const request = f.net.https.request;
+  f.net.https.request = async (url, method, body) => { if (body?.includes('"eth_getLogs"') === true) logScans++; return request(url, method, body); };
   const prepared = await f.prepare(); assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
   const op = prepared.operation as PublicOperation;
   assert.equal(op.state, "awaiting_source"); assert.equal(op.recipient, BENEFICIARY); assert.equal(op.amount_atomic, "1000000");
@@ -93,7 +96,7 @@ test(`CCTP V2 Fast 42161 -> ${chain}${sameProfile ? " (one profile signs both ch
   const status = await f.cli(["status", "--operation", op.operation_id]); assert.equal((status.operation as PublicOperation).state, "completed");
   const closed = (await new CircleRepository(f.root).loadAny(op.operation_id))!;
   for (const row of closed.usage) assert.ok(["finalized", "failed_confirmed_revert"].includes((await new AssetUsageLedger(f.root).load(row, row.reservationId))!.state));
-  assert.equal(f.net.arbitrum.sends + f.net.destination.sends, 3, "one approval, one burn, one mint; nothing resent");
+  assert.equal(f.net.arbitrum.sends + f.net.destination.sends, 3, "one approval, one burn, one mint; nothing resent"); assert.equal(logScans, 0);
 });
 
 test("an owner recipient pin on the source USDC admission must list the beneficiary (OD-1), at prepare and before the first burn", async t => {

@@ -1,6 +1,6 @@
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { deriveCircleFundingParameters } from "./circle-v2-evm/funding-binding.js";
-import { publicKnownCircle, publicCircleFundingOperation, validateKnownCircle } from "./circle-v2-evm/funding-operation.js";
+import { publicKnownCircle, publicCircleFundingOperation, validateCircleFundingOperation, validateKnownCircle } from "./circle-v2-evm/funding-operation.js";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import type { CommandRequest, CommandOutcome } from "./commands.js";
 import type { RuntimeContext } from "./runtime.js";
@@ -41,7 +41,8 @@ export async function executeCircleCommand(request: Extract<CommandRequest, { co
         if (service === undefined) unavailable();
         if (request.command === "circle.evm.status") return operationOutcome(await service.status(request.operationId));
         const result = request.command === "circle.evm.approve-source" ? await service.approveSource(request.operationId) : request.command === "circle.evm.approve-mint" ? await service.approveMint(request.operationId) : request.command === "circle.evm.refresh-attestation" ? await service.refreshAttestation(request.operationId) : request.command === "circle.evm.cleanup" ? await service.cleanup(request.operationId) : await service.observe(request.operationId);
-        return operationOutcome(publicKnownCircle(validateKnownCircle(result)));
+        // A mint someone else relayed for this burn is reported with its next action (adopted, awaiting finality, or not found).
+        return operationOutcome(publicCircleFundingOperation(validateCircleFundingOperation(result.operation), result.externalMint));
       }
       case "circle.approval.prepare": {
         await context.ready();

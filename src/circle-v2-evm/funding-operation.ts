@@ -10,6 +10,7 @@ import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, enco
   type CircleSourceProof, type CircleAttestation, type CircleReceiptProof, type decodeCircleDestination } from "./protocol.js";
 import { circleBlocked, circleCorrupt, circleSame, validateCircle, publicCircle, type CircleOperationV1, type CircleRole, type CircleEffect, type CircleEnvelope } from "./operation-model.js";
 import { validateCircleFundingBinding, assertCircleFundingFee, type CircleFundingBindingV2, type CircleFundingFeeV2 } from "./funding-binding.js";
+import type { CircleExternalMintNotice } from "./funding-external-mint.js";
 export interface CircleFundingOperationV2 extends Omit<CircleOperationV1, "schemaVersion" | "externalFulfillment" | "nonceRetirement" | "state"> {
   readonly schemaVersion: "apn.circle-v2-evm-operation.v2";
   readonly funding: CircleFundingBindingV2;
@@ -110,15 +111,22 @@ export function validateCircleFundingOperation(value: unknown): CircleFundingOpe
   if (op.transitions.at(-1)!.snapshotHash !== hashObject(snapshot)) circleCorrupt("snapshot_binding");
   return op;
 }
-export function publicCircleFundingOperation(op: CircleFundingOperationV2) { return { operation_id: op.operationId, kind: "circle_route", state: op.state, terminal: op.terminal,
+/** Journal reason of an owned mint closed because the destination consumed its issuer message without it. */
+export const CIRCLE_MINT_CLOSED_EXTERNAL_USE = "mint_closed_issuer_message_used_externally";
+/** `externalMint` is what this command learned about a mint someone else relayed. Not found by the bounded scan, the next
+ * action is the explicit adoption of a transaction the operator names; found or waiting for finality, observe again. */
+export function publicCircleFundingOperation(op: CircleFundingOperationV2, externalMint?: CircleExternalMintNotice | null) {
+  const usedExternally = externalMint !== undefined && externalMint !== null || op.transitions.some(t => t.reason === CIRCLE_MINT_CLOSED_EXTERNAL_USE);
+  return { operation_id: op.operationId, kind: "circle_route", state: op.state, terminal: op.terminal,
   source_profile: op.profile, destination_profile: op.destinationProfile, destination_chain: op.destinationChain,
   amount_atomic: op.funding.amountAtomic, minimum_output_atomic: op.funding.minMintAtomic, maximum_issuer_fee_atomic: op.funding.maxFeeAtomic, recipient: op.funding.recipient,
   effects: op.effects.map(e => ({ role: e.role, phase: e.phase, transaction_hash: e.transactionHash, actual_fee_atomic: e.proof?.actualFeeAtomic ?? null })),
   source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? op.externalFulfillment?.destinationReceipt.finalityTag ?? null,
   residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash,
   ...(op.externalFulfillment === undefined ? {} : { external_fulfillment: op.externalFulfillment, proof_class: "circle_funding_external_mint_fulfillment", controlled_destination_native_atomic: "0", external_destination_fee_payer: op.externalFulfillment.caller }),
-  next_actions: op.terminal ? [] : op.effects.some(e => e.role === "mint" && e.phase === "abandoned_unsent")
-    ? [`apn circle evm approve-mint --operation ${op.operationId}`]
+  ...(externalMint === undefined || externalMint === null ? {} : { external_mint: externalMint }),
+  next_actions: op.terminal ? [] : externalMint?.status === "not_found" ? [`apn circle evm adopt-external-mint --operation ${op.operationId} --transaction-hash <transaction-hash>`]
+    : !usedExternally && op.effects.some(e => e.role === "mint" && e.phase === "abandoned_unsent") ? [`apn circle evm approve-mint --operation ${op.operationId}`]
     : op.effects.some(e => e.role === "cleanup" && e.phase === "abandoned_unsent") ? [`apn circle evm cleanup --operation ${op.operationId}`] : [`apn circle evm observe --operation ${op.operationId}`] }; }
 function shape(value: unknown, keys: readonly string[]): boolean { return isPlainRecord(value) && exactKeys(value, keys); }
 

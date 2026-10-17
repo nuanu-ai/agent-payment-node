@@ -99,7 +99,8 @@ async function lostMint(ambiguous: (e: CircleEffect) => Promise<"own_transaction
     mintEnvelope: async o => circleEnvelope({ chainId: o.destinationChain, from: o.funding.gasPayer, to: CIRCLE_TRANSMITTER, data: encodeCircleMint(o.attestation!), valueAtomic: "0",
       nonceAtomic: String(10 + counts.mintEnvelopes++), gasLimitAtomic: "500000", maxFeePerGasAtomic: "102000000000", maxPriorityFeePerGasAtomic: "0" }),
     unsent: { outcome: async () => "nonce_not_consumed", ambiguous: async (_o, e) => { counts.outcomes++; return lose ? "own_transaction_known" : ambiguous(e); },
-      resend: async (_o, e, rawTransaction) => { assert.equal(e.role, "mint"); counts.resends.push(rawTransaction); return true; }, discard: async () => { counts.discards++; } }, ...overrides });
+      resend: async (_o, e, rawTransaction) => { assert.equal(e.role, "mint"); counts.resends.push(rawTransaction); return true; }, discard: async () => { counts.discards++; } },
+    messageNonceUsed: async () => false, ...overrides });
   let op = await approveCircleFundingSource(start, c.ports); assert.equal(op.state, "awaiting_mint"); assert.notEqual(op.attestation, null);
   op = await approveCircleFundingMint(op, c.ports); lose = false;
   assert.equal(op.effects.find(e => e.role === "mint")!.phase, "unknown"); assert.equal(op.state, "mint_unknown"); assert.equal(c.signs(), 3);
@@ -134,12 +135,44 @@ test("R4: a lost mint whose nonce another transaction consumed is abandoned; re-
   validateCircleFundingOperation(op);
 });
 
-test("R4: when the abandoned mint's issuer message is already used on the destination, approve-mint refuses and points to external adoption", async () => {
-  let consents = 0;
-  const s = await lostMint(async () => "never_lands", { approve: async () => { consents++; }, messageNonceUsed: async () => true });
-  const op = await observeCircleFunding(s.op, s.c.ports), before = consents;
-  await assert.rejects(approveCircleFundingMint(op, s.c.ports), /mint_message_used_external_adoption_required/);
-  assert.equal(consents, before); assert.equal(s.c.signs(), 3); assert.equal(s.c.current().integrityHash, op.integrityHash);
+test("R4: when the abandoned mint's issuer message is already used on the destination, approve-mint signs nothing, asks nothing and hands it to external adoption", async () => {
+  let consents = 0, used = false, handed = 0;
+  const s = await lostMint(async () => "never_lands", { approve: async () => { consents++; }, messageNonceUsed: async () => used, externalMint: async () => { handed++; } });
+  used = true; const op = await observeCircleFunding(s.op, s.c.ports), before = consents;
+  assert.equal(op.effects.find(e => e.role === "mint")!.phase, "abandoned_unsent"); assert.equal(handed, 1);
+  const after = await approveCircleFundingMint(op, s.c.ports);
+  assert.equal(consents, before); assert.equal(s.c.signs(), 3); assert.equal(handed, 2); assert.equal(after.integrityHash, op.integrityHash); assert.equal(s.c.current().integrityHash, op.integrityHash);
+});
+
+for (const outcome of ["resend_identical", "other_transaction_pending"] as const)
+test(`R4: a lost mint the node does not know (${outcome}) whose issuer message someone else used is closed, its bytes discarded, never resent`, async () => {
+  let used = false, handed = 0;
+  const s = await lostMint(async () => outcome, { messageNonceUsed: async () => used, externalMint: async () => { handed++; } });
+  used = true; const op = await observeCircleFunding(s.op, s.c.ports), mint = op.effects.find(e => e.role === "mint")!;
+  assert.equal(mint.phase, "abandoned_unsent"); assert.equal(mint.transactionHash, tx); assert.equal(op.state, "awaiting_mint");
+  assert.equal(op.transitions.at(-1)!.reason, "mint_closed_issuer_message_used_externally"); assert.deepEqual(s.counts.resends, []); assert.equal(s.counts.discards, 1); assert.equal(handed, 1);
+  validateCircleFundingOperation(op);
+});
+
+test("R4: a lost mint the node knows keeps being observed when its issuer message is used: nothing is closed or handed to adoption", async () => {
+  let used = false, handed = 0;
+  const s = await lostMint(async () => "own_transaction_known", { messageNonceUsed: async () => used, externalMint: async () => { handed++; } });
+  used = true; const op = await observeCircleFunding(s.op, s.c.ports);
+  assert.equal(op.effects.find(e => e.role === "mint")!.phase, "unknown"); assert.equal(op.integrityHash, s.op.integrityHash); assert.equal(handed, 0); assert.equal(s.counts.discards, 0);
+});
+
+test("R4: a sealed owned mint never sent is closed and discarded once its issuer message is used; approve-mint then asks no consent", async () => {
+  const s = await lostMint(async () => "own_transaction_known");
+  // The same operation as if the command had stopped after sealing the mint, before its submission fence.
+  const sealed = advanceCircleFundingOperation(s.op, { effects: s.op.effects.map(e => e.role === "mint" ? { ...e, phase: "sealed" as const } : e) }, "mint_material_sealed", at + 1);
+  let handed = 0, discards = 0, consents = 0;
+  const c = controller(sealed, { messageNonceUsed: async () => true, externalMint: async () => { handed++; }, approve: async () => { consents++; },
+    unsent: { outcome: async () => "nonce_not_consumed", discard: async (_o, e) => { discards++; assert.equal(e.phase, "abandoned_unsent"); } } });
+  let op = await observeCircleFunding(sealed, c.ports);
+  assert.equal(op.effects.find(e => e.role === "mint")!.phase, "abandoned_unsent"); assert.equal(op.transitions.at(-1)!.reason, "mint_closed_issuer_message_used_externally");
+  assert.deepEqual([discards, handed, c.sends()], [1, 1, 0]);
+  op = await approveCircleFundingMint(op, c.ports);
+  assert.deepEqual([consents, c.signs(), c.sends(), handed], [0, 0, 0, 2]); validateCircleFundingOperation(op);
 });
 
 test("R4: a lost approve-zero cleanup whose nonce another transaction took is abandoned and re-armed at a fresh nonce under fresh consent", async () => {

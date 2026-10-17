@@ -7,10 +7,12 @@ export const CIRCLE_TRANSMITTER = getAddress("0x81D40F21F12A8F0E3252Bccb954D722d
 export const CIRCLE_MINTER = getAddress("0xfd78EE919681417d192449715b2594ab58f5D002");
 export const CIRCLE_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 export const CIRCLE_TOKEN_IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
+/** Linea uses rpc.linea.build: linea-rpc.publicnode.com refuses transmitter logs older than about 128 blocks ("archive
+ * requests require a personal token"), so an external mint could not be found there. */
 export const CIRCLE_ROUTES = Object.freeze({
-    1329: { chainId: 1329, domain: 16, token: getAddress("0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"), gasBilling: "used", destinationNativeCap: "50000000000000000", rpcEnvironment: "APN_SEI_RPC_URL", rpcDefault: "https://evm-rpc.sei-apis.com" },
-    59144: { chainId: 59144, domain: 11, token: getAddress("0x176211869cA2b568f2A7D4EE941E073a821EE1ff"), gasBilling: "used", destinationNativeCap: "100000000000000", rpcEnvironment: "APN_LINEA_RPC_URL", rpcDefault: "https://linea-rpc.publicnode.com" },
-    143: { chainId: 143, domain: 15, token: getAddress("0x754704Bc059F8C67012fEd69BC8A327a5aafb603"), gasBilling: "limit", destinationNativeCap: "100000000000000000", rpcEnvironment: "APN_MONAD_RPC_URL", rpcDefault: "https://rpc.monad.xyz" },
+    1329: { chainId: 1329, domain: 16, token: getAddress("0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"), gasBilling: "used", destinationNativeCap: "50000000000000000", rpcEnvironment: "APN_SEI_RPC_URL", rpcDefault: "https://evm-rpc.sei-apis.com", logRange: 2000 },
+    59144: { chainId: 59144, domain: 11, token: getAddress("0x176211869cA2b568f2A7D4EE941E073a821EE1ff"), gasBilling: "used", destinationNativeCap: "100000000000000", rpcEnvironment: "APN_LINEA_RPC_URL", rpcDefault: "https://rpc.linea.build", logRange: 10000 },
+    143: { chainId: 143, domain: 15, token: getAddress("0x754704Bc059F8C67012fEd69BC8A327a5aafb603"), gasBilling: "limit", destinationNativeCap: "100000000000000000", rpcEnvironment: "APN_MONAD_RPC_URL", rpcDefault: "https://rpc.monad.xyz", logRange: 100 },
 });
 export function isCircleDestinationChain(chain) {
     return typeof chain === "number" && Object.hasOwn(CIRCLE_ROUTES, String(chain));
