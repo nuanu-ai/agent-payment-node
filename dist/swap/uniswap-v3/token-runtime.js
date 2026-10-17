@@ -5,6 +5,9 @@ import { UniswapTokenExecution } from "./token-execution.js";
 import { newUniswapTokenOperation, UniswapTokenJournal } from "./token-operation.js";
 import { UNISWAP_TOKEN_MECHANISM_PIN } from "./token-route.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
+import { admitOperation } from "../../operation-index/admission.js";
+import { evmClaim, namedProfileHash } from "../../operation-index/adapters/family-claims.js";
+import { UNISWAP_TOKEN_CHAIN_ID } from "../../operation-index/adapters/uniswap-token.js";
 export class InstalledUniswapTokenRuntime {
     builder;
     materials;
@@ -49,6 +52,13 @@ export class InstalledUniswapTokenRuntime {
             blocked("Token quote expired.", "uniswap_token_quote_expired");
         const operationId = domainHash("apn.uniswap-token-operation-id.v1", canonicalJson({ profile: request.profile,
             quoteHash: request.quoteHash, idempotencyKey: request.idempotencyKey }));
+        // A new swap's account claim is written before its confirmation reads; a replay keeps its existing path.
+        if (await this.journal.read(operationId) !== null)
+            return await this.prepareBody(request, material, operationId);
+        return await admitOperation(this.journal, { family: "uniswap_token", profileHash: namedProfileHash(material.profile), operationId,
+            idempotencyHash: null, requestHash: null }, [evmClaim(UNISWAP_TOKEN_CHAIN_ID, material.account)], async () => await this.prepareBody(request, material, operationId));
+    }
+    async prepareBody(request, material, operationId) {
         const cap = this.quotePrepareCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
         try {
             await this.ports.confirm(material);

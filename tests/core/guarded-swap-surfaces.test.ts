@@ -26,7 +26,7 @@ const FAMILIES = [
   { path: "swap solana orca", command: "swap.orca", cleanup: false, stableReads: true },
 ] as const;
 const ACTIONS = ["inventory", "quote", "prepare", "status", "approve", "execute"] as const;
-const STABLE_ACTIONS = ["stable-inventory", "stable-quote", "stable-prepare", "stable-status", "stable-approve", "stable-execute", "stable-release", "stable-recover-no-send", "stable-observe"] as const;
+const STABLE_ACTIONS = ["stable-status", "stable-release", "stable-recover-no-send", "stable-observe"] as const;
 
 test("guarded swap families expose six parity actions plus explicit token cleanup", () => {
   const catalog = COMMANDS.filter((row) => row.path[0] === "swap");
@@ -35,11 +35,15 @@ test("guarded swap families expose six parity actions plus explicit token cleanu
       .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
   const foreground = MCP_FOREGROUND_HANDOFF.commands.filter((row) => row.path[0] === "swap");
-  assert.equal(tools.length, 26); assert.equal(foreground.length, 14);
-  assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_execute"), false);
-  assert.equal(foreground.some((row) => row.path.join(" ") === "swap solana orca stable-execute"), true);
-  assert.equal(bindArgv(["swap", "solana", "orca", "stable-execute", "--operation", H("a")]).request.command,
-    "swap.orca.stable-execute");
+  assert.equal(tools.length, 23); assert.equal(foreground.length, 12);
+  assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_recover_no_send"), false);
+  assert.equal(foreground.some((row) => row.path.join(" ") === "swap solana orca stable-recover-no-send"), true);
+  assert.equal(bindArgv(["swap", "solana", "orca", "stable-observe", "--operation", H("a")]).request.command,
+    "swap.orca.stable-observe");
+  // SWAP-10: the stable creation commands are gone; an old invocation names its keyless replacement.
+  for (const action of ["stable-inventory", "stable-quote", "stable-prepare", "stable-approve", "stable-execute"]) {
+    assert.throws(() => bindArgv(["swap", "solana", "orca", action, "--operation", H("a")]), /swap solana orca/u);
+  }
   assert.deepEqual([...tools.map((row) => row.command), ...foreground].sort((a, b) => catalog.indexOf(a) - catalog.indexOf(b)), catalog);
   for (const command of catalog) {
     const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "));
@@ -137,6 +141,7 @@ test("status performs only a durable read and returns a stable missing-operation
 
 function sample(option: string, chain: string): string {
   if (option === "--profile") return "swap-test";
+  if (option === "--pool") return "usdc-usdt";
   if (option === "--account" || option === "--to") return chain === "tron" ? TRON_OWNER : chain === "solana" ? SOLANA_OWNER :
     "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1";
   if (option === "--owner") return SOLANA_OWNER;

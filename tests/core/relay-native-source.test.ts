@@ -321,7 +321,10 @@ test("default Monad profile is released only by a valid confirmed source journal
   assert.equal("statusLocator" in status, false);
   const path = join(temp.root, "relay-native-source-journals", op.profileHash, `${op.operationId}.json`);
   await writeFile(path, `${JSON.stringify({ ...journal, quoteDigest: "f".repeat(64) })}\n`);
-  await assert.rejects(operations.assertProfileAvailable(op.profileHash), { code: "APN_STATE_CORRUPT" });
+  // The operation index settled this operation when its confirmed journal was read; the damaged journal now fails the
+  // operation's own reads and no longer refuses every other admission of the profile.
+  await assert.rejects(operations.status(op.operationId), { code: "APN_STATE_CORRUPT" });
+  await operations.assertProfileAvailable(op.profileHash);
 });
 
 test("relay execute routes a saved native quote to native execution and a keyless RPC URL is mandatory", async t => {

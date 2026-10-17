@@ -29,7 +29,6 @@ class PresendRecords implements MetaMaskGaslessRepositoryPort {
   findOperation(operationId: string) { return this.inner.findOperation(operationId); }
   listOperations(profileHash: string) { return this.inner.listOperations(profileHash); }
   listAllOperations() { return this.inner.listAllOperations(); }
-  repairReceipt(operation: MetaMaskGaslessOperationRecord) { return this.inner.repairReceipt(operation); }
   loadReceipt(profileHash: string, operationId: string) { return this.inner.loadReceipt(profileHash, operationId); }
   async writeOperation(operation: MetaMaskGaslessOperationRecord) {
     await this.gate(operation, async () => await this.inner.writeOperation(operation));

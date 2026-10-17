@@ -1,3 +1,4 @@
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { saPolicyHash } from "./integrity.js";
@@ -25,45 +26,46 @@ export class SmartAccountGaslessPreparation {
             if (existing !== null) {
                 if (existing.kind !== "smart_account_gasless_transfer")
                     saFail("sa_gasless_state_corrupt");
-                await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
             const clock = new SmartAccountGaslessClock(this.o.clock);
             clock.check();
             const owner = await smartAccountGaslessOwner(state, profile);
             clock.check();
-            await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, owner.address);
-            const binding = assertSmartAccountGaslessBinding(await this.o.material.inspect(owner, Math.floor(clock.check() / 1000)), owner);
-            clock.check();
-            if (request.recipient === binding.ownerAddress || request.recipient === binding.sessionAddress)
-                saFail("sa_gasless_input");
-            if (BigInt(binding.rootCapAtomic) < BigInt(request.grossAtomic))
-                saFail("sa_gasless_allowance");
-            const provider = saProviderBinding(await this.o.provider.supported());
-            clock.fresh(provider.observedAt);
-            const rpc = this.o.rpcFor(request.chainId);
-            if (rpc.chainId !== request.chainId)
-                saFail("sa_gasless_rpc_binding");
-            const snapshot = smartAccountGaslessSnapshot(await rpc.snapshot(binding), binding, rpc);
-            clock.fresh(snapshot.observedAt);
-            if (BigInt(snapshot.safeState.usdcBalanceAtomic) < BigInt(request.grossAtomic))
-                saFail("sa_gasless_balance");
-            if (BigInt(snapshot.safeState.availableAtomic) < BigInt(request.grossAtomic))
-                saFail("sa_gasless_allowance");
-            const prepared = clock.fresh(provider.observedAt), preparedAt = new Date(prepared).toISOString(), afterUnix = Math.floor(prepared / 1000);
-            const beforeUnix = Math.min(afterUnix + SA_TTL_MS / 1000, binding.rootExpiresAtUnix);
-            if (beforeUnix * 1000 - prepared < SA_MIN_REMAINING_MS || afterUnix < binding.rootStartsAtUnix)
-                saFail("sa_gasless_expired");
-            const intent = { profile, request, binding, token: registry.token.address, decimals: 6,
-                deploymentEvidenceHash: registry.evidenceHash, provider, initialSnapshot: snapshot, preparedAt,
-                expiresAt: new Date(beforeUnix * 1000).toISOString(), afterUnix, beforeUnix, policyHash: saPolicyHash(binding, request),
-                requirements: { scheme: "exact", network: "eip155:8453", asset: registry.token.address, amount: request.grossAtomic,
-                    payTo: request.recipient, maxTimeoutSeconds: beforeUnix - afterUnix,
-                    extra: { assetTransferMethod: "erc7710", facilitatorAddresses: provider.facilitatorAddresses } } };
-            const op = newSmartAccountGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash }, intent);
-            clock.live(op);
-            await this.o.records.persist(op);
-            return op;
+            // The account claim is written before any RPC or provider read, and dropped if no operation is written.
+            return await this.o.operations.admit({ kind: "smart_account_gasless_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(request.chainId, owner.address)] }, async () => {
+                const binding = assertSmartAccountGaslessBinding(await this.o.material.inspect(owner, Math.floor(clock.check() / 1000)), owner);
+                clock.check();
+                if (request.recipient === binding.ownerAddress || request.recipient === binding.sessionAddress)
+                    saFail("sa_gasless_input");
+                if (BigInt(binding.rootCapAtomic) < BigInt(request.grossAtomic))
+                    saFail("sa_gasless_allowance");
+                const provider = saProviderBinding(await this.o.provider.supported());
+                clock.fresh(provider.observedAt);
+                const rpc = this.o.rpcFor(request.chainId);
+                if (rpc.chainId !== request.chainId)
+                    saFail("sa_gasless_rpc_binding");
+                const snapshot = smartAccountGaslessSnapshot(await rpc.snapshot(binding), binding, rpc);
+                clock.fresh(snapshot.observedAt);
+                if (BigInt(snapshot.safeState.usdcBalanceAtomic) < BigInt(request.grossAtomic))
+                    saFail("sa_gasless_balance");
+                if (BigInt(snapshot.safeState.availableAtomic) < BigInt(request.grossAtomic))
+                    saFail("sa_gasless_allowance");
+                const prepared = clock.fresh(provider.observedAt), preparedAt = new Date(prepared).toISOString(), afterUnix = Math.floor(prepared / 1000);
+                const beforeUnix = Math.min(afterUnix + SA_TTL_MS / 1000, binding.rootExpiresAtUnix);
+                if (beforeUnix * 1000 - prepared < SA_MIN_REMAINING_MS || afterUnix < binding.rootStartsAtUnix)
+                    saFail("sa_gasless_expired");
+                const intent = { profile, request, binding, token: registry.token.address, decimals: 6,
+                    deploymentEvidenceHash: registry.evidenceHash, provider, initialSnapshot: snapshot, preparedAt,
+                    expiresAt: new Date(beforeUnix * 1000).toISOString(), afterUnix, beforeUnix, policyHash: saPolicyHash(binding, request),
+                    requirements: { scheme: "exact", network: "eip155:8453", asset: registry.token.address, amount: request.grossAtomic,
+                        payTo: request.recipient, maxTimeoutSeconds: beforeUnix - afterUnix,
+                        extra: { assetTransferMethod: "erc7710", facilitatorAddresses: provider.facilitatorAddresses } } };
+                const op = newSmartAccountGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash }, intent);
+                clock.live(op);
+                await this.o.records.persist(op);
+                return op;
+            });
         });
     }
 }

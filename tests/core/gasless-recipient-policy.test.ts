@@ -10,7 +10,7 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { localGaslessMechanism } from "../../src/gasless/asset-policy.js";
 import { gaslessDeployment } from "../../src/gasless/registry.js";
 import { gaslessFixture, GASLESS_TEST_RECIPIENT } from "./gasless-helpers.js";
-import { temporaryState } from "./helpers.js";
+import { temporaryState, savedGaslessOperations } from "./helpers.js";
 
 const now = new Date("2026-09-18T02:00:00.000Z");
 const otherRecipient = "0x6666666666666666666666666666666666666666" as const;
@@ -41,7 +41,7 @@ for (const chainId of [1, 8453] as const) {
     assert.equal(denied.ok, false);
     assert.equal(denied.error?.code, "APN_ALLOWLIST_REFUSED", JSON.stringify(denied.error));
     assert.equal(s.rpc.calls.length, 0);
-    assert.equal((await s.core.gasless.records.listAllOperations()).length, 0);
+    assert.equal((await savedGaslessOperations(s.core.gasless.records)).length, 0);
     assert.equal((await new AssetUsageLedger(temporary.root).usage({ account: s.account.address,
       chain: `eip155:${chainId}`, asset: { kind: "token", identifier: gaslessDeployment(chainId).token } }, now)).amountAtomic, "0");
     const { operation } = await s.prepare(`right-recipient-${chainId}`);

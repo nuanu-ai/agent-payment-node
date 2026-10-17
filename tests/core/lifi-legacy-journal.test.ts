@@ -48,8 +48,8 @@ async function installLegacyFixture(root: string, record: BridgeOperationRecord)
   const raw = downgradeFixture(record), operationPath = join(root, "bridge-operations", raw.profileHash, `${raw.operationId}.json`);
   const legacy = adaptLegacyBridgeOperation(raw), receipt = legacyBridgeReceipt(legacy);
   const receiptPath = join(root, "bridge-receipts", raw.profileHash, `${raw.operationId}.json`);
-  await mkdir(dirname(operationPath), { recursive: true }); await mkdir(dirname(receiptPath), { recursive: true });
-  await writeFile(operationPath, `${canonicalJson(raw)}\n`); await writeFile(receiptPath, `${canonicalJson(receipt)}\n`);
+  await mkdir(dirname(operationPath), { recursive: true }); await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
+  await writeFile(operationPath, `${canonicalJson(raw)}\n`); await writeFile(receiptPath, `${canonicalJson(receipt)}\n`, { mode: 0o600 });
   return { raw, receipt, operationPath, receiptPath };
 }
 
@@ -76,8 +76,8 @@ async function installPreProofBindingFixture(root: string, record: BridgeOperati
   const raw = preProofBindingFixture(record), validated = validateBridgeOperation(raw);
   const operationPath = join(root, "bridge-operations", raw.profileHash, `${raw.operationId}.json`);
   const receiptPath = join(root, "bridge-receipts", raw.profileHash, `${raw.operationId}.json`);
-  await mkdir(dirname(operationPath), { recursive: true }); await mkdir(dirname(receiptPath), { recursive: true });
-  await writeFile(operationPath, `${canonicalJson(raw)}\n`); await writeFile(receiptPath, `${canonicalJson(bridgeReceipt(validated))}\n`);
+  await mkdir(dirname(operationPath), { recursive: true }); await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
+  await writeFile(operationPath, `${canonicalJson(raw)}\n`); await writeFile(receiptPath, `${canonicalJson(bridgeReceipt(validated))}\n`, { mode: 0o600 });
   return { raw, operationPath, receiptPath };
 }
 

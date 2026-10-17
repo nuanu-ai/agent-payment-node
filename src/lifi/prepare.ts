@@ -3,6 +3,7 @@ import { walletCustodyLock } from "../encrypted-wallet-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { hashObject } from "../canonical.js";
 import { OperationService } from "../operation-service.js";
+import { bridgeConflictDomain } from "../operation-conflict-domain.js";
 import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -22,7 +23,6 @@ import { bridgeExecutionDestination, bridgeExecutionSource, bridgeNativePrincipa
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import type { StoredBridgeOperationRecord } from "./legacy-operation.js";
-import { isLegacyBridgeOperation } from "./legacy-operation.js";
 import { BNB_COMPOSITE, verifyFlyHeaderSignature } from "./bnb-composite.js";
 import { approvalData } from "./transaction.js";
 
@@ -59,12 +59,14 @@ export class BridgePreparation {
       const existing = await this.o.operations.resolvePrepare({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== "bridge_route") bridgeFailure("APN_STATE_CORRUPT", "bridge_global_operation_kind");
-        if (!isLegacyBridgeOperation(existing.record)) await this.o.records.repairReceipt(existing.record);
         return existing.record;
       }
       const quote = await this.o.quotes.load(profileHash, quoteHash);
       if (quote === null) bridgeFailure("APN_INVALID_INPUT", "quote_not_owned_by_profile");
-      await this.o.operations.assertEvmAccountAvailable(profileHash, quote.request.fromChainId, quote.owner.address);
+      // The source account claim (the one the stored bridge holds) is written before any provider or RPC read, and dropped
+      // if no operation is written.
+      return await this.o.operations.admit({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [bridgeConflictDomain(quote.request.fromChainId, quote.owner.address)] }, async () => {
       await assertBridgeOwner(state, quote);
       await assertExclusiveEvmRawSigner(state, quote.owner.address, profileHash);
       const selected = parseBridgeRoutes({ status: 200, body: quote.rawResponse }, quote.request, quote.owner.address).find((r) => r.choice.routeId === routeId);
@@ -105,6 +107,7 @@ export class BridgePreparation {
           implicitProtocolFeeAtomic: parsed.implicitProtocolFeeAtomic, allowlist },
         effects: envelopes.map(newBridgeEffect) });
       await this.o.records.persist(operation); return operation;
+      });
     }));
   }
 }

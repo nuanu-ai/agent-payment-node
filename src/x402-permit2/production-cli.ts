@@ -47,9 +47,9 @@ export async function executePermit2ProductionCli(bound: BoundCommand, options: 
       if (canonicalJson(saved.material.checked.request) !== canonicalJson(exact)) throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Permit2 key names a different frozen request.");
       if (saved.exposureAt !== null || saved.exposureJournal !== undefined || saved.terminal || !["prepared", "reserving", "reserved"].includes(saved.state)) return output({ status: publicPermit2Production(saved), code: saved.terminal ? "terminal" : "held" });
     }
-    // These constructors are inert. Branded local capability and metadata are checked before unsigned HTTP.
+    // These constructors are inert. The exact local signer and metadata are checked before unsigned HTTP.
     const native = options.native ?? new LocalWalletNative(state, options.wrappingSecret ?? new MacOSLoginKeychainSecret(), options.approval);
-    LocalWalletNative.resolvePermit2LocalCapability(native, root);
+    LocalWalletNative.permit2Signer(native, root);
     const wallet = await permit2WalletBinding(state, profile);
     new HttpsBaseRpc(bound.rpcUrl);
     const preparation = new Permit2ProductionPreparation(root, { rpc: permit2PublicRpc(bound.rpcUrl, root), now: clock });

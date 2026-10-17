@@ -7,7 +7,7 @@ export class RailOperationRepository extends SecureStateStore {
   private initialized: Promise<void> | undefined;
   private async ready(): Promise<void> {
     this.initialized ??= (async () => {
-      await super.initialize(); await this.ensureDirectory("rail-operations"); await this.ensureDirectory("rail-receipts");
+      await super.initialize(); await this.ensureDirectory("rail-operations");
     })();
     await this.initialized;
   }
@@ -19,9 +19,8 @@ export class RailOperationRepository extends SecureStateStore {
     return operation;
   }
   async findOperation(operationId: string): Promise<RailOperationRecord | null> {
-    const matches = (await this.listAllOperations()).filter((operation) => operation.operationId === operationId);
-    if (matches.length > 1) corrupt();
-    return matches[0] ?? null;
+    stateIdentifier(operationId, "rail operation ID");
+    return await this.findInProfiles("rail-operations", async (profileHash) => await this.loadOperation(profileHash, operationId), corrupt);
   }
   async listOperations(profileHash: string): Promise<readonly RailOperationRecord[]> {
     stateIdentifier(profileHash, "rail profile hash");
@@ -35,15 +34,6 @@ export class RailOperationRepository extends SecureStateStore {
     }
     return result;
   }
-  async listAllOperations(): Promise<readonly RailOperationRecord[]> {
-    const result: RailOperationRecord[] = [];
-    for (const entry of await this.readDirectory("rail-operations")) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) corrupt();
-      result.push(...await this.listOperations(entry.name));
-    }
-    if (new Set(result.map((operation) => operation.operationId)).size !== result.length) corrupt();
-    return result;
-  }
   async writeOperation(operation: RailOperationRecord): Promise<void> {
     validateRailOperation(operation); await this.ready();
     const previous = await this.loadOperation(operation.profileHash, operation.operationId);
@@ -52,41 +42,28 @@ export class RailOperationRepository extends SecureStateStore {
     await this.ensureDirectory(`rail-operations/${operation.profileHash}`);
     await this.writeJson(this.path("rail-operations", operation.profileHash, operation.operationId), operation);
   }
-  /** The operation is authoritative and is persisted before its derived receipt. */
+  /** The operation is the only record written; its receipt is derived from it on read. */
   async persist(operation: RailOperationRecord): Promise<void> {
     await this.writeOperation(operation);
-    await this.repairReceipt(operation);
   }
-  async repairReceipt(operation: RailOperationRecord): Promise<void> {
-    await this.ready();
-    const stored = await this.loadOperation(operation.profileHash, operation.operationId);
-    if (stored === null || canonicalJson(stored) !== canonicalJson(operation)) corrupt();
-    const path = this.path("rail-receipts", operation.profileHash, operation.operationId);
-    const previous = await this.readJson(path);
-    if (previous !== null) validateReceiptShape(previous, operation);
-    const receipt = railReceipt(operation);
-    if (canonicalJson(previous) === canonicalJson(receipt)) return;
-    await this.ensureDirectory(`rail-receipts/${operation.profileHash}`);
-    await this.writeJson(path, receipt);
-  }
+  /**
+   * The receipt of the operation's current transition. A receipt file a released version wrote for that transition is
+   * returned as written; a file of an earlier transition is history, so the receipt is then derived from the operation.
+   */
   async loadReceipt(profileHash: string, operationId: string): Promise<RailReceipt> {
     const operation = await this.loadOperation(profileHash, operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "The direct-rail operation was not found.");
     const value = await this.readJson(this.path("rail-receipts", profileHash, operationId));
-    if (value !== null) validateReceiptShape(value, operation);
-    if (value === null || canonicalJson(value) !== canonicalJson(railReceipt(operation))) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "The receipt needs recovery from its durable operation.", {
-        operationId, nextActions: [`apn operation resume --operation ${operationId}`],
-      });
-    }
-    return value as RailReceipt;
+    if (value !== null && receiptTransition(value, operation) === operation.transitions.length - 1) return value as RailReceipt;
+    return railReceipt(operation);
   }
   private path(root: "rail-operations" | "rail-receipts", profileHash: string, operationId: string): string {
     stateIdentifier(profileHash, "rail profile hash"); stateIdentifier(operationId, "rail operation ID");
     return `${root}/${profileHash}/${operationId}.json`;
   }
 }
-function validateReceiptShape(value: unknown, operation: RailOperationRecord): void {
+/** The transition a stored receipt belongs to; corrupt when it binds none of them exactly. */
+function receiptTransition(value: unknown, operation: RailOperationRecord): number {
   if (!isPlainRecord(value)) corrupt();
   const index = operation.transitions.findIndex((entry) => entry.state === value.state && entry.at === value.updated_at);
   if (index < 0) corrupt();
@@ -96,5 +73,6 @@ function validateReceiptShape(value: unknown, operation: RailOperationRecord): v
   const { receipt_hash, ...body } = value;
   if (hashObject(body) !== receipt_hash) corrupt();
   if (canonicalJson(value) !== canonicalJson(expected)) corrupt();
+  return index;
 }
 function corrupt(): never { throw new ApnError("APN_STATE_CORRUPT", "The direct-rail store or receipt binding is invalid."); }

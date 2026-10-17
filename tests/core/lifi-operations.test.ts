@@ -1,7 +1,7 @@
 import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
-import { readFile, unlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
@@ -196,10 +196,10 @@ for (const reason of ["refusal", "expiry", "last-slot", "nonce", "allowance", "c
   assert.ok(record.effects.every((e) => e.phase === "unsealed"));
 });
 
-for (const boundary of ["signing_started", "sealed", "submitting", "submitted_pending"] as const) test(`LI.FI durable ${boundary} survives receipt-write interruption and never replaces an effect`, async (t) => {
+for (const boundary of ["signing_started", "sealed", "submitting", "submitted_pending"] as const) test(`LI.FI durable ${boundary} survives an interruption after its write and never replaces an effect`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.source.allowance = s.request.amountAtomic;
-  const { id } = await s.prepare(); const repair = s.core.bridges.records.repairReceipt.bind(s.core.bridges.records);
-  s.core.bridges.records.repairReceipt = async (op) => { if (op.effects[0]!.phase === boundary) throw new Error("synthetic durable receipt interruption"); await repair(op); };
+  const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
+  s.core.bridges.records.persist = async (op) => { await persist(op); if (op.effects[0]!.phase === boundary) throw new Error("synthetic interruption after the durable write"); };
   const interrupted = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(interrupted.ok, false);
   const stored = (await s.core.bridges.records.findOperation(id))!; assert.equal(stored.effects[0]!.phase, boundary);
   const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
@@ -232,11 +232,11 @@ test("LI.FI ambiguous accepted submission recovers after expiry with the origina
 
 test("LI.FI missing sealed material is never regenerated and an expired preserved seal is never submitted", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.source.allowance = s.request.amountAtomic;
-  const { id } = await s.prepare(); const repair = s.core.bridges.records.repairReceipt.bind(s.core.bridges.records);
-  s.core.bridges.records.repairReceipt = async (op) => { if (op.effects[0]!.phase === "sealed") throw new Error("stop at seal"); await repair(op); };
+  const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
+  s.core.bridges.records.persist = async (op) => { await persist(op); if (op.effects[0]!.phase === "sealed") throw new Error("stop at seal"); };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false);
   const op = (await s.core.bridges.records.findOperation(id))!, path = join(temporary.root, "bridge-effects", op.profileHash, `${id}-bridge.json`);
-  const bytes = await readFile(path); await unlink(path); s.core.bridges.records.repairReceipt = repair;
+  const bytes = await readFile(path); await unlink(path); s.core.bridges.records.persist = persist;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).error?.code, "APN_PROVIDER_EFFECT_UNAVAILABLE");
   await writeFile(path, bytes, { mode: 0o600 }); s.now.setTime(s.now.getTime() + 301_000);
   const recovered = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(recovered.ok, true, recovered.error?.message);
@@ -252,41 +252,43 @@ test("LI.FI history, immutable effect identities and derived receipt corruption 
   assert.throws(() => transitionBridge(operation, { state: "completed" }, s.now.toISOString()), { code: "APN_STATE_CORRUPT" });
   const receipt = bridgeReceipt(operation) as any; receipt.transfer.amountAtomic = "1";
   const { receipt_hash: _r, ...receiptBody } = receipt; receipt.receipt_hash = hashObject(receiptBody);
-  await writeFile(join(temporary.root, "bridge-receipts", operation.profileHash, `${id}.json`), JSON.stringify(receipt), { mode: 0o600 });
+  const receiptPath = join(temporary.root, "bridge-receipts", operation.profileHash, `${id}.json`);
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 }); await writeFile(receiptPath, JSON.stringify(receipt), { mode: 0o600 });
   assert.equal((await s.core.execute({ command: "receipt.get", operationId: id })).error?.code, "APN_STATE_CORRUPT");
   assert.equal(s.source.submissions.length, 0);
 });
 
-test("LI.FI pre-asset-bounds current-v1 receipt upgrades atomically without custody or effects", async (t) => {
+test("LI.FI pre-asset-bounds current-v1 receipt of the current transition is returned as written; without it the receipt is derived", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root, "eth-linea");
   const { id, operation } = await s.prepare("across", "current-v1-receipt-upgrade");
   const receiptPath = join(temporary.root, "bridge-receipts", operation.profileHash, `${id}.json`);
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
   const previous = previousCurrentReceipt(operation), forged = structuredClone(previous);
   forged.transfer.amountAtomic = (BigInt(forged.transfer.amountAtomic) + 1n).toString();
   delete forged.receipt_hash; forged.receipt_hash = hashObject(forged);
   await writeFile(receiptPath, `${canonicalJson(forged)}\n`, { mode: 0o600 });
-  await assert.rejects(s.core.bridges.records.repairReceipt(operation), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(s.core.bridges.records.loadReceipt(operation.profileHash, id), { code: "APN_STATE_CORRUPT" });
 
-  await writeFile(receiptPath, `${canonicalJson(previous)}\n`, { mode: 0o600 });
-  await assert.rejects(s.core.bridges.records.loadReceipt(operation.profileHash, id), { code: "APN_OPERATION_BLOCKED" });
   const calls = s.source.calls.length, submissions = s.source.submissions.length;
   const materializations = s.provider.materializeCalls, wraps = s.wrapping.loads;
   let custodyAccesses = 0;
   s.custody.load = async () => { custodyAccesses++; throw new Error("custody must stay closed"); };
   s.custody.seal = async () => { custodyAccesses++; throw new Error("custody must stay closed"); };
-  const loaded = await s.core.bridges.records.loadOperation(operation.profileHash, id); assert.ok(loaded);
-  await s.core.bridges.records.repairReceipt(loaded);
-
-  const repaired = await s.core.bridges.records.loadReceipt(operation.profileHash, id) as any;
-  assert.notEqual(repaired.receipt_hash, previous.receipt_hash);
-  assert.equal(repaired.asset_bounds.same_denomination, true);
+  await writeFile(receiptPath, `${canonicalJson(previous)}\n`, { mode: 0o600 });
+  // Phase 4b (CORE-13): a released version's receipt of this transition keeps its own shape; nothing is rewritten.
+  assert.deepEqual(await s.core.bridges.records.loadReceipt(operation.profileHash, id), previous);
+  assert.deepEqual(JSON.parse(await readFile(receiptPath, "utf8")), previous);
+  await rm(receiptPath);
+  const derived = await s.core.bridges.records.loadReceipt(operation.profileHash, id) as any;
+  assert.notEqual(derived.receipt_hash, previous.receipt_hash);
+  assert.equal(derived.asset_bounds.same_denomination, true);
   assert.deepEqual([custodyAccesses, s.wrapping.loads, s.source.calls.length, s.source.submissions.length, s.provider.materializeCalls],
     [0, wraps, calls, submissions, materializations]);
-  assert.deepEqual(repaired, bridgeReceipt(operation));
+  assert.deepEqual(derived, bridgeReceipt(operation));
 });
 
-test("LI.FI pre-telemetry receipt integrity upgrades only the exact omitted-empty projection", async (t) => {
+test("LI.FI pre-telemetry receipt is returned as written for its transition and derived with telemetry after it", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root, "base-arb"); s.source.sendTimeout = true; s.source.failObserve = true;
   const { id } = await s.prepare("stargateV2", "pre-observation-telemetry-receipt");
@@ -296,11 +298,14 @@ test("LI.FI pre-telemetry receipt integrity upgrades only the exact omitted-empt
   const historical = beforeObservationTelemetryWriter(current), operationPath = join(temporary.root, "bridge-operations", historical.profileHash, `${id}.json`),
     receiptPath = join(temporary.root, "bridge-receipts", historical.profileHash, `${id}.json`), historicalReceipt = receiptBeforeObservationTelemetry(historical);
   await writeFile(operationPath, `${canonicalJson(historical)}\n`, { mode: 0o600 });
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
   await writeFile(receiptPath, `${canonicalJson(historicalReceipt)}\n`, { mode: 0o600 });
-  const journalBefore = await readFile(operationPath); await s.core.bridges.records.repairReceipt(historical);
-  assert.deepEqual(await readFile(operationPath), journalBefore, "receipt recovery must not rewrite the operation journal");
-  const repaired = await s.core.bridges.records.loadReceipt(historical.profileHash, id) as any;
-  assert.deepEqual(repaired.observation_rpc_telemetry, []);
+  const journalBefore = await readFile(operationPath);
+  assert.deepEqual(await s.core.bridges.records.loadReceipt(historical.profileHash, id), historicalReceipt);
+  assert.deepEqual(await readFile(operationPath), journalBefore, "a receipt read must not rewrite the operation journal");
+  await rm(receiptPath);
+  assert.deepEqual((await s.core.bridges.records.loadReceipt(historical.profileHash, id) as any).observation_rpc_telemetry, []);
+  await writeFile(receiptPath, `${canonicalJson(historicalReceipt)}\n`, { mode: 0o600 });
   const loaded = (await s.core.bridges.records.findOperation(id))!;
   assert.deepEqual(loaded.effects.map((effect) => [effect.role, effect.submissionAttempts, effect.transactionHash]),
     historical.effects.map((effect) => [effect.role, effect.submissionAttempts, effect.transactionHash]));
@@ -315,13 +320,13 @@ test("LI.FI pre-telemetry receipt integrity upgrades only the exact omitted-empt
   const observed = transitionBridge(historical, { observationTelemetry: [telemetry],
     failure: { reason: "source_observation_unavailable", residualAllowance: null } }, later);
   assert.equal(observed.transitions.length, historical.transitions.length + 1);
-  await s.core.bridges.records.writeOperation(observed); await s.core.bridges.records.repairReceipt(observed);
-  const exact = bridgeReceipt(observed) as any; assert.deepEqual((await s.core.bridges.records.loadReceipt(observed.profileHash, id) as any).observation_rpc_telemetry,
-    exact.observation_rpc_telemetry);
+  // The released receipt file now belongs to an earlier transition: the current receipt is derived, telemetry included.
+  await s.core.bridges.records.writeOperation(observed);
+  const exact = bridgeReceipt(observed) as any; assert.deepEqual(await s.core.bridges.records.loadReceipt(observed.profileHash, id), exact);
   const reject = async (mutate: (receipt: any) => void) => {
     const forged = structuredClone(exact); mutate(forged); delete forged.receipt_hash; forged.receipt_hash = hashObject(forged);
     await writeFile(receiptPath, `${canonicalJson(forged)}\n`, { mode: 0o600 });
-    await assert.rejects(s.core.bridges.records.repairReceipt(observed), { code: "APN_STATE_CORRUPT" });
+    await assert.rejects(s.core.bridges.records.loadReceipt(observed.profileHash, id), { code: "APN_STATE_CORRUPT" });
     await writeFile(receiptPath, `${canonicalJson(exact)}\n`, { mode: 0o600 });
   };
   await reject((receipt) => { delete receipt.observation_rpc_telemetry; });

@@ -75,66 +75,69 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
         }
         return existing;
     }
-    const quote = await quoteStargateV2Direct({ sourceChainId: SOURCE_CHAIN, destinationChainId: DESTINATION_CHAIN,
-        sourceToken: "native", destinationToken: "native", recipient, amountAtomic: amount.toString() }, ports.sourceCall, ports.sourcePrepareBatch);
-    assertLane(quote);
-    if (quote.quote.amountSentAtomic !== amount.toString())
-        fail("APN_OPERATION_BLOCKED", "dust_amount_not_supported");
-    const quoteTag = `0x${BigInt(quote.block.numberAtomic).toString(16)}`;
-    const config = await readSourceConfig(ports.sourceCall, quoteTag, undefined, ports.sourcePrepareBatch);
-    const destinationConfig = await readPoolConfig(ports.destinationCall, DESTINATION_CHAIN, DESTINATION_POOL, DESTINATION_EID, "latest", ports.destinationPrepareBatch);
-    const sendParam = { dstEid: DESTINATION_EID, to: pad(recipient, { size: 32 }), amountLD: amount,
-        minAmountLD: BigInt(quote.quote.minimumOutputAtomic), extraOptions: "0x", composeMsg: "0x", oftCmd: "0x" };
-    const finalFee = await requoteFinalSend(ports.sourceCall, sendParam, quoteTag);
-    if (finalFee !== BigInt(quote.quote.nativeMessageFeeAtomic))
-        fail("APN_REPREPARE_REQUIRED", "final_send_fee_differs");
-    const value = amount + finalFee;
-    const data = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken",
-        args: [sendParam, { nativeFee: finalFee, lzTokenFee: 0n }, owner] });
-    const prepared = await ports.prepareEnvelope({ chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString() });
-    const gasUpper = uint(prepared.gasLimitAtomic, true) * uint(prepared.maxFeePerGasAtomic, true), maximumDebit = value + gasUpper;
-    if (uint(prepared.maxPriorityFeePerGasAtomic) > uint(prepared.maxFeePerGasAtomic, true))
-        fail("APN_RPC_PROTOCOL", "priority_fee");
-    if (maximumDebit > cap)
-        fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
-    if (uint(prepared.nativeBalanceAtomic) < maximumDebit)
-        fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
-    const finalityPolicy = stargateV2RouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN);
-    const destination = await ports.destinationBalance(recipient, finalityPolicy.destination.blockTag);
-    uint(destination.balanceAtomic);
-    uint(destination.blockNumberAtomic);
-    hex32(destination.blockHash);
-    // The quote's earlier recheck does not cover config, credit, or the final fee read.
-    const [sourceBlock, sourceChain] = ports.sourcePrepareBatch === undefined
-        ? [await ports.sourceCall("eth_getBlockByNumber", [quoteTag, false]), undefined]
-        : await ports.sourcePrepareBatch([{ method: "eth_getBlockByNumber", params: [quoteTag, false] },
-            { method: "eth_chainId", params: [] }]);
-    if (sourceChain !== undefined && rpcQuantity(sourceChain) !== BigInt(SOURCE_CHAIN))
-        fail("APN_CHAIN_MISMATCH", "source_chain_drift");
-    if (sourceBlock === null || typeof sourceBlock !== "object" || Array.isArray(sourceBlock))
-        fail("APN_RPC_PROTOCOL", "source_block");
-    const checkedSource = sourceBlock;
-    if (rpcQuantity(checkedSource.number) !== BigInt(quote.block.numberAtomic) ||
-        hex32(checkedSource.hash) !== quote.block.hash)
-        fail("APN_RPC_PROTOCOL", "source_block_changed_after_prepare_reads");
-    const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString() });
-    const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
-    const body = {
-        schemaVersion: "apn.stargate-v2-native-operation.v3", operationId, profile, profileHash, idempotencyHash, policy,
-        owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy,
-        finalityPolicyProvenance: "pinned_v2", sourcePool: SOURCE_POOL,
-        destinationPool: DESTINATION_POOL, sourceEid: SOURCE_EID, destinationEid: DESTINATION_EID, quote, sourceCodeHash: config.codeHash ?? fail("APN_RPC_PROTOCOL", "source_code"),
-        destinationCodeHash: destinationConfig.codeHash ?? fail("APN_RPC_PROTOCOL", "source_code"),
-        destinationBalanceBeforeAtomic: destination.balanceAtomic, destinationBalanceBlock: { numberAtomic: destination.blockNumberAtomic, hash: destination.blockHash },
-        envelope: { chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString(), nonceAtomic: uint(prepared.nonceAtomic).toString(),
-            gasLimitAtomic: uint(prepared.gasLimitAtomic, true).toString(), maxFeePerGasAtomic: uint(prepared.maxFeePerGasAtomic, true).toString(),
-            maxPriorityFeePerGasAtomic: uint(prepared.maxPriorityFeePerGasAtomic).toString() },
-        totalValueAtomic: value.toString(), maximumDebitAtomic: maximumDebit.toString(), preparedAt, expiresAt,
-        phase: "prepared", transitions: [{ phase: "prepared", at: preparedAt, reason: "fresh_quote_and_envelope_frozen" }],
-    };
-    const operation = seal(body);
-    await journal.save(operation);
-    return operation;
+    // The owner's claim is written before the quote and every RPC read: any other money operation on this account waits.
+    return await journal.admit({ operationId, profile, owner }, async () => {
+        const quote = await quoteStargateV2Direct({ sourceChainId: SOURCE_CHAIN, destinationChainId: DESTINATION_CHAIN,
+            sourceToken: "native", destinationToken: "native", recipient, amountAtomic: amount.toString() }, ports.sourceCall, ports.sourcePrepareBatch);
+        assertLane(quote);
+        if (quote.quote.amountSentAtomic !== amount.toString())
+            fail("APN_OPERATION_BLOCKED", "dust_amount_not_supported");
+        const quoteTag = `0x${BigInt(quote.block.numberAtomic).toString(16)}`;
+        const config = await readSourceConfig(ports.sourceCall, quoteTag, undefined, ports.sourcePrepareBatch);
+        const destinationConfig = await readPoolConfig(ports.destinationCall, DESTINATION_CHAIN, DESTINATION_POOL, DESTINATION_EID, "latest", ports.destinationPrepareBatch);
+        const sendParam = { dstEid: DESTINATION_EID, to: pad(recipient, { size: 32 }), amountLD: amount,
+            minAmountLD: BigInt(quote.quote.minimumOutputAtomic), extraOptions: "0x", composeMsg: "0x", oftCmd: "0x" };
+        const finalFee = await requoteFinalSend(ports.sourceCall, sendParam, quoteTag);
+        if (finalFee !== BigInt(quote.quote.nativeMessageFeeAtomic))
+            fail("APN_REPREPARE_REQUIRED", "final_send_fee_differs");
+        const value = amount + finalFee;
+        const data = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken",
+            args: [sendParam, { nativeFee: finalFee, lzTokenFee: 0n }, owner] });
+        const prepared = await ports.prepareEnvelope({ chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString() });
+        const gasUpper = uint(prepared.gasLimitAtomic, true) * uint(prepared.maxFeePerGasAtomic, true), maximumDebit = value + gasUpper;
+        if (uint(prepared.maxPriorityFeePerGasAtomic) > uint(prepared.maxFeePerGasAtomic, true))
+            fail("APN_RPC_PROTOCOL", "priority_fee");
+        if (maximumDebit > cap)
+            fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
+        if (uint(prepared.nativeBalanceAtomic) < maximumDebit)
+            fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
+        const finalityPolicy = stargateV2RouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN);
+        const destination = await ports.destinationBalance(recipient, finalityPolicy.destination.blockTag);
+        uint(destination.balanceAtomic);
+        uint(destination.blockNumberAtomic);
+        hex32(destination.blockHash);
+        // The quote's earlier recheck does not cover config, credit, or the final fee read.
+        const [sourceBlock, sourceChain] = ports.sourcePrepareBatch === undefined
+            ? [await ports.sourceCall("eth_getBlockByNumber", [quoteTag, false]), undefined]
+            : await ports.sourcePrepareBatch([{ method: "eth_getBlockByNumber", params: [quoteTag, false] },
+                { method: "eth_chainId", params: [] }]);
+        if (sourceChain !== undefined && rpcQuantity(sourceChain) !== BigInt(SOURCE_CHAIN))
+            fail("APN_CHAIN_MISMATCH", "source_chain_drift");
+        if (sourceBlock === null || typeof sourceBlock !== "object" || Array.isArray(sourceBlock))
+            fail("APN_RPC_PROTOCOL", "source_block");
+        const checkedSource = sourceBlock;
+        if (rpcQuantity(checkedSource.number) !== BigInt(quote.block.numberAtomic) ||
+            hex32(checkedSource.hash) !== quote.block.hash)
+            fail("APN_RPC_PROTOCOL", "source_block_changed_after_prepare_reads");
+        const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString() });
+        const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
+        const body = {
+            schemaVersion: "apn.stargate-v2-native-operation.v3", operationId, profile, profileHash, idempotencyHash, policy,
+            owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy,
+            finalityPolicyProvenance: "pinned_v2", sourcePool: SOURCE_POOL,
+            destinationPool: DESTINATION_POOL, sourceEid: SOURCE_EID, destinationEid: DESTINATION_EID, quote, sourceCodeHash: config.codeHash ?? fail("APN_RPC_PROTOCOL", "source_code"),
+            destinationCodeHash: destinationConfig.codeHash ?? fail("APN_RPC_PROTOCOL", "source_code"),
+            destinationBalanceBeforeAtomic: destination.balanceAtomic, destinationBalanceBlock: { numberAtomic: destination.blockNumberAtomic, hash: destination.blockHash },
+            envelope: { chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString(), nonceAtomic: uint(prepared.nonceAtomic).toString(),
+                gasLimitAtomic: uint(prepared.gasLimitAtomic, true).toString(), maxFeePerGasAtomic: uint(prepared.maxFeePerGasAtomic, true).toString(),
+                maxPriorityFeePerGasAtomic: uint(prepared.maxPriorityFeePerGasAtomic).toString() },
+            totalValueAtomic: value.toString(), maximumDebitAtomic: maximumDebit.toString(), preparedAt, expiresAt,
+            phase: "prepared", transitions: [{ phase: "prepared", at: preparedAt, reason: "fresh_quote_and_envelope_frozen" }],
+        };
+        const operation = seal(body);
+        await journal.save(operation);
+        return operation;
+    });
 }
 export async function executeStargateV2NativeEth(operationId, ports, journal) {
     const initial = await journal.load(operationId);

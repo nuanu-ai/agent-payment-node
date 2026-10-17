@@ -3,7 +3,7 @@ import { walletCustodyLock } from "./encrypted-wallet-store.js";
 import { DirectPublicEffectJournal } from "./direct-public-effect.js";
 import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
 import { ApnError } from "./errors.js";
-import { hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
+import { assertDirectTerminalReceiptAuthority, hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
 import { armDirectEvmStep, requireEvmRpc } from "./evm-direct.js";
 import { directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import type { EvmUnlandedEvidence } from "./evm-ports.js";
@@ -227,6 +227,8 @@ export class TransferServiceObservation {
     const operation = await this.requiredOperation(operationId);
     if (operation.providerDirect !== undefined) return await this.providerDirect.receipt(operationId);
     const receipt = await this.context.state.loadReceipt(operation.profileHash, operationId);
+    // A terminal EVM transfer's receipt must prove its exact terminal state; only this operation's receipt get fails otherwise.
+    if (operation.evm !== undefined && operation.terminal) assertDirectTerminalReceiptAuthority(operation, receipt);
     if (receipt === null) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
     if (receipt.operationIntegrityHash !== operation.integrityHash) {
       throw new ApnError("APN_STATE_CORRUPT", "Receipt is not linked to the current operation transition.");

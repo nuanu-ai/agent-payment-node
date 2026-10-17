@@ -21,7 +21,6 @@ export class MetaMaskGaslessOperationRepository extends SecureStateStore impleme
     this.initialized ??= (async () => {
       await super.initialize();
       await this.ensureDirectory(OPERATIONS);
-      await this.ensureDirectory(RECEIPTS);
     })();
     await this.initialized;
   }
@@ -89,37 +88,18 @@ export class MetaMaskGaslessOperationRepository extends SecureStateStore impleme
     await this.writeJson(this.path(OPERATIONS, operation.profileHash, operation.operationId), operation);
   }
 
-  /** Caller holds the shared profile and operation locks. The operation is always authoritative. */
+  /** Caller holds the shared profile and operation locks. The operation is the only record; its receipt is derived. */
   async persist(operation: MetaMaskGaslessOperationRecord): Promise<void> {
     await this.writeOperation(operation);
-    await this.repairReceipt(operation);
   }
 
-  async repairReceipt(operationInput: MetaMaskGaslessOperationRecord): Promise<void> {
-    await this.ready();
-    const operation = validateMetaMaskGaslessOperation(operationInput);
-    const stored = await this.loadOperation(operation.profileHash, operation.operationId);
-    if (stored === null || !mmSame(stored, operation)) corrupt();
-    const path = this.path(RECEIPTS, operation.profileHash, operation.operationId);
-    const previous = await this.readJson(path);
-    if (previous !== null) validateMetaMaskGaslessReceipt(previous, operation);
-    const receipt = metaMaskGaslessReceipt(operation);
-    if (mmSame(previous, receipt)) return;
-    await this.ensureDirectory(`${RECEIPTS}/${operation.profileHash}`);
-    await this.writeJson(path, receipt);
-  }
-
+  /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
   async loadReceipt(profileHash: string, operationId: string): Promise<MetaMaskGaslessReceipt> {
     const operation = await this.loadOperation(profileHash, operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "The MetaMask gasless operation was not found.");
     const value = await this.readJson(this.path(RECEIPTS, profileHash, operationId));
-    if (value !== null) validateMetaMaskGaslessReceipt(value, operation);
-    const expected = metaMaskGaslessReceipt(operation);
-    if (value === null || !mmSame(value, expected)) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "The MetaMask gasless receipt needs recovery from its saved operation.",
-        { reason: "mm_gasless_pending", operationId, nextActions: [`apn operation resume --operation ${operationId}`] });
-    }
-    return value as MetaMaskGaslessReceipt;
+    const stored = value === null ? null : validateMetaMaskGaslessReceipt(value, operation);
+    return stored !== null && stored.transition_hash === operation.transitions.at(-1)!.transitionHash ? stored : metaMaskGaslessReceipt(operation);
   }
 
   private path(root: typeof OPERATIONS | typeof RECEIPTS, profileHash: string, operationId: string): string {

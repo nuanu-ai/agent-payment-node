@@ -30,7 +30,7 @@ import { StateProfileRepository } from "../../src/profile-repository.js";
 import { sealWallet, StateStore } from "../../src/state.js";
 import { EVM_REQUEST, evmCore } from "./evm-helpers.js";
 import { GaslessApproval, GaslessTestRpc, gaslessFixture as gaslessCoreFixture } from "./gasless-helpers.js";
-import { TestNative, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
+import { TestNative, TestProfilePolicy, TestRpc, temporaryState, savedBridgeOperations, savedGaslessOperations, savedX402Operations } from "./helpers.js";
 import { LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 import { TestHttp } from "./x402-helpers.js";
@@ -200,7 +200,7 @@ test("gasless repository initialization preserves local-wallet, provider-authori
   const bytesBefore = await Promise.all(paths.map(async (path) => await readFile(path)));
   for (let index = 0; index < 3; index += 1) {
     await new StateStore(temporary.root).initialize();
-    assert.deepEqual(await new GaslessOperationRepository(temporary.root).listAllOperations(), []);
+    assert.deepEqual(await savedGaslessOperations(new GaslessOperationRepository(temporary.root)), []);
   }
   const bytesAfter = await Promise.all(paths.map(async (path) => await readFile(path)));
   assert.deepEqual(bytesAfter, bytesBefore);
@@ -217,7 +217,7 @@ test("gasless repository initialization preserves local-wallet, provider-authori
     idempotencyKey: "gasless-behind-older-direct-0001",
   });
   assert.equal(blocked.error?.code, "APN_OPERATION_BLOCKED");
-  assert.deepEqual(await gasless.core.gasless.records.listOperations(profileHash), []);
+  assert.deepEqual(await savedGaslessOperations(gasless.core.gasless.records, profileHash), []);
   assert.equal(gasless.rpc.calls.length, 0, "the active direct operation must block before gasless RPC access");
   assert.deepEqual(await Promise.all(paths.map(async (path) => await readFile(path))), bytesBefore);
 });
@@ -261,7 +261,7 @@ test("concurrent direct and gasless prepares serialize one shared idempotency id
   assert.deepEqual(results.filter((result) => !result.ok).map((result) => result.error?.code), ["APN_IDEMPOTENCY_CONFLICT"]);
 
   const profileHash = gasless.state.profileHash(gasless.profile);
-  const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
+  const gaslessOperations = await savedGaslessOperations(gasless.core.gasless.records, profileHash);
   const directOperations = await direct.state.listOperations(profileHash);
   assert.equal(gaslessOperations.length + directOperations.length, 1);
   const winner = [...gaslessOperations, ...directOperations][0]!;
@@ -470,7 +470,7 @@ test("concurrent legacy direct and gasless preparation preserves the same-profil
     const [winnerResult, loserResult] = await Promise.all([winner, loser]);
     assert.equal(winnerResult.ok, true, winnerResult.error?.message);
     assert.equal(loserResult.error?.code, "APN_OPERATION_BLOCKED");
-    const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
+    const gaslessOperations = await savedGaslessOperations(gasless.core.gasless.records, profileHash);
     const directOperations = await direct.state.listOperations(profileHash);
     assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
     assert.equal(directOperations.length, first === "direct" ? 1 : 0);
@@ -519,8 +519,8 @@ test("concurrent local x402 and gasless preparation preserves the same-profile g
     const [winnerResult, loserResult] = await Promise.all([winner, loser]);
     assert.equal(winnerResult.ok, true, winnerResult.error?.message);
     assert.equal(loserResult.error?.code, "APN_OPERATION_BLOCKED");
-    const gaslessOperations = await fixture.core.gasless.records.listAllOperations();
-    const x402Operations = await fixture.state.listAllX402Operations();
+    const gaslessOperations = await savedGaslessOperations(fixture.core.gasless.records);
+    const x402Operations = await savedX402Operations(fixture.state);
     assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
     assert.equal(x402Operations.length, first === "x402" ? 1 : 0);
     const operations = [...gaslessOperations, ...x402Operations];
@@ -568,7 +568,7 @@ test("concurrent provider-atomic x402 and gasless preparation serialize one glob
     const [winnerResult, loserResult] = await Promise.all([winner, loser]);
     assert.equal(winnerResult.ok, true, winnerResult.error?.message);
     assert.equal(loserResult.error?.code, "APN_IDEMPOTENCY_CONFLICT");
-    const gaslessOperations = await gasless.core.gasless.records.listAllOperations();
+    const gaslessOperations = await savedGaslessOperations(gasless.core.gasless.records);
     const providerOperations = await provider.repository.listAllOperations();
     assert.equal(gaslessOperations.length, first === "gasless" ? 1 : 0);
     assert.equal(providerOperations.length, first === "provider" ? 1 : 0);
@@ -615,7 +615,7 @@ test("concurrent Solana rail and gasless preparation on different networks both 
     const [winnerResult, loserResult] = await Promise.all([winner, loser]);
     assert.equal(winnerResult.ok, true, winnerResult.error?.message);
     assert.equal(loserResult.ok, true, loserResult.error?.message);
-    const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
+    const gaslessOperations = await savedGaslessOperations(gasless.core.gasless.records, profileHash);
     const railOperations = await rail.core.rails.records.listOperations(profileHash);
     assert.equal(gaslessOperations.length, 1); assert.equal(railOperations.length, 1);
     for (const operation of [...gaslessOperations, ...railOperations]) assert.equal(operation.terminal, false);
@@ -656,8 +656,8 @@ test("concurrent LI.FI bridge and gasless preparation on different networks both
     const [winnerResult, loserResult] = await Promise.all([winner, loser]);
     assert.equal(winnerResult.ok, true, winnerResult.error?.message);
     assert.equal(loserResult.ok, true, loserResult.error?.message);
-    const gaslessOperations = await gasless.core.gasless.records.listOperations(profileHash);
-    const bridgeOperations = await bridge.core.bridges.records.listOperations(profileHash);
+    const gaslessOperations = await savedGaslessOperations(gasless.core.gasless.records, profileHash);
+    const bridgeOperations = await savedBridgeOperations(bridge.core.bridges.records, profileHash);
     assert.equal(gaslessOperations.length, 1); assert.equal(bridgeOperations.length, 1);
     for (const operation of [...gaslessOperations, ...bridgeOperations]) assert.equal(operation.terminal, false);
     assert.equal(bridge.wrapping.loads, wrappingBefore); assert.equal(bridge.approval.calls.length, 0);

@@ -26,10 +26,6 @@ export class CircleRepository extends SecureStateStore {
         }
         return result;
     }
-    async listAny(profileHash) {
-        stateIdentifier(profileHash, "Circle profile hash");
-        return (await this.listAllAny()).filter(op => op.profileHash === profileHash || op.destinationProfileHash === profileHash);
-    }
     async saveFunding(input) {
         const next = validateCircleFundingOperation(input), previous = await this.loadAny(next.operationId);
         if (previous !== null) {

@@ -4,6 +4,8 @@ import { decodeFunctionData } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import { StateStore } from "../state.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim, namedProfileHash } from "../operation-index/adapters/family-claims.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
 import { assertStargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_POOL, UINT, address, fail, } from "./token-codec.js";
@@ -22,6 +24,12 @@ export class FileStargateTokenJournal {
     async withOwnerLock(owner, work) {
         await this.locks.initialize();
         return await this.locks.withLocks([evmAddressLock(address(owner))], work, { waitMs: 30_000 });
+    }
+    async admit(operation, work) {
+        const state = new StateStore(this.root);
+        await state.initialize();
+        return await admitOperation(state, { family: "stargate_token", profileHash: namedProfileHash(operation.profile), operationId: operation.operationId,
+            idempotencyHash: null, requestHash: null }, [evmClaim(STARGATE_TOKEN_SOURCE_CHAIN, address(operation.owner))], work);
     }
     async load(id) {
         try {

@@ -64,6 +64,5 @@ export interface SmartAccountGaslessRepositoryPort {
     listAllOperations(): Promise<readonly SmartAccountGaslessOperationRecord[]>;
     writeOperation(operation: SmartAccountGaslessOperationRecord): Promise<void>;
     persist(operation: SmartAccountGaslessOperationRecord): Promise<void>;
-    repairReceipt(operation: SmartAccountGaslessOperationRecord): Promise<void>;
     loadReceipt(profileHash: string, operationId: string): Promise<SmartAccountGaslessReceipt>;
 }

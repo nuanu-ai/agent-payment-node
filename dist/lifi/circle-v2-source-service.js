@@ -17,6 +17,8 @@ import { prepareCircleV2BaseSourceReadOnly } from "./circle-v2-source-preparatio
 import { bindCircleV2SourcePreparationToJournal } from "./circle-v2-source-journal.js";
 import { circleV2BurnTermsFromQuote } from "./circle-v2-source-receipt.js";
 import { bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRIDGE_MIN_REMAINING_MS } from "./validation.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim } from "../operation-index/adapters/family-claims.js";
 const CIRCLE = "https://iris-api.circle.com";
 const USDC = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
 const WRAPPER = getAddress("0x71f54F818671cD0D7ea140Da213e5C8b5C92a408");
@@ -37,6 +39,8 @@ function rq(value) {
 }
 function rw(value) { return BigInt(bridgeHex(value, 32, 32)); }
 function hash(value) { return createHash("sha256").update(value).digest("hex"); }
+/** The submit command signs only before its preparation expires: at most this long after it was prepared. */
+export const CIRCLE_V2_SOURCE_TTL_MS = 60_000;
 /** Production adapters use one pinned HTTPS Circle origin and one explicitly configured Base RPC origin. */
 export class CircleV2SourceService {
     state;
@@ -63,86 +67,93 @@ export class CircleV2SourceService {
         const rpc = new CircleBaseJsonRpc(rpcUrl, transport);
         const walletStore = new EncryptedWalletStore(this.state, this.wrapping);
         await this.state.initialize();
-        // No wallet.ensure or import is called here; an operator must import the exact payer profile separately.
-        const loaded = await walletStore.describe(profile);
-        if (loaded === null)
-            fail("wallet_missing");
-        try {
-            if (loaded.identity.address !== payer || loaded.identity.profile !== profile ||
-                privateKeyToAccount(loaded.secret.privateKey).address !== payer)
-                fail("wallet_owner");
-            // Owner allowlist admission before any quote or prompt; the hold itself is taken after consent, before signing.
-            const admission = new CircleV2SourceAdmission(this.state, profile, payer, amount.toString(), operationId, () => new Date(), request.recipientOwner);
-            await admission.admit();
-            const ata = await associatedUsdc(request.recipientOwner);
-            const bytes = getBase58Encoder().encode(ata);
-            if (bytes.length !== 32)
-                fail("recipient_ata");
-            const mintRecipient = `0x${Buffer.from(bytes).toString("hex")}`;
-            const ownerBytes = getBase58Encoder().encode(request.recipientOwner);
-            if (ownerBytes.length !== 32)
-                fail("recipient_owner");
-            const hook = request.recipientSetup === "existing_ata" ? HOOK :
-                `${HOOK.slice(0, 50)}000000000000002101${Buffer.from(ownerBytes).toString("hex")}`;
-            const quoteRequest = { amount: amount.toString(), feeToken: USDC,
-                requests: [{ type: "FORWARD", params: { hookData: hook } }] };
-            let validationHash;
-            const circlePost = async (path, body) => {
-                const response = await transport.request(`${CIRCLE}${path}`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
-                if (response.status !== 200)
-                    fail("circle_http_status");
-                try {
-                    const parsed = JSON.parse(response.body);
-                    if (path === "/v2/quote/validate/usdc/6")
-                        validationHash = hashObject({ request: body, response: parsed });
-                    return parsed;
-                }
-                catch {
-                    return fail("circle_json");
-                }
-            };
-            const result = await submitCircleV2BaseSourceBurnLive({ payer, solanaWalletOwner: request.recipientOwner,
-                solanaRecipientAta: ata, recipientSetup: request.recipientSetup, profileHash, operationId,
-                limits: { maxAllowanceAtomic: request.maxAllowanceAtomic, maxGasLimitAtomic: request.maxGasLimitAtomic,
-                    maxFeePerGasWei: request.maxFeePerGasWei, maxPriorityFeePerGasWei: request.maxPriorityFeePerGasWei,
-                    maxNativeDebitWei: request.maxNativeDebitWei, ttlMs: 60_000 },
-                claimedValidationHash: hash(canonicalJson({ quoteRequest, operationId })) }, {
-                freshDraft: async () => {
-                    const response = bridgeRecord(await circlePost("/v2/quote/burn/usdc/6/5", quoteRequest));
-                    const signedQuote = bridgeHex(response.signedQuote, 16 * 1024);
-                    const data = encodeFunctionData({ abi: ABI, functionName: "depositForBurnWithHookAndFees",
-                        args: [amount, 5, mintRecipient, USDC, ZERO, hook,
-                            { signedQuote, refundAddress: payer }] });
-                    return { payer, quoteEndpoint: `${CIRCLE}/v2/quote/burn/usdc/6/5`, quoteRequest, quoteResponse: response,
-                        transaction: { from: payer, to: WRAPPER, chainId: 8453, valueAtomic: "0", refundAddress: payer, data },
-                        recipientWallet: request.recipientOwner, recipientSetup: request.recipientSetup,
-                        amountAtomic: amount.toString(), maxSourceFeeAtomic: feeCap.toString() };
-                },
-                preflight: async (query) => query.target === "circle"
-                    ? circlePost("/v2/quote/validate/usdc/6", query.body) : rpc.call(query.method, query.params),
-                readBase: async (query) => rpc.readSource(query),
-                signer: { kind: "imported_evm_signer", address: payer,
-                    signTransaction: tx => privateKeyToAccount(loaded.secret.privateKey).signTransaction(tx) },
-                sendRawTransaction: raw => rpc.send(raw),
-                approve: p => new TtyCircleV2SourceApproval().approve(p),
-                admission,
-                journal: new NonEvmSourceJournalRepository(this.state.root),
-                admitLive: async (p) => {
-                    if (validationHash === undefined)
-                        fail("validation_missing");
-                    return { kind: "circle_v2_live_transport_v1", circleOrigin: CIRCLE, rpcOrigin: rpc.origin,
-                        quoteHash: p.quoteHash.slice(7), validationHash, sourceBlockHash: p.sourceBlock.hash,
-                        preparationDigest: p.preparationDigest.slice(7), payer, recipientOwner: p.recipient.wallet,
-                        recipientAta: p.recipient.ata, feeTotalAtomic: p.quote.feeTotalAtomic };
-                },
-            });
-            return { operationId, sourceTransactionHash: result.sourceTransactionHash, sourceState: result.sourceState,
-                submissionAttempts: 1, bridgeCompletion: false, circleAttestationObserved: false,
-                solanaDestinationFinalized: false };
-        }
-        finally {
-            walletStore.clear(loaded.secret);
-        }
+        const journal = new NonEvmSourceJournalRepository(this.state.root);
+        // The payer's Base claim is written before the wallet, the quote and every RPC read. A key that already has a journal
+        // keeps its earlier refusal at staging (its fresh quote never matches the staged one).
+        const admitted = async (work) => await journal.load(profileHash, operationId) !== null ? await work()
+            : await admitOperation(this.state, { family: "circle_source", profileHash, operationId, idempotencyHash: null, requestHash: null }, [evmClaim(8453, payer)], work);
+        return await admitted(async () => {
+            // No wallet.ensure or import is called here; an operator must import the exact payer profile separately.
+            const loaded = await walletStore.describe(profile);
+            if (loaded === null)
+                fail("wallet_missing");
+            try {
+                if (loaded.identity.address !== payer || loaded.identity.profile !== profile ||
+                    privateKeyToAccount(loaded.secret.privateKey).address !== payer)
+                    fail("wallet_owner");
+                // Owner allowlist admission before any quote or prompt; the hold itself is taken after consent, before signing.
+                const admission = new CircleV2SourceAdmission(this.state, profile, payer, amount.toString(), operationId, () => new Date(), request.recipientOwner);
+                await admission.admit();
+                const ata = await associatedUsdc(request.recipientOwner);
+                const bytes = getBase58Encoder().encode(ata);
+                if (bytes.length !== 32)
+                    fail("recipient_ata");
+                const mintRecipient = `0x${Buffer.from(bytes).toString("hex")}`;
+                const ownerBytes = getBase58Encoder().encode(request.recipientOwner);
+                if (ownerBytes.length !== 32)
+                    fail("recipient_owner");
+                const hook = request.recipientSetup === "existing_ata" ? HOOK :
+                    `${HOOK.slice(0, 50)}000000000000002101${Buffer.from(ownerBytes).toString("hex")}`;
+                const quoteRequest = { amount: amount.toString(), feeToken: USDC,
+                    requests: [{ type: "FORWARD", params: { hookData: hook } }] };
+                let validationHash;
+                const circlePost = async (path, body) => {
+                    const response = await transport.request(`${CIRCLE}${path}`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
+                    if (response.status !== 200)
+                        fail("circle_http_status");
+                    try {
+                        const parsed = JSON.parse(response.body);
+                        if (path === "/v2/quote/validate/usdc/6")
+                            validationHash = hashObject({ request: body, response: parsed });
+                        return parsed;
+                    }
+                    catch {
+                        return fail("circle_json");
+                    }
+                };
+                const result = await submitCircleV2BaseSourceBurnLive({ payer, solanaWalletOwner: request.recipientOwner,
+                    solanaRecipientAta: ata, recipientSetup: request.recipientSetup, profileHash, operationId,
+                    limits: { maxAllowanceAtomic: request.maxAllowanceAtomic, maxGasLimitAtomic: request.maxGasLimitAtomic,
+                        maxFeePerGasWei: request.maxFeePerGasWei, maxPriorityFeePerGasWei: request.maxPriorityFeePerGasWei,
+                        maxNativeDebitWei: request.maxNativeDebitWei, ttlMs: CIRCLE_V2_SOURCE_TTL_MS },
+                    claimedValidationHash: hash(canonicalJson({ quoteRequest, operationId })) }, {
+                    freshDraft: async () => {
+                        const response = bridgeRecord(await circlePost("/v2/quote/burn/usdc/6/5", quoteRequest));
+                        const signedQuote = bridgeHex(response.signedQuote, 16 * 1024);
+                        const data = encodeFunctionData({ abi: ABI, functionName: "depositForBurnWithHookAndFees",
+                            args: [amount, 5, mintRecipient, USDC, ZERO, hook,
+                                { signedQuote, refundAddress: payer }] });
+                        return { payer, quoteEndpoint: `${CIRCLE}/v2/quote/burn/usdc/6/5`, quoteRequest, quoteResponse: response,
+                            transaction: { from: payer, to: WRAPPER, chainId: 8453, valueAtomic: "0", refundAddress: payer, data },
+                            recipientWallet: request.recipientOwner, recipientSetup: request.recipientSetup,
+                            amountAtomic: amount.toString(), maxSourceFeeAtomic: feeCap.toString() };
+                    },
+                    preflight: async (query) => query.target === "circle"
+                        ? circlePost("/v2/quote/validate/usdc/6", query.body) : rpc.call(query.method, query.params),
+                    readBase: async (query) => rpc.readSource(query),
+                    signer: { kind: "imported_evm_signer", address: payer,
+                        signTransaction: tx => privateKeyToAccount(loaded.secret.privateKey).signTransaction(tx) },
+                    sendRawTransaction: raw => rpc.send(raw),
+                    approve: p => new TtyCircleV2SourceApproval().approve(p),
+                    admission,
+                    journal,
+                    admitLive: async (p) => {
+                        if (validationHash === undefined)
+                            fail("validation_missing");
+                        return { kind: "circle_v2_live_transport_v1", circleOrigin: CIRCLE, rpcOrigin: rpc.origin,
+                            quoteHash: p.quoteHash.slice(7), validationHash, sourceBlockHash: p.sourceBlock.hash,
+                            preparationDigest: p.preparationDigest.slice(7), payer, recipientOwner: p.recipient.wallet,
+                            recipientAta: p.recipient.ata, feeTotalAtomic: p.quote.feeTotalAtomic };
+                    },
+                });
+                return { operationId, sourceTransactionHash: result.sourceTransactionHash, sourceState: result.sourceState,
+                    submissionAttempts: 1, bridgeCompletion: false, circleAttestationObserved: false,
+                    solanaDestinationFinalized: false };
+            }
+            finally {
+                walletStore.clear(loaded.secret);
+            }
+        });
     }
 }
 /** Minimal EIP-1898 Base reader. Every token and native balance read uses the same canonical block hash. */

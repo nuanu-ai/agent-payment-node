@@ -4,7 +4,7 @@ import { type MetaMaskNativeReadObservation } from "./metamask-native-transfer-a
 import { type MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
 export type { MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
 /** Journal readers, also reachable here for callers that name the command module. */
-export { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease, assertMetaMaskNativeConflictDomainAvailable, metaMaskNativeOperationExists } from "./metamask-native-journal.js";
+export { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease, metaMaskNativeOperationExists } from "./metamask-native-journal.js";
 /** One guarded USDC transfer from the profile's MetaMask Agent Wallet; every field is the caller's explicit input. */
 export interface MetaMaskNativeTransferInput {
     readonly profile: string;

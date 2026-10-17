@@ -4,7 +4,6 @@ import { SecureStateStore } from "../secure-state-store.js";
 export declare class CircleRepository extends SecureStateStore {
     loadAny(operationId: string): Promise<CircleKnownOperation | null>;
     listAllAny(): Promise<readonly CircleKnownOperation[]>;
-    listAny(profileHash: string): Promise<readonly CircleKnownOperation[]>;
     saveFunding(input: CircleFundingOperationV2): Promise<void>;
 }
 export declare function validateCircleFundingAdvance(previous: CircleFundingOperationV2, next: CircleFundingOperationV2): void;

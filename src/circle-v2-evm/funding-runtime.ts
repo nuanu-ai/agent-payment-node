@@ -13,6 +13,7 @@ import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-owne
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { BridgeHttps } from "../lifi/https.js";
 import type { StateStore } from "../state.js";
 import { exactChainConsent } from "../tty-approval.js";
@@ -74,6 +75,11 @@ export class CircleFundingEvmService {
       try { await this.operations.required(operationId); circleBlocked("operation_identity_occupied"); } catch (e) { if (!(e instanceof ApnError) || e.code !== "APN_OPERATION_NOT_FOUND") throw e; }
       await assertExclusiveEvmRawSigner(this.state, sourceCustody.walletAddress, sourceCustody.profileHash);
       await assertExclusiveEvmRawSigner(this.state, destinationCustody.walletAddress, destinationCustody.profileHash);
+      // Both signing accounts are claimed (the destination profile held too) before any RPC or fee read, and dropped if no
+      // operation is written. Another Circle route may queue only behind a source burn that is canonical.
+      return await this.operations.admit({ kind: "circle_route", profileHash: sourceCustody.profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [evmConflictDomain(42161, sourceCustody.walletAddress), evmConflictDomain(route.chainId, destinationCustody.walletAddress)],
+          otherProfiles: [destinationCustody.profileHash], tag: { kind: "circle_source_after_burn" } }, async () => {
       const { source, destination } = this.remotes(route.chainId), deployments = await currentCircleDeployments(source, destination, route.chainId), fee = await this.fee(funding);
       assertCircleFundingFee(funding, fee, this.now());
       const sourceAccount = await source.account(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER), src = this.sourceAccount(sourceAccount, sourceCustody.walletAddress, funding.amountAtomic);
@@ -92,8 +98,9 @@ export class CircleFundingEvmService {
           { role: "burn", phase: "prepared", envelope: burnEnvelope, transactionHash: null, materialHash: null, proof: null }], source: null, attestation: null, destination: null,
         residualAllowanceAtomic: "0", usage: [], usageFinalized: false, transitions: [] });
       op = sealCircle({ ...op, policies: await this.usage.policies(op) }); op = sealCircle({ ...op, fingerprint: circleFundingFingerprint(op) });
-      const initial = advanceCircle(op, {}, "exact_route_prepared", this.now()); await this.operations.assertCircleAccountsAvailable(initial); await this.repo.saveFunding(initial);
+      const initial = advanceCircle(op, {}, "exact_route_prepared", this.now()); await this.repo.saveFunding(initial);
       const usage = await this.usage.reserve(initial), reserved = advanceCircle(initial, { usage }, "all_assets_reserved", this.now()); await this.repo.saveFunding(reserved); return reserved;
+      });
     }));
   }
   async status(id: string) { return publicCircle(await this.required(id)); }

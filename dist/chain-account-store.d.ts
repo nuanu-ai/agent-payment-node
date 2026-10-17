@@ -31,6 +31,7 @@ export declare class ChainAccountStore extends SecureStateStore implements Chain
     private effectLock;
     private requiredSecret;
     private requiredWrapping;
+    /** The stored plaintext is parsed as JSON without a canonical-bytes check, as every release has read it. */
     private decrypt;
     private saveEncrypted;
     private saveAccount;

@@ -49,6 +49,8 @@ class MemoryJournal implements StargateNativeJournal {
     await prior; try { return await work(); } finally { release(); }
   }
   async withOwnerLock<T>(_owner: `0x${string}`, work: () => Promise<T>): Promise<T> { return await work(); }
+  /** The in-memory journal has no operation index; the file journal's admission is covered by operation-index-families. */
+  async admit<T>(_operation: unknown, work: () => Promise<T>): Promise<T> { return await work(); }
 }
 
 function quoteRpc(options: { code?: Hex; fee?: bigint; freshFee?: bigint; estimateGas?: bigint; baseFee?: bigint } = {}) {

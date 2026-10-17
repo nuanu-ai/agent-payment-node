@@ -1,4 +1,5 @@
 import type { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import type { ClockPort } from "../ports.js";
 import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
@@ -33,11 +34,13 @@ export class SmartAccountGaslessPreparation {
         operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== "smart_account_gasless_transfer") saFail("sa_gasless_state_corrupt");
-        await this.o.records.repairReceipt(existing.record); return existing.record;
+        return existing.record;
       }
       const clock = new SmartAccountGaslessClock(this.o.clock); clock.check();
       const owner = await smartAccountGaslessOwner(state, profile); clock.check();
-      await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, owner.address);
+      // The account claim is written before any RPC or provider read, and dropped if no operation is written.
+      return await this.o.operations.admit({ kind: "smart_account_gasless_transfer", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [evmConflictDomain(request.chainId, owner.address)] }, async () => {
       const binding = assertSmartAccountGaslessBinding(await this.o.material.inspect(owner, Math.floor(clock.check() / 1000)), owner);
       clock.check();
       if (request.recipient === binding.ownerAddress || request.recipient === binding.sessionAddress) saFail("sa_gasless_input");
@@ -59,6 +62,7 @@ export class SmartAccountGaslessPreparation {
           extra: { assetTransferMethod: "erc7710", facilitatorAddresses: provider.facilitatorAddresses } } };
       const op = newSmartAccountGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash }, intent);
       clock.live(op); await this.o.records.persist(op); return op;
+      });
     });
   }
 }

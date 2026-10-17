@@ -1,0 +1,14 @@
+import { OperationIndex } from "./index.js";
+/**
+ * Admits a new operation of a family outside the OperationService facade. Its claims are checked and written to the
+ * operation index as one step before `work` (the family's prepare body: RPC reads, signing material, the durable record)
+ * runs, and removed when `work` fails or writes no record. `holds` are held besides `claims` but never waited for.
+ */
+export async function admitOperation(state, identity, claims, work, holds = []) {
+    return await new OperationIndex(state).admit(identity, { family: null, profileHash: identity.profileHash, claims, ...(holds.length === 0 ? {} : { holds }) }, work);
+}
+/** The same check without a write: a fail-fast refusal before work whose admission must wait for its operation ID. */
+export async function assertClaimsAvailable(state, profileHash, claims) {
+    await new OperationIndex(state).assertAvailable({ family: null, profileHash, claims });
+}
+//# sourceMappingURL=admission.js.map

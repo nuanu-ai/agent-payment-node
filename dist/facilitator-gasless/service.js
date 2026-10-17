@@ -79,7 +79,6 @@ export class FacilitatorGaslessService {
             const current = await this.operations.required(id);
             if (current.kind !== FACILITATOR_KIND)
                 facilitatorFail("facilitator_gasless_state_corrupt");
-            await this.records.repairReceipt(current.record);
             await this.policy.reconcile(current.record);
             return await work(current.record);
         }));

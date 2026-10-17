@@ -525,9 +525,9 @@ export declare const stateSchema: z.ZodEnum<{
     included_success: "included_success";
     included_revert: "included_revert";
     abandoned_unknown: "abandoned_unknown";
+    failed_effects_pending: "failed_effects_pending";
     bootstrap_pending: "bootstrap_pending";
     user_operation_pending: "user_operation_pending";
-    failed_effects_pending: "failed_effects_pending";
     failed_permissions_invalidated: "failed_permissions_invalidated";
 }>;
 export declare const phaseSchema: z.ZodEnum<{
@@ -617,9 +617,9 @@ export declare const transitionSchema: z.ZodObject<{
         included_success: "included_success";
         included_revert: "included_revert";
         abandoned_unknown: "abandoned_unknown";
+        failed_effects_pending: "failed_effects_pending";
         bootstrap_pending: "bootstrap_pending";
         user_operation_pending: "user_operation_pending";
-        failed_effects_pending: "failed_effects_pending";
         failed_permissions_invalidated: "failed_permissions_invalidated";
     }>;
     approval: z.ZodNullable<z.ZodObject<{
@@ -1078,9 +1078,9 @@ export declare const operationSchema: z.ZodObject<{
             included_success: "included_success";
             included_revert: "included_revert";
             abandoned_unknown: "abandoned_unknown";
+            failed_effects_pending: "failed_effects_pending";
             bootstrap_pending: "bootstrap_pending";
             user_operation_pending: "user_operation_pending";
-            failed_effects_pending: "failed_effects_pending";
             failed_permissions_invalidated: "failed_permissions_invalidated";
         }>;
         approval: z.ZodNullable<z.ZodObject<{
@@ -1424,9 +1424,9 @@ export declare const operationSchema: z.ZodObject<{
         included_success: "included_success";
         included_revert: "included_revert";
         abandoned_unknown: "abandoned_unknown";
+        failed_effects_pending: "failed_effects_pending";
         bootstrap_pending: "bootstrap_pending";
         user_operation_pending: "user_operation_pending";
-        failed_effects_pending: "failed_effects_pending";
         failed_permissions_invalidated: "failed_permissions_invalidated";
     }>;
     approval: z.ZodNullable<z.ZodObject<{

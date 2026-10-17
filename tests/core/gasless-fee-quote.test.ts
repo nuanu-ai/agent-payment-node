@@ -7,7 +7,7 @@ import { bindMcpInput } from "../../src/command-binder.js";
 import { parseArgv } from "../../src/cli.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { gaslessFixture } from "./gasless-helpers.js";
-import { temporaryState } from "./helpers.js";
+import { temporaryState, savedGaslessOperations } from "./helpers.js";
 
 test("Ethereum local quote shows the exact production fee and cap result without creating money state", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
@@ -15,7 +15,7 @@ test("Ethereum local quote shows the exact production fee and cap result without
   s.rpc.current = { ...s.rpc.current,
     feeConfiguration: { ...s.rpc.current.feeConfiguration, nativeTokenPrice: "1000000000" } };
   const request = { ...s.request, grossAtomic: "5000", maxFeeAtomic: "4000", minReceivedAtomic: "1000" };
-  const before = await s.core.gasless.records.listAllOperations();
+  const before = await savedGaslessOperations(s.core.gasless.records);
   const filesBefore = (await readdir(temporary.root, { recursive: true })).sort();
   const first = await s.core.execute({ command: "gasless.transfer.quote", profile: s.profile, owner: s.account.address, request });
   assert.equal(first.ok, true, first.error?.message);
@@ -34,7 +34,7 @@ test("Ethereum local quote shows the exact production fee and cap result without
   assert.equal(data.usage_checked, false);
   assert.equal(data.prepare_admitted, "unknown");
   assert.deepEqual(s.rpc.calls, ["snapshot"]);
-  assert.deepEqual(await s.core.gasless.records.listAllOperations(), before);
+  assert.deepEqual(await savedGaslessOperations(s.core.gasless.records), before);
   assert.equal(s.wrapping.loads, 0);
   assert.equal(s.approval.calls.length, 0);
   assert.equal(s.rpc.sends.length, 0);
@@ -46,7 +46,7 @@ test("Ethereum local quote shows the exact production fee and cap result without
   assert.equal(second.ok, true, second.error?.message);
   assert.equal((second.data as { status: string }).status, "fee_exceeds_cap");
   assert.ok(BigInt((second.data as { quote_atomic: string }).quote_atomic) > 4000n);
-  assert.deepEqual(await s.core.gasless.records.listAllOperations(), before);
+  assert.deepEqual(await savedGaslessOperations(s.core.gasless.records), before);
   assert.deepEqual((await readdir(temporary.root, { recursive: true })).sort(), filesBefore);
 });
 
@@ -59,7 +59,7 @@ test("invalid Circle calibration is reported as a configuration stage, not an ec
   assert.equal(result.ok, false);
   assert.equal(result.error?.code, "APN_PROVIDER_PROTOCOL");
   assert.equal(result.error?.details?.stage, "fee_calibration");
-  assert.deepEqual(await s.core.gasless.records.listAllOperations(), []);
+  assert.deepEqual(await savedGaslessOperations(s.core.gasless.records), []);
   assert.deepEqual(s.rpc.calls, ["snapshot"]);
 });
 

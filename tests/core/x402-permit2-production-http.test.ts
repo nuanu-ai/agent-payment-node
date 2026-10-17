@@ -9,11 +9,10 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 import { StateStore } from "../../src/state.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { walletCustodyLock } from "../../src/encrypted-wallet-store.js";
-import { LocalWalletNative } from "../../src/local-wallet-native.js";
 import { HttpsX402Http } from "../../src/x402-http.js";
-import { Permit2ProductionHttps } from "../../src/x402-permit2/production-http.js";
 import { Permit2ProductionSigningFence } from "../../src/x402-permit2/production-signing-fence.js";
 import { Permit2ProductionJournal } from "../../src/x402-permit2/production-journal.js";
+import { sendPermit2Production } from "../../src/x402-permit2/production-send.js";
 import { productionUsageIdentity } from "../../src/x402-permit2/production-repository.js";
 import { paidHttpFixture } from "./x402-permit2-production-http-fixture.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
@@ -51,10 +50,12 @@ function clock(t: TestContext) {
   return { tick(value: number) { ms += value; for (const task of pending) if (!task.fired && task.at <= ms) { task.fired = true; task.action(); } },
     elapse(value: number) { ms += value; } };
 }
-async function first(t: TestContext, maxTimeoutSeconds = 120) { const f = await paidHttpFixture(t, "sign-and-submit-once", false, maxTimeoutSeconds), begun = await f.begin(); assert.ok(begun.requestGrant);
-  return { ...f, grant: begun.requestGrant, submit: () => f.native.submitPermit2Production(f.journal, f.fence, f.id, begun.requestGrant!) }; }
+async function first(t: TestContext, maxTimeoutSeconds = 120) { const f = await paidHttpFixture(t, "sign-and-submit-once", false, maxTimeoutSeconds);
+  return { ...f, submit: () => f.send() }; }
 async function held(f: Awaited<ReturnType<typeof first>>) { const r = (await f.records.findOperation(f.id))!;
   assert.equal(r.state, "request_pending"); assert.equal(r.exposureJournal!.request!.attempt, 1); assert.equal((await f.lease()).state, "unknown_finality"); }
+/** A later send after the one attempt: refused, or status only; either way nothing is sent. */
+async function resend(f: Awaited<ReturnType<typeof first>>) { await f.submit().then(r => assert.equal(r.outcome, null), () => undefined); }
 
 test("actual paid first grant sends exactly stored request/header once only after authorized pinned TLS; no custody crypto or RPC", async t => {
   const f = await first(t), mock = wire(t), before = [f.keys(), f.signatures(), f.batches.length], saved = (await f.records.findOperation(f.id))!;
@@ -68,33 +69,38 @@ test("actual paid first grant sends exactly stored request/header once only afte
   assert.equal(sent.options.rejectUnauthorized, true); assert.ok(sent.options.ca.length); assert.equal(sent.options.agent, false);
   let pin: unknown[] = []; sent.options.lookup("seller.example", {}, (...args: unknown[]) => { pin = args; }); assert.deepEqual(pin, [null, "8.8.8.8", 4]);
   sent.respond(200, ["payment-response", "untrusted-hint"]); const result = await pending;
-  assert.equal(result.outcome.kind, "observed"); if (result.outcome.kind === "observed") assert.equal(result.outcome.observation.status, 200);
-  assert.deepEqual([f.keys(), f.signatures(), f.batches.length], before); await held(f); await assert.rejects(f.submit()); assert.equal(mock.requests.length, 1);
+  assert.equal(result.outcome?.kind, "observed"); if (result.outcome?.kind === "observed") assert.equal(result.outcome.observation.status, 200);
+  assert.deepEqual([f.keys(), f.signatures(), f.batches.length], before); await held(f); await resend(f); assert.equal(mock.requests.length, 1);
 });
 
-test("clones/raw signed/loaded marker/fake execution and wrong native cannot admit HTTPS; generic transport still rejects Permit2", async t => {
-  const f = await first(t), mock = wire(t), saved = (await f.records.findOperation(f.id))!;
-  for (const candidate of [{ ...f.grant }, JSON.parse(JSON.stringify(f.grant)), saved.exposureJournal!.signed, saved.exposureJournal!.request])
-    await assert.rejects(f.native.submitPermit2Production(f.journal, f.fence, f.id, candidate as any));
-  await assert.rejects(new LocalWalletNative(f.state, f.wrapping).submitPermit2Production(f.journal, f.fence, f.id, f.grant));
-  await assert.rejects(new Permit2ProductionHttps().submit({ kind: "permit2-native-dispatch-execution" }));
+test("a changed origin cannot mark or send; the generic transport still rejects Permit2", async t => {
+  const f = await first(t), mock = wire(t), saved = (await f.records.findOperation(f.id))!, origin = f.signed.origin, other = "f".repeat(64);
+  for (const changed of [{ ...origin, signedHash: other }, { ...origin, leaseDigest: other }, { ...origin, approval: { ...origin.approval, completedAt: 0 } }])
+    await assert.rejects(sendPermit2Production(f.journal, f.fence, changed, f.now));
   await assert.rejects(new HttpsX402Http().get({ url: saved.material.checked.request.url, paymentSignature: saved.exposureJournal!.signed!.paymentSignatureHeader }));
-  assert.equal(mock.requests.length, 0); assert.equal(mock.calls(), 0); await held(f);
+  assert.equal(mock.requests.length, 0); assert.equal(mock.calls(), 0); assert.equal((await f.records.findOperation(f.id))!.exposureJournal!.request, null);
 });
-for (const binding of ["id", "journal", "root", "fence"] as const) test(`wrong ${binding} consumes genuine first request without HTTPS or replay`, async t => {
+for (const binding of ["id", "root", "fence"] as const) test(`wrong ${binding} refuses before the marker without HTTPS`, async t => {
+  const f = await first(t), mock = wire(t), origin = f.signed.origin;
+  const journal = binding === "root" ? { root: `${f.root}/wrong` } as Permit2ProductionJournal : f.journal;
+  const fence = binding === "fence" ? new Permit2ProductionSigningFence(`${f.root}/wrong`, f.input.rpcUrl, f.now) : f.fence;
+  await assert.rejects(sendPermit2Production(journal, fence, binding === "id" ? { ...origin, approval: { ...origin.approval, operationId: "f".repeat(64) } } : origin, f.now));
+  assert.equal(mock.requests.length, 0); assert.equal((await f.records.findOperation(f.id))!.exposureJournal!.request, null);
+});
+test("another journal instance of the same state sends the same single attempt", async t => {
   const f = await first(t), mock = wire(t);
-  const journal = binding === "journal" ? new Permit2ProductionJournal(f.root, f.preparation, f.now) : binding === "root" ? { root: `${f.root}/wrong` } as Permit2ProductionJournal : f.journal;
-  const fence = binding === "fence" ? new Permit2ProductionSigningFence(f.root, f.input.rpcUrl, f.now) : f.fence;
-  await assert.rejects(f.native.submitPermit2Production(journal, fence, binding === "id" ? "f".repeat(64) : f.id, f.grant));
-  await assert.rejects(f.submit()); assert.equal(mock.requests.length, 0); await held(f);
+  const pending = sendPermit2Production(new Permit2ProductionJournal(f.root, f.preparation, f.now), f.fence, f.signed.origin, f.now);
+  await until(() => mock.requests.length === 1); const sent = mock.requests[0]; sent.tls(); await until(() => sent.ends === 1); sent.respond();
+  assert.equal((await pending).outcome?.kind, "observed"); await resend(f); assert.equal(mock.requests.length, 1); await held(f);
 });
-test("default sign-only origin cannot create a grant or any dedicated HTTPS request", async t => {
-  const f = await paidHttpFixture(t, "sign-only"), mock = wire(t); await assert.rejects(f.begin());
-  await assert.rejects(f.native.submitPermit2Production(f.journal, f.fence, f.id, f.signed.signingOrigin as any)); assert.equal(mock.requests.length, 0);
+test("a sign-only origin cannot mark or make any dedicated HTTPS request", async t => {
+  const f = await paidHttpFixture(t, "sign-only"), mock = wire(t); await assert.rejects(f.send()); assert.equal(mock.requests.length, 0);
+  assert.equal((await f.records.findOperation(f.id))!.exposureJournal!.request, null);
 });
-test("expired original approval is consumed once and cannot revive after clock rollback", async t => {
-  const f = await first(t), mock = wire(t); f.advance(63); await assert.rejects(f.submit()); f.advance(1); await assert.rejects(f.submit());
-  assert.equal(mock.requests.length, 0); await held(f);
+test("an expired original approval refuses before the marker and sends nothing", async t => {
+  const f = await first(t), mock = wire(t); f.advance(63); await assert.rejects(f.submit());
+  assert.equal(mock.requests.length, 0); assert.equal((await f.records.findOperation(f.id))!.exposureJournal!.request, null);
+  assert.equal((await f.lease()).state, "unknown_finality");
 });
 for (const fault of ["private-dns", "policy", "lease", "ui-expiry", "deadline"] as const) test(`after DNS ${fault} denies construction with durable attempt1`, async t => {
   const f = await first(t), mock = wire(t), timer = clock(t);
@@ -114,68 +120,69 @@ for (const fault of ["private-dns", "policy", "lease", "ui-expiry", "deadline"] 
     if (fault === "lease") await f.usage.transition({ ...productionUsageIdentity(f.record), reservationId: f.record.usageReservationId,
       policyDigest: f.record.material.owner.policyDigest, state: "finalized", outcomeDigest: "e".repeat(64), expectedCurrentStates: ["unknown_finality"], now: f.now() });
   });
-  const result = await f.submit(); assert.equal(result.outcome.kind, "held"); assert.equal(mock.requests.length, 0); await assert.rejects(f.submit());
+  const result = await f.submit(); assert.equal(result.outcome?.kind, "held"); assert.equal(mock.requests.length, 0); await resend(f);
   if (fault !== "lease") await held(f);
 });
 for (const fault of ["unauthorized", "ip", "ui-expiry", "deadline"] as const) test(`TLS ${fault} never ends payment request`, async t => {
   const f = await first(t), mock = wire(t), timer = clock(t), pending = f.submit(); await until(() => mock.requests.length === 1); const sent = mock.requests[0];
   if (fault === "unauthorized") sent.socket.authorized = false; if (fault === "ip") sent.socket.remoteAddress = "1.1.1.1";
   if (fault === "ui-expiry") f.advance(63); if (fault === "deadline") timer.elapse(20_000);
-  sent.tls(); assert.equal((await pending).outcome.kind, "held"); assert.equal(sent.ends, 0); await held(f); await assert.rejects(f.submit());
+  sent.tls(); assert.equal((await pending).outcome?.kind, "held"); assert.equal(sent.ends, 0); await held(f); await resend(f);
 });
 test("20000ms deadline returns held while delayed genuine TLS owner drains under custody lock; no late end/replay", async t => {
   const f = await first(t), mock = wire(t), timer = clock(t), pending = f.submit(); await until(() => mock.requests.length === 1);
   let release!: () => void, entered = false, acquired = false;
   const original = StateStore.prototype.loadWalletArtifacts;
-  t.mock.method(StateStore.prototype, "loadWalletArtifacts", async function(this: StateStore, ...args: Parameters<typeof original>) {
+  const blocker = t.mock.method(StateStore.prototype, "loadWalletArtifacts", async function(this: StateStore, ...args: Parameters<typeof original>) {
     entered = true; await new Promise<void>(resolve => { release = resolve; }); return original.apply(this, args);
   });
   const sent = mock.requests[0]; sent.tls(); await until(() => entered);
   const contender = f.state.withLocks([walletCustodyLock(f.state, "owner")], async () => { acquired = true; });
-  timer.tick(20_000); assert.equal((await pending).outcome.kind, "held"); await nextTurn(); assert.equal(acquired, false); assert.equal(sent.ends, 0);
-  release(); await contender; assert.equal(acquired, true); assert.equal(sent.ends, 0); await assert.rejects(f.submit()); await held(f);
+  timer.tick(20_000); assert.equal((await pending).outcome?.kind, "held"); await nextTurn(); assert.equal(acquired, false); assert.equal(sent.ends, 0);
+  release(); await contender; assert.equal(acquired, true); assert.equal(sent.ends, 0);
+  blocker.mock.restore(); await resend(f); assert.equal(mock.requests.length, 1); await held(f);
 });
 test("20000ms timeout after one end remains held attempt1 and cannot issue a second constructor", async t => {
   const f = await first(t), mock = wire(t), timer = clock(t), pending = f.submit(); await until(() => mock.requests.length === 1);
   const sent = mock.requests[0]; sent.tls(); await until(() => sent.ends === 1); timer.tick(20_000);
-  assert.equal((await pending).outcome.kind, "held"); sent.respond(); await nextTurn(); assert.equal(sent.ends, 1); assert.ok(sent.destroyed);
-  await assert.rejects(f.submit()); assert.equal(mock.requests.length, 1); await held(f);
+  assert.equal((await pending).outcome?.kind, "held"); sent.respond(); await nextTurn(); assert.equal(sent.ends, 1); assert.ok(sent.destroyed);
+  await resend(f); assert.equal(mock.requests.length, 1); await held(f);
 });
 test("20000ms late DNS cannot construct after caller returns held or release custody before its read drains", async t => {
   const f = await first(t), mock = wire(t), timer = clock(t); mock.pauseDns(); const pending = f.submit(); await until(() => mock.calls() === 1);
   let acquired = false; const contender = f.state.withLocks([walletCustodyLock(f.state, "owner")], async () => { acquired = true; });
-  timer.tick(20_000); assert.equal((await pending).outcome.kind, "held"); await nextTurn(); assert.equal(acquired, false); assert.equal(mock.requests.length, 0);
-  mock.releaseDns(); await contender; assert.equal(acquired, true); assert.equal(mock.requests.length, 0); await assert.rejects(f.submit()); await held(f);
+  timer.tick(20_000); assert.equal((await pending).outcome?.kind, "held"); await nextTurn(); assert.equal(acquired, false); assert.equal(mock.requests.length, 0);
+  mock.releaseDns(); await contender; assert.equal(acquired, true); assert.equal(mock.requests.length, 0); await resend(f); await held(f);
 });
 test("TLS signing deadline expires at31000ms while original UI remains within60000ms; zero end", async t => {
   const f = await first(t, 30), mock = wire(t), pending = f.submit(); await until(() => mock.requests.length === 1);
-  const sent = mock.requests[0]; f.advance(32); sent.tls(); assert.equal((await pending).outcome.kind, "held"); assert.equal(sent.ends, 0); await held(f);
+  const sent = mock.requests[0]; f.advance(32); sent.tls(); assert.equal((await pending).outcome?.kind, "held"); assert.equal(sent.ends, 0); await held(f);
 });
 test("TLS policy expiry at21000ms denies end using genuine captured policy while UI/signature stay live", async t => {
   const f = await paidHttpFixture(t, "sign-and-submit-once", false, 120, new Date((protocolSecond + 20) * 1000).toISOString());
-  const begun = await f.begin(); assert.ok(begun.requestGrant); const mock = wire(t);
-  const pending = f.native.submitPermit2Production(f.journal, f.fence, f.id, begun.requestGrant); await until(() => mock.requests.length === 1);
-  const sent = mock.requests[0]; f.advance(22); sent.tls(); assert.equal((await pending).outcome.kind, "held"); assert.equal(sent.ends, 0);
+  const mock = wire(t);
+  const pending = f.send(); await until(() => mock.requests.length === 1);
+  const sent = mock.requests[0]; f.advance(22); sent.tls(); assert.equal((await pending).outcome?.kind, "held"); assert.equal(sent.ends, 0);
   assert.equal((await f.records.findOperation(f.id))!.exposureJournal!.request!.attempt, 1);
 });
 for (const fault of ["duplicate", "alias", "folded", "trailer", "redirect"] as const) test(`response ${fault} cannot become payment proof or trigger another attempt`, async t => {
   const f = await first(t), mock = wire(t), pending = f.submit(); await until(() => mock.requests.length === 1); const sent = mock.requests[0]; sent.tls(); await until(() => sent.ends === 1);
   const headers = fault === "duplicate" ? ["payment-response", "a", "Payment-Response", "b"] : fault === "alias" ? ["payment-response", "a", "x-payment-response", "b"] : fault === "folded" ? ["payment-response", "a,b"] : [];
   sent.respond(fault === "redirect" ? 302 : 200, headers, fault === "trailer" ? ["payment-response", "a"] : []);
-  assert.equal((await pending).outcome.kind, "held"); await held(f); await assert.rejects(f.submit()); assert.equal(mock.requests.length, 1);
+  assert.equal((await pending).outcome?.kind, "held"); await held(f); await resend(f); assert.equal(mock.requests.length, 1);
 });
 test("paid HTTP402 remains an untrusted observation with attempt1 held and no challenge retry", async t => {
   const f = await first(t), mock = wire(t), pending = f.submit(); await until(() => mock.requests.length === 1);
   const sent = mock.requests[0]; sent.tls(); await until(() => sent.ends === 1);
   sent.respond(402, ["payment-required", "untrusted-next-offer", "payment-response", "untrusted-hint"]);
-  const result = await pending; assert.equal(result.outcome.kind, "observed");
-  if (result.outcome.kind === "observed") assert.equal(result.outcome.observation.status, 402);
-  await held(f); await assert.rejects(f.submit()); assert.equal(mock.requests.length, 1); assert.equal(sent.ends, 1);
+  const result = await pending; assert.equal(result.outcome?.kind, "observed");
+  if (result.outcome?.kind === "observed") assert.equal(result.outcome.observation.status, 402);
+  await held(f); await resend(f); assert.equal(mock.requests.length, 1); assert.equal(sent.ends, 1);
 });
 test("post-send transport error returns safe held status without raw data or a second request", async t => {
   const f = await first(t), mock = wire(t), pending = f.submit(); await until(() => mock.requests.length === 1);
   const sent = mock.requests[0]; sent.tls(); await until(() => sent.ends === 1); sent.req.emit("error", new Error("synthetic-private-error"));
-  const result = await pending; assert.equal(result.outcome.kind, "held");
+  const result = await pending; assert.equal(result.outcome?.kind, "held");
   for (const secret of ["synthetic-private-error", sent.endpoint.toString(), sent.options.headers["PAYMENT-SIGNATURE"]]) assert.equal(JSON.stringify(result).includes(secret), false);
-  await held(f); await assert.rejects(f.submit()); assert.equal(mock.requests.length, 1); assert.equal(sent.ends, 1);
+  await held(f); await resend(f); assert.equal(mock.requests.length, 1); assert.equal(sent.ends, 1);
 });

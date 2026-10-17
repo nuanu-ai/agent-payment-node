@@ -13,7 +13,8 @@ import { KeylessOrcaQuoteBuilder, type OrcaKeylessQuoteRequest } from "./builder
 import { OrcaExecutionBindingStore, OrcaLocalSigner, OrcaSingleSender } from "./effects.js";
 import { OrcaExecutionGuard, OrcaSolanaExecutionDriver } from "./execution.js";
 import { SavedOrcaQuoteStore } from "./material.js";
-import { ORCA_KEYLESS_PROTOCOL_REGISTRY, ORCA_SOLANA_CHAIN, type OrcaProgramPinVerifier } from "./pins.js";
+import { ORCA_SOLANA_CHAIN, type OrcaProgramPinVerifier } from "./pins.js";
+import type { OrcaPoolConfig } from "./pools.js";
 import { OrcaReceiptObserver } from "./receipt.js";
 import { orcaApprovalScreen } from "./tty.js";
 import { TtyGuardedSwapApproval } from "../tty-consent.js";
@@ -30,19 +31,32 @@ export interface OrcaKeylessRuntimeOptions {
   readonly accounts: Pick<ChainWalletStoragePort, "account" | "withSeed" | "effect" | "saveEffect">;
   /** Program byte verifier. Production passes verifyOrcaProgramPins. */
   readonly verifyPins: OrcaProgramPinVerifier;
+  /** The one pinned pool this runtime quotes, approves, signs and observes; its lane registry binds every operation. */
+  readonly pool: OrcaPoolConfig;
 }
+/** The runtime of one pool, built on first use within a command. */
+export type OrcaRuntimeSelector = (pool: OrcaPoolConfig) => GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
 
 export function createOrcaKeylessRuntime(options: OrcaKeylessRuntimeOptions): GuardedSwapRuntime<OrcaKeylessQuoteRequest> {
-  const { state, clock, rpc, accounts } = options, root = state.root;
+  const { state, clock, rpc, accounts, pool } = options, root = state.root, registry = pool.protocolRegistry;
   const quotes = new SavedOrcaQuoteStore(root), operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root);
   const admission = new OrcaLocalOwnerAdmission(accounts, options.policy), signer = new OrcaLocalSigner(accounts);
   const sender = new OrcaSingleSender(rpc), observer = new OrcaReceiptObserver(rpc, () => clock.now());
-  const execution = new OrcaSolanaExecutionDriver({ core: new GuardedSwapService(operations, usage), protocolRegistry: ORCA_KEYLESS_PROTOCOL_REGISTRY,
+  const execution = new OrcaSolanaExecutionDriver({ core: new GuardedSwapService(operations, usage), protocolRegistry: registry,
     admission, guard: new OrcaExecutionGuard(rpc, clock, options.verifyPins), bindings: new OrcaExecutionBindingStore(root), signer, sender,
     observer, effects: accounts, clock });
   const foregroundApproval = options.foreground === "tty" ? new TtyGuardedSwapApproval("orca", intent => orcaApprovalScreen(quotes, intent), clock, options.tty) : options.foreground;
-  return new GuardedSwapRuntime<OrcaKeylessQuoteRequest>({ chain: ORCA_SOLANA_CHAIN, builder: new KeylessOrcaQuoteBuilder(rpc, quotes, options.verifyPins),
-    policy: options.policy, clock, protocolRegistry: ORCA_KEYLESS_PROTOCOL_REGISTRY, usage, operations, ownerAdmission: admission,
+  return new GuardedSwapRuntime<OrcaKeylessQuoteRequest>({ chain: ORCA_SOLANA_CHAIN, builder: new KeylessOrcaQuoteBuilder(rpc, quotes, options.verifyPins, pool),
+    policy: options.policy, clock, protocolRegistry: registry, usage, operations, ownerAdmission: admission,
     foregroundApproval, execution, approvals: new GuardedSwapApprovalRepository(root), rpc, effectStore: accounts, signer, sender,
     observer, caps: { approvalCapAtomic: "0" } });
+}
+
+/** Builds each pool's runtime once per command: a pool selects exactly its own lane registry and builder. */
+export function orcaRuntimeSelector(build: OrcaRuntimeSelector): OrcaRuntimeSelector {
+  const built = new Map<string, GuardedSwapRuntime<OrcaKeylessQuoteRequest>>();
+  return (pool) => {
+    const existing = built.get(pool.id); if (existing !== undefined) return existing;
+    const runtime = build(pool); built.set(pool.id, runtime); return runtime;
+  };
 }

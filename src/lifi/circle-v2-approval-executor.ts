@@ -13,6 +13,8 @@ import type { BridgeProtocolReceipt } from "./model.js";
 import type { BridgeRpcPort } from "./ports.js";
 import { bridgeOwner } from "./owner.js";
 import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
+import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
+import { evmClaim } from "../operation-index/adapters/family-claims.js";
 
 export type CircleApprovalPhase = "prepared" | "signing_started" | "sealed" | "submitting" | "unknown_finality" | "completed" | "confirmed_revert" | "failed_before_effect";
 export interface CircleApprovalRecord {
@@ -111,6 +113,10 @@ class CircleApprovalJournal extends SecureStateStore {
     await this.writeJson(`circle-approvals/${record.id}.json`, record);
   }
 }
+/** Lock-free read of one approval journal (the operation index's reader). */
+export async function loadCircleApproval(root: string, id: string): Promise<CircleApprovalRecord | null> {
+  return await new CircleApprovalJournal(root).load(id);
+}
 function update(record: CircleApprovalRecord, patch: Partial<CircleApprovalRecord>): CircleApprovalRecord {
   const { integrityHash: _ignored, ...body } = { ...record, ...patch };
   return { ...body, integrityHash: hashObject(body) };
@@ -181,8 +187,11 @@ export class CircleV2ApprovalExecutor {
   async prepare(input: { readonly profile: string; readonly payer: string; readonly walletBindingHash: string;
     readonly walletCreatedAt: string; readonly approvalCapAtomic: string }): Promise<CircleApprovalRecord> {
     await this.state.initialize();
-    const profileHash = this.state.profileHash(input.profile);
+    const profileHash = this.state.profileHash(input.profile), claims = [evmClaim(8453, input.payer)];
     return await this.state.withLocks([`profile:${profileHash}`], async () => {
+      // The ID is the digest of what the reads return, so the claim is written atomically once it is known (before the
+      // record and before anything is signed); this check refuses an account another operation holds before any read.
+      await assertClaimsAvailable(this.state, profileHash, claims);
       const p = await prepareCircleV2BaseUsdcApprovalReadOnly({ chainId: 8453, payer: input.payer,
         token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", spender: "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408",
         approvalCapAtomic: input.approvalCapAtomic }, this.rpc.read, this.limits, this.now);
@@ -198,7 +207,8 @@ export class CircleV2ApprovalExecutor {
         phase: "prepared" as const, rawTransaction: null, transactionHash: null,
         submissionAttempts: 0 as const, observedAllowanceAtomic: null };
       const record = { ...body, integrityHash: hashObject(body) };
-      await this.journal.save(record); return record;
+      return await admitOperation(this.state, { family: "circle_approval", profileHash, operationId: id, idempotencyHash: null, requestHash: null },
+        claims, async () => { await this.journal.save(record); return record; });
     });
   }
   async execute(id: string, confirm: (record: CircleApprovalRecord) => Promise<boolean>): Promise<CircleApprovalRecord> {

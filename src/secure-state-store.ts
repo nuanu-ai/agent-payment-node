@@ -172,6 +172,21 @@ export class SecureStateStore {
     return await withoutAtomicTemporaries(this.resolveRelative(relativePath), entries, Date.now());
   }
 
+  /**
+   * The one record named for this ID across the per-profile directories of `store`, through the family's own `load`.
+   * Only that name is read under each profile, so another saved record can never break the lookup.
+   */
+  protected async findInProfiles<T>(store: string, load: (profileHash: string) => Promise<T | null>, corrupt: () => never): Promise<T | null> {
+    let found: T | null = null;
+    for (const entry of await this.readDirectory(store)) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) corrupt();
+      const record = await load(entry.name);
+      if (record !== null && found !== null) corrupt();
+      found = record ?? found;
+    }
+    return found;
+  }
+
   /** Raw listing that still shows atomic-write stages; only for code that inspects its own in-flight stage. */
   protected async readDirectoryWithStagedWrites(relativePath: string): Promise<readonly Dirent[]> {
     const target = this.resolveRelative(relativePath);

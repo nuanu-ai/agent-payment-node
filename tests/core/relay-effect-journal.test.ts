@@ -117,7 +117,12 @@ test("Relay journal is create only, durable after reopen, and preserves one subm
   const tampered = reseal(journal, { orderId: "changed" });
   await writeFile(path, `${JSON.stringify(tampered)}\n`);
   await assert.rejects(repo.load(op.profileHash, op.operationId), { code: "APN_STATE_CORRUPT" });
-  await assert.rejects(operations.assertProfileAvailable(op.profileHash), { code: "APN_STATE_CORRUPT" });
+  // The operation index settled this operation when its source effect was proven; a later damaged sidecar fails its own
+  // reads, and the profile guard still reports only the operation that is really unresolved.
+  await assert.rejects(operations.relayStatus(op), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(operations.assertProfileAvailable(op.profileHash), {
+    code: "APN_OPERATION_BLOCKED", details: { blockingOperationId: other.operationId, blockingState: "prepared" },
+  });
 });
 
 test("Relay effect phases reject skips and failures never permit another attempt", async () => {
