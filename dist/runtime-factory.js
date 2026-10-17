@@ -200,7 +200,7 @@ export function createApnCore(bound, options = {}) {
                 isUniswapTokenCleanup(bound.request.command) ? "cleanup" : "refuse" })
         : undefined);
     // Keyless SunSwap likewise, over APN_TRON_RPC_URL and the profile's encrypted local TRON wallet.
-    const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.") && options.sunswap === undefined
+    const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.")
         ? createSunSwapKeylessRuntime({ state, rpc: tronRpc, accounts: chainAccounts, clock,
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
             foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
@@ -288,7 +288,6 @@ export function createApnCore(bound, options = {}) {
             orcaStableObserve: async (operationId) => await new OrcaStableFinalizedObserver(new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)), new SavedOrcaStableMaterialStore(state.root), new OrcaStableExecutionBindingStore(state.root), chainAccounts, solanaRpc, () => clock.now()).observe(operationId),
             orcaStableRelease: async (operationId) => await releaseOrcaStableNoEffect(new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)), new SavedOrcaStableMaterialStore(state.root), operationId, clock.now()),
         } : {}),
-        ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
         ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
             circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
         } : {}),

@@ -34,7 +34,6 @@ export class RuntimeContext {
     orcaStableRecoverNoSend;
     orcaStableRelease;
     orcaStableObserve;
-    sunswap;
     jupiterV1Runtime;
     facilitatorGasless;
     smartAccountGasless;
@@ -138,8 +137,6 @@ export class RuntimeContext {
             this.orcaStableRelease = dependencies.orcaStableRelease;
         if (dependencies.orcaStableObserve !== undefined)
             this.orcaStableObserve = dependencies.orcaStableObserve;
-        if (dependencies.sunswap !== undefined)
-            this.sunswap = dependencies.sunswap;
         if (dependencies.jupiterV1Runtime !== undefined)
             this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
         if (dependencies.facilitatorGasless !== undefined)

@@ -1,5 +1,4 @@
 import type { ChainAccount, ChainWalletStoragePort } from "../../direct-rail-ports.js";
-import type { SwapChainSignerPort, SwapChainSenderPort } from "../ports.js";
 import { type SwapOperationRecord } from "../model.js";
 import { SwapOperationRepository } from "../repository.js";
 import type { SunSwapSimulationProof } from "./simulation.js";
@@ -17,7 +16,7 @@ export interface SunSwapBroadcastRpcPort {
  * A per-operation protected adapter. Signed bytes remain in ChainAccountStore's authenticated
  * encrypted envelope; the public swap journal receives only the opaque binding fingerprint.
  */
-export declare class SunSwapProtectedExecutionAdapter implements SwapChainSignerPort, SwapChainSenderPort {
+export declare class SunSwapProtectedExecutionAdapter {
     private readonly storage;
     private readonly rpc;
     private readonly operations;
