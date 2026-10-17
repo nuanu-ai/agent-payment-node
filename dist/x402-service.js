@@ -6,6 +6,7 @@ import { BASE_USDC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { evmConflictDomain, sharedEvmConflictDomain } from "./operation-conflict-domain.js";
 import { assertUnattendedX402Balance, effectiveX402Cap, requireProfilePolicy, x402PayeeAdmittedOffers, } from "./profile-policy.js";
 import { candidatesWithinCap, canonicalPrepareUrl, freshChallenge, paymentIdentifierState, positiveCap, selectPrepareOffer, } from "./x402-policy.js";
 import { appendX402Transition, publicX402Operation, sealX402Operation, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, } from "./x402-state-integrity.js";
@@ -60,138 +61,138 @@ export class X402Service extends X402PaidRequest {
             if (existing !== null)
                 return publicX402Operation(existing.record);
             const payer = await resolveX402Payer(this.context, profileHash, network.chainId);
-            // EIP-3009 uses its own random nonce: purchases share the account, but nonce and EIP-7702 spenders still exclude them.
-            if (payer.transferMethod === "eip3009")
-                await this.operations.assertEvmAccountSharedAvailable(profileHash, network.chainId, payer.wallet);
-            else
-                await this.operations.assertEvmAccountAvailable(profileHash, network.chainId, payer.wallet);
             const profilePolicy = requireProfilePolicy(await this.context.requirePolicy().load(payer.policy));
             const capAtomic = effectiveX402Cap(profilePolicy, callerCap);
             const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic, chainId: network.chainId, ...requestFields });
-            const wallet = payer.wallet;
-            const http = this.context.requireHttp();
-            const rpc = selectX402Rpc(this.context.requireRpc(), network.chainId);
-            const discovered = await freshChallenge(http, canonicalUrl, httpRequest, network.chainId);
-            // The owner's optional payee pin narrows the offers before selection (checked again before signing and the first send).
-            const underCap = x402PayeeAdmittedOffers(profilePolicy, candidatesWithinCap(discovered, capAtomic));
-            const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
-            const createdAt = createdAtDate.toISOString();
-            const createdAtUnix = Math.floor(createdAtDate.getTime() / 1000).toString();
-            const invocationStartedAtMs = this.context.clock.now().getTime();
-            const chain = await assertX402RpcChain(rpc, network.chainId);
-            const evidence = await rpc.getX402PrepareEvidence(wallet);
-            const invocationCompletedAtMs = this.context.clock.now().getTime();
-            const selected = selectPrepareOffer(discovered, underCap, evidence, wallet, {
-                rpcOriginHash: sha256(chain.rpcOrigin),
-                invocationStartedAtMs,
-                invocationCompletedAtMs,
-            }, payer.transferMethod);
-            assertUnattendedX402Balance(profilePolicy, evidence.usdcAtomic);
-            const delegatedMaterial = payer.delegated === undefined ? undefined : await payer.delegated.port.prepare({
-                profile,
-                profileHash,
-                profileRevision: payer.delegated.profileRevision,
-                capabilityHash: payer.delegated.capabilityHash,
-                accountBindingHash: payer.delegated.accountBindingHash,
-                wallet,
-                token: BASE_USDC,
-                payee: selected.payee,
-                amountAtomic: selected.amountAtomic,
-                capAtomic,
-                offerHash: selected.selectedOffer.offerHash,
-                requirements: selected.requirements,
-                facilitatorAddresses: selected.selectedOffer.resolved.assetTransferMethod === "erc7710"
-                    ? selected.selectedOffer.resolved.facilitatorAddresses
-                    : [],
-                preparedAtUnix: createdAtUnix,
-                maxTimeoutSeconds: selected.maxTimeoutSeconds,
-                rpcOriginHash: sha256(chain.rpcOrigin),
+            // The account claim is written before the seller challenge and any RPC read, and dropped if no operation is written.
+            // EIP-3009 uses its own random nonce: purchases share the account, but nonce and EIP-7702 spenders still exclude them.
+            return await this.operations.admit({ kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [payer.transferMethod === "eip3009" ? sharedEvmConflictDomain(network.chainId, payer.wallet)
+                        : evmConflictDomain(network.chainId, payer.wallet)] }, async () => {
+                const wallet = payer.wallet;
+                const http = this.context.requireHttp();
+                const rpc = selectX402Rpc(this.context.requireRpc(), network.chainId);
+                const discovered = await freshChallenge(http, canonicalUrl, httpRequest, network.chainId);
+                // The owner's optional payee pin narrows the offers before selection (checked again before signing and the first send).
+                const underCap = x402PayeeAdmittedOffers(profilePolicy, candidatesWithinCap(discovered, capAtomic));
+                const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
+                const createdAt = createdAtDate.toISOString();
+                const createdAtUnix = Math.floor(createdAtDate.getTime() / 1000).toString();
+                const invocationStartedAtMs = this.context.clock.now().getTime();
+                const chain = await assertX402RpcChain(rpc, network.chainId);
+                const evidence = await rpc.getX402PrepareEvidence(wallet);
+                const invocationCompletedAtMs = this.context.clock.now().getTime();
+                const selected = selectPrepareOffer(discovered, underCap, evidence, wallet, {
+                    rpcOriginHash: sha256(chain.rpcOrigin),
+                    invocationStartedAtMs,
+                    invocationCompletedAtMs,
+                }, payer.transferMethod);
+                assertUnattendedX402Balance(profilePolicy, evidence.usdcAtomic);
+                const delegatedMaterial = payer.delegated === undefined ? undefined : await payer.delegated.port.prepare({
+                    profile,
+                    profileHash,
+                    profileRevision: payer.delegated.profileRevision,
+                    capabilityHash: payer.delegated.capabilityHash,
+                    accountBindingHash: payer.delegated.accountBindingHash,
+                    wallet,
+                    token: BASE_USDC,
+                    payee: selected.payee,
+                    amountAtomic: selected.amountAtomic,
+                    capAtomic,
+                    offerHash: selected.selectedOffer.offerHash,
+                    requirements: selected.requirements,
+                    facilitatorAddresses: selected.selectedOffer.resolved.assetTransferMethod === "erc7710"
+                        ? selected.selectedOffer.resolved.facilitatorAddresses
+                        : [],
+                    preparedAtUnix: createdAtUnix,
+                    maxTimeoutSeconds: selected.maxTimeoutSeconds,
+                    rpcOriginHash: sha256(chain.rpcOrigin),
+                });
+                const paymentIdentifier = paymentIdentifierState(discovered.paymentRequired, operationId);
+                const resourceCanonicalJson = canonicalJson(discovered.paymentRequired.resource);
+                const authorizationBase = {
+                    from: wallet,
+                    to: selected.payee.toLowerCase(),
+                    value: selected.amountAtomic,
+                    validAfter: "0",
+                    validBefore: delegatedMaterial?.effectiveExpiryUnix ??
+                        (BigInt(createdAtUnix) + BigInt(selected.maxTimeoutSeconds)).toString(),
+                    nonce: `0x${randomBytes(32).toString("hex")}`,
+                    createdAt: createdAtUnix,
+                };
+                const resource = {
+                    ...requestFields,
+                    canonicalUrl,
+                    origin: endpoint.origin,
+                    path: endpoint.pathname,
+                    urlHash: sha256(canonicalUrl),
+                };
+                const fingerprintInput = {
+                    kind: "x402_fetch",
+                    profile,
+                    operationId,
+                    resource,
+                    chainId: network.chainText,
+                    network: network.network,
+                    token: network.token.toLowerCase(),
+                    capAtomic,
+                    selectedOffer: selected.selectedOffer,
+                    wallet,
+                    ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
+                    ...(delegatedMaterial === undefined ? {} : { delegatedMaterial }),
+                    ...(paymentIdentifier === undefined ? {} : { paymentIdentifier }),
+                };
+                const initial = {
+                    at: createdAt,
+                    state: "awaiting_approval",
+                    terminal: false,
+                    reason: "x402_awaiting_authorization",
+                    proofClass: "x402_frozen_offer",
+                };
+                const operation = sealX402Operation({
+                    schemaVersion: "apn.x402.state.v1",
+                    kind: "x402_fetch",
+                    operationId,
+                    idempotencyHash,
+                    profile,
+                    profileHash,
+                    requestHash,
+                    fingerprint: x402Fingerprint(fingerprintInput),
+                    resource,
+                    sellerWire: {
+                        resourceCanonicalJson,
+                        resourceHash: domainHash("apn.x402.resource.v1", resourceCanonicalJson),
+                    },
+                    chainId: network.chainText,
+                    network: network.network,
+                    token: network.token.toLowerCase(),
+                    wallet,
+                    payee: authorizationBase.to,
+                    amountAtomic: selected.amountAtomic,
+                    capAtomic,
+                    selectedOffer: selected.selectedOffer,
+                    ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
+                    ...(delegatedMaterial === undefined ? {} : { delegatedMaterial }),
+                    preparedBlock: {
+                        number: evidence.block.number,
+                        hash: evidence.block.hash,
+                        observedAt: evidence.observedAt,
+                    },
+                    ...(paymentIdentifier === undefined ? {} : { paymentIdentifier }),
+                    authorization: { ...authorizationBase, intentHash: x402AuthorizationIntentHash(authorizationBase) },
+                    attempts: [],
+                    state: initial.state,
+                    finalityClass: "pre_effect",
+                    terminal: initial.terminal,
+                    reason: initial.reason,
+                    proofClass: initial.proofClass,
+                    nextActions: ["x402.fetch.approve", "operation.status"],
+                    createdAt,
+                    updatedAt: createdAt,
+                    transitions: appendX402Transition([], initial),
+                });
+                await state.writeX402Operation(operation);
+                return publicX402Operation(operation);
             });
-            const paymentIdentifier = paymentIdentifierState(discovered.paymentRequired, operationId);
-            const resourceCanonicalJson = canonicalJson(discovered.paymentRequired.resource);
-            const authorizationBase = {
-                from: wallet,
-                to: selected.payee.toLowerCase(),
-                value: selected.amountAtomic,
-                validAfter: "0",
-                validBefore: delegatedMaterial?.effectiveExpiryUnix ??
-                    (BigInt(createdAtUnix) + BigInt(selected.maxTimeoutSeconds)).toString(),
-                nonce: `0x${randomBytes(32).toString("hex")}`,
-                createdAt: createdAtUnix,
-            };
-            const resource = {
-                ...requestFields,
-                canonicalUrl,
-                origin: endpoint.origin,
-                path: endpoint.pathname,
-                urlHash: sha256(canonicalUrl),
-            };
-            const fingerprintInput = {
-                kind: "x402_fetch",
-                profile,
-                operationId,
-                resource,
-                chainId: network.chainText,
-                network: network.network,
-                token: network.token.toLowerCase(),
-                capAtomic,
-                selectedOffer: selected.selectedOffer,
-                wallet,
-                ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
-                ...(delegatedMaterial === undefined ? {} : { delegatedMaterial }),
-                ...(paymentIdentifier === undefined ? {} : { paymentIdentifier }),
-            };
-            const initial = {
-                at: createdAt,
-                state: "awaiting_approval",
-                terminal: false,
-                reason: "x402_awaiting_authorization",
-                proofClass: "x402_frozen_offer",
-            };
-            const operation = sealX402Operation({
-                schemaVersion: "apn.x402.state.v1",
-                kind: "x402_fetch",
-                operationId,
-                idempotencyHash,
-                profile,
-                profileHash,
-                requestHash,
-                fingerprint: x402Fingerprint(fingerprintInput),
-                resource,
-                sellerWire: {
-                    resourceCanonicalJson,
-                    resourceHash: domainHash("apn.x402.resource.v1", resourceCanonicalJson),
-                },
-                chainId: network.chainText,
-                network: network.network,
-                token: network.token.toLowerCase(),
-                wallet,
-                payee: authorizationBase.to,
-                amountAtomic: selected.amountAtomic,
-                capAtomic,
-                selectedOffer: selected.selectedOffer,
-                ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
-                ...(delegatedMaterial === undefined ? {} : { delegatedMaterial }),
-                preparedBlock: {
-                    number: evidence.block.number,
-                    hash: evidence.block.hash,
-                    observedAt: evidence.observedAt,
-                },
-                ...(paymentIdentifier === undefined ? {} : { paymentIdentifier }),
-                authorization: { ...authorizationBase, intentHash: x402AuthorizationIntentHash(authorizationBase) },
-                attempts: [],
-                state: initial.state,
-                finalityClass: "pre_effect",
-                terminal: initial.terminal,
-                reason: initial.reason,
-                proofClass: initial.proofClass,
-                nextActions: ["x402.fetch.approve", "operation.status"],
-                createdAt,
-                updatedAt: createdAt,
-                transitions: appendX402Transition([], initial),
-            });
-            await state.writeX402Operation(operation);
-            return publicX402Operation(operation);
         });
     }
     async approve(request) {

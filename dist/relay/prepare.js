@@ -11,6 +11,7 @@ import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-re
 import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { StateStore } from "../state.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
@@ -87,31 +88,33 @@ export class RelayUnsignedPrepareService {
         // share one profile/operation/address critical section in OperationService.
         const checkOwner = async () => await this.state.withLocks([evmAddressLock(payer)], async () => await assertExclusiveEvmOwner(this.state, payer, profileHash));
         await checkOwner();
-        await this.operations.assertProfileAvailable(profileHash);
-        const intent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
-            minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000),
-            ...(route === "base" ? { destinationChainId: 8453 } : {}) };
-        const quote = await (this.ports.quote?.(intent) ?? requestRelayQuote(intent));
-        const { quoteDigest, ...projection } = quote;
-        if (hashObject(projection) !== quoteDigest || quote.payer !== payer || quote.recipient !== intent.recipient ||
-            quote.orderData.output.chainId !== route || quote.routeReference !== (route === "base" ? RELAY_BASE_ROUTE_REFERENCE : undefined) ||
-            quote.principalAtomic !== input.amountAtomic || BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
-            quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
-            (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
-            BigInt(quote.approval.maximumNetworkFeeWei) > BigInt(input.maxApprovalNetworkFeeWei) ||
-            BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
-            throw new ApnError("APN_OPERATION_BLOCKED", "Relay quote identity, deadline, or fee ceiling changed.");
-        }
-        const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
-            kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
-            requestHash, sourceChainId: 1, destinationChainId: route === "base" ? 8453 : 56, sourceAccount: payer, recipient: intent.recipient,
-            quoteDigest, quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
-            policyDigest: active.digest, policyRevision: active.revision,
-            approvalNetworkFeeCeilingWei: quote.approval.maximumNetworkFeeWei,
-            depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
-            amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
-            createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
-        return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+        // The profile and the source account are claimed before the quote, and dropped if no operation is written.
+        return await this.operations.admit({ kind: "relay_unsigned", profileHash, operationId, idempotencyHash, requestHash }, { profileWide: true, domains: () => [evmConflictDomain(1, payer)] }, async () => {
+            const intent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
+                minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000),
+                ...(route === "base" ? { destinationChainId: 8453 } : {}) };
+            const quote = await (this.ports.quote?.(intent) ?? requestRelayQuote(intent));
+            const { quoteDigest, ...projection } = quote;
+            if (hashObject(projection) !== quoteDigest || quote.payer !== payer || quote.recipient !== intent.recipient ||
+                quote.orderData.output.chainId !== route || quote.routeReference !== (route === "base" ? RELAY_BASE_ROUTE_REFERENCE : undefined) ||
+                quote.principalAtomic !== input.amountAtomic || BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
+                quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
+                (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
+                BigInt(quote.approval.maximumNetworkFeeWei) > BigInt(input.maxApprovalNetworkFeeWei) ||
+                BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
+                throw new ApnError("APN_OPERATION_BLOCKED", "Relay quote identity, deadline, or fee ceiling changed.");
+            }
+            const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
+                kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
+                requestHash, sourceChainId: 1, destinationChainId: route === "base" ? 8453 : 56, sourceAccount: payer, recipient: intent.recipient,
+                quoteDigest, quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
+                policyDigest: active.digest, policyRevision: active.revision,
+                approvalNetworkFeeCeilingWei: quote.approval.maximumNetworkFeeWei,
+                depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
+                amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
+                createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
+            return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+        });
     }
     async prepareBase(input) { return this.prepare(input, "base"); }
     /** A local quote file is validated before create-only persistence; no network or wallet is used. */
@@ -149,40 +152,42 @@ export class RelayUnsignedPrepareService {
         }, now).then(value => value.amountAtomic));
         await this.state.initialize();
         await this.state.withLocks([evmAddressLock(owner)], async () => assertExclusiveEvmOwner(this.state, owner, profileHash));
-        await this.operations.assertProfileAvailable(profileHash);
-        const rawQuote = await (this.ports.arbitrumQuoteFile?.(input.quoteFile) ?? (async () => {
-            const file = await open(input.quoteFile, constants.O_RDONLY | constants.O_NOFOLLOW)
-                .catch(() => { throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file cannot be opened."); });
-            try {
-                const stat = await file.stat();
-                if (!stat.isFile() || stat.size > 65_536)
-                    throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file is invalid or too large.");
-                const bytes = await file.readFile();
-                if (bytes.length > 65_536)
-                    throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file is too large.");
-                return JSON.parse(bytes.toString("utf8"));
-            }
-            finally {
-                await file.close();
-            }
-        })());
-        const draft = await createRelayArbitrumSourceDraft({ profile: input.profile, owner, recipient: input.recipient, publicAccount: owner,
-            amountAtomic: input.amountAtomic, minimumOutputAtomic: input.minOutputAtomic,
-            maxProviderFeeAtomic: input.maxProviderFeeAtomic,
-            maxApprovalNetworkFeeWei: input.maxApprovalNetworkFeeWei,
-            maxDepositNetworkFeeWei: input.maxDepositNetworkFeeWei, dailyUsageAtomic: usage,
-            activePolicy: active, rawQuote, now });
-        const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
-            kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
-            requestHash, sourceChainId: 42161, destinationChainId: 1, sourceAccount: owner,
-            recipient: draft.recipient.toLowerCase(), quoteDigest: draft.quoteDigest,
-            statusLocator: relayStatusLocator(draft.requestId), arbitrumDraft: draft,
-            policyDigest: draft.policyDigest, policyRevision: draft.policyRevision,
-            approvalNetworkFeeCeilingWei: draft.maxApprovalNetworkFeeWei,
-            depositNetworkFeeCeilingWei: draft.maxDepositNetworkFeeWei,
-            amountAtomic: draft.amountAtomic, minOutputAtomic: draft.minimumOutputAtomic,
-            createdAt: draft.createdAt, deadline: draft.deadline });
-        return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+        // The profile and the source account are claimed before the quote, and dropped if no operation is written.
+        return await this.operations.admit({ kind: "relay_unsigned", profileHash, operationId, idempotencyHash, requestHash }, { profileWide: true, domains: () => [evmConflictDomain(42161, owner)] }, async () => {
+            const rawQuote = await (this.ports.arbitrumQuoteFile?.(input.quoteFile) ?? (async () => {
+                const file = await open(input.quoteFile, constants.O_RDONLY | constants.O_NOFOLLOW)
+                    .catch(() => { throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file cannot be opened."); });
+                try {
+                    const stat = await file.stat();
+                    if (!stat.isFile() || stat.size > 65_536)
+                        throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file is invalid or too large.");
+                    const bytes = await file.readFile();
+                    if (bytes.length > 65_536)
+                        throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file is too large.");
+                    return JSON.parse(bytes.toString("utf8"));
+                }
+                finally {
+                    await file.close();
+                }
+            })());
+            const draft = await createRelayArbitrumSourceDraft({ profile: input.profile, owner, recipient: input.recipient, publicAccount: owner,
+                amountAtomic: input.amountAtomic, minimumOutputAtomic: input.minOutputAtomic,
+                maxProviderFeeAtomic: input.maxProviderFeeAtomic,
+                maxApprovalNetworkFeeWei: input.maxApprovalNetworkFeeWei,
+                maxDepositNetworkFeeWei: input.maxDepositNetworkFeeWei, dailyUsageAtomic: usage,
+                activePolicy: active, rawQuote, now });
+            const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
+                kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
+                requestHash, sourceChainId: 42161, destinationChainId: 1, sourceAccount: owner,
+                recipient: draft.recipient.toLowerCase(), quoteDigest: draft.quoteDigest,
+                statusLocator: relayStatusLocator(draft.requestId), arbitrumDraft: draft,
+                policyDigest: draft.policyDigest, policyRevision: draft.policyRevision,
+                approvalNetworkFeeCeilingWei: draft.maxApprovalNetworkFeeWei,
+                depositNetworkFeeCeilingWei: draft.maxDepositNetworkFeeWei,
+                amountAtomic: draft.amountAtomic, minOutputAtomic: draft.minimumOutputAtomic,
+                createdAt: draft.createdAt, deadline: draft.deadline });
+            return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+        });
     }
     async prepareNative(input) {
         const source = EIP155.exec(input.sourceChain), destination = EIP155.exec(input.destinationChain);
@@ -235,40 +240,42 @@ export class RelayUnsignedPrepareService {
         await this.state.initialize();
         const checkOwner = async () => this.state.withLocks([evmAddressLock(payer)], async () => assertExclusiveEvmOwner(this.state, payer, profileHash));
         await checkOwner();
-        await this.operations.assertProfileAvailable(profileHash);
-        const intent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
-            minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000), routeReference: route.reference,
-            maximumNetworkFeeWei: input.maxDepositNetworkFeeWei };
-        const quote = await (this.ports.nativeQuote?.(intent) ?? requestRelayNativeQuote(intent));
-        const { quoteDigest, ...projection } = quote;
-        // A Base order's signed deadline bounds settlement/refunds, not local source-effect authority.
-        const authorizationDeadline = Math.min(quote.deadline * 1000 - 60_000, active.registry.expiresAt === undefined ? Infinity : Date.parse(active.registry.expiresAt));
-        if (route.sourceChainId === 8453) {
-            const current = await (this.ports.activePolicy?.(input.profile) ?? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile));
-            const at = this.clock.now().getTime();
-            if (current === null || current.profile !== active.profile || current.digest !== active.digest || current.revision !== active.revision ||
-                current.activationDigest !== active.activationDigest || current.accounts.evm?.toLowerCase() !== payer ||
-                !Number.isFinite(at) || !Number.isFinite(authorizationDeadline) || at >= authorizationDeadline)
-                refuse("relay_native_authorization_window");
-        }
-        if (hashObject(projection) !== quoteDigest || quote.routeReference !== route.reference ||
-            quote.payer !== payer || quote.recipient !== intent.recipient || quote.principalAtomic !== input.amountAtomic ||
-            BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
-            quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
-            (route.sourceChainId !== 8453 && active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
-            BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
-            throw new ApnError("APN_OPERATION_BLOCKED", "Relay native quote identity, deadline, or fee ceiling changed.");
-        }
-        const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
-            kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
-            requestHash, sourceChainId: route.sourceChainId, destinationChainId: route.chainId, sourceAccount: payer, recipient: intent.recipient,
-            quoteDigest, nativeQuote: quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
-            policyDigest: active.digest, policyRevision: active.revision,
-            ...(route.sourceChainId === 8453 ? { policyActivationDigest: active.activationDigest } : {}),
-            depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
-            amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
-            createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
-        return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+        // The profile and the source account are claimed before the quote, and dropped if no operation is written.
+        return await this.operations.admit({ kind: "relay_unsigned", profileHash, operationId, idempotencyHash, requestHash }, { profileWide: true, domains: () => [evmConflictDomain(route.sourceChainId, payer)] }, async () => {
+            const intent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
+                minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000), routeReference: route.reference,
+                maximumNetworkFeeWei: input.maxDepositNetworkFeeWei };
+            const quote = await (this.ports.nativeQuote?.(intent) ?? requestRelayNativeQuote(intent));
+            const { quoteDigest, ...projection } = quote;
+            // A Base order's signed deadline bounds settlement/refunds, not local source-effect authority.
+            const authorizationDeadline = Math.min(quote.deadline * 1000 - 60_000, active.registry.expiresAt === undefined ? Infinity : Date.parse(active.registry.expiresAt));
+            if (route.sourceChainId === 8453) {
+                const current = await (this.ports.activePolicy?.(input.profile) ?? loadActiveAssetPolicyRegistry({ state: this.state, clock: this.clock }, input.profile));
+                const at = this.clock.now().getTime();
+                if (current === null || current.profile !== active.profile || current.digest !== active.digest || current.revision !== active.revision ||
+                    current.activationDigest !== active.activationDigest || current.accounts.evm?.toLowerCase() !== payer ||
+                    !Number.isFinite(at) || !Number.isFinite(authorizationDeadline) || at >= authorizationDeadline)
+                    refuse("relay_native_authorization_window");
+            }
+            if (hashObject(projection) !== quoteDigest || quote.routeReference !== route.reference ||
+                quote.payer !== payer || quote.recipient !== intent.recipient || quote.principalAtomic !== input.amountAtomic ||
+                BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
+                quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
+                (route.sourceChainId !== 8453 && active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
+                BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
+                throw new ApnError("APN_OPERATION_BLOCKED", "Relay native quote identity, deadline, or fee ceiling changed.");
+            }
+            const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
+                kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
+                requestHash, sourceChainId: route.sourceChainId, destinationChainId: route.chainId, sourceAccount: payer, recipient: intent.recipient,
+                quoteDigest, nativeQuote: quote, ...(quote.statusLocator === undefined ? {} : { statusLocator: quote.statusLocator }),
+                policyDigest: active.digest, policyRevision: active.revision,
+                ...(route.sourceChainId === 8453 ? { policyActivationDigest: active.activationDigest } : {}),
+                depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei,
+                amountAtomic: input.amountAtomic, minOutputAtomic: quote.minimumOutputWei,
+                createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
+            return publicRelayUnsignedOperation(await this.operations.persistRelayUnsigned(operation));
+        });
     }
 }
 //# sourceMappingURL=prepare.js.map

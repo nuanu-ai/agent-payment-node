@@ -288,4 +288,11 @@ export interface StargateTokenJournal {
     withLock<T>(id: string, work: () => Promise<T>): Promise<T>;
     /** The kernel per-account EVM lock (`evmAddressLock`) every EVM writer holds around its nonce check and send. */
     withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
+    /** Writes a new operation's owner claim to the operation index before `work` (its prepare body) reads anything. */
+    admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T>;
+}
+export interface StargateAdmission {
+    readonly operationId: string;
+    readonly profile: string;
+    readonly owner: Address;
 }

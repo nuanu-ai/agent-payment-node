@@ -256,3 +256,33 @@ test("a damaged index file is removed and re-derived from the records", async (t
     assert.deepEqual(await snapshot(s.root), expected, path);
   }
 });
+
+test("terminal records of one walk share durable pointer shards written before their entries; a crash in between converges", async (t) => {
+  const records = Array.from({ length: 6 }, (_, n) => record(30 + n, { state: "completed", terminal: true, account: n % 2 === 0 ? A : B }));
+  const clean = await setup(t);
+  for (const r of records) await save(clean.root, r);
+  await save(clean.root, record(40));
+  await clean.index().reconcile();
+  const expected = await snapshot(clean.root);
+  assert.equal(expected.has(`/idempotency/${id(1040)}.json`), true, "an unresolved record keeps its own pointer file");
+  assert.ok([...expected.keys()].some(key => key.startsWith("/terminal-pointers/")));
+  for (const r of records) {
+    assert.equal(expected.has(`/idempotency/${r.idempotencyHash}.json`), false);
+    assert.equal(expected.has(`/open/${r.operationId}.json`), false);
+    assert.equal((await clean.index().findByIdempotency(r.idempotencyHash))?.operationId, r.operationId);
+    assert.equal((await clean.index().resolvePrepare(identity(r)))?.state, "terminal");
+  }
+  // A crash after the shards and before any entry: the next walk writes the same files.
+  const s = await setup(t);
+  for (const r of records) await save(s.root, r);
+  await save(s.root, record(40));
+  const prototype = OperationIndexStore.prototype as unknown as { putUnflushed: unknown }, original = prototype.putUnflushed;
+  prototype.putUnflushed = async () => { throw new Error("crash before entries"); };
+  try { await assert.rejects(s.index().reconcile(), /crash before entries/u); } finally { prototype.putUnflushed = original; }
+  await s.index().reconcile();
+  assert.deepEqual(await snapshot(s.root), expected);
+  // An entry written without a flush that did not survive is derived again; its pointer never left the durable shard.
+  await rm(join(s.root, "operation-index", "entries", `${records[0]!.operationId}.json`));
+  assert.equal((await s.index().find(records[0]!.operationId))?.state, "terminal");
+  assert.deepEqual(await snapshot(s.root), expected);
+});

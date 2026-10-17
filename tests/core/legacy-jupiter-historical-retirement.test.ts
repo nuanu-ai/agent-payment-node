@@ -9,7 +9,6 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { createSwapQuote } from "../../src/swap/quote.js";
 import { newSwapOperation } from "../../src/swap/model.js";
 import { transitionSwapOperation } from "../../src/swap/transitions.js";
-import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { HISTORICAL_JUPITER_IDS, HISTORICAL_JUPITER_OWNER_PROFILE, HISTORICAL_JUPITER_ACCOUNT_BINDING, HISTORICAL_JUPITER_PAYER,
  HISTORICAL_JUPITER_MECHANISM_PIN, HISTORICAL_JUPITER_MECHANISM_DIGEST, HISTORICAL_JUPITER_REGISTRY_DIGEST, HISTORICAL_JUPITER_REGISTRY_VERSION,
@@ -37,7 +36,10 @@ async function fixture(root:string,index=0){
  const lease=await ledger.reserve({...identity,registry:active.registry,rail:"swap",amountAtomic:"1000000",idempotencyKey:`swap-${idempotencyHash}`,now:old});op=transitionSwapOperation(op,"reserved",{usageLease:lease},old);
  const markerBody={operationId:id,operationIntegrityHash:op.integrityHash,unsignedTransactionPayloadHash:q.unsignedTransactionPayloadHash,markedAt:old.toISOString()};
  op=transitionSwapOperation(op,"submitting",{submissionMarker:{operationIntegrityHash:markerBody.operationIntegrityHash,unsignedTransactionPayloadHash:markerBody.unsignedTransactionPayloadHash,markedAt:markerBody.markedAt,markerHash:domainHash("apn.swap-submission-marker.v1",canonicalJson(markerBody))}},old);
- const unknown=await ledger.transition({...identity,reservationId:lease.reservationId,policyDigest:lease.policyDigest,state:"unknown_finality",now:old});op=transitionSwapOperation(op,"unknown_finality",{usageLease:unknown},old);await new SwapOperationRepository(root).create(op);
+ const unknown=await ledger.transition({...identity,reservationId:lease.reservationId,policyDigest:lease.policyDigest,state:"unknown_finality",now:old});op=transitionSwapOperation(op,"unknown_finality",{usageLease:unknown},old);
+ // Written as the released version wrote these historical records, before the operation index (whose admission now
+ // refuses a second unresolved swap on one account).
+ await mkdir(join(root,"swap-operations",op.ownerProfileHash),{recursive:true,mode:0o700});await writeFile(join(root,"swap-operations",op.ownerProfileHash,`${id}.json`),canonicalJson(op)+"\n",{mode:0o600});
  assert.equal(op.ownerProfileHash,HISTORICAL_JUPITER_OWNER_PROFILE);
  const path=join(root,"asset-usage",historicalRetirementBucketHash(),`${unknown.reservationId}.json`),bytes=await readFile(path);
  const authentication={schemaVersion:"apn.jupiter-historical-authentication.v1" as const,operationId:id,operationIntegrityHash:op.integrityHash,rootBinding:hashObject({root}),ownerProfileHash:op.ownerProfileHash,accountBindingHash:HISTORICAL_JUPITER_ACCOUNT_BINDING,payer:identity.account,policyDigest:op.policyDigest,activationDigest:H("a"),originalBindingHash:H("b"),originalMaterialDigest:H("c"),freshMaterialDigest:H("d"),markerHash:op.submissionMarker!.markerHash,principalLamports:"1000000",maximumNativeExpenseLamports:"6000000",freshMaximumNativeExpenseLamports:"6000000",networkFeeLamports:"6400",tokenAccountRentLamports:"1488440",genesis:SOLANA_MAINNET_GENESIS,blockhash,lastValidBlockHeight:"300",signature:"1".repeat(88),rawPayloadHash:H("9"),messageHash:H("8"),freshBlockhash:blockhash,freshLastValidBlockHeight:"300",heightBinding:"authenticated_material_not_signed_message" as const,originalQuoteRpcLifetime:{source:"configured_mainnet_rpc_before_quote_freeze" as const,rpcOriginHash:H("7"),contextSlot:"120",minimumContextSlot:"100",blockhash,lastValidBlockHeight:"300"},lifetimeProvenance:"configured_mainnet_rpc_before_quote_freeze" as const,retainedClaimEvidence:{kind:"retained_send_claim_present" as const,claimHash:H("6"),signedMarkerSnapshotHash:H("5")},ordinaryRecentBlockhash:true as const,authenticatedAt:at.toISOString(),authenticationExpiresAt:"2026-10-10T12:01:00.000Z"};

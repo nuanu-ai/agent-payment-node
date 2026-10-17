@@ -21,6 +21,9 @@ import { createInterface } from "node:readline/promises";
 import { approvalCode } from "../approval-code.js";
 import { decodeUsdtPaymasterData } from "./paymaster-data.js";
 import { OperationService } from "../operation-service.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim } from "../operation-index/adapters/family-claims.js";
+import { GASLESS_USDT_CHAIN_ID } from "../operation-index/adapters/gasless-usdt.js";
 import { usdtEffectiveFeeCap } from "./quote.js";
 
 export interface UsdtForegroundApproval { approve(bound: UsdtBoundOperation): Promise<void> }
@@ -143,13 +146,16 @@ export class GaslessUsdtCommandExecute {
     assertUsdtBoundCurrent(bound);
     await this.assertAccountAvailable(bound);
     await (this.options.approval ?? new TtyUsdtApproval()).approve(bound);
-    // The foreground prompt can take minutes; another family may have started on this account meanwhile.
-    await this.assertAccountAvailable(bound);
     const signer = this.options.signer ?? new LocalUsdtSigningService(this.state, this.wrapping, () => this.clock.now());
     const send = this.options.sendTransport ?? { send: usdtSendPort(this.options.transport ?? new GaslessHttps()) };
-    return await new GuardedUsdtSendService(this.journal, signer, send, this.preparePort()).send(bound, {
+    // The foreground prompt can take minutes; another family may have started on this account meanwhile. The sender's
+    // claim is checked again and written as one step before the first RPC read or signature of the execution, and held
+    // while the execution can still sign, send or land.
+    return await admitOperation(this.state, { family: "gasless_usdt", profileHash: bound.profileHash, operationId: bound.operationId,
+      idempotencyHash: null, requestHash: null }, [evmClaim(GASLESS_USDT_CHAIN_ID, bound.binding.plan.request.sender)],
+    async () => await new GuardedUsdtSendService(this.journal, signer, send, this.preparePort()).send(bound, {
       profile: bound.binding.profile, profileHash, operationId, bindingHash: bound.binding.bindingHash,
-    });
+    }));
   }
 
   /** No other non-terminal money operation of any family may hold this Ethereum account (shared EntryPoint and EOA nonces). */

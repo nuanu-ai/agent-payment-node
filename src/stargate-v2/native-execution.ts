@@ -1,6 +1,7 @@
 import { SOURCE_CHAIN, DESTINATION_CHAIN, SOURCE_EID, DESTINATION_EID, SOURCE_POOL, DESTINATION_POOL,
   CODE, HASH, MAX_TTL_MS, fail, uint, address, hex32, rpcQuantity, transition, seal } from "./native-record.js";
 export { FileStargateNativeJournal } from "./native-journal.js";
+import type { StargateAdmission } from "./token-model.js";
 export { stargateV2NativeCanonicalReceipt } from "./native-record.js";
 export type { StargateNativeCanonicalReceipt } from "./native-record.js";
 import {
@@ -104,6 +105,8 @@ export interface StargateNativeJournal {
   withLock<T>(operationId: string, work: () => Promise<T>): Promise<T>;
   /** The kernel per-account EVM lock (`evmAddressLock`) every EVM writer holds around its nonce check and send. */
   withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
+  /** Writes a new operation's owner claim to the operation index before `work` (its prepare body) reads anything. */
+  admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T>;
 }
 
 export class LocalStargateNativeSigner {
@@ -152,6 +155,8 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
     }
     return existing;
   }
+  // The owner's claim is written before the quote and every RPC read: any other money operation on this account waits.
+  return await journal.admit({ operationId, profile, owner }, async () => {
   const quote = await quoteStargateV2Direct({ sourceChainId: SOURCE_CHAIN, destinationChainId: DESTINATION_CHAIN,
     sourceToken: "native", destinationToken: "native", recipient, amountAtomic: amount.toString() }, ports.sourceCall, ports.sourcePrepareBatch);
   assertLane(quote);
@@ -199,6 +204,7 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
     phase: "prepared" as const, transitions: [{ phase: "prepared" as const, at: preparedAt, reason: "fresh_quote_and_envelope_frozen" }],
   };
   const operation = seal(body); await journal.save(operation); return operation;
+  });
 }
 
 export async function executeStargateV2NativeEth(operationId: string, ports: StargateNativeExecutionPorts,

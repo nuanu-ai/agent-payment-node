@@ -57,6 +57,8 @@ export async function prepareStargateV2Token(request: StargateTokenPreparationRe
       (requestedMaxFee === undefined && existing.feeApproval?.provenance === "owner_ceiling")) fail("APN_OPERATION_BLOCKED", "idempotency_conflict");
     return existing;
   }
+  // The owner's claim is written before the quote and every RPC read: any other money operation on this account waits.
+  return await journal.admit({ operationId, profile, owner }, async () => {
   const options = drop === 0n ? "0x" as Hex : encodeStargateNativeDrop(drop.toString(), recipient);
   const nativeCap = await readExecutorCap(ports.sourceCall, "latest"); if (drop > nativeCap) fail("APN_OPERATION_BLOCKED", "native_drop_cap_exceeded");
   const quote = await quoteStargateV2Direct({ sourceChainId: 10, destinationChainId: 137, sourceToken: STARGATE_TOKEN_SOURCE_TOKEN,
@@ -128,6 +130,7 @@ export async function prepareStargateV2Token(request: StargateTokenPreparationRe
     transitions: [{ phase: "prepared" as const, at: preparedAt, reason: "fresh_quote_caps_allowance_and_envelopes_frozen" }],
   };
   const operation = seal(body); await journal.save(operation); return operation;
+  });
 }
 export async function executeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
   const initial = await journal.load(id); if (initial === null) fail("APN_OPERATION_BLOCKED", "operation_missing");

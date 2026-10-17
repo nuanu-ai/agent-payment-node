@@ -49,12 +49,14 @@ test("a USDT execution that can still land holds evm:1 for every family; a bound
       error.details.blockingState === "submitting" && error.details.blockingNetwork === "evm:1" &&
       error.details.blockingAccount === V2_OWNER.toLowerCase());
   await s.operations.assertEvmAccountAvailable(s.state.profileHash("owner"), 8453, V2_OWNER);
-  // A store's own in-flight temporary is not a record; anything else unexpected fails closed.
+  // Phase 4b: the operation index reads record names only; a store's in-flight temporary or another foreign name is not a
+  // record and wedges nothing, while the execution that can still land keeps blocking its account.
   const directory = join(s.state.root, "gasless-usdt-executions");
   await writeFile(join(directory, `.${"a".repeat(12)}.${"b".repeat(24)}.tmp`), "{}", { mode: 0o600 });
   await assert.rejects(s.operations.assertEvmAccountAvailable(s.state.profileHash("owner"), 1, V2_OWNER), { code: "APN_OPERATION_BLOCKED" });
   await mkdir(join(directory, "unexpected"));
-  await assert.rejects(s.operations.assertEvmAccountAvailable(s.state.profileHash("owner"), 1, V2_OWNER), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(s.operations.assertEvmAccountAvailable(s.state.profileHash("owner"), 1, V2_OWNER), { code: "APN_OPERATION_BLOCKED" });
+  await s.operations.assertEvmAccountAvailable(s.state.profileHash("owner"), 8453, V2_OWNER);
 });
 
 test("USDT prepare and execute refuse an Ethereum account another operation holds, before any read or prompt", async t => {

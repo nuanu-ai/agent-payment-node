@@ -48,7 +48,8 @@ export interface PrepareIdentity {
   readonly family: OperationFamily;
   readonly profileHash: string;
   readonly operationId: string;
-  readonly idempotencyHash: string;
+  /** Null for a family whose operation ID is itself derived from its profile and key, so replay is by ID alone. */
+  readonly idempotencyHash: string | null;
   readonly requestHash: string | null;
 }
 
@@ -67,6 +68,10 @@ export interface WantedClaims {
   /** The admitting profile; null for provider-account checks that span profiles. */
   readonly profileHash: string | null;
   readonly claims: readonly OperationClaim[];
+  /** Held by an admission besides `claims` but never wanted, such as a second profile the operation signs for. */
+  readonly holds?: readonly OperationClaim[];
+  /** Wanted besides `claims` but never held, such as that second profile's quarantine. */
+  readonly waits?: readonly OperationClaim[];
   readonly tag?: WantedTag;
   /** The caller's own saved operation, whose claims never block itself. */
   readonly except?: string;

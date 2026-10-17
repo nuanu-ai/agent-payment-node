@@ -87,7 +87,12 @@ test("a prepare beside 2,000 terminal historical records reads at most k+2 recor
   const open = JSON.parse(await readFile(join(temporary.root, "mega-gaszip", openName!), "utf8")) as GaszipFundingRecord;
   assert.equal(open.state, "prepared");
   const state = new StateStore(temporary.root);
+  const started = performance.now();
   await new OperationIndex(state).reconcile(); // the one-time backfill of the upgrade
+  // One durable write per index file took about 23 ms per record (46 s here); terminal records now share at most 16
+  // durable pointer shards and their entries follow without a flush each (about 1 s here).
+  const backfillMs = performance.now() - started;
+  assert.ok(backfillMs <= 3_000, `the first walk over 2,001 records took ${Math.round(backfillMs)} ms`);
 
   const reads: string[] = [];
   const prototype = SecureStateStore.prototype as unknown as { readJson(path: string): Promise<unknown> };
