@@ -155,14 +155,16 @@ test("CLI approval dispatches once and cold public recovery/terminal replay uses
   assert.equal((resumed.operation as any).permission.guard_held, false);
   assert.equal((resumed.operation as any).fees.unused_gross_atomic, "10000");
   for (const key of Object.keys(counts) as Array<keyof typeof counts>) assert.equal(f.calls[key], counts[key] + (key === "observe" ? 1 : 0), key);
-  const receiptPath = join(temporary.root, "smart-account-gasless-receipts", f.binding.profileHash, `${op.operation_id}.json`);
-  const before = await readFile(receiptPath), finalCounts = { ...f.calls };
+  // Receipts are derived from the operation (phase 4b): reading them writes nothing.
+  const journalPath = join(temporary.root, "smart-account-gasless-operations", f.binding.profileHash, `${op.operation_id}.json`);
+  const before = await readFile(journalPath), finalCounts = { ...f.calls };
   const status = await runCli(["operation", "status", "--operation", op.operation_id], {}, f.options);
   const repeat = await runCli(["gasless", "transfer", "approve", "--operation", op.operation_id], {}, f.options);
   assert.deepEqual(status.operation, resumed.operation); assert.deepEqual(repeat.operation, resumed.operation);
   const cliReceipt = await runCli(["receipt", "get", "--operation", op.operation_id], {}, f.options);
   const mcpReceipt = await c.call("apn_receipt_get", { operation: op.operation_id });
-  assert.deepEqual(cliReceipt.receipt, mcpReceipt.receipt); assert.deepEqual(await readFile(receiptPath), before);
+  assert.deepEqual(cliReceipt.receipt, mcpReceipt.receipt); assert.deepEqual(await readFile(journalPath), before);
+  await assert.rejects(readFile(join(temporary.root, "smart-account-gasless-receipts", f.binding.profileHash, `${op.operation_id}.json`)), { code: "ENOENT" });
   assert.deepEqual(f.calls, finalCounts);
   const publicBytes = JSON.stringify([approved, resumed, cliReceipt]);
   for (const secret of ["0x1234", "permissionContext", "paymentPayload", "session_private_key"]) assert.equal(publicBytes.includes(secret), false, secret);

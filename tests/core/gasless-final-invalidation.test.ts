@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
-import { hashObject } from "../../src/canonical.js";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import type { GaslessObservation } from "../../src/gasless/model.js";
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
+import { gaslessReceipt } from "../../src/gasless/receipt.js";
 import { OperationService } from "../../src/operation-service.js";
 import { gaslessFixture, testWord } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -32,12 +33,12 @@ function invalidation(op: GaslessOperationRecord): GaslessObservation {
 type Fixture = Awaited<ReturnType<typeof gaslessFixture>>;
 async function stopAfterFinalSeal(root: string, delegation: "empty" | "expected") {
   const first = await gaslessFixture(root, 8453, { delegation }), { id } = await first.prepare();
-  const repair = first.core.gasless.records.repairReceipt.bind(first.core.gasless.records);
-  first.core.gasless.records.repairReceipt = async op => {
+  const persist = first.core.gasless.records.persist.bind(first.core.gasless.records);
+  first.core.gasless.records.persist = async op => {
+    await persist(op);
     if (op.userOperation.phase === "sealed" && op.userOperation.signingAttempts === 1 &&
       op.userOperation.materialHash !== null && op.userOperation.userOperationHash !== null &&
       op.userOperation.submissionAttempts === 0) throw new Error("final-seal-write-interrupted");
-    await repair(op);
   };
   const interrupted = await first.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(interrupted.ok, false);
@@ -81,7 +82,8 @@ for (const [delegation, mode] of finalCases) test(`gasless ${delegation} ${mode}
   assert.equal(before.userOperation.submissionAttempts, mode === "sealed_unsubmitted" ? 0 : 1);
   assert.equal(before.terminal, false);
   const receiptPath = resolve(temporary.root, "gasless-receipts", before.profileHash, `${id}.json`);
-  const oldReceipt = await readFile(receiptPath, "utf8");
+  // A receipt file a released version wrote for the unresolved transition (receipts are derived since phase 4b).
+  const oldReceipt = `${canonicalJson(gaslessReceipt(before))}\n`;
   s.rpc.observe = async () => invalidation(before);
   const result = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(result.ok, true, result.error?.message); const after = await s.record(id), publicOp = result.operation as any;
@@ -103,7 +105,7 @@ for (const [delegation, mode] of finalCases) test(`gasless ${delegation} ${mode}
   assert.equal(s.wrapping.loads, loads); assert.equal(custodyCalls(), 0); assert.equal(s.rpc.sends.length, sends);
   assert.equal(s.rpc.calls.filter(c => c === "estimate").length, estimates);
   await new OperationService(s.state).assertProfileAvailable(after.profileHash);
-  await writeFile(receiptPath, oldReceipt, { mode: 0o600 });
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 }); await writeFile(receiptPath, oldReceipt, { mode: 0o600 });
   assert.equal((await s.core.execute({ command: "operation.status", operationId: id })).ok, true);
   const child = await promisify(execFile)(process.execPath,
     [resolve("tests/core/gasless-fixtures/restart.mjs"), temporary.root, id], { cwd: process.cwd(), timeout: 30000, maxBuffer: 1024 * 1024 });

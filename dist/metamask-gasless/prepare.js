@@ -32,7 +32,6 @@ export class MetaMaskGaslessPreparation {
             if (existing !== null) {
                 if (existing.kind !== "metamask_gasless_transfer")
                     mmFail("mm_gasless_state_corrupt");
-                await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
             const clock = new MetaMaskGaslessClock(this.o.clock);

@@ -244,7 +244,6 @@ export class RailOperationService {
         return await state.withLocks([`rail:approval-claim:${operationId}`], async () => {
             const staged = await state.withLocks(keys, async () => {
                 const operation = await this.lifecycle.required(operationId);
-                await this.records.repairReceipt(operation);
                 await this.lifecycle.followUsage(operation);
                 const saved = await claims.load(operationId);
                 if (operation.terminal) {
@@ -304,7 +303,6 @@ export class RailOperationService {
             try {
                 const committed = await state.withLocks(keys, async () => {
                     const latest = await this.lifecycle.required(operationId);
-                    await this.records.repairReceipt(latest);
                     await this.lifecycle.followUsage(latest);
                     const saved = await claims.load(operationId);
                     if (latest.integrityHash !== operation.integrityHash || saved?.integrityHash !== claim.integrityHash) {
@@ -387,7 +385,6 @@ export class RailOperationService {
         const found = await this.lifecycle.required(operationId);
         return await this.context.state.withLocks([`profile:${found.profileHash}`, `operation:${operationId}`], async () => {
             const operation = await this.lifecycle.required(operationId);
-            await this.records.repairReceipt(operation);
             await this.lifecycle.followUsage(operation);
             return publicRailOperation(await action(operation));
         });

@@ -70,12 +70,11 @@ test("LIFI-11: every route claims SIGN and SEND; a journal restored to a sealed 
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root, "base-arb");
   const { id, operation } = await s.prepare();
   const opPath = join(temporary.root, "bridge-operations", operation.profileHash, `${id}.json`);
-  const receiptPath = join(temporary.root, "bridge-receipts", operation.profileHash, `${id}.json`);
-  let snapshot: { op: Buffer; receipt: Buffer; usage: Map<string, Buffer> } | undefined;
+  let snapshot: { op: Buffer; usage: Map<string, Buffer> } | undefined;
   const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
   s.core.bridges.records.persist = async (next) => {
     await persist(next);
-    if (snapshot === undefined && next.effects[0]!.phase === "sealed") snapshot = { op: await readFile(opPath), receipt: await readFile(receiptPath),
+    if (snapshot === undefined && next.effects[0]!.phase === "sealed") snapshot = { op: await readFile(opPath),
       usage: await files(join(temporary.root, "asset-usage")) };
   };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
@@ -85,7 +84,7 @@ test("LIFI-11: every route claims SIGN and SEND; a journal restored to a sealed 
     completed.effects.find((effect) => effect.role === role)!.transactionHash);
   // Restore the journal and the usage ledger to the sealed, unsent approval: the SEND claims survive outside them, so APN
   // records each attempt and observes it instead of sending again, for both effects in turn.
-  await writeFile(opPath, snapshot!.op); await writeFile(receiptPath, snapshot!.receipt); await restore(join(temporary.root, "asset-usage"), snapshot!.usage);
+  await writeFile(opPath, snapshot!.op); await restore(join(temporary.root, "asset-usage"), snapshot!.usage);
   for (let resume = 0; resume < 3; resume++) await s.core.execute({ command: "operation.resume", operationId: id });
   const caughtUp = (await s.core.bridges.records.findOperation(id))!;
   assert.equal(caughtUp.state, "completed"); assert.equal(s.source.submissions.length, 2);

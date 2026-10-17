@@ -1,12 +1,13 @@
 import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
-import { hashObject } from "../../src/canonical.js";
+import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { OperationService } from "../../src/operation-service.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
 import { gaslessCapabilities } from "../../src/gasless/catalog.js";
+import { gaslessReceipt } from "../../src/gasless/receipt.js";
 import { GASLESS_CHAINS } from "../../src/gasless/validation.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -120,16 +121,19 @@ test("gasless joins global identity, profile, duplicate lookup and different-inp
   await assert.rejects(service.required(id), { code: "APN_STATE_CORRUPT", message: "Operation ID is duplicated across operation stores." });
 });
 
-test("gasless strict history binding rejects a rehashed amount mutation and repairs only an authentic stale receipt", async (t) => {
+test("gasless strict history binding rejects a rehashed amount mutation; an authentic stale receipt file is history", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id, operation } = await s.prepare();
   const receiptPath = join(temporary.root, "gasless-receipts", operation.profileHash, `${id}.json`);
-  const originalReceipt = await readFile(receiptPath, "utf8");
+  // The receipt file a released version wrote at prepare (receipts are derived since phase 4b).
+  const originalReceipt = `${canonicalJson(gaslessReceipt(operation))}\n`;
   s.approval.accepted = false;
   const declined = await s.core.execute({ command: "gasless.transfer.approve", operationId: id }); assert.equal(declined.ok, true);
-  await writeFile(receiptPath, originalReceipt, { mode: 0o600 });
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 }); await writeFile(receiptPath, originalReceipt, { mode: 0o600 });
   const status = await s.core.execute({ command: "operation.status", operationId: id }); assert.equal(status.ok, true);
-  assert.equal(JSON.parse(await readFile(receiptPath, "utf8")).state, "failed_before_effect");
+  const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
+  assert.equal((receipt.receipt as { state: string }).state, "failed_before_effect");
+  assert.equal(await readFile(receiptPath, "utf8"), originalReceipt);
   const operationPath = join(temporary.root, "gasless-operations", operation.profileHash, `${id}.json`);
   const corrupt = JSON.parse(await readFile(operationPath, "utf8")); corrupt.intent.recipientAtomic = "1";
   const { integrityHash: _hash, ...body } = corrupt; corrupt.integrityHash = hashObject(body);

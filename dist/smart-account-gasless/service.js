@@ -93,7 +93,6 @@ export class SmartAccountGaslessService {
             const current = await this.operations.required(id);
             if (current.kind !== "smart_account_gasless_transfer")
                 saFail("sa_gasless_state_corrupt");
-            await this.records.repairReceipt(current.record);
             return await work(current.record);
         });
     }

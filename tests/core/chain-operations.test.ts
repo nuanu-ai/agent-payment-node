@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { OperationService } from "../../src/operation-service.js";
 import { hashObject } from "../../src/canonical.js";
-import { transitionRail, validateRailOperation } from "../../src/rail-operation-model.js";
+import { railReceipt, transitionRail, validateRailOperation } from "../../src/rail-operation-model.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { ApnCore } from "../../src/core.js";
 import { chainAsset, SOLANA_GENESIS } from "../../src/chain-policy.js";
@@ -47,23 +47,23 @@ test("lost broadcast response plus expired blockhash and absent history cannot r
   assert.equal((result.operation as { state: string }).state, "completed"); assert.deepEqual(s.rpc.submissions, [transaction]);
 });
 
-test("operation-first receipt crash preserves submission boundary and resume repairs only the derived receipt", async (t) => {
+test("a crash after the durable submitting write preserves the submission boundary; the receipt is derived meanwhile", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root); const id = await s.prepare();
-  const repair = s.core.rails.records.repairReceipt.bind(s.core.rails.records);
-  s.core.rails.records.repairReceipt = async (operation) => {
-    if (operation.state === "submitting") throw new Error("synthetic receipt interruption");
-    return await repair(operation);
+  const persist = s.core.rails.records.persist.bind(s.core.rails.records);
+  s.core.rails.records.persist = async (operation) => {
+    await persist(operation);
+    if (operation.state === "submitting") throw new Error("synthetic interruption after the durable write");
   };
   const failed = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(failed.ok, false); assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting");
   assert.equal(s.rpc.submissions.length, 0);
+  // Phase 4b (CORE-13): the receipt is derived from the saved operation, so it never needs a repair.
   const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
-  assert.equal(receipt.error?.code, "APN_OPERATION_BLOCKED");
-  assert.deepEqual(receipt.next_actions, [`apn operation resume --operation ${id}`]);
+  assert.equal(receipt.ok, true, receipt.error?.message); assert.equal((receipt.receipt as { state: string }).state, "submitting");
   const restart = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false }); s.rpc.absentHistory = true;
   const resumed = await restart.core.execute({ command: "operation.resume", operationId: id });
   assert.equal((resumed.operation as { state: string }).state, "unknown_finality"); assert.equal(s.rpc.submissions.length, 0);
-  assert.equal((await restart.core.execute({ command: "receipt.get", operationId: id })).ok, true);
+  assert.equal(((await restart.core.execute({ command: "receipt.get", operationId: id })).receipt as { state: string }).state, "unknown_finality");
 });
 
 test("trusted missing effect can end interrupted local signing, while missing committed effect is corruption", async (t) => {
@@ -112,12 +112,15 @@ test("strict operation and historic-receipt integrity reject added fields and fo
   await s.core.execute({ command: "transfer.approve", operationId: id });
   const final = (await s.core.rails.records.findOperation(id))!;
   assert.throws(() => transitionRail(final, { state: "unknown_finality", at: s.now.toISOString(), reason: "invalid_reopen", proofClass: "effect_outcome_unknown" }), { code: "APN_STATE_CORRUPT" });
+  // A receipt file (as released versions wrote them) that claims the current transition but differs from it is corrupt,
+  // and fails only its own receipt read: the operation itself still resumes (phase 4b, CORE-13).
   const path = join(temporary.root, "rail-receipts", s.account.profileHash, `${id}.json`);
-  const value = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+  const value = railReceipt(final) as unknown as Record<string, unknown>;
   const { receipt_hash: _hash, ...body } = value; body.transaction_id = "invalid";
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, JSON.stringify({ ...body, receipt_hash: hashObject(body) }), { mode: 0o600 });
   assert.equal((await s.core.execute({ command: "receipt.get", operationId: id })).error?.code, "APN_STATE_CORRUPT");
-  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).error?.code, "APN_STATE_CORRUPT");
+  assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
   assert.equal(s.rpc.submissions.length, 1);
 });
 

@@ -19,7 +19,6 @@ async function savedByEarlierRelease(root: string, s: Awaited<ReturnType<typeof 
   const earlier = newGaslessOperation({ profileHash: current.profileHash, operationId: id,
     idempotencyHash: current.idempotencyHash, requestHash: current.requestHash, intent });
   await rm(join(root, "gasless-operations", current.profileHash, `${id}.json`));
-  await rm(join(root, "gasless-receipts", current.profileHash, `${id}.json`));
   await s.core.gasless.records.persist(earlier);
   return earlier;
 }
