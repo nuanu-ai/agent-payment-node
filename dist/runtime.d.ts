@@ -2,7 +2,6 @@ import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js
 import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
 import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
-import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayObserveService } from "./relay/observe.js";
@@ -69,7 +68,6 @@ export interface RelayExecuteHandler {
 }
 export interface CoreDependencies {
     readonly relayPrepare?: RelayUnsignedPrepareService;
-    readonly relayPreflight?: RelayReadOnlyPreflightService;
     readonly relayRetire?: RelayRetireService;
     readonly relayStatus?: RelayKeylessStatusService;
     readonly relayObserve?: RelayObserveService;
@@ -152,7 +150,6 @@ export interface CoreDependencies {
 }
 export declare class RuntimeContext {
     readonly relayPrepare?: RelayUnsignedPrepareService;
-    readonly relayPreflight?: RelayReadOnlyPreflightService;
     readonly relayRetire?: RelayRetireService;
     readonly relayStatus?: RelayKeylessStatusService;
     readonly relayObserve?: RelayObserveService;

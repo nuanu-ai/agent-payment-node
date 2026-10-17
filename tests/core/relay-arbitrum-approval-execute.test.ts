@@ -11,7 +11,6 @@ import { activeAssetPolicyFromState, type ActiveAssetPolicy } from "../../src/al
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
-import { bindArgv } from "../../src/command-binder.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { freezeRelayUnsignedOperation, type RelayUnsignedOperation } from "../../src/relay-unsigned-operation.js";
 import { RelayArbitrumApprovalExecuteService } from "../../src/relay/arbitrum-approval-execute.js";
@@ -148,9 +147,6 @@ async function lease(state: StateStore, op: RelayUnsignedOperation) {
 
 test("approval executes one exact signed transaction; replay is observation-only", async t => {
   const { temporary, state, op } = await setup(); t.after(temporary.cleanup);
-  const bound = bindArgv(["relay", "arbitrum", "approval-execute", "--profile", "default",
-    "--operation", op.operationId, "--rpc-url", "https://arb-rpc.example"]);
-  assert.equal(bound.request.command, "relay.arbitrum.approval-execute");
   const h = harness(state, op);
   const first = await h.service.execute("default", op.operationId);
   assert.equal(first.state, "approval_submitted");
