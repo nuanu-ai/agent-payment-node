@@ -180,12 +180,11 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     assertSigningTime(record, now);
   }
   async #markRisk(id: string, proof?: Permit2ForegroundApprovalProof): Promise<{ readonly record: Permit2ProductionRecord; readonly candidate: RiskCandidate | null }> {
-    await this.ready(); let r = await this.#required(id), candidate: RiskCandidate | null = null;
-    if (r.exposureJournal !== undefined) return { record: await this.#confirmHold(id), candidate: null };
-    r = await this.preparation.assertCurrentOwner(id);
-    const usage = await this.usage.usageWithReservation(productionUsageIdentity(r), r.usageReservationId, this.#now());
-    const lease = await this.#lease(r);
-    if (r.state !== "reserved" || lease.state !== "reserved" || lease.reservationDigest !== r.usageReservationDigest) blocked();
+    await this.ready(); const first = await this.#required(id); let candidate: RiskCandidate | null = null;
+    if (first.exposureJournal !== undefined) return { record: await this.#confirmHold(id), candidate: null };
+    const admitted = await this.#admitFirstRisk(id);
+    if (admitted === null) return { record: await this.#confirmHold(id), candidate: null };
+    const { r, usage, lease } = admitted;
     await this.state.withLocks(this.#locks(r), async () => {
       const current = await this.#required(id);
       if (current.exposureJournal !== undefined) return;
@@ -213,6 +212,21 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
     });
     try { return { record: await this.#confirmHold(id), candidate }; }
     catch (error) { if (candidate !== null) this.#riskCandidates.delete(candidate); throw error; }
+  }
+  /** Owner admission of the first exposure, read outside the locks. A caller whose first read predates a concurrent first
+   * exposure sees that exposure (or its confirmed hold) here; it is then a replay of the durable hold, exactly as if it had
+   * started later, and gets null. Any refusal without a durable exposure stands. */
+  async #admitFirstRisk(id: string) {
+    try {
+      const r = await this.preparation.assertCurrentOwner(id);
+      const usage = await this.usage.usageWithReservation(productionUsageIdentity(r), r.usageReservationId, this.#now());
+      const lease = await this.#lease(r);
+      if (r.state !== "reserved" || lease.state !== "reserved" || lease.reservationDigest !== r.usageReservationDigest) blocked();
+      return { r, usage, lease };
+    } catch (error) {
+      if ((await this.#required(id)).exposureJournal !== undefined) return null;
+      throw error;
+    }
   }
   /** No state locks span ledger I/O; risk remains durable if either side fails. */
   async confirmHold(id: string): Promise<Permit2ProductionRecord> { return this.#confirmHold(id); }
