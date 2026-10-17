@@ -635,9 +635,6 @@ export type CommandRequest = {
     readonly command: "operation.status";
     readonly operationId: string;
 } | {
-    readonly command: "operation.repair-deployment";
-    readonly operationId: string;
-} | {
     readonly command: "receipt.get";
     readonly operationId: string;
 };

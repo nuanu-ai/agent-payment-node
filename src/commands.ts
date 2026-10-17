@@ -206,7 +206,6 @@ export type CommandRequest =
     readonly idempotencyKey: string;
   }
   | { readonly command: "operation.status"; readonly operationId: string }
-  | { readonly command: "operation.repair-deployment"; readonly operationId: string }
   | { readonly command: "receipt.get"; readonly operationId: string };
 
 export interface CommandOutcome {

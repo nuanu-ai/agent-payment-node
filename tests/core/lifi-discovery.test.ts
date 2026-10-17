@@ -41,12 +41,11 @@ test("v1 candidate lanes retain the exact pre-Circle LI.FI rows and indexes", ()
   ]);
 });
 
-test("LI.FI all six CLI and MCP commands bind identically, without a generic RPC fallback", () => {
+test("LI.FI all five CLI and MCP commands bind identically, without a generic RPC fallback", () => {
   const argumentsByPath: Record<string, Record<string, string>> = {
     "bridge capabilities": { profile: "lifi-local" }, "bridge inventory": {}, "bridge routes": routeArgs,
     "bridge prepare": { profile: "lifi-local", quote: "a".repeat(64), route: "route-across", idempotency_key: "bridge-key-0001" },
     "bridge approve": { operation: "b".repeat(64) },
-    "operation repair-deployment": { operation: "b".repeat(64) },
   };
   for (const c of BRIDGE_COMMANDS) {
     const args = argumentsByPath[c.path.join(" ")]!;
