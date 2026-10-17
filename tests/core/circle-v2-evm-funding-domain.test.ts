@@ -109,7 +109,11 @@ for (const first of ["v1", "v2"] as const) for (const [chain, profile] of [[143,
   // A v2 save never replaces a stored v1 journal (nothing writes v1 any more).
   const before = await repo.loadAny(held.operationId); if (first === "v1") await assert.rejects(repo.saveFunding(fresh)); assert.equal(canonicalJson(await repo.loadAny(held.operationId)), canonicalJson(before));
   await writeFile(join(root,"circle-v2-evm",`${"a".repeat(64)}.json`), `${canonicalJson({ ...fresh, schemaVersion: "unknown" })}\n`, { mode: 0o600 });
-  await assert.rejects(repo.listAllAny(), /unsupported_operation_schema/); await assert.rejects(service.assertEvmAccountAvailable(held.profileHash, 1, CIRCLE_SOURCE_OWNER));
+  await assert.rejects(repo.listAllAny(), /unsupported_operation_schema/);
+  // A record no reader accepts quarantines only the accounts its bytes name (here the same Circle custody): the
+  // operation index keeps it out of every other chain and account instead of refusing every admission.
+  await assert.rejects(service.assertEvmAccountAvailable(held.profileHash, 42161, CIRCLE_SOURCE_OWNER), { code: "APN_OPERATION_BLOCKED" });
+  await service.assertEvmAccountAvailable(held.profileHash, 1, CIRCLE_SOURCE_OWNER);
 });
 test("held v1 ledger reservations still count against a new v2 operation's caps", async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "circle-v2-ledger-"))); t.after(() => rm(root, { recursive: true, force: true }));

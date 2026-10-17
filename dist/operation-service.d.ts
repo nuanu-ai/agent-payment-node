@@ -1,27 +1,21 @@
-import { type CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
-import { GaszipFundingJournal, type GaszipFundingRecord } from "./lifi/gaszip-direct-journal.js";
+import type { CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
+import type { GaszipFundingRecord } from "./lifi/gaszip-direct-journal.js";
 import type { CircleRole } from "./circle-v2-evm/operation-model.js";
 import { type MerchantOperation } from "./x402-merchant/model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
-import { type X402SettlementWaitProjection, type X402OperationRecord } from "./x402-state-integrity.js";
-import { type ProviderX402OperationRecord } from "./provider-x402-model.js";
+import type { X402SettlementWaitProjection, X402OperationRecord } from "./x402-state-integrity.js";
+import type { ProviderX402OperationRecord } from "./provider-x402-model.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
-import { RailOperationRepository } from "./rail-operation-repository.js";
-import { type RailOperationRecord } from "./rail-operation-model.js";
-import { BridgeOperationRepository } from "./lifi/operation-repository.js";
+import type { RailOperationRecord } from "./rail-operation-model.js";
 import type { StoredBridgeOperationRecord } from "./lifi/legacy-operation.js";
-import { GaslessOperationRepository } from "./gasless/operation-repository.js";
 import type { GaslessOperationRecord } from "./gasless/operation-model.js";
 import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
-import type { MetaMaskGaslessRepositoryPort } from "./metamask-gasless/ports.js";
 import type { SmartAccountGaslessOperationRecord } from "./smart-account-gasless/operation-model.js";
-import type { SmartAccountGaslessRepositoryPort } from "./smart-account-gasless/ports.js";
-import { type FacilitatorGaslessRepositoryPort } from "./facilitator-gasless/operation-repository.js";
 import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation-model.js";
-import { RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
+import { type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 export type StoredMoneyOperation = {
     readonly kind: "sei_gaszip";
     readonly record: GaszipFundingRecord;
@@ -70,19 +64,16 @@ export type StoredMoneyOperation = {
     readonly strategy: "provider_atomic";
     readonly record: ProviderX402OperationRecord;
 };
+/**
+ * The money-operation facade over the operation index (src/operation-index): idempotency, lookup and the
+ * one-operation-per-account guard read one index entry and at most the blocking records, never every store.
+ * Repository ports that older call sites still pass are not read: each family is read through its index adapter.
+ */
 export declare class OperationService {
     private readonly state;
     private readonly providerX402;
-    private readonly rails;
-    private readonly bridges;
-    private readonly gasless;
-    private readonly metaMaskGasless;
-    private readonly smartAccountGasless;
-    private readonly facilitatorGasless;
-    private readonly relayUnsigned;
-    private readonly seiFunding;
-    private readonly megaFunding;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository, seiFunding?: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation">, megaFunding?: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation">);
+    private readonly index;
+    constructor(state: StateStore, providerX402?: Pick<ProviderX402Repository, "loadReceipt">, ..._unreadPorts: readonly unknown[]);
     /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
      * locks are acquired together so owner validation and durable write are atomic. */
     persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation>;
@@ -109,27 +100,21 @@ export declare class OperationService {
     /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */
     assertRailAccountAvailable(profileHash: string, rail: "solana" | "tron", account: string): Promise<void>;
     private assertConflictDomainsAvailable;
-    private permit2ProductionOperations;
-    private profileOperations;
-    private circleOperations;
     /** Both Circle signing accounts are held under their existing profile locks. */
     assertCircleAccountsAvailable(record: CircleKnownOperation, exceptSaved?: boolean, effectRole?: CircleRole): Promise<void>;
+    /** The provider account and payer are held across profiles by provider direct and provider x402 operations. */
     assertProviderAccountAvailable(providerId: string, accountBindingHash: string, payer: string, exceptOperationId?: string): Promise<void>;
-    private merchantOperations;
     assertMerchantAccountAvailable(record: MerchantOperation): Promise<void>;
     required(operationId: string): Promise<StoredMoneyOperation>;
     status(operationId: string): Promise<unknown>;
     relayStatus(operation: RelayUnsignedOperation): Promise<import("./relay-unsigned-operation.js").PublicRelayUnsignedOperation>;
-    /** Source finality or a finality-proven revert ends this spend attempt. Destination delivery is observed separately. */
-    private relaySourceCompletion;
-    private relayLifecycle;
-    private listAllBridgeOperations;
-    private listBridgeOperations;
-    private findBridgeOperation;
     x402Outcome(operationId: string, options: {
         readonly exposeSellerResult: boolean;
         readonly exposeTerminalReceipt: boolean;
         readonly settlementWait?: X402SettlementWaitProjection;
     }): Promise<CommandOutcome>;
     x402ReceiptOutcome(operationId: string): Promise<CommandOutcome>;
+    private requiredX402;
+    /** The record behind an entry through its family's own reader (its errors propagate); null when absent. */
+    private stored;
 }
