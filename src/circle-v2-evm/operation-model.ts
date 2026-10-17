@@ -16,12 +16,16 @@ export interface CircleEnvelope { readonly chainId: number; readonly from: Addre
 export interface CircleEffect { readonly role: CircleRole; readonly phase: CircleEffectPhase; readonly envelope: CircleEnvelope;
   readonly transactionHash: Hex | null; readonly materialHash: string | null; readonly proof: CircleReceiptProof | null; }
 export interface CirclePolicy { readonly profile: string; readonly profileHash: string; readonly policyDigest: string; readonly revision: number; readonly activationDigest?: string; }
+/** Every state a v1 Circle route may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export const CIRCLE_V1_STATES = ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required",
+  "completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"] as const;
+export const CIRCLE_V1_TERMINAL_STATES: readonly string[] = ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"];
 export interface CircleOperationV1 { readonly schemaVersion: "apn.circle-v2-evm-operation.v1"; readonly operationId: string;
   readonly profile: string; readonly profileHash: string; readonly destinationProfile: string; readonly destinationProfileHash: string;
   readonly idempotencyHash: string; readonly requestHash: string; readonly fingerprint: string; readonly destinationChain: CircleDestinationChain;
   readonly sourceCustody: EvmNativeCustody; readonly destinationCustody: EvmNativeCustody; readonly policies: readonly CirclePolicy[];
   readonly preparedAt: string; readonly expiresAt: string; readonly deploymentDigest: string; readonly feeQuoteAtomic: string;
-  readonly state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
+  readonly state: typeof CIRCLE_V1_STATES[number];
   readonly terminal: boolean; readonly effects: readonly CircleEffect[]; readonly source: CircleSourceProof | null;
   readonly attestation: CircleAttestation | null; readonly destination: ReturnType<typeof decodeCircleDestination> | null;
   readonly residualAllowanceAtomic: string; readonly usage: readonly AssetUsageReservation[]; readonly usageFinalized: boolean;
@@ -49,7 +53,7 @@ export function validateCircle(value: unknown): CircleOperationV1 {
   validateEvmNativeCustody(op.sourceCustody); validateEvmNativeCustody(op.destinationCustody);
   if (op.profile !== "evm-live-buyer" || op.destinationProfile !== route.gasPayerProfile || op.sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || op.destinationCustody.walletAddress !== route.gasPayer ||
     op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > 100n ||
-    !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"].includes(op.state) ||
+    !(CIRCLE_V1_STATES as readonly string[]).includes(op.state) || op.terminal !== CIRCLE_V1_TERMINAL_STATES.includes(op.state) ||
     !Number.isFinite(Date.parse(op.preparedAt)) || !Number.isFinite(Date.parse(op.expiresAt)) || Date.parse(op.expiresAt) <= Date.parse(op.preparedAt) ||
     !/^(?:0|40100)$/u.test(op.residualAllowanceAtomic) || typeof op.usageFinalized !== "boolean" || !Array.isArray(op.usage) || !Array.isArray(op.policies)) circleCorrupt("intent");
   if (op.policies.length !== new Set([op.profileHash, op.destinationProfileHash]).size || new Set(op.policies.map(p => p.profileHash)).size !== op.policies.length) circleCorrupt("policy_count");

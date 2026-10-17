@@ -1,4 +1,4 @@
-import { SOURCE_CHAIN, DESTINATION_CHAIN, SOURCE_EID, DESTINATION_EID, SOURCE_POOL, DESTINATION_POOL, CODE, HASH, MAX_TTL_MS, fail, uint, address, hex32, rpcQuantity, transition, seal } from "./native-record.js";
+import { SOURCE_CHAIN, DESTINATION_CHAIN, SOURCE_EID, DESTINATION_EID, SOURCE_POOL, DESTINATION_POOL, CODE, HASH, MAX_TTL_MS, fail, uint, address, hex32, rpcQuantity, transition, seal, STARGATE_NATIVE_TERMINAL_PHASES } from "./native-record.js";
 export { FileStargateNativeJournal } from "./native-journal.js";
 export { stargateV2NativeCanonicalReceipt } from "./native-record.js";
 import { decodeAbiParameters, decodeEventLog, decodeFunctionResult, encodeFunctionData, getAddress, keccak256, pad, parseTransaction, recoverTransactionAddress, zeroAddress, } from "viem";
@@ -151,7 +151,7 @@ async function executeLocked(operationId, ports, journal) {
         fail("APN_OPERATION_BLOCKED", "operation_missing");
     if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase))
         return await observeOnly(operation, ports, journal);
-    if (operation.phase === "observed" || operation.phase === "failed_confirmed_revert")
+    if (STARGATE_NATIVE_TERMINAL_PHASES.includes(operation.phase))
         return await followPhaseUsage(operation, ports);
     if (operation.policy === undefined)
         fail("APN_REPREPARE_REQUIRED", "owner_policy_binding_required");

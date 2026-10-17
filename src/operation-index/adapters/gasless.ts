@@ -3,22 +3,22 @@ import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
 import { ApnError } from "../../errors.js";
 import { facilitatorFail } from "../../facilitator-gasless/failure.js";
 import { FacilitatorGaslessOperationRepository } from "../../facilitator-gasless/operation-repository.js";
-import type { FacilitatorOperationRecord } from "../../facilitator-gasless/operation-model.js";
+import { FACILITATOR_TERMINAL, type FacilitatorOperationRecord } from "../../facilitator-gasless/operation-model.js";
 import { publicFacilitatorOperation } from "../../facilitator-gasless/receipt.js";
 import { FacilitatorGaslessService } from "../../facilitator-gasless/service.js";
-import type { GaslessOperationRecord } from "../../gasless/operation-model.js";
+import { GASLESS_TERMINAL, type GaslessOperationRecord } from "../../gasless/operation-model.js";
 import { GaslessOperationRepository } from "../../gasless/operation-repository.js";
 import { publicGaslessOperation } from "../../gasless/receipt.js";
 import { GaslessService } from "../../gasless/service.js";
 import { MetaMaskGaslessOperationRepository } from "../../metamask-gasless/journal/repository.js";
 import { publicMetaMaskGaslessOperation } from "../../metamask-gasless/journal/receipt.js";
-import type { MetaMaskGaslessOperationRecord } from "../../metamask-gasless/operation-model.js";
+import { MM_TERMINAL, type MetaMaskGaslessOperationRecord } from "../../metamask-gasless/operation-model.js";
 import { MetaMaskGaslessService } from "../../metamask-gasless/service.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "../../operation-abandon-gasless.js";
 import { abandonSmartAccountGasless } from "../../operation-abandon-provider.js";
 import { assertResumeOptions, oneObservationOnly, type ResumeOptionUse } from "../../operation-command-options.js";
 import { evmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
-import type { SmartAccountGaslessOperationRecord } from "../../smart-account-gasless/operation-model.js";
+import { SA_TERMINAL, type SmartAccountGaslessOperationRecord } from "../../smart-account-gasless/operation-model.js";
 import { SmartAccountGaslessOperationRepository } from "../../smart-account-gasless/operation-repository.js";
 import { OperationService } from "../../operation-service.js";
 import type { RuntimeContext } from "../../runtime.js";
@@ -41,8 +41,11 @@ interface GaslessCommands {
   abandon(context: RuntimeContext, operationId: string): Promise<unknown>;
 }
 
-/** The four gasless journals differ only in their directory, reader, signing-owner field, public projection and service. */
-function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, directory: string,
+/**
+ * The four gasless journals differ only in their directory, reader, outcome list (which each validator ties the record's
+ * `terminal` flag to), signing-owner field, public projection and service.
+ */
+function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, directory: string, outcomes: () => readonly string[],
   load: (root: string, profileHash: string, operationId: string) => Promise<R | null>,
   domains: (record: R) => readonly MoneyConflictDomain[], ownerPath: readonly string[], view: (record: R) => unknown,
   commands: GaslessCommands): OperationFamilyAdapter<R> {
@@ -56,7 +59,7 @@ function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, direct
     },
     identity: standardIdentity,
     claims: record => readableClaims(() => domainClaims(domains(record))),
-    terminal: record => record.terminal,
+    terminal: record => outcomes().includes(record.state),
     state: record => record.state,
     salvage: raw => salvageRecord(raw, value => [salvageEvm(field(value, "intent", "request", "chainId"), field(value, "intent", ...ownerPath))]),
     view: async record => view(record),
@@ -80,7 +83,7 @@ export const smartAccountGaslessDomains = (record: SmartAccountGaslessOperationR
 export const facilitatorGaslessDomains = (record: FacilitatorOperationRecord): readonly MoneyConflictDomain[] =>
   [evmConflictDomain(record.intent.request.chainId, record.intent.owner.address)];
 
-export const gaslessTransferAdapter = gaslessAdapter<GaslessOperationRecord>("gasless_transfer", "gasless-operations",
+export const gaslessTransferAdapter = gaslessAdapter<GaslessOperationRecord>("gasless_transfer", "gasless-operations", () => GASLESS_TERMINAL,
   async (root, profileHash, id) => await new GaslessOperationRepository(root).loadOperation(profileHash, id),
   gaslessDomains, ["owner", "address"], publicGaslessOperation, {
     resumeOptions: { observationRpc: true, refuseWait: () => oneObservationOnly("Gasless") },
@@ -90,6 +93,7 @@ export const gaslessTransferAdapter = gaslessAdapter<GaslessOperationRecord>("ga
     abandon: async (context, id) => await abandonLocalGasless({ context, operations: operations(context), gasless: new GaslessService(context) }, id),
   });
 export const metaMaskGaslessAdapter = gaslessAdapter<MetaMaskGaslessOperationRecord>("metamask_gasless_transfer", "metamask-gasless-operations",
+  () => MM_TERMINAL,
   async (root, profileHash, id) => await new MetaMaskGaslessOperationRepository(root).loadOperation(profileHash, id),
   metaMaskGaslessDomains, ["binding", "address"], record => publicMetaMaskGaslessOperation(record), {
     resumeOptions: { observationRpc: true, refuseWait: () => {
@@ -102,7 +106,7 @@ export const metaMaskGaslessAdapter = gaslessAdapter<MetaMaskGaslessOperationRec
       metaMaskGasless: new MetaMaskGaslessService(context) }, id),
   });
 export const smartAccountGaslessAdapter = gaslessAdapter<SmartAccountGaslessOperationRecord>("smart_account_gasless_transfer",
-  "smart-account-gasless-operations",
+  "smart-account-gasless-operations", () => SA_TERMINAL,
   async (root, profileHash, id) => await new SmartAccountGaslessOperationRepository(root).loadOperation(profileHash, id),
   smartAccountGaslessDomains, ["binding", "ownerAddress"], publicSmartAccountGaslessOperation, {
     resumeOptions: { observationRpc: true, refuseWait: () => saFail("sa_gasless_input") },
@@ -112,7 +116,7 @@ export const smartAccountGaslessAdapter = gaslessAdapter<SmartAccountGaslessOper
     abandon: async (context, id) => await abandonSmartAccountGasless(context, operations(context), id),
   });
 export const facilitatorGaslessAdapter = gaslessAdapter<FacilitatorOperationRecord>("facilitator_gasless_transfer",
-  "facilitator-gasless-operations",
+  "facilitator-gasless-operations", () => FACILITATOR_TERMINAL,
   async (root, profileHash, id) => await new FacilitatorGaslessOperationRepository(root).loadOperation(profileHash, id),
   facilitatorGaslessDomains, ["owner", "address"], publicFacilitatorOperation, {
     resumeOptions: { refuseWait: () => facilitatorFail("facilitator_gasless_input") },

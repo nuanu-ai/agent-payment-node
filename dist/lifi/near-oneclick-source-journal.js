@@ -99,6 +99,13 @@ function nonceReservationPath(chainId, profileHash, payer, nonce) {
 function nonceReservation(record) {
     return nonceReservationPath(oneClickRecordLane(record).origin.chainId, record.profileHash, record.payer, record.sourceCall.nonce);
 }
+/** Where each phase may go next; `source_observed` (a safe source receipt, success or revert) is the only outcome. */
+export const ONECLICK_SOURCE_EDGES = {
+    prepared: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
+    submitting: ["submitted_pending", "unknown_finality", "source_observed"],
+    submitted_pending: ["unknown_finality", "source_observed"],
+    unknown_finality: ["source_observed"], source_observed: []
+};
 export class OneClickSourceJournal extends SecureStateStore {
     path(id) { stateIdentifier(id, "operation ID"); return `oneclick-source/${id}.json`; }
     async load(id) {
@@ -165,13 +172,7 @@ export class OneClickSourceJournal extends SecureStateStore {
             const prior = await this.load(id);
             if (prior === null || prior.integrityHash !== expectedHash)
                 blocked();
-            const edges = {
-                prepared: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
-                submitting: ["submitted_pending", "unknown_finality", "source_observed"],
-                submitted_pending: ["unknown_finality", "source_observed"],
-                unknown_finality: ["source_observed"], source_observed: []
-            };
-            if (!edges[prior.phase].includes(phase))
+            if (!ONECLICK_SOURCE_EDGES[prior.phase].includes(phase))
                 blocked();
             const { integrityHash: _old, ...body } = prior;
             const next = { ...body, ...changes, phase, updatedAt: new Date().toISOString() };

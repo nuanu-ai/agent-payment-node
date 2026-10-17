@@ -5,6 +5,7 @@ import { ApnError } from "./errors.js";
 import { evmUint, validateEvmAmount, validateEvmAsset } from "./evm-asset.js";
 import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel } from "./evm-direct-networks.js";
 import { directEvmStepBudget } from "./evm-direct-reads.js";
+import { LOCAL_DIRECT_TERMINAL_STATES } from "./model.js";
 import { canonicalAddress } from "./wallet-policy.js";
 import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 import { validateEvmNativeCustody } from "./evm-native-custody.js";
@@ -124,7 +125,7 @@ export function validateEvmOperation(operation) {
         completed: [], failed_before_effect: [], failed_confirmed_revert: [], failed_proven_superseded: [], abandoned_unknown: [],
     };
     if (operation.transitions[0]?.state !== "awaiting_approval" ||
-        operation.terminal !== ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"].includes(operation.state)) {
+        operation.terminal !== LOCAL_DIRECT_TERMINAL_STATES.includes(operation.state)) {
         throw new ApnError("APN_STATE_CORRUPT", "EVM operation state is invalid.");
     }
     for (let index = 1; index < operation.transitions.length; index += 1) {

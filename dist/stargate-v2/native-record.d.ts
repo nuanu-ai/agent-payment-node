@@ -27,6 +27,9 @@ export declare function transition(operation: StargateNativeOperation, phase: St
 export declare function seal<T extends Omit<StargateNativeOperation, "integrityHash"> & {
     integrityHash?: never;
 } | StargateNativeOperation>(value: T): StargateNativeOperation;
+/** Every phase of a native Stargate journal; `observed` and `failed_confirmed_revert` are its outcomes (nothing signs or lands after them). */
+export declare const STARGATE_NATIVE_PHASES: readonly StargateNativePhase[];
+export declare const STARGATE_NATIVE_TERMINAL_PHASES: readonly StargateNativePhase[];
 export declare function validateRecord(value: unknown): StargateNativeOperation;
 export declare function validateAdvance(previous: StargateNativeOperation | null, next: StargateNativeOperation): void;
 export interface StargateNativeCanonicalReceipt {

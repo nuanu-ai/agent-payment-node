@@ -1,5 +1,7 @@
 import { SecureStateStore } from "../secure-state-store.js";
 import { z } from "zod";
+/** Every phase of a source journal. None is an observed outcome: no observer of the source receipt exists for this route. */
+export declare const NON_EVM_SOURCE_PHASES: readonly string[];
 declare const schemaV3: z.ZodObject<{
     transitions: z.ZodArray<z.ZodObject<{
         at: z.ZodString;

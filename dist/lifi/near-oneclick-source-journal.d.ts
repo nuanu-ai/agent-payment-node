@@ -50,6 +50,8 @@ export declare function oneClickSourceCall(lane: OneClickLane, depositAddress: s
     data: Hex;
     value: string;
 };
+/** Where each phase may go next; `source_observed` (a safe source receipt, success or revert) is the only outcome. */
+export declare const ONECLICK_SOURCE_EDGES: Readonly<Record<OneClickSourceRecord["phase"], readonly OneClickSourceRecord["phase"][]>>;
 export declare class OneClickSourceJournal extends SecureStateStore {
     private path;
     load(id: string): Promise<OneClickSourceRecord | null>;

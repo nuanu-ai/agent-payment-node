@@ -1,5 +1,6 @@
 import { GaszipFundingJournal, publicGaszipFunding, type GaszipFundingRecord } from "../../lifi/gaszip-direct-journal.js";
 import { GASZIP_DIRECT_ROUTES } from "../../lifi/gaszip-direct-route.js";
+import { GASZIP_TERMINAL_STATES } from "../../lifi/gaszip-outcome.js";
 import { evmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
@@ -21,7 +22,8 @@ function gaszipAdapter(lane: "sei" | "mega", domains: (record: GaszipFundingReco
     },
     identity: standardIdentity,
     claims: record => readableClaims(() => domainClaims(domains(record))),
-    terminal: record => record.terminal,
+    // The family's outcome list, which its journal reader ties the record's `terminal` flag to.
+    terminal: record => GASZIP_TERMINAL_STATES.includes(record.state),
     state: record => record.state,
     salvage: raw => salvageRecord(raw, value => chains.map(chain => salvageEvm(chain, field(value, "owner", "address")))),
     view: async record => publicGaszipFunding(route(), record),

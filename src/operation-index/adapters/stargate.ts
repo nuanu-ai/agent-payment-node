@@ -1,6 +1,7 @@
 import { FileStargateNativeJournal } from "../../stargate-v2/native-journal.js";
 import type { StargateNativeOperation } from "../../stargate-v2/native-execution.js";
-import { FileStargateTokenJournal } from "../../stargate-v2/token-journal.js";
+import { STARGATE_NATIVE_TERMINAL_PHASES } from "../../stargate-v2/native-record.js";
+import { FileStargateTokenJournal, STARGATE_TOKEN_TRANSITIONS } from "../../stargate-v2/token-journal.js";
 import type { StargateTokenOperation } from "../../stargate-v2/token-model.js";
 import { ApnError } from "../../errors.js";
 import { legacyStargateTerminal } from "../../legacy/stargate-v2/closure.js";
@@ -69,14 +70,14 @@ function stargateAdapter<R extends StargateRecord>(family: LegacyStargateFamily,
 /** Execute refuses an expired `prepared` or `approved` journal before signing; once a hash is recorded it is observed to the end. */
 export const stargateNativeAdapter = stargateAdapter<StargateNativeOperation>("stargate_native", "stargate-v2-native", STARGATE_NATIVE_SOURCE_CHAIN,
   async (root, id) => await new FileStargateNativeJournal(root).load(id),
-  record => record.phase === "observed" || record.phase === "failed_confirmed_revert" ||
+  record => STARGATE_NATIVE_TERMINAL_PHASES.includes(record.phase) ||
     (record.phase === "prepared" || record.phase === "approved") && record.transactionHash === undefined && pastUnstartedDeadline(record.expiresAt),
   context => installed(context.stargateNative, "Stargate native runtime is unavailable."), "stargate.native.status");
 
 /** Neither an approval nor a send is signed past the prepare expiry; any signed approval, send or cleanup ends observed or cleaned. */
 export const stargateTokenAdapter = stargateAdapter<StargateTokenOperation>("stargate_token", "stargate-v2-token", STARGATE_TOKEN_SOURCE_CHAIN_ID,
   async (root, id) => await new FileStargateTokenJournal(root).load(id),
-  record => record.phase === "observed" || record.phase === "cleaned" ||
+  record => STARGATE_TOKEN_TRANSITIONS[record.phase]?.length === 0 ||
     (record.phase === "prepared" || record.phase === "approved") && record.approvalTransactionHash === undefined &&
       record.transactionHash === undefined && pastUnstartedDeadline(record.expiresAt),
   context => installed(context.stargateToken, "Stargate token runtime is unavailable."), "stargate.token.status",

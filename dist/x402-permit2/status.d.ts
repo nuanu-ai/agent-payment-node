@@ -7,7 +7,7 @@ export declare function readPermit2ProductionStatus(root: string, requestedProfi
     lifecycle: string;
     observeOnly: boolean;
     operationId: string;
-    state: import("./production-repository.js").Permit2ProductionState;
+    state: "prepared" | "reserved" | "released_unsubmitted" | "settled" | "reserving" | "release_pending" | "exposure_unknown" | "request_pending" | "terminal_pending" | "expired_no_effect";
     terminal: boolean;
     capability: string;
     chain: "eip155:43114";

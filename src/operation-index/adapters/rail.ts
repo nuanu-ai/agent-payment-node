@@ -3,7 +3,7 @@ import { ApnError } from "../../errors.js";
 import { abandonRailTransfer } from "../../operation-abandon-service.js";
 import { assertResumeOptions } from "../../operation-command-options.js";
 import { railConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
-import { publicRailOperation, type RailOperationRecord } from "../../rail-operation-model.js";
+import { publicRailOperation, RAIL_TERMINAL_STATES, type RailOperationRecord } from "../../rail-operation-model.js";
 import { RailOperationRepository } from "../../rail-operation-repository.js";
 import { RailOperationService } from "../../rail-operation-service.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageRail, salvageRecord, standardIdentity,
@@ -24,7 +24,7 @@ export const railAdapter: OperationFamilyAdapter<RailOperationRecord> = {
   },
   identity: standardIdentity,
   claims: record => readableClaims(() => domainClaims(railDomains(record))),
-  terminal: record => record.terminal,
+  terminal: record => RAIL_TERMINAL_STATES.includes(record.state),
   state: record => record.state,
   salvage: raw => salvageRecord(raw, value => [salvageRail(field(value, "account", "rail"), field(value, "account", "address"))]),
   view: async record => publicRailOperation(record),

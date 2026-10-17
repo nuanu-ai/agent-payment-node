@@ -1,5 +1,5 @@
 import { SOURCE_CHAIN, DESTINATION_CHAIN, SOURCE_EID, DESTINATION_EID, SOURCE_POOL, DESTINATION_POOL,
-  CODE, HASH, MAX_TTL_MS, fail, uint, address, hex32, rpcQuantity, transition, seal } from "./native-record.js";
+  CODE, HASH, MAX_TTL_MS, fail, uint, address, hex32, rpcQuantity, transition, seal, STARGATE_NATIVE_TERMINAL_PHASES } from "./native-record.js";
 export { FileStargateNativeJournal } from "./native-journal.js";
 import type { StargateAdmission } from "./token-model.js";
 export { stargateV2NativeCanonicalReceipt } from "./native-record.js";
@@ -218,7 +218,7 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   journal: StargateNativeJournal): Promise<StargateNativeOperation> {
   let operation = await journal.load(operationId); if (operation === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
   if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase)) return await observeOnly(operation, ports, journal);
-  if (operation.phase === "observed" || operation.phase === "failed_confirmed_revert") return await followPhaseUsage(operation, ports);
+  if (STARGATE_NATIVE_TERMINAL_PHASES.includes(operation.phase)) return await followPhaseUsage(operation, ports);
   if (operation.policy === undefined) fail("APN_REPREPARE_REQUIRED", "owner_policy_binding_required");
   const now = ports.now ?? Date.now;
   // Nothing was marked for sending, so an expired operation releases any hold an interrupted earlier run took.

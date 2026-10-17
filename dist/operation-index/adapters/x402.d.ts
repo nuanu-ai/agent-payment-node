@@ -14,6 +14,12 @@ export type X402StoredOperation = {
     readonly record: ProviderX402OperationRecord;
 };
 export declare function x402Domains(operation: X402StoredOperation): readonly MoneyConflictDomain[];
+export declare function x402Terminal(operation: {
+    readonly strategy: X402StoredOperation["strategy"];
+    readonly record: {
+        readonly state: string;
+    };
+}): boolean;
 export declare const x402Adapter: OperationFamilyAdapter<X402StoredOperation>;
 export interface X402OutcomeOptions {
     readonly exposeSellerResult: boolean;

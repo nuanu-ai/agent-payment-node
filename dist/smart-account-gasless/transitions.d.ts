@@ -1,5 +1,7 @@
-import type { SmartAccountGaslessIntent, SmartAccountGaslessMutable } from "./model.js";
+import type { SmartAccountGaslessIntent, SmartAccountGaslessMutable, SmartAccountGaslessState } from "./model.js";
 import { type SmartAccountGaslessOperationIdentity, type SmartAccountGaslessOperationRecord } from "./operation-model.js";
+/** Every state a Smart Account gasless journal may hold (its transition check refuses any other). */
+export declare const SA_STATES: readonly SmartAccountGaslessState[];
 export declare function validateSmartAccountGaslessOperation(value: unknown): SmartAccountGaslessOperationRecord;
 export declare function validateSmartAccountGaslessContinuity(previous: SmartAccountGaslessOperationRecord, next: SmartAccountGaslessOperationRecord): void;
 export declare function newSmartAccountGaslessOperation(identityInput: SmartAccountGaslessOperationIdentity, intent: SmartAccountGaslessIntent): SmartAccountGaslessOperationRecord;

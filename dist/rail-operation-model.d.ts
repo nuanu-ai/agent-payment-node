@@ -2,6 +2,10 @@ import type { ChainAccount, RailFinalEvidence, RailPreparedTransfer, RailSendBin
 import { type DirectAllowlistBinding } from "./direct-allowlist-gate.js";
 import type { DirectAssetUsageLease } from "./direct-asset-usage.js";
 export type RailState = "awaiting_approval" | "signing_started" | "signed_not_submitted" | "submitting" | "submitted_pending" | "unknown_finality" | "completed" | "failed_before_effect" | "failed_confirmed_revert" | "abandoned_unknown";
+/** A rail transfer's outcomes: its record's `terminal` flag must equal membership. */
+export declare const RAIL_TERMINAL_STATES: readonly RailState[];
+/** Every state a rail transfer record may hold (its validator refuses any other). */
+export declare const RAIL_STATES: readonly RailState[];
 interface RailTransition {
     readonly state: RailState;
     readonly at: string;

@@ -24,7 +24,8 @@ const PROFILE = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const EMPTY_CODE_HASH = "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470";
 const BATCH_PROTOCOL = ["manager", "delegate", "limitedCalls", "exactBatch"] as const;
 const SPONSORED_PROTOCOL = ["manager", "delegate", "limitedCalls", "exactSingle"] as const;
-const STATES: readonly MetaMaskGaslessState[] = ["awaiting_approval", "execution_pending", "dispatch_pending",
+/** Every state a MetaMask gasless journal may hold (its validator refuses any other). */
+export const MM_STATES: readonly MetaMaskGaslessState[] = ["awaiting_approval", "execution_pending", "dispatch_pending",
   "submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "failed_before_effect", "abandoned_unknown"];
 const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "dispatch",
   "providerObservation", "cursor", "observation", "settlement", "failure"] as const;
@@ -206,7 +207,7 @@ function failure(value: unknown): MetaMaskGaslessMutable["failure"] {
 export function mmJournalMutable(value: Record<string, unknown>, intent: MetaMaskGaslessIntent,
   fingerprint: string, atInput: unknown): MetaMaskGaslessMutable {
   const at = mmIso(atInput), m = mmExact(recordMutable(value), MUTABLE_KEYS);
-  if (!STATES.includes(m.state as MetaMaskGaslessState) || (m.submissionAttempts !== 0 && m.submissionAttempts !== 1)) corrupt();
+  if (!MM_STATES.includes(m.state as MetaMaskGaslessState) || (m.submissionAttempts !== 0 && m.submissionAttempts !== 1)) corrupt();
   const a = approval(m.approval, fingerprint, intent.expiresAt, at);
   const dispatch = m.dispatchStartedAt === null ? null : mmIso(m.dispatchStartedAt);
   if ((m.submissionAttempts === 0) !== (dispatch === null) ||

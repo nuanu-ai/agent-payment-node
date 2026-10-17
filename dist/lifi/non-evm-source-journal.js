@@ -21,6 +21,8 @@ const liveCircleProof = z.strictObject({ kind: z.literal("circle_v2_live_transpo
     preparationDigest: hashSchema, payer: addressSchema, recipientOwner: z.string().min(32).max(44),
     recipientAta: z.string().min(32).max(44), feeTotalAtomic: uintSchema });
 const phase = z.enum(["staged_untrusted", "signing_started", "sealed", "submitting", "submitted_pending", "unknown_finality"]);
+/** Every phase of a source journal. None is an observed outcome: no observer of the source receipt exists for this route. */
+export const NON_EVM_SOURCE_PHASES = phase.options;
 const signedHex = z.string().regex(/^0x(?:[a-f0-9]{2})*$/u).max(32_770);
 const snapshot = z.strictObject({ phase, signedTransaction: signedHex.nullable(), transactionHash: wordSchema.nullable(),
     nonceAtomic: uintSchema.nullable(), submissionAttempts: z.union([z.literal(0), z.literal(1)]),
