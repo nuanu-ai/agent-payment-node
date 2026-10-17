@@ -65,7 +65,7 @@ test("CLI native prepare of any profile names chains, picks the owner-free Base 
   const tmp = await temporaryState(); t.after(tmp.cleanup); const state = new StateStore(tmp.root); let calls = 0;
   const input = { profile: "carol", sourceChain: "eip155:8453", destinationChain: "eip155:4326", recipient: intent().recipient,
     amountAtomic: intent().amountAtomic, minOutputAtomic: intent().minimumOutputWei, maxDepositNetworkFeeWei: "1000000000000", idempotencyKey: "relay-base-mega-0001" };
-  const bound = bindArgv(["relay", "native", "prepare", "--profile", input.profile, "--source-chain", input.sourceChain, "--destination-chain", input.destinationChain,
+  const bound = bindArgv(["relay", "prepare", "--profile", input.profile, "--source-chain", input.sourceChain, "--asset", "native", "--destination-chain", input.destinationChain,
     "--recipient", input.recipient, "--amount-atomic", input.amountAtomic, "--min-output-atomic", input.minOutputAtomic,
     "--max-deposit-network-fee-wei", input.maxDepositNetworkFeeWei, "--idempotency-key", input.idempotencyKey]);
   assert.deepEqual(bound.request, { command: "relay.native.prepare", ...input });

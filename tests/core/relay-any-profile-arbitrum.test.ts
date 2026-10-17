@@ -1,7 +1,7 @@
 /** QA RELAY-008 (Arbitrum USDC to Ethereum USDC) end to end through the installed command path, for a profile and
- * addresses that belong to nobody: `wallet import` → owner policy → `relay arbitrum prepare --recipient` →
- * `approval-check` → `approval-execute` → `observe` → `deposit-dispatch` → `observe` → `observe --ethereum-rpc-url`
- * (the Ethereum USDC credit to the caller's recipient, recorded once and then terminal). */
+ * addresses that belong to nobody: `wallet import` → owner policy → `relay prepare --source-chain eip155:42161` →
+ * `relay execute` (allowance check, then the approval) → `relay observe` → `relay execute` (deposit) → `relay observe`
+ * → `relay observe --destination-rpc-url` (the Ethereum USDC credit to the caller's recipient, recorded once and then terminal). */
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -12,7 +12,8 @@ import { ARBITRUM_USDC, ETHEREUM_USDC, QA_PAYER, QA_RECIPIENT, SimChain, admitBr
   qaWorld, quotePath } from "./relay-any-profile-harness.js";
 
 const ARBITRUM_RPC = "https://arb1.arbitrum.io", PROFILE = "relay-qa-arbitrum";
-const prepareArgs = (recipient: string, key: string) => ["relay", "arbitrum", "prepare", "--profile", PROFILE, "--owner", QA_PAYER,
+const prepareArgs = (recipient: string, key: string) => ["relay", "prepare", "--profile", PROFILE, "--source-chain", "eip155:42161",
+  "--asset", "usdc", "--destination-chain", "eip155:1", "--payer", QA_PAYER,
   "--recipient", recipient, "--amount-atomic", "2000000", "--min-output-atomic", "1800000", "--max-provider-fee-atomic", "100000",
   "--max-approval-network-fee-wei", "3000000000000", "--max-deposit-network-fee-wei", "3000000000000",
   "--quote-file", resolve(quotePath("arbitrum-usdc-ethereum-usdc")), "--idempotency-key", key];
@@ -36,23 +37,24 @@ test("RELAY-008: any profile bridges Arbitrum USDC to the Ethereum recipient it 
 
   const arbitrum = new SimChain(42161).fund(QA_PAYER, 10n ** 17n, { address: ARBITRUM_USDC, atomic: 5_000_000n });
   const id = ["--profile", PROFILE, "--operation", op.operationId, "--rpc-url", ARBITRUM_RPC];
-  const check = await world.cli(["relay", "arbitrum", "approval-check", ...id], { relayArbitrumApprovalRpc: arbitrum });
-  assert.equal(check.ok, true, JSON.stringify(check.error)); assert.equal((check.data as any).state, "approval_required");
-
+  // One `relay execute`: the allowance check finds no allowance (saving nothing), so the approval follows under consent.
   const screens: string[] = [];
-  const approval = await world.cli(["relay", "arbitrum", "approval-execute", ...id],
-    { relayArbitrumApprovalExecuteRpc: arbitrum, ...consent(op.operationId, op.quoteDigest, screens) });
+  const approval = await world.cli(["relay", "execute", ...id], { relayArbitrumApprovalRpc: arbitrum,
+    relayArbitrumApprovalExecuteRpc: arbitrum, ...consent(op.operationId, op.quoteDigest, screens) });
   assert.equal(approval.ok, true, JSON.stringify(approval.error)); assert.equal((approval.data as any).state, "approval_submitted");
+  assert.equal(approval.command, "relay.arbitrum.approval-execute");
+  assert.deepEqual(approval.next_actions, [`apn relay observe ${id.join(" ")}`]);
   assert.ok(screens[0]!.includes(QA_RECIPIENT.toLowerCase()));
   arbitrum.mine();
-  const approved = await world.cli(["relay", "arbitrum", "observe", ...id], { relayArbitrumObserveRpc: arbitrum });
+  const approved = await world.cli(["relay", "observe", ...id], { relayArbitrumObserveRpc: arbitrum });
   assert.equal(approved.ok, true, JSON.stringify(approved.error)); assert.equal((approved.data as any).state, "approval_source_confirmed");
 
-  const deposit = await world.cli(["relay", "arbitrum", "deposit-dispatch", ...id],
+  const deposit = await world.cli(["relay", "execute", ...id],
     { relayArbitrumDepositDispatchRpc: arbitrum, ...consent(op.operationId, op.quoteDigest, screens) });
   assert.equal(deposit.ok, true, JSON.stringify(deposit.error)); assert.equal((deposit.data as any).state, "deposit_submitted");
+  assert.deepEqual(deposit.next_actions, [`apn relay observe ${id.join(" ")} --destination-rpc-url <ethereum-rpc>`]);
   arbitrum.mine();
-  const deposited = await world.cli(["relay", "arbitrum", "observe", ...id], { relayArbitrumObserveRpc: arbitrum });
+  const deposited = await world.cli(["relay", "observe", ...id], { relayArbitrumObserveRpc: arbitrum });
   assert.equal(deposited.ok, true, JSON.stringify(deposited.error)); assert.equal((deposited.data as any).state, "deposit_source_confirmed");
   assert.equal(arbitrum.sent.length, 2, "one approval and one deposit");
   for (const raw of arbitrum.sent) {
@@ -60,9 +62,9 @@ test("RELAY-008: any profile bridges Arbitrum USDC to the Ethereum recipient it 
     assert.equal(parseTransaction(raw).chainId, 42161);
   }
 
-  // Destination through the same command: with --ethereum-rpc-url a final deposit continues to the Ethereum USDC credit.
+  // Destination through the same command: with --destination-rpc-url a final deposit continues to the Ethereum USDC credit.
   const ethereum = new SimChain(1), sourceHash = (deposited.data as any).sourceProof.deposit.transactionHash as string;
-  const observeDestination = () => world.cli(["relay", "arbitrum", "observe", ...id, "--ethereum-rpc-url", "https://ethereum-rpc.publicnode.com"],
+  const observeDestination = () => world.cli(["relay", "observe", ...id, "--destination-rpc-url", "https://ethereum-rpc.publicnode.com"],
     { relayArbitrumObserveRpc: arbitrum, relayArbitrumDestinationRpc: ethereum });
   provider = { status: "pending", originChainId: 42161, destinationChainId: 1, inTxHashes: [sourceHash] };
   let observed = await observeDestination();
@@ -94,8 +96,8 @@ test("RELAY-008: any profile bridges Arbitrum USDC to the Ethereum recipient it 
   assert.deepEqual([(again.data as any).state, (again.data as any).reason, (again.data as any).destinationProof],
     ["operational_acceptance", "recorded_destination_credit", accepted.destinationProof]);
   assert.equal(ethereum.posts, posts); assert.equal(statusReads, reads);
-  // Without --ethereum-rpc-url the source-only contract is unchanged.
-  const sourceOnly = await world.cli(["relay", "arbitrum", "observe", ...id], { relayArbitrumObserveRpc: arbitrum });
+  // Without --destination-rpc-url the source-only contract is unchanged.
+  const sourceOnly = await world.cli(["relay", "observe", ...id], { relayArbitrumObserveRpc: arbitrum });
   assert.equal((sourceOnly.data as any).state, "deposit_source_confirmed"); assert.equal((sourceOnly.data as any).destinationDeliveryProven, false);
   // The record is checked against its own seal and the operation: an edited record is corrupt, never an acceptance.
   const path = join(world.root, "relay-arbitrum-destination-credits", op.profileHash, `${op.operationId}.json`);

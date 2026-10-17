@@ -299,7 +299,7 @@ test("MCP abandon exposes only a canonical foreground CLI handoff", async () => 
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   try {
-    const result = await client.callTool({ name: "apn_operation_abandon", arguments: { operation: "a".repeat(64) } });
+    const result = await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "operation abandon", arguments: { operation: "a".repeat(64) } } });
     const envelope = result.structuredContent as unknown as { error?: { code?: string; details?: Record<string, unknown> } };
     assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.deepEqual(envelope.error?.details?.cli_handoff_argv, ["apn", "operation", "abandon", "--operation", "a".repeat(64)]);

@@ -145,8 +145,11 @@ export type CommandRequest = {
     readonly minOutputAtomic: string;
     readonly maxDepositNetworkFeeWei: string;
     readonly idempotencyKey: string;
-} | {
-    readonly command: "relay.preflight";
+}
+/** `relay execute` and `relay observe` before the saved operation names their route (relay/command-route.ts). */
+ | {
+    readonly command: "relay.route";
+    readonly action: "execute" | "observe";
     readonly profile: string;
     readonly operationId: string;
 } | {
@@ -607,8 +610,6 @@ export type CommandRequest = {
     readonly maxFeeWei?: string;
     /** Owner tip per gas; replaces the RPC suggestion. */
     readonly priorityFeeWei?: string;
-    /** Explicit Linea native, Unichain native or USDC, or Polygon USDC prepare read batching; default is scalar RPC. */
-    readonly batchRpcReads?: true;
 } | {
     readonly command: "transfer.approve";
     readonly operationId: string;

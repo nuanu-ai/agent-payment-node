@@ -24,8 +24,7 @@ export class RejectingMcpPolicyApproval {
     }
 }
 function policyHandoff(request) {
-    const path = request.chainId === undefined ? "wallet policy set" : "wallet policy set-network";
-    const definition = COMMANDS.find((command) => command.path.join(" ") === path);
+    const definition = COMMANDS.find((command) => command.path.join(" ") === "wallet policy set");
     if (definition === undefined)
         throw new ApnError("APN_INTERNAL", "The policy command is absent from the command manifest.");
     const values = {
@@ -43,13 +42,5 @@ function policyHandoff(request) {
             tokens.push(option.name, value);
     }
     return createCliHandoff(tokens);
-}
-export function chainPolicyHandoff(request) {
-    const solana = request.command === "policy.admit-solana";
-    const handoff = createCliHandoff(["apn", "policy", solana ? "admit-solana" : "admit-tron", "--profile", request.profile, "--asset", request.asset,
-        "--max-per-transfer", request.maximumPerTransfer, "--daily-limit", request.dailyLimit, solana ? "--max-fee-sol" : "--max-fee-trx", request.maximumFee]);
-    throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", `Run the exact mainnet asset admission command in a foreground terminal with ${solana ? "APN_SOLANA_RPC_URL" : "APN_TRON_RPC_URL"} configured.`, {
-        approval_boundary: "foreground_tty", ...cliHandoffDetails(handoff),
-    });
 }
 //# sourceMappingURL=mcp-policy-approval.js.map

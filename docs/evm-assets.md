@@ -2,8 +2,8 @@
 
 Owner acceptance runbook: [direct EVM live proofs](evm-direct-live-acceptance-2026-09-19.md).
 
-The APN 0.5.26 package supports the local encrypted disposable wallet on the
-11 direct EVM networks in the frozen allowlist. `wallet balance-asset` reads
+The local encrypted wallet works on the 11 direct EVM networks in the frozen
+allowlist. `wallet balance --chain <caip2> --asset <native-or-contract>` reads
 native coins or any explicitly selected contract on each of those networks;
 direct transfers (`pay transfer prepare-asset`) use the same network registry
 with the frozen token allowlist. x402, wallet policy, LI.FI and the portfolio
@@ -14,7 +14,7 @@ availability and a fresh mainnet payment remain separate proof layers.
 ## One direct-transfer journey
 
 ```sh
-apn wallet balance-asset --profile default --chain eip155:8453 --asset native --rpc-url <https-base-rpc-url>
+apn wallet balance --profile default --chain eip155:8453 --asset native --rpc-url <https-base-rpc-url>
 apn pay transfer prepare-asset --profile default --chain eip155:8453 --asset native --to <recipient> --amount 0.000001 --max-fee-wei <owner-budget> --idempotency-key <unique-key> --rpc-url <https-base-rpc-url>
 apn pay transfer approve --operation <operation-id> --rpc-url <https-base-rpc-url>
 apn operation status --operation <operation-id>
@@ -40,8 +40,8 @@ and must equal it, and a contract reporting other decimals fails. Every direct
 transfer also needs an owner-activated allowlist policy that admits the asset on
 the `direct` rail; its per-operation and daily caps apply to native ETH and every
 listed token (see `docs/allowlist-direct-integration.md`). No rounding, NFT,
-swap, approval or arbitrary calldata is supported. `wallet balance-asset` still
-reads any contract.
+swap, approval or arbitrary calldata is supported. `wallet balance --chain --asset`
+still reads any contract.
 
 `--amount` is a canonical exact positive decimal; `--max-fee-wei` is a positive
 integer native-ETH **pre-submission quote budget**, not an onchain-enforced total
@@ -125,7 +125,6 @@ rejected or rate-limited batch ends that step without scalar fallback; there is
 no per-call variant: **the selected `--rpc-url` must accept JSON-RPC batches**.
 An endpoint that answers a batch with a single object fails with
 `APN_RPC_PROTOCOL` and reason `rpc_batch_unsupported`, after that one POST.
-`--rpc-read-mode batch` is still accepted and changes nothing.
 
 Keyless public endpoints checked on 2026-10-17 without keys. Each was sent one
 `[eth_chainId, eth_blockNumber]` batch. The endpoint in the second column also
@@ -228,8 +227,7 @@ even when the same symbol is admitted on another network.
 ### Read-only mainnet check (2026-09-18)
 
 `prepare-asset` was run through the production RPC and prepare code, up to the
-frozen fee quote, from the owner's public address
-`0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7`. A stand-in wallet returned only
+frozen fee quote, from one funded public address. A stand-in wallet returned only
 that address. The state root was temporary, the policy admitted every row, the
 budget was 0.05 native, and nothing was approved, signed or broadcast. Amounts
 were 0.000001 native and 0.01 of each token. The fee probe is the production
@@ -251,9 +249,9 @@ unfunded. An amount above the asset balance now refuses before the gas estimate,
 which would otherwise fail on the same shortfall.
 
 Exact foreground TTY approval precedes private-key access. MCP
-`apn_wallet_balance_asset` and `apn_pay_transfer_prepare_asset` use the same
-catalog/core. MCP direct approval returns the existing CLI handoff; it cannot
-authorize or strand the operation. Status and receipt do not resume effects.
+`apn_wallet_balance` and `apn_pay_transfer_prepare_asset` use the same
+catalog/core. Approval is not an MCP tool: `apn_foreground_handoff` returns the
+exact CLI command; it cannot authorize or strand the operation. Status and receipt do not resume effects.
 
 Every listed token, including canonical Ethereum USDC and WETH9, Base USDC and
 WETH and Arbitrum USDC and USD₮0, uses the read plan above. The frozen allowlist
@@ -320,13 +318,13 @@ this path.
 
 ## Ethereum / Arbitrum x402 and policy
 
-Use `wallet policy set-network --chain eip155:1` with explicit
+Use `wallet policy set --chain eip155:1` with explicit
 `--max-balance-usdc-atomic` and `--max-x402-amount-atomic`, then
-`x402 inspect-network` / `x402 fetch prepare-network --chain eip155:1` with the
+`x402 inspect` / `x402 fetch prepare --chain eip155:1` with the
 existing URL, HTTP, RPC and idempotency options. Policy creation/increases require
 foreground TTY approval; MCP returns the exact CLI handoff. Decreases are
-noninteractive. `show-network` reports only the selected policy. Explicit Base
-selection aliases the legacy Base policy. For Arbitrum use `--chain eip155:42161`
+noninteractive. `wallet policy show --chain` reports only the selected policy. Explicit Base
+selection (or omitting `--chain`) uses the Base policy. For Arbitrum use `--chain eip155:42161`
 with the same commands and the selected-network RPC. All three policies are
 separate; neither Ethereum nor Arbitrum inherits another network allowance.
 

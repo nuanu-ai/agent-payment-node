@@ -1,6 +1,6 @@
 /** QA RELAY-001 (Ethereum USDC to BNB) and RELAY-005 (Ethereum USDC to Base ETH) end to end through the installed
  * command path, for a profile and addresses that belong to nobody: `wallet import` → owner policy → `relay prepare` /
- * `relay base prepare` → `relay preflight` → `relay execute` (approval) → `relay execute` (deposit) → `relay execute`
+ * `relay prepare` → `relay execute` (approval) → `relay execute` (deposit) → `relay execute`
  * (finalized deposit) → `relay observe` / `relay base observe` (credit to the caller's recipient) → `relay status`. */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -32,7 +32,8 @@ for (const lane of LANES) test(`${lane.qa}: any profile prepares, approves, depo
   await admitBridge(world, lane.profile, { chain: "eip155:1", asset: ETHEREUM_USDC, reference: lane.reference,
     maximumPerTransferAtomic: lane.amount, dailyLimitAtomic: (BigInt(lane.amount) * 2n).toString(), recipients: [QA_RECIPIENT] });
 
-  const prepared = await world.cli([...(lane.base ? ["relay", "base", "prepare"] : ["relay", "prepare"]), "--profile", lane.profile,
+  const prepared = await world.cli(["relay", "prepare", "--profile", lane.profile, "--source-chain", "eip155:1", "--asset", "usdc",
+    "--destination-chain", lane.base ? "eip155:8453" : "eip155:56",
     "--recipient", QA_RECIPIENT, "--amount-atomic", lane.amount, "--min-output-atomic", lane.minOut,
     "--max-approval-network-fee-wei", "10000000000000", "--max-deposit-network-fee-wei", "10000000000000",
     "--idempotency-key", `${lane.qa.toLowerCase()}-0001`]);
@@ -46,9 +47,6 @@ for (const lane of LANES) test(`${lane.qa}: any profile prepares, approves, depo
     [[QA_PAYER.toLowerCase(), QA_RECIPIENT.toLowerCase(), QA_PAYER.toLowerCase(), lane.amount]]);
 
   const ethereum = new SimChain(1).fund(QA_PAYER, 10n ** 18n, { address: ETHEREUM_USDC, atomic: 10_000_000n });
-  const preflight = await world.cli(["relay", "preflight", "--profile", lane.profile, "--operation", op.operationId, "--rpc-url", ETHEREUM_RPC],
-    { relayPreflightPorts: { batch: ethereum.batchCall } });
-  assert.equal(preflight.ok, true, JSON.stringify(preflight.error));
 
   const screens: string[] = [];
   const execute = ["relay", "execute", "--profile", lane.profile, "--operation", op.operationId, "--rpc-url", ETHEREUM_RPC];
@@ -83,11 +81,9 @@ for (const lane of LANES) test(`${lane.qa}: any profile prepares, approves, depo
   const credit = BigInt(op.minOutputAtomic);
   const payout = lane.base ? destination.payoutRouter(QA_RECIPIENT, credit) : destination.payoutNative(QA_RECIPIENT, credit);
   provider = { status: "success", originChainId: 1, destinationChainId: lane.base ? 8453 : 56, inTxHashes: [sourceHash], txHashes: [payout] };
-  const observed = lane.base
-    ? await world.cli(["relay", "base", "observe", "--profile", lane.profile, "--operation", op.operationId, "--rpc-url", lane.destinationRpc,
-      "--ethereum-rpc-url", ETHEREUM_RPC], { relayObserveBaseRpc: destination, relayObserveSourceRpc: ethereum })
-    : await world.cli(["relay", "observe", "--profile", lane.profile, "--operation", op.operationId, "--rpc-url", ETHEREUM_RPC,
-      "--bnb-rpc-url", lane.destinationRpc], { relayObserveSourceRpc: ethereum, relayObserveBnbRpc: destination });
+  const observed = await world.cli(["relay", "observe", "--profile", lane.profile, "--operation", op.operationId, "--rpc-url", ETHEREUM_RPC,
+    "--destination-rpc-url", lane.destinationRpc], lane.base ? { relayObserveBaseRpc: destination, relayObserveSourceRpc: ethereum }
+    : { relayObserveSourceRpc: ethereum, relayObserveBnbRpc: destination });
   assert.equal(observed.ok, true, JSON.stringify(observed.error));
   const result = observed.data as any;
   assert.equal(result.state, "operational_acceptance", JSON.stringify(result));
@@ -107,7 +103,8 @@ test("RELAY-001: a recipient outside the owner's pin is refused at prepare, befo
   await importPayer(world, "relay-qa-pinned");
   await admitBridge(world, "relay-qa-pinned", { chain: "eip155:1", asset: ETHEREUM_USDC, reference: RELAY_ROUTE_REFERENCE,
     maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "2000000", recipients: [QA_PAYER] });
-  const refused = await world.cli(["relay", "prepare", "--profile", "relay-qa-pinned", "--recipient", QA_RECIPIENT, "--amount-atomic", "1000000",
+  const refused = await world.cli(["relay", "prepare", "--profile", "relay-qa-pinned", "--source-chain", "eip155:1", "--asset", "usdc",
+    "--destination-chain", "eip155:56", "--recipient", QA_RECIPIENT, "--amount-atomic", "1000000",
     "--min-output-atomic", "1", "--max-approval-network-fee-wei", "1", "--max-deposit-network-fee-wei", "1", "--idempotency-key", "relay-001-pin-0001"]);
   assert.equal(refused.ok, false); assert.equal(refused.error?.code, "APN_ALLOWLIST_REFUSED");
   assert.equal(world.quoteRequests.length, 0);

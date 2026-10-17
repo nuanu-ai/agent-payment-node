@@ -20,5 +20,5 @@ export interface SelectedAssetFunding {
     readonly nativeLimit: string | undefined;
     readonly x402Token: boolean;
 }
-/** `wallet balance-asset` advice: the selected asset follows its posture; a token read also applies the rule to native gas. */
+/** `wallet balance --chain --asset` advice: the selected asset follows its posture; a token read also applies the rule to native gas. */
 export declare function selectedAssetFundingGuidance(input: SelectedAssetFunding): WalletFundingGuidance;

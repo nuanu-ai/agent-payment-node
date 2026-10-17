@@ -3,7 +3,7 @@ import { finiteFundingRuntime } from "./runtime-factory-finite-rails.js";
 import { executeMerchantCli } from "./x402-merchant/cli.js";
 import { createSpecialApnCore } from "./runtime-factory-special.js";
 import { RelayUnsignedPrepareService } from "./relay/prepare.js";
-import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
+import { executeRelayRoute } from "./relay/command-route.js";
 import { RelayRetireService, TtyRelayAbandonConfirmation } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
@@ -229,15 +229,6 @@ export function createApnCore(bound, options = {}) {
         ...(bound.request.command === "relay.status" || options.relayStatus !== undefined ? {
             relayStatus: options.relayStatus ?? new RelayKeylessStatusService(state, options.relayStatusFetch),
         } : {}),
-        ...(bound.request.command === "relay.preflight" || options.relayPreflight !== undefined ? {
-            relayPreflight: options.relayPreflight ?? new RelayReadOnlyPreflightService(state, clock, options.relayPreflightPorts ?? {
-                batch: calls => {
-                    if (rpc === undefined || !(rpc instanceof HttpsBaseRpc))
-                        throw new ApnError("APN_RPC_CONFIG", "Relay preflight requires its explicit HTTPS RPC.");
-                    return rpc.batchCall(calls);
-                },
-            }),
-        } : {}),
         ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
             portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
         } : {}),
@@ -375,6 +366,8 @@ function uniswapTokenRpcBudget(command) {
 export async function executeBoundCommand(bound, options = {}) {
     if (bound.request.command.startsWith("x402.merchant."))
         return executeMerchantCli(bound, options, options.stateRoot ?? effectiveStateRoot());
+    if (bound.request.command === "relay.route")
+        return executeRelayRoute(bound, options.stateRoot ?? effectiveStateRoot(), (internal) => executeBoundCommand(internal, options));
     if (bound.request.command === "x402.permit2.approve" || bound.request.command === "x402.permit2.observe")
         return executePermit2ProductionCli(bound, options, options.stateRoot ?? effectiveStateRoot());
     if (bound.request.command === "x402.permit2.preflight") {

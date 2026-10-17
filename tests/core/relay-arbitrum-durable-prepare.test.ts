@@ -73,7 +73,8 @@ test("offline command prepares one durable unsigned Arbitrum operation and repla
     arbitrumQuoteFile: async () => { reads++; if (reads > 1) throw new Error("replay must not read quote file");
       return JSON.parse(await readFile(quoteFile, "utf8")) as unknown; },
   });
-  const argv = ["relay", "arbitrum", "prepare", "--profile", "default", "--owner", owner, "--recipient", RELAY_ETHEREUM_USDC_RECIPIENT,
+  const argv = ["relay", "prepare", "--profile", "default", "--source-chain", "eip155:42161", "--asset", "usdc", "--destination-chain", "eip155:1",
+    "--payer", owner, "--recipient", RELAY_ETHEREUM_USDC_RECIPIENT,
     "--amount-atomic", input.amountAtomic, "--min-output-atomic", input.minOutputAtomic,
     "--max-provider-fee-atomic", input.maxProviderFeeAtomic,
     "--max-approval-network-fee-wei", input.maxApprovalNetworkFeeWei,

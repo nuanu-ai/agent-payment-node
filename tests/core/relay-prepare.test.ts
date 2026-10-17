@@ -16,7 +16,6 @@ import { temporaryState, TestNative } from "./helpers.js";
 import { ApnCore } from "../../src/core.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
-import { RelayReadOnlyPreflightService } from "../../src/relay/preflight.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { join } from "node:path";
@@ -311,11 +310,6 @@ test("Relay retirement preserves quote, unblocks a fresh key, and never calls a 
   assert.deepEqual(await readFile(join(temporary.root, "relay-unsigned-operations", first.profileHash, `${first.operationId}.json`)), beforeBytes);
   const fresh = await prepare.prepare({ ...input, idempotencyKey: "relay-prepare-0002" });
   assert.equal(fresh.state, "prepared"); assert.notEqual(fresh.operationId, first.operationId); assert.equal(quotes, 2);
-  let rpcCalls = 0;
-  await assert.rejects(new RelayReadOnlyPreflightService(state, { now: () => instant },
-    { batch: async () => { rpcCalls++; return []; } }).preflight({ profile: "default", operationId: first.operationId }),
-  { code: "APN_OPERATION_BLOCKED" });
-  assert.equal(rpcCalls, 0);
 });
 
 test("Relay retirement refuses existing effects and corrupted marker; parallel retirement is idempotent", async t => {
@@ -524,7 +518,8 @@ test("Relay policy and fee caps refuse before or after exactly one quote", async
 test("Relay rejects changed quote digest and CLI binds the finite prepare inputs", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root);
-  const bound = bindArgv(["relay", "prepare", "--profile", "default", "--recipient", recipient,
+  const bound = bindArgv(["relay", "prepare", "--profile", "default", "--source-chain", "eip155:1", "--asset", "usdc",
+    "--destination-chain", "eip155:56", "--recipient", recipient,
     "--amount-atomic", input.amountAtomic, "--min-output-atomic", input.minOutputAtomic,
     "--max-approval-network-fee-wei", input.maxApprovalNetworkFeeWei,
     "--max-deposit-network-fee-wei", input.maxDepositNetworkFeeWei, "--idempotency-key", input.idempotencyKey]);

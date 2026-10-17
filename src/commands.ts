@@ -35,7 +35,8 @@ export type CommandRequest =
   | { readonly command: "relay.arbitrum.approval-execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.deposit-dispatch"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.native.prepare"; readonly profile: string; readonly sourceChain: string; readonly destinationChain: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
-  | { readonly command: "relay.preflight"; readonly profile: string; readonly operationId: string }
+  /** `relay execute` and `relay observe` before the saved operation names their route (relay/command-route.ts). */
+  | { readonly command: "relay.route"; readonly action: "execute" | "observe"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.native.execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.retire"; readonly profile: string; readonly operationId: string }
@@ -188,7 +189,6 @@ export type CommandRequest =
     /** Owner tip per gas; replaces the RPC suggestion. */
     readonly priorityFeeWei?: string;
     /** Explicit Linea native, Unichain native or USDC, or Polygon USDC prepare read batching; default is scalar RPC. */
-    readonly batchRpcReads?: true;
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
   | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number;

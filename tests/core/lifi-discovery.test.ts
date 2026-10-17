@@ -55,7 +55,7 @@ test("LI.FI all five CLI and MCP commands bind identically, without a generic RP
     assert.match(renderHelp([...c.path]), new RegExp(`apn ${c.path[0]}`, "u"));
   }
   assert.deepEqual(projectMcpTools().filter((t) => t.name.startsWith("apn_bridge_")).map((t) => t.name),
-    ["apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare", "apn_bridge_approve"]);
+    ["apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare"]);
   for (const changed of [{ amount: "1e2" }, { min_output: "0" }, { slippage_bps: "1001" }, { to_chain: "eip155:1" },
     { from_token: LIFI_RECIPIENT }, { max_route_fee: "0.0000001" }, { from_chain: "eip155:10" },
     { to_chain: String(BASE_SOLANA_USDC_CANDIDATE.toChainId), to_token: BASE_SOLANA_USDC_CANDIDATE.toToken },
@@ -89,7 +89,7 @@ test("LI.FI offline capability and MCP approval handoff do not inspect invalid s
   const [a, b] = InMemoryTransport.createLinkedPair(); await Promise.all([server.connect(a), client.connect(b)]); t.after(async () => { await client.close(); await server.close(); });
   const capability = await client.callTool({ name: "apn_bridge_capabilities", arguments: { profile: "unbound" } });
   assert.deepEqual((capability.structuredContent as unknown as OutputEnvelope).data, result.data);
-  const op = "a".repeat(64), handoff = (await client.callTool({ name: "apn_bridge_approve", arguments: { operation: op } })).structuredContent as unknown as OutputEnvelope;
+  const op = "a".repeat(64), handoff = (await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "bridge approve", arguments: { operation: op } } })).structuredContent as unknown as OutputEnvelope;
   assert.equal(handoff.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.match(JSON.stringify(handoff), new RegExp(`apn bridge approve --operation ${op}`, "u"));
   assert.equal(touched, 0); assert.equal(await readFile(temporary.root, "utf8"), "not a state directory");

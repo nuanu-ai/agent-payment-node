@@ -1,7 +1,6 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
 import type { RelayUnsignedPrepareService, RelayPreparePorts } from "./relay/prepare.js";
-import type { RelayReadOnlyPreflightService, RelayPreflightPorts } from "./relay/preflight.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayApprovalInclusionWait } from "./relay/source-runtime.js";
 import type { RelayObserveService } from "./relay/observe.js";
@@ -60,8 +59,6 @@ export interface RuntimeFactoryOptions {
   readonly relayExecuteTtyOptions?: TtyTransferApprovalOptions;
   readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly relayPreparePorts?: RelayPreparePorts;
-  readonly relayPreflight?: RelayReadOnlyPreflightService;
-  readonly relayPreflightPorts?: RelayPreflightPorts;
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayStatusFetch?: typeof fetch;
   readonly relayObserve?: RelayObserveService;

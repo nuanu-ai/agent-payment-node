@@ -32,7 +32,7 @@ function renderRootHelp() {
     for (const commandDefinition of COMMANDS.filter((candidate) => candidate.path.length === 1)) {
         lines.push(`  ${commandDefinition.synopsis.padEnd(24)} ${commandDefinition.summary}`);
     }
-    lines.push("", "Discovery:", "  apn help <path...>", "  apn <path...> --help", "  apn help --json    Exact apn.command-manifest.v1 contract");
+    lines.push("", "Discovery:", "  apn help <path...>", "  apn <path...> --help", "  apn help --json    Exact apn.command-manifest.v2 contract");
     return lines.join("\n");
 }
 function renderGroupHelp(group) {

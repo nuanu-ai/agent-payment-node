@@ -21,6 +21,7 @@ import {
 } from "../../src/command-catalog.js";
 import { runCli } from "../../src/cli.js";
 import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
+import { removedV1Command, removedV1CommandMessage, removedV1Commands } from "../../src/command-manifest-migration.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { PRODUCT_VERSION } from "../../src/constants.js";
 import { ApnError } from "../../src/errors.js";
@@ -38,10 +39,10 @@ const EXPECTED_COMMANDS = [
   "x402 permit2 preflight",
   "x402 permit2 status",
   "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant retire-unsent", "x402 merchant status",
-  "relay arbitrum prepare", "relay arbitrum observe", "relay arbitrum approval-check", "relay arbitrum approval-execute", "relay arbitrum deposit-dispatch", "relay base prepare", "relay base observe", "relay prepare", "relay native prepare", "relay preflight", "relay execute", "relay native execute", "relay retire", "relay status", "relay observe",
+  "relay prepare", "relay execute", "relay observe", "relay retire", "relay status",
   "stargate native prepare", "stargate native execute", "stargate native observe", "stargate native status", "stargate native receipt",
   "stargate token prepare", "stargate token execute", "stargate token cleanup", "stargate token observe", "stargate token status", "stargate token receipt",
-  "wallet balance-asset",
+  "wallet balance",
   "pay transfer prepare-asset",
   "--version",
   "mcp serve",
@@ -58,7 +59,6 @@ const EXPECTED_COMMANDS = [
   "wallet metamask native-transfer-status",
   "wallet metamask native-transfer-observe",
   "wallet status",
-  "wallet balance",
   "wallet policy show",
   "wallet policy set",
   "x402 inspect",
@@ -72,10 +72,6 @@ const EXPECTED_COMMANDS = [
   "operation recover-provider-request",
   "operation recover-transaction-settlement",
   "receipt get",
-  "wallet policy show-network",
-  "wallet policy set-network",
-  "x402 inspect-network",
-  "x402 fetch prepare-network",
   "wallet ensure-solana",
   "wallet balance-solana",
   "wallet capabilities-solana",
@@ -107,11 +103,12 @@ const EXPECTED_COMMANDS = [
 test("one exact static catalog owns all groups, commands, recovery targets, examples and manifest fields", () => {
   assert.deepEqual(COMMAND_GROUPS.map((entry) => entry.path.join(" ")), EXPECTED_GROUPS);
   assert.deepEqual(COMMANDS.map((entry) => entry.path.join(" ")), EXPECTED_COMMANDS);
-  assert.equal(COMMAND_MANIFEST.schema_version, "apn.command-manifest.v1");
+  assert.equal(COMMAND_MANIFEST.schema_version, "apn.command-manifest.v2");
   assert.equal(COMMAND_MANIFEST.product_version, PRODUCT_VERSION);
   assert.equal(COMMAND_MANIFEST.cli_envelope_version, "apn.cli.v1");
   assert.deepEqual(Object.keys(COMMAND_MANIFEST), [
     "schema_version", "product", "product_version", "cli_envelope_version", "compatibility", "discovery", "groups", "commands",
+    "removed_v1_commands",
   ]);
   assert.doesNotThrow(() => validateCommandManifest(COMMAND_MANIFEST));
   const paths = new Set(EXPECTED_COMMANDS);
@@ -187,16 +184,15 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "",
     "Subgroups:",
     "  apn wallet permission <command> [options] — Inspect and manage bounded provider permission state.",
-    "  apn wallet metamask <command> [options] — Finite fixed MetaMask native-paid transfer.",
+    "  apn wallet metamask <command> [options] — Guarded MetaMask Agent Wallet USDC transfer that pays its network fee in the native coin.",
     "  apn wallet policy <command> [options] — Inspect or change owner-approved wallet policy.",
     "",
     "Commands:",
-    "  apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] — Read one explicitly selected local-wallet EVM asset and native gas balance.",
+    "  apn wallet balance --profile <profile> [--chain <caip2> --asset <native-or-contract> [--decimals <integer>]] --rpc-url <https-url> — Read one profile's EVM balances: with --chain and --asset one selected asset plus native gas, without them Base ETH and canonical Base USDC.",
     "  apn wallet ensure [--profile <profile>] — Create or reuse one encrypted disposable wallet.",
     "  apn wallet import --profile <profile> --key-file <absolute-path> --key-name <env-name> --expected-address <checksummed-address> — Import a private key from an owner-only file into a new encrypted local wallet profile.",
     "  apn wallet connect --profile <profile> --provider <provider-id> [--auth-method <method>] [--expected-revision <positive-integer>] [--permission-cap-usdc-atomic <atomic>] [--permission-expires-at <unix-seconds>] [--idempotency-key <key>] — Create, reuse or explicitly rebind a foreground-authenticated provider wallet profile.",
     "  apn wallet status [--profile <profile>] — Read wallet presence and public identity.",
-    "  apn wallet balance [--profile <profile>] --rpc-url <https-url> — Read Base ETH and canonical Base-USDC balances.",
     "  apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true] — Ensure a separate local ed25519 wallet or link an existing authenticated awal Solana account.",
     "  apn wallet balance-solana --profile <profile> --asset <sol-usdc-or-usdt> — Read SOL, canonical USDC or pinned USDT and the separate SOL fee balance through APN_SOLANA_RPC_URL.",
     "  apn wallet capabilities-solana [--profile <profile>] — Inspect all four provider capabilities, fee-contract gates and unavailable Solana x402.",
@@ -236,10 +232,8 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  (none)",
     "",
     "Commands:",
-    "  apn wallet policy show --profile <profile> — Read the encrypted owner-approved profile policy.",
-    "  apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>] — Create, lower or raise owner-approved balance and x402 limits.",
-    "  apn wallet policy show-network --chain <caip2> --profile <profile> — Read the encrypted owner-approved profile policy. Explicit local-wallet network selection; no cross-network authority inheritance.",
-    "  apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>] — Create, lower or raise owner-approved balance and x402 limits. Explicit local-wallet network selection; no cross-network authority inheritance.",
+    "  apn wallet policy show --profile <profile> [--chain <caip2>] — Read the encrypted owner-approved profile policy.",
+    "  apn wallet policy set --profile <profile> [--chain <caip2>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>] — Create, lower or raise owner-approved balance and x402 limits.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet policy <child>",
@@ -318,6 +312,79 @@ test("catalog parser derives requiredness, defaults, duplicate rejection and sca
   }
 });
 
+test("manifest v2 names every removed v1 command with a current replacement, and an old invocation gets it as next action", async () => {
+  const removed = COMMAND_MANIFEST.removed_v1_commands;
+  assert.ok(removed.length > 0);
+  for (const entry of removed) {
+    assert.equal(COMMANDS.some((command) => command.path.join(" ") === entry.path.join(" ")), false, entry.path.join(" "));
+    if (entry.replacement === null) {
+      // Removed without a successor: the reason, ordinary discovery guidance and no invented replacement.
+      const invoked = await runCli([...entry.path, "--profile", "x"], {});
+      assert.equal(invoked.error?.code, "APN_UNSUPPORTED_COMMAND");
+      assert.equal(invoked.error?.message.endsWith(entry.reason), true);
+      assert.equal(invoked.next_actions.every((action) => action.startsWith("apn help")), true, JSON.stringify(invoked.next_actions));
+      continue;
+    }
+    assert.ok(COMMANDS.some((command) => `${entry.replacement} `.startsWith(`apn ${command.path.join(" ")} `)), entry.replacement);
+    const next = catalogNextActions([...entry.path, "--profile", "x"]);
+    assert.equal(next[0], entry.replacement);
+    assert.match(next[1] ?? "", /^apn help /u);
+    assert.ok(COMMANDS.some((command) => next[1] === `apn help ${command.path.join(" ")}`), next[1]);
+    assert.deepEqual(catalogNextActions(["help", ...entry.path]), next);
+    const invoked = await runCli([...entry.path, "--profile", "x"], {});
+    assert.equal(invoked.error?.code, "APN_UNSUPPORTED_COMMAND");
+    assert.equal(invoked.error?.message.endsWith(entry.replacement), true);
+    assert.deepEqual(invoked.next_actions, next);
+  }
+  const current = cloneManifest() as unknown as { removed_v1_commands: Array<{ path: string[]; replacement: string }> };
+  current.removed_v1_commands.push({ path: ["wallet", "status"], replacement: "apn wallet status" });
+  assert.throws(() => validateCommandManifest(current), ApnError, "a current command cannot be listed as removed");
+  const dangling = cloneManifest() as unknown as { removed_v1_commands: Array<{ path: string[]; replacement: string }> };
+  dangling.removed_v1_commands.push({ path: ["wallet", "gone"], replacement: "apn wallet nowhere --profile <profile>" });
+  assert.throws(() => validateCommandManifest(dangling), ApnError, "a replacement must name a current command");
+  const dropped = cloneManifest() as unknown as { removed_v1_commands: unknown[] };
+  dropped.removed_v1_commands.pop();
+  assert.throws(() => assertCompatibleManifestEvolution(COMMAND_MANIFEST, dropped), ApnError, "removals stay listed within v2");
+});
+
+test("a v1 command removed without a successor carries replacement null and a reason, and the validator stays strict", () => {
+  type Entry = { path: string[]; replacement: string | null; reason?: string };
+  const withEntry = (entry: Entry) => {
+    const manifest = cloneManifest() as unknown as { removed_v1_commands: Entry[] };
+    manifest.removed_v1_commands.push(entry);
+    return manifest;
+  };
+  const reason = "Historical recovery for operations that are now terminal.";
+  assert.doesNotThrow(() => validateCommandManifest(withEntry({ path: ["wallet", "gone"], replacement: null, reason })));
+  for (const [name, entry] of [
+    ["null replacement without a reason", { path: ["wallet", "gone"], replacement: null }],
+    ["empty reason", { path: ["wallet", "gone"], replacement: null, reason: "" }],
+    ["overlong reason", { path: ["wallet", "gone"], replacement: null, reason: "r".repeat(201) }],
+    ["control character in the reason", { path: ["wallet", "gone"], replacement: null, reason: "line\nbreak" }],
+    ["reason beside a replacement", { path: ["wallet", "gone"], replacement: "apn wallet status --profile <profile>", reason }],
+    ["a current command removed without a successor", { path: ["wallet", "status"], replacement: null, reason }],
+    ["an empty replacement", { path: ["wallet", "gone"], replacement: "" }],
+  ] as const) assert.throws(() => validateCommandManifest(withEntry(entry as unknown as Entry)), ApnError, name);
+
+  const entry = { path: ["circle", "evm", "cleanup85-prepare"], replacement: null, reason } as const;
+  assert.deepEqual(removedV1Command(["circle", "evm", "cleanup85-prepare", "--operation", "a".repeat(64)], [entry]), entry);
+  assert.equal(removedV1CommandMessage(entry), `This command was removed in command manifest v2: ${reason}`);
+  assert.doesNotMatch(removedV1CommandMessage(entry), /use:/u);
+
+  // The phase-4a deletions are pre-registered: each appears once its command has left the catalog, never while current.
+  const current = new Set(COMMANDS.map((command) => command.path.join(" ")));
+  const retired = removedV1Commands(new Set()).filter((row) => row.replacement === null).map((row) => row.path.join(" "));
+  assert.deepEqual(retired, ["circle evm cleanup85-prepare", "circle evm cleanup85-cancel", "circle evm cleanup86-approve", "circle evm cleanup-nonce", "operation repair-deployment"]);
+  for (const path of retired) {
+    const listed = COMMAND_MANIFEST.removed_v1_commands.some((row) => row.path.join(" ") === path);
+    assert.notEqual(listed, current.has(path), path);
+    const without = new Set([...current].filter((candidate) => candidate !== path));
+    const row = removedV1Commands(without).find((candidate) => candidate.path.join(" ") === path);
+    assert.ok(row !== undefined && row.replacement === null && row.reason.length > 0, path);
+    assert.equal(removedV1Commands(new Set([...current, path])).some((candidate) => candidate.path.join(" ") === path), false, path);
+  }
+});
+
 test("catalog-declared x402 policy ceiling is enforced before request binding", () => {
   const command = COMMANDS.find((entry) => entry.path.join(" ") === "wallet policy set") as CommandDefinition;
   const argv = replaceOption(validArgv(command, true), "--max-balance-usdc-atomic", "100");
@@ -333,7 +400,7 @@ test("HTTPS parser constraints preserve RPC compatibility and match canonical bo
   const longRpc = `https://rpc.example/${"r".repeat(2_100)}`;
   const noncanonicalRpc = "https://RPC.Example:443/resource";
   for (const rpcUrl of [longRpc, noncanonicalRpc]) {
-    assert.doesNotThrow(() => parseCatalogArgv(["wallet", "balance", "--rpc-url", rpcUrl]));
+    assert.doesNotThrow(() => parseCatalogArgv(["wallet", "balance", "--profile", "default", "--rpc-url", rpcUrl]));
     assert.doesNotThrow(() => new HttpsBaseRpc(rpcUrl));
   }
 
@@ -400,7 +467,7 @@ test("manifest validator and compatibility gate reject every declared structural
   assert.throws(() => validateCommandManifest(missingField), ApnError);
 
   const schemaChanged = cloneManifest();
-  schemaChanged.schema_version = "apn.command-manifest.v2";
+  schemaChanged.schema_version = "apn.command-manifest.v3";
   assert.throws(() => assertCompatibleManifestEvolution(COMMAND_MANIFEST, schemaChanged), ApnError);
 
   const productChanged = cloneManifest();
