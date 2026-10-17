@@ -6,5 +6,6 @@ export declare class ApnError extends Error {
     readonly details?: ErrorDetails;
     constructor(code: ErrorCode, message: string, details?: ErrorDetails);
 }
+/** Unexpected exceptions keep only their class name (never the message), so a bug can be told from an environment fault. */
 export declare function asApnError(error: unknown): ApnError;
 export declare function assertInput(condition: unknown, message: string): asserts condition;

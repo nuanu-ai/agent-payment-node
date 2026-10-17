@@ -1,5 +1,6 @@
 import { OUTPUT_VERSION } from "./constants.js";
 import { asApnError } from "./errors.js";
+import { asRateLimited } from "./rpc-rate-limit.js";
 export function successEnvelope(request, requestId, outcome) {
     return {
         version: OUTPUT_VERSION,
@@ -15,7 +16,8 @@ export function successEnvelope(request, requestId, outcome) {
     };
 }
 export function failureEnvelope(command, requestId, error) {
-    const safe = asApnError(error);
+    // A caller sees an HTTP 429 as a rate limit in every family, whichever transport first classified it.
+    const safe = asApnError(asRateLimited(error));
     return {
         version: OUTPUT_VERSION,
         request_id: requestId,
@@ -58,11 +60,21 @@ function nextActions(error) {
             return typeof handoff === "string" ? [handoff] : [];
         }
         case "APN_NATIVE_CHANNEL_REQUIRED": return ["Initialize the local APN custody adapter."];
-        case "APN_RPC_CONFIG": return ["Correct the selected network's RPC setting named in the error (its --rpc-url or APN_*_RPC_URL), then retry."];
+        case "APN_RPC_CONFIG": {
+            const names = rpcEnvironmentNames(error);
+            return names.length > 0
+                ? [`Set ${names.join(" and ")} to a public HTTPS RPC endpoint of that chain, then rerun the same command.`]
+                : ["Correct the selected network's RPC setting named in the error (its --rpc-url or APN_*_RPC_URL), then retry."];
+        }
         case "APN_RPC_RATE_LIMITED": return ["Wait for the RPC provider's rate-limit window, then rerun the same command; prepared operations are idempotent."];
         case "APN_REPREPARE_REQUIRED": return ["Prepare a new operation with a new idempotency key; this one can no longer proceed."];
         case "APN_STATE_BUSY": return ["The kernel lock stayed busy through the bounded wait; retry after the active APN process exits. APN keeps stable lock files in place."];
         default: return [];
     }
+}
+/** The RPC environment variables an RPC configuration failure names in its message or reason, in order, once each. */
+function rpcEnvironmentNames(error) {
+    const text = `${error.message} ${typeof error.details?.reason === "string" ? error.details.reason : ""}`;
+    return [...new Set(text.match(/APN_[A-Z0-9_]+_RPC_URLS?/gu) ?? [])];
 }
 //# sourceMappingURL=output.js.map
