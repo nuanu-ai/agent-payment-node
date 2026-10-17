@@ -18,7 +18,7 @@ export const CIRCLE_RPC_ABI = parseAbi([
     "function signatureThreshold() view returns(uint256)", "function getNumEnabledAttesters() view returns(uint256)", "function getEnabledAttester(uint256) view returns(address)",
 ]);
 const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_getCode", "eth_getStorageAt", "eth_call",
-    "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt", "eth_getTransactionByHash"]);
+    "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getLogs"]);
 const READ_METHODS = new Set([...METHODS].filter(method => method !== "eth_sendRawTransaction"));
 /** Read plans of the live rails in calls per client (P4): chain identity; functional configuration with its head;
  * the attester set (head, threshold, count, at most 20 attesters); one account; one envelope (head, tip, estimate);
