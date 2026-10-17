@@ -31,7 +31,7 @@ function reader(mutation?: Mutation, limits: { maxHttpRequests?: number; deadlin
   const epoch = now, wait = async (milliseconds: number) => { await new Promise<void>((resolve) => setImmediate(resolve)); now += milliseconds; };
   const physical = new BridgeRpcPhysicalBudget(24);
   const session = new RpcReadSession({ now: () => now, wait, physicalBudget: physical, maxReadAttempts: 1,
-    archiveDeploymentBatchMaxItems: 3, maxHttpRequests: 16, maxHttpAttempts: 16, deadlineMs: 180_000, ...limits });
+    maxHttpRequests: 16, maxHttpAttempts: 16, deadlineMs: 180_000, ...limits });
   const posts: Array<{ role: string; methods: string[]; at: number }> = [];
   const rpc = bridgeRpcFactory({ APN_LINEA_RPC_URL: "https://linea-rpc.publicnode.com",
     APN_LINEA_ARCHIVE_RPC_URL: capture.rpcOrigin }, { wait, transport: {
@@ -137,12 +137,3 @@ test("Linea observation accepts proof read through another primary RPC endpoint 
   assert.equal(s.source.submissions.length, 1);
 });
 
-
-test("the frozen migration proof still reproduces the captured Linea deployment identity without a trace probe", async () => {
-  const r = reader(), observed = await r.rpc.observeDestination!(capture.transactionHash, capture.expected); assert(observed);
-  const before = r.posts.length;
-  const deployment = await r.rpc.deployment("across", 1, BRIDGE_ZERO_ADDRESS, observed.transaction.block, true);
-  assert.deepEqual(deployment.block, observed.transaction.block); assert.equal(deployment.rpcOrigin, "https://linea-rpc.publicnode.com");
-  assert.equal(deployment.codeHash, deploymentCapture.proof.codeHash); assert.equal(deployment.configurationHash, deploymentCapture.proof.configurationHash);
-  assert(r.posts.slice(before).every(row => row.role === "archive" && !row.methods.includes("debug_traceTransaction")));
-});

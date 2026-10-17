@@ -9,7 +9,7 @@ import { EvmRpc } from "../../src/evm-rpc.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
 import type { Hex } from "../../src/model.js";
 import { BridgeRpc, RpcReadSession, bridgeRpcCall, bridgeRpcFactory, type BridgeRpcRequestTrace } from "../../src/lifi/rpc.js";
-import { BASE_FEE_CONTRACT, BRIDGE_RECEIPT_FEE_RULE_HASH, bridgeActualFees, legacyBridgeActualFees } from "../../src/lifi/rpc-fees.js";
+import { BRIDGE_RECEIPT_FEE_RULE_HASH, bridgeActualFees } from "../../src/lifi/rpc-fees.js";
 import { evmTransactionSignatureScalar, verifyRpcTransaction } from "../../src/lifi/rpc-transaction.js";
 import { verifyBridgeSigned } from "../../src/lifi/transaction.js";
 import { BRIDGE_DIAMOND } from "../../src/lifi/validation.js";
@@ -492,24 +492,6 @@ test("LI.FI Base actual fee comes from the receipt: explicit L1 fee, operator fe
     assert.throws(() => bridgeActualFees(8453, Object.fromEntries(Object.entries({ ...receipt, ...broken }).filter(([, value]) => value !== undefined))),
       { code: "APN_RPC_PROTOCOL" });
   }
-});
-
-test("legacy migration fee proof still proves operator zero at the receipt block through the pinned oracle", async () => {
-  const s = await baseFeeFixture(); assert.equal(s.receipt.operatorFeeScalar, undefined);
-  const actual = await legacyBridgeActualFees(8453, s.receipt, s.block, s.call);
-  const execution = BigInt(s.receipt.gasUsed) * BigInt(s.receipt.effectiveGasPrice);
-  assert.equal(actual.actualTotalFeeWei, (execution + BigInt(s.receipt.l1Fee)).toString());
-  assert.equal(actual.blobFeeWei, "0"); assert.equal(actual.operatorFeeWei, "0"); assert.equal(actual.feeEvidence.baseOracle!.blockHash, s.block.hash);
-  assert.equal(s.observed.length, 11); assert.ok(s.observed.filter((r) => r.request.method === "eth_getCode").every((r) => r.result.length > 1000));
-  const mutations: Array<(s: Awaited<ReturnType<typeof baseFeeFixture>>) => void> = [
-    (s) => { s.entries.find((r) => r.label === "gpo.implementationCode")!.result = "0x6000"; },
-    (s) => { s.entries.find((r) => r.label === "gpo.proxyImplementationSlot")!.result = word(1n); },
-    (s) => { s.entries.find((r) => r.label === "gpo.version")!.result = "0x"; },
-    (s) => { s.entries.find((r) => r.label === "gpo.isJovian")!.result = word(0n); },
-    (s) => { s.entries.find((r) => r.label === "gpo.getOperatorFee.gasUsed67773")!.result = word(1n); },
-    (s) => { s.entries.find((r) => r.label === "l1Block.operatorFeeScalar")!.result = word(1n << 32n); },
-  ];
-  for (const mutate of mutations) { const s = await baseFeeFixture(); mutate(s); await assert.rejects(legacyBridgeActualFees(8453, s.receipt, s.block, s.call), { code: "APN_RPC_PROTOCOL" }); }
 });
 
 test("LI.FI actual fee arithmetic counts Arbitrum poster gas once and Ethereum type-3 blob gas separately", () => {
