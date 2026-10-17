@@ -80,9 +80,10 @@ export class UniswapTokenUsage {
     };
     if (target === "unknown_finality") { if (current.state === "reserved") await move("submitted"); if (current.state === "submitted") await move(target); }
     else if (target === "failed_confirmed_revert") { if (current.state === "reserved") await move("submitted"); await move(target, true); }
-    // A swap proven never to land (R4): its exposed hold is released as unsubmitted, nothing of it was spent.
+    // A swap proven never to land (R4): its hold is released as unsubmitted, nothing of it was spent. A hold a crash left
+    // reserved after the swap was bound releases directly (the ledger allows both).
     else if (target === "released_unsubmitted") {
-      if (op.swapAttempt?.transactionHash == null || current.state === "reserved") corrupt("Uniswap token usage cannot release an unsent swap as unsubmitted.");
+      if (op.swapAttempt?.transactionHash == null) corrupt("Uniswap token usage can release as unsubmitted only a bound swap.");
       if (current.state === "submitted") await move("unknown_finality");
       await move(target, true);
     }

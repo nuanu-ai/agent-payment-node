@@ -10,8 +10,12 @@ import { OperationService } from "../../src/operation-service.js";
 import { createApnCore } from "../../src/runtime-factory.js";
 import { StateStore } from "../../src/state.js";
 import { UniswapTokenExecution, type TokenEffectKind, type TokenEffectObservation, type UniswapTokenCommandRuntime } from "../../src/swap/uniswap-v3/token-execution.js";
-import { newUniswapTokenOperation, tokenEffectRound, UniswapTokenJournal, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
-import { createUniswapTokenRoute } from "../../src/swap/uniswap-v3/token-route.js";
+import { newUniswapTokenOperation, tokenAttempt, tokenEffectRound, transitionUniswapToken, UniswapTokenJournal, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
+import { createUniswapTokenRoute, UNISWAP_TOKEN_MECHANISM_PIN } from "../../src/swap/uniswap-v3/token-route.js";
+import { UniswapTokenUsage } from "../../src/swap/uniswap-v3/token-usage.js";
+import { swapMechanismDigest } from "../../src/swap/pin.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { ETHEREUM_USDT } from "../../src/swap/uniswap-v3/pins.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { temporaryState } from "./helpers.js";
@@ -159,4 +163,30 @@ test("owner abandon is the last resort: refused before the route deadline, then 
   assert.deepEqual([(again.operation as UniswapTokenOperation).phase, intents.length], ["abandoned_unknown", 1], "a replay asks nothing");
   assert.equal(((await f.cli(["swap", "ethereum", "uniswap-token", "execute", "--operation", ID])).operation as UniswapTokenOperation).phase, "abandoned_unknown");
   assert.deepEqual(f.sends, [`swap:${H("2")}`]);
+});
+
+test("the real ledger releases a never-landed swap's hold as unsubmitted from reserved, submitted or unknown finality", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const policy = await activateDirectPolicy(temporary.root, PROFILE, { accounts: { evm: ACCOUNT }, now: NOW, admissions: [UNISWAP_USDC, ETHEREUM_USDT]
+    .map(identifier => ({ chain: "eip155:1", kind: "token" as const, identifier, rail: "swap" as const, maximumPerTransferAtomic: "1000000",
+      dailyLimitAtomic: "3000000", mechanism: UNISWAP_TOKEN_MECHANISM_PIN })) });
+  const ledger = new AssetUsageLedger(temporary.root), usage = new UniswapTokenUsage(new StateStore(temporary.root), { now: () => NOW }, ledger);
+  const route = createUniswapTokenRoute({ inputToken: UNISWAP_USDC, outputToken: ETHEREUM_USDT, recipient: RECIPIENT, amountIn: "1000000",
+    amountOutMinimum: "990000", deadline: DEADLINE }), gas = { gasLimit: "100000", maxFeePerGas: "2", maxPriorityFeePerGas: "1" };
+  const bound = async (id: string) => {
+    const op = newUniswapTokenOperation({ operationId: id.repeat(64), profile: PROFILE, account: ACCOUNT, route, approvalCapAtomic: "1000000",
+      allowanceAtPrepare: "1000000", approvalGas: gas, swapGas: gas, cleanupGas: gas, maximumNativeDebitWei: "600000",
+      policyDigest: policy.policyDigest, mechanismDigest: swapMechanismDigest(UNISWAP_TOKEN_MECHANISM_PIN), now: NOW });
+    const lease = await usage.reserve(op);
+    return transitionUniswapToken(op, "unknown_finality", { usageReservationId: lease.reservationId, usageState: lease.state,
+      swapAttempt: { ...tokenAttempt(op, "swap", "7", NOW), transactionHash: H("2") } }, NOW);
+  };
+  const identity = { account: ACCOUNT, chain: "eip155:1", asset: { kind: "token" as const, identifier: UNISWAP_USDC } };
+  const reserved = await bound("b"), submitted = await bound("c"), unknown = await bound("e");
+  await usage.follow(submitted, "submitted"); await usage.follow(unknown, "unknown_finality");
+  assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "3000000");
+  for (const op of [reserved, submitted, unknown]) assert.equal((await usage.follow(op, "released_unsubmitted")).state, "released_unsubmitted");
+  assert.equal((await ledger.usage(identity, NOW)).amountAtomic, "0", "nothing of a swap that never landed counts");
+  // Only a bound swap's hold can be released as unsubmitted.
+  await assert.rejects(usage.follow({ ...await bound("f"), swapAttempt: null }, "released_unsubmitted"), { code: "APN_STATE_CORRUPT" });
 });
