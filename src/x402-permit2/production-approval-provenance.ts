@@ -1,68 +1,60 @@
 import { ApnError } from "../errors.js";
-import { LocalWalletNative } from "../local-wallet-native.js";
-import type { NativePort } from "../ports.js";
-import type { Permit2LocalCapability } from "./production-native-capability.js";
 import { Permit2ProductionRepository, type Permit2ProductionRecord } from "./production-repository.js";
-import type { Permit2ProductionJournal } from "./production-journal.js";
 import { assertSigningLifecycle } from "./production-signing-owner.js";
 import { assertSigningTime } from "./production-signing-facts.js";
 import { permit2ApprovalDisplay, type Permit2ApprovalPurpose, type Permit2ForegroundApprovalPort } from "./production-approval.js";
-export interface Permit2ForegroundApprovalProof { readonly kind: "permit2-foreground-approval-proof" }
-interface Issued {
-  readonly journal: Permit2ProductionJournal; readonly controller: object; readonly native: NativePort;
-  readonly capability: Permit2LocalCapability; readonly nativeState: object; readonly root: string;
-  readonly purpose: Permit2ApprovalPurpose; readonly operationId: string; readonly materialHash: string; readonly displayHash: string; readonly fingerprint: string;
-  readonly completedAt: number; readonly clock: () => Date; claimed: boolean;
+
+/** How long a foreground approval may be used after the owner completed it. */
+export const PERMIT2_APPROVAL_WINDOW_MS = 60_000;
+
+/**
+ * What the owner approved at the foreground prompt: a plain value. Only the paid CLI path shows the prompt and then
+ * signs, and every later step re-checks the value against the saved record and the clock (assertPermit2ApprovalCurrent).
+ */
+export interface Permit2ForegroundApproval {
+  readonly operationId: string;
+  readonly purpose: Permit2ApprovalPurpose;
+  readonly materialHash: string;
+  readonly displayHash: string;
+  readonly fingerprint: string;
+  readonly completedAt: number;
 }
-export type Permit2ApprovalBinding = Readonly<Omit<Issued, "claimed">>;
-const proofs = new WeakMap<Permit2ForegroundApprovalProof, Issued>();
-/** Trusted wiring; the only UI-proof issuer performs actual owned disclosure and foreground approval. */
+
+/** Shows one reserved operation at the foreground prompt; no key, signing or transport is involved. */
 export class Permit2ForegroundApprovalAuthority {
   readonly #records: Permit2ProductionRepository;
   readonly #approval: Permit2ForegroundApprovalPort;
   readonly #clock: () => Date;
-  readonly #binding: { readonly journal: Permit2ProductionJournal; readonly controller: object; readonly native: NativePort;
-    readonly capability: Permit2LocalCapability; readonly nativeState: object; readonly root: string };
-  constructor(journal: Permit2ProductionJournal, controller: object, native: NativePort, capability: Permit2LocalCapability,
-    approval: Permit2ForegroundApprovalPort, clock: () => Date) {
-    const nativeState = LocalWalletNative.assertPermit2LocalCapability(capability, native, journal.root);
-    this.#approval = approval; this.#clock = clock;
-    this.#records = new Permit2ProductionRepository(journal.root);
-    this.#binding = Object.freeze({ journal, controller, native, capability, nativeState, root: journal.root });
+  constructor(root: string, approval: Permit2ForegroundApprovalPort, clock: () => Date) {
+    this.#records = new Permit2ProductionRepository(root); this.#approval = approval; this.#clock = clock;
   }
-  async approveOwned(id: string, purpose: Permit2ApprovalPurpose = "sign-only"): Promise<Permit2ForegroundApprovalProof> {
+  async approveOwned(id: string, purpose: Permit2ApprovalPurpose = "sign-only"): Promise<Permit2ForegroundApproval> {
     const record = await this.#records.findOperation(id); if (record === null) blocked();
-    assertSigningLifecycle(record, "reserved"); assertSigningTime(record, now(this.#clock));
-    const display = permit2ApprovalDisplay(record, purpose), started = now(this.#clock).getTime();
+    assertSigningLifecycle(record, "reserved"); assertSigningTime(record, permit2Now(this.#clock));
+    const display = permit2ApprovalDisplay(record, purpose), started = permit2Now(this.#clock).getTime();
     await this.#approval.approve(display);
-    const completedAt = now(this.#clock).getTime(); if (completedAt < started) blocked();
+    const completedAt = permit2Now(this.#clock).getTime(); if (completedAt < started) blocked();
     assertSigningTime(record, new Date(completedAt));
-    const proof = Object.freeze({ kind: "permit2-foreground-approval-proof" as const });
-    proofs.set(proof, { ...this.#binding, purpose: display.purpose, operationId: id, materialHash: record.material.materialHash,
-      displayHash: display.displayHash, fingerprint: display.fingerprint, completedAt, clock: this.#clock, claimed: false });
-    return proof;
+    return Object.freeze({ operationId: id, purpose: display.purpose, materialHash: record.material.materialHash,
+      displayHash: display.displayHash, fingerprint: display.fingerprint, completedAt });
   }
 }
-function checked(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal, record: Permit2ProductionRecord): Issued {
-  const entry = proofs.get(proof); if (entry === undefined || entry.journal !== journal || entry.root !== journal.root ||
-    entry.operationId !== record.operationId || entry.materialHash !== record.material.materialHash) blocked();
-  const display = permit2ApprovalDisplay(record, entry.purpose);
-  if (display.displayHash !== entry.displayHash || display.fingerprint !== entry.fingerprint ||
-    LocalWalletNative.assertPermit2LocalCapability(entry.capability, entry.native, entry.root) !== entry.nativeState) blocked();
-  const at = now(entry.clock); if (at.getTime() < entry.completedAt || at.getTime() - entry.completedAt > 60_000) blocked();
-  assertSigningTime(record, at); return entry;
+
+/** The approval names exactly what `record` displays and is at most 60 s old at `at`; returns `at`. */
+export function assertPermit2ApprovalCurrent(approval: Permit2ForegroundApproval, record: Permit2ProductionRecord, at: Date): Date {
+  if (approval.operationId !== record.operationId || approval.materialHash !== record.material.materialHash) blocked();
+  const display = permit2ApprovalDisplay(record, approval.purpose);
+  if (display.displayHash !== approval.displayHash || display.fingerprint !== approval.fingerprint) blocked();
+  assertPermit2ApprovalWindow(approval, at); assertSigningTime(record, at); return at;
 }
-/** Read-only recognition before fresh RPC. Atomic claiming still occurs only under the journal's first-write locks. */
-export function assertCurrentPermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal,
-  record: Permit2ProductionRecord): void { if (checked(proof, journal, record).claimed) blocked(); }
-/** Recognizes only an actual privately issued UI proof; there is no caller-authoritative time. */
-export function claimPermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal,
-  record: Permit2ProductionRecord): Permit2ApprovalBinding {
-  const entry = checked(proof, journal, record); if (entry.claimed) blocked(); entry.claimed = true;
-  const { claimed: _claimed, ...binding } = entry; return Object.freeze(binding);
+/** The approval is at most 60 s old at `at`, and `at` is not before it. */
+export function assertPermit2ApprovalWindow(approval: Permit2ForegroundApproval, at: Date): void {
+  const ms = at.getTime();
+  if (!Number.isSafeInteger(ms) || ms < approval.completedAt || ms - approval.completedAt > PERMIT2_APPROVAL_WINDOW_MS) blocked();
 }
-export function assertClaimedPermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal,
-  record: Permit2ProductionRecord): void { if (!checked(proof, journal, record).claimed) blocked(); }
-export function revokePermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof): void { proofs.delete(proof); }
-function now(clock: () => Date): Date { const at = clock(); if (!(at instanceof Date) || !Number.isSafeInteger(at.getTime()) || at.getTime() < 0) blocked(); return new Date(at); }
-function blocked(): never { throw new ApnError("APN_OPERATION_BLOCKED", "Permit2 foreground approval is not privately owned, current or bound."); }
+
+export function permit2Now(clock: () => Date): Date {
+  const at = clock(); if (!(at instanceof Date) || !Number.isSafeInteger(at.getTime()) || at.getTime() < 0) blocked();
+  return new Date(at.getTime());
+}
+function blocked(): never { throw new ApnError("APN_OPERATION_BLOCKED", "Permit2 foreground approval is not current or bound to this operation."); }

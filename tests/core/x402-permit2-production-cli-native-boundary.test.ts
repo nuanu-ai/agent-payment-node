@@ -25,16 +25,15 @@ test("coordinator independently rejects registered ordinary native subclass befo
   assert.deepEqual([ui, f.keys(), f.signatures(), f.batches.length], [0, 0, 0, 0]);
   assert.equal(await readFile(`${f.root}/permit2-production/${f.record.operationId}.json`, "utf8"), bytes);
 });
-for (const method of ["signPermit2Production", "beginPermit2ProductionRequest", "submitPermit2Production"] as const)
-  test(`paid CLI ignores own ${method} replacement and genuine primitives sign and send exactly once`, async t => {
-    const f = await permit2CliFixture(t), wire = cliWire(t, f); let replacement = 0, ui = 0;
-    // Synthetic consent fixture only; no actual human TTY receipt is asserted.
-    t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async () => { ui++; assert.equal(f.keys(), 0); });
-    Object.defineProperty(f.native, method, { configurable: true, value: async () => { replacement++; throw new Error("Caller native override must not execute"); } });
-    const result = await runCli(argv(f), {}, { stateRoot: f.root, native: f.native, clock: { now: f.now } });
-    assert.equal(result.ok, true); assert.equal(replacement, 0); assert.equal(ui, 1);
-    assert.equal(f.signatures(), 2); assert.ok(f.keys() > 0); assert.equal(wire.paid.length, 1);
-    const saved = (await f.records.findOperation(f.id))!;
-    assert.equal(saved.state, "request_pending"); assert.equal(saved.exposureJournal!.request!.attempt, 1);
-    const text = JSON.stringify(result); for (const privateValue of ["paymentSignatureHeader", "signingOrigin", "requestGrant", "private-paid-body", "private=hidden"]) assert.ok(!text.includes(privateValue));
-  });
+test("the paid CLI signs and sends exactly once through the exact local signer", async t => {
+  const f = await permit2CliFixture(t), wire = cliWire(t, f); let ui = 0;
+  // Synthetic consent fixture only; no actual human TTY receipt is asserted.
+  t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async () => { ui++; assert.equal(f.keys(), 0); });
+  t.mock.method(f.native, "request", async () => { throw new Error("The generic native request is never used for Permit2"); });
+  const result = await runCli(argv(f), {}, { stateRoot: f.root, native: f.native, clock: { now: f.now } });
+  assert.equal(result.ok, true); assert.equal(ui, 1);
+  assert.equal(f.signatures(), 2); assert.ok(f.keys() > 0); assert.equal(wire.paid.length, 1);
+  const saved = (await f.records.findOperation(f.id))!;
+  assert.equal(saved.state, "request_pending"); assert.equal(saved.exposureJournal!.request!.attempt, 1);
+  const text = JSON.stringify(result); for (const privateValue of ["paymentSignatureHeader", "permit2Signature", "continuation", "private-paid-body", "private=hidden"]) assert.ok(!text.includes(privateValue));
+});

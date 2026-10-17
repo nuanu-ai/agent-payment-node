@@ -30,8 +30,7 @@ async function setup(t: test.TestContext, sponsor = false, maxTimeoutSeconds = 6
     createdAt: f.record.createdAt, bindingHash: f.record.material.wallet.bindingHash },
   { version: "apn.wallet-secret.v1", privateKey: `0x${"1".repeat(64)}`, directEffects: {}, x402Effects: {} }, Buffer.alloc(32, 7));
   const native = new LocalWalletNative(f.state, wrapping), fence = new Permit2ProductionSigningFence(f.root, f.input.rpcUrl, f.now);
-  const capability = LocalWalletNative.resolvePermit2LocalCapability(native, f.root);
-  const proof = await new Permit2ForegroundApprovalAuthority(f.journal, {}, native, capability, { approve: async () => {} }, f.now).approveOwned(f.record.operationId);
+  const proof = await new Permit2ForegroundApprovalAuthority(f.root, { approve: async () => {} }, f.now).approveOwned(f.record.operationId);
   let riskOverrides = 0;
   if (reflectedRisk) for (const key of ["persistExposureLocked", "required", "locks", "save", "findOperation", "confirmHold"])
     (f.journal as any)[key] = async () => { riskOverrides++; return f.record; };
@@ -39,20 +38,18 @@ async function setup(t: test.TestContext, sponsor = false, maxTimeoutSeconds = 6
   const originalClear = EncryptedWalletStore.prototype.clear;
   t.mock.method(EncryptedWalletStore.prototype, "clear", function(this: EncryptedWalletStore, secret: WalletSecretState) { originalClear.call(this, secret); cleared = secret; });
   return { ...f, native, fence, continuation: result.continuation, decrypts: () => decrypts, cleared: () => cleared,
-    wrapping, riskOverrides: () => riskOverrides, sign: () => native.signPermit2Production(f.journal, fence, f.record.operationId, result.continuation!) };
+    wrapping, riskOverrides: () => riskOverrides, sign: () => LocalWalletNative.signPermit2Production(native, fence, f.journal, result.continuation!, f.now) };
 }
 for (const sponsor of [false, true]) test(`actual encrypted local signer persists canonical ${sponsor ? "sponsored" : "allowance"} bundle and clears custody`, async t => {
   const f = await setup(t, sponsor);
   t.mock.method(f.native, "request", async () => { throw new Error("No request/reentrant custody path"); });
   (f.native as any).wallets = { describe: async () => { throw new Error("Reflected store cannot sign"); } };
   (f.native as any).state = new StateStore(`${f.root}/foreign`);
-  // Public overrides cannot substitute the actual private fence implementation.
-  t.mock.method(f.fence, "checkScoped", async () => { throw new Error("Public override ignored"); });
-  t.mock.method(f.fence, "consumeScoped", async () => { throw new Error("Public override ignored"); });
   const result = await f.sign(), saved = (await f.journal.findOperation(f.record.operationId))!;
-  assert.deepEqual(result.signingOrigin, { kind: "permit2-native-signing-origin" });
-  assert.equal(Object.isFrozen(result.signingOrigin), true); assert.equal(Object.getOwnPropertyNames(result.signingOrigin).length, 1);
   const signed = saved.exposureJournal!.signed!; await validatePermit2ProductionSigned(signed, saved);
+  assert.deepEqual(result.origin, { approval: f.continuation.approval, signedHash: signed.signedHash,
+    leaseDigest: f.continuation.saved.leaseDigest, walletHash: f.continuation.saved.walletHash });
+  assert.equal(Object.isFrozen(result.origin), true);
   const plan = reconstructPermit2ProductionMaterial(saved.material).plan;
   assert.equal((await recoverPermit2Payer(plan.permit2, signed.permit2Signature)).toLowerCase(), f.record.material.wallet.account.toLowerCase());
   assert.equal(signed.eip2612Signature === null, !sponsor);
@@ -62,24 +59,22 @@ for (const sponsor of [false, true]) test(`actual encrypted local signer persist
     assert.equal(JSON.stringify(result).includes(privateValue), false);
   await assert.rejects(f.sign()); assert.equal(f.decrypts(), 1);
 });
-test("raw cloned foreign native/journal/op/root/fence grants refuse before real decrypt", async t => {
-  const f = await setup(t), id = f.record.operationId;
-  for (const grant of [{ kind: f.continuation.kind }, { ...f.continuation }, JSON.parse(JSON.stringify(f.continuation))])
-    await assert.rejects(f.native.signPermit2Production(f.journal, f.fence, id, grant));
-  const other = new LocalWalletNative(f.state, { load: async () => { throw new Error("Foreign native key"); }, create: async () => { throw new Error("No create"); } });
-  await assert.rejects(other.signPermit2Production(f.journal, f.fence, id, f.continuation));
-  await assert.rejects(f.native.signPermit2Production(new Permit2ProductionJournal(f.root, f.preparation, f.now), f.fence, id, f.continuation));
-  await assert.rejects(f.native.signPermit2Production(f.journal, f.fence, "f".repeat(64), f.continuation));
-  for (const fence of [Object.create(Permit2ProductionSigningFence.prototype),
-    { withScope: async (_id: unknown, _mode: unknown, action: any) => action({ kind: "permit2-metadata-lock-scope" }) },
-    new Permit2ProductionSigningFence(`${f.root}/other`, f.input.rpcUrl, f.now),
-    new (class extends Permit2ProductionSigningFence {})(f.root, f.input.rpcUrl, f.now)])
-    await assert.rejects(f.native.signPermit2Production(f.journal, fence as Permit2ProductionSigningFence, id, f.continuation));
-  const fakeJournal = { root: f.root, claimNativeSigningContinuation: async () => f.record,
-    assertNativeSigningContinuation: async () => f.record, nativeSigningSecond: () => protocolSecond + 1,
-    releaseNativeSigningContinuation: () => {}, storeSigned: async () => f.record };
-  await assert.rejects(f.native.signPermit2Production(fakeJournal as unknown as Permit2ProductionJournal, f.fence, id, f.continuation));
-  assert.equal(f.decrypts(), 0); await f.sign(); assert.equal(f.decrypts(), 1);
+test("a continuation that no longer names the saved hold, another signer or another state refuses before decrypt", async t => {
+  const f = await setup(t), c = f.continuation, other = "f".repeat(64);
+  const sign = (continuation: typeof c, native = f.native as LocalWalletNative, fence = f.fence, journal = f.journal) =>
+    LocalWalletNative.signPermit2Production(native, fence, journal, continuation, f.now);
+  for (const changed of [{ ...c, saved: { ...c.saved, recordHash: other } }, { ...c, saved: { ...c.saved, leaseDigest: other } },
+    { ...c, saved: { ...c.saved, walletHash: other } }, { ...c, approval: { ...c.approval, operationId: other } },
+    { ...c, approval: { ...c.approval, displayHash: other } }, { ...c, approval: { ...c.approval, completedAt: c.approval.completedAt - 61_000 } }])
+    await assert.rejects(sign(changed));
+  await assert.rejects(sign(c, new (class extends LocalWalletNative {})(f.state, f.wrapping)));
+  await assert.rejects(sign(c, Object.create(LocalWalletNative.prototype)));
+  await assert.rejects(sign(c, f.native, new Permit2ProductionSigningFence(`${f.root}/other`, f.input.rpcUrl, f.now)));
+  await assert.rejects(sign(c, f.native, f.fence, { root: `${f.root}/other` } as Permit2ProductionJournal));
+  assert.equal(f.decrypts(), 0);
+  // A clone is the same plain value: the saved record decides, and the durable signed bundle ends further signing.
+  await sign(structuredClone(c), f.native, f.fence, new Permit2ProductionJournal(f.root, f.preparation, f.now)); assert.equal(f.decrypts(), 1);
+  await assert.rejects(f.sign()); assert.equal(f.decrypts(), 1);
 });
 test("actual custody lock wait expires UI grant before decrypt", async t => {
   const f = await setup(t), entered = deferred(), release = deferred();
@@ -123,10 +118,12 @@ test("store failure occurs after custody release with cleared secret and preserv
     return (original as any).call(this, path, value, ...rest);
   });
   await assert.rejects(f.sign()); assert.equal(writes, 1); assert.equal((await f.lease()).state, "unknown_finality");
-  await assert.rejects(f.sign()); assert.equal(f.decrypts(), 1); assert.equal(writes, 1);
+  // Nothing was saved or exposed: a retry inside the approval window signs the same deterministic bytes again.
+  await assert.rejects(f.sign()); assert.equal(f.decrypts(), 2); assert.equal(writes, 2);
+  assert.equal((await f.journal.findOperation(f.record.operationId))!.exposureJournal!.signed, null);
 });
 
-for (const fault of ["owner", "expired", "identity", "describe"] as const) test(`actual signer ${fault} fault preserves hold and consumes no retry`, async t => {
+for (const fault of ["owner", "expired", "identity", "describe"] as const) test(`actual signer ${fault} fault preserves hold and signs nothing`, async t => {
   const f = await setup(t);
   if (fault === "owner") await f.revoke();
   if (fault === "expired") f.advance(120);
@@ -142,7 +139,9 @@ for (const fault of ["owner", "expired", "identity", "describe"] as const) test(
   assert.equal((await f.journal.findOperation(f.record.operationId))!.exposureJournal!.signed, null);
   assert.equal((await f.lease()).state, "unknown_finality");
   if (fault === "identity") assert.equal(f.cleared()!.privateKey, `0x${"0".repeat(64)}`);
-  const decrypts = f.decrypts(); await assert.rejects(f.sign()); assert.equal(f.decrypts(), decrypts);
+  // A retry meets the same refusal; only the identity fault, which needs the key to detect, decrypts again.
+  const decrypts = f.decrypts(); await assert.rejects(f.sign()); assert.equal(f.decrypts(), decrypts + (fault === "identity" ? 1 : 0));
+  assert.equal((await f.journal.findOperation(f.record.operationId))!.exposureJournal!.signed, null);
 });
 test("fresh fence failure after key load ends the attempt without a signature or a second decrypt", async t => {
   const f = await setup(t, true), originalSign = secp256k1.sign; let fences = 0, signatures = 0;
@@ -157,13 +156,13 @@ test("fresh fence failure after key load ends the attempt without a signature or
 });
 test("native signing observes the chain before and after key load only, not around every signature", async t => {
   const f = await setup(t, true), before = f.batches.length;
-  assert.ok((await f.sign()).signingOrigin);
+  assert.ok((await f.sign()).origin);
   const posts = f.batches.slice(before);
   assert.equal(posts.length, 4, "two fence checks of two POSTs (was 5-7 checks of 4 POSTs)");
   assert.equal(posts.filter(batch => batch.some((call: any) => call.method === "eth_chainId")).length, 2);
 });
 
-test("deadline expiry after successful signed persistence produces no signing origin", async t => {
+test("deadline expiry after successful signed persistence produces no signed origin", async t => {
   const f = await setup(t), original = (SecureStateStore.prototype as any).writeJson;
   t.mock.method(SecureStateStore.prototype as any, "writeJson", async function(this: SecureStateStore, path: string, value: any, ...rest: any[]) {
     const result = await original.call(this, path, value, ...rest);
@@ -176,14 +175,15 @@ test("deadline expiry after successful signed persistence produces no signing or
 });
 
 for (const point of ["describe", "token", "permit2"] as const) test(`await-resumption expiry immediately before ${point} prevents new decrypt or signature`, async t => {
-  const f = await setup(t, point !== "describe", 120), original = Permit2ProductionJournal.assertNativeSigningContinuation;
+  const f = await setup(t, point !== "describe", 120), original = Permit2ProductionSigningFence.prototype.scopeOwner;
   const originalSign = secp256k1.sign; let signatures = 0, assertions = 0;
   t.mock.method(secp256k1, "sign", (...args: Parameters<typeof originalSign>) => { signatures++; return originalSign(...args); });
   const cutoff = point === "describe" ? 3 : point === "token" ? 8 : 10;
-  t.mock.method(Permit2ProductionJournal, "assertNativeSigningContinuation", async (...args: Parameters<typeof original>) => {
-    const record = await original(...args);
+  // Each signer step re-reads the saved operation once through scopeOwner; the cutoff lands right before the point.
+  t.mock.method(Permit2ProductionSigningFence.prototype, "scopeOwner", async function(this: Permit2ProductionSigningFence, ...args: Parameters<typeof original>) {
+    const owned = await original.apply(this, args);
     if (++assertions === cutoff) queueMicrotask(() => f.advance(62));
-    return record;
+    return owned;
   });
   await assert.rejects(f.sign());
   assert.equal(f.decrypts(), point === "describe" ? 0 : 1);
@@ -200,12 +200,12 @@ test("reflected journal clock cannot revive an expired genuine private UI clock"
 });
 
 for (const point of ["describe", "token", "permit2"] as const) test(`6000ms fact expiry immediately before ${point} refuses actual decrypt or crypto`, async t => {
-  const f = await setup(t, point !== "describe", 120), original = Permit2ProductionJournal.assertNativeSigningContinuation;
+  const f = await setup(t, point !== "describe", 120), original = Permit2ProductionSigningFence.prototype.scopeOwner;
   const originalSign = secp256k1.sign; let signatures = 0, assertions = 0;
   t.mock.method(secp256k1, "sign", (...args: Parameters<typeof originalSign>) => { signatures++; return originalSign(...args); });
   const cutoff = point === "describe" ? 3 : point === "token" ? 8 : 10;
-  t.mock.method(Permit2ProductionJournal, "assertNativeSigningContinuation", async (...args: Parameters<typeof original>) => {
-    const record = await original(...args); if (++assertions === cutoff) { const before = f.now().getTime(); queueMicrotask(() => { f.advance(7); assert.equal(f.now().getTime() - before, 6000); }); } return record;
+  t.mock.method(Permit2ProductionSigningFence.prototype, "scopeOwner", async function(this: Permit2ProductionSigningFence, ...args: Parameters<typeof original>) {
+    const owned = await original.apply(this, args); if (++assertions === cutoff) { const before = f.now().getTime(); queueMicrotask(() => { f.advance(7); assert.equal(f.now().getTime() - before, 6000); }); } return owned;
   });
   await assert.rejects(f.sign()); assert.equal(f.decrypts(), point === "describe" ? 0 : 1);
   assert.equal(signatures, point === "permit2" ? 1 : 0);
@@ -227,7 +227,7 @@ test("genuine journal reflected persistence/read/lock/save helpers cannot fake n
   const f = await setup(t); let overrides = 0;
   for (const key of ["persistExposureLocked", "required", "locks", "save", "findOperation", "confirmHold"])
     (f.journal as any)[key] = async () => { overrides++; return f.record; };
-  const result = await f.sign(); assert.ok(result.signingOrigin); assert.equal(overrides, 0);
+  const result = await f.sign(); assert.ok(result.origin); assert.equal(overrides, 0);
   const saved = (await new Permit2ProductionRepository(f.root).findOperation(f.record.operationId))!;
   assert.ok(saved.exposureJournal!.signed); await validatePermit2ProductionSigned(saved.exposureJournal!.signed!, saved);
 });
@@ -237,14 +237,14 @@ test("approved risk ignores reflected journal helpers and reloads actual durable
   assert.equal(f.riskOverrides(), 0); assert.equal(saved.state, "exposure_unknown");
   assert.equal(saved.exposureJournal!.holdConfirmed, true); assert.equal(saved.exposureJournal!.signed, null);
   assert.equal((await f.lease()).state, "unknown_finality");
-  assert.ok((await f.sign()).signingOrigin); assert.equal(f.riskOverrides(), 0);
+  assert.ok((await f.sign()).origin); assert.equal(f.riskOverrides(), 0);
   assert.ok((await new Permit2ProductionRepository(f.root).findOperation(f.record.operationId))!.exposureJournal!.signed);
 });
 
 test("genuine journal persistExposureLocked noop cannot mint origin without real signed disk write", async t => {
   const f = await setup(t); let bypasses = 0;
   (f.journal as any).persistExposureLocked = async () => { bypasses++; };
-  const result = await f.sign(); assert.ok(result.signingOrigin);
+  const result = await f.sign(); assert.ok(result.origin);
   const saved = (await new Permit2ProductionRepository(f.root).findOperation(f.record.operationId))!;
   assert.ok(saved.exposureJournal!.signed); assert.equal(bypasses, 0); await validatePermit2ProductionSigned(saved.exposureJournal!.signed!, saved);
 });

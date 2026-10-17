@@ -1,11 +1,8 @@
 import { type Permit2ObservationMetrics } from "./production-observer-rpc.js";
-import { type Permit2SigningMode } from "./production-signing-owner.js";
+import { type Permit2MetadataMode, type Permit2SavedIdentity, type Permit2SigningMode } from "./production-signing-owner.js";
 import { type Permit2MetadataLockScope } from "./production-signing-scope.js";
 export type { Permit2MetadataLockScope } from "./production-signing-scope.js";
 export type { Permit2SigningMode } from "./production-signing-owner.js";
-export interface Permit2SigningFact {
-    readonly kind: "checked-permit2-signing-observation";
-}
 export interface Permit2SigningProjection {
     readonly operationId: string;
     readonly mode: Permit2SigningMode;
@@ -23,39 +20,39 @@ export interface Permit2SigningProjection {
     readonly blockHash: string | null;
     readonly rpc: Permit2ObservationMetrics;
 }
+/** A checked observation: what the chain and the saved operation held at `capturedAt`. A plain value; consuming it
+ * re-reads the saved record, lease and wallet binding and requires them unchanged and the observation under 5 s old. */
+export type Permit2SigningFact = Permit2SigningProjection & {
+    readonly outcome: "checked";
+    readonly recordHash: string;
+    readonly currentLeaseDigest: string;
+    readonly walletHash: string;
+    readonly capturedAt: string;
+};
+export declare const PERMIT2_SIGNING_FACT_MAX_AGE_MS = 5000;
 /** Actual read-only observation only. Never human approval, custody permission, or transport authority. */
 export declare class Permit2ProductionSigningFence {
     #private;
     constructor(root: string, endpoint: string, clock?: () => Date);
-    static assertNativeScope(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): void;
-    static withNativeScope<T>(fence: Permit2ProductionSigningFence, root: string, id: string, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
-    static nativeScopeOwner(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
-        record: import("./production-repository.js").Permit2ProductionRecord;
-        lease: import("../asset-usage-ledger-types.js").AssetUsageReservation;
-    }>;
-    static checkNativeScoped(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
-        readonly projection: Permit2SigningProjection;
-        readonly fact: Permit2SigningFact | null;
-    }>;
-    static consumeNativeScoped(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, fact: Permit2SigningFact, root: string, id: string): Promise<Permit2SigningProjection>;
-    static assertNativeDispatchScope(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): void;
-    static assertNativeDispatchTime(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string, at: Date): void;
-    static withNativeDispatchScope<T>(fence: Permit2ProductionSigningFence, root: string, id: string, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
-    static nativeDispatchScopeOwner(fence: Permit2ProductionSigningFence, scope: Permit2MetadataLockScope, root: string, id: string): Promise<{
-        record: import("./production-repository.js").Permit2ProductionRecord;
-        lease: import("../asset-usage-ledger-types.js").AssetUsageReservation;
-    }>;
+    get root(): string;
     check(operationId: string, mode: Permit2SigningMode): Promise<{
         readonly projection: Permit2SigningProjection;
         readonly fact: Permit2SigningFact | null;
     }>;
-    /** Scope owns actual metadata locks only; the callback receives no key/signing grant. */
-    withScope<T>(operationId: string, mode: Permit2SigningMode, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
+    /** Holds the operation's metadata locks around `action`; the scope grants no key, signing or transport. */
+    withScope<T>(operationId: string, mode: Permit2MetadataMode, action: (scope: Permit2MetadataLockScope) => Promise<T>): Promise<T>;
     checkScoped(scope: Permit2MetadataLockScope, operationId: string, mode: Permit2SigningMode): Promise<{
         readonly projection: Permit2SigningProjection;
         readonly fact: Permit2SigningFact | null;
     }>;
-    /** Single-use private provenance; owned lifecycle/lease/owner and trusted age are rechecked, never caller facts. */
-    consume(fact: Permit2SigningFact, operationId: string, mode: Permit2SigningMode): Promise<Permit2SigningProjection>;
-    consumeScoped(scope: Permit2MetadataLockScope, fact: Permit2SigningFact, operationId: string, mode: Permit2SigningMode): Promise<Permit2SigningProjection>;
+    /** The saved operation and lease, re-read under the held scope, optionally required to equal `expected`. */
+    scopeOwner(scope: Permit2MetadataLockScope, operationId: string, mode: Permit2MetadataMode, expected?: Permit2SavedIdentity): Promise<{
+        record: import("./production-repository.js").Permit2ProductionRecord;
+        lease: import("../asset-usage-ledger-types.js").AssetUsageReservation;
+    }>;
+    /** Owner identity, policy, caps and the signing window at `at`, against what the held scope last read. */
+    assertScopeTime(scope: Permit2MetadataLockScope, operationId: string, mode: Permit2MetadataMode, at: Date): void;
+    /** Re-checks a fact: the saved record, lease and wallet binding are unchanged and the observation is under 5 s old. */
+    consume(fact: Permit2SigningFact, operationId: string, mode: Permit2SigningMode): Promise<Permit2SigningFact>;
+    consumeScoped(scope: Permit2MetadataLockScope, fact: Permit2SigningFact, operationId: string, mode: Permit2SigningMode): Promise<Permit2SigningFact>;
 }

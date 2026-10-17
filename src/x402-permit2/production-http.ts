@@ -4,22 +4,34 @@ import { isIP } from "node:net";
 import { rootCertificates, type TLSSocket } from "node:tls";
 import { canonicalJson, domainHash, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { LocalWalletNative } from "../local-wallet-native.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, unbracket } from "../network-policy.js";
 import { decodePermit2PaymentSignatureHeader, encodePermit2PaymentSignatureHeader } from "../x402-codec.js";
 import { decodeX402RequestBody, normalizeX402HttpRequest } from "../x402-http-request.js";
 import type { HttpObservation } from "../x402-model.js";
-import type { Permit2NativeDispatchExecution } from "./production-native-capability.js";
+import type { Permit2ProductionRecord } from "./production-repository.js";
 
 const MAX_HEADER_PAIRS = 64, MAX_HEADER_NAME_BYTES = 256, MAX_CONTROL_VALUE_BYTES = 64 * 1024;
 const MAX_AGGREGATE_HEADER_BYTES = 96 * 1024, MAX_BODY_BYTES = 256 * 1024;
 const PAYMENT_RESPONSE_HEADERS = new Set(["payment-response", "x-payment-response"]);
 const CONTROL_HEADERS = new Set(["payment-required", "payment-signature", ...PAYMENT_RESPONSE_HEADERS]);
 
-/** Concrete single-attempt transport. Only the actual native's private dispatch execution admits it. */
+/** One dispatch attempt, live only while its sender holds the operation's dispatch locks and its 20 s deadline. */
+export interface Permit2HttpAttempt {
+  /** The saved request-pending record whose signed header is sent. */
+  readonly record: Permit2ProductionRecord;
+  readonly signal: AbortSignal;
+  /** Throws unless the deadline, the paid approval, the owner policy and the signing window still hold. */
+  assertCurrent(): void;
+  /** Re-reads the saved record and lease under the held locks; throws unless they are unchanged. */
+  owner(): Promise<void>;
+  /** Each stage once, in order: construct the request, then end it with the body. */
+  step(stage: "construct" | "end"): void;
+}
+
+/** Concrete single-attempt transport for one attempt that sendPermit2Production admitted. */
 export class Permit2ProductionHttps {
-  async submit(execution: Permit2NativeDispatchExecution): Promise<HttpObservation> {
-    const { record, signal } = LocalWalletNative.permit2HttpMaterial(execution, this);
+  async submit(attempt: Permit2HttpAttempt): Promise<HttpObservation> {
+    attempt.assertCurrent(); const { record, signal } = attempt;
     const request = normalizeX402HttpRequest(record.material.checked.request), signed = record.exposureJournal?.signed;
     if (signed === undefined || signed === null || record.exposureJournal?.request?.attempt !== 1 ||
         record.exposureJournal.request.requestHash !== record.material.checked.requestHash ||
@@ -31,7 +43,7 @@ export class Permit2ProductionHttps {
     const endpoint = parsePublicHttpsUrl(request.url, "APN_HTTP_CONFIG", "Seller URL", 2048);
     const pending = new Set<Promise<unknown>>();
     const track = <T>(job: Promise<T>): Promise<T> => { pending.add(job); void job.then(() => pending.delete(job), () => pending.delete(job)); return job; };
-    const owner = () => track(LocalWalletNative.assertPermit2HttpOwner(execution, this));
+    const owner = () => track(attempt.owner());
     try {
       await owner();
       const addresses = await track(resolvePublicAddresses(endpoint, "APN_HTTP_CONFIG", "Seller URL"));
@@ -52,7 +64,7 @@ export class Permit2ProductionHttps {
           if (socket.authorized !== true || socket.remoteAddress === undefined || !sameIpAddress(socket.remoteAddress, selected.address)) throw refused();
         };
         try {
-          LocalWalletNative.consumePermit2HttpStep(execution, this, "construct");
+          attempt.step("construct");
           wire = httpsRequest(endpoint, { method: request.method, agent: false, maxHeaderSize: 128 * 1024,
             family: selected.family, rejectUnauthorized: true, ca: [...rootCertificates],
             ...(isIP(hostname) === 0 ? { servername: hostname } : {}), headers,
@@ -82,7 +94,7 @@ export class Permit2ProductionHttps {
                   if (trailers.some(([name]) => CONTROL_HEADERS.has(name.toLowerCase()))) throw refused();
                   const length = optionalSingleHeader(pairs, "content-length"); if (length !== undefined && BigInt(length) !== BigInt(total)) throw refused();
                   await owner(); if (settled) return; tls(incoming.socket as TLSSocket);
-                  LocalWalletNative.permit2HttpMaterial(execution, this);
+                  attempt.assertCurrent();
                   settled = true; signal.removeEventListener("abort", fail);
                   resolve({ status, rawHeaderPairs: pairs, bodyBytes: Buffer.concat(chunks, total), finalUrl: request.url,
                     observedOrigin: endpoint.origin, dnsAddresses: addresses.map(a => a.address), selectedAddress: selected.address,
@@ -98,7 +110,7 @@ export class Permit2ProductionHttps {
               void track((async () => {
                 try {
                   tls(socket); await owner(); if (settled) return; tls(socket);
-                  LocalWalletNative.consumePermit2HttpStep(execution, this, "end"); ended = true; wire!.end(body);
+                  attempt.step("end"); ended = true; wire!.end(body);
                 } catch { fail(); }
               })());
             });

@@ -40,9 +40,7 @@ for (const sponsor of [false, true]) test(`actual scoped ${sponsor ? "sponsored"
   await f.fence.withScope(f.id, "exposed", async scope => {
     const checked = await f.fence.checkScoped(scope, f.id, "exposed"); assert.ok(checked.fact);
     assert.equal(checked.projection.rpc.physicalDispatches, 2); assert.equal(checked.projection.rpc.logicalReads, sponsor ? 7 : 6);
-    await assert.rejects(f.fence.consume(checked.fact, f.id, "exposed"));
-    assert.equal((await f.fence.consumeScoped(scope, checked.fact, f.id, "exposed")).outcome, "checked");
-    await assert.rejects(f.fence.consumeScoped(scope, checked.fact, f.id, "exposed"));
+    assert.equal((await f.fence.consumeScoped(scope, checked.fact!, f.id, "exposed")).outcome, "checked");
     assert.equal(JSON.stringify(scope), '{"kind":"permit2-metadata-lock-scope"}');
   });
   const outer = [`profile:${f.record.profileHash}`, `operation:${f.id}`, evmAddressLock(f.record.material.wallet.account),
@@ -50,11 +48,11 @@ for (const sponsor of [false, true]) test(`actual scoped ${sponsor ? "sponsored"
   for (const key of outer) assert.equal(keys.filter(k => k === key).length, 1, key);
   assert.deepEqual(await f.journal.findOperation(f.id), saved); assert.deepEqual(await f.lease(), lease);
 });
-test("raw, cloned, serialized, foreign-instance and retained contexts/facts cannot bypass active locks", async t => {
+test("raw, cloned, serialized, foreign-instance and retained scopes cannot stand in for held locks", async t => {
   const f = await setup(t), other = new Permit2ProductionSigningFence(f.root, f.input.rpcUrl, f.now);
   const foreignRoot = new Permit2ProductionSigningFence(`${f.root}/unrelated`, f.input.rpcUrl, f.now);
   let retained!: Permit2MetadataLockScope, fact!: Permit2SigningFact;
-  await assert.rejects(f.fence.checkScoped({ kind: "permit2-metadata-lock-scope" }, f.id, "exposed"));
+  await assert.rejects(f.fence.checkScoped({ kind: "permit2-metadata-lock-scope" } as unknown as Permit2MetadataLockScope, f.id, "exposed"));
   await f.fence.withScope(f.id, "exposed", async scope => {
     retained = scope;
     for (const clone of [{ ...scope }, JSON.parse(JSON.stringify(scope))]) await assert.rejects(f.fence.checkScoped(clone, f.id, "exposed"));
@@ -62,14 +60,13 @@ test("raw, cloned, serialized, foreign-instance and retained contexts/facts cann
     await assert.rejects(foreignRoot.checkScoped(scope, f.id, "exposed"));
     await assert.rejects(f.fence.checkScoped(scope, "e".repeat(64), "exposed"));
     await assert.rejects(f.fence.checkScoped(scope, f.id, "reserved"));
-    const checked = await f.fence.checkScoped(scope, f.id, "exposed"); assert.ok(checked.fact); fact = checked.fact;
+    const checked = await f.fence.checkScoped(scope, f.id, "exposed"); assert.ok(checked.fact); fact = checked.fact!;
   });
   await assert.rejects(f.fence.checkScoped(retained, f.id, "exposed"));
   await assert.rejects(f.fence.consumeScoped(retained, fact, f.id, "exposed"));
-  await assert.rejects(f.fence.consume(fact, f.id, "exposed"));
-  await f.fence.withScope(f.id, "exposed", async scope => {
-    await assert.rejects(f.fence.consumeScoped(scope, fact, f.id, "exposed"));
-  });
+  await assert.rejects(f.fence.scopeOwner(retained, f.id, "exposed"));
+  // The fact itself is a plain observation: used again it is re-checked against the saved operation, under fresh locks.
+  assert.equal((await f.fence.consume(fact, f.id, "exposed")).outcome, "checked");
   await assert.rejects(f.fence.withScope("e".repeat(64), "exposed", async () => assert.fail("missing operation admitted")));
 });
 test("actual competing wallet, operation, custody and allowlist writes wait for scope exit", async t => {
