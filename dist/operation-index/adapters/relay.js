@@ -1,0 +1,34 @@
+import { evmConflictDomain } from "../../operation-conflict-domain.js";
+import { relaySourceTerminal } from "../../relay/lifecycle.js";
+import { publicRelayUnsignedOperation, RelayRetirementRepository, RelayUnsignedOperationRepository } from "../../relay-unsigned-operation.js";
+import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity } from "../adapter.js";
+const STORE = { directory: "relay-unsigned-operations", perProfile: true };
+export function relayDomains(record) {
+    return [evmConflictDomain(record.sourceChainId, record.sourceAccount)];
+}
+/** The public view: a retirement or a proven source outcome ends this spend attempt (destination delivery is observed separately). */
+export async function relayStatus(root, operation) {
+    const retirement = await new RelayRetirementRepository(root).load(operation);
+    const completion = retirement === null ? await relaySourceTerminal(root, operation) : null;
+    return publicRelayUnsignedOperation(operation, retirement, completion);
+}
+/** The saved draft stays `prepared`; it stops holding its account once retired or once its source effect is final. */
+export const relayAdapter = {
+    family: "relay_unsigned",
+    stores: [STORE],
+    async load(root, recordPath) {
+        const { profileHash, operationId } = requiredRecordPath(recordPath, STORE);
+        return await new RelayUnsignedOperationRepository(root).loadOperation(profileHash, operationId);
+    },
+    identity: standardIdentity,
+    claims: record => readableClaims(() => domainClaims(relayDomains(record))),
+    async terminal(record, root) {
+        if (record.terminal || await new RelayRetirementRepository(root).load(record) !== null)
+            return true;
+        return await relaySourceTerminal(root, record) !== null;
+    },
+    state: record => record.state,
+    salvage: raw => salvageRecord(raw, value => [salvageEvm(field(value, "sourceChainId"), field(value, "sourceAccount"))]),
+    view: async (record, root) => await relayStatus(root, record),
+};
+//# sourceMappingURL=relay.js.map
