@@ -96,10 +96,6 @@ export function chainUsage(policy: ChainPolicy, operations: readonly RailOperati
   }
   return { principalAtomic: principal.toString(), nativeFeeAtomic: nativeFees.toString() };
 }
-export function assertChainPolicy(policy: ChainPolicy, account: ChainAccount, asset: ChainAsset, amount: string, maximumFee: string, operations: readonly RailOperationRecord[], now: Date, excluding?: string): void {
-  assertChainFeePolicy(policy, account, asset, maximumFee);
-  assertChainPrincipal(policy, amount, operations, now, excluding);
-}
 /** The per-transfer and UTC-daily principal caps the owner approved on the admission screen; unresolved transfers stay charged. */
 export function assertChainPrincipal(policy: ChainPolicy, amount: string, operations: readonly RailOperationRecord[], now: Date, excluding?: string): void {
   validateChainPolicy(policy);

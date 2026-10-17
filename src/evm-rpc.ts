@@ -1,5 +1,4 @@
 import { encodeFunctionData } from "viem";
-import { MAX_NONCE_SCAN_BLOCKS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { evmDecimals, evmToken, evmUint, MAX_DIRECT_TRANSACTION_BYTES, resolveEvmAsset, type EvmAssetSelection } from "./evm-asset.js";
 import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "./evm-direct-networks.js";
@@ -164,31 +163,6 @@ export class EvmRpc implements EvmRpcPort {
       throw new ApnError("APN_RPC_PROTOCOL", "EVM transaction lookup returned a different hash.");
     }
     return { finalizedNonce: evmRpcQuantity(nonce).toString(), receiptFound: receipt !== null, transactionKnown: transaction !== null };
-  }
-
-  async confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null> {
-    await this.assertChain(chainId);
-    const latest = await evmRpcBlock(this.call, directEvmRequiresSafeHead(chainId) ? "safe" : "latest");
-    const last = BigInt(latest.number);
-    const lower = last >= MAX_NONCE_SCAN_BLOCKS - 1n ? last - MAX_NONCE_SCAN_BLOCKS + 1n : 0n;
-    const first = evmUint(startBlock) > lower ? evmUint(startBlock) : lower;
-    for (let number = last; number >= first; number -= 1n) {
-      const block = evmRpcRecord(await this.call("eth_getBlockByNumber", [`0x${number.toString(16)}`, true]));
-      if (evmRpcQuantity(block.number) !== number || !Array.isArray(block.transactions)) throw new ApnError("APN_RPC_PROTOCOL", "EVM nonce-scan block is invalid.");
-      for (const value of block.transactions) {
-        const transaction = evmRpcRecord(value);
-        if (evmRpcAddress(transaction.from) === address && evmRpcQuantity(transaction.nonce) === evmUint(nonce)) {
-          const hash = evmRpcHex(transaction.hash, 32), blockHash = evmRpcHex(block.hash, 32);
-          if (evmRpcQuantity(transaction.chainId) !== BigInt(chainId) || evmRpcQuantity(transaction.blockNumber) !== number ||
-              evmRpcHex(transaction.blockHash, 32) !== blockHash) throw new ApnError("APN_RPC_PROTOCOL", "Nonce evidence has a different chain or block identity.");
-          await recheckEvmBlock(this.call, { tag: `0x${number.toString(16)}`, hash: blockHash });
-          await this.assertChain(chainId);
-          return hash;
-        }
-      }
-      if (number === 0n) break;
-    }
-    return null;
   }
 }
 

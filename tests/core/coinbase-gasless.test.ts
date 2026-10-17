@@ -147,8 +147,7 @@ class CoinbaseRpcFixture implements RpcPort {
   async getBalances(): Promise<never> { throw new Error(); } async getX402PrepareEvidence(): Promise<never> { throw new Error(); }
   async getPendingNonce(): Promise<never> { throw new Error(); } async estimateDirectTransfer(): Promise<never> { throw new Error(); }
   async estimateTransaction(): Promise<never> { throw new Error(); } async submitRawTransaction(): Promise<never> { throw new Error(); }
-  async getReceipt(): Promise<null> { return null; } async getLatestConfirmedNonce(): Promise<never> { throw new Error(); }
-  async getConfirmedTransactionAtNonce(): Promise<null> { return null; }
+  async getReceipt(): Promise<null> { return null; }
 }
 
 async function policyFixture(t: test.TestContext, outcome: "not_started" | "ambiguous" = "not_started") {

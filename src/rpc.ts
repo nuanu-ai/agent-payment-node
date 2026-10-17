@@ -7,7 +7,7 @@ import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, nonzeroBytes32
 import { x402Network } from "./x402-network.js";
 import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
 import { sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
+import { BASE_USDC, CHAIN_ID, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { EvmRpc } from "./evm-rpc.js";
 import type { EvmBalanceSnapshot } from "./evm-ports.js";
@@ -376,33 +376,6 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
       return { address: rpcAddress(log.address), topics: log.topics.map((topic: unknown) => rpcHex(topic, 32)), data: rpcHex(log.data) };
     });
     return { transactionHash: rpcHex(receipt.transactionHash, 32), status: status === 1n ? "success" : "reverted", blockNumberAtomic: rpcQuantity(receipt.blockNumber).toString(), logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin };
-  }
-
-  async getLatestConfirmedNonce(address: Address): Promise<string> {
-    await this.assertBaseChain();
-    return rpcQuantity(await this.call("eth_getTransactionCount", [address, "latest"])).toString();
-  }
-
-  async getConfirmedTransactionAtNonce(address: Address, nonceAtomic: string, startBlockNumberAtomic: string): Promise<Hex | null> {
-    await this.assertBaseChain();
-    const latestBlock = record(await this.call("eth_getBlockByNumber", ["latest", false]), "latest block");
-    const latest = rpcQuantity(latestBlock.number);
-    const requestedStart = parseAtomic(startBlockNumberAtomic);
-    const boundedStart = latest >= MAX_NONCE_SCAN_BLOCKS - 1n ? latest - (MAX_NONCE_SCAN_BLOCKS - 1n) : 0n;
-    const start = requestedStart > boundedStart ? requestedStart : boundedStart;
-    for (let blockNumber = latest; blockNumber >= start; blockNumber -= 1n) {
-      const tag = `0x${blockNumber.toString(16)}`;
-      const block = record(await this.call("eth_getBlockByNumber", [tag, true]), "confirmed block");
-      if (!Array.isArray(block.transactions)) throw new ApnError("APN_RPC_PROTOCOL", "RPC block transactions are invalid.");
-      for (const item of block.transactions) {
-        const transaction = record(item, "block transaction");
-        if (typeof transaction.from === "string" && transaction.from.toLowerCase() === address.toLowerCase() && rpcQuantity(transaction.nonce).toString() === nonceAtomic) {
-          return rpcHex(transaction.hash, 32);
-        }
-      }
-      if (blockNumber === 0n) break;
-    }
-    return null;
   }
 
   async coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0],

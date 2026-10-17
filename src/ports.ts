@@ -202,12 +202,6 @@ export interface RpcPort {
   }): Promise<FeeEstimate>;
   submitRawTransaction(rawTransaction: Hex): Promise<Hex>;
   getReceipt(transactionHash: Hex): Promise<RpcReceipt | null>;
-  getLatestConfirmedNonce(address: Address): Promise<string>;
-  getConfirmedTransactionAtNonce(
-    address: Address,
-    nonceAtomic: string,
-    startBlockNumberAtomic: string,
-  ): Promise<Hex | null>;
   /** Bounded read-only Base RPC used by the Coinbase gasless observer. */
   coinbaseGaslessCall?(method: "eth_chainId" | "eth_getTransactionCount" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getCode" |
     "eth_getStorageAt" | "eth_call" | "eth_getTransactionByHash" | "eth_getTransactionReceipt",

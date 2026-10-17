@@ -8,12 +8,7 @@ export const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 export const USDC_DECIMALS = 6;
 export const ETH_DECIMALS = 18;
 export const APPROVAL_WINDOW_MS = 10 * 60 * 1000;
-export const MAX_NONCE_SCAN_BLOCKS = 2048n;
 export const MAX_RPC_RESPONSE_BYTES = 1024 * 1024;
-export const MAX_IPC_FRAME_BYTES = 64 * 1024;
-export const NATIVE_REQUEST_FD_ENV = "APN_NATIVE_REQUEST_FD";
-export const NATIVE_RESPONSE_FD_ENV = "APN_NATIVE_RESPONSE_FD";
-export const HOST_SERIALIZED_ENV = "APN_HOST_SERIALIZED";
 export const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 /** Anonymous Solana mainnet baseline shared by normal rails and portfolio. */
 export const SOLANA_PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com";
