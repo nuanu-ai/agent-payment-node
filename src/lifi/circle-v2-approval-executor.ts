@@ -14,12 +14,19 @@ import type { BridgeRpcPort } from "./ports.js";
 import { bridgeOwner } from "./owner.js";
 import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
+import { jsonRpcBatchReader, provesUnlanded, readEvmUnlandedEvidence, type EvmBatchRead, type EvmUnlandedEvidence } from "../evm-unlanded-proof.js";
+import { BridgeHttps } from "./https.js";
+import { BRIDGE_RPC_ENV } from "./rpc-transport.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
 
-/** Every phase of a Circle Base USDC approval, and its outcomes (a safe receipt either way, or proven never sent). */
-export const CIRCLE_APPROVAL_PHASES = ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect"] as const;
+/**
+ * Every phase of a Circle Base USDC approval, and its outcomes: a safe receipt either way, proven never sent, or proven
+ * never to land (another transaction took its nonce at finality while the node knows neither it nor a receipt).
+ */
+export const CIRCLE_APPROVAL_PHASES = ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect",
+  "failed_proven_superseded"] as const;
 export type CircleApprovalPhase = typeof CIRCLE_APPROVAL_PHASES[number];
-export const CIRCLE_APPROVAL_RESOLVED_PHASES: readonly CircleApprovalPhase[] = ["completed", "confirmed_revert", "failed_before_effect"];
+export const CIRCLE_APPROVAL_RESOLVED_PHASES: readonly CircleApprovalPhase[] = ["completed", "confirmed_revert", "failed_before_effect", "failed_proven_superseded"];
 export interface CircleApprovalRecord {
   readonly schemaVersion: "apn.circle-v2-approval.v1";
   readonly id: string;
@@ -36,6 +43,8 @@ export interface CircleApprovalRecord {
   readonly submissionAttempts: 0 | 1;
   readonly observedAllowanceAtomic: string | null;
   readonly failureReason?: string;
+  /** `failed_proven_superseded` only: the payer's nonce at the `finalized` tag when status proved the approval can never land. */
+  readonly finalizedNonceAtomic?: string;
   readonly integrityHash: string;
 }
 export interface CircleApprovalRpc {
@@ -46,13 +55,26 @@ export interface CircleApprovalRpc {
   send(raw: Hex): Promise<Hex>;
   /** Returns a chain-verified receipt at safe finality, or null while unresolved. */
   observe(hash: Hex): Promise<{ readonly receipt: BridgeProtocolReceipt; readonly status: "success" | "reverted"; readonly safe: true } | null>;
+  /** One batch on the same endpoint: the payer's nonce at the `finalized` tag, and whether the node knows the transaction or a receipt. */
+  unlanded(payer: string, hash: Hex): Promise<EvmUnlandedEvidence>;
 }
 export interface CircleApprovalSigner {
   sign(record: CircleApprovalRecord): Promise<Hex>;
 }
 export function publicCircleApproval(record: CircleApprovalRecord) {
   const { rawTransaction: _raw, ...publicRecord } = record;
-  return publicRecord;
+  return { ...publicRecord, allowance: circleApprovalAllowance(record) };
+}
+/**
+ * What the approval leaves on chain. A completed one leaves the Base USDC allowance it set for the Circle V2 wrapper, which
+ * `apn circle source submit` spends; APN has no command that revokes it. Every other outcome changed no allowance.
+ */
+function circleApprovalAllowance(record: CircleApprovalRecord) {
+  const p = record.preparation;
+  if (record.phase === "completed") return { effect: "allowance_set", token: p.token, owner: p.transaction.from, spender: p.spender,
+    approvedAtomic: p.approvalCapAtomic, observedAtCompletionAtomic: record.observedAllowanceAtomic, spentBy: "apn circle source submit",
+    revoke: "none_in_apn: the allowance stays until a Circle source transfer spends it or another approve from this wallet replaces it" };
+  return { effect: CIRCLE_APPROVAL_RESOLVED_PHASES.includes(record.phase) ? "allowance_unchanged" : "unknown_until_resolved" };
 }
 
 /**
@@ -60,7 +82,7 @@ export function publicCircleApproval(record: CircleApprovalRecord) {
  * its own command session on the primary endpoint: a state read is one batch (chain identity, head, account, Base fee
  * inputs and the approval's own simulation), and the estimate and fee quote reuse it.
  */
-export function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort)): CircleApprovalRpc {
+export function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort), proofBatch: () => EvmBatchRead): CircleApprovalRpc {
   const rpcFor = typeof input === "function" ? input : () => input, first = rpcFor();
   if (first.chainId !== 8453) bridgeFailure("APN_RPC_CONFIG", "circle_approval_base_only");
   return {
@@ -94,6 +116,16 @@ export function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => Bridge
         receipt.chainId !== 8453 || receipt.transactionHash !== hash) bridgeFailure("APN_RPC_PROTOCOL", "circle_approval_receipt_binding");
       return { receipt, status: tx.status, safe: true };
     },
+    unlanded: async (payer, hash) => await readEvmUnlandedEvidence(proofBatch(), 8453, payer, hash),
+  };
+}
+
+/** The never-lands proof reads the same configured Base endpoint as every other approval read, in one batch. */
+export function circleApprovalProofBatch(environment: Readonly<Record<string, string | undefined>>): () => EvmBatchRead {
+  return () => {
+    const url = environment[BRIDGE_RPC_ENV[8453]];
+    if (url === undefined || url.length === 0) bridgeFailure("APN_RPC_CONFIG", `missing_${BRIDGE_RPC_ENV[8453]}`);
+    return jsonRpcBatchReader(new BridgeHttps(), url);
   };
 }
 
@@ -278,7 +310,13 @@ export class CircleV2ApprovalExecutor {
     try {
       if (await verifySigned(r.rawTransaction, r) !== r.transactionHash) throw new Error("signed hash");
       const found = await this.rpc.observe(r.transactionHash);
-      if (found === null) return await this.unknown(r);
+      if (found === null) {
+        // No safe receipt. Once another transaction took its nonce at finality and the node knows neither this one nor a
+        // receipt, the approval can never land: no allowance changed, and the payer's account is free again.
+        const evidence = await this.rpc.unlanded(r.preparation.transaction.from, r.transactionHash);
+        if (!provesUnlanded(evidence, r.preparation.transaction.nonceAtomic)) return await this.unknown(r);
+        r = update(r, { phase: "failed_proven_superseded", finalizedNonceAtomic: evidence.finalizedNonce }); await this.journal.save(r); return r;
+      }
       const receipt = found.receipt;
       if (found.safe !== true || receipt.chainId !== 8453 || receipt.transactionHash !== r.transactionHash) throw new Error("receipt identity");
       if (found.status === "reverted") {
