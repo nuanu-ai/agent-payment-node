@@ -6,7 +6,6 @@ export declare const UNISWAP_V3_SWAP_ROUTER_CODE_HASH: "0xbb90113d2f9a5e9b7feb15
 export declare const UNISWAP_V3_USDC_USDT_100_CODE_HASH: "0x2ff673bacc60a73fc85c678888296c6bce3de2a9d7475c032fe7aa6e0eacba86";
 export declare const UNISWAP_TOKEN_ROUTE_SCHEMA: "apn.uniswap-v3.swap-router.exact-input-single.v1";
 export declare const UNISWAP_TOKEN_MECHANISM_PIN: import("../pin.js").SwapMechanismPin;
-export declare const UNISWAP_TOKEN_PROTOCOL_REGISTRY: import("../protocol-registry.js").SwapProtocolRegistry;
 export interface UniswapTokenRoute {
     readonly schemaVersion: typeof UNISWAP_TOKEN_ROUTE_SCHEMA;
     readonly inputToken: string;
@@ -37,4 +36,5 @@ export declare function encodeUniswapTokenApproval(tokenAddress: string, amount:
     readonly amount: string;
 };
 export declare function verifyUniswapTokenRoutePins(call: EvmRpcCall, tag: Hex): Promise<void>;
-export declare function verifyUniswapTokenUsdtState(call: EvmRpcCall, tag: Hex): Promise<void>;
+/** USDT must stay non-deprecated and fee-free; every token-route read of its flags goes through this check. */
+export declare function assertUsdtSafety(functionName: "deprecated" | "basisPointsRate" | "maximumFee", value: unknown): void;

@@ -55,12 +55,6 @@ export interface UniswapExecutionApprovalRequest {
     readonly expiresAt: string;
     readonly approvalHash: string;
 }
-export interface UniswapForegroundApprovalPort {
-    confirm(request: UniswapExecutionApprovalRequest): Promise<{
-        readonly approved: boolean;
-        readonly approvalHash: string;
-    }>;
-}
 export interface UniswapExecutionBinding {
     readonly schemaVersion: "apn.uniswap-ethereum.execution-binding.v1";
     readonly operationId: string;

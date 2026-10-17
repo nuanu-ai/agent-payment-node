@@ -17,7 +17,6 @@ export interface SwapProtocolRegistry {
 }
 
 /** The shipped registry is intentionally empty until owners supply official immutable pins. */
-export const EMPTY_SWAP_PROTOCOL_REGISTRY = compileSwapProtocolRegistry({ registryVersion: "unconfigured.1", pins: [] });
 
 export function compileSwapProtocolRegistry(input: { readonly registryVersion: string; readonly pins: readonly unknown[] }): SwapProtocolRegistry {
   if (!isPlainRecord(input) || !exactKeys(input, ["registryVersion", "pins"]) || typeof input.registryVersion !== "string" ||
@@ -64,15 +63,6 @@ export function requireSwapProtocol(registryValue: unknown, mechanismDigest: str
   const record = registry.records.find((row) => row.mechanismDigest === mechanismDigest);
   if (record === undefined) throw new ApnError("APN_OPERATION_BLOCKED", "The exact swap mechanism is not admitted.");
   return record;
-}
-
-/** A legacy family/chain lookup may select only when the identity is unambiguous. */
-export function requireUnambiguousSwapProtocol(registryValue: unknown, chain: string, protocolFamily: string): SwapProtocolRecord {
-  const matches = validateSwapProtocolRegistry(registryValue).records.filter(({ pin }) =>
-    pin.chain === chain && pin.protocolFamily === protocolFamily);
-  if (matches.length !== 1) throw new ApnError("APN_OPERATION_BLOCKED", "An exact swap mechanism must be selected.",
-    { reason: matches.length === 0 ? "swap_protocol_absent" : "swap_protocol_ambiguous" });
-  return matches[0]!;
 }
 
 function invalid(message: string): never { throw new ApnError("APN_INVALID_INPUT", message); }
