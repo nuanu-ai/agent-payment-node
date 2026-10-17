@@ -10,7 +10,7 @@ const option = (name: CommandOption["name"], type: CommandOption["type"]): Comma
 const profile = option("--profile", "profile"), operation = option("--operation", "operation_id");
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "Saved exact Circle V2 Base approval state.", failures: ["Classified APN failure; no automatic resend."] } as const;
-const states = { terminal: ["completed", "confirmed_revert", "failed_before_effect"],
+const states = { terminal: ["completed", "confirmed_revert", "failed_before_effect", "failed_proven_superseded"],
   non_terminal: ["prepared", "signing_started", "sealed", "submitting", "unknown_finality"] };
 const limits = [option("--max-gas-limit-atomic", "string"), option("--max-fee-per-gas-wei", "wei"),
   option("--max-priority-fee-per-gas-wei", "wei"), option("--max-native-debit-wei", "wei")];
@@ -27,8 +27,8 @@ export const CIRCLE_COMMANDS: readonly CommandDefinition[] = [
     approval: { class: "foreground_tty", when: "Before signing the exact saved intent." }, output, states,
     recovery: [{ command_path: ["circle", "approval", "status"], when: "Observe the exact signed transaction at safe finality." }], examples: ["apn circle approval execute --operation <approval-id>"] },
   { path: ["circle", "approval", "status"], synopsis: "apn circle approval status --operation <approval-id>",
-    summary: "Observe a saved approval without any resend.", options: [operation],
-    effect: { class: "network_read", summary: "Reads the exact saved Base transaction and fresh allowance." },
+    summary: "Observe a saved approval without any resend; one the finalized nonce proves can never land ends failed_proven_superseded.", options: [operation],
+    effect: { class: "network_read", summary: "Reads the exact saved Base transaction and fresh allowance, or the payer's finalized nonce when no receipt exists. A completed approval leaves its allowance for circle source submit; APN has no revoke." },
     approval: { class: "none", when: "Observation only." }, output, states, recovery: [], examples: ["apn circle approval status --operation <approval-id>"] },
   { path: ["circle", "source", "submit"], synopsis: "apn circle source submit --profile <profile> --expected-payer <base-address> --recipient-owner <solana-address> --recipient-setup <existing_ata|create_ata> --amount-atomic <uint> --max-source-fee-atomic <uint> --max-allowance-atomic <uint> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>",
     summary: "Prepare, confirm and submit one bounded Circle V2 Base USDC source transfer.",

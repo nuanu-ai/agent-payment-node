@@ -7,7 +7,9 @@ const STORE: OperationStore = { directory: "circle-approvals", perProfile: false
 
 /**
  * Circle Base USDC allowance effects. Execute refuses a `prepared` approval past its preparation expiry before signing;
- * a started one resolves through status (an unsent marker ends failed_before_effect, a sent one is observed).
+ * a started one resolves through status: an unsent marker ends failed_before_effect, a sent one is observed, and one
+ * without a receipt ends failed_proven_superseded once the payer's finalized nonce is past its nonce while the node
+ * knows neither its transaction nor a receipt.
  */
 export const circleApprovalAdapter: OperationFamilyAdapter<CircleApprovalRecord> = {
   family: "circle_approval",
