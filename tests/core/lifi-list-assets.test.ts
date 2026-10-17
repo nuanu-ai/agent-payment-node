@@ -7,7 +7,14 @@ import type { AbiParameter } from "viem";
 import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
 import type { Address, Hex } from "../../src/model.js";
 import { acrossBridgeAbi, bridgeEventsAbi, FEE_FORWARDER, FEE_RECIPIENT, feeForwarderAbi } from "../../src/lifi/abi.js";
-import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgeAssetPair, bridgeAssetRow, bridgeTokenRow, validateBridgeRequest } from "../../src/lifi/asset-registry.js";
+import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgeAssetPair, bridgeAssetRow, bridgeChain, validateBridgeRequest, type BridgeTokenAsset } from "../../src/lifi/asset-registry.js";
+/** Token rows of the execution chains: the zero address is the native sentinel, never a token. */
+function bridgeTokenRow(chainId: unknown, address: unknown): BridgeTokenAsset {
+  const row = bridgeAssetRow(bridgeChain(chainId), address);
+  if (row.kind !== "erc20") throw new Error("native_sentinel_is_not_a_token");
+  return row;
+}
+
 import { bridgeCapabilities } from "../../src/lifi/catalog.js";
 import { bindBridgeCommand } from "../../src/lifi/command-catalog.js";
 import { decodeBridgeCall } from "../../src/lifi/decode.js";
@@ -91,7 +98,7 @@ test("unlisted, unpaired and mixed-kind legs are refused with a named reason", a
   assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 42161, fromToken: USDT, toToken: USDC[42161] }), /asset_has_no_listed_peer/u);
   assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 8453, fromToken: BRIDGE_ZERO_ADDRESS, toToken: USDC[8453] }), /admitted_asset_pair/u);
   assert.throws(() => bridgeAssetPair({ fromChainId: 1, toChainId: 8453, fromToken: USDC[1], toToken: BRIDGE_ZERO_ADDRESS }), /admitted_asset_pair/u);
-  assert.throws(() => bridgeTokenRow(1, BRIDGE_ZERO_ADDRESS), /native_sentinel_is_not_a_token/u);
+  assert.equal(bridgeAssetRow(1, BRIDGE_ZERO_ADDRESS).kind, "native");
   assert.equal(bridgeDeployment(1, 8453, "stargateV2", BRIDGE_ZERO_ADDRESS).endpointId, 30101);
   assert.throws(() => bridgeDeployment(1, 42161, "stargateV2", BRIDGE_ZERO_ADDRESS), /stargate_native_pair_unreviewed/u);
   assert.throws(() => bridgeDeployment(1, 42161, "across", USDT), /finite_chain/u);

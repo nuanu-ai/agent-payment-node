@@ -11,7 +11,7 @@ import { ACROSS_SELECTOR, acrossBridgeAbi, bridgeEventsAbi, EVENT_TOPICS, FEE_FO
 import { decodeBridgeCall } from "../../src/lifi/decode.js";
 import { bridgeDeployment, bridgeEndpointId, bridgeProtocolEmitter } from "../../src/lifi/deployments.js";
 import type { BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall } from "../../src/lifi/model.js";
-import { bridgeDestinationProof, bridgeSourceProof, destinationEventFilter } from "../../src/lifi/protocol-evidence.js";
+import { bridgeDestinationProof, bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
 
@@ -171,9 +171,6 @@ test("source and destination proofs correlate both tools across all three direct
     const destination = bridgeDestinationProof(source, m, decoded, destinationReceipt);
     assert.equal(destination.amountAtomic, source.correlation.kind === "across" ? source.correlation.outputAmountAtomic : source.correlation.amountReceivedAtomic);
     assert.equal(destination.correlationHash, sha256(canonicalJson(source.correlation)));
-    const filter = destinationEventFilter(source, decoded.destinationToken);
-    assert.equal(filter.address, bridgeProtocolEmitter(decoded.destinationChainId, decoded.tool, decoded.destinationToken));
-    assert.equal(filter.topics.length, 3);
   }
 });
 

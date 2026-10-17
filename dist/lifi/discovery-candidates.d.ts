@@ -11,7 +11,7 @@ export declare const BASE_SOLANA_CIRCLE_V2_CANDIDATE: {
     readonly providerRouteState: "selected_design_unverified_for_execution";
     readonly executable: false;
 };
-/** LI.FI inventory candidate; the separate captured Mayan evidence remains exploratory only. */
+/** LI.FI inventory candidate (discovery only). */
 export declare const BASE_SOLANA_USDC_CANDIDATE: {
     readonly fromChainId: 8453;
     readonly toChainId: 1151111081099710;

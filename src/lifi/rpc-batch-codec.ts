@@ -1,6 +1,6 @@
 import { ApnError } from "../errors.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-codec.js";
-import type { Address, Hex } from "../model.js";
+import type { Hex } from "../model.js";
 import type { BridgeChainId } from "./chains.js";
 import type { BridgeBlock, BridgeTransaction } from "./model.js";
 import { bridgeHex, bridgeUint } from "./validation.js";
@@ -17,7 +17,6 @@ export function rpcWordValue(value: unknown): bigint { return evmRpcWord(value);
 export function rpcHexValue(maximumBytes: number): (value: unknown) => Hex {
   return (value) => bridgeHex(value, maximumBytes, undefined, "APN_RPC_PROTOCOL");
 }
-export function rpcRecordValue(value: unknown): Record<string, unknown> { return evmRpcRecord(value); }
 export function rpcBlockValue(value: unknown): Record<string, unknown> {
   const block = evmRpcRecord(value); evmRpcQuantity(block.number); evmRpcHex(block.hash, 32); evmRpcQuantity(block.timestamp); return block;
 }

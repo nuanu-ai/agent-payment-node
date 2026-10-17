@@ -5,7 +5,7 @@ export type { RpcReadMethod } from "./rpc-session-helpers.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { BridgeChainId } from "./chains.js";
 import { RpcProviderScheduler } from "./rpc-scheduler.js";
-export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity, rpcProviderFamily } from "./rpc-scheduler.js";
+export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcProviderFamily } from "./rpc-scheduler.js";
 export type { RpcProviderPacingCoordinator } from "./rpc-scheduler.js";
 export type RpcBatchAttempt = (canonicalBody: string) => Promise<unknown>;
 export interface RpcBatchReadItem<T = unknown> {

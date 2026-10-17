@@ -138,12 +138,6 @@ function transientTransport(error) {
     return typeof reason === "string" && ["DNS_deadline", "request_deadline", "request_interrupted", "response_aborted", "response_interrupted"]
         .includes(reason);
 }
-export function rpcOriginIdentity(origin) { try {
-    return new URL(origin).origin;
-}
-catch {
-    return "invalid-origin";
-} }
 export function rpcProviderFamily(origin) {
     try {
         const hostname = new URL(origin).hostname.toLowerCase();

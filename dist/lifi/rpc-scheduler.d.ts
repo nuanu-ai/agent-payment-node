@@ -22,5 +22,4 @@ export declare class RpcProviderScheduler {
     private pump;
     private run;
 }
-export declare function rpcOriginIdentity(origin: string): string;
 export declare function rpcProviderFamily(origin: string): string;

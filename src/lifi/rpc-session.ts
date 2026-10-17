@@ -13,8 +13,8 @@ import { isDeepStrictEqual } from "node:util";
 import { ApnError } from "../errors.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { BridgeChainId } from "./chains.js";
-import { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity } from "./rpc-scheduler.js";
-export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity, rpcProviderFamily } from "./rpc-scheduler.js";
+import { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS } from "./rpc-scheduler.js";
+export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcProviderFamily } from "./rpc-scheduler.js";
 export type { RpcProviderPacingCoordinator } from "./rpc-scheduler.js";
 
 export type RpcBatchAttempt = (canonicalBody: string) => Promise<unknown>;
