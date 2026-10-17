@@ -22,7 +22,14 @@ export class MerchantRepository extends SecureStateStore {
         await this.initialize();
         await this.ensureDirectory("merchant-x402");
         const prior = await this.findOperation(o.operationId);
-        const edges: Record<MerchantOperation["state"], readonly MerchantOperation["state"][]> = { prepared:["signing_started"], signing_started:["submission_started","unknown_finality"], submission_started:["unknown_finality","payment_finalized","reverted"], unknown_finality:["payment_finalized","reverted","retired_unsent"], payment_finalized:["delivery_unknown"], delivery_unknown:["delivered"], delivered:[], reverted:[],retired_unsent:[] };
+        // Phase 4c exits: never signed or never sent (failed_before_effect), superseded at the finalized nonce, owner abandon,
+        // and delivery attempts exhausted after a finalized payment.
+        const edges: Record<MerchantOperation["state"], readonly MerchantOperation["state"][]> = { prepared:["signing_started","failed_before_effect"],
+            signing_started:["submission_started","unknown_finality","failed_before_effect","failed_proven_superseded","abandoned_unknown"],
+            submission_started:["unknown_finality","payment_finalized","reverted","failed_proven_superseded","abandoned_unknown"],
+            unknown_finality:["payment_finalized","reverted","retired_unsent","failed_before_effect","failed_proven_superseded","abandoned_unknown"],
+            payment_finalized:["delivery_unknown"], delivery_unknown:["delivered","delivery_failed"], delivered:[], reverted:[], retired_unsent:[],
+            failed_before_effect:[], failed_proven_superseded:[], abandoned_unknown:[], delivery_failed:[] };
         const auditAppend = prior !== null && canonicalJson(o.canonicalObservations?.slice(0, prior.canonicalObservations?.length ?? 0) ?? []) === canonicalJson(prior.canonicalObservations ?? []);
         const stripAudit = (value: MerchantOperation) => { const { integrityHash: _, canonicalObservations: __, ...body } = value; return body; };
         if (prior !== null && (prior.state !== o.state && !edges[prior.state].includes(o.state) ||canonicalJson(o.failures?.slice(0,prior.failures?.length??0)??[])!==canonicalJson(prior.failures??[]) || prior.retirementDigest!==undefined&&prior.retirementDigest!==o.retirementDigest || prior.fingerprint !== o.fingerprint || prior.signingAttempts > o.signingAttempts || prior.submissionAttempts > o.submissionAttempts ||

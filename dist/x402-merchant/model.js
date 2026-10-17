@@ -6,8 +6,13 @@ import { canonicalMerchantUrl, checkChallengeFor, refuse } from "./protocol.js";
 import { merchantTerms } from "./terms.js";
 import { LEGACY_MERCHANT_MECHANISM, validMerchantAssetPin } from "./pins.js";
 /** Every phase a merchant payment may hold, and its outcomes (the record's `terminal` flag must equal membership). */
-export const MERCHANT_PHASES = ["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent"];
-export const MERCHANT_TERMINAL_PHASES = ["delivered", "reverted", "retired_unsent"];
+export const MERCHANT_PHASES = ["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent",
+    "failed_before_effect", "failed_proven_superseded", "abandoned_unknown", "delivery_failed"];
+export const MERCHANT_TERMINAL_PHASES = ["delivered", "reverted", "retired_unsent", "failed_before_effect", "failed_proven_superseded", "abandoned_unknown", "delivery_failed"];
+/** The most merchant GETs that may carry one payment's proof (started and outcome rows, two per GET). */
+export const MERCHANT_DELIVERY_ATTEMPT_LIMIT = 16;
+const EXIT_REASONS = { failed_before_effect: ["never_signed", "signature_never_left_process"],
+    failed_proven_superseded: ["finalized_nonce_superseded"], abandoned_unknown: ["owner_abandoned"], delivery_failed: ["delivery_attempts_exhausted"] };
 export function merchantFingerprint(o) {
     return hashObject({ schemaVersion: o.schemaVersion, kind: o.kind, operationId: o.operationId, profile: o.profile, profileHash: o.profileHash,
         idempotencyHash: o.idempotencyHash, requestHash: o.requestHash, custody: o.custody, frozen: o.frozen, ...(o.url === undefined ? {} : { url: o.url }), ...(o.asset === undefined ? {} : { asset: o.asset }), envelope: o.envelope, ...(o.feeContext === undefined ? {} : { feeContext: o.feeContext }), policy: o.policy, ...(o.effectBinding === undefined ? {} : { effectBinding: o.effectBinding }), createdAt: o.createdAt, expiresAt: o.expiresAt });
@@ -22,7 +27,7 @@ export function merchantMove(o, state, at, changes = {}) {
 }
 export function validateMerchant(v) {
     const v2 = isPlainRecord(v) && v.schemaVersion === "apn.x402-merchant.v2";
-    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", ...(v2 ? ["url", "asset"] : []), "envelope", "policy", ...(v.failures === undefined ? [] : ["failures"]), ...(v.retirementDigest === undefined ? [] : ["retirementDigest"]), ...(v.feeContext === undefined ? [] : ["feeContext"]), ...(v.effectBinding === undefined ? [] : ["effectBinding"]), "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"])]))
+    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", ...(v2 ? ["url", "asset"] : []), "envelope", "policy", ...(v.failures === undefined ? [] : ["failures"]), ...(v.retirementDigest === undefined ? [] : ["retirementDigest"]), ...(v.feeContext === undefined ? [] : ["feeContext"]), ...(v.effectBinding === undefined ? [] : ["effectBinding"]), "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"]), ...(v.exit === undefined ? [] : ["exit"])]))
         refuse("merchant_state_schema");
     const o = v, { integrityHash, ...body } = o;
     if (!MERCHANT_PHASES.includes(o.state) || !exactKeys(o.policy, ["digest", "revision", "activationDigest"]) || o.schemaVersion !== "apn.x402-merchant.v1" && o.schemaVersion !== "apn.x402-merchant.v2" || o.kind !== "merchant_x402" || hashObject(body) !== integrityHash || merchantFingerprint(o) !== o.fingerprint ||
@@ -66,7 +71,7 @@ export function validateMerchant(v) {
     }
     if (o.events.at(-1)?.snapshotHash !== merchantSnapshot(o) || o.events.at(-1)?.state !== o.state || o.txHash !== null && !/^0x[0-9a-f]{64}$/u.test(o.txHash) || o.submissionAttempts === 1 && o.txHash === null)
         refuse("merchant_state_attempt");
-    if (o.state === "prepared" && (o.signingAttempts !== 0 || o.submissionAttempts !== 0 || o.txHash !== null || o.receipt !== null || o.deliveryAttempts.length !== 0) || o.state === "signing_started" && (o.signingAttempts !== 1 || o.submissionAttempts !== 0) || ["submission_started", "payment_finalized", "delivery_unknown", "delivered", "reverted"].includes(o.state) && o.submissionAttempts !== 1 || o.state === "unknown_finality" && o.signingAttempts !== 1)
+    if (o.state === "prepared" && (o.signingAttempts !== 0 || o.submissionAttempts !== 0 || o.txHash !== null || o.receipt !== null || o.deliveryAttempts.length !== 0) || o.state === "signing_started" && (o.signingAttempts !== 1 || o.submissionAttempts !== 0) || ["submission_started", "payment_finalized", "delivery_unknown", "delivered", "reverted", "delivery_failed"].includes(o.state) && o.submissionAttempts !== 1 || o.state === "unknown_finality" && o.signingAttempts !== 1)
         refuse("merchant_phase_attempt_binding");
     if (o.receipt !== null && (!exactKeys(o.receipt, ["transactionHash", "blockNumber", "blockHash", "finality", "status", "evidenceHash", "networkFeeWei", ...(o.receipt.fullFee === undefined ? [] : ["fullFee"]), ...(o.receipt.canonical === undefined ? [] : ["canonical"])]) || !/^[0-9]+$/u.test(o.receipt.blockNumber) || !/^0x[0-9a-f]{64}$/u.test(o.receipt.blockHash) || !/^(0|[1-9][0-9]*)$/u.test(o.receipt.networkFeeWei) || !["success", "reverted"].includes(o.receipt.status) || o.receipt.transactionHash !== o.txHash || o.receipt.finality !== "finalized" || !/^[a-f0-9]{64}$/u.test(o.receipt.evidenceHash)))
         refuse("merchant_state_receipt");
@@ -85,9 +90,10 @@ export function validateMerchant(v) {
             ![c.blockHeaderHash, c.finalizedHeaderHash].every(h => /^[a-f0-9]{64}$/u.test(h)) || !/^0x[0-9a-f]{64}$/u.test(c.finalizedHash) || BigInt(c.finalizedNumber) < BigInt(o.receipt.blockNumber))
             refuse("merchant_canonical_receipt_shape");
     }
-    if (["payment_finalized", "delivery_unknown", "delivered"].includes(o.state) && o.receipt?.status !== "success" || o.state === "reverted" && o.receipt?.status !== "reverted" || o.state === "delivered" && o.deliveryAttempts.at(-1)?.outcome !== "delivered")
+    validateMerchantExit(o);
+    if (["payment_finalized", "delivery_unknown", "delivered", "delivery_failed"].includes(o.state) && o.receipt?.status !== "success" || o.state === "reverted" && o.receipt?.status !== "reverted" || o.state === "delivered" && o.deliveryAttempts.at(-1)?.outcome !== "delivered")
         refuse("merchant_state_completion");
-    if (o.deliveryAttempts.length > 16)
+    if (o.deliveryAttempts.length > MERCHANT_DELIVERY_ATTEMPT_LIMIT)
         refuse("merchant_delivery_attempt_bound");
     for (let i = 0; i < o.deliveryAttempts.length; i++) {
         const a = o.deliveryAttempts[i];
@@ -127,6 +133,28 @@ export function validateMerchant(v) {
     }
     return o;
 }
+/** The exit record belongs to its exit state, and each exit state to the attempts it can follow. */
+function validateMerchantExit(o) {
+    const allowed = EXIT_REASONS[o.state], x = o.exit;
+    if (allowed === undefined ? x !== undefined : x === undefined || !isPlainRecord(x) || !allowed.includes(x.reason))
+        refuse("merchant_exit_binding");
+    if (x === undefined)
+        return;
+    const superseded = x.reason === "finalized_nonce_superseded";
+    if (!exactKeys(x, ["reason", ...(superseded ? ["finalizedNonce", "transactionHash"] : [])]))
+        refuse("merchant_exit_binding");
+    if (superseded && (!/^(0|[1-9][0-9]*)$/u.test(x.finalizedNonce ?? "") || BigInt(x.finalizedNonce) <= BigInt(o.envelope.nonce) ||
+        !/^0x[0-9a-f]{64}$/u.test(x.transactionHash ?? "") || o.txHash !== null && o.txHash !== x.transactionHash))
+        refuse("merchant_exit_binding");
+    // Delivery stops only after the last allowed GET left no delivery; every other exit has no payment and no delivery.
+    const attempts = o.state === "delivery_failed"
+        ? o.deliveryAttempts.length === MERCHANT_DELIVERY_ATTEMPT_LIMIT && o.deliveryAttempts.at(-1)?.outcome === "unknown"
+        : o.receipt === null && o.deliveryAttempts.length === 0 && (o.state === "failed_before_effect"
+            ? o.submissionAttempts === 0 && o.txHash === null && (x.reason === "never_signed" || o.signingAttempts === 1)
+            : o.signingAttempts === 1);
+    if (!attempts)
+        refuse("merchant_exit_binding");
+}
 function canonicalUrl(url) { try {
     return canonicalMerchantUrl(url) === url;
 }
@@ -141,6 +169,6 @@ export function publicMerchant(o) {
         url: t.url, payer: t.payer, payee: t.payee, asset: { chain: t.chain, token: t.token, symbol: t.asset.symbol, decimals: t.asset.decimals }, legacyMechanism: t.legacy ? LEGACY_MERCHANT_MECHANISM : null, paymentFinalized: o.receipt?.status === "success", merchantDelivered: o.state === "delivered", transactionHash: o.txHash,
         challengeHash: o.frozen.challengeHash, paymentWindowSeconds: o.frozen.accepted.maxTimeoutSeconds, expiresAt: o.expiresAt, amountAtomic: o.frozen.accepted.amount, feeCeilingWei: o.envelope.maximumNativeFee, ...(o.feeContext === undefined ? {} : { feeBudgetSemantics: "pre_submission_full_fee_estimate_not_onchain_l1_cap", signedExecutionCapWei: o.feeContext.executionUpper, admissionEstimatedUpperWei: o.feeContext.admissionEstimatedUpper, l1EstimatedUpperWei: o.feeContext.l1EstimatedUpper, operatorEstimatedUpperWei: o.feeContext.operatorEstimatedUpper, feeRule: o.feeContext.schemaVersion }),
         failures: o.failures ?? [], retirementDigest: o.retirementDigest ?? null, retirementReceipt: o.state === "retired_unsent" ? { kind: "merchant_unsent_retirement", tombstoneDigest: o.retirementDigest, consumedAtomic: "0", payment: false, delivery: false } : null, ...(o.envelope.nativeFeeReserveWei === undefined ? {} : { nativeFeeReserveWei: o.envelope.nativeFeeReserveWei }),
-        currentCanonicalProof: o.canonicalObservations?.at(-1) ?? null, result: o.state === "delivered" ? o.deliveryAttempts.at(-1)?.result : null, receipt: o.receipt };
+        exit: o.exit ?? null, currentCanonicalProof: o.canonicalObservations?.at(-1) ?? null, result: o.state === "delivered" ? o.deliveryAttempts.at(-1)?.result : null, receipt: o.receipt };
 }
 //# sourceMappingURL=model.js.map

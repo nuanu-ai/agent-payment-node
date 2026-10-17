@@ -50,7 +50,7 @@ import { LocalBridgeCustody } from "./lifi/custody.js";
 import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
 import { environmentFinalizedReader } from "./evm-finalized-proof.js";
-import { CircleV2ApprovalExecutor, LocalCircleApprovalSigner, circleApprovalRpcFromBridge } from "./lifi/circle-v2-approval-executor.js";
+import { CircleV2ApprovalExecutor, LocalCircleApprovalSigner, circleApprovalProofBatch, circleApprovalRpcFromBridge } from "./lifi/circle-v2-approval-executor.js";
 import { OneClickSourceService } from "./lifi/near-oneclick-source-service.js";
 import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
 import { TtyBridgeApproval } from "./lifi/tty.js";
@@ -283,7 +283,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       accounts: chainAccounts, rpc: solanaRpc, consent: options.orcaStableRecoveryConsent ?? new TtyOrcaStableConsent() }) } : {}),
     ...(runtimeCommand.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
       circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state,
-        circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)),
+        circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453), circleApprovalProofBatch(process.env)),
         new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits,
         () => options.clock?.now().getTime() ?? Date.now()),
     } : {}),

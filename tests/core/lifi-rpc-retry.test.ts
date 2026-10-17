@@ -108,7 +108,7 @@ test("Circle approval reuses the gas estimate's price instead of making a duplic
     prices: async () => { prices++; throw Error("duplicate price read"); },
     feeQuote: async () => ({ chainId: 8453, totalQuoteWei: "900000000000" }),
   } as unknown as BridgeRpcPort;
-  const state = await circleApprovalRpcFromBridge(rpc).read({ chainId: 8453, payer, token, spender, data: "0x095ea7b3" });
+  const state = await circleApprovalRpcFromBridge(rpc, () => { throw new Error("no never-lands proof in this test"); }).read({ chainId: 8453, payer, token, spender, data: "0x095ea7b3" });
   assert.equal(state.maxFeePerGasWei, "11000000");
   assert.equal(state.gasLimitAtomic, "56240");
   assert.equal(estimates, 1); assert.equal(prices, 0);
@@ -127,7 +127,7 @@ test("a Circle approval state read is one keyless primary batch through a fresh 
     return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? values : values[0]) };
   } };
   const factory = bridgeRpcFactory({ APN_BASE_RPC_URL: "https://base.example" }, { transport, wait: async () => {} });
-  const state = await circleApprovalRpcFromBridge(() => factory(8453)).read({ chainId: 8453, payer, token, spender, data: "0x095ea7b3" });
+  const state = await circleApprovalRpcFromBridge(() => factory(8453), () => { throw new Error("no never-lands proof in this test"); }).read({ chainId: 8453, payer, token, spender, data: "0x095ea7b3" });
   assert.equal(state.gasLimitAtomic, "56240"); assert.equal(state.usdcAllowanceAtomic, "7");
   // Chain identity, head, fee suggestion, balances, allowance, Base fee inputs, nonces and the approval's simulation together.
   assert.equal(posts.length, 1); assert.ok(posts[0]!.includes("eth_estimateGas")); assert.ok(!posts[0]!.includes("eth_getCode"));

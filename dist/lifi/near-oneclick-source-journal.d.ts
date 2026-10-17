@@ -32,7 +32,7 @@ export interface OneClickSourceRecord {
         readonly maxPriorityFeePerGas: string;
         readonly maxNativeDebitWei: string;
     };
-    readonly phase: "prepared" | "signing_started" | "sealed" | "submitting" | "submitted_pending" | "unknown_finality" | "source_observed";
+    readonly phase: "prepared" | "signing_started" | "sealed" | "submitting" | "submitted_pending" | "unknown_finality" | "source_observed" | "failed_proven_superseded";
     readonly rawTransaction: Hex | null;
     readonly transactionHash: Hex | null;
     readonly submissionAttempts: 0 | 1;
@@ -40,6 +40,11 @@ export interface OneClickSourceRecord {
     readonly sourceReceiptHash: string | null;
     /** The finalized destination proof once status proved it after a successful safe source receipt; it ends the operation. */
     readonly destinationStatus: OneClickDestinationProof | null;
+    /**
+     * `failed_proven_superseded` only: the payer's nonce at the `finalized` tag when status proved the signed source can never
+     * land (past the source nonce, while the node knew neither the transaction nor a receipt).
+     */
+    readonly finalizedNonceAtomic?: string;
     readonly updatedAt: string;
     readonly integrityHash: string;
 }
@@ -50,7 +55,10 @@ export declare function oneClickSourceCall(lane: OneClickLane, depositAddress: s
     data: Hex;
     value: string;
 };
-/** Where each phase may go next; `source_observed` (a safe source receipt, success or revert) is the only outcome. */
+/**
+ * Where each phase may go next. The outcomes: `source_observed` (a safe source receipt, success or revert) and
+ * `failed_proven_superseded` (another transaction took the source nonce at finality; this one can never land).
+ */
 export declare const ONECLICK_SOURCE_EDGES: Readonly<Record<OneClickSourceRecord["phase"], readonly OneClickSourceRecord["phase"][]>>;
 export declare class OneClickSourceJournal extends SecureStateStore {
     private path;
