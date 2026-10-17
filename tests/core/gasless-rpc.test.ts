@@ -707,8 +707,7 @@ test("gasless observation reports bootstrap-only permission without inventing a 
   const intent = makeIntent(), cursor = initialCursor(intent), calls: string[] = [];
   const context = { chainId: 8453 as const, rpcOrigin: "https://rpc.example",
     rpc: async (method: string) => { calls.push(method); throw new Error("no RPC expected"); },
-    bundler: async (method: string) => { calls.push(method); throw new Error("no bundler expected"); },
-    snapshot: async () => intent.initialSnapshot } as GaslessObservationContext;
+    bundler: async (method: string) => { calls.push(method); throw new Error("no bundler expected"); } } as GaslessObservationContext;
   const observation = await observeGasless(context, intent,
     { bootstrapMaterialHash: "a".repeat(64), userOperationMaterialHash: null, userOperationHash: null }, cursor);
   assert.equal(observation.status, "unresolved"); assert.equal(observation.transactionHash, null);
@@ -788,7 +787,6 @@ function bootstrapRpcFixture(designation: "empty" | "expected", final = false, c
   const eoaNonce = `0x${(BigInt(intent.initialSnapshot.eoaNonceAtomic) + (designation === "empty" ? 1n : 0n)).toString(16)}`;
   const calls: string[] = [], blockTags: unknown[] = []; let fault = "";
   const context: GaslessObservationContext = { chainId, rpcOrigin: "https://rpc.example",
-    snapshot: async () => { calls.push("snapshot"); throw new Error("no snapshot"); },
     bundler: async () => { calls.push("bundler"); if (final) return null; throw new Error("no bundler"); },
     rpc: async (method, params) => {
       calls.push(method);
@@ -870,7 +868,7 @@ for (const fault of ["transport", "range", "count"] as const) {
     const userLog = settlementLogs(intent, userOperationHash).at(-1)!;
     let requests = 0;
     const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example",
-      bundler: async () => null, snapshot: async () => intent.initialSnapshot,
+      bundler: async () => null,
       rpc: async (method, params) => {
         if (method === "eth_getBlockByNumber") {
           const number = params[0] === "safe" ? 400n : BigInt(params[0] as string);
@@ -898,7 +896,7 @@ test("gasless scan locates a matching operation in a later range without an effe
   const userLog = rawLog(settlementLogs(intent, userOperationHash).at(-1)!, transactionHash, block(125n));
   const ranges: Array<[bigint, bigint]> = [];
   const context: GaslessObservationContext = { chainId: 8453, rpcOrigin: "https://rpc.example",
-    bundler: async () => null, snapshot: async () => intent.initialSnapshot,
+    bundler: async () => null,
     rpc: async (method, params) => {
       calls.push(method);
       if (method === "eth_getBlockByNumber") return rawBlock(params[0] === "safe" ? 150n : BigInt(params[0] as string),

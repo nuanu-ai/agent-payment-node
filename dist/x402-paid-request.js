@@ -1,5 +1,4 @@
 import { assertCurrentNetworkPolicy, assertCurrentX402Payee } from "./x402-network-policy.js";
-import { sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { assertUnattendedX402Balance, policyBinding, requireProfilePolicy, } from "./profile-policy.js";
 import { decodeAndNormalizePaymentResponseHeader } from "./x402-codec.js";
@@ -62,8 +61,6 @@ export class X402PaidRequest extends X402Lifecycle {
         if (operation.unusedExpiryEvidence !== undefined)
             return await this.finishReconciledEvidence(operation);
         const rpc = x402ReadPort(this.context.requireRpc(), x402Network(operation.network).chainId);
-        if (rpc === null)
-            return null;
         let evidence;
         try {
             evidence = await readX402UnusedExpiryEvidence(rpc, operation);
@@ -76,17 +73,6 @@ export class X402PaidRequest extends X402Lifecycle {
         if (evidence === null)
             return null;
         return await this.finishReconciledEvidence(await this.transition(operation, operation.state, { unusedExpiryEvidence: evidence }));
-    }
-    async assertLegacySafeRead(operation) {
-        if (operation.chainId !== "8453")
-            throw new ApnError("APN_RPC_CONFIG", "Non-Base x402 requires network-bound settlement reads.");
-        const rpc = this.context.requireRpc();
-        const chain = await rpc.assertBaseChain();
-        const evidence = await rpc.getX402PrepareEvidence(operation.wallet);
-        if (evidence.address.toLowerCase() !== operation.wallet || evidence.queriedTag !== "safe" ||
-            evidence.rpcOriginHash !== sha256(chain.rpcOrigin) ||
-            BigInt(evidence.block.number) < BigInt(operation.preparedBlock.number))
-            throw new ApnError("APN_RPC_PROTOCOL", "RPC safe read does not bind the frozen x402 payer and exposure range.");
     }
     async withOperationLock(operation, callback, lockWaitMs) {
         return await this.context.state.withLocks([

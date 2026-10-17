@@ -4,7 +4,9 @@ import { hashObject } from "../../src/canonical.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
-import { baseLocalGaslessMechanism } from "../../src/gasless/asset-policy.js";
+import { localGaslessMechanism } from "../../src/gasless/asset-policy.js";
+
+const baseLocalGaslessMechanism = () => localGaslessMechanism(8453);
 import { GaslessExecution } from "../../src/gasless/execution.js";
 import { validateGaslessIntent } from "../../src/gasless/intent-validation.js";
 import { newGaslessOperation, transitionGasless } from "../../src/gasless/transitions.js";

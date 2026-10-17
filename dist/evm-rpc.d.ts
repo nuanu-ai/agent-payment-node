@@ -27,5 +27,4 @@ export declare class EvmRpc implements EvmRpcPort {
     evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence>;
     /** A finalized nonce past the frozen one, with no receipt for this hash from the same node, proves another transaction took it. */
     unlandedEvidence(chainId: DirectEvmChainId, address: Address, transactionHash: Hex): Promise<EvmUnlandedEvidence>;
-    confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null>;
 }

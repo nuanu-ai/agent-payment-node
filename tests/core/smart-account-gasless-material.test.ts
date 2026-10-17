@@ -27,7 +27,7 @@ import type { SmartAccountGaslessIntent, SmartAccountGaslessMaterialDescriptor,
 import type { SmartAccountGaslessOperationRecord } from "../../src/smart-account-gasless/operation-model.js";
 import { saRegistry } from "../../src/smart-account-gasless/registry.js";
 import { observeSmartAccountGasless } from "../../src/smart-account-gasless/chain/observation.js";
-import { initialSmartAccountGaslessCursor } from "../../src/smart-account-gasless/chain/scan.js";
+import { initialSmartAccountGaslessCursor } from "./smart-account-gasless-fixtures.js";
 import { SA_SINGLE_DEFAULT } from "../../src/smart-account-gasless/chain/abi.js";
 import { StateStore } from "../../src/state.js";
 import { domainHash } from "../../src/canonical.js";

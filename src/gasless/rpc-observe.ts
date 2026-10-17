@@ -1,7 +1,7 @@
 import { hashObject } from "../canonical.js";
-import type { Address, Hex } from "../model.js";
+import type { Hex } from "../model.js";
 import type { GaslessBlock, GaslessChainId, GaslessCursor, GaslessEffectIdentity,
-  GaslessIntent, GaslessObservation, GaslessProtocolReceipt, GaslessSnapshot } from "./model.js";
+  GaslessIntent, GaslessObservation, GaslessProtocolReceipt } from "./model.js";
 import { gaslessAccounting } from "./protocol.js";
 import { observeGaslessBootstrap } from "./rpc-bootstrap-observe.js";
 import { GASLESS_LOG_REQUEST_BLOCKS, GASLESS_SCAN_WINDOW_BLOCKS, GASLESS_SCAN_WINDOWS } from "./rpc-budget.js";
@@ -20,8 +20,6 @@ export interface GaslessObservationContext {
   readonly rpcOrigin: string;
   readonly rpc: GaslessRpcCall;
   readonly bundler?: GaslessRpcCall;
-  /** Retained for existing callers; canonical observation never uses an execution snapshot. */
-  readonly snapshot?: (owner: Address) => Promise<GaslessSnapshot>;
 }
 
 /**

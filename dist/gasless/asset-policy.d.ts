@@ -13,10 +13,6 @@ export declare function localGaslessMechanism(chainId: GaslessChainId): {
     provider: "local";
     reference: string;
 };
-export declare const baseLocalGaslessMechanism: () => {
-    provider: "local";
-    reference: string;
-};
 /** Called only while the common profile lock is held. Ledger bucket locks are nested after it. */
 export declare class GaslessAssetPolicy {
     private readonly state;

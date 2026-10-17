@@ -15,13 +15,6 @@ export function mmUint(value, positive = false, reason = "mm_gasless_input") {
         mmFail(reason);
     return parsed;
 }
-export function mmDecimal(value, positive = false) {
-    if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,71})(?:\.[0-9]{1,6})?$/u.test(value))
-        mmFail("mm_gasless_input");
-    const [whole, fraction = ""] = value.split(".");
-    const result = BigInt(whole) * 1000000n + BigInt(fraction.padEnd(6, "0"));
-    return mmUint(result.toString(), positive).toString();
-}
 export function mmFormat(value) {
     const n = mmUint(value), fraction = (n % 1000000n).toString().padStart(6, "0").replace(/0+$/u, "");
     return `${n / 1000000n}${fraction ? `.${fraction}` : ""}`;

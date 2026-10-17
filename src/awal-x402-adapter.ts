@@ -18,8 +18,6 @@ import { assertAwalHttpRequest } from "./provider-x402-http-request.js";
 import { optionalX402HttpRequest, type X402HttpRequestV1 } from "./x402-http-request.js";
 
 export const AWAL_X402_PROCESS_TIMEOUT_MS = 210_000;
-export const AWAL_X402_INTERNAL_TIMEOUT_MS = 180_000;
-export const AWAL_X402_SHUTDOWN_MARGIN_MS = 30_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const MAX_STATUS_TEXT_BYTES = 512;
 const MAX_PROVIDER_ATOMIC = 9_007_199_254_740_991n;

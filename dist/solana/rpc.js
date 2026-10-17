@@ -103,9 +103,6 @@ export class SolanaRpc {
         this.budget = budget;
     }
     get hasPersistentPacer() { return this.pacer !== undefined; }
-    get maximumAccountsPerRead() {
-        return this.endpoint === "https://solana-rpc.publicnode.com" || this.endpoint === "https://solana-rpc.publicnode.com/" ? 8 : 16;
-    }
     async call(method, params) {
         if (method === "getGenesisHash" && this.genesis !== undefined)
             return this.genesis;

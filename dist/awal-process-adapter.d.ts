@@ -43,7 +43,6 @@ export declare class AwalProcessAdapter implements ProviderLifecyclePort, Provid
     constructor(runner?: AwalProcessRunnerPort, direct?: DirectExecutionPort, x402?: X402ExecutionPort);
     bundle(): ProviderAdapterBundle;
     connect(foreground: ForegroundAuthenticationPort): Promise<void>;
-    logout(): Promise<void>;
     observeBalance(): Promise<ProviderBalanceObservation>;
     probeStatus(): Promise<void>;
     crossCheckAddress(expected: Address): Promise<void>;

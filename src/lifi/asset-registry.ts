@@ -26,12 +26,6 @@ export const BRIDGE_QUOTE_DESTINATIONS = {
 } as const;
 export type BridgeQuoteDestinationChainId = keyof typeof BRIDGE_QUOTE_DESTINATIONS;
 
-/** Quote inspection only. Sei is absent from every bridge execution chain and asset peer set. */
-export const SEI_GASZIP_QUOTE_DESTINATION = {
-  chainId: 1329, caip2: "eip155:1329", nativeToken: BRIDGE_ZERO_ADDRESS,
-  nativeSymbol: "SEI", nativeDecimals: 18, tool: "gasZipBridge",
-} as const;
-
 /** Each upgradeability shape is pinned explicitly; there is no default shape for an unreviewed proxy. */
 export type BridgeTokenCode =
   | { readonly upgradeability: "immutable"; readonly codeHash: Hex }
@@ -272,12 +266,6 @@ export function bridgeChainRow(value: unknown, code: ErrorCode = "APN_PROVIDER_P
 }
 export function bridgeNativeCoin(chainId: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeNativeCoin {
   return bridgeChainRow(chainId, code).nativeCoin;
-}
-/** The one admission point for a bridgeable token. The zero address is the native sentinel and is never a token. */
-export function bridgeTokenRow(chainId: unknown, address: unknown, code: ErrorCode = "APN_PROVIDER_PROTOCOL"): BridgeTokenAsset {
-  const asset = bridgeAssetRow(bridgeChain(chainId, code), address, code);
-  if (asset.kind === "native") bridgeFailure(code, "native_sentinel_is_not_a_token");
-  return asset;
 }
 /**
  * The one admission point for a route leg. The zero address names the chain's native coin; any other address must be

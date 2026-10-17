@@ -1,7 +1,6 @@
 import { type ErrorCode, type ErrorDetails } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 export declare const BRIDGE_MAX_CALLDATA_BYTES: number;
-export declare const BRIDGE_MAX_SIGNED_BYTES: number;
 export declare const BRIDGE_MAX_GAS = 5000000n;
 export declare const BRIDGE_TTL_MS = 300000;
 export declare const BRIDGE_MIN_REMAINING_MS = 15000;

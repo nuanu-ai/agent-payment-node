@@ -37,7 +37,6 @@ export class MetaMaskSmartAccountAdapter {
                 authenticationMethods: ["browser"],
                 connect: async () => unsupportedInternalPath(),
                 probeStatus: async () => undefined,
-                logout: async () => { throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Use wallet permission forget for this local Smart Account profile."); },
             },
             reads: {
                 observeBalance: async () => unsupportedInternalPath(),

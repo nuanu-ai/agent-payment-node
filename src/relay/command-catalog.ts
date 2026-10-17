@@ -94,7 +94,7 @@ export const RELAY_COMMANDS: readonly CommandDefinition[] = [
     "Foreground-confirm and run the exact saved Ethereum approval and deposit source effects.", [profile, operation, rpc], "payment_submit",
     `Requires the operation's own profile, explicit foreground confirmation, the exact saved Ethereum USDC to BNB native or Base ETH route, and ${ADMISSION}; may sign and submit the exact saved Ethereum source effects once per durable effect. Returns only the source effect journal; destination delivery and paid acceptance remain unproven.`,
     "foreground_tty", "Inside the source runtime, after operation validation and before any durable source effect or signing.",
-    { terminal: ["confirmed", "failed"], non_terminal: ["pending", "signing_started", "sealed", "submitting", "submission_marked", "tx_known"] },
+    { terminal: ["confirmed", "failed"], non_terminal: ["pending", "signing_started", "sealed", "submitting"] },
     [{ command_path: ["operation", "status"], when: "Inspect saved source state without a new signing attempt." }],
     ["apn relay execute --profile <profile> --operation <operation-id> --rpc-url https://rpc.example"]),
   command(["relay", "native", "execute"], "apn relay native execute --profile <profile> --operation <operation-id> --rpc-url <source-rpc>",

@@ -1,8 +1,6 @@
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
-import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
 import type { CommandDefinition, CommandGroup } from "./command-catalog-types.js";
 export { renderHelp, renderReadmeCommandReference };
-export { assertCompatibleManifestEvolution, validateCommandManifest };
 export * from "./command-catalog-parser.js";
 export type { ApprovalClass, CommandDefinition, CommandGroup, CommandOption, EffectClass, ScalarType } from "./command-catalog-types.js";
 export declare const COMMAND_GROUPS: readonly CommandGroup[];

@@ -3,11 +3,18 @@ import test from "node:test";
 import { getAddress } from "viem";
 import type { Address } from "../../src/model.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_CHAINS, bridgeAssetPair, bridgeCaip2, bridgeChain, bridgeDecimal,
-  bridgeNativeCoin, bridgePeerToken, bridgeTokenRow, validateBridgeRequest } from "../../src/lifi/asset-registry.js";
+  bridgeAssetRow, bridgeNativeCoin, bridgePeerToken, validateBridgeRequest, type BridgeTokenAsset } from "../../src/lifi/asset-registry.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import { bridgeReceipt } from "../../src/lifi/receipt.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_ZERO_ADDRESS, bridgeHeadroomWei } from "../../src/lifi/validation.js";
 import { temporaryState } from "./helpers.js";
+
+/** Token rows of the execution chains: the zero address is the native sentinel, never a token. */
+function bridgeTokenRow(chainId: unknown, address: unknown): BridgeTokenAsset {
+  const row = bridgeAssetRow(bridgeChain(chainId), address);
+  if (row.kind !== "erc20") throw new Error("native_sentinel_is_not_a_token");
+  return row;
+}
 import { LIFI_RECIPIENT, LifiTestProvider, lifiFixture, lifiSteps, type LifiJson } from "./lifi-helpers.js";
 
 /** Pinned independently of the registry so the test fails if a row's address is ever edited. */

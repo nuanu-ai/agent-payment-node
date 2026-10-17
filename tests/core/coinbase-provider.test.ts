@@ -229,11 +229,9 @@ test("exact awal identity, declared bin and Node-plus-script closed argv are imm
   const adapter = new AwalProcessAdapter(fixture);
   await adapter.probeStatus();
   await adapter.crossCheckAddress(ADDRESS_A);
-  await adapter.logout();
   assert.deepEqual(fixture.calls, [
     { argv: ["status", "--json"], sensitive: true },
     { argv: ["address", "--chain", "base"], sensitive: false },
-    { argv: ["auth", "logout", "--json"], sensitive: true },
   ]);
 });
 

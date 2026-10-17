@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import https from "node:https";
 import { syncBuiltinESMExports } from "node:module";
-import { performance } from "node:perf_hooks";
 import test from "node:test";
 import { keccak256 } from "viem";
 import { ApnCore } from "../../src/core.js";
@@ -143,28 +142,3 @@ test("a substituted batch response id is refused after one POST, and the plan ca
   assert.equal(posts, 2);
 });
 
-test("Sei native balance is one bounded POST and stops at its aggregate deadline without retry", async t => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const state = new StateStore(temporary.root); await state.initialize();
-  const chain = mockEvmHttps(t, 1329, () => WALLET);
-  const balance = await new HttpsBaseRpc("https://8.8.8.8/sei", { directGuardState: state })
-    .seiNativeBalance(WALLET, { chainId: 1329, token: "native", decimals: 18 }, performance.now() + 20_000);
-  assert.equal(balance.assetAtomic, (10n ** 19n).toString());
-  assert.deepEqual(chain.posts, [["eth_chainId", "eth_getBlockByNumber", "eth_getBalance"]]);
-  t.mock.restoreAll();
-  const fresh = await temporaryState(); t.after(fresh.cleanup);
-  const unpaced = new StateStore(fresh.root); await unpaced.initialize();
-  let posts = 0;
-  t.mock.method(https, "request", (_endpoint: URL, options: { signal: AbortSignal }) => {
-    posts += 1;
-    const request = new EventEmitter() as any;
-    request.setTimeout = () => request; request.end = () => request;
-    options.signal.addEventListener("abort", () => request.emit("close"), { once: true });
-    return request;
-  });
-  syncBuiltinESMExports();
-  const started = Date.now();
-  await assert.rejects(new HttpsBaseRpc("https://8.8.8.8/sei", { directGuardState: unpaced })
-    .seiNativeBalance(WALLET, { chainId: 1329, token: "native", decimals: 18 }, performance.now() + 1_000));
-  assert.ok(Date.now() - started < 1_500); assert.equal(posts, 1);
-});

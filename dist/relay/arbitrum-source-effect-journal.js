@@ -1,4 +1,4 @@
-/** Offline Arbitrum source effect ledger. No signer, broadcaster, command, or RPC is installed. */
+/** Durable Arbitrum source effect journal for the Relay Arbitrum USDC route. Signing and broadcast live in the approval and deposit services. */
 import { randomBytes } from "node:crypto";
 import { keccak256, parseTransaction, recoverTransactionAddress } from "viem";
 import { hashObject } from "../canonical.js";
@@ -224,28 +224,12 @@ export async function advanceArbitrumSourceEffectJournal(j, op, event) {
     const data = { ...fields(j), effects };
     return validateArbitrumSourceEffectJournal({ ...data, integrityHash: hashObject(data) }, op);
 }
-export async function arbitrumSourceRecoveryClass(j, op) {
-    await validateArbitrumSourceEffectJournal(j, op);
-    const [approval, deposit] = j.effects;
-    if (approval.phase === "failed" || deposit.phase === "failed" ||
-        approval.phase === "abandoned_unsent" || deposit.phase === "abandoned_unsent")
-        return "failed";
-    if (deposit.phase === "confirmed")
-        return "completed";
-    if (deposit.phase !== "pending" || ["signing_started", "sealed", "submitting", "submitted", "unknown_finality"].includes(approval.phase))
-        return "observation_only";
-    if (approval.phase === "approval_skipped")
-        return "approval_skipped";
-    return approval.phase === "confirmed" ? "approval_confirmed" : "not_started";
-}
 export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     verifiedObservation;
-    verifiedAllowance;
     clock;
-    constructor(root, verifiedObservation, verifiedAllowance, clock = () => new Date()) {
+    constructor(root, verifiedObservation, clock = () => new Date()) {
         super(root);
         this.verifiedObservation = verifiedObservation;
-        this.verifiedAllowance = verifiedAllowance;
         this.clock = clock;
     }
     operations = new RelayUnsignedOperationRepository(this.root);
@@ -307,53 +291,9 @@ export class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
         await this.writeJson(path, next);
         return next;
     }
-    async beginSigning(profileHash, operationId, expectedIntegrityHash, role, at) {
-        return this.transition(profileHash, operationId, expectedIntegrityHash, { kind: "begin_signing", role, marker: randomBytes(32).toString("hex"), at });
-    }
     /** Caller holds profile, operation and effect locks in the shared canonical order. */
     async beginSigningUnderLocks(profileHash, operationId, expectedIntegrityHash, role, at) {
         return this.transitionUnderLocks(profileHash, operationId, expectedIntegrityHash, { kind: "begin_signing", role, marker: randomBytes(32).toString("hex"), at });
-    }
-    /** Only a separately wired canonical read may create this proof. It does not authorize deposit dispatch. */
-    async skipApproval(profileHash, operationId, expectedIntegrityHash) {
-        await this.initialize();
-        return this.withLocks([`profile:${profileHash}`, `operation:${operationId}`, `relay-arbitrum-effect:${operationId}`], async () => {
-            const op = await this.operation(profileHash, operationId), path = this.path(profileHash, operationId);
-            if (await new RelayRetirementRepository(this.root).load(op) !== null)
-                blocked("operation_retired");
-            const data = await this.readJson(path);
-            if (data === null)
-                throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay Arbitrum source effect journal was not found.");
-            const j = await validateArbitrumSourceEffectJournal(data, op);
-            if (j.integrityHash !== expectedIntegrityHash)
-                blocked("stale_journal_revision");
-            if (j.effects[0].phase !== "pending" || j.effects[1].phase !== "pending")
-                blocked("approval_already_started");
-            if (this.verifiedAllowance === undefined)
-                blocked("canonical_allowance_verifier_unavailable");
-            const read = await this.verifiedAllowance({ operation: op, journal: j });
-            const now = this.clock();
-            if (read === null || !(now instanceof Date) || !Number.isFinite(now.getTime()) ||
-                !iso(read.observedAt) || Date.parse(read.observedAt) > now.getTime() ||
-                now.getTime() - Date.parse(read.observedAt) > 30_000 ||
-                now.getTime() + 60_000 >= Date.parse(op.deadline))
-                blocked("fresh_canonical_allowance_unavailable");
-            const proof = { proofClass: "canonical_allowance_observation",
-                operationIntegrityHash: op.integrityHash, policyDigest: read.policyDigest,
-                policyRevision: read.policyRevision, token: RELAY_ARBITRUM_USDC,
-                owner: op.sourceAccount, spender: ETHEREUM_DEPOSITORY, amountAtomic: op.amountAtomic,
-                allowanceAtomic: read.allowanceAtomic, blockNumber: read.blockNumber,
-                blockHash: read.blockHash, observedAt: read.observedAt };
-            if (!validSkipProof(proof, op, j.createdAt))
-                blocked("allowance_or_policy_mismatch");
-            const effects = [
-                { role: "approval", phase: "approval_skipped", attempt: null, skipProof: proof }, j.effects[1]
-            ];
-            const body = { ...fields(j), effects };
-            const next = await validateArbitrumSourceEffectJournal({ ...body, integrityHash: hashObject(body) }, op);
-            await this.writeJson(path, next);
-            return next;
-        });
     }
     /** Atomically create a skipped journal only after an injected fresh canonical allowance read. */
     async skipApprovalIfVerified(profileHash, operationId, expectedIntegrityHash, verifier, policyUnderLock, additionalLocks = []) {

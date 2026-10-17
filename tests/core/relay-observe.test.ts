@@ -66,18 +66,18 @@ async function fixture() {
     const repo = new RelayEffectJournalRepository(temp.root);
     await repo.create(op.profileHash, op.operationId, "2026-09-30T00:00:00.000Z");
     // Synthetic journal write uses the normal compare-and-swap transitions.
-    const events = phase === "deposit" ? [
-      { kind: "mark_submission", role: "approval", marker: "6".repeat(64), at: now },
-      { kind: "record_transaction", role: "approval", transactionHash: hash("7") },
-      { kind: "observe", role: "approval", outcome: "confirmed", at: now },
-      { kind: "mark_submission", role: "deposit", marker: "8".repeat(64), at: now },
-      { kind: "record_transaction", role: "deposit", transactionHash: sourceHash },
-      { kind: "observe", role: "deposit", outcome: "confirmed", at: now },
-    ] as const : [
-      { kind: "mark_submission", role: "approval", marker: "6".repeat(64), at: now },
-      { kind: "record_transaction", role: "approval", transactionHash: hash("7") },
+    const approval = [
+      { kind: "mark_signing", role: "approval", marker: "6".repeat(64), at: now },
+      { kind: "seal_signed", role: "approval", transactionHash: hash("7") },
+      { kind: "mark_submitting", role: "approval", at: now },
       { kind: "observe", role: "approval", outcome: "confirmed", at: now },
     ] as const;
+    const events = phase === "deposit" ? [...approval,
+      { kind: "mark_signing", role: "deposit", marker: "8".repeat(64), at: now },
+      { kind: "seal_signed", role: "deposit", transactionHash: sourceHash },
+      { kind: "mark_submitting", role: "deposit", at: now },
+      { kind: "observe", role: "deposit", outcome: "confirmed", at: now },
+    ] as const : approval;
     let saved = await repo.load(op.profileHash, op.operationId); assert.ok(saved);
     for (const event of events) saved = await repo.transition(op.profileHash, op.operationId, saved.integrityHash, event);
     return saved;

@@ -1,4 +1,4 @@
-import { COMMAND_MANIFEST, validateCommandManifest, } from "./command-catalog.js";
+import { COMMAND_MANIFEST, } from "./command-catalog.js";
 import { mcpFieldName } from "./command-binder.js";
 import { ApnError } from "./errors.js";
 const SELECTED_PATHS = [
@@ -70,7 +70,6 @@ const SELECTED_PATHS = [
     "oneclick source submit", "oneclick source status",
 ];
 export function projectMcpTools(manifest = COMMAND_MANIFEST) {
-    validateCommandManifest(manifest);
     const commands = manifest.commands;
     const byPath = new Map(commands.map((command) => [command.path.join(" "), command]));
     const names = new Set();

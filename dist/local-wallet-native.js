@@ -2,8 +2,6 @@ var _a;
 import { recheckCircleNativeAdmission } from "./circle-native-admission.js";
 import { OperationService } from "./operation-service.js";
 import { assertFreshDirectEffect, publishDirectPublicEffect } from "./direct-public-attestation.js";
-import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
-import { evmAllowlistSubject } from "./evm-direct-allowlist.js";
 import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
 import { assertSigningTime } from "./x402-permit2/production-signing-facts.js";
 import { Permit2ProductionSigningFence } from "./x402-permit2/production-signing-fence.js";
@@ -14,7 +12,7 @@ import { publicPermit2Production } from "./x402-permit2/production-repository.js
 import { parseDirectIntent, parseDirectRecovery } from "./local-wallet-direct-payload.js";
 import { signedDirectTransaction } from "./local-wallet-direct-signed.js";
 import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization } from "./local-wallet-native-x402-fields.js";
-import { assertWallet, ensureX402Live, effectSlot, requestProfile, exactRecord, addressEqual, x402Address, protocol, rejected } from "./local-wallet-native-fields.js";
+import { assertWallet, ensureX402Live, effectSlot, requestProfile, protocol, rejected } from "./local-wallet-native-fields.js";
 import { performance } from "node:perf_hooks";
 import { Permit2ProductionHttps } from "./x402-permit2/production-http.js";
 import { constants } from "node:fs";
