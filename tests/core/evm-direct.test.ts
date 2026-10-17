@@ -14,6 +14,8 @@ import type { Address } from "../../src/model.js";
 import { sealReceipt } from "../../src/state-integrity.js";
 import { assertDirectTerminalReceiptAuthority } from "../../src/direct-terminal-receipt.js";
 import { publicReceipt } from "../../src/transfer-policy.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
+import { OperationService } from "../../src/operation-service.js";
 import { EVM_BLOCK_HASH, EVM_REQUEST, EVM_TOKEN, EvmApproval, EvmTestRpc, EvmWrappingSecret, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { EVM_USDC, activateDirectPolicy, directAdmission, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -477,18 +479,25 @@ test("ERC-20 completes from its sole exact Transfer log without balance deltas; 
   assert.throws(() => assertDirectTerminalReceiptAuthority(legacy, { ...receipt, proofClass: legacy.proofClass }), { code: "APN_STATE_CORRUPT" });
 });
 
-test("terminal EVM operation with missing or forged receipt fails closed even when hashes are resealed", async (context) => {
+test("terminal EVM operation with a missing or forged receipt fails only its own receipt get, even when hashes are resealed", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
-  const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
-  await setup.core.transfer.approve(prepared.operation_id);
-  const path = join(temporary.root, "receipts", setup.state.profileHash("default"), `${prepared.operation_id}.json`);
+  const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string }, id = prepared.operation_id;
+  await setup.core.transfer.approve(id);
+  const operation = (await setup.state.findOperation(id))!; assert.equal(operation.terminal, true);
+  const path = join(temporary.root, "receipts", setup.state.profileHash("default"), `${id}.json`);
   const original = JSON.parse(await readFile(path, "utf8"));
   const { integrityHash: _integrityHash, ...body } = original;
   await writeFile(path, JSON.stringify(sealReceipt({ ...body, amountAtomic: "2" })), { mode: 0o600 });
-  await assert.rejects(setup.core.transfer.status(prepared.operation_id), { code: "APN_STATE_CORRUPT" });
+  // Phase 4b (CORE-13): the receipt's authority is checked by the command that returns it, not by every load of the operation.
+  assert.equal((await setup.core.transfer.status(id) as { state: string }).state, operation.state);
+  await assert.rejects(setup.core.transfer.receipt(id), { code: "APN_STATE_CORRUPT" });
   await rm(path);
-  await assert.rejects(setup.core.transfer.status(prepared.operation_id), { code: "APN_STATE_CORRUPT" });
+  assert.equal((await setup.core.execute({ command: "operation.status", operationId: id })).ok, true);
+  assert.equal((await setup.core.execute({ command: "receipt.get", operationId: id })).error?.code, "APN_STATE_CORRUPT");
+  // The index settles it as terminal (never unreadable): it holds no claim, so its account takes the next operation.
+  await new OperationService(setup.state).assertEvmAccountAvailable(operation.profileHash, operation.chainId, operation.walletAddress);
+  assert.equal((await new OperationIndex(setup.state).find(id))?.state, "terminal");
 });
 
 for (const [chainId, feeModel] of [[42161, "arbitrum-inclusive"], [56, undefined]] as const) test(`chain ${chainId} receipt without safe proof stays nonterminal and resumes without another signature or submission`, async (context) => {
