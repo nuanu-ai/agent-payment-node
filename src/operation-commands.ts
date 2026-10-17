@@ -114,21 +114,23 @@ export class OperationCommands {
   }
 }
 
-const GENERIC_COMMANDS: ReadonlySet<CommandRequest["command"]> = new Set(["operation.status", "operation.resume", "operation.abandon", "receipt.get"]);
+/** The generic commands that delegate to a family runtime; the owner exits (abandon) read only the state root. */
+const DELEGATED = { "operation.status": "status", "operation.resume": "resume", "receipt.get": "receipt" } as const;
 
 /**
  * The family command whose runtime a generic operation command delegates to, read before that runtime is built: the
- * runtime factory builds a family runtime only for the commands that name it. Null for any other command, for a family
- * that needs no runtime of its own, and when the lookup refuses (an unknown ID, an unreadable record): the command repeats
- * the same lookup and answers that refusal itself, and an unreadable record's only exit (the index release) needs no runtime.
+ * runtime factory builds a family runtime only for the commands that name it. Null for any other command, when the
+ * family answers this one without its runtime, and when the lookup refuses (an unknown ID, an unreadable record): the
+ * command repeats the same lookup and answers that refusal itself.
  */
 export async function operationRuntimeCommand(root: string, request: CommandRequest): Promise<CommandRequest["command"] | null> {
-  if (!GENERIC_COMMANDS.has(request.command)) return null;
+  const method = (DELEGATED as Readonly<Record<string, "status" | "resume" | "receipt">>)[request.command];
+  if (method === undefined) return null;
   try {
     const state = new StateStore(root); await state.initialize();
     const index = new OperationIndex(state), entry = await index.find(canonicalOperationId((request as { readonly operationId: string }).operationId));
     const adapter = entry === null ? undefined : index.adapter(entry);
-    if (entry === null || adapter?.runtimeCommand === undefined) return null;
+    if (entry === null || adapter?.runtimeCommand === undefined || adapter[method] === undefined) return null;
     const record = await index.loadRecord(entry);
     return record === null ? null : await adapter.runtimeCommand(record);
   } catch (error) {
