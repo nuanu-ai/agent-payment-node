@@ -22,6 +22,8 @@ export declare class MerchantExits {
     constructor(state: StateStore, rpc: MerchantRpcPort, now: () => Date);
     /** The proven exit of an attempt without a receipt, or null while none is proven (nothing changes). The caller holds merchantLocks. */
     settle(o: MerchantOperation): Promise<MerchantOperation | null>;
+    /** `landed`: the node holds a receipt for the attempt's transaction, so observation (not an exit) records its outcome. */
+    private decide;
     abandon(idInput: string, consent: OperationAbandonApprovalPort): Promise<MerchantOperation>;
     /** Holds first (a retry after a crash repeats the same outcome digest), then the terminal record. */
     private finish;

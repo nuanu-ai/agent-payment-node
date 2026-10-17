@@ -56,21 +56,26 @@ export class MerchantExits {
   }
 
   /** The proven exit of an attempt without a receipt, or null while none is proven (nothing changes). The caller holds merchantLocks. */
-  async settle(o: MerchantOperation): Promise<MerchantOperation | null> {
-    if (o.terminal || o.receipt !== null || o.state !== "prepared" && !OPEN_ATTEMPTS.includes(o.state)) return null;
+  async settle(o: MerchantOperation): Promise<MerchantOperation | null> { return (await this.decide(o)).next; }
+
+  /** `landed`: the node holds a receipt for the attempt's transaction, so observation (not an exit) records its outcome. */
+  private async decide(o: MerchantOperation): Promise<{ readonly next: MerchantOperation | null; readonly landed: boolean }> {
+    const open = { next: null, landed: false };
+    if (o.terminal || o.receipt !== null || o.state !== "prepared" && !OPEN_ATTEMPTS.includes(o.state)) return open;
     const fence = await this.fences.read(o);
     // A retirement tombstone belongs to retire-unsent, which finishes that attempt itself.
-    if (fence.retired) return null;
+    if (fence.retired) return open;
     if (o.submissionAttempts === 0 && fence.signed === null) {
       // Custody signs only under the SIGN claim, sealing is the only durable copy of signed bytes, and the wire comes after
       // the durable submission fence: nothing of this attempt ever left the process.
-      if (this.now().toISOString() < o.expiresAt) return null;
-      return await this.finish(o, "failed_before_effect", { reason: fence.sign ? "signature_never_left_process" : "never_signed" });
+      if (this.now().toISOString() < o.expiresAt) return open;
+      return { next: await this.finish(o, "failed_before_effect", { reason: fence.sign ? "signature_never_left_process" : "never_signed" }), landed: false };
     }
     const hash = o.txHash ?? fence.signed!;
     const evidence = await readEvmUnlandedEvidence(async calls => await this.rpc.batch(calls), 4326, merchantTerms(o).payer, hash);
-    if (!provesUnlanded(evidence, o.envelope.nonce)) return null;
-    return await this.finish(o, "failed_proven_superseded", { reason: "finalized_nonce_superseded", finalizedNonce: evidence.finalizedNonce, transactionHash: hash });
+    if (!provesUnlanded(evidence, o.envelope.nonce)) return { next: null, landed: evidence.receiptFound };
+    return { next: await this.finish(o, "failed_proven_superseded", { reason: "finalized_nonce_superseded", finalizedNonce: evidence.finalizedNonce,
+      transactionHash: hash }), landed: false };
   }
 
   async abandon(idInput: string, consent: OperationAbandonApprovalPort): Promise<MerchantOperation> {
@@ -79,10 +84,11 @@ export class MerchantExits {
       const o = await this.required(found.operationId);
       if (o.state === "abandoned_unknown") return o;
       if (o.terminal) throw blocked(o, "operation_already_terminal", "The merchant payment is already terminal; there is nothing to abandon.", "status");
-      let settled: MerchantOperation | null = null;
+      let decided: { readonly next: MerchantOperation | null; readonly landed: boolean } = { next: null, landed: false };
       // A proof ends the attempt without consent; an unreachable chain leaves the owner's consent as the exit.
-      try { settled = await this.settle(o); } catch (error) { if (!(error instanceof ApnError)) throw error; }
-      if (settled !== null) return settled;
+      try { decided = await this.decide(o); } catch (error) { if (!(error instanceof ApnError)) throw error; }
+      if (decided.next !== null) return decided.next;
+      if (decided.landed) throw blocked(o, "merchant_abandon_receipt_exists", "The payment's transaction has a receipt: observe records its outcome.", "observe");
       if (o.signingAttempts !== 1 || !OPEN_ATTEMPTS.includes(o.state)) {
         throw blocked(o, "merchant_abandon_not_unknown", o.receipt === null
           ? "An unsigned merchant payment needs no abandon: observe closes it once its deadline passed."
@@ -130,5 +136,5 @@ export class MerchantExits {
 function blocked(o: MerchantOperation, reason: string, message: string, next: "status" | "observe" | "deliver"): ApnError {
   const id = o.operationId;
   return new ApnError("APN_OPERATION_BLOCKED", message, { operationId: id, state: o.state, reason, nextActions: [next === "status"
-    ? `apn x402 merchant status --operation ${id}` : `apn x402 merchant observe --operation ${id}${next === "deliver" ? " --deliver" : ""}`] });
+    ? `apn operation status --operation ${id}` : `apn x402 merchant observe --operation ${id}${next === "deliver" ? " --deliver" : ""}`] });
 }

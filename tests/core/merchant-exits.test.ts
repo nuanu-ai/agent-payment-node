@@ -191,3 +191,13 @@ test("owner abandon: refused before the deadline; after it, TTY consent ends aba
   assert.equal(approval.calls.length, 1);
   assert.equal(f.rpc.sends, 0);
 });
+
+test("owner abandon refuses a sent payment whose transaction has a receipt: observe records it", async t => {
+  const { f } = await setup(t), o = await prepare(f); f.rpc.lost = true;
+  await f.service.approve(o.operationId); f.advance(300_001);
+  const approval = new Approval();
+  const refused = await runCli(["operation", "abandon", "--operation", o.operationId], {}, options(f, { operationAbandonApproval: approval }) as never);
+  assert.equal(refused.error?.details?.reason, "merchant_abandon_receipt_exists");
+  assert.equal(approval.calls.length, 0);
+  assert.notEqual(data(await merchant(f, "observe", "--operation", o.operationId)).receipt, null);
+});
