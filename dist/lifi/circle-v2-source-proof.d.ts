@@ -31,8 +31,8 @@ export declare class CircleSourceProofStore extends SecureStateStore {
     /** Publishes the proof once; a concurrent observer's file wins and is returned after the same validation. */
     create(journal: NonEvmSourceJournal, proof: CircleSourceProof): Promise<CircleSourceProof>;
 }
-/** The payer's claim ends with the signing window, or earlier once the burn's finalized receipt is recorded. */
-export declare function circleSourceTerminal(root: string, journal: NonEvmSourceJournal): Promise<boolean>;
+/** The payer's claim ends with the signing window, or earlier once the burn's finalized receipt is recorded (read only then). */
+export declare function circleSourceTerminal(root: string, journal: NonEvmSourceJournal): boolean | Promise<boolean>;
 export interface CircleSourceStatus {
     readonly schemaVersion: "apn.circle-v2-source-status.v1";
     readonly operationId: string;
