@@ -1,23 +1,11 @@
 import type { ClockPort } from "./ports.js";
 import { parsePortfolioCache, type PortfolioCacheRecord } from "./portfolio/cache-record.js";
-import { randomBytes } from "node:crypto";
-import { constants, type Dirent, type Stats } from "node:fs";
-import {
-  type FileHandle,
-  lstat,
-  mkdir,
-  open,
-  realpath,
-  rename,
-  stat,
-  unlink,
-} from "node:fs/promises";
-import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
-import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
+import { type Dirent, type Stats } from "node:fs";
+import { lstat, realpath } from "node:fs/promises";
+import { join } from "node:path";
+import { isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { MacosAdvisoryLock, type AdvisoryLockPort } from "./macos-advisory-lock.js";
 import { validateProviderProfile, type ProviderProfileRecord } from "./provider-profile.js";
-import { assertDirectTerminalReceiptAuthority } from "./direct-terminal-receipt.js";
 import { validateEvmOperationWrite } from "./evm-operation-write.js";
 import type {
   OperationRecord,
@@ -35,7 +23,6 @@ import {
 } from "./secure-state-store.js";
 import { validateX402AppendOnly, validateX402ScanContinuity } from "./x402-state-continuity.js";
 import {
-  x402TransactionHintSourceBindingHash,
   validateX402Operation,
   validateX402Receipt,
   validateX402Result,
@@ -188,11 +175,9 @@ export class StateStore extends SecureStateStore {
   async loadOperation(profileHash: string, operationId: string): Promise<OperationRecord | null> {
     const value = await this.readJson(join("operations", profileHash, `${operationId}.json`));
     if (value === null) return null;
-    const operation = validateOperation(value);
-    if ((operation.providerDirect !== undefined || operation.evm !== undefined) && operation.terminal) {
-      assertDirectTerminalReceiptAuthority(operation, await this.loadReceipt(profileHash, operationId));
-    }
-    return operation;
+    // A terminal direct operation's receipt is checked by `receipt get` of that operation (direct-terminal-receipt.ts),
+    // never here: a damaged receipt must not make the operation itself, or any lookup that meets it, unreadable.
+    return validateOperation(value);
   }
   async findOperation(operationId: string): Promise<OperationRecord | null> {
     const entries = await this.readDirectory("operations");

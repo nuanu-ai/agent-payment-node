@@ -144,7 +144,6 @@ test("old WBTC absent activation remains readable and never requests signing con
   const legacy = newBridgeOperation({ profileHash: op.profileHash, operationId: op.operationId, idempotencyHash: op.idempotencyHash,
     requestHash: op.requestHash, intent: { ...op.intent, allowlist }, effects: op.effects.map(e => newBridgeEffect(e.envelope)) });
   await writeFile(join(temp.root, "bridge-operations", op.profileHash, `${op.operationId}.json`), `${canonicalJson(legacy)}\n`);
-  await rm(join(temp.root, "bridge-receipts", op.profileHash, `${op.operationId}.json`));
   const before = hashObject(legacy), result = await f.core.execute({ command: "bridge.approve", operationId: op.operationId });
   assert.equal(result.ok, false); assert.equal(result.error?.details?.reason, "bridge_activation_binding_missing"); assert.equal(f.approval.calls.length, 0); assert.equal(f.source.submissions.length, 0);
   assert.equal(hashObject((await f.core.bridges.records.findOperation(op.operationId))!), before);

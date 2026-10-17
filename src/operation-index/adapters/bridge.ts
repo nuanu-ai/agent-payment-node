@@ -1,6 +1,9 @@
+import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
 import type { StoredBridgeOperationRecord } from "../../lifi/legacy-operation.js";
 import { BridgeOperationRepository } from "../../lifi/operation-repository.js";
 import { publicStoredBridgeOperation } from "../../lifi/receipt.js";
+import { BridgeService } from "../../lifi/service.js";
+import { assertResumeOptions, oneObservationOnly } from "../../operation-command-options.js";
 import { bridgeConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageBridge, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
@@ -26,4 +29,11 @@ export const bridgeAdapter: OperationFamilyAdapter<StoredBridgeOperationRecord> 
   salvage: raw => salvageRecord(raw, value => [salvageBridge(field(value, "intent", "sourceDeployment", "chainId"),
     field(value, "intent", "owner", "address"))]),
   view: async record => publicStoredBridgeOperation(record),
+  async resume(context, record, options) {
+    assertResumeOptions(options, { refuseWait: () => oneObservationOnly("Bridge") });
+    return operationOutcome(await new BridgeService(context).resume(record.operationId));
+  },
+  receipt: async (context, record) => receiptOutcome(await new BridgeService(context).receipt(record.operationId)),
+  // No owner abandon: resume proves the outcome, including a source effect that can no longer land.
+  commands: { status: "apn operation status --operation <operation-id>", exit: "apn operation resume --operation <operation-id>" },
 };

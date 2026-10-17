@@ -47,7 +47,6 @@ export class FacilitatorPreparation {
       const existing = await this.o.operations.resolvePrepare({ kind: FACILITATOR_KIND, profileHash, operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== FACILITATOR_KIND) return facilitatorFail("facilitator_gasless_state_corrupt");
-        await this.o.records.repairReceipt(existing.record);
         return existing.record;
       }
       const binding = await gaslessOwner(state, profile), owner = binding.owner.address;

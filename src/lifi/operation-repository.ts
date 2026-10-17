@@ -14,7 +14,7 @@ export class BridgeOperationRepository extends SecureStateStore {
   private initialized: Promise<void> | undefined;
   private async ready(): Promise<void> {
     this.initialized ??= (async () => {
-      await super.initialize(); await this.ensureDirectory("bridge-operations"); await this.ensureDirectory("bridge-receipts");
+      await super.initialize(); await this.ensureDirectory("bridge-operations");
     })();
     await this.initialized;
   }
@@ -85,31 +85,17 @@ export class BridgeOperationRepository extends SecureStateStore {
     await this.ensureDirectory(`bridge-operations/${op.profileHash}`);
     await this.writeJson(this.path("bridge-operations", op.profileHash, op.operationId), op);
   }
-  /** Caller holds the same profile/operation locks as every other money service. */
+  /** Caller holds the same profile/operation locks as every other money service. Its receipt is derived on read. */
   async persist(op: BridgeOperationRecord): Promise<void> {
     await this.writeOperation(op);
-    await this.repairReceipt(op);
   }
-  async repairReceipt(op: BridgeOperationRecord): Promise<void> {
-    await this.ready();
-    const stored = await this.loadOperation(op.profileHash, op.operationId);
-    if (stored === null || !bridgeSame(stored, op)) bridgeCorrupt();
-    const path = this.path("bridge-receipts", op.profileHash, op.operationId), previous = await this.readJson(path);
-    if (previous !== null) validateReceipt(previous, op);
-    const receipt = bridgeReceipt(op);
-    if (bridgeSame(previous, receipt)) return;
-    await this.ensureDirectory(`bridge-receipts/${op.profileHash}`);
-    await this.writeJson(path, receipt);
-  }
+  /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
   async loadReceipt(profileHash: string, operationId: string): Promise<BridgeReceipt> {
     const op = await this.loadOperation(profileHash, operationId);
     if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "The bridge operation was not found.");
     const value = await this.readJson(this.path("bridge-receipts", profileHash, operationId));
-    if (value !== null) validateReceipt(value, op);
-    if (value === null || !bridgeSame(value, bridgeReceipt(op))) throw new ApnError("APN_OPERATION_BLOCKED", "The bridge receipt needs recovery from its saved operation.", {
-      operationId, nextActions: [`apn operation resume --operation ${operationId}`],
-    });
-    return value as BridgeReceipt;
+    if (value !== null && receiptTransition(value, op) === op.transitions.length - 1) return value as BridgeReceipt;
+    return bridgeReceipt(op);
   }
   async loadLegacyReceipt(op: LegacyBridgeOperationRecord): Promise<Record<string, unknown>> {
     const value = await this.readJson(this.path("bridge-receipts", op.profileHash, op.operationId));
@@ -121,7 +107,8 @@ export class BridgeOperationRepository extends SecureStateStore {
     return `${root}/${profileHash}/${operationId}.json`;
   }
 }
-function validateReceipt(value: unknown, op: BridgeOperationRecord): void {
+/** The transition a stored receipt binds; corrupt unless it is one of that transition's receipt shapes. */
+function receiptTransition(value: unknown, op: BridgeOperationRecord): number {
   if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint) bridgeCorrupt();
   const { receipt_hash, ...body } = value;
   if (hashObject(body) !== receipt_hash) bridgeCorrupt();
@@ -129,4 +116,5 @@ function validateReceipt(value: unknown, op: BridgeOperationRecord): void {
   const index = op.transitions.findLastIndex((_, i) => bridgeAtTransition(op, i).integrityHash === value.operation_binding_hash);
   if (index < 0 || !currentBridgeReceiptCandidates(bridgeAtTransition(op, index))
     .some((candidate) => bridgeSame(value, candidate))) bridgeCorrupt();
+  return index;
 }

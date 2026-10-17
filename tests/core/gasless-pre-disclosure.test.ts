@@ -10,13 +10,10 @@ test("a bootstrap sealed by an earlier invocation is guarded again before disclo
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
   // The approving invocation stops right after the local bootstrap seal, before any disclosure.
-  const repair = s.core.gasless.records.repairReceipt.bind(s.core.gasless.records);
-  s.core.gasless.records.repairReceipt = async (op) => {
-    if (op.bootstrap.phase === "sealed") throw new Error("receipt-write-interrupted");
-    await repair(op);
-  };
+  const persist = s.core.gasless.records.persist.bind(s.core.gasless.records);
+  s.core.gasless.records.persist = async (op) => { await persist(op); if (op.bootstrap.phase === "sealed") throw new Error("interrupted-after-durable-write"); };
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, false);
-  s.core.gasless.records.repairReceipt = repair;
+  s.core.gasless.records.persist = persist;
   assert.equal((await s.record(id)).bootstrap.phase, "sealed");
   // No guard of the resuming invocation preceded that seal, so the disclosure waits for a full guard.
   s.rpc.current = { ...s.rpc.current, balanceAtomic: "1" };
@@ -47,13 +44,10 @@ test("within one invocation the bootstrap guard's fees are reused for the disclo
 test("a 0.5.13 unknown_finality record with an undisclosed sealed bootstrap resumes to failed_before_effect after expiry", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
-  const repair = s.core.gasless.records.repairReceipt.bind(s.core.gasless.records);
-  s.core.gasless.records.repairReceipt = async (op) => {
-    if (op.bootstrap.phase === "sealed") throw new Error("receipt-write-interrupted");
-    await repair(op);
-  };
+  const persist = s.core.gasless.records.persist.bind(s.core.gasless.records);
+  s.core.gasless.records.persist = async (op) => { await persist(op); if (op.bootstrap.phase === "sealed") throw new Error("interrupted-after-durable-write"); };
   assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, false);
-  s.core.gasless.records.repairReceipt = repair;
+  s.core.gasless.records.persist = persist;
   const sealed = await s.record(id);
   assert.equal(sealed.bootstrap.phase, "sealed"); assert.equal(sealed.bootstrap.disclosureAttempts, 0);
   await s.core.gasless.records.persist(transitionGasless(sealed, { state: "unknown_finality", failure: "gasless_fee_budget" }, s.now.toISOString()));

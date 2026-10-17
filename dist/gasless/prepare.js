@@ -28,7 +28,6 @@ export class GaslessPreparation {
             if (existing !== null) {
                 if (existing.kind !== "gasless_transfer")
                     gaslessFailure("APN_STATE_CORRUPT", "gasless_operation_kind");
-                await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
             assertGaslessExecutionChain(request.chainId);

@@ -90,10 +90,10 @@ for (const mutation of ["reference", "expiry", "last-slot", "permission", "fundi
   assert.equal(await s.storage.effect(s.account, id, record.fingerprint), null);
 });
 
-test("TRON durable submission boundary survives receipt-write interruption without transmitting on restart", async (t) => {
+test("TRON durable submission boundary survives an interruption after its write without transmitting on restart", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare();
-  const repair = s.core.rails.records.repairReceipt.bind(s.core.rails.records);
-  s.core.rails.records.repairReceipt = async (operation) => { if (operation.state === "submitting") throw new Error("synthetic receipt write interruption"); await repair(operation); };
+  const persist = s.core.rails.records.persist.bind(s.core.rails.records);
+  s.core.rails.records.persist = async (operation) => { await persist(operation); if (operation.state === "submitting") throw new Error("synthetic interruption after the durable write"); };
   assert.equal((await s.core.execute({ command: "transfer.approve", operationId: id })).ok, false);
   assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting"); assert.equal(s.rpc.submissions.length, 0);
   s.rpc.absentHistory = true; const restart = await tronFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
@@ -140,7 +140,7 @@ test("TRON custody remains separate, survives interrupted account publication an
   assert.equal((await s.core.execute({ command: "wallet.ensure-tron", profile: s.account.profile, provider: "local", acceptRisk: true })).ok, true);
   assert.deepEqual(await s.storage.account(s.account.profile, "tron"), s.account); assert.equal(s.wrapping.creates, creates);
   const id = await s.prepare(); await s.core.execute({ command: "transfer.approve", operationId: id }); const tx = s.rpc.submissions[0]!;
-  for (const directory of ["chain-wallets/tron", `rail-operations/${s.account.profileHash}`, `rail-receipts/${s.account.profileHash}`]) for (const path of await readdir(join(temporary.root, directory))) {
+  for (const directory of ["chain-wallets/tron", `rail-operations/${s.account.profileHash}`]) for (const path of await readdir(join(temporary.root, directory))) {
     const text = await readFile(join(temporary.root, directory, path), "utf8"); assert.equal(text.includes(Buffer.alloc(32, 47).toString("hex")), false); assert.equal(text.includes(tx.signature![0]!), false);
   }
 });

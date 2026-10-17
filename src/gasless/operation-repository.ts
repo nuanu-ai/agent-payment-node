@@ -11,7 +11,7 @@ export class GaslessOperationRepository extends SecureStateStore {
   private initialized: Promise<void> | undefined;
   private async ready(): Promise<void> {
     this.initialized ??= (async () => {
-      await super.initialize(); await this.ensureDirectory("gasless-operations"); await this.ensureDirectory("gasless-receipts");
+      await super.initialize(); await this.ensureDirectory("gasless-operations");
     })();
     await this.initialized;
   }
@@ -58,28 +58,17 @@ export class GaslessOperationRepository extends SecureStateStore {
     await this.ensureDirectory(`gasless-operations/${op.profileHash}`);
     await this.writeJson(this.path("gasless-operations", op.profileHash, op.operationId), op);
   }
-  /** Caller holds the same profile/operation locks as all money families. */
+  /** Caller holds the same profile/operation locks as all money families. Its receipt is derived on read. */
   async persist(op: GaslessOperationRecord): Promise<void> {
-    await this.writeOperation(op); await this.repairReceipt(op);
+    await this.writeOperation(op);
   }
-  async repairReceipt(op: GaslessOperationRecord): Promise<void> {
-    await this.ready();
-    const stored = await this.loadOperation(op.profileHash, op.operationId);
-    if (stored === null || !gaslessSame(stored, op)) gaslessCorrupt();
-    const path = this.path("gasless-receipts", op.profileHash, op.operationId), previous = await this.readJson(path);
-    if (previous !== null) validateReceipt(previous, op);
-    const receipt = gaslessReceipt(op); if (gaslessSame(previous, receipt)) return;
-    await this.ensureDirectory(`gasless-receipts/${op.profileHash}`); await this.writeJson(path, receipt);
-  }
+  /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
   async loadReceipt(profileHash: string, operationId: string): Promise<GaslessReceipt> {
     const op = await this.loadOperation(profileHash, operationId);
     if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "The gasless operation was not found.");
     const value = await this.readJson(this.path("gasless-receipts", profileHash, operationId));
-    if (value !== null) validateReceipt(value, op);
-    if (value === null || !gaslessSame(value, gaslessReceipt(op))) throw new ApnError("APN_OPERATION_BLOCKED", "The gasless receipt needs recovery from its saved operation.", {
-      operationId, nextActions: [`apn operation resume --operation ${operationId}`],
-    });
-    return value as GaslessReceipt;
+    if (value !== null && receiptTransition(value, op) === op.transitions.length - 1) return value as GaslessReceipt;
+    return gaslessReceipt(op);
   }
   private path(root: "gasless-operations" | "gasless-receipts", profileHash: string, operationId: string): string {
     stateIdentifier(profileHash, "gasless profile hash"); stateIdentifier(operationId, "gasless operation ID");
@@ -88,7 +77,8 @@ export class GaslessOperationRepository extends SecureStateStore {
 }
 // Proof classes that earlier releases wrote for a transition whose projection now names a different one.
 const HISTORICAL_PROOF_CLASSES = ["effect_observation_pending"];
-function validateReceipt(value: unknown, op: GaslessOperationRecord): void {
+/** The transition an authentic stored receipt belongs to; corrupt otherwise. */
+function receiptTransition(value: unknown, op: GaslessOperationRecord): number {
   if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint) gaslessCorrupt();
   const { receipt_hash, ...body } = value;
   if (hashObject(body) !== receipt_hash) gaslessCorrupt();
@@ -98,8 +88,9 @@ function validateReceipt(value: unknown, op: GaslessOperationRecord): void {
   // that transition rejects extra fields without requiring the latest shape.
   if (index < 0) gaslessCorrupt();
   const rebuilt = gaslessReceipt(gaslessAtTransition(op, index));
-  if (gaslessSame(value, rebuilt)) return;
+  if (gaslessSame(value, rebuilt)) return index;
   // An authentic receipt of the same transition may still carry the proof class its own release named.
   if (typeof value.proof_class !== "string" || !HISTORICAL_PROOF_CLASSES.includes(value.proof_class) ||
     !gaslessSame({ ...body, proof_class: rebuilt.proof_class, receipt_hash: rebuilt.receipt_hash }, rebuilt)) gaslessCorrupt();
+  return index;
 }

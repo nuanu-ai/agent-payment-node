@@ -4,10 +4,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import test from "node:test";
-import { hashObject, sha256 } from "../../src/canonical.js";
+import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
 import { OperationService } from "../../src/operation-service.js";
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
 import type { GaslessObservation } from "../../src/gasless/model.js";
+import { gaslessReceipt } from "../../src/gasless/receipt.js";
 import { assertGaslessPermissionClosure } from "../../src/gasless/permission-invalidation.js";
 import { gaslessFixture, GaslessTestRpc, testWord } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -27,11 +28,8 @@ function atBoundary(op: GaslessOperationRecord, boundary: typeof phases[number])
 for (const boundary of phases) test(`gasless durable ${boundary} survives expiry without repeat effects`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
-  const repair = s.core.gasless.records.repairReceipt.bind(s.core.gasless.records);
-  s.core.gasless.records.repairReceipt = async (op) => {
-    if (atBoundary(op, boundary)) throw new Error("receipt-write-interrupted");
-    await repair(op);
-  };
+  const persist = s.core.gasless.records.persist.bind(s.core.gasless.records);
+  s.core.gasless.records.persist = async (op) => { await persist(op); if (atBoundary(op, boundary)) throw new Error("interrupted-after-durable-write"); };
   const interrupted = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(interrupted.ok, false); const before = await s.record(id); assert.equal(atBoundary(before, boundary), true);
   const estimates = s.rpc.calls.filter((c) => c === "estimate").length, sends = s.rpc.sends.length;
@@ -55,8 +53,8 @@ for (const boundary of ["bootstrap_checked", "user_sealed"] as const) {
   test(`gasless ${boundary} resumes the remaining original approved phase before expiry`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
-    const repair = s.core.gasless.records.repairReceipt.bind(s.core.gasless.records);
-    s.core.gasless.records.repairReceipt = async (op) => { if (atBoundary(op, boundary)) throw new Error("interrupted"); await repair(op); };
+    const persist = s.core.gasless.records.persist.bind(s.core.gasless.records);
+    s.core.gasless.records.persist = async (op) => { await persist(op); if (atBoundary(op, boundary)) throw new Error("interrupted"); };
     assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, false);
     const before = await s.record(id), bootHash = before.bootstrap.materialHash;
     const restart = await gaslessFixture(temporary.root, 8453, { ...s, initializeWallet: false });
@@ -165,7 +163,8 @@ for (const delegation of ["empty", "expected"] as const) {
     s.rpc.estimateFails = true;
     assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
     const before = await s.record(id), oldReceiptPath = resolve(temporary.root, "gasless-receipts", before.profileHash, `${id}.json`);
-    const oldReceipt = await readFile(oldReceiptPath, "utf8"), loads = s.wrapping.loads;
+    // The receipt file a released version wrote for this unresolved transition (receipts are derived since phase 4b).
+    const oldReceipt = `${canonicalJson(gaslessReceipt(before))}\n`, loads = s.wrapping.loads;
     assert.equal(before.bootstrap.disclosureAttempts, 1); assert.equal(before.userOperation.signingAttempts, 0);
     const observation = permissionObservation(before);
     if (delegation === "expected") {
@@ -191,12 +190,14 @@ for (const delegation of ["empty", "expected"] as const) {
     assert.equal(s.wrapping.loads, loads); assert.equal(s.rpc.sends.length, 0);
     assert.equal(s.rpc.calls.filter((c) => c === "estimate").length, 1);
     await new OperationService(s.state).assertProfileAvailable(after.profileHash);
-    // The old receipt was generated without the new optional proof fields. It is
-    // still authenticated as a historical receipt and repaired to the new state.
-    await writeFile(oldReceiptPath, oldReceipt, { mode: 0o600 });
+    // The old receipt was generated without the new optional proof fields. It is still authenticated as a historical
+    // receipt, stays as written, and the receipt of the current state is derived from the operation.
+    await mkdir(resolve(oldReceiptPath, ".."), { recursive: true, mode: 0o700 }); await writeFile(oldReceiptPath, oldReceipt, { mode: 0o600 });
     const calls = s.rpc.calls.length;
     assert.equal((await s.core.execute({ command: "operation.status", operationId: id })).ok, true);
-    assert.equal(JSON.parse(await readFile(oldReceiptPath, "utf8")).state, "failed_permissions_invalidated");
+    const derived = await s.core.execute({ command: "receipt.get", operationId: id });
+    assert.equal((derived.receipt as { state: string }).state, "failed_permissions_invalidated");
+    assert.equal(await readFile(oldReceiptPath, "utf8"), oldReceipt);
     const child = await promisify(execFile)(process.execPath,
       [resolve("tests/core/gasless-fixtures/restart.mjs"), temporary.root, id],
       { cwd: process.cwd(), timeout: 30000, maxBuffer: 1024 * 1024 });
@@ -261,10 +262,8 @@ for (const boundary of ["bootstrap_signing", "user_signing", "user_sealed"] as c
   test(`gasless permission invalidation rejects ineligible ${boundary} markers`, async (t) => {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
-    const repair = s.core.gasless.records.repairReceipt.bind(s.core.gasless.records);
-    s.core.gasless.records.repairReceipt = async (op) => {
-      if (atBoundary(op, boundary)) throw new Error("interrupted"); await repair(op);
-    };
+    const persist = s.core.gasless.records.persist.bind(s.core.gasless.records);
+    s.core.gasless.records.persist = async (op) => { await persist(op); if (atBoundary(op, boundary)) throw new Error("interrupted"); };
     assert.equal((await s.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, false);
     const op = await s.record(id), observation = permissionObservation(op);
     assert.throws(() => assertGaslessPermissionClosure(op, { ...op, observation }), { code: "APN_STATE_CORRUPT" });

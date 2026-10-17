@@ -15,7 +15,6 @@ export interface FacilitatorGaslessRepositoryPort {
   listOperations(profileHash: string): Promise<readonly FacilitatorOperationRecord[]>;
   listAllOperations(): Promise<readonly FacilitatorOperationRecord[]>;
   persist(op: FacilitatorOperationRecord): Promise<void>;
-  repairReceipt(op: FacilitatorOperationRecord): Promise<void>;
   loadReceipt(profileHash: string, operationId: string): Promise<FacilitatorReceipt>;
 }
 
@@ -23,7 +22,7 @@ export class FacilitatorGaslessOperationRepository extends SecureStateStore impl
   private initialized: Promise<void> | undefined;
   private async ready(): Promise<void> {
     this.initialized ??= (async () => {
-      await super.initialize(); await this.ensureDirectory(OPERATIONS); await this.ensureDirectory(RECEIPTS);
+      await super.initialize(); await this.ensureDirectory(OPERATIONS);
     })();
     await this.initialized;
   }
@@ -78,32 +77,17 @@ export class FacilitatorGaslessOperationRepository extends SecureStateStore impl
     await this.ensureDirectory(`${OPERATIONS}/${op.profileHash}`);
     await this.writeJson(this.path(OPERATIONS, op.profileHash, op.operationId), op);
   }
+  /** The operation is the only record written; its receipt is derived from it on read. */
   async persist(op: FacilitatorOperationRecord): Promise<void> {
     await this.writeOperation(op);
-    await this.repairReceipt(op);
   }
-  async repairReceipt(input: FacilitatorOperationRecord): Promise<void> {
-    const op = validateFacilitatorOperation(input);
-    await this.ready();
-    const stored = await this.loadOperation(op.profileHash, op.operationId);
-    if (stored === null || !facilitatorSame(stored, op)) corrupt();
-    const path = this.path(RECEIPTS, op.profileHash, op.operationId), previous = await this.readJson(path);
-    if (previous !== null) validateReceipt(previous, op);
-    const receipt = facilitatorReceipt(op);
-    if (facilitatorSame(previous, receipt)) return;
-    await this.ensureDirectory(`${RECEIPTS}/${op.profileHash}`);
-    await this.writeJson(path, receipt);
-  }
+  /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
   async loadReceipt(profileHash: string, operationId: string): Promise<FacilitatorReceipt> {
     const op = await this.loadOperation(profileHash, operationId);
     if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "The Avalanche facilitator operation was not found.");
     const value = await this.readJson(this.path(RECEIPTS, profileHash, operationId));
-    if (value !== null) validateReceipt(value, op);
-    if (value === null || !facilitatorSame(value, facilitatorReceipt(op))) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "The Avalanche facilitator receipt needs recovery from its saved operation.",
-        { reason: "facilitator_gasless_receipt", operationId, nextActions: [`apn operation resume --operation ${operationId}`] });
-    }
-    return value as FacilitatorReceipt;
+    if (value !== null && receiptTransition(value, op) === op.transitions.length - 1) return value as FacilitatorReceipt;
+    return facilitatorReceipt(op);
   }
   private path(root: typeof OPERATIONS | typeof RECEIPTS, profileHash: string, operationId: string): string {
     stateIdentifier(profileHash, "facilitator gasless profile hash");
@@ -112,11 +96,12 @@ export class FacilitatorGaslessOperationRepository extends SecureStateStore impl
   }
 }
 
-/** A stale receipt must equal the exact historical projection of one earlier transition. */
-function validateReceipt(value: unknown, op: FacilitatorOperationRecord): void {
+/** The transition a stored receipt belongs to: it must equal that transition's exact historical projection. */
+function receiptTransition(value: unknown, op: FacilitatorOperationRecord): number {
   if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint) corrupt();
   const { receipt_hash, ...body } = value;
   if (hashObject(body) !== receipt_hash) corrupt();
   const index = op.transitions.findIndex((_, i) => facilitatorAtTransition(op, i).integrityHash === value.operation_binding_hash);
   if (index < 0 || !facilitatorSame(value, facilitatorReceipt(facilitatorAtTransition(op, index)))) corrupt();
+  return index;
 }
