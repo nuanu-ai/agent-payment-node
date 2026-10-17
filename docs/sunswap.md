@@ -171,7 +171,8 @@ screen is shown. The recipient is always that same account.
   is only observed, never rebroadcast.
 
 MCP serves `inventory`, `quote`, `prepare` and `status`. `approve` and
-`execute` return `APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI handoff.
+`execute` are reachable only through `apn_foreground_handoff`, which returns
+`APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI command.
 
 The success proof requires full-node and solidified history to agree,
 `SUCCESS`, the exact transaction bytes, owner debit `= amount + fee` where
