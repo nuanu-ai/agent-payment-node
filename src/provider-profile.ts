@@ -156,10 +156,6 @@ export function coinbaseDirectCapabilitySnapshot(): ProviderCapabilitySnapshot {
   };
 }
 
-export function metamaskReadOnlyCapabilitySnapshot(): ProviderCapabilitySnapshot {
-  return lifecycleReadOnlyCapabilitySnapshot();
-}
-
 export function metamaskDirectCapabilitySnapshot(): ProviderCapabilitySnapshot {
   const snapshot = lifecycleReadOnlyCapabilitySnapshot();
   return {

@@ -129,8 +129,6 @@ export class TestRpc implements RpcPort {
   submitError: Error | null = null;
   returnedHash: Hex = TRANSACTION_HASH;
   latestNonceAtomic = "7";
-  confirmedAtNonce: Hex | null = null;
-  confirmedNonceStartBlockAtomic: string | null = null;
   x402Evidence: X402PrepareEvidence = {
     address: WALLET,
     usdcAtomic: "50000000",
@@ -152,6 +150,10 @@ export class TestRpc implements RpcPort {
   async assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }> {
     if (this.chainId !== 8453) throw new Error("wrong chain");
     return { chainId: 8453, rpcOrigin: this.rpcOrigin };
+  }
+  async assertX402Chain(chainId: 1 | 8453 | 42161): Promise<{ readonly chainId: 1 | 8453 | 42161; readonly rpcOrigin: string }> {
+    if (chainId !== 8453) throw new Error("wrong chain");
+    return await this.assertBaseChain();
   }
   async getBalances(address: Address): Promise<BalanceSnapshot> {
     this.balanceCalls += 1;
@@ -179,15 +181,6 @@ export class TestRpc implements RpcPort {
     return this.returnedHash;
   }
   async getReceipt(_transactionHash: Hex): Promise<RpcReceipt | null> { return this.receipt; }
-  async getLatestConfirmedNonce(_address: Address): Promise<string> { return this.latestNonceAtomic; }
-  async getConfirmedTransactionAtNonce(
-    _address: Address,
-    _nonceAtomic: string,
-    startBlockNumberAtomic: string,
-  ): Promise<Hex | null> {
-    this.confirmedNonceStartBlockAtomic = startBlockNumberAtomic;
-    return this.confirmedAtNonce;
-  }
 }
 
 export async function temporaryState(): Promise<{ readonly base: string; readonly root: string; cleanup(): Promise<void> }> {

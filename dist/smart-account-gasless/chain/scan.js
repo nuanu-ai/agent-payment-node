@@ -8,12 +8,6 @@ import { verifyChildScanLog, verifyTransferScanLog } from "./receipt.js";
 export const SA_SCAN_RANGE = 1999n;
 export const SA_SCAN_LOG_LIMIT = 128;
 export const SA_SCAN_CANDIDATE_LIMIT = 8;
-export function initialSmartAccountGaslessCursor(intent) {
-    return { startBlock: intent.initialSnapshot.preparationBlock,
-        nextBlockAtomic: intent.initialSnapshot.preparationBlock.numberAtomic, previousEndBlock: null,
-        expiryBlock: null, candidateHashes: [], transferAnomalies: [], childScanComplete: false,
-        transferScanComplete: false };
-}
 export function validateSmartAccountGaslessCursor(intent, cursor) {
     const start = saBlock(cursor.startBlock), expected = intent.initialSnapshot.preparationBlock;
     if (!sameBlock(start, expected))

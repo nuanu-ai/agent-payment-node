@@ -4,7 +4,6 @@ import { MM_CHAINS, type MetaMaskGaslessChainId, type MetaMaskGaslessDeployment 
 import { mmFail } from "./reasons.js";
 
 export { MM_CHAINS } from "./model.js";
-export const MM_DEPLOYMENT_INPUT_SHA = "136babcbb5f856292e1519d19a8ee78070ec06188fe3f7f245fe59c38b14ad38";
 export const MM_RPC_ENV: Readonly<Record<MetaMaskGaslessChainId, string>> = Object.freeze({
   1: "APN_ETHEREUM_RPC_URL", 10: "APN_OPTIMISM_RPC_URL", 137: "APN_POLYGON_RPC_URL",
   143: "APN_MONAD_RPC_URL", 1329: "APN_SEI_RPC_URL", 8453: "APN_BASE_RPC_URL",

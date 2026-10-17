@@ -8,16 +8,8 @@ import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { EVM_CO
 import { networkCommandVariants } from "./network-command-catalog.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
-import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
-import type {
-  ApprovalClass,
-  CommandDefinition,
-  CommandGroup,
-  CommandOption,
-  EffectClass,
-  ScalarType,
-} from "./command-catalog-types.js";
-export { renderHelp, renderReadmeCommandReference };export { assertCompatibleManifestEvolution, validateCommandManifest };
+import type { CommandDefinition, CommandGroup } from "./command-catalog-types.js";
+export { renderHelp, renderReadmeCommandReference };
 export * from "./command-catalog-parser.js";
 export type { ApprovalClass, CommandDefinition, CommandGroup, CommandOption, EffectClass, ScalarType } from "./command-catalog-types.js";
 const noDefault = { kind: "none" } as const;
@@ -427,4 +419,3 @@ export const COMMAND_MANIFEST = {
   groups: COMMAND_GROUPS,
   commands: COMMANDS,
 } as const;
-validateCommandManifest(COMMAND_MANIFEST);

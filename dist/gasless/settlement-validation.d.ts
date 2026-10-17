@@ -19,4 +19,3 @@ export declare function gaslessSettlementEffect(p: GaslessSettlement): {
     accounting: import("./model.js").GaslessAccounting;
 };
 export declare function assertGaslessSettlementContinuation(previous: GaslessSettlement, next: GaslessSettlement): void;
-export declare function gaslessSettlementHash(p: GaslessSettlement): string;

@@ -1,4 +1,4 @@
-/** Offline Arbitrum source draft and read-only funding snapshot. No operation repository or dispatch uses this module. */
+/** Arbitrum source draft and read-only funding snapshot used by Relay Arbitrum USDC prepare. */
 import { hashObject } from "../canonical.js";
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";

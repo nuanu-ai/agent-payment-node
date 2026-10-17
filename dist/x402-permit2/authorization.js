@@ -5,7 +5,6 @@ import { validatePermit2Selection } from "./offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY } from "./registry.js";
 const PLAN_DOMAIN = "apn.x402-permit2.plan.v1";
 const MAX_UINT256 = (1n << 256n) - 1n;
-export const EIP2612_GAS_SPONSORING = "eip2612GasSponsoring";
 /** Must equal the x402 exact proxy's witness layout; the test suite cross-checks it against @x402/evm. */
 export const PERMIT2_WITNESS_TYPES = {
     PermitWitnessTransferFrom: [

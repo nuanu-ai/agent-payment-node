@@ -3,10 +3,9 @@ import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, normalize, resolve } from "node:path";
 import { getAddress } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
-import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { ApnError } from "../errors.js";
 import { USDT_EXCHANGE_RATE_MAX, USDT_GASLESS, USDT_POST_OP_GAS_MAX } from "./model.js";
-import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "./paymaster-data.js";
+import { validateUsdtPaymasterData } from "./paymaster-data.js";
 import { usdtApprovalTransferBatch } from "./policy-prepare.js";
 import { planUsdtTransfer } from "./quote.js";
 import { usdtUserOperation } from "./userop.js";
@@ -395,49 +394,6 @@ export class UsdtBoundOperationRepository {
             fail("bound_idempotency", "APN_IDEMPOTENCY_CONFLICT");
         await this.publish(this.profilePath(profileHash), this.path(profileHash, record.operationId), record);
         return record;
-    }
-}
-/** Classification reads only. Drift or revocation never advances the operation or authorizes an effect. */
-export async function classifyUsdtBoundRecovery(operation, port) {
-    const b = operation.binding;
-    try {
-        const now = port.now();
-        if (!(now instanceof Date) || !Number.isFinite(now.getTime()))
-            return { state: "recovery_required", reason: "clock_unavailable", operation };
-        if (BigInt(Math.floor(now.getTime() / 1000)) >= decodeUsdtPaymasterData(b.paymasterData).validUntil) {
-            return { state: "capability_unavailable", reason: "paymaster_expired", operation };
-        }
-        const active = await port.activePolicy(b.profile);
-        if (active === null || active.digest !== active.registry.policyDigest || active.digest !== b.policyDigest || active.revision !== b.policyRevision ||
-            active.activationDigest !== b.activationDigest || active.accounts.evm !== b.plan.request.sender) {
-            return { state: "capability_unavailable", reason: "policy_revoked_or_changed", operation };
-        }
-        const usage = await port.dailyUsage(b.plan.request.sender, now);
-        const admission = evaluateAssetPolicy(active.registry, { chain: USDT_GASLESS.chain, asset: { kind: "token", identifier: USDT_GASLESS.token },
-            rail: "gasless", amountAtomic: b.plan.request.grossAtomic.toString(), dailyUsageAtomic: usage,
-            asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
-        if (admission.asset.mechanismPins?.gasless === undefined ||
-            canonicalJson(admission.asset.mechanismPins.gasless) !== canonicalJson(USDT_GASLESS.mechanism)) {
-            return { state: "capability_unavailable", reason: "policy_mechanism_changed", operation };
-        }
-        const snapshot = await port.safeSnapshot(b.plan.request.sender);
-        if (snapshot.chainId !== 1n || snapshot.blockNumber < BigInt(b.safeBlockNumber) ||
-            snapshot.account.entryPointNonce !== BigInt(b.account.entryPointNonce) ||
-            snapshot.account.eoaNonce !== BigInt(b.account.eoaNonce) || snapshot.account.delegation !== b.account.delegation ||
-            snapshot.account.usdtBalanceAtomic < BigInt(b.plan.request.grossAtomic)) {
-            return { state: "capability_unavailable", reason: "chain_state_drift", operation };
-        }
-        // A later safe block is the normal case: execution re-guards at its own fresh safe block. Only a different block at
-        // the prepared height (the prepared anchor itself left the canonical chain) needs recovery.
-        if (snapshot.blockNumber === BigInt(b.safeBlockNumber) && snapshot.blockHash !== b.safeBlockHash) {
-            return { state: "recovery_required", reason: "safe_block_changed", operation };
-        }
-        return { state: "prepared", operation };
-    }
-    catch (error) {
-        if (error instanceof ApnError && error.code === "APN_ALLOWLIST_REFUSED")
-            return { state: "capability_unavailable", reason: "policy_revoked_or_changed", operation };
-        return { state: "recovery_required", reason: "read_unavailable", operation };
     }
 }
 //# sourceMappingURL=bound-operation.js.map

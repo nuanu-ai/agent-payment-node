@@ -1,4 +1,4 @@
-import { canonicalJson, hashObject, sha256 } from "../canonical.js";
+import { hashObject, sha256 } from "../canonical.js";
 import type { BridgeChainId } from "./chains.js";
 import type { Address } from "../model.js";
 import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeExecutionSource, bridgeFeeAsset, bridgeNativeCoin, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination, type BridgeAsset } from "./asset-registry.js";
@@ -7,7 +7,7 @@ import type { BridgeFee, BridgeMaterialization, BridgeRouteRequest, BridgeTool }
 import type { LifiResponse } from "./ports.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure,
-  bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
+  bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeUint } from "./validation.js";
 
 /** Exact contracts for the reviewed composite BNB delivery graph. */
 const BNB_QUOTE_DELIVERY = {
@@ -71,20 +71,7 @@ export function parseBridgeRoutes(response: LifiResponse, request: BridgeRouteRe
 export function materializeBridgeRoute(selected: ParsedBridgeRoute, response: LifiResponse, request: BridgeRouteRequest, sender: Address): {
   readonly materialization: BridgeMaterialization; readonly implicitProtocolFeeAtomic: string; readonly providerNonceAtomic: string | null;
 } {
-  return parseBridgeMaterialization(selected, response, request, sender, false);
-}
-/** Decode and validate a reviewed quote-only destination without creating an operation or enabling an RPC/send path. */
-export function inspectBridgeRouteMaterialization(selected: ParsedBridgeRoute, response: LifiResponse, request: BridgeRouteRequest, sender: Address): {
-  readonly materialization: BridgeMaterialization; readonly implicitProtocolFeeAtomic: string; readonly providerNonceAtomic: string | null;
-} {
-  return parseBridgeMaterialization(selected, response, request, sender, true);
-}
-function parseBridgeMaterialization(selected: ParsedBridgeRoute, response: LifiResponse, request: BridgeRouteRequest, sender: Address, quoteOnly: boolean): {
-  readonly materialization: BridgeMaterialization; readonly implicitProtocolFeeAtomic: string; readonly providerNonceAtomic: string | null;
-} {
-  if (!selected.choice.preparable && !(quoteOnly && selected.choice.unavailableReason === "destination_execution_unreviewed")) {
-    bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
-  }
+  if (!selected.choice.preparable) bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
   if (response.status !== 200) bridgeFailure("APN_PROVIDER_UNAVAILABLE", "step_materialization_status");
   const step = bridgeRecord(bridgeJson(response.body, LIFI_ROUTE_RESPONSE_BYTES));
   assertStep(step, request, sender);

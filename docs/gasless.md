@@ -844,33 +844,11 @@ same verified archive or a compatible newer archive. An older binary does not
 provide gasless recovery; do not delete unresolved state or create a replacement
 payment to work around it.
 
-Once the state directory contains any Smart Account gasless operation, select
-a recovery archive through the current archive's read-only preflight. Supply
-canonical absolute paths and the manifest hash obtained from independent
-archive, source and installed-byte verification:
-
-```sh
-node <verified-current-package>/dist/smart-account-gasless/recovery-gate.js \
-  --state-root <existing-state-root> \
-  --archive <target-archive.tgz> \
-  --manifest <verified-target-manifest.json> \
-  --manifest-sha256 <independently-verified-manifest-sha256> \
-  --package-root <target-installed-package>
-```
-
-Only select the target executable after a successful preflight. The gate
-validates saved journals and the target's exact runtime bytes without running
-the target or editing state. An unknown manifest, changed artifact, malformed
-state or incompatible runtime returns
-`APN_OPERATION_BLOCKED / sa_gasless_archive_incompatible`. Recheck after a
-state or installation change.
-
-The retained I745 archive with SHA-256
-`1883f117a84552e720319d2770ea9439fad30d8eb6f1bd3212f344854b0ce267`
-is incompatible with Smart Account gasless state: its original operation
-lookup cannot discover this family or its guards. Preserve it as historical
-evidence; use the verified current archive for this state. The preflight does
-not change older binaries or migrate existing profiles and operations.
+Recover a Smart Account gasless operation with the release that wrote it or a
+newer one; `apn operation status` and `apn operation resume` read the saved
+journal without running any other binary. The retained I745 archive with
+SHA-256 `1883f117a84552e720319d2770ea9439fad30d8eb6f1bd3212f344854b0ce267`
+cannot discover this family; preserve it only as historical evidence.
 
 MetaMask Agent operations written before the reprice guard existed carry no
 dispatched-material field. They keep their exact stored key set, transition

@@ -5,7 +5,7 @@ import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./a
 import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
 import type { AcrossCorrelation, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
-import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
+import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeUint } from "./validation.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
 
 type BridgeEventData = Readonly<{
@@ -105,17 +105,6 @@ function validateStoredSource(source: BridgeSourceProof, decoded: DecodedBridgeC
     return;
   }
   fail("stored_correlation_kind");
-}
-
-/** The destination token selects the Stargate pool emitter; the Across spoke pool is asset independent. */
-export function destinationEventFilter(source: BridgeSourceProof, destinationToken: Address): { address: Address; topics: readonly (Hex | null)[] } {
-  if (source.correlation.kind === "across") {
-    const c = source.correlation;
-    return { address: bridgeProtocolEmitter(c.destinationChainId, "across", destinationToken), topics: [EVENT_TOPICS.filledRelay, uintWord(c.originChainId), uintWord(c.depositId)] };
-  }
-  const c = source.correlation;
-  const destination = chainForEid(c.destinationEid);
-  return { address: bridgeProtocolEmitter(destination, "stargateV2", destinationToken), topics: [EVENT_TOPICS.oftReceived, bridgeHex(c.guid, 32, 32), addressWord(c.recipient)] };
 }
 
 function validateCommonSourceEvents(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): void {
@@ -381,7 +370,5 @@ function events(receipt: BridgeProtocolReceipt, address: Address, topic: Hex, ev
 }
 
 function logsHash(logs: readonly BridgeLog[]): string { return sha256(canonicalJson(logs)); }
-function uintWord(value: string | number): Hex { return `0x${BigInt(value).toString(16).padStart(64, "0")}` as Hex; }
 function addressWord(address: Address): Hex { return `0x${"0".repeat(24)}${address.slice(2).toLowerCase()}` as Hex; }
-function chainForEid(eid: number): 1 | 8453 | 42161 { if (eid === 30101) return 1; if (eid === 30184) return 8453; if (eid === 30110) return 42161; return fail("endpoint_identity"); }
 function fail(reason: string): never { return bridgeFailure("APN_RPC_PROTOCOL", reason); }

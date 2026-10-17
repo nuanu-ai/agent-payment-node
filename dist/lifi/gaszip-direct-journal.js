@@ -77,10 +77,6 @@ export class GaszipFundingJournal extends SecureStateStore {
         await this.saveLocked(sealed);
         return sealed;
     }
-    async assertNoEffectClaimsLocked(r) {
-        if (await this.readJson(`${this.directory}-first-sign/${r.operationId}.json`) !== null || await this.readJson(`${this.directory}-first-send/${r.operationId}.json`) !== null)
-            gaszipCodec(this.route).fail("effect_marker_blocks_retirement");
-    }
     /** The create-only first-send marker precedes every broadcast; without it APN never sent these bytes. */
     async sendClaimedLocked(r) { return await this.readJson(`${this.directory}-first-send/${r.operationId}.json`) !== null; }
     async claimSigningLocked(r) {

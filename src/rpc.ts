@@ -5,14 +5,12 @@ export { isPublicIp } from "./network-policy.js";
 import { performance } from "node:perf_hooks";
 import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
 import { x402Network } from "./x402-network.js";
-import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
+import type { EvmChainId } from "./evm-asset.js";
 import { sha256 } from "./canonical.js";
-import { BASE_USDC, CHAIN_ID, MAX_NONCE_SCAN_BLOCKS, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
+import { BASE_USDC, CHAIN_ID, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { EvmRpc } from "./evm-rpc.js";
-import type { EvmBalanceSnapshot } from "./evm-ports.js";
 import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
-import { directEvmStepBudget } from "./evm-direct-reads.js";
 import type { StateStore } from "./state.js";
 import { parseAtomic } from "./money.js";
 import type { Address, Hex } from "./model.js";
@@ -66,36 +64,6 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const signal = this.abortSignal;
     const wait = rpcAbortableWait(signal);
     this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, maxPhysicalRequests, Date.now, wait, () => this.remainingTimeoutMs());
-  }
-
-  async seiNativeBalance(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot> {
-    if (selection.chainId !== 1329 || selection.token !== "native") {
-      throw new ApnError("APN_INVALID_INPUT", "Bounded Sei balance requires native SEI on Sei.");
-    }
-    if (this.directGuardState === undefined) throw new ApnError("APN_RPC_CONFIG", "Bounded Sei balance RPC guard state is unavailable.");
-    const remainingMs = Math.floor(deadlineAtMs - performance.now());
-    if (!Number.isFinite(remainingMs) || remainingMs < 1 || remainingMs > 20_000) {
-      throw new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate RPC deadline.");
-    }
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), remainingMs);
-    const bounded = new HttpsBaseRpc(this.endpoint.toString(), {
-      totalDeadlineMs: deadlineAtMs, abortSignal: controller.signal,
-      directGuardState: this.directGuardState,
-    });
-    bounded.pinnedAddresses = this.pinnedAddresses; bounded.chainIdCell = this.chainIdCell;
-    try {
-      // DNS validation precedes the first POST and must share the same deadline.
-      let onAbort: (() => void) | undefined;
-      try {
-        await Promise.race([bounded.primePublicAddresses(), new Promise<never>((_, reject) => {
-          onAbort = () => reject(new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate RPC deadline."));
-          controller.signal.addEventListener("abort", onAbort, { once: true });
-        })]);
-      } finally { if (onAbort !== undefined) controller.signal.removeEventListener("abort", onAbort); }
-      bounded.armEvmDirectRpcGuard(directEvmStepBudget(1329, "balance"));
-      return await bounded.evm.directReads(1329).balance(address, selection);
-    } finally { clearTimeout(timeout); }
   }
 
   /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
@@ -376,33 +344,6 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
       return { address: rpcAddress(log.address), topics: log.topics.map((topic: unknown) => rpcHex(topic, 32)), data: rpcHex(log.data) };
     });
     return { transactionHash: rpcHex(receipt.transactionHash, 32), status: status === 1n ? "success" : "reverted", blockNumberAtomic: rpcQuantity(receipt.blockNumber).toString(), logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin };
-  }
-
-  async getLatestConfirmedNonce(address: Address): Promise<string> {
-    await this.assertBaseChain();
-    return rpcQuantity(await this.call("eth_getTransactionCount", [address, "latest"])).toString();
-  }
-
-  async getConfirmedTransactionAtNonce(address: Address, nonceAtomic: string, startBlockNumberAtomic: string): Promise<Hex | null> {
-    await this.assertBaseChain();
-    const latestBlock = record(await this.call("eth_getBlockByNumber", ["latest", false]), "latest block");
-    const latest = rpcQuantity(latestBlock.number);
-    const requestedStart = parseAtomic(startBlockNumberAtomic);
-    const boundedStart = latest >= MAX_NONCE_SCAN_BLOCKS - 1n ? latest - (MAX_NONCE_SCAN_BLOCKS - 1n) : 0n;
-    const start = requestedStart > boundedStart ? requestedStart : boundedStart;
-    for (let blockNumber = latest; blockNumber >= start; blockNumber -= 1n) {
-      const tag = `0x${blockNumber.toString(16)}`;
-      const block = record(await this.call("eth_getBlockByNumber", [tag, true]), "confirmed block");
-      if (!Array.isArray(block.transactions)) throw new ApnError("APN_RPC_PROTOCOL", "RPC block transactions are invalid.");
-      for (const item of block.transactions) {
-        const transaction = record(item, "block transaction");
-        if (typeof transaction.from === "string" && transaction.from.toLowerCase() === address.toLowerCase() && rpcQuantity(transaction.nonce).toString() === nonceAtomic) {
-          return rpcHex(transaction.hash, 32);
-        }
-      }
-      if (blockNumber === 0n) break;
-    }
-    return null;
   }
 
   async coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0],

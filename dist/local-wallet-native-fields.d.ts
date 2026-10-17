@@ -8,8 +8,5 @@ export declare function assertWallet(identity: WalletIdentity, expected: Address
 export declare function ensureX402Live(validBefore: string): void;
 export declare function effectSlot(domain: string, profile: string, operationId: string, fingerprint: string): string;
 export declare function requestProfile(payload: Readonly<Record<string, unknown>>): string;
-export declare function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown>;
-export declare function addressEqual(left: string, right: string): boolean;
-export declare function x402Address(value: unknown, label: string): Address;
 export declare function protocol(message: string): ApnError;
 export declare function rejected(nativeCode: string, message: string): ApnError;

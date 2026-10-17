@@ -1,4 +1,3 @@
-import { hashObject } from "../canonical.js";
 import type { Hex } from "../model.js";
 import type { GaslessAccountState, GaslessIntent, GaslessSettlement } from "./model.js";
 import { settlementSchema } from "./schema.js";
@@ -49,4 +48,3 @@ export function assertGaslessSettlementContinuation(previous: GaslessSettlement,
     gaslessFailure("APN_STATE_CORRUPT", "gasless_safe_proof_changed");
   }
 }
-export function gaslessSettlementHash(p: GaslessSettlement): string { return hashObject(p); }

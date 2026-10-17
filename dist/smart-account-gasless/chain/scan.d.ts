@@ -9,7 +9,6 @@ export interface SmartAccountScanResult {
     readonly partial: boolean;
     readonly evidenceHash: string;
 }
-export declare function initialSmartAccountGaslessCursor(intent: SmartAccountGaslessIntent): SmartAccountGaslessCursor;
 export declare function validateSmartAccountGaslessCursor(intent: SmartAccountGaslessIntent, cursor: SmartAccountGaslessCursor): SmartAccountGaslessCursor;
 /** Advance both exact-child and conservative transfer scans over one fully checked range. */
 export declare function advanceSmartAccountGaslessScan(call: SaRpcCall, intent: SmartAccountGaslessIntent, childHash: Hex, cursorInput: SmartAccountGaslessCursor, safeHead: SmartAccountGaslessBlock): Promise<SmartAccountScanResult>;

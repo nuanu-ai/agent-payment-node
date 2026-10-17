@@ -19,11 +19,6 @@ export const BRIDGE_QUOTE_DESTINATIONS = {
     43114: { name: "Avalanche C-Chain", caip2: "eip155:43114", token: getAddress("0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"), tools: ["stargateV2"], endpointId: 30106 },
     130: { name: "Unichain", caip2: "eip155:130", token: getAddress("0x078D782b760474a361dDA0AF3839290b0EF57AD6"), tools: ["across"], endpointId: null },
 };
-/** Quote inspection only. Sei is absent from every bridge execution chain and asset peer set. */
-export const SEI_GASZIP_QUOTE_DESTINATION = {
-    chainId: 1329, caip2: "eip155:1329", nativeToken: BRIDGE_ZERO_ADDRESS,
-    nativeSymbol: "SEI", nativeDecimals: 18, tool: "gasZipBridge",
-};
 const native = (chainId, symbol, peers, wrapped) => ({ kind: "native", chainId, symbol, coinKey: symbol, decimals: 18, pairKey: symbol.toLowerCase(), acrossSupported: true,
     stargate: chainId === 1 ? NATIVE_STARGATE_ETHEREUM : chainId === 8453 ? NATIVE_STARGATE_BASE : null,
     peers, wrapped, listing: "frozen_list" });
@@ -191,13 +186,6 @@ export function bridgeChainRow(value, code = "APN_PROVIDER_PROTOCOL") {
 }
 export function bridgeNativeCoin(chainId, code = "APN_PROVIDER_PROTOCOL") {
     return bridgeChainRow(chainId, code).nativeCoin;
-}
-/** The one admission point for a bridgeable token. The zero address is the native sentinel and is never a token. */
-export function bridgeTokenRow(chainId, address, code = "APN_PROVIDER_PROTOCOL") {
-    const asset = bridgeAssetRow(bridgeChain(chainId, code), address, code);
-    if (asset.kind === "native")
-        bridgeFailure(code, "native_sentinel_is_not_a_token");
-    return asset;
 }
 /**
  * The one admission point for a route leg. The zero address names the chain's native coin; any other address must be

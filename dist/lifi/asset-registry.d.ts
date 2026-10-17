@@ -44,15 +44,6 @@ export declare const BRIDGE_QUOTE_DESTINATIONS: {
     };
 };
 export type BridgeQuoteDestinationChainId = keyof typeof BRIDGE_QUOTE_DESTINATIONS;
-/** Quote inspection only. Sei is absent from every bridge execution chain and asset peer set. */
-export declare const SEI_GASZIP_QUOTE_DESTINATION: {
-    readonly chainId: 1329;
-    readonly caip2: "eip155:1329";
-    readonly nativeToken: `0x${string}`;
-    readonly nativeSymbol: "SEI";
-    readonly nativeDecimals: 18;
-    readonly tool: "gasZipBridge";
-};
 /** Each upgradeability shape is pinned explicitly; there is no default shape for an unreviewed proxy. */
 export type BridgeTokenCode = {
     readonly upgradeability: "immutable";
@@ -177,8 +168,6 @@ export declare function bridgeExecutionSource(value: unknown): value is BridgeEx
 export declare function bridgeExecutionSourceCaip2(value: unknown): boolean;
 export declare function bridgeChainRow(value: unknown, code?: ErrorCode): BridgeChainRow;
 export declare function bridgeNativeCoin(chainId: unknown, code?: ErrorCode): BridgeNativeCoin;
-/** The one admission point for a bridgeable token. The zero address is the native sentinel and is never a token. */
-export declare function bridgeTokenRow(chainId: unknown, address: unknown, code?: ErrorCode): BridgeTokenAsset;
 /**
  * The one admission point for a route leg. The zero address names the chain's native coin; any other address must be
  * a registry row. An address the frozen list does not name is refused as unlisted, never matched by symbol.

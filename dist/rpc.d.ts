@@ -1,8 +1,7 @@
 export { parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, classifyX402LogAvailabilityMessage, acceptRpcHttpBody } from "./rpc-envelope.js";
 export { isPublicIp } from "./network-policy.js";
-import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
+import type { EvmChainId } from "./evm-asset.js";
 import { EvmRpc } from "./evm-rpc.js";
-import type { EvmBalanceSnapshot } from "./evm-ports.js";
 import type { StateStore } from "./state.js";
 import type { Address, Hex } from "./model.js";
 import type { BalanceSnapshot, FeeEstimate, RpcPort, RpcReceipt, X402AuthorizationState, X402AuthorizationUsedLogs, X402BlockReference, X402PrepareEvidence, X402RpcBlock, X402RpcHead, X402RpcPort, X402RpcReceipt, X402TransferLogs } from "./ports.js";
@@ -33,7 +32,6 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     });
     /** The first arm of an invocation sets its cap; direct EVM steps pass the cap derived from their read plan. */
     armEvmDirectRpcGuard(maxPhysicalRequests?: number): void;
-    seiNativeBalance(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot>;
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal: AbortSignal): HttpsBaseRpc;
     /** Resolve and validate public addresses before a caller reserves a physical POST start. */
@@ -81,8 +79,6 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     }): Promise<FeeEstimate>;
     submitRawTransaction(rawTransaction: Hex, beforeSend?: () => void): Promise<Hex>;
     getReceipt(transactionHash: Hex): Promise<RpcReceipt | null>;
-    getLatestConfirmedNonce(address: Address): Promise<string>;
-    getConfirmedTransactionAtNonce(address: Address, nonceAtomic: string, startBlockNumberAtomic: string): Promise<Hex | null>;
     coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]): Promise<unknown>;
     coinbaseGaslessLogs(filter: Readonly<Record<string, unknown>>): Promise<readonly unknown[]>;
     private call;

@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   canonicalizeNormalizedProviderJson,
-  isSafeNormalizedProviderJson,
   NORMALIZED_PROVIDER_JSON_LIMITS,
 } from "../../src/normalized-provider-json.js";
+
+function isSafeNormalizedProviderJson(value: unknown): boolean {
+  try { canonicalizeNormalizedProviderJson(value); return true; } catch { return false; }
+}
 
 test("normalized provider JSON accepts deterministic JSON values and source-shaped objects", () => {
   const input = {

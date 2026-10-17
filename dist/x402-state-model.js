@@ -1,10 +1,6 @@
 import { x402Network } from "./x402-network.js";
-import { canonicalJson, domainHash, hashObject, sha256 } from "./canonical.js";
+import { canonicalJson, domainHash, hashObject } from "./canonical.js";
 import { x402HttpRequestBinding } from "./x402-http-request.js";
-const HASH = /^[a-f0-9]{64}$/u;
-const ADDRESS = /^0x[0-9a-f]{40}$/u;
-const BYTES32 = /^0x[0-9a-f]{64}$/u;
-const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 export const ZERO_HASH = "0".repeat(64);
 export const X402_STATE_VERSION = "apn.x402.state.v1";
 export const TRANSITION_VERSION = "apn.x402.transition.v1";

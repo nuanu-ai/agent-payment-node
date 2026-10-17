@@ -1,26 +1,15 @@
-import { type UsdtOperationInput, type UsdtOperationRecord, type UsdtOperationRepository } from "./operation.js";
-import { type UsdtAnyBoundOperation as UsdtBoundOperation, type UsdtBoundRecovery, type UsdtBoundReplayIntent } from "./bound-operation.js";
-import type { UsdtPolicyPrepared, UsdtPreparePort } from "./policy-prepare.js";
-/** Read-only operation boundary for the gasless USDT foundation. No signer or dispatcher is reachable. */
+import { type UsdtAnyBoundOperation as UsdtBoundOperation, type UsdtBoundReplayIntent } from "./bound-operation.js";
+import type { UsdtPolicyPrepared } from "./policy-prepare.js";
+/** Profile-bound access to the gasless USDT bound journal. No signer or dispatcher is reachable from here. */
 export declare class GaslessUsdtOperationService {
-    readonly repository: UsdtOperationRepository;
+    readonly root: string;
     private readonly profileHash?;
-    constructor(repository: UsdtOperationRepository, profileHash?: string | undefined);
+    constructor(root: string, profileHash?: string | undefined);
     /** Bind an explicit persisted profile hash; profile names are never interpreted as hashes. */
     forProfile(profileHash: string): GaslessUsdtOperationService;
     private boundProfile;
-    prepare(input: Omit<UsdtOperationInput, "profileHash">, idempotencyKey: string): Promise<UsdtOperationRecord>;
-    status(operationId: string): Promise<UsdtOperationRecord>;
-    resume(operationId: string): Promise<UsdtOperationRecord>;
     /** Persist the complete domain preparation. This cannot reserve usage or reach a signer. */
     prepareBound(binding: UsdtPolicyPrepared | import("./policy-prepare-v2.js").UsdtPolicyPreparedV2, idempotencyKey: string, now: Date): Promise<UsdtBoundOperation>;
     replayBound(idempotencyKey: string, intent: UsdtBoundReplayIntent): Promise<UsdtBoundOperation | null>;
     statusBound(operationId: string): Promise<UsdtBoundOperation>;
-    /** Fresh, read-only recovery classification. No saved state is changed. */
-    resumeBound(operationId: string, port: UsdtPreparePort): Promise<UsdtBoundRecovery>;
-    approve(): never;
-    execute(): never;
-    sign(): never;
-    dispatch(): never;
-    recover(): never;
 }

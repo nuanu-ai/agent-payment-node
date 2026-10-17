@@ -17,8 +17,6 @@ export interface UsdtReceiptPins {
     readonly treasury: Address;
     readonly entryPoint: Address;
 }
-/** Pins of a freshly prepared plan: the current constants it was just validated against. */
-export declare const USDT_CURRENT_PINS: UsdtReceiptPins;
 export interface UsdtChainReceipt {
     readonly transactionHash: Hex;
     readonly blockNumber: bigint;

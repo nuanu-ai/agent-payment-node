@@ -177,15 +177,6 @@ export function resolveAllowlistAsset(input: {
   return asset;
 }
 
-export function assertAllowlistExecutionConfigured(input: {
-  readonly chain: string; readonly kind: CandidateKind; readonly identifier?: string; readonly rail: CandidateRail;
-}, inventory: AllowlistInventory = loadAllowlistInventory()): never {
-  const asset = resolveAllowlistAsset(input, inventory);
-  if (!RAILS.includes(input.rail)) refuse("APN_ALLOWLIST_IDENTITY_INVALID", "The requested rail is invalid.", "invalid_rail");
-  const reason = asset.rails[input.rail] ? "owner_caps_missing" : "rail_not_admitted";
-  refuse("APN_ALLOWLIST_NOT_ADMITTED", "The candidate identity is not configured for execution.", reason);
-}
-
 function candidateAsset(raw: unknown, chain: string, family: CandidateFamily, networkName: string, kind: CandidateKind): CandidateAsset {
   const value = record(raw, "An allowlist asset row is invalid.");
   const keys = kind === "native"

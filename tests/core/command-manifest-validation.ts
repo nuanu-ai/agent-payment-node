@@ -1,12 +1,13 @@
-import { isPlainRecord } from "./canonical.js";
+/** Test-side validator for the static command manifest (APN no longer re-validates its own constant at start-up). */
+import { isPlainRecord } from "../../src/canonical.js";
 import type {
   ApprovalClass,
   CommandOption,
   EffectClass,
   ScalarType,
-} from "./command-catalog.js";
-import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
-import { ApnError } from "./errors.js";
+} from "../../src/command-catalog.js";
+import { OUTPUT_VERSION, PRODUCT_VERSION } from "../../src/constants.js";
+import { ApnError } from "../../src/errors.js";
 
 const scalarTypes = new Set<ScalarType>(["boolean", "string", "base64", "profile", "provider_id", "provider_auth_method", "positive_integer", "https_url", "address", "decimal_usdc", "atomic_usdc", "wei", "operation_id", "transaction_hash", "provider_request_id", "idempotency_key", "integer_seconds"]);
 const effectClasses = new Set<EffectClass>(["none", "local_read", "network_read", "network_request", "local_write", "payment_prepare", "payment_submit", "recovery"]);

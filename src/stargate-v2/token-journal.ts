@@ -6,17 +6,11 @@ import { evmAddressLock } from "../evm-address-ownership.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
+import { assertStargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import {
-  assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy,
-  stargateV2LegacyRouteFinalityPolicy,
-} from "./finality-policy.js";
-import {
-  STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN,
-  STARGATE_TOKEN_DESTINATION_EID, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN,
-  STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_SOURCE_CHAIN,
-  STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS,
-  STARGATE_TOKEN_SOURCE_EID, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_POOL,
-  STARGATE_TOKEN_SOURCE_TOKEN, UINT, address, fail,
+  STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_MAX_BRIDGE_GAS,
+  STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN,
+  STARGATE_TOKEN_SOURCE_POOL, UINT, address, fail,
 } from "./token-codec.js";
 import type {
   StargateTokenJournal, StargateTokenOperation, StargateTokenPhase, StargateTokenPostApprovalQuote,
@@ -86,12 +80,11 @@ function validatePostApprovalQuote(op: StargateTokenOperation, snapshot: Stargat
     decoded.args[1].nativeFee.toString() !== snapshot.quote.quote.nativeMessageFeeAtomic || decoded.args[2] !== op.owner)
     fail("APN_STATE_CORRUPT", "post_approval_calldata_binding");
 }
-export function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRecord(value) || !["apn.stargate-v2-token-operation.v1", "apn.stargate-v2-token-operation.v2", "apn.stargate-v2-token-operation.v3", "apn.stargate-v2-token-operation.v4", "apn.stargate-v2-token-operation.v5"].includes(String(value.schemaVersion))) fail("APN_STATE_CORRUPT", "schema"); const raw = value as unknown as StargateTokenOperation, { integrityHash, ...body } = raw; if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
-  let record = raw;
-  if (raw.schemaVersion === "apn.stargate-v2-token-operation.v1") { assertLegacyTokenLane(raw);
-    if (raw.finalityPolicy === undefined && raw.finalityPolicyProvenance === undefined) record = seal({ ...body, finalityPolicy: stargateV2LegacyRouteFinalityPolicy(STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN), finalityPolicyProvenance: "derived_legacy_v1" } as StargateTokenOperation); else { assertStargateV2LegacyRouteFinalityPolicy(raw.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN); if (raw.finalityPolicyProvenance !== "derived_legacy_v1") fail("APN_STATE_CORRUPT", "finality_policy_provenance"); }
-  } else { assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN); if (raw.finalityPolicyProvenance !== "pinned_v2") fail("APN_STATE_CORRUPT", "finality_policy_provenance"); }
-  if (raw.schemaVersion === "apn.stargate-v2-token-operation.v3" || raw.schemaVersion === "apn.stargate-v2-token-operation.v4" || raw.schemaVersion === "apn.stargate-v2-token-operation.v5") {
+/** Every released version (0.5.25..) wrote only token schema v5. */
+export function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRecord(value) || value.schemaVersion !== "apn.stargate-v2-token-operation.v5") fail("APN_STATE_CORRUPT", "schema"); const raw = value as unknown as StargateTokenOperation, { integrityHash, ...body } = raw; if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
+  const record = raw;
+  assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN); if (raw.finalityPolicyProvenance !== "pinned_v2") fail("APN_STATE_CORRUPT", "finality_policy_provenance");
+  {
     const simulation = raw.bridgeSimulation;
     const approvalDebit = raw.approvalEnvelope === undefined ? 0n : BigInt(raw.approvalEnvelope.gasLimitAtomic) * BigInt(raw.approvalEnvelope.maxFeePerGasAtomic);
     const totalDebit = approvalDebit + BigInt(raw.sendEnvelope.valueAtomic) + BigInt(raw.sendEnvelope.gasLimitAtomic) * BigInt(raw.sendEnvelope.maxFeePerGasAtomic);
@@ -100,7 +93,7 @@ export function validateRecord(value: unknown): StargateTokenOperation { if (!is
       (raw.allowanceRequired ? simulation.mode !== "pending_post_approval" || simulation.prepareStatus !== "pending_post_approval" || raw.initialAllowanceAtomic !== "0" || raw.approvalEnvelope === undefined ||
         BigInt(raw.sendEnvelope.nonceAtomic) !== BigInt(raw.approvalEnvelope.nonceAtomic) + 1n || raw.sendEnvelope.maxFeePerGasAtomic !== raw.approvalEnvelope.maxFeePerGasAtomic || raw.sendEnvelope.maxPriorityFeePerGasAtomic !== raw.approvalEnvelope.maxPriorityFeePerGasAtomic
         : simulation.mode !== "exact_at_prepare" || simulation.prepareStatus !== "succeeded" || raw.initialAllowanceAtomic !== raw.amountAtomic || raw.approvalEnvelope !== undefined)) fail("APN_STATE_CORRUPT", "bridge_simulation_binding");
-    if (raw.schemaVersion === "apn.stargate-v2-token-operation.v4" || raw.schemaVersion === "apn.stargate-v2-token-operation.v5") {
+    {
       const fees = raw.feeApproval;
       const validStoredUint = (input: unknown, positive = false) => typeof input === "string" && UINT.test(input) && BigInt(input) < 1n << 256n && (!positive || BigInt(input) > 0n);
       if (fees === undefined || !["exact_snapshot", "owner_ceiling"].includes(fees.provenance) ||
@@ -113,9 +106,9 @@ export function validateRecord(value: unknown): StargateTokenOperation { if (!is
         raw.sendEnvelope.maxFeePerGasAtomic !== fees.approvedMaxFeePerGasWei || raw.sendEnvelope.maxPriorityFeePerGasAtomic !== fees.approvedMaxPriorityFeePerGasWei ||
         (raw.approvalEnvelope !== undefined && (raw.approvalEnvelope.maxFeePerGasAtomic !== fees.approvedMaxFeePerGasWei || raw.approvalEnvelope.maxPriorityFeePerGasAtomic !== fees.approvedMaxPriorityFeePerGasWei)) ||
         (fees.provenance === "exact_snapshot" && (fees.quotedMaxFeePerGasWei !== fees.approvedMaxFeePerGasWei || fees.quotedMaxPriorityFeePerGasWei !== fees.approvedMaxPriorityFeePerGasWei))) fail("APN_STATE_CORRUPT", "fee_approval_binding");
-    } else if (raw.feeApproval !== undefined) fail("APN_STATE_CORRUPT", "legacy_fee_approval_field");
-  } else if (raw.bridgeSimulation !== undefined || raw.feeApproval !== undefined) fail("APN_STATE_CORRUPT", "legacy_simulation_field");
-  if (raw.schemaVersion === "apn.stargate-v2-token-operation.v5") {
+    }
+  }
+  {
     if (raw.approvalFinalityWindowMs !== STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS) fail("APN_STATE_CORRUPT", "approval_finality_window");
     const attemptedApproval = raw.approvalTransactionHash !== undefined;
     if (!raw.allowanceRequired && (raw.approvalSubmissionStartedAt !== undefined || raw.approvalFinalityDeadline !== undefined || raw.postApprovalQuote !== undefined))
@@ -132,8 +125,7 @@ export function validateRecord(value: unknown): StargateTokenOperation { if (!is
     if (raw.postApprovalQuote !== undefined) validatePostApprovalQuote(raw, raw.postApprovalQuote);
     if (["post_approval_quote_bound", "submission_started", "submitted", "unknown_finality", "observed"].includes(raw.phase) && raw.allowanceRequired && raw.postApprovalQuote === undefined)
       fail("APN_STATE_CORRUPT", "post_approval_quote_required");
-  } else if (raw.approvalFinalityWindowMs !== undefined || raw.approvalSubmissionStartedAt !== undefined ||
-    raw.approvalFinalityDeadline !== undefined || raw.postApprovalQuote !== undefined) fail("APN_STATE_CORRUPT", "legacy_approval_finality_field");
+  }
   const usageStates: readonly StargateTokenUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
   if ((record.usageState !== undefined && !usageStates.includes(record.usageState)) || (record.usageTarget !== undefined && !usageStates.includes(record.usageTarget))) fail("APN_STATE_CORRUPT", "usage_state");
   if (canonicalJson(record.policy.mechanism) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) fail("APN_STATE_CORRUPT", "mechanism_pin");
@@ -153,7 +145,6 @@ export function validateRecord(value: unknown): StargateTokenOperation { if (!is
   if (record.transitions[0]?.phase !== "prepared") fail("APN_STATE_CORRUPT", "transition");
   for (let i = 1; i < record.transitions.length; i++) if (!allowed[record.transitions[i - 1]!.phase]?.includes(record.transitions[i]!.phase)) fail("APN_STATE_CORRUPT", "transition");
   return record; }
-function assertLegacyTokenLane(record: StargateTokenOperation) { const route = record.quote?.route, approval = record.approvalEnvelope, cleanup = record.cleanupEnvelope; if (record.recipient !== record.owner || record.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || record.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || record.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || record.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || record.sourceEid !== STARGATE_TOKEN_SOURCE_EID || record.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || record.executor !== STARGATE_TOKEN_SOURCE_EXECUTOR || record.sendEnvelope?.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || record.sendEnvelope.from !== record.owner || record.sendEnvelope.to !== STARGATE_TOKEN_SOURCE_POOL || (approval !== undefined && (approval.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || approval.from !== record.owner || approval.to !== STARGATE_TOKEN_SOURCE_TOKEN)) || (cleanup !== undefined && (cleanup.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || cleanup.from !== record.owner || cleanup.to !== STARGATE_TOKEN_SOURCE_TOKEN)) || route?.sourceChainId !== STARGATE_TOKEN_SOURCE_CHAIN || route?.destinationChainId !== STARGATE_TOKEN_DESTINATION_CHAIN || route?.sourceEid !== STARGATE_TOKEN_SOURCE_EID || route?.destinationEid !== STARGATE_TOKEN_DESTINATION_EID || route?.sourcePool !== STARGATE_TOKEN_SOURCE_POOL || route?.destinationPool !== STARGATE_TOKEN_DESTINATION_POOL || route?.sourceToken !== STARGATE_TOKEN_SOURCE_TOKEN || route?.destinationToken !== STARGATE_TOKEN_DESTINATION_TOKEN || record.quote?.recipient !== record.owner || route?.asset !== "USDC") fail("APN_STATE_CORRUPT", "legacy_lane"); }
 function validateAdvance(previous: StargateTokenOperation | null, next: StargateTokenOperation) { if (previous === null) { if (next.phase !== "prepared" || next.transitions.length !== 1) fail("APN_STATE_CORRUPT", "initial"); return; }
   const frozen = (x: StargateTokenOperation) => { const { phase: _p, transitions: _t, integrityHash: _i, approvalTransactionHash: _a, transactionHash: _h,
     residualAllowanceAtomic: _r, sourceReceipt: _s, destinationEvidence: _d, cleanupEnvelope: _ce, cleanupTransactionHash: _ch,
@@ -177,14 +168,14 @@ function validateAdvance(previous: StargateTokenOperation | null, next: Stargate
   if (previous.usageState !== undefined && next.usageState !== previous.usageState && !allowedUsage[previous.usageState]?.includes(next.usageState!)) fail("APN_STATE_CORRUPT", "usage_state_rewrite"); }
 export function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation) { const op = validateRecord(input); if (op.phase !== "observed" || op.sourceReceipt === undefined || op.destinationEvidence === undefined || op.residualAllowanceAtomic !== "0" || op.usageState !== "finalized" || op.usageTarget !== undefined) fail("APN_OPERATION_BLOCKED", "receipt_not_observed");
   const effectiveQuote = op.postApprovalQuote?.quote ?? op.quote;
-  const body = { schemaVersion: op.schemaVersion === "apn.stargate-v2-token-operation.v5" ? "apn.stargate-v2-token-receipt.v2" as const : "apn.stargate-v2-token-receipt.v1" as const, operationId: op.operationId, profile: op.profile,
+  const body = { schemaVersion: "apn.stargate-v2-token-receipt.v2" as const, operationId: op.operationId, profile: op.profile,
     route: { sourceChainId: 10, sourceEid: 30111, sourcePool: op.sourcePool, sourceToken: op.sourceToken, destinationChainId: 137, destinationEid: 30109, destinationPool: op.destinationPool, destinationToken: op.destinationToken },
     owner: op.owner, recipient: op.recipient, principalAtomic: op.amountAtomic, minimumOutputAtomic: effectiveQuote.quote.minimumOutputAtomic,
     nativeDropAtomic: op.nativeDropAtomic, nativeMessageFeeAtomic: effectiveQuote.quote.nativeMessageFeeAtomic,
     maximumDebitAtomic: op.postApprovalQuote?.maximumDebitAtomic ?? op.maximumDebitAtomic,
     options: op.options, executor: op.executor, executorNativeCapAtomic: op.postApprovalQuote?.executorNativeCapAtomic ?? op.executorNativeCapAtomic, policy: op.policy,
     finalityPolicy: op.finalityPolicy, quoteHash: effectiveQuote.quoteHash,
-    ...(op.schemaVersion === "apn.stargate-v2-token-operation.v5" ? { quoteLifecycle: {
+    quoteLifecycle: {
       ownerApprovedMinimumOutputAtomic: op.minOutputAtomic,
       ownerApprovedMaximumQuoteLossAtomic: (BigInt(op.amountAtomic) - BigInt(op.minOutputAtomic)).toString(),
       initialQuotedOutputAtomic: op.quote.quote.minimumOutputAtomic,
@@ -194,9 +185,7 @@ export function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation) {
       postApprovalQuoteHash: op.postApprovalQuote?.snapshotHash ?? null, postApprovalQuoteBlock: op.postApprovalQuote?.quoteBlock ?? null,
       postApprovalQuoteExpiresAt: op.postApprovalQuote?.expiresAt ?? null,
       postApprovalQuotedOutputAtomic: op.postApprovalQuote?.quote.quote.minimumOutputAtomic ?? null,
-      postApprovalQuotedNativeMessageFeeAtomic: op.postApprovalQuote?.quote.quote.nativeMessageFeeAtomic ?? null } } : {}),
-    feeApproval: op.feeApproval ?? { provenance: "legacy_exact_snapshot" as const, quotedMaxFeePerGasWei: op.sendEnvelope.maxFeePerGasAtomic, quotedMaxPriorityFeePerGasWei: op.sendEnvelope.maxPriorityFeePerGasAtomic, approvedMaxFeePerGasWei: op.sendEnvelope.maxFeePerGasAtomic, approvedMaxPriorityFeePerGasWei: op.sendEnvelope.maxPriorityFeePerGasAtomic },
-    bridgeSimulation: op.bridgeSimulation ?? { mode: "legacy_exact_at_prepare" as const, prepareStatus: "legacy_succeeded" as const,
-      gasCeilingAtomic: op.sendEnvelope.gasLimitAtomic },
+      postApprovalQuotedNativeMessageFeeAtomic: op.postApprovalQuote?.quote.quote.nativeMessageFeeAtomic ?? null },
+    feeApproval: op.feeApproval!, bridgeSimulation: op.bridgeSimulation!,
     approvalTransactionHash: op.approvalTransactionHash ?? null, residualAllowanceAtomic: op.residualAllowanceAtomic, source: op.sourceReceipt, destination: op.destinationEvidence };
   return Object.freeze({ ...body, evidenceHash: hashObject(body) }); }

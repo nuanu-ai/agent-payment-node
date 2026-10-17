@@ -31,7 +31,6 @@ export declare function chainUsage(policy: ChainPolicy, operations: readonly Rai
     principalAtomic: string;
     nativeFeeAtomic: string;
 };
-export declare function assertChainPolicy(policy: ChainPolicy, account: ChainAccount, asset: ChainAsset, amount: string, maximumFee: string, operations: readonly RailOperationRecord[], now: Date, excluding?: string): void;
 /** The per-transfer and UTC-daily principal caps the owner approved on the admission screen; unresolved transfers stay charged. */
 export declare function assertChainPrincipal(policy: ChainPolicy, amount: string, operations: readonly RailOperationRecord[], now: Date, excluding?: string): void;
 /** The native fee, rent and resource cap; the principal caps are checked by assertChainPrincipal beside the allowlist caps. */

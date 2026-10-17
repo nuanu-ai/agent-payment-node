@@ -9,19 +9,18 @@ import {
   COMMAND_GROUPS,
   COMMAND_MANIFEST,
   COMMANDS,
-  assertCompatibleManifestEvolution,
   catalogNextActions,
   dispatchDiscovery,
   parseCatalogArgv,
   renderDiscoveryOutput,
   renderHelp,
   renderReadmeCommandReference,
-  validateCommandManifest,
   type CommandDefinition,
   type CommandOption,
   type ScalarType,
 } from "../../src/command-catalog.js";
 import { runCli } from "../../src/cli.js";
+import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { PRODUCT_VERSION } from "../../src/constants.js";
 import { ApnError } from "../../src/errors.js";

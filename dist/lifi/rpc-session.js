@@ -3,8 +3,8 @@ export { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATC
 import { canonicalJson, hashObject } from "../canonical.js";
 import { isDeepStrictEqual } from "node:util";
 import { ApnError } from "../errors.js";
-import { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity } from "./rpc-scheduler.js";
-export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity, rpcProviderFamily } from "./rpc-scheduler.js";
+import { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS } from "./rpc-scheduler.js";
+export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcProviderFamily } from "./rpc-scheduler.js";
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export class RpcReadSession {
     physicalBudget;

@@ -54,7 +54,6 @@ import { TtyBridgeApproval } from "./lifi/tty.js";
 import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
 import { GaslessUsdtCommandPrepare } from "./gasless-usdt/command-prepare.js";
 import { GaslessUsdtCommandExecute } from "./gasless-usdt/command-execute.js";
-import { UsdtOperationRepository } from "./gasless-usdt/operation.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
 import { gaslessObservationRpcFactory } from "./gasless/observation-rpc.js";
@@ -145,7 +144,6 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const effectiveRpcUrl = bound.rpcUrl;
   // Every direct EVM network is capped and paced the same way, so every transfer prepare carries the guard state.
   const directGuardCommand = bound.request.command === "transfer.approve" || bound.request.command === "operation.resume" ||
-    bound.request.command === "wallet.balance" && bound.request.asset?.chainId === 1329 && bound.request.asset.token === "native" ||
     bound.request.command === "transfer.prepare";
   const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl,
     directGuardCommand ? { directGuardState: state } : {}));
@@ -378,11 +376,11 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
       ...(["gasless.transfer.approve", "gasless.transfer.approve-sealed"].includes(bound.request.command) ? { approval: new TtyGaslessApproval() } : {}) },
     ...(bound.request.command.startsWith("gasless.usdt.") || options.gaslessUsdt !== undefined ? {
-      gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)),
+      gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(state.root),
     } : {}),
     ...(bound.request.command === "gasless.usdt.prepare" || options.gaslessUsdtPrepare !== undefined ? {
       gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock,
-        options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), options.gaslessUsdtPrepareOptions),
+        options.gaslessUsdt ?? new GaslessUsdtOperationService(state.root), options.gaslessUsdtPrepareOptions),
     } : {}),
     ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe", "gasless.usdt.resume"].includes(bound.request.command) ||
       options.gaslessUsdtExecute !== undefined ? {
