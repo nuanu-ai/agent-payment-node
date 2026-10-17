@@ -10,7 +10,6 @@ import { BASE_USDC, CHAIN_ID, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./c
 import { ApnError } from "./errors.js";
 import { EvmRpc } from "./evm-rpc.js";
 import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
-import { directEvmStepBudget } from "./evm-direct-reads.js";
 import { parseAtomic } from "./money.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses } from "./network-policy.js";
 const AUTHORIZATION_STATE_SELECTOR = "0xe94a0102";
@@ -52,44 +51,6 @@ export class HttpsBaseRpc {
         const signal = this.abortSignal;
         const wait = rpcAbortableWait(signal);
         this.directGuard ??= new EvmDirectRpcGuard(this.directGuardState, maxPhysicalRequests, Date.now, wait, () => this.remainingTimeoutMs());
-    }
-    async seiNativeBalance(address, selection, deadlineAtMs) {
-        if (selection.chainId !== 1329 || selection.token !== "native") {
-            throw new ApnError("APN_INVALID_INPUT", "Bounded Sei balance requires native SEI on Sei.");
-        }
-        if (this.directGuardState === undefined)
-            throw new ApnError("APN_RPC_CONFIG", "Bounded Sei balance RPC guard state is unavailable.");
-        const remainingMs = Math.floor(deadlineAtMs - performance.now());
-        if (!Number.isFinite(remainingMs) || remainingMs < 1 || remainingMs > 20_000) {
-            throw new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate RPC deadline.");
-        }
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), remainingMs);
-        const bounded = new HttpsBaseRpc(this.endpoint.toString(), {
-            totalDeadlineMs: deadlineAtMs, abortSignal: controller.signal,
-            directGuardState: this.directGuardState,
-        });
-        bounded.pinnedAddresses = this.pinnedAddresses;
-        bounded.chainIdCell = this.chainIdCell;
-        try {
-            // DNS validation precedes the first POST and must share the same deadline.
-            let onAbort;
-            try {
-                await Promise.race([bounded.primePublicAddresses(), new Promise((_, reject) => {
-                        onAbort = () => reject(new ApnError("APN_RPC_AMBIGUOUS", "Sei native balance reached its aggregate RPC deadline."));
-                        controller.signal.addEventListener("abort", onAbort, { once: true });
-                    })]);
-            }
-            finally {
-                if (onAbort !== undefined)
-                    controller.signal.removeEventListener("abort", onAbort);
-            }
-            bounded.armEvmDirectRpcGuard(directEvmStepBudget(1329, "balance"));
-            return await bounded.evm.directReads(1329).balance(address, selection);
-        }
-        finally {
-            clearTimeout(timeout);
-        }
     }
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
     withAbortSignal(signal) {

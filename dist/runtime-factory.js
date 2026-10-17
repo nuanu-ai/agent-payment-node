@@ -131,7 +131,6 @@ export function createApnCore(bound, options = {}) {
     const effectiveRpcUrl = bound.rpcUrl;
     // Every direct EVM network is capped and paced the same way, so every transfer prepare carries the guard state.
     const directGuardCommand = bound.request.command === "transfer.approve" || bound.request.command === "operation.resume" ||
-        bound.request.command === "wallet.balance" && bound.request.asset?.chainId === 1329 && bound.request.asset.token === "native" ||
         bound.request.command === "transfer.prepare";
     const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl, directGuardCommand ? { directGuardState: state } : {}));
     const coinbaseRpc = options.rpc;

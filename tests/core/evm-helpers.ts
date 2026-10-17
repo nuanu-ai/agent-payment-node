@@ -91,9 +91,6 @@ export class EvmTestRpc extends TestRpc {
       tokenBalanceDeltasVerified: operation.evm?.asset.kind === "erc20" && this.deltasVerified,
       ...(operation.evm?.asset.kind === "erc20" ? { senderDeltaAtomic: operation.amountAtomic, recipientDeltaAtomic: this.deltasVerified ? operation.amountAtomic : "0" } : {}) }),
   };
-  async seiNativeBalance(address: Address, selection: Parameters<EvmRpcPort["balance"]>[1]) {
-    return await this.evm.directReads!(1329).balance(address, selection);
-  }
   sender: Address = RECIPIENT;
 
   override async submitRawTransaction(rawTransaction: Hex): Promise<Hex> {
