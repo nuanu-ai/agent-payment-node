@@ -213,7 +213,9 @@ export class OneClickSourceService {
     const journal = this.journal();
     let record = await journal.load(operationId); if (record === null) fail("missing_operation");
     const lane = oneClickRecordLane(record);
-    // A finished operation answers from its journal with no RPC: a reverted safe source, or a stored finalized destination.
+    // A finished operation answers from its journal with no RPC: a source proven never to land, a reverted safe source, or a
+    // stored finalized destination.
+    if (record.phase === "failed_proven_superseded") return statusView(record, lane, null, { status: null, provenance: "not_queried" }, null);
     if (record.phase === "source_observed" && (record.sourceReceiptStatus === "reverted" || record.destinationStatus !== null)) {
       return statusView(record, lane, { safe: true, transactionHash: record.transactionHash, status: record.sourceReceiptStatus,
         receiptHash: record.sourceReceiptHash, provenance: "apn_journal" }, { status: null, provenance: "apn_journal" }, record.destinationStatus);
@@ -225,6 +227,18 @@ export class OneClickSourceService {
     if (safe?.safe === true && (safe.status === "success" || safe.status === "reverted") && typeof safe.receiptHash === "string" &&
       ["submitting", "submitted_pending", "unknown_finality"].includes(record.phase)) {
       record = await journal.advance(operationId, record.integrityHash, "source_observed", { sourceReceiptStatus: safe.status, sourceReceiptHash: safe.receiptHash });
+    }
+    // No receipt at all: once another transaction took the source nonce at finality and the node knows neither this
+    // transaction nor a receipt, the deposit can never land and the operation ends. Until then it stays open; a deposit
+    // that does land, even after the quote deadline, is observed here as `source_observed`: the deposit address is
+    // 1Click's, and its status (a late deposit is refunded to the payer, the refund address) is reported as provider
+    // data, while no destination proof is claimed.
+    if (sourceReceipt === null && ["sealed", "submitting", "submitted_pending", "unknown_finality"].includes(record.phase)) {
+      const finalizedNonceAtomic = await source.unlanded(record);
+      if (finalizedNonceAtomic !== null) {
+        record = await journal.advance(operationId, record.integrityHash, "failed_proven_superseded", { finalizedNonceAtomic });
+        return statusView(record, lane, null, { status: null, provenance: "not_queried" }, null);
+      }
     }
     if (record.sourceReceiptStatus === "reverted") return statusView(record, lane, sourceReceipt, { status: null, provenance: "not_queried" }, null);
     // Destination status is obtained from a separate provider read and is never inferred from the source receipt.
@@ -256,7 +270,9 @@ function statusView(record: OneClickSourceRecord, lane: OneClickLane, sourceRece
   destinationProof: OneClickDestinationProof | null, hashes: readonly string[] = destinationProof?.transactions.map((row) => row.id) ?? []) {
   const destinationClaimed = provider.status === "SUCCESS", destinationFinalized = destinationProof?.status === "finalized";
   return { operationId: record.operationId, lane: lane.id, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
-    sourceReceipt, oneClickProviderStatus: provider.status, providerStatusProvenance: provider.provenance,
+    sourceReceipt, sourceNeverLands: record.finalizedNonceAtomic === undefined ? null
+      : { proof: "finalized_nonce_past_without_transaction_or_receipt", sourceNonce: record.sourceCall.nonce, finalizedNonceAtomic: record.finalizedNonceAtomic },
+    oneClickProviderStatus: provider.status, providerStatusProvenance: provider.provenance,
     destinationClaimed, providerDestinationTransactions: hashes, destinationProof, destinationFinalized,
     ...(lane.id === LEGACY_ONECLICK_LANE ? { tronDestinationClaimed: destinationClaimed, tronDestinationFinalized: destinationFinalized } : {}) };
 }

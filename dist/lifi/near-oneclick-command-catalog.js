@@ -5,7 +5,7 @@ const option = (name, type, ...extra) => ({
 });
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
     success: "OneClick source state saved.", failures: ["Classified APN failure; no automatic resend."] };
-const states = { terminal: ["source_observed"], non_terminal: ["prepared", "signing_started", "sealed", "submitting", "submitted_pending", "unknown_finality"] };
+const states = { terminal: ["source_observed", "failed_proven_superseded"], non_terminal: ["prepared", "signing_started", "sealed", "submitting", "submitted_pending", "unknown_finality"] };
 export const ONECLICK_COMMANDS = [
     { path: ["oneclick", "source", "submit"], synopsis: "apn oneclick source submit --lane <lane> --profile <profile> --expected-payer <evm-address> --recipient <tron-or-solana-address> --amount-atomic <origin atomic> --min-output-atomic <destination atomic> --max-quoted-loss-atomic <lane loss atomic> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>",
         summary: "Prepare, confirm and submit one direct deposit on a pinned NEAR 1Click lane: Base USDC to TRON USDT, or Ethereum ETH to TRON TRX, Solana SOL or TRON USDT.",
@@ -24,7 +24,7 @@ export const ONECLICK_COMMANDS = [
         examples: ["apn oneclick source submit --lane base-usdc-to-tron-usdt --profile <profile> --expected-payer <base-payer> --recipient <tron-recipient> --amount-atomic 3000000 --min-output-atomic 1000000 --max-quoted-loss-atomic 2000000 --max-gas-limit-atomic 100000 --max-fee-per-gas-wei 2000000000 --max-priority-fee-per-gas-wei 100000000 --max-native-debit-wei 200000000000000 --idempotency-key tron-first",
             "apn oneclick source submit --lane ethereum-eth-to-tron-trx --profile <profile> --expected-payer <ethereum-payer> --recipient <tron-recipient> --amount-atomic 2000000000000000 --min-output-atomic 12500000 --max-quoted-loss-atomic 200000 --max-gas-limit-atomic 60000 --max-fee-per-gas-wei 20000000000 --max-priority-fee-per-gas-wei 2000000000 --max-native-debit-wei 2600000000000000 --idempotency-key trx-fund-1"] },
     { path: ["oneclick", "source", "status"], synopsis: "apn oneclick source status --operation <operation-id>",
-        summary: "Read the saved source record, source receipt, 1Click status claim and independent TRON or Solana destination proof without resending.",
+        summary: "Read the saved source record, source receipt, 1Click status claim and independent TRON or Solana destination proof without resending; a source the finalized nonce proves can never land ends failed_proven_superseded.",
         options: [option("--operation", "operation_id")], effect: { class: "network_read", summary: "Read-only source-chain, 1Click and destination-chain observation; destination reads use APN_TRON_RPC_URL or APN_SOLANA_RPC_URL." },
         approval: { class: "none", when: "Observation only." }, output, states, recovery: [],
         examples: ["apn oneclick source status --operation <operation-id>"] },

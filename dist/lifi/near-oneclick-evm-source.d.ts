@@ -80,6 +80,11 @@ export declare class OneClickEvmSource {
     send(raw: Hex): Promise<Hex>;
     /** Whether the node knows this hash at all (pending or mined). Read only when an earlier operation still reserves the nonce. */
     transactionKnown(hash: Hex): Promise<boolean>;
+    /**
+     * R4 exit 2 for a signed source without a receipt: the payer's nonce at the `finalized` tag past the source nonce, while
+     * the node knows neither the transaction nor a receipt (one batch). The finalized nonce, or null while not proven.
+     */
+    unlanded(record: OneClickSourceRecord): Promise<string | null>;
     /** Safe-block receipt observation. It never implies destination delivery. */
     observe(record: OneClickSourceRecord): Promise<unknown>;
     /** Reads outside the shared reader's method list, over the same validated endpoint and transport. */
