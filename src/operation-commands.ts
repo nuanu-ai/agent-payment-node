@@ -50,15 +50,18 @@ export class OperationCommands {
     await this.context.ready();
     let entry = await this.index.find(operationId);
     if (entry === null) return operationOutcome(await pendingFamilyAbandon(this.context, this.index.registry, operationId));
-    if (entry.state === "released") return operationOutcome(publicRelease(entry));
     let record: unknown;
     try { record = entry.unreadableReason === "duplicate_operation_id" ? undefined : await this.index.loadRecord(entry); }
     catch (error) {
       if (!(error instanceof ApnError)) throw error;
       record = undefined;
       // A record that became unreadable after it was indexed is quarantined first, so its release names the reason.
-      if (entry.state !== "unreadable") { await this.index.settle(operationId); entry = await this.index.find(operationId) ?? entry; }
+      if (entry.state === "active" || entry.state === "admitted") {
+        await this.index.settle(operationId); entry = await this.index.find(operationId) ?? entry;
+      }
     }
+    // Already released and still unreadable: the answer is the release (asked once); a readable record takes its family's exit.
+    if (record === undefined && entry.state === "released") return operationOutcome(publicRelease(entry));
     if (record === undefined || (record === null && entry.state === "admitted")) {
       return operationOutcome(publicRelease(await this.index.releaseByOwner(operationId, this.context.requireOperationAbandonApproval())));
     }
