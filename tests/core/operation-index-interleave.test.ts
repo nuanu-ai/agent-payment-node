@@ -207,7 +207,7 @@ test("direct EVM and a guarded swap exclude each other on Ethereum in both order
 function circleApproval(d: DirectSetup) {
   const token = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", spender = "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408", reads = { count: 0 };
   const rpc: CircleApprovalRpc = { chainId: 8453, origin: "https://base.example.org", send: unreached("send"), observe: unreached("observe"),
-    unlanded: unreached("unlanded"), read: async () => { reads.count += 1; return { chainId: 8453, payer: d.account, token, spender, blockNumber: "12345", blockHash: `0x${H("a")}`,
+    finalizedBatch: unreached("finalizedBatch"), read: async () => { reads.count += 1; return { chainId: 8453, payer: d.account, token, spender, blockNumber: "12345", blockHash: `0x${H("a")}`,
       latestNonceAtomic: "7", pendingNonceAtomic: "7", usdcBalanceAtomic: "434611", usdcAllowanceAtomic: "0", nativeBalanceWei: "200000000000000",
       gasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000", totalNativeDebitWei: "200000000000000" }; } };
   const limits = { maxGasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60000 };

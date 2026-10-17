@@ -103,7 +103,7 @@ export class StargateTokenService {
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateTokenSourceReceipt(source, txHash, finalityTag),
       observeDestination: async input => await observeStargateTokenDestination(destination, input, tokenAt, cursor), now: this.now,
       neverLands: async effect => await checkNeverLands({ chainId: 10, account: owner, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash },
-        { call: (method, params) => source.call(method, params) }) };
+        async calls => await remotes.source.batchCall(calls)) };
   }
   private async reserveUsage(op: StargateTokenOperation): Promise<StargateTokenUsageState> { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);
     if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again.");

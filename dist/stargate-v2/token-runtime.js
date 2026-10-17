@@ -159,7 +159,7 @@ export class StargateTokenService {
             sendRawTransaction: async (raw) => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw))
                 throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateTokenSourceReceipt(source, txHash, finalityTag),
             observeDestination: async (input) => await observeStargateTokenDestination(destination, input, tokenAt, cursor), now: this.now,
-            neverLands: async (effect) => await checkNeverLands({ chainId: 10, account: owner, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash }, { call: (method, params) => source.call(method, params) }) };
+            neverLands: async (effect) => await checkNeverLands({ chainId: 10, account: owner, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash }, async (calls) => await remotes.source.batchCall(calls)) };
     }
     async reserveUsage(op) {
         const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);

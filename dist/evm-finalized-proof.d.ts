@@ -8,15 +8,24 @@ export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "e
 export interface FinalizedChainRead {
     call(method: FinalizedReadMethod, params: readonly unknown[]): Promise<unknown>;
 }
-export declare function finalizedQuantity(value: unknown): bigint;
-/** A keyless public HTTPS JSON-RPC endpoint, one exact result envelope per call, through the shared bounded transport. */
-export declare function publicFinalizedRead(url: string, label: string, https?: Pick<BridgeHttps, "request">): FinalizedChainRead;
+export interface FinalizedReadCall {
+    readonly method: FinalizedReadMethod;
+    readonly params: readonly unknown[];
+}
+/** One JSON-RPC batch: one POST, so one node answers every call in it. */
+export type FinalizedBatchRead = (calls: readonly FinalizedReadCall[]) => Promise<readonly unknown[]>;
+/** A public endpoint answers single calls and one-node batches. */
+export interface PublicFinalizedRead extends FinalizedChainRead {
+    readonly batch: FinalizedBatchRead;
+}
+/** A keyless public HTTPS JSON-RPC endpoint, exact result envelopes, through the shared bounded transport. */
+export declare function publicFinalizedRead(url: string, label: string, https?: Pick<BridgeHttps, "request">): PublicFinalizedRead;
 /** The finalized-tag reader of each chain an R4 proof may need, by chain id. */
 export type FinalizedReader = (chainId: number) => FinalizedChainRead;
 /** The public RPC setting each family already reads for that chain. */
 export declare const FINALIZED_RPC_ENV: Readonly<Record<number, string>>;
 /** The production reader: the chain's own APN_<CHAIN>_RPC_URL, read keyless; a missing setting is named in the refusal. */
-export declare function environmentFinalizedReader(environment: Readonly<Record<string, string | undefined>>): FinalizedReader;
+export declare function environmentFinalizedReader(environment: Readonly<Record<string, string | undefined>>): (chainId: number) => PublicFinalizedRead;
 export declare function assertFinalizedChain(rpc: FinalizedChainRead, chainId: number): Promise<void>;
 export type OwnTransactionSeen = "not_found" | "included";
 /** What a record says a nonce closure must prove: its signing chain and account, the highest nonce it froze, its own hashes. */
@@ -50,16 +59,20 @@ export interface SignedEffectFacts {
     readonly nonce: bigint;
     readonly transactionHash: string;
 }
+/** Not proven: `receiptFound` says the node holds a receipt, so the effect's observation (not an exit) decides it. */
 export type NeverLandsCheck = {
     readonly neverLands: true;
     readonly finalizedNonce: bigint;
 } | {
     readonly neverLands: false;
-    readonly waitingFor: string;
+    readonly receiptFound: boolean;
 };
 /**
- * R4 exit 2 for one signed effect: at the finalized tag the signer's nonce is past the effect's nonce (so the nonce is
- * spent by a finalized transaction) and the node knows neither the effect's transaction nor a receipt for it, so that
- * transaction was not the one and can never be included. The nonce is read first, then the hash.
+ * R4 exit 2 for one signed effect, the one rule every family uses: at the finalized tag the signer's nonce is past the
+ * effect's nonce (a finalized transaction spent it) and the node knows neither the effect's transaction nor a receipt
+ * for it, so that transaction was not the one and can never be included. A nonce not yet past proves nothing. Chain id,
+ * nonce, receipt and transaction are one batch: a load balancer could route separate requests to a node behind the
+ * finalized head, which would not know a transaction the finalized nonce already covers. Current state only, never a
+ * historical (archive) read.
  */
-export declare function checkNeverLands(effect: SignedEffectFacts, rpc: FinalizedChainRead): Promise<NeverLandsCheck>;
+export declare function checkNeverLands(effect: SignedEffectFacts, batch: FinalizedBatchRead): Promise<NeverLandsCheck>;

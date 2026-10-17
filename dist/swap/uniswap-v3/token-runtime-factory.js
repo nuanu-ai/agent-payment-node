@@ -13,7 +13,7 @@ import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
-import { tokenFinalizedRead } from "./token-rpc.js";
+import { tokenFinalizedBatch } from "./token-rpc.js";
 import { checkNeverLands } from "../../evm-finalized-proof.js";
 export function createUniswapTokenRuntime(input) {
     const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()), observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call, input.verifyPins), ledger = new AssetUsageLedger(state.root), usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
@@ -35,7 +35,7 @@ export function createUniswapTokenRuntime(input) {
         },
         neverLands: async (op, kind, attempt) => {
             await custody.bindEffectProvider(op, kind, attempt.transactionHash);
-            return await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash }, tokenFinalizedRead(call));
+            return await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash }, tokenFinalizedBatch(call));
         },
         foregroundApprove: async (op) => { await approveOwner(op); await foreground(input.foreground === "approve", op, false, clock.now(), input.tty); await approveOwner(op); },
         foregroundCleanup: async (op) => { await approveOwner(op); await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty); await approveOwner(op); },

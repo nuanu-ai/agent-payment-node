@@ -1,7 +1,7 @@
 import { encodeFunctionData, getAddress, keccak256, pad, parseAbi } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { jsonRpcBatchReader, provesUnlanded, readEvmUnlandedEvidence } from "../evm-unlanded-proof.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
+import { checkNeverLands, publicFinalizedRead } from "../evm-finalized-proof.js";
 import { CircleBaseJsonRpc } from "./circle-v2-source-service.js";
 import { bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord } from "./validation.js";
 const ORACLE = getAddress("0x420000000000000000000000000000000000000F");
@@ -151,8 +151,9 @@ export class OneClickEvmSource {
     async unlanded(record) {
         if (record.transactionHash === null)
             return null;
-        const evidence = await readEvmUnlandedEvidence(jsonRpcBatchReader(this.https, this.url), this.lane.origin.chainId, record.payer, record.transactionHash);
-        return provesUnlanded(evidence, record.sourceCall.nonce) ? evidence.finalizedNonce : null;
+        const check = await checkNeverLands({ chainId: this.lane.origin.chainId, account: record.payer, nonce: BigInt(record.sourceCall.nonce),
+            transactionHash: record.transactionHash }, publicFinalizedRead(this.url, "1Click origin RPC", this.https).batch);
+        return check.neverLands ? check.finalizedNonce.toString() : null;
     }
     /** Safe-block receipt observation. It never implies destination delivery. */
     async observe(record) {

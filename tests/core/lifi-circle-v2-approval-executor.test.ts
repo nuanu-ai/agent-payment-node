@@ -32,7 +32,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
       totalNativeDebitWei: "200000000000000" }); },
     send: async sent => { sends++; raw = sent; if (ambiguous) throw new Error("lost response"); return keccak256(sent); },
     // The payer's finalized nonce is the approval's own: nothing proves it can never land.
-    unlanded: async () => ({ finalizedNonce: nonce, receiptFound: false, transactionKnown: false }),
+    finalizedBatch: async () => ["0x2105", `0x${BigInt(nonce).toString(16)}`, null, null],
     observe: async hash => include && raw !== null ? { status: "success", safe: true,
       receipt: { chainId: 8453, transactionHash: hash, blockNumberAtomic: "12345", blockHash: `0x${"a".repeat(64)}` as Hex,
         logs: [{ address: token as Hex, topics: [keccak256(Buffer.from("Approval(address,address,uint256)")),

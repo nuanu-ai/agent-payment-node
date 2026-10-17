@@ -10,9 +10,7 @@ import { prepareCircleV2BaseUsdcApprovalReadOnly } from "./circle-v2-approval-pr
 import { bridgeOwner } from "./owner.js";
 import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
-import { jsonRpcBatchReader, provesUnlanded, readEvmUnlandedEvidence } from "../evm-unlanded-proof.js";
-import { BridgeHttps } from "./https.js";
-import { BRIDGE_RPC_ENV } from "./rpc-transport.js";
+import { checkNeverLands } from "../evm-finalized-proof.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
 /**
  * Every phase of a Circle Base USDC approval, and its outcomes: a safe receipt either way, proven never sent, or proven
@@ -44,7 +42,7 @@ function circleApprovalAllowance(record) {
  * its own command session on the primary endpoint: a state read is one batch (chain identity, head, account, Base fee
  * inputs and the approval's own simulation), and the estimate and fee quote reuse it.
  */
-export function circleApprovalRpcFromBridge(input, proofBatch) {
+export function circleApprovalRpcFromBridge(input, finalizedBatch) {
     const rpcFor = typeof input === "function" ? input : () => input, first = rpcFor();
     if (first.chainId !== 8453)
         bridgeFailure("APN_RPC_CONFIG", "circle_approval_base_only");
@@ -83,16 +81,7 @@ export function circleApprovalRpcFromBridge(input, proofBatch) {
                 bridgeFailure("APN_RPC_PROTOCOL", "circle_approval_receipt_binding");
             return { receipt, status: tx.status, safe: true };
         },
-        unlanded: async (payer, hash) => await readEvmUnlandedEvidence(proofBatch(), 8453, payer, hash),
-    };
-}
-/** The never-lands proof reads the same configured Base endpoint as every other approval read, in one batch. */
-export function circleApprovalProofBatch(environment) {
-    return () => {
-        const url = environment[BRIDGE_RPC_ENV[8453]];
-        if (url === undefined || url.length === 0)
-            bridgeFailure("APN_RPC_CONFIG", `missing_${BRIDGE_RPC_ENV[8453]}`);
-        return jsonRpcBatchReader(new BridgeHttps(), url);
+        finalizedBatch,
     };
 }
 class CircleApprovalJournal extends SecureStateStore {
@@ -340,10 +329,11 @@ export class CircleV2ApprovalExecutor {
             if (found === null) {
                 // No safe receipt. Once another transaction took its nonce at finality and the node knows neither this one nor a
                 // receipt, the approval can never land: no allowance changed, and the payer's account is free again.
-                const evidence = await this.rpc.unlanded(r.preparation.transaction.from, r.transactionHash);
-                if (!provesUnlanded(evidence, r.preparation.transaction.nonceAtomic))
+                const check = await checkNeverLands({ chainId: 8453, account: r.preparation.transaction.from, nonce: BigInt(r.preparation.transaction.nonceAtomic),
+                    transactionHash: r.transactionHash }, this.rpc.finalizedBatch);
+                if (!check.neverLands)
                     return await this.unknown(r);
-                r = update(r, { phase: "failed_proven_superseded", finalizedNonceAtomic: evidence.finalizedNonce });
+                r = update(r, { phase: "failed_proven_superseded", finalizedNonceAtomic: check.finalizedNonce.toString() });
                 await this.journal.save(r);
                 return r;
             }

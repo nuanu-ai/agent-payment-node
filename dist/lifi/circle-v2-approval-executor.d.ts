@@ -4,7 +4,7 @@ import { type Hex } from "viem";
 import { type CircleV2ApprovalLimits, type CircleV2ApprovalPreparation, type CircleV2ApprovalStateReader } from "./circle-v2-approval-preparation.js";
 import type { BridgeProtocolReceipt } from "./model.js";
 import type { BridgeRpcPort } from "./ports.js";
-import { type EvmBatchRead, type EvmUnlandedEvidence } from "../evm-unlanded-proof.js";
+import { type FinalizedBatchRead } from "../evm-finalized-proof.js";
 import type { OperationAbandonApprovalPort } from "../operation-abandon-approval.js";
 /**
  * Every phase of a Circle Base USDC approval, and its outcomes: a safe receipt either way, proven never sent, or proven
@@ -45,8 +45,8 @@ export interface CircleApprovalRpc {
         readonly status: "success" | "reverted";
         readonly safe: true;
     } | null>;
-    /** One batch on the same endpoint: the payer's nonce at the `finalized` tag, and whether the node knows the transaction or a receipt. */
-    unlanded(payer: string, hash: Hex): Promise<EvmUnlandedEvidence>;
+    /** The never-lands proof's one-node batch on the configured Base endpoint (APN_BASE_RPC_URL), read at the `finalized` tag. */
+    readonly finalizedBatch: FinalizedBatchRead;
 }
 export interface CircleApprovalSigner {
     sign(record: CircleApprovalRecord): Promise<Hex>;
@@ -93,9 +93,7 @@ export declare function publicCircleApproval(record: CircleApprovalRecord): {
  * its own command session on the primary endpoint: a state read is one batch (chain identity, head, account, Base fee
  * inputs and the approval's own simulation), and the estimate and fee quote reuse it.
  */
-export declare function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort), proofBatch: () => EvmBatchRead): CircleApprovalRpc;
-/** The never-lands proof reads the same configured Base endpoint as every other approval read, in one batch. */
-export declare function circleApprovalProofBatch(environment: Readonly<Record<string, string | undefined>>): () => EvmBatchRead;
+export declare function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort), finalizedBatch: FinalizedBatchRead): CircleApprovalRpc;
 /** Lock-free read of one approval journal (the operation index's reader). */
 export declare function loadCircleApproval(root: string, id: string): Promise<CircleApprovalRecord | null>;
 /** APN encrypted local wallet is opened solely in the signing call; no secret enters the journal. */
