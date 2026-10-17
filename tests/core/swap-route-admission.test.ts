@@ -14,7 +14,7 @@ import { createSwapQuote, type SwapQuoteInput } from "../../src/swap/quote.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { GuardedSwapService } from "../../src/swap/service.js";
 import { ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_MECHANISM_PIN_SLOT_440170207, ORCA_KEYLESS_PROTOCOL_REGISTRY } from "../../src/swap/orca-solana/pins.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/swap/orca-solana/stable-mechanism.js";
+import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/legacy/orca-stable/mechanism.js";
 import { UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_WBTC_MECHANISM_PIN } from "../../src/swap/uniswap-v3/pins.js";
 import { JUPITER_V1_ROUTES as JUPITER_V1_CURRENT_ROUTES, JUPITER_V1_KNOWN_ROUTES as JUPITER_V1_FINITE_ROUTES } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { temporaryState } from "./helpers.js";

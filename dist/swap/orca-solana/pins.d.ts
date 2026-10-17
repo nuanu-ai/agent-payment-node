@@ -50,8 +50,6 @@ export declare const ORCA_KEYLESS_MECHANISM_PIN_SLOT_457152296: SwapMechanismPin
 export declare const ORCA_KEYLESS_MECHANISM_PIN: SwapMechanismPin;
 /** Official identity only. Owners must still admit SOL and USDC with this route under a sealed policy. */
 export declare const ORCA_KEYLESS_PROTOCOL_REGISTRY: SwapProtocolRegistry;
-/** Any registered keyless generation: existing operations stay readable and observable after a program upgrade. */
-export declare function isOrcaKeylessMechanismDigest(digest: string): boolean;
 /** Verifies every program the transaction may invoke, at quote time and again before signing. A changed authority refuses. */
 export type OrcaProgramPinVerifier = (rpc: SolanaRpcPort) => Promise<readonly SolanaProgramObservation[]>;
 /** One `getMultipleAccounts` of seven 45-byte slices: each Program account and the two ProgramData headers. */

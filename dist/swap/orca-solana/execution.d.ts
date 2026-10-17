@@ -22,6 +22,10 @@ export declare class OrcaExecutionGuard {
     private readonly verifyPins;
     constructor(rpc: SolanaRpcPort, clock: ClockPort, verifyPins: OrcaProgramPinVerifier);
     inspect(operationValue: SwapOperationRecord, materialValue: OrcaKeylessMaterial): Promise<OrcaExecutionFreshness>;
+    private inspectNative;
+    /** Token-input pools: the same re-read, rebuild, fee, funds and exact-bytes simulation; the input never leaves as SOL. */
+    private inspectToken;
+    private fresh;
 }
 export interface OrcaExecutionDriverDependencies {
     readonly core: GuardedSwapService;
