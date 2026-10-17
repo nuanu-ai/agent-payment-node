@@ -102,8 +102,12 @@ function validateCommandManifestShape(value: unknown, installedProductVersion?: 
   for (const rawRemoved of value.removed_v1_commands) {
     const removed = recordWithKeys(rawRemoved, ["path", "replacement"]);
     const path = manifestPath(removed.path);
-    // A removed path is gone for good, and its replacement must name a current command.
-    if (knownPaths.has(path) || commandPaths.has(path) || removedPaths.has(path) || !nonempty(removed.replacement) ||
+    // A removed path is gone for good. A replacement names a current command and carries no reason; a removal
+    // without a successor has replacement null and one short reason.
+    if (knownPaths.has(path) || commandPaths.has(path) || removedPaths.has(path)) manifestInvalid();
+    if (removed.replacement === null) {
+      if (!nonempty(removed.reason) || removed.reason.length > 200 || containsControl(removed.reason)) manifestInvalid();
+    } else if (Object.hasOwn(removed, "reason") || !nonempty(removed.replacement) ||
       ![...commandPaths].some((current) => `${removed.replacement} `.startsWith(`apn ${current} `))) manifestInvalid();
     removedPaths.add(path);
   }
@@ -194,6 +198,10 @@ function uniqueStrings(value: unknown): value is readonly string[] {
 
 function sameStrings(value: unknown, expected: readonly string[]): boolean {
   return Array.isArray(value) && value.length === expected.length && value.every((item, index) => item === expected[index]);
+}
+
+function containsControl(value: string): boolean {
+  return /[\u0000-\u001f\u007f]/u.test(value);
 }
 
 function nonempty(value: unknown): value is string {

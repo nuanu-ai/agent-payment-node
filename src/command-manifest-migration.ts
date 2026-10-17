@@ -1,11 +1,11 @@
-/** Manifest v2 removed these v1 commands. Each names the v2 command that performs the same request, so `apn help --json`
- * clients can migrate and an old invocation fails with the replacement as its next action. */
-export interface RemovedV1Command {
-  readonly path: readonly string[];
-  readonly replacement: string;
-}
+/** Manifest v2 removed these v1 commands. A merged command names the v2 command that performs the same request, so
+ * `apn help --json` clients can migrate and an old invocation fails with the replacement as its next action. A command
+ * removed without a successor has `replacement: null` and a short `reason`. */
+export type RemovedV1Command =
+  | { readonly path: readonly string[]; readonly replacement: string }
+  | { readonly path: readonly string[]; readonly replacement: null; readonly reason: string };
 
-export const REMOVED_V1_COMMANDS: readonly RemovedV1Command[] = [
+const REPLACED_V1_COMMANDS: readonly RemovedV1Command[] = [
   { path: ["wallet", "policy", "show-network"], replacement: "apn wallet policy show --profile <profile> --chain <caip2>" },
   { path: ["wallet", "policy", "set-network"], replacement: "apn wallet policy set --profile <profile> --chain <caip2> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>" },
   { path: ["x402", "inspect-network"], replacement: "apn x402 inspect --chain <caip2> --url <https-url>" },
@@ -24,7 +24,29 @@ export const REMOVED_V1_COMMANDS: readonly RemovedV1Command[] = [
   { path: ["relay", "arbitrum", "observe"], replacement: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc> [--destination-rpc-url <ethereum-rpc>]" },
 ];
 
+const HISTORICAL_CIRCLE = "Historical Circle CCTP recovery for operations that are now terminal.";
+/** v1 commands that the phase-4a pruning deletes without a successor. Each is listed once its command has left the
+ * catalog; while it is still a command it stays out of the list, and the validator refuses a listed current path. */
+const RETIRED_V1_COMMANDS: readonly RemovedV1Command[] = [
+  { path: ["circle", "evm", "cleanup85-prepare"], replacement: null, reason: HISTORICAL_CIRCLE },
+  { path: ["circle", "evm", "cleanup85-cancel"], replacement: null, reason: HISTORICAL_CIRCLE },
+  { path: ["circle", "evm", "cleanup86-approve"], replacement: null, reason: HISTORICAL_CIRCLE },
+  { path: ["operation", "repair-deployment"], replacement: null, reason: "Historical LI.FI deployment repair for an operation that is now terminal." },
+];
+
+/** The manifest's removed list for the given current command paths: every merged command, and each retired command
+ * that is no longer current. */
+export function removedV1Commands(currentPaths: ReadonlySet<string>): readonly RemovedV1Command[] {
+  return [...REPLACED_V1_COMMANDS, ...RETIRED_V1_COMMANDS.filter((entry) => !currentPaths.has(entry.path.join(" ")))];
+}
+
 /** The removed v1 command an argv names, if any. */
-export function removedV1Command(argv: readonly string[]): RemovedV1Command | undefined {
-  return REMOVED_V1_COMMANDS.find((entry) => entry.path.every((token, index) => argv[index] === token));
+export function removedV1Command(argv: readonly string[], removed: readonly RemovedV1Command[]): RemovedV1Command | undefined {
+  return removed.find((entry) => entry.path.every((token, index) => argv[index] === token));
+}
+
+/** The failure message for an invocation of a removed v1 command. */
+export function removedV1CommandMessage(entry: RemovedV1Command): string {
+  return entry.replacement === null ? `This command was removed in command manifest v2: ${entry.reason}`
+    : `This command was replaced in command manifest v2; use: ${entry.replacement}`;
 }

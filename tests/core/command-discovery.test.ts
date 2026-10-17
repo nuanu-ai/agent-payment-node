@@ -22,6 +22,7 @@ import {
   type ScalarType,
 } from "../../src/command-catalog.js";
 import { runCli } from "../../src/cli.js";
+import { removedV1Command, removedV1CommandMessage, removedV1Commands } from "../../src/command-manifest-migration.js";
 import { projectMcpTools } from "../../src/mcp-projection.js";
 import { PRODUCT_VERSION } from "../../src/constants.js";
 import { ApnError } from "../../src/errors.js";
@@ -318,6 +319,14 @@ test("manifest v2 names every removed v1 command with a current replacement, and
   assert.ok(removed.length > 0);
   for (const entry of removed) {
     assert.equal(COMMANDS.some((command) => command.path.join(" ") === entry.path.join(" ")), false, entry.path.join(" "));
+    if (entry.replacement === null) {
+      // Removed without a successor: the reason, ordinary discovery guidance and no invented replacement.
+      const invoked = await runCli([...entry.path, "--profile", "x"], {});
+      assert.equal(invoked.error?.code, "APN_UNSUPPORTED_COMMAND");
+      assert.equal(invoked.error?.message.endsWith(entry.reason), true);
+      assert.equal(invoked.next_actions.every((action) => action.startsWith("apn help")), true, JSON.stringify(invoked.next_actions));
+      continue;
+    }
     assert.ok(COMMANDS.some((command) => `${entry.replacement} `.startsWith(`apn ${command.path.join(" ")} `)), entry.replacement);
     const next = catalogNextActions([...entry.path, "--profile", "x"]);
     assert.equal(next[0], entry.replacement);
@@ -338,6 +347,44 @@ test("manifest v2 names every removed v1 command with a current replacement, and
   const dropped = cloneManifest() as unknown as { removed_v1_commands: unknown[] };
   dropped.removed_v1_commands.pop();
   assert.throws(() => assertCompatibleManifestEvolution(COMMAND_MANIFEST, dropped), ApnError, "removals stay listed within v2");
+});
+
+test("a v1 command removed without a successor carries replacement null and a reason, and the validator stays strict", () => {
+  type Entry = { path: string[]; replacement: string | null; reason?: string };
+  const withEntry = (entry: Entry) => {
+    const manifest = cloneManifest() as unknown as { removed_v1_commands: Entry[] };
+    manifest.removed_v1_commands.push(entry);
+    return manifest;
+  };
+  const reason = "Historical recovery for operations that are now terminal.";
+  assert.doesNotThrow(() => validateCommandManifest(withEntry({ path: ["wallet", "gone"], replacement: null, reason })));
+  for (const [name, entry] of [
+    ["null replacement without a reason", { path: ["wallet", "gone"], replacement: null }],
+    ["empty reason", { path: ["wallet", "gone"], replacement: null, reason: "" }],
+    ["overlong reason", { path: ["wallet", "gone"], replacement: null, reason: "r".repeat(201) }],
+    ["control character in the reason", { path: ["wallet", "gone"], replacement: null, reason: "line\nbreak" }],
+    ["reason beside a replacement", { path: ["wallet", "gone"], replacement: "apn wallet status --profile <profile>", reason }],
+    ["a current command removed without a successor", { path: ["wallet", "status"], replacement: null, reason }],
+    ["an empty replacement", { path: ["wallet", "gone"], replacement: "" }],
+  ] as const) assert.throws(() => validateCommandManifest(withEntry(entry as unknown as Entry)), ApnError, name);
+
+  const entry = { path: ["circle", "evm", "cleanup85-prepare"], replacement: null, reason } as const;
+  assert.deepEqual(removedV1Command(["circle", "evm", "cleanup85-prepare", "--operation", "a".repeat(64)], [entry]), entry);
+  assert.equal(removedV1CommandMessage(entry), `This command was removed in command manifest v2: ${reason}`);
+  assert.doesNotMatch(removedV1CommandMessage(entry), /use:/u);
+
+  // The phase-4a deletions are pre-registered: each appears once its command has left the catalog, never while current.
+  const current = new Set(COMMANDS.map((command) => command.path.join(" ")));
+  const retired = removedV1Commands(new Set()).filter((row) => row.replacement === null).map((row) => row.path.join(" "));
+  assert.deepEqual(retired, ["circle evm cleanup85-prepare", "circle evm cleanup85-cancel", "circle evm cleanup86-approve", "operation repair-deployment"]);
+  for (const path of retired) {
+    const listed = COMMAND_MANIFEST.removed_v1_commands.some((row) => row.path.join(" ") === path);
+    assert.notEqual(listed, current.has(path), path);
+    const without = new Set([...current].filter((candidate) => candidate !== path));
+    const row = removedV1Commands(without).find((candidate) => candidate.path.join(" ") === path);
+    assert.ok(row !== undefined && row.replacement === null && row.reason.length > 0, path);
+    assert.equal(removedV1Commands(new Set([...current, path])).some((candidate) => candidate.path.join(" ") === path), false, path);
+  }
 });
 
 test("catalog-declared x402 policy ceiling is enforced before request binding", () => {

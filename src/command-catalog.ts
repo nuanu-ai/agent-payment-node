@@ -6,7 +6,7 @@ import { RELAY_COMMANDS, RELAY_COMMAND_GROUPS } from "./relay/command-catalog.js
 import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";import { EVM_COMMANDS } from "./evm-command-catalog.js";import { BRIDGE_COMMANDS, includeBridgeRecovery } from "./lifi/command-catalog.js";import { ONECLICK_COMMANDS } from "./lifi/near-oneclick-command-catalog.js";import { CIRCLE_COMMANDS } from "./lifi/circle-command-catalog.js";import { GASLESS_COMMANDS, includeGaslessRecovery } from "./gasless/command-catalog.js";import { ALLOWLIST_COMMANDS, ALLOWLIST_COMMAND_GROUPS } from "./allowlist-command-catalog.js";import { UNISWAP_COMMANDS, UNISWAP_COMMAND_GROUPS } from "./swap/uniswap-command-catalog.js";import { SUNSWAP_COMMANDS, SUNSWAP_COMMAND_GROUPS } from "./swap/sunswap-tron/command-catalog.js";import { JUPITER_COMMANDS, JUPITER_COMMAND_GROUPS } from "./swap/jupiter-solana/command-catalog.js";import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-catalog.js";import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
 import { EVM_NETWORKS } from "./evm-asset.js";
-import { REMOVED_V1_COMMANDS } from "./command-manifest-migration.js";
+import { removedV1Commands } from "./command-manifest-migration.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
 import { assertCompatibleManifestEvolution, COMMAND_MANIFEST_SCHEMA, validateCommandManifest } from "./command-manifest-validation.js";
@@ -433,6 +433,6 @@ export const COMMAND_MANIFEST = {
   },
   groups: COMMAND_GROUPS,
   commands: COMMANDS,
-  removed_v1_commands: REMOVED_V1_COMMANDS,
+  removed_v1_commands: removedV1Commands(new Set(COMMANDS.map((entry) => entry.path.join(" ")))),
 } as const;
 validateCommandManifest(COMMAND_MANIFEST);
