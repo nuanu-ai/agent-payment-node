@@ -35,7 +35,7 @@ function reader(mutation?: "configuration" | "multicall_code", requests = BRIDGE
   const wait = async (ms: number) => { now += ms; };
   const physical = new BridgeRpcPhysicalBudget(requests + 2);
   const session = new RpcReadSession({ now: () => now, wait, maxHttpRequests: requests, maxHttpAttempts: requests + 2,
-    archiveDeploymentBatchMaxItems: 3, physicalBudget: physical });
+    physicalBudget: physical });
   const posts: Array<{ role: string; count: number; methods: string[] }> = [];
   const read = (endpointRole: string, method: string, params: unknown[]): unknown => {
     assert.notEqual(method, "eth_sendRawTransaction");
@@ -86,23 +86,4 @@ test("a captured mainnet Base native Across observation replays on primary and r
   assert.deepEqual(r.posts.map(post => post.role), ["primary", "receipt", "receipt", "primary"]);
   assert.equal(r.session.telemetry().httpRequests, BRIDGE_CANONICAL_OBSERVATION_POSTS); assert.equal(bridgeSourceObservationRequests(1), 8);
   assert(r.posts.every(post => !post.methods.includes("eth_sendRawTransaction")));
-});
-
-test("the frozen migration proof still reproduces the captured historical deployment identity on the archive role", async () => {
-  const r = reader(undefined, 12);
-  const deployment = await r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", captured.observed.transaction.block, true);
-  assert.deepEqual(deployment, captured.historical);
-  assert(r.posts.filter(post => post.role === "archive").every(post => post.count <= 3));
-});
-
-test("Base Across aggregation still refuses a changed independently captured configuration component", async () => {
-  const r = reader("configuration", 12);
-  await assert.rejects(r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", captured.observed.transaction.block, true),
-    { code: "APN_PROVIDER_PROTOCOL" });
-});
-
-test("Base Across historical aggregation requires the exact reviewed Multicall bytecode", async () => {
-  const r = reader("multicall_code", 12);
-  await assert.rejects(r.rpc.deployment("across", 1, "0x0000000000000000000000000000000000000000", captured.observed.transaction.block, true),
-    { code: "APN_PROVIDER_PROTOCOL" });
 });

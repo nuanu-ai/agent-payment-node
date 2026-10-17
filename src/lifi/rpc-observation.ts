@@ -4,11 +4,11 @@ import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-r
 import type { Hex } from "../model.js";
 import { verifyBnbCompositeTrace } from "./bnb-composite.js";
 import type { BridgeChainId } from "./chains.js";
-import type { BridgeBlock, BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTransactionProof } from "./model.js";
+import type { BridgeDestinationTransactionProof, BridgeEnvelope, BridgeProtocolReceipt, BridgeTransactionProof } from "./model.js";
 import type { BridgeObservationOptions, BridgeRpcPort } from "./ports.js";
 import { hashObject } from "../canonical.js";
 import { rpcBlockValue, rpcExpectedChainValue } from "./rpc-batch-codec.js";
-import { bridgeActualFees, type legacyBridgeActualFees } from "./rpc-fees.js";
+import { bridgeActualFees } from "./rpc-fees.js";
 import { exactNativeTransfer, parseReceiptLogs } from "./rpc-proof-codec.js";
 import type { RpcBatchReadItem } from "./rpc-session.js";
 import { quantity } from "./rpc-support.js";
@@ -16,9 +16,8 @@ import { verifyRpcTransaction } from "./rpc-transaction.js";
 import { bridgeFailure, bridgeHex } from "./validation.js";
 
 type PlannedRead = Omit<RpcBatchReadItem, "batchAttempt">;
-export type BridgeBatchCall = (items: readonly PlannedRead[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>;
+export type BridgeBatchCall = (items: readonly PlannedRead[], route?: "primary" | "archive" | "receipt") => Promise<readonly unknown[]>;
 type NativeDelivery = Parameters<BridgeRpcPort["observe"]>[2];
-type Fees = ReturnType<typeof bridgeActualFees> | Awaited<ReturnType<typeof legacyBridgeActualFees>>;
 export interface BridgeObservationContext {
   readonly chainId: BridgeChainId;
   readonly origin: string;
@@ -26,8 +25,6 @@ export interface BridgeObservationContext {
   readonly call: EvmRpcCall;
   readonly batchCall: BridgeBatchCall;
   readonly receipts: Readonly<{ reader: boolean; fallback: boolean }>;
-  /** Only the frozen historical migration proofs re-prove Base fees through the legacy pinned oracle. */
-  readonly legacyFees?: (receipt: Readonly<Record<string, unknown>>, block: BridgeBlock, safe: BridgeBlock) => Promise<Fees>;
 }
 
 /**
@@ -95,7 +92,7 @@ export async function observeCanonical(c: BridgeObservationContext, hash: Hex, e
   const identity = await verifyRpcTransaction(tx, c.chainId, hash, expected);
   if (evmRpcAddress(r.from) !== identity.from || evmRpcAddress(r.to) !== identity.to) bridgeFailure("APN_RPC_PROTOCOL", "receipt_sender_target");
   const logs = parseReceiptLogs(r.logs, hash, block, index);
-  const fees = !includeFees ? null : c.legacyFees !== undefined ? await c.legacyFees(r, block, safe) : bridgeActualFees(c.chainId, r);
+  const fees = !includeFees ? null : bridgeActualFees(c.chainId, r);
   if (fees !== null && (BigInt(fees.gasUsedAtomic) > BigInt(identity.gasLimitAtomic) ||
     BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic))) bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
   let nativeBalance: BridgeProtocolReceipt["nativeBalance"] = null, nativeTransfer: BridgeProtocolReceipt["nativeTransfer"] = null;

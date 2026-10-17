@@ -29,7 +29,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
   /** Optional read-only observation hook; called from the selected production route before each physical HTTP attempt. */
   readonly onRequest?: (trace: BridgeRpcRequestTrace) => void;
 } = {}): { readonly origin: string; readonly call: EvmRpcCall; readonly attempt: EvmRpcCall; readonly sessionCall: (session: RpcReadSession) => EvmRpcCall;
-  readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "archive_deployment" | "receipt") => Promise<readonly unknown[]>;
+  readonly sessionBatchCall: (session: RpcReadSession) => (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route?: "primary" | "archive" | "receipt") => Promise<readonly unknown[]>;
   readonly receipts: BridgeReceiptRoute } {
   bridgeChain(chainId, "APN_RPC_CONFIG");
   const transport = options.transport ?? new BridgeHttps();
@@ -148,7 +148,7 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     if (response.status !== 200) throw new RpcHttpFailure(rpcMethod, response.status, parseRetryAfter(response.headers, now));
     return bridgeJson(response.body, 1024 * 1024);
   };
-  const sessionBatchCall = (session: RpcReadSession) => async (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route: "primary" | "archive" | "archive_deployment" | "receipt" = "primary") => {
+  const sessionBatchCall = (session: RpcReadSession) => async (items: readonly Omit<RpcBatchReadItem, "batchAttempt">[], route: "primary" | "archive" | "receipt" = "primary") => {
     if (route === "receipt" && !isReceiptBatchShape(items)) {
       bridgeFailure("APN_RPC_CONFIG", "bridge_receipt_RPC_method");
     }
@@ -163,8 +163,6 @@ export function bridgeRpcCall(chainId: BridgeChainId, environment: Readonly<Reco
     const bound = items.map((item) => ({ ...item, batchAttempt: attempt }));
     return await withEndpointRole(route === "receipt"
       ? session.readReceiptBatch(target.toString(), chainId, bound, fallback!.maxItemsPerRequest)
-      : route === "archive_deployment"
-      ? session.readArchiveDeploymentBatch(target.toString(), chainId, bound)
       : session.readBatch(target.toString(), chainId, bound, knownBatchItems(target)), role);
   };
   const sessionArchiveReceipt = async (session: RpcReadSession, method: string, params: readonly unknown[]): Promise<unknown> => {

@@ -30,8 +30,6 @@ export declare class BridgeRpc implements BridgeRpcPort {
     readTelemetry(): import("./rpc-session.js").RpcReadTelemetry | null;
     assertChain(): Promise<void>;
     block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-    /** The legacy full historical proof at one block, only for the frozen migration proofs. */
-    deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock, exactHashPin?: boolean): Promise<import("./model.js").BridgeDeploymentIdentity>;
     /** The light deployment check of one role at the moving head, with that head: one POST. */
     deploymentCheck(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, role: "source" | "destination"): Promise<import("./model.js").BridgeDeploymentIdentity>;
     /** The source deployment check and the account snapshot in the same POST, at the same moving head. */

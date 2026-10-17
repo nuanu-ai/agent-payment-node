@@ -9,7 +9,6 @@ import type { BridgeChainId } from "../../src/lifi/chains.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import type { BridgeTool } from "../../src/lifi/model.js";
 import { BRIDGE_ARCHIVE_RPC_ENV, BRIDGE_RECEIPT_RPC_ENV } from "../../src/lifi/rpc-archive.js";
-import { BASE_FEE_CONTRACT } from "../../src/lifi/rpc-fees.js";
 import { BRIDGE_RPC_ENV } from "../../src/lifi/rpc.js";
 import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
 import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
@@ -68,7 +67,7 @@ export function chainDouble(routes: readonly ChainRoute[], code: ReadonlyMap<str
   const expected = new Map<string, Hex>(), key = (chainId: number, kind: string, address: string, data: string) =>
     canonicalJson([chainId, kind, address.toLowerCase(), data.toLowerCase()]);
   for (const [chainId, peer, tool, token] of routes) {
-    for (const row of [...bridgeDeployment(chainId, peer, tool, token).reads, ...(chainId === 8453 ? BASE_FEE_CONTRACT.reads : [])]) {
+    for (const row of bridgeDeployment(chainId, peer, tool, token).reads) {
       expected.set(key(chainId, row.kind, row.address, row.data), row.expected);
     }
   }

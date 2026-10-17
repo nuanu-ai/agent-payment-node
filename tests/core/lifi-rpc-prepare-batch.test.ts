@@ -7,7 +7,7 @@ import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { ApnError } from "../../src/errors.js";
 import { acrossBridgeAbi } from "../../src/lifi/abi.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
-import { RpcReadSession, bridgeRpcFactory, deploymentMulticallEligible } from "../../src/lifi/rpc.js";
+import { RpcReadSession, bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { bridgeDeploymentCheck } from "../../src/lifi/deployment-check.js";
 import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
@@ -163,18 +163,3 @@ for (const flow of [
   }
 });
 
-test("legacy deployment Multicall eligibility stays defined for the frozen migration proofs", () => {
-  assert.equal(deploymentMulticallEligible("0x313ce567"), true);
-  assert.equal(deploymentMulticallEligible("0xcdffacc6"), false);
-  assert.equal(deploymentMulticallEligible("0x5c60da1b"), false);
-  assert.equal(deploymentMulticallEligible("0x70a082310000000000000000000000000000000000000000000000000000000000000000"), false);
-});
-
-for (const [mode, code] of [["failed", "APN_RPC_PROTOCOL"], ["malformed", "APN_RPC_PROTOCOL"],
-  ["reversed", "APN_PROVIDER_PROTOCOL"], ["delegation", "APN_PROVIDER_PROTOCOL"]] as const) test(`deployment proof fails closed on ${mode} code/subresults`, async (t) => {
-    const temporary = await temporaryState(); t.after(temporary.cleanup);
-    const now = new Date("2026-09-08T12:00:00.000Z"), spy = await prepareSpy(now, mode);
-    const rpc = spy.rpcFor(8453, new RpcReadSession({ maxHttpRequests: 16, maxHttpAttempts: 16, wait: async () => {} }));
-    await assert.rejects(rpc.deployment("stargateV2", 42161, "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
-      (error: unknown) => error instanceof ApnError && error.code === code);
-  });

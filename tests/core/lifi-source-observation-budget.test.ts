@@ -12,7 +12,6 @@ import { bridgeSourceObservationRequests } from "../../src/lifi/observation-budg
 import { BRIDGE_CANONICAL_OBSERVATION_POSTS } from "../../src/lifi/rpc-observation.js";
 import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import { bridgeInvocationPostBudget, bridgeSendStepPostBudget } from "../../src/lifi/send-budget.js";
-import { bridgeDeploymentReadPlan } from "../../src/lifi/rpc-deployment.js";
 import { BRIDGE_RECEIPT_FEE_RULE_HASH } from "../../src/lifi/rpc-fees.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession, bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { transitionBridge } from "../../src/lifi/transitions.js";
