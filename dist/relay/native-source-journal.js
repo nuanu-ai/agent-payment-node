@@ -7,6 +7,12 @@ import { SecureStateStore } from "../secure-state-store.js";
 const HASH = /^[a-f0-9]{64}$/u, TX_HASH = /^0x[a-f0-9]{64}$/u;
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay native source execution is blocked.", { reason }); }
 function corrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Relay native source state is invalid: ${reason}.`); }
+/** Where each phase may go next; a phase with nowhere to go is the attempt's outcome. */
+export const RELAY_NATIVE_SOURCE_EDGES = {
+    pending: ["signing_started"], signing_started: ["sealed", "failed_before_effect"], sealed: ["submitting", "abandoned_unsent"],
+    submitting: ["confirmed", "failed"], confirmed: [], failed: [], failed_before_effect: [], abandoned_unsent: []
+};
+export const RELAY_NATIVE_SOURCE_PHASES = Object.keys(RELAY_NATIVE_SOURCE_EDGES);
 /** Provider locator stays in the durable owner journal, never in CLI or MCP output. */
 export function publicRelayNativeSourceJournal(journal) {
     const { requestId: _requestId, ...publicFields } = journal;
@@ -25,7 +31,7 @@ function validateJournal(value, op) {
     if (Object.keys(j).sort().join() !== keys.sort().join() || j.schemaVersion !== "apn.relay-native-source-journal.v1" ||
         j.profileHash !== op.profileHash || j.operationId !== op.operationId || j.operationIntegrityHash !== op.integrityHash ||
         j.quoteDigest !== op.quoteDigest || j.requestId !== op.statusLocator?.requestId ||
-        j.depositEnvelopeHash !== hashObject(op.nativeQuote.deposit) || !["pending", "signing_started", "sealed", "submitting", "confirmed", "failed", "failed_before_effect", "abandoned_unsent"].includes(j.phase) ||
+        j.depositEnvelopeHash !== hashObject(op.nativeQuote.deposit) || !RELAY_NATIVE_SOURCE_PHASES.includes(j.phase) ||
         j.integrityHash !== hashObject(journalBody(j)))
         corrupt("journal binding");
     if (j.phase === "pending") {
@@ -88,10 +94,7 @@ export class RelayNativeSourceJournalRepository extends SecureStateStore {
             if ((old?.integrityHash ?? null) !== expected)
                 blocked("stale_journal");
             const previous = old?.phase ?? null;
-            if (!((previous === null && phase === "pending") || (previous === "pending" && phase === "signing_started") ||
-                (previous === "signing_started" && phase === "sealed") || (previous === "sealed" && phase === "submitting") ||
-                (previous === "signing_started" && phase === "failed_before_effect") || (previous === "sealed" && phase === "abandoned_unsent") ||
-                (previous === "submitting" && (phase === "confirmed" || phase === "failed"))))
+            if (!(previous === null ? phase === "pending" : RELAY_NATIVE_SOURCE_EDGES[previous].includes(phase)))
                 blocked("journal_transition");
             const fields = previous === null ? { schemaVersion: "apn.relay-native-source-journal.v1",
                 profileHash: op.profileHash, operationId: op.operationId, operationIntegrityHash: op.integrityHash,

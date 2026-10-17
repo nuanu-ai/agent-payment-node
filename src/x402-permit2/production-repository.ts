@@ -10,7 +10,11 @@ import { PERMIT2_PRODUCTION_SCHEMA, validatePermit2ProductionMaterial, reconstru
   type Permit2ProductionMaterial } from "./production-material.js";
 import { validateExposureJournal, assertExposureAppend, type Permit2ExposureJournal } from "./production-journal-codec.js";
 import { validatePermit2ProductionSigned } from "./production-signed.js";
-export type Permit2ProductionState = "prepared" | "reserving" | "reserved" | "release_pending" | "released_unsubmitted" | "exposure_unknown" | "request_pending" | "terminal_pending" | "settled" | "expired_no_effect";
+/** Every state a Permit2 production record may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export const PERMIT2_PRODUCTION_STATES = ["prepared", "reserving", "reserved", "release_pending", "released_unsubmitted", "exposure_unknown",
+  "request_pending", "terminal_pending", "settled", "expired_no_effect"] as const;
+export const PERMIT2_PRODUCTION_TERMINAL_STATES: readonly Permit2ProductionState[] = ["released_unsubmitted", "settled", "expired_no_effect"];
+export type Permit2ProductionState = typeof PERMIT2_PRODUCTION_STATES[number];
 export interface Permit2ProductionRecord {
   readonly schemaVersion: typeof PERMIT2_PRODUCTION_SCHEMA;
   readonly operationId: string;
@@ -68,8 +72,8 @@ export function validatePermit2ProductionRecord(value: unknown): Permit2Producti
   } else if (v.exposureJournal !== undefined || exposed && v.state !== "exposure_unknown") corrupt();
   if (v.profileHash !== v.material.wallet.profileHash || !instant(v.createdAt) || !instant(v.updatedAt) || v.updatedAt < v.createdAt ||
       Date.parse(v.createdAt) !== v.material.signingSecond * 1000 ||
-      !["prepared", "reserving", "reserved", "release_pending", "released_unsubmitted", "exposure_unknown", "request_pending", "terminal_pending", "settled", "expired_no_effect"].includes(v.state) ||
-      v.terminal !== (["released_unsubmitted", "settled", "expired_no_effect"].includes(v.state)) ||
+      !(PERMIT2_PRODUCTION_STATES as readonly string[]).includes(v.state) ||
+      v.terminal !== PERMIT2_PRODUCTION_TERMINAL_STATES.includes(v.state) ||
       (["release_pending", "released_unsubmitted"].includes(v.state) && Date.parse(v.updatedAt) < Number(prepared.expiresAtUnix) * 1000) || typeof v.reservationStarted !== "boolean" ||
       (["reserving", "reserved", "exposure_unknown"].includes(v.state) && !v.reservationStarted) ||
       (v.state === "prepared" && v.reservationStarted) ||

@@ -3,6 +3,9 @@ import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
+/** Every phase of a token-lane effect, and the observed ones no transition leaves (a confirmed approval is followed by its deposit). */
+export const RELAY_EFFECT_PHASES = ["pending", "signing_started", "sealed", "submitting", "confirmed", "failed", "abandoned_unsent"];
+export const RELAY_EFFECT_OBSERVED_PHASES = ["confirmed", "failed", "abandoned_unsent"];
 function corrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Relay effect journal is invalid: ${reason}.`); }
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", `Relay effect transition refused: ${reason}.`); }
 const HASH = /^[a-f0-9]{64}$/u;
@@ -19,8 +22,7 @@ function prepared(op) {
         blocked("prepared quote required");
 }
 function validateEffect(effect, role) {
-    if (effect.role !== role || !["pending", "signing_started", "sealed", "submitting", "confirmed", "failed",
-        "abandoned_unsent"].includes(effect.phase))
+    if (effect.role !== role || !RELAY_EFFECT_PHASES.includes(effect.phase))
         corrupt("effect role or phase");
     if (effect.phase === "pending") {
         if (effect.attempt !== null || effect.observedAt !== null)
@@ -38,7 +40,7 @@ function validateEffect(effect, role) {
         corrupt("marked state");
     if (["sealed", "submitting"].includes(effect.phase) && (effect.attempt.transactionHash === null || effect.observedAt !== null))
         corrupt("known transaction");
-    if ((effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent") &&
+    if (RELAY_EFFECT_OBSERVED_PHASES.includes(effect.phase) &&
         (!iso(effect.observedAt) || Date.parse(effect.observedAt) < Date.parse(effect.attempt.markedAt)))
         corrupt("observation");
     if (effect.phase === "abandoned_unsent" && (effect.attempt.transactionHash === null || effect.attempt.attemptNumber !== 1))

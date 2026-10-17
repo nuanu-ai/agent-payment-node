@@ -12,6 +12,11 @@ function corrupt(reason: string): never { throw new ApnError("APN_STATE_CORRUPT"
 /** `abandoned_unsent`: sealed bytes never sent whose nonce another transaction consumed at safe depth; they can never land. */
 export type RelayNativeSourcePhase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "failed_before_effect" |
   "abandoned_unsent";
+/** Where each phase may go next; a phase with nowhere to go is the attempt's outcome. */
+export const RELAY_NATIVE_SOURCE_EDGES: Readonly<Record<RelayNativeSourcePhase, readonly RelayNativeSourcePhase[]>> = {
+  pending: ["signing_started"], signing_started: ["sealed", "failed_before_effect"], sealed: ["submitting", "abandoned_unsent"],
+  submitting: ["confirmed", "failed"], confirmed: [], failed: [], failed_before_effect: [], abandoned_unsent: [] };
+export const RELAY_NATIVE_SOURCE_PHASES = Object.keys(RELAY_NATIVE_SOURCE_EDGES) as readonly RelayNativeSourcePhase[];
 export interface RelayNativeSourceJournal {
   readonly schemaVersion: "apn.relay-native-source-journal.v1";
   readonly profileHash: string; readonly operationId: string; readonly operationIntegrityHash: string;
@@ -35,7 +40,7 @@ function validateJournal(value: unknown, op: RelayUnsignedOperation): RelayNativ
   if (Object.keys(j).sort().join() !== keys.sort().join() || j.schemaVersion !== "apn.relay-native-source-journal.v1" ||
     j.profileHash !== op.profileHash || j.operationId !== op.operationId || j.operationIntegrityHash !== op.integrityHash ||
     j.quoteDigest !== op.quoteDigest || j.requestId !== op.statusLocator?.requestId ||
-    j.depositEnvelopeHash !== hashObject(op.nativeQuote!.deposit) || !["pending", "signing_started", "sealed", "submitting", "confirmed", "failed", "failed_before_effect", "abandoned_unsent"].includes(j.phase) ||
+    j.depositEnvelopeHash !== hashObject(op.nativeQuote!.deposit) || !RELAY_NATIVE_SOURCE_PHASES.includes(j.phase) ||
     j.integrityHash !== hashObject(journalBody(j))) corrupt("journal binding");
   if (j.phase === "pending") {
     if (j.marker !== null || j.markedAt !== null || j.transactionHash !== null || j.observedAt !== null) corrupt("pending journal");
@@ -88,10 +93,7 @@ export class RelayNativeSourceJournalRepository extends SecureStateStore {
       const old = await this.load(op);
       if ((old?.integrityHash ?? null) !== expected) blocked("stale_journal");
       const previous = old?.phase ?? null;
-      if (!((previous === null && phase === "pending") || (previous === "pending" && phase === "signing_started") ||
-         (previous === "signing_started" && phase === "sealed") || (previous === "sealed" && phase === "submitting") ||
-         (previous === "signing_started" && phase === "failed_before_effect") || (previous === "sealed" && phase === "abandoned_unsent") ||
-         (previous === "submitting" && (phase === "confirmed" || phase === "failed")))) blocked("journal_transition");
+      if (!(previous === null ? phase === "pending" : RELAY_NATIVE_SOURCE_EDGES[previous].includes(phase))) blocked("journal_transition");
       const fields = previous === null ? { schemaVersion: "apn.relay-native-source-journal.v1" as const,
         profileHash: op.profileHash, operationId: op.operationId, operationIntegrityHash: op.integrityHash,
         quoteDigest: op.quoteDigest, requestId: op.statusLocator!.requestId,
