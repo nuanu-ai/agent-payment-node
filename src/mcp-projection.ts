@@ -1,6 +1,5 @@
 import {
   COMMAND_MANIFEST,
-  validateCommandManifest,
   type CommandDefinition,
   type CommandOption,
 } from "./command-catalog.js";
@@ -92,7 +91,6 @@ export interface ProjectedMcpTool {
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 export function projectMcpTools(manifest: unknown = COMMAND_MANIFEST): readonly ProjectedMcpTool[] {
-  validateCommandManifest(manifest);
   const commands = (manifest as { readonly commands: readonly CommandDefinition[] }).commands;
   const byPath = new Map(commands.map((command) => [command.path.join(" "), command]));
   const names = new Set<string>();
