@@ -176,7 +176,7 @@ test("MCP activate and revoke return a foreground handoff; MCP stage and status 
   const client = new Client({ name: "allowlist-activation", version: "1" }); await client.connect(clientTransport);
   t.after(async () => { await client.close(); await server.close(); });
   for (const action of ["activate", "revoke"] as const) {
-    const envelope = await mcp(client, `apn_allowlist_policy_${action}`, { profile: PROFILE, revision: "1" });
+    const envelope = await mcp(client, "apn_foreground_handoff", { command: `allowlist policy ${action}`, arguments: { profile: PROFILE, revision: "1" } });
     assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.equal(envelope.error?.details?.cli_handoff, `apn allowlist policy ${action} --profile ${PROFILE} --revision 1`);
   }

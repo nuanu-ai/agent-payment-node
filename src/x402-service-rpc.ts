@@ -18,26 +18,31 @@ export function selectX402Rpc(rpc: RpcPort, chainId: EvmChainId = 8453): RpcPort
   return rpc.forX402Network(chainId);
 }
 
-export async function assertX402RpcChain(rpc: Pick<RpcPort, "assertBaseChain"> & Partial<X402RpcPort>, chainId: EvmChainId = 8453) {
-  const chain = rpc.assertX402Chain === undefined && chainId === 8453 ? await rpc.assertBaseChain() :
-    await rpc.assertX402Chain?.(chainId);
+export async function assertX402RpcChain(rpc: Partial<X402RpcPort>, chainId: EvmChainId = 8453) {
+  const chain = await rpc.assertX402Chain?.(chainId);
   if (chain === undefined || chain.chainId !== chainId || !chain.rpcOrigin) {
     throw new ApnError("APN_CHAIN_MISMATCH", "RPC does not prove the frozen x402 network.");
   }
   return chain;
 }
 
-export function x402ReadPort(rpc: RpcPort, chainId: EvmChainId = 8453): X402RpcPort | null {
+/** The production RPC adapter always carries the x402 read surface; an adapter without it cannot observe x402. */
+export function x402ReadPort(rpc: RpcPort, chainId: EvmChainId = 8453): X402RpcPort {
   const value = selectX402Rpc(rpc, chainId) as Partial<X402RpcPort>;
-  return typeof value.getX402Head === "function" && typeof value.getX402Block === "function" &&
-    typeof value.getX402Receipt === "function" && typeof value.getX402AuthorizationState === "function" &&
-    typeof value.getX402AuthorizationUsedLogs === "function" ? value as X402RpcPort : null;
+  if (typeof value.getX402Head !== "function" || typeof value.getX402Block !== "function" ||
+    typeof value.getX402Receipt !== "function" || typeof value.getX402AuthorizationState !== "function" ||
+    typeof value.getX402AuthorizationUsedLogs !== "function") missingX402ReadSurface();
+  return value as X402RpcPort;
 }
 
-export function boundedX402ReadPort(rpc: RpcPort, timeoutMs: number, chainId: EvmChainId = 8453): X402RpcPort | null {
+export function boundedX402ReadPort(rpc: RpcPort, timeoutMs: number, chainId: EvmChainId = 8453): X402RpcPort {
   const port = x402ReadPort(rpc, chainId);
-  if (port === null || typeof port.withTotalTimeout !== "function") return null;
+  if (typeof port.withTotalTimeout !== "function") missingX402ReadSurface();
   return port.withTotalTimeout(timeoutMs);
+}
+
+function missingX402ReadSurface(): never {
+  throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
 }
 
 /**

@@ -1,3 +1,4 @@
+import { advanceCircle, sealCircle } from "./circle-v1-journal.js";
 const issuerFeeRecipient = getAddress(`0x${"44".repeat(20)}`);
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -7,7 +8,7 @@ import { getAddress } from "viem";
 import { hashObject, canonicalJson } from "../../src/canonical.js";
 import { StateStore } from "../../src/state.js";
 import { circleLegacyRoute as circleRoute, CIRCLE_SEI_SELLER, CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_RECIPIENT } from "../../src/circle-v2-evm/catalog.js";
-import { circleEnvelope, sealCircle, advanceCircle, validateCircle, type CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
+import { circleEnvelope, validateCircle, type CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
 import { decodeCircleSource, bindCircleAttestation, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, circleWord } from "../../src/circle-v2-evm/protocol.js";
 import { verifyCircleDestinationAccount } from "../../src/circle-v2-evm/preflight.js";
 import { bindCircleEvmCommand } from "../../src/circle-v2-evm/command-catalog.js";

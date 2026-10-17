@@ -70,7 +70,6 @@ export class JupiterV1ReadOnlyProvider {
         }
     }
 }
-export function validateJupiterV1Request(request: JupiterV1ExactInRequest): void { validateRequest(request); }
 function validateRequest(request: JupiterV1ExactInRequest): void {
     if (request.maximumInnerAccounts !== undefined && request.maximumInnerAccounts !== 12) invalid("Jupiter V1 inner account filter is outside the finite legacy lane.");
     canonicalAddress(request.taker);

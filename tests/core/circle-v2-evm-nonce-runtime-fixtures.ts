@@ -1,8 +1,9 @@
 import { join } from "node:path";
+import { advanceCircle, sealCircle } from "./circle-v1-journal.js";
 import { tmpdir } from "node:os";
 import type { Hex } from "viem";
 import { StateStore } from "../../src/state.js";
-import { advanceCircle, circleEnvelope, sealCircle, type CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
+import { circleEnvelope, type CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { encodeCircleApproval, encodeCircleBurn } from "../../src/circle-v2-evm/protocol.js";
 /** The v2 binding identity of a fixture: its own profiles and custody wallets (never constants). */

@@ -23,7 +23,7 @@ const REQUIRED_KINDS = [
   "relay-lifecycle:failed_before_effect",
   "circle:apn.circle-v2-evm-operation.v1:1329:cleanup_required", "circle:apn.circle-v2-evm-operation.v1:143:external_fulfilled",
   "circle:apn.circle-v2-evm-operation.v1:59144:completed", "circle:apn.circle-v2-evm-operation.v2:143:awaiting_mint",
-  "circle:apn.circle-v2-evm-operation.v2:1329:awaiting_source", "circle-sidecar:v1:retirement-authority", "circle-sidecar:v2:external-claim",
+  "circle:apn.circle-v2-evm-operation.v2:1329:awaiting_source", "circle-sidecar:v2:external-claim",
   "merchant:prepared", "merchant:delivered", "merchant:retired_unsent", "mega-gaszip:prepared", "sei-gaszip:completed",
   "metamask-native:confirmed", "metamask-native:unknown",
   "ledger:x402:consumedAtomic+merchantNativeActualFee:finalized", "ledger:direct:cleanup85NativeReservation:reserved",

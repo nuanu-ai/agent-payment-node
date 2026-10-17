@@ -1,9 +1,5 @@
 import { parseAbiParameters } from "viem";
 
-export const STARGATE_SEND_PARAM = parseAbiParameters(
-  "(uint32 dstEid,bytes32 to,uint256 amountLD,uint256 minAmountLD,bytes extraOptions,bytes composeMsg,bytes oftCmd)",
-);
-
 export const STARGATE_QUOTE_OFT_OUTPUT = parseAbiParameters(
   "(uint256 minAmountLD,uint256 maxAmountLD) limit,(int256 feeAmountLD,string description)[] oftFeeDetails,(uint256 amountSentLD,uint256 amountReceivedLD) receipt",
 );

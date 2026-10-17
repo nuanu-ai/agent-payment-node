@@ -48,7 +48,6 @@ export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWa
       reads: this,
       direct: this.direct,
       x402Signer: this.x402Signer,
-      evidence: { owner: "apn" },
     };
   }
 
@@ -81,14 +80,6 @@ export class MetaMaskProcessAdapter implements ProviderLifecyclePort, ProviderWa
     await this.exclusive(async () => {
       const status = await this.doctor();
       if (!status.authenticated || !status.initialized) throw sessionFailure();
-    });
-  }
-
-  async logout(): Promise<void> {
-    await this.exclusive(async () => {
-      const result = await this.runner.runJson(["logout", "--json"]);
-      try { requireSuccess(result.exitCode, result.stdout); }
-      finally { result.stdout.fill(0); }
     });
   }
 

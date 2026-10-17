@@ -2,7 +2,8 @@ import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
-import { requireSwapProtocol, validateSwapProtocolRegistry, type SwapProtocolRegistry } from "../protocol-registry.js";
+import { assertOperationProtocolRegistry } from "../family-guards.js";
+import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
 import type { SwapUnlandedProof } from "../unlanded.js";
@@ -43,7 +44,7 @@ export class SunSwapTronExecutionDriver implements GuardedSwapExecutionDriver {
     let material: SunSwapPreparedMaterial, effect: SunSwapExecutionBinding, binding: SunSwapTronExecutionBinding;
     try {
       material = validateSunSwapPreparedMaterial(input.material, "stored");
-      assertInjectedProtocol(operation, this.d.protocolRegistry);
+      assertOperationProtocolRegistry(operation, this.d.protocolRegistry, "sunswap");
       const admission = await this.d.admission.assert(operation);
       effect = { account: admission.account, intent: material.execution.intent, transaction: material.execution.transaction,
         simulation: material.execution.simulation };
@@ -108,13 +109,6 @@ export class SunSwapTronExecutionDriver implements GuardedSwapExecutionDriver {
   }
 }
 
-function assertInjectedProtocol(operation: SwapOperationRecord, registryValue: SwapProtocolRegistry): void {
-  const registry = validateSwapProtocolRegistry(registryValue);
-  if (registry.registryDigest !== operation.protocolRegistryDigest || registry.registryVersion !== operation.protocolRegistryVersion) {
-    blocked("Injected SunSwap protocol registry does not match the prepared operation.", "sunswap_protocol_registry_drift");
-  }
-  requireSwapProtocol(registry, operation.mechanismDigest);
-}
 function signingWindowLive(material: SunSwapPreparedMaterial, now: Date): boolean {
   if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new ApnError("APN_INVALID_INPUT", "SunSwap execution time is invalid.");
   const at = BigInt(now.getTime()), intent = material.execution.intent;

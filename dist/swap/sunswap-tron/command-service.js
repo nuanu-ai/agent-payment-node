@@ -13,11 +13,9 @@ export async function executeSunSwapCommand(request, context) {
                 protocolRegistryDigest: SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY.registryDigest,
                 codePins: SUNSWAP_PINNED_CONTRACTS.map(({ role, address }) => ({ role, address, codeHash: SUNSWAP_V2_CODE_HASHES[role] })) } }, "official_catalog_not_owner_admission");
     if (request.command === "swap.sunswap.quote") {
-        if (context.sunswapRuntime !== undefined)
-            return data(await context.sunswapRuntime.quote(request, context.clock.now()), "unsigned_exact_simulated_swap_quote");
-        if (context.sunswap === undefined)
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "SunSwap quote requires an explicitly injected read-only builder.", { reason: "sunswap_runtime_unavailable" });
-        return data(await context.sunswap.quote({ ...request, now: context.clock.now() }), "unsigned_read_only_swap_quote");
+        if (context.sunswapRuntime === undefined)
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "SunSwap quote requires the keyless TRON runtime.", { reason: "sunswap_runtime_unavailable" });
+        return data(await context.sunswapRuntime.quote(request, context.clock.now()), "unsigned_exact_simulated_swap_quote");
     }
     if (request.command === "swap.sunswap.prepare") {
         if (context.sunswapRuntime === undefined)

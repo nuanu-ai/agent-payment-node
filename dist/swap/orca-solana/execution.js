@@ -2,7 +2,7 @@ import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { assertSolanaNetwork, rpcAtomic } from "../../solana/rpc.js";
 import { validateSwapOperation } from "../model.js";
-import { assertInjectedProtocol } from "../uniswap-ethereum/execution/binding.js";
+import { assertOperationProtocolRegistry } from "../family-guards.js";
 import { latestLifetime, orcaMessageFee, requireOrcaFunds } from "./builder.js";
 import { createOrcaExecutionBinding } from "./effects.js";
 import { compileOrcaSwap } from "./instructions.js";
@@ -74,7 +74,7 @@ export class OrcaSolanaExecutionDriver {
         const material = validateOrcaKeylessMaterial(input.material);
         let admission, freshness;
         try {
-            assertInjectedProtocol(operation, this.d.protocolRegistry);
+            assertOperationProtocolRegistry(operation, this.d.protocolRegistry, "orca");
             admission = await this.d.admission.assert(operation);
             freshness = await this.d.guard.inspect(operation, material);
             if (freshness.checkedAt >= operation.quote.expiresAt)

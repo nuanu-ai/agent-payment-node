@@ -1,10 +1,7 @@
 import { decodeAbiParameters, getAddress, toEventSelector } from "viem";
-import { USDT_GASLESS, usdtFailure } from "./model.js";
+import { usdtFailure } from "./model.js";
 const USER_OPERATION_EVENT = toEventSelector("UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)");
 const TRANSFER = toEventSelector("Transfer(address indexed from, address indexed to, uint256 value)");
-/** Pins of a freshly prepared plan: the current constants it was just validated against. */
-export const USDT_CURRENT_PINS = Object.freeze({ token: USDT_GASLESS.token, paymaster: USDT_GASLESS.paymaster,
-    treasury: USDT_GASLESS.treasury, entryPoint: USDT_GASLESS.entryPoint });
 /** A failed UserOperationEvent in a successful, canonical EntryPoint transaction proves no account effect. */
 export function verifyUsdtRevert(sender, userOpHash, receipt, pins) {
     if (receipt.status !== "success")

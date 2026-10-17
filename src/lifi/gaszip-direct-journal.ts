@@ -59,9 +59,6 @@ export class GaszipFundingJournal extends SecureStateStore {
     if(r.state!=="signing_started" || await recoverTransactionAddress({serializedTransaction:raw as `0x02${string}`})!==r.owner.address) gaszipCodec(this.route).fail("signer_binding");
     const sealed=sealGaszipFunding(this.route,{...r,state:"sealed",rawTransaction:raw,transactionHash:keccak256(raw)});await this.saveLocked(sealed);return sealed;
   }
-  async assertNoEffectClaimsLocked(r:GaszipFundingRecord):Promise<void>{
-    if(await this.readJson(`${this.directory}-first-sign/${r.operationId}.json`)!==null || await this.readJson(`${this.directory}-first-send/${r.operationId}.json`)!==null)gaszipCodec(this.route).fail("effect_marker_blocks_retirement");
-  }
   /** The create-only first-send marker precedes every broadcast; without it APN never sent these bytes. */
   async sendClaimedLocked(r:{operationId:string}):Promise<boolean>{return await this.readJson(`${this.directory}-first-send/${r.operationId}.json`)!==null;}
   async claimSigningLocked(r:GaszipFundingRecord):Promise<void>{

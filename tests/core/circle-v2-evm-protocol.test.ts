@@ -9,8 +9,8 @@ import { CIRCLE_AMOUNT, CIRCLE_DEPLOYMENT_PINS, CIRCLE_MESSENGER, CIRCLE_MINTER,
 import { CIRCLE_ABI, CIRCLE_ZERO, bindCircleAttestation, circleWord, decodeCircleDestination, decodeCircleMessage, decodeCircleSource,
   encodeCircleApproval, encodeCircleBurn, encodeCircleMint, verifyCircleApproval, circleAttesterConfigurationHash, verifyCircleAttestationSigners, type CircleAttesterSnapshot,
   type CircleObservation, type CircleSourceProof } from "../../src/circle-v2-evm/protocol.js";
-import { quoteCircleFastFee, assertCircleFeeQuote, verifyCircleDeployments, verifyCircleGasEnvelope, verifyCircleMintPreflight,
-  verifyCircleSourceAccount, verifyCircleClosureFinality, type CircleDeploymentSnapshot } from "../../src/circle-v2-evm/preflight.js";
+import { verifyCircleDeployments, verifyCircleGasEnvelope, verifyCircleMintPreflight,
+  verifyCircleClosureFinality, type CircleDeploymentSnapshot } from "../../src/circle-v2-evm/preflight.js";
 const hash = `0x${"11".repeat(32)}` as Hex, blockHash = `0x${"22".repeat(32)}` as Hex, nonce = `0x${"33".repeat(32)}` as Hex;
 const n = (v: bigint, bytes: number) => v.toString(16).padStart(bytes * 2, "0"), q = (v: bigint) => `0x${v.toString(16)}`;
 function message(chain: CircleDestinationChain, attested = false, fee = 6n, finality = 1000n, expiry = 1000n): Hex {
@@ -121,15 +121,8 @@ test("exact allowance approval/reset receipts and native source budget", () => {
     assert.ok(verifyCircleApproval(obs,reset,amount.toString())); assert.throws(() => verifyCircleApproval(obs,reset,"999"));
   }
   assert.throws(() => verifyCircleGasEnvelope({gasLimitAtomic:"600000",maxFeePerGasAtomic:"60000000",maxPriorityFeePerGasAtomic:"1",valueAtomic:"0",nonceAtomic:"1"},42161), /budget/);
-  assert.throws(() => verifyCircleSourceAccount({chainId:42161,address:CIRCLE_SOURCE_OWNER,nativeBalanceAtomic:"30000000000000",usdcBalanceAtomic:"40100",allowanceAtomic:"40000",latestNonceAtomic:"1",pendingNonceAtomic:"1"}), /account/);
 });
-test("fast quote uses rational ceil and refuses unavailable, expired or over-cap fees", () => {
-  const quote=quoteCircleFastFee(143,[{finalityThreshold:1000,minimumFee:1.4},{finalityThreshold:2000,minimumFee:0}],1000,1001);
-  assert.equal(quote.quotedFeeAtomic,"6"); assertCircleFeeQuote(quote,143,1001);
-  assert.throws(()=>assertCircleFeeQuote(quote,143,31000),/expired/);
-  for(const value of [[{finalityThreshold:2000,minimumFee:0}],[{finalityThreshold:1000,minimumFee:25}],
-    [{finalityThreshold:1000,minimumFee:1.4},{finalityThreshold:1000,minimumFee:1.4}],[{finalityThreshold:1000,minimumFee:NaN}]]) assert.throws(()=>quoteCircleFastFee(143,value,1000,1001));
-});
+
 function deployment(chain: 42161|CircleDestinationChain, peer: CircleDestinationChain): CircleDeploymentSnapshot {
   const destination=chain!==42161, route=circleRoute(peer);
   return {chainId:chain,domain:destination?circleRoute(chain).domain:3,blockHash,blockNumberAtomic:"10",contracts:CIRCLE_DEPLOYMENT_PINS[chain],

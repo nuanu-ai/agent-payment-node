@@ -90,11 +90,7 @@ export class EvmTestRpc extends TestRpc {
     evidence: async (operation) => ({ ...(directEvmRequiresSafeHead(operation.chainId) ? { safeBlockNumberAtomic: "12346", safeBlockHash: EVM_BLOCK_HASH } : {}), blockHash: EVM_BLOCK_HASH, transactionVerified: this.transactionVerified,
       tokenBalanceDeltasVerified: operation.evm?.asset.kind === "erc20" && this.deltasVerified,
       ...(operation.evm?.asset.kind === "erc20" ? { senderDeltaAtomic: operation.amountAtomic, recipientDeltaAtomic: this.deltasVerified ? operation.amountAtomic : "0" } : {}) }),
-    confirmedAtNonce: async () => this.confirmedAtNonce,
   };
-  async seiNativeBalance(address: Address, selection: Parameters<EvmRpcPort["balance"]>[1]) {
-    return await this.evm.directReads!(1329).balance(address, selection);
-  }
   sender: Address = RECIPIENT;
 
   override async submitRawTransaction(rawTransaction: Hex): Promise<Hex> {

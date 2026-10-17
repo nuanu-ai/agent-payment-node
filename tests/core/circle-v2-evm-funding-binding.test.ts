@@ -2,33 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getAddress } from "viem";
 import { hashObject } from "../../src/canonical.js";
-import { sealAssetPolicyRegistry, type AssetPolicyRow } from "../../src/asset-policy-registry.js";
-import { CIRCLE_SOURCE_TOKEN, circleRoute } from "../../src/circle-v2-evm/catalog.js";
-import { quoteCircleFastFee } from "../../src/circle-v2-evm/preflight.js";
-import { admitCircleFundingAssets, assertCircleFundingFee, circleFundingBinding, deriveCircleFundingParameters,
-  quoteCircleFundingFee, sealCircleFundingIntent, validateCircleFundingBinding, validateCircleFundingIntent } from "../../src/circle-v2-evm/funding-binding.js";
+import { circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { assertCircleFundingFee, circleFundingBinding, deriveCircleFundingParameters,
+  quoteCircleFundingFee, validateCircleFundingBinding } from "../../src/circle-v2-evm/funding-binding.js";
 const now = Date.parse("2026-10-11T06:00:00.000Z");
 // Synthetic beneficiary and signers, unrelated to any live wallet, profile or policy.
 const p = { recipient: getAddress(`0x${"55".repeat(20)}`), amountAtomic: "1000000", maxFeeAtomic: "1000", minMintAtomic: "999000" };
 const id = { sourceProfile: "cctp-source", sourceOwner: getAddress(`0x${"a1".repeat(20)}`), destinationProfile: "cctp-gas", gasPayer: getAddress(`0x${"b2".repeat(20)}`) };
 const response = [{ finalityThreshold: 1000, minimumFee: 1.234567 }];
 const binding = () => circleFundingBinding(1329, id, p);
-const row = (kind: "token" | "native", identifier: string | null, decimals: number, reference: string, cap = "1000000000000000000"): AssetPolicyRow => ({
-  kind, identifier, symbol: kind === "token" ? "USDC" : "ETH", decimals,
-  rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
-  railCaps: { bridge: { maximumPerTransferAtomic: cap, dailyLimitAtomic: cap } }, mechanismPins: { bridge: { provider: "circle-cctp-v2", reference } },
-});
-function policy(chain: number, assets: AssetPolicyRow[]) {
-  return sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2", registryVersion: "test-funding-v2", publishedAt: "2026-10-11T00:00:00.000Z",
-    effectiveDate: "2026-10-11", effectiveAt: "2026-10-11T00:00:00.000Z", expiresAt: "2026-10-12T00:00:00.000Z", chains: [{ chain: `eip155:${chain}`, family: "evm", name: "Synthetic", assets }] });
-}
-function admission() {
-  const b = binding(), ref = b.mechanism.reference;
-  return { source: { chainId: 42161, address: id.sourceOwner, nativeBalanceAtomic: "75000000000000", usdcBalanceAtomic: p.amountAtomic, allowanceAtomic: "0", latestNonceAtomic: "10", pendingNonceAtomic: "10" },
-    destination: { chainId: 1329, address: b.gasPayer, nativeBalanceAtomic: circleRoute(1329).destinationNativeCap, usdcBalanceAtomic: "0", allowanceAtomic: "0", latestNonceAtomic: "3", pendingNonceAtomic: "3" },
-    sourceRegistry: policy(42161, [row("token", CIRCLE_SOURCE_TOKEN, 6, ref), row("native", null, 18, ref)]), destinationRegistry: policy(1329, [row("native", null, 18, ref)]),
-    sourceTokenUsageAtomic: "0", sourceNativeUsageAtomic: "0", destinationNativeUsageAtomic: "0", nowMs: now };
-}
 test("all absent is legacy; partial and unknown funding fields refuse", () => {
   assert.equal(deriveCircleFundingParameters({}), null);
   assert.deepEqual(deriveCircleFundingParameters(p), p);
@@ -45,8 +27,6 @@ for (const [chain, profiles] of [[1329, ["cctp-source", "cctp-gas"]], [1329, ["o
     assert.deepEqual(validateCircleFundingBinding(b), b);
     const fee = quoteCircleFundingFee(b, response, now, now);
     assert.equal(fee.quotedFeeAtomic, "124");
-    const i = sealCircleFundingIntent(b, fee, "a".repeat(64), now);
-    assert.equal(Date.parse(i.expiresAt) - Date.parse(i.preparedAt), 900_000); assert.deepEqual(validateCircleFundingIntent(i), i);
   });
 }
 test("canonical quantities and beneficiary reject ambiguous or invalid input", () => {
@@ -80,29 +60,9 @@ test("fresh fee binds tuple, exact rational ceiling, cap and original 30 second 
   assert.throws(() => assertCircleFundingFee(b, { ...body, quotedFeeAtomic: "123", integrityHash: hashObject({ ...body, quotedFeeAtomic: "123" }) }, now));
   assert.throws(() => assertCircleFundingFee(circleFundingBinding(1329, id, { ...p, recipient: getAddress(`0x${"66".repeat(20)}`) }), f, now));
 });
-test("intent keeps exact expiry/digest without treating metadata as an execution grant", () => {
-  const b = binding(), f = quoteCircleFundingFee(b, response, now, now), i = sealCircleFundingIntent(b, f, "a".repeat(64), now);
-  const { integrityHash: _hash, ...body } = i, changed = { ...body, expiresAt: new Date(now + 901_000).toISOString() };
-  assert.throws(() => validateCircleFundingIntent({ ...changed, integrityHash: hashObject(changed) }));
-  assert.throws(() => sealCircleFundingIntent(b, f, "url", now));
-  assert.throws(() => sealCircleFundingIntent(b, f, "a".repeat(64), Infinity));
-  assert.equal("effects" in i, false); assert.equal("authority" in i, false);
-});
-test("normal pure asset admission preserves exact balances, allowance, nonce and current policy caps", () => {
-  const b = binding(), a = admission(); admitCircleFundingAssets(b, a);
-  for (const patch of [{ usdcBalanceAtomic: "999999" }, { nativeBalanceAtomic: "74999999999999" }, { allowanceAtomic: "1000000" }, { pendingNonceAtomic: "11" }, { chainId: 1 }, { address: p.recipient }])
-    assert.throws(() => admitCircleFundingAssets(b, { ...a, source: { ...a.source, ...patch } }));
-  assert.throws(() => admitCircleFundingAssets(b, { ...a, destination: { ...a.destination, address: p.recipient } }));
-  assert.throws(() => admitCircleFundingAssets(b, { ...a, nowMs: Date.parse("2026-10-12T00:00:00.000Z") }));
-  assert.throws(() => admitCircleFundingAssets(b, { ...a, sourceRegistry: policy(42161, [row("token", CIRCLE_SOURCE_TOKEN, 6, b.mechanism.reference, "999999"), row("native", null, 18, b.mechanism.reference)]) }));
-  assert.throws(() => admitCircleFundingAssets(b, { ...a, sourceRegistry: policy(42161, [row("token", CIRCLE_SOURCE_TOKEN, 6, "circle-v2-evm-fast-42161-1329.v1"), row("native", null, 18, b.mechanism.reference)]) }));
-  assert.throws(() => admitCircleFundingAssets(b, { ...a, sourceTokenUsageAtomic: "1000000000000000000" }));
-});
-test("legacy fee quote serialization remains exact and new schema is separate", () => {
-  const legacy = quoteCircleFastFee(1329, [{ finalityThreshold: 1000, minimumFee: 1 }], now, now);
+test("a v1 fee quote (the deleted v1 writer's exact serialization) is refused by the v2 fee check", () => {
   const body = { schemaVersion: "apn.circle-fast-fee.v1", sourceDomain: 3, destinationDomain: 16, minimumFeeBps: "1", quotedFeeAtomic: "5",
     amountAtomic: "40100", maxFeeAtomic: "100", minMintAtomic: "40000", fetchedAtMs: now, expiresAtMs: now + 30_000,
-    responseHash: hashObject([{ finalityThreshold: 1000, minimumFee: 1 }]) };
-  assert.deepEqual(legacy, { ...body, integrityHash: hashObject(body) });
+    responseHash: hashObject([{ finalityThreshold: 1000, minimumFee: 1 }]) }, legacy = { ...body, integrityHash: hashObject(body) };
   assert.throws(() => assertCircleFundingFee(binding(), legacy, now));
 });

@@ -2,10 +2,8 @@
 import { getAddress } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { sealedStoredRecord } from "../stored-record-binding.js";
 import { CIRCLE_SOURCE_TOKEN, circleFundingMechanism, circleRoute, isCircleDestinationChain } from "./catalog.js";
-export const CIRCLE_FUNDING_OPERATION_V2 = "apn.circle-v2-evm-operation.v2";
 const UINT256 = (1n << 256n) - 1n;
 const ZERO = `0x${"0".repeat(40)}`;
 const FIELDS = ["recipient", "amountAtomic", "maxFeeAtomic", "minMintAtomic"];
@@ -126,46 +124,5 @@ export function assertCircleFundingFee(bindingValue, value, nowMs) {
     if (uint(body.quotedFeeAtomic) !== fee || fee > BigInt(binding.maxFeeAtomic) || BigInt(binding.amountAtomic) - fee < BigInt(binding.minMintAtomic))
         refuse("funding_fee_cap_or_net_floor");
     return Object.freeze({ ...body, integrityHash });
-}
-export function sealCircleFundingIntent(binding, feeQuote, deploymentDigest, preparedAtMs) {
-    time(preparedAtMs);
-    const b = validateCircleFundingBinding(binding), fee = assertCircleFundingFee(b, feeQuote, preparedAtMs);
-    const body = { schemaVersion: "apn.circle-v2-evm-operation-intent.v2", operationSchemaVersion: CIRCLE_FUNDING_OPERATION_V2,
-        binding: b, feeQuote: fee, deploymentDigest: hash(deploymentDigest), preparedAt: new Date(preparedAtMs).toISOString(), expiresAt: new Date(preparedAtMs + 15 * 60_000).toISOString() };
-    return Object.freeze({ ...body, integrityHash: hashObject(body) });
-}
-export function validateCircleFundingIntent(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationSchemaVersion", "binding", "feeQuote", "deploymentDigest", "preparedAt", "expiresAt", "integrityHash"]) ||
-        typeof value.preparedAt !== "string" || typeof value.expiresAt !== "string")
-        refuse("funding_intent_shape");
-    const expected = sealCircleFundingIntent(value.binding, value.feeQuote, String(value.deploymentDigest), Date.parse(value.preparedAt));
-    if (hashObject(value) !== hashObject(expected))
-        refuse("funding_intent_changed");
-    return expected;
-}
-/** Evaluate fresh inputs using the normal owner registry. This returns metadata, never a reservation or grant. */
-export function admitCircleFundingAssets(bindingValue, input) {
-    const b = validateCircleFundingBinding(bindingValue), route = circleRoute(b.destinationChain);
-    time(input.nowMs);
-    const s = input.source, d = input.destination;
-    if (s.chainId !== b.sourceChain || s.address !== b.sourceOwner || uint(s.usdcBalanceAtomic) < BigInt(b.amountAtomic) ||
-        uint(s.nativeBalanceAtomic) < 75000000000000n || uint(s.allowanceAtomic) !== 0n || uint(s.latestNonceAtomic) !== uint(s.pendingNonceAtomic) ||
-        d.chainId !== b.destinationChain || d.address !== b.gasPayer || uint(d.nativeBalanceAtomic) < BigInt(route.destinationNativeCap) || uint(d.latestNonceAtomic) !== uint(d.pendingNonceAtomic))
-        refuse("funding_accounts");
-    const at = new Date(input.nowMs).toISOString();
-    const admit = (registry, chain, asset, amountAtomic, usage) => {
-        uint(usage);
-        const result = evaluateAssetPolicy(registry, { chain: `eip155:${chain}`, asset, rail: "bridge", mechanism: b.mechanism,
-            amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at });
-        if (!bridgeMechanismAdmitted(result, b.mechanism) || result.asset.decimals !== (asset.kind === "token" ? 6 : 18))
-            refuse("funding_policy_mechanism_or_decimals");
-    };
-    admit(input.sourceRegistry, 42161, { kind: "token", identifier: b.sourceToken }, b.amountAtomic, input.sourceTokenUsageAtomic);
-    let nativeUsage = uint(input.sourceNativeUsageAtomic);
-    for (const amount of ["30000000000000", "30000000000000", "15000000000000"]) {
-        admit(input.sourceRegistry, 42161, { kind: "native", identifier: null }, amount, nativeUsage.toString());
-        nativeUsage += BigInt(amount);
-    }
-    admit(input.destinationRegistry, b.destinationChain, { kind: "native", identifier: null }, route.destinationNativeCap, input.destinationNativeUsageAtomic);
 }
 //# sourceMappingURL=funding-binding.js.map

@@ -1,8 +1,8 @@
-import { canonicalJson, hashObject, sha256 } from "../canonical.js";
+import { hashObject, sha256 } from "../canonical.js";
 import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeExecutionSource, bridgeFeeAsset, bridgeNativeCoin, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination } from "./asset-registry.js";
 import { decodeBridgeCall } from "./decode.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
-import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeSame, bridgeUint } from "./validation.js";
+import { BRIDGE_DIAMOND, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, bridgeAddress, bridgeFailure, bridgeHex, bridgeJson, bridgeOpaque, bridgeRecord, bridgeUint } from "./validation.js";
 /** Exact contracts for the reviewed composite BNB delivery graph. */
 const BNB_QUOTE_DELIVERY = {
     token: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
@@ -68,16 +68,8 @@ export function parseBridgeRoutes(response, request, sender) {
     return results;
 }
 export function materializeBridgeRoute(selected, response, request, sender) {
-    return parseBridgeMaterialization(selected, response, request, sender, false);
-}
-/** Decode and validate a reviewed quote-only destination without creating an operation or enabling an RPC/send path. */
-export function inspectBridgeRouteMaterialization(selected, response, request, sender) {
-    return parseBridgeMaterialization(selected, response, request, sender, true);
-}
-function parseBridgeMaterialization(selected, response, request, sender, quoteOnly) {
-    if (!selected.choice.preparable && !(quoteOnly && selected.choice.unavailableReason === "destination_execution_unreviewed")) {
+    if (!selected.choice.preparable)
         bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "finite_bridge_decoder_unavailable");
-    }
     if (response.status !== 200)
         bridgeFailure("APN_PROVIDER_UNAVAILABLE", "step_materialization_status");
     const step = bridgeRecord(bridgeJson(response.body, LIFI_ROUTE_RESPONSE_BYTES));

@@ -140,8 +140,6 @@
   "writtenBy": "0.5.43",
   "origin": "circle-historical-paid-closure",
   "kinds": [
-   "circle-sidecar:v1:external-claim",
-   "circle-sidecar:v1:external-evidence",
    "circle:apn.circle-v2-evm-operation.v1:143:external_fulfilled",
    "ledger:bridge:plain:finalized",
    "ledger:bridge:plain:released_unsubmitted"
@@ -160,10 +158,6 @@
   "writtenBy": "0.5.43",
   "origin": "circle-v2-evm-burn-retirement-runtime",
   "kinds": [
-   "circle-sidecar:v1:retirement-authority",
-   "circle-sidecar:v1:retirement-claim:send",
-   "circle-sidecar:v1:retirement-claim:sign",
-   "circle-sidecar:v1:retirement-intent:apn.circle-burn-nonce-retirement.v1",
    "circle:apn.circle-v2-evm-operation.v1:1329:nonce_retired",
    "ledger:bridge:consumedAtomic:failed_confirmed_revert"
   ]
@@ -215,8 +209,6 @@
   "writtenBy": "0.5.43",
   "origin": "circle-v2-evm-nonce-runtime",
   "kinds": [
-   "circle-sidecar:v1:retirement-authority",
-   "circle-sidecar:v1:retirement-intent:apn.circle-nonce-retirement.v1",
    "circle:apn.circle-v2-evm-operation.v1:143:cleanup_required",
    "ledger:bridge:plain:reserved"
   ]
@@ -226,10 +218,6 @@
   "writtenBy": "0.5.43",
   "origin": "circle-v2-evm-nonce-runtime",
   "kinds": [
-   "circle-sidecar:v1:retirement-authority",
-   "circle-sidecar:v1:retirement-claim:send",
-   "circle-sidecar:v1:retirement-claim:sign",
-   "circle-sidecar:v1:retirement-intent:apn.circle-nonce-retirement.v1",
    "circle:apn.circle-v2-evm-operation.v1:143:nonce_retired",
    "ledger:bridge:consumedAtomic:failed_confirmed_revert"
   ]
@@ -289,9 +277,6 @@
   "writtenBy": "0.5.43",
   "origin": "cleanup85-native-successor-production",
   "kinds": [
-   "circle-sidecar:v1:retirement-authority",
-   "circle-sidecar:v1:retirement-claim:sign",
-   "circle-sidecar:v1:retirement-intent:apn.circle-consumed-burn-retirement.v1",
    "circle:apn.circle-v2-evm-operation.v1:1329:cleanup_required",
    "ledger:bridge:plain:unknown_finality",
    "ledger:direct:cleanup85NativeReservation:reserved",
@@ -546,6 +531,15 @@
   "kinds": [
    "ledger:bridge:plain:unknown_finality",
    "sei-gaszip:submitted"
+  ]
+ },
+ {
+  "name": "60-v0544-circle-cleanup85-retirement-terminal",
+  "writtenBy": "0.5.44",
+  "origin": "circle-cleanup85-frozen-repair",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:1329:nonce_retired",
+   "ledger:bridge:consumedAtomic:failed_confirmed_revert"
   ]
  }
 ]

@@ -6,7 +6,7 @@ export class TtyStargateTokenApproval {
         this.options = options;
     }
     async approve(op) {
-        const code = approvalCode("bridge", op.integrityHash);
+        const code = approvalCode("bridge", op.integrityHash), fees = op.feeApproval, simulation = op.bridgeSimulation;
         await exactChainConsent([
             "Agent Payment Node Stargate V2 USDC bridge approval",
             `Profile: ${op.profile}`,
@@ -21,10 +21,10 @@ export class TtyStargateTokenApproval {
             `Owner-approved source native debit cap: ${op.maxNativeDebitAtomic} wei ETH`,
             `Source token/pool: ${op.sourceToken} / ${op.sourcePool}; destination token/pool: ${op.destinationToken} / ${op.destinationPool}`,
             `Allowance: ${op.allowanceRequired ? `separate exact approval for ${op.amountAtomic}` : "already exactly equal to principal"}`,
-            `EIP-1559 fee approval: ${op.feeApproval?.provenance ?? "legacy_exact_snapshot"}; quoted max/priority: ${op.feeApproval?.quotedMaxFeePerGasWei ?? op.sendEnvelope.maxFeePerGasAtomic} / ${op.feeApproval?.quotedMaxPriorityFeePerGasWei ?? op.sendEnvelope.maxPriorityFeePerGasAtomic} wei per gas; approved max/priority: ${op.feeApproval?.approvedMaxFeePerGasWei ?? op.sendEnvelope.maxFeePerGasAtomic} / ${op.feeApproval?.approvedMaxPriorityFeePerGasWei ?? op.sendEnvelope.maxPriorityFeePerGasAtomic} wei per gas`,
+            `EIP-1559 fee approval: ${fees.provenance}; quoted max/priority: ${fees.quotedMaxFeePerGasWei} / ${fees.quotedMaxPriorityFeePerGasWei} wei per gas; approved max/priority: ${fees.approvedMaxFeePerGasWei} / ${fees.approvedMaxPriorityFeePerGasWei} wei per gas`,
             "Network fee cap: every transaction is signed with the approved max fee per gas and is sent only while the current base fee plus its priority fee fits under it; a rise within that cap is accepted.",
-            `Bridge simulation: ${op.bridgeSimulation?.mode ?? "legacy_exact_at_prepare"}; prepare status: ${op.bridgeSimulation?.prepareStatus ?? "legacy_succeeded"}; frozen gas ceiling: ${op.bridgeSimulation?.gasCeilingAtomic ?? op.sendEnvelope.gasLimitAtomic}`,
-            ...(op.bridgeSimulation?.mode === "pending_post_approval" ? ["The bridge has not simulated successfully yet. After the approval is safe, APN must revalidate and exactly simulate it within this ceiling before signing."] : []),
+            `Bridge simulation: ${simulation.mode}; prepare status: ${simulation.prepareStatus}; frozen gas ceiling: ${simulation.gasCeilingAtomic}`,
+            ...(simulation.mode === "pending_post_approval" ? ["The bridge has not simulated successfully yet. After the approval is safe, APN must revalidate and exactly simulate it within this ceiling before signing."] : []),
             `Policy digest/revision: ${op.policy.policyDigest} / ${op.policy.policyRevision}`,
             `Quote: ${op.quote.quoteHash}; options: ${op.options}`,
             `Approval must be signed and submitted before preparation expiry: ${op.expiresAt}`,

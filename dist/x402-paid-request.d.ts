@@ -11,7 +11,6 @@ export declare class X402PaidRequest extends X402Lifecycle {
      * cannot prove non-use yet; a used nonce is then left to settlement reconciliation.
      */
     protected closeExpiredUnexposed(operation: X402OperationRecord): Promise<X402OperationRecord | null>;
-    protected assertLegacySafeRead(operation: X402OperationRecord): Promise<void>;
     protected withOperationLock(operation: X402OperationRecord, callback: (current: X402OperationRecord) => Promise<unknown>, lockWaitMs?: number): Promise<unknown>;
     protected completeAuthorization(operation: X402OperationRecord, kind: "create" | "get"): Promise<unknown>;
     private providerAuthorization;

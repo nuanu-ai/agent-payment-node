@@ -5,16 +5,6 @@ import { SUNSWAP_USDT, SUNSWAP_V2_ROUTER, SUNSWAP_V2_WTRX_USDT_PAIR, SUNSWAP_WTR
 import { normalizeTronEvidence } from "./tron-call.js";
 const SWAP_TOPIC = "d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822";
 const DEPOSIT_TOPIC = "e1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c";
-export async function observeSunSwapReceipt(rpc, expected) {
-    const [transaction, info, head] = await Promise.all([
-        rpc.call("walletsolidity/gettransactionbyid", { value: expected.transactionHash }),
-        rpc.call("walletsolidity/gettransactioninfobyid", { value: expected.transactionHash }),
-        rpc.call("walletsolidity/getnowblock", {}),
-    ]);
-    const headRecord = record(record(record(head).block_header).raw_data);
-    const solid = integer(headRecord.number);
-    return validateSunSwapReceipt(transaction, info, solid.toString(), expected);
-}
 /**
  * Proves one solidified successful V2 swap: exact txid and bytes, owner debit = call_value (input) + fee where
  * fee = energy_fee (<= fee_limit) + net_fee (<= bandwidth budget), one WTRX deposit of the input by the router, one pair

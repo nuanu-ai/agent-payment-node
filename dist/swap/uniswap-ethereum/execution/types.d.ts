@@ -1,6 +1,6 @@
 import type { Hex } from "../../../model.js";
 import type { SwapOperationRecord, SwapReceiptProof } from "../../model.js";
-import type { UniswapTransactionEnvelope } from "../../uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "../../uniswap-v3/envelope.js";
 export interface UniswapOwnerAdmission {
     readonly profile: string;
     readonly profileHash: string;
@@ -54,12 +54,6 @@ export interface UniswapExecutionApprovalRequest {
     readonly protocolRegistryDigest: string;
     readonly expiresAt: string;
     readonly approvalHash: string;
-}
-export interface UniswapForegroundApprovalPort {
-    confirm(request: UniswapExecutionApprovalRequest): Promise<{
-        readonly approved: boolean;
-        readonly approvalHash: string;
-    }>;
 }
 export interface UniswapExecutionBinding {
     readonly schemaVersion: "apn.uniswap-ethereum.execution-binding.v1";

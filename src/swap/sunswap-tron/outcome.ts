@@ -3,7 +3,6 @@ import { ApnError } from "../../errors.js";
 import { tronHex } from "../../tron/codec.js";
 import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
 import { SUNSWAP_V2_ROUTER } from "./catalog.js";
-import type { SunSwapObservationRpcPort } from "./observer.js";
 import { validateSunSwapPreparedMaterial, type SunSwapPreparedMaterial } from "./prepared.js";
 import { validateSunSwapReceipt, type SunSwapReceiptExpectation } from "./receipt.js";
 import { normalizeTronEvidence } from "./tron-call.js";
@@ -13,6 +12,12 @@ import { proveTronUnlanded, type SwapUnlandedProof } from "../unlanded.js";
 const FAILED_RESULTS = new Set(["REVERT", "BAD_JUMP_DESTINATION", "OUT_OF_MEMORY", "PRECOMPILED_CONTRACT", "STACK_TOO_SMALL",
   "STACK_TOO_LARGE", "ILLEGAL_OPERATION", "STACK_OVERFLOW", "OUT_OF_ENERGY", "OUT_OF_TIME", "JVM_STACK_OVER_FLOW",
   "TRANSFER_FAILED", "INVALID_CODE"]);
+
+export type SunSwapObservationMethod = "wallet/gettransactionbyid" | "wallet/gettransactioninfobyid" |
+  "walletsolidity/gettransactionbyid" | "walletsolidity/gettransactioninfobyid" | "walletsolidity/getnowblock";
+export interface SunSwapObservationRpcPort {
+  call(method: SunSwapObservationMethod, body: Readonly<Record<string, unknown>>): Promise<unknown>;
+}
 
 export type SunSwapObservedOutcome = { readonly outcome: "succeeded" | "reverted"; readonly proof: SwapReceiptProof };
 

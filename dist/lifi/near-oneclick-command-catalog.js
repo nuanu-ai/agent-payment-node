@@ -1,4 +1,3 @@
-import { createCliHandoff } from "../cli-handoff.js";
 import { ONECLICK_LANE_IDS, oneClickLane, oneClickRecipient } from "./near-oneclick-lanes.js";
 import { bridgeAddress, bridgeHash, bridgeUint } from "./validation.js";
 const option = (name, type, ...extra) => ({
@@ -22,8 +21,8 @@ export const ONECLICK_COMMANDS = [
         effect: { class: "payment_submit", summary: "After exact foreground approval, may send one Base USDC transfer or one plain Ethereum ETH value transfer to the fresh 1Click quote deposit address. Uses the lane's APN_BASE_RPC_URL or APN_ETHEREUM_RPC_URL." },
         approval: { class: "foreground_tty", when: "Before signing the exact saved deposit." }, output, states,
         recovery: [{ command_path: ["oneclick", "source", "status"], when: "Observe source and 1Click state without resending." }],
-        examples: ["apn oneclick source submit --lane base-usdc-to-tron-usdt --profile evm-live-buyer --expected-payer <base-payer> --recipient <tron-recipient> --amount-atomic 3000000 --min-output-atomic 1000000 --max-quoted-loss-atomic 2000000 --max-gas-limit-atomic 100000 --max-fee-per-gas-wei 2000000000 --max-priority-fee-per-gas-wei 100000000 --max-native-debit-wei 200000000000000 --idempotency-key tron-first",
-            "apn oneclick source submit --lane ethereum-eth-to-tron-trx --profile evm-live-buyer --expected-payer <ethereum-payer> --recipient <tron-recipient> --amount-atomic 2000000000000000 --min-output-atomic 12500000 --max-quoted-loss-atomic 200000 --max-gas-limit-atomic 60000 --max-fee-per-gas-wei 20000000000 --max-priority-fee-per-gas-wei 2000000000 --max-native-debit-wei 2600000000000000 --idempotency-key trx-fund-1"] },
+        examples: ["apn oneclick source submit --lane base-usdc-to-tron-usdt --profile <profile> --expected-payer <base-payer> --recipient <tron-recipient> --amount-atomic 3000000 --min-output-atomic 1000000 --max-quoted-loss-atomic 2000000 --max-gas-limit-atomic 100000 --max-fee-per-gas-wei 2000000000 --max-priority-fee-per-gas-wei 100000000 --max-native-debit-wei 200000000000000 --idempotency-key tron-first",
+            "apn oneclick source submit --lane ethereum-eth-to-tron-trx --profile <profile> --expected-payer <ethereum-payer> --recipient <tron-recipient> --amount-atomic 2000000000000000 --min-output-atomic 12500000 --max-quoted-loss-atomic 200000 --max-gas-limit-atomic 60000 --max-fee-per-gas-wei 20000000000 --max-priority-fee-per-gas-wei 2000000000 --max-native-debit-wei 2600000000000000 --idempotency-key trx-fund-1"] },
     { path: ["oneclick", "source", "status"], synopsis: "apn oneclick source status --operation <operation-id>",
         summary: "Read the saved source record, source receipt, 1Click status claim and independent TRON or Solana destination proof without resending.",
         options: [option("--operation", "operation_id")], effect: { class: "network_read", summary: "Read-only source-chain, 1Click and destination-chain observation; destination reads use APN_TRON_RPC_URL or APN_SOLANA_RPC_URL." },
@@ -45,11 +44,4 @@ export function bindOneClickCommand(path, o) {
         maxNativeDebitWei: u(o, "--max-native-debit-wei"), idempotencyKey: v(o, "--idempotency-key") };
 }
 /** MCP never approves money: it returns the exact foreground command for the owner to run. */
-export function oneClickSubmitHandoff(r) {
-    return createCliHandoff(["apn", "oneclick", "source", "submit", "--lane", r.lane, "--profile", r.profile, "--expected-payer", r.expectedPayer,
-        "--recipient", r.recipient, "--amount-atomic", r.amountAtomic, "--min-output-atomic", r.minOutputAtomic,
-        "--max-quoted-loss-atomic", r.maxQuotedLossAtomic, "--max-gas-limit-atomic", r.maxGasLimitAtomic,
-        "--max-fee-per-gas-wei", r.maxFeePerGasWei, "--max-priority-fee-per-gas-wei", r.maxPriorityFeePerGasWei,
-        "--max-native-debit-wei", r.maxNativeDebitWei, "--idempotency-key", r.idempotencyKey]);
-}
 //# sourceMappingURL=near-oneclick-command-catalog.js.map

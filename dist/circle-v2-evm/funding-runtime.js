@@ -6,7 +6,7 @@ import { verifyCircleFinalizedRevert } from "./revert-proof.js";
 import { getAddress, keccak256 } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { evmSentOutcome, evmUnsentOutcome } from "../evm-unsent-outcome.js";
+import { evmAmbiguousSendOutcome, evmSentOutcome, evmUnsentOutcome } from "../evm-unsent-outcome.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import { OperationService } from "../operation-service.js";
@@ -182,7 +182,7 @@ export class CircleFundingEvmService {
     preflightAttesters(destination, digest) { return readCircleAttesters(destination, digest); }
     remotes(chain) {
         const route = circleRoute(chain), sourceUrl = this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
-        return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "0", undefined, "lean"), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "0", undefined, "lean") };
+        return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean"), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean") };
     }
     async api(path) {
         const response = await this.https.request(`https://iris-api.circle.com${path}`, "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");
@@ -204,7 +204,10 @@ export class CircleFundingEvmService {
         const deployments = memo.deployments, observe = (client, hash, tag) => memo.observation(client, hash, tag);
         // P1: a used CCTP nonce never becomes unused, so the current value plus the receipt's MessageReceived event proves consumption.
         const usedNonce = async (nonce) => String(await destination.read(CIRCLE_TRANSMITTER, "usedNonces", [nonce], "latest"));
-        return { now: this.now, save: op => this.repo.saveFunding(op), authorizationDeadline: op => this.usage.authorizationDeadline(op),
+        // R4: the sealed bytes of an effect are sent at most once per command (a first broadcast counts).
+        const resent = new Set();
+        return { now: this.now, messageNonceUsed: async (op) => { if (op.attestation === null)
+                circleCorrupt("attestation_missing"); return await usedNonce(op.attestation.nonce) !== "0"; }, save: op => this.repo.saveFunding(op), authorizationDeadline: op => this.usage.authorizationDeadline(op),
             assertOwnerPolicyAndConflicts: async (op, role) => { await assertEvmNativeCustody(this.state, op.profile, op.sourceCustody); await assertEvmNativeCustody(this.state, op.destinationProfile, op.destinationCustody); await assertExclusiveEvmRawSigner(this.state, op.sourceCustody.walletAddress, op.profileHash); await assertExclusiveEvmRawSigner(this.state, op.destinationCustody.walletAddress, op.destinationProfileHash); await this.operations.assertCircleAccountsAvailable(op, true, role); await this.usage.confirm(op); },
             approve: async (input, role, deadline) => {
                 const op = snapshotCircleFundingOperation(input);
@@ -283,8 +286,34 @@ export class CircleFundingEvmService {
                     return evmSentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
                         nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
                 },
+                ambiguous: async (_op, effect) => {
+                    const remote = rpc(effect);
+                    await remote.identity();
+                    return evmAmbiguousSendOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
+                        nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
+                },
+                // The same sealed bytes the owner approved: same hash and nonce, so they can be included at most once. Nothing is signed.
+                resend: async (input, effectInput, raw) => {
+                    const op = snapshotCircleFundingOperation(input), effect = snapshotCircleFundingEffect(op, effectInput), hash = effect.transactionHash;
+                    if (resent.has(effect.role) || hash === null || keccak256(raw) !== hash)
+                        return false;
+                    resent.add(effect.role);
+                    await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op);
+                    // A message someone else already minted would only revert this mint: leave it to external adoption.
+                    if (effect.role === "mint" && (op.attestation === null || await usedNonce(op.attestation.nonce) !== "0"))
+                        return false;
+                    try {
+                        return circleHex(await rpc(effect).call("eth_sendRawTransaction", [raw], () => { if (keccak256(raw) !== hash)
+                            circleBlocked("sealed_broadcast_hash_changed"); }), 32) === hash;
+                    }
+                    catch (error) {
+                        if (error instanceof ApnError)
+                            return false;
+                        throw error;
+                    }
+                },
                 discard: (op, effect) => this.custody.discard(op, effect) },
-            broadcast: async (e, raw, guard) => { guard(); const current = await this.required(initial.operationId); if (e.role === "mint" || e.role === "cleanup")
+            broadcast: async (e, raw, guard) => { guard(); resent.add(e.role); const current = await this.required(initial.operationId); if (e.role === "mint" || e.role === "cleanup")
                 await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(current); guard(); const effect = snapshotCircleFundingEffect(current, e); await this.custody.claimSend(current, effect, guard); guard(); if (keccak256(raw) !== e.transactionHash)
                 circleBlocked("sealed_broadcast_hash_changed"); const returned = circleHex(await rpc(e).call("eth_sendRawTransaction", [raw], guard), 32); if (returned !== keccak256(raw))
                 circleBlocked("broadcast_hash_changed"); return returned; },

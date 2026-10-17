@@ -7,7 +7,6 @@ import { assetAdmitsSwapMechanism } from "../route-admission.js";
 import { validateJupiterV1PreparedMaterial } from "./v1-material.js";
 import { JUPITER_V1_KNOWN_ROUTES, JUPITER_V1_ROUTES, routeConfigForMaterial } from "./v1-route-config.js";
 import { JUPITER_V1_WHIRLPOOL_MECHANISM_PIN } from "./v1-pins.js";
-export const JUPITER_V1_MECHANISM_DIGEST = swapMechanismDigest(JUPITER_V1_WHIRLPOOL_MECHANISM_PIN);
 /** Resolves the owner-activated sealed policy and both public/envelope identities before any custody access. */
 export class JupiterV1OwnerAdmission {
     accounts;

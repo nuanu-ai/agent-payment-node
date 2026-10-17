@@ -1,4 +1,3 @@
-import { decodeAbiParameters } from "viem";
 import { ApnError } from "./errors.js";
 const MAX_X402_TOPICS = 4;
 const MAX_X402_LOG_DATA_BYTES = 4096;
@@ -48,18 +47,6 @@ export function x402RpcLog(value) {
         transactionHash: nonzeroBytes32(log.transactionHash, "log transaction hash"),
         logIndex: rpcQuantity(log.logIndex).toString(),
     };
-}
-export function rpcString(value, label) {
-    const encoded = rpcHex(value);
-    try {
-        const [decoded] = decodeAbiParameters([{ type: "string" }], encoded);
-        if (decoded.length === 0 || Buffer.byteLength(decoded, "utf8") > 128)
-            throw new Error("bounded string");
-        return decoded;
-    }
-    catch {
-        throw new ApnError("APN_RPC_PROTOCOL", `RPC ${label} is invalid.`);
-    }
 }
 export function rpcUint256Data(value, label) {
     try {

@@ -16,7 +16,7 @@ import type { GaslessEstimate, GaslessIntent, GaslessSnapshot } from "../../src/
 import type { GaslessOperationRecord } from "../../src/gasless/operation-model.js";
 import { gaslessOwner } from "../../src/gasless/owner.js";
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
-import { baseLocalGaslessMechanism, localGaslessMechanism } from "../../src/gasless/asset-policy.js";
+import { localGaslessMechanism } from "../../src/gasless/asset-policy.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { newGaslessOperation, transitionGasless } from "../../src/gasless/transitions.js";
 import { gaslessBatch, gaslessEnvelopeBinding, gaslessUserOperation } from "../../src/gasless/wire.js";
@@ -39,7 +39,7 @@ import { X402_URL } from "./x402-vectors.js";
 const gaslessAdmission = () => ({ chain: "eip155:8453", kind: "token" as const,
   identifier: gaslessDeployment(8453).token, rail: "gasless" as const,
   maximumPerTransferAtomic: "100000000", dailyLimitAtomic: "1000000000",
-  mechanism: baseLocalGaslessMechanism() });
+  mechanism: localGaslessMechanism(8453) });
 import { activateDirectPolicy, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 
 const MASTER = Buffer.from("6d".repeat(32), "hex");
@@ -730,7 +730,6 @@ async function providerAtomicFixture(root: string, now: Date) {
     lifecycle: {
       async connect() { throw new Error("provider connect is forbidden in preparation concurrency tests"); },
       async probeStatus() { calls.probe += 1; },
-      async logout() { throw new Error("provider logout is forbidden in preparation concurrency tests"); },
     },
     reads: {
       async observeBalance() { calls.balance += 1; return { address: profile.public_address,
@@ -743,7 +742,6 @@ async function providerAtomicFixture(root: string, now: Date) {
       async prime() { calls.prime += 1; throw new Error("provider prime is forbidden during prepare"); },
       async execute() { calls.execute += 1; throw new Error("provider paid fetch is forbidden during prepare"); },
     },
-    evidence: { owner: "apn" },
   };
   const registry = new ProviderRegistry([{ provider_id: providerId, create: () => adapter }]);
   const repository = new ProviderX402Repository(root), policy = new TestProfilePolicy(), rpc = new TestRpc();

@@ -14,9 +14,6 @@ import { transitionBridge } from "./transitions.js";
 import { bridgeFailure } from "./validation.js";
 import { BridgeAllowlistGate, bridgeUsageTarget } from "./allowlist.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
-import { LINEA_DEPLOYMENT_MIGRATION_CANDIDATE, assertLineaDeploymentMigrationProof, migrateLineaDeploymentOperation } from "./deployment-migration.js";
-import { bridgeProtocolEmitter } from "./deployments.js";
-import { BASE_DEPLOYMENT_MIGRATION_CANDIDATE, assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationProof, migrateBaseDeploymentOperation } from "./base-deployment-migration.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { bridgeDestinationObservationRequests, bridgeSourceObservationRequests } from "./observation-budget.js";
 import { BRIDGE_OBSERVATION_RETRY_POSTS, BRIDGE_RESIDUAL_OBSERVATION_REQUESTS, bridgeInvocationPostBudget, bridgeSendStepPostBudget } from "./send-budget.js";
@@ -75,84 +72,6 @@ export class BridgeService {
             return await this.records.loadLegacyReceipt(found.record);
         return await this.locked(operationId, async (op) => await this.records.loadReceipt(op.profileHash, op.operationId));
     }
-    async repairDeployment(operationId) {
-        return await this.deploymentMigrationLocked(operationId, async (op) => {
-            const raw = isLegacyBridgeOperation(op) ? op.raw : op;
-            // The recognized Base migration needs 29 clean POSTs: 12 source reads, then 17 destination
-            // and finality reads after a durable source checkpoint. Each command gets a fresh physical cap.
-            const session = new RpcReadSession({ now: () => this.context.clock.now().getTime(), maxHttpRequests: 31, maxHttpAttempts: 33,
-                archiveDeploymentBatchMaxItems: 3,
-                providerScheduler: this.providerScheduler, physicalBudget: new BridgeRpcPhysicalBudget(24) });
-            if (raw.operationId === BASE_DEPLOYMENT_MIGRATION_CANDIDATE.operationId) {
-                if (!isLegacyBridgeOperation(op)) {
-                    const eligible = migrateBaseDeploymentOperation(raw);
-                    await this.records.repairMigratedLegacyDeployment(eligible.previousOperation, eligible.operation, eligible.audit);
-                    return migrationProjection(eligible.operation, eligible.audit, true);
-                }
-                assertBaseDeploymentMigrationCandidate(raw);
-                const d = this.context.bridge;
-                if (d === undefined)
-                    bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bridge_runtime_unavailable");
-                const request = raw.intent.materialization.request, source = d.rpcFor(request.fromChainId, session), destination = d.rpcFor(request.toChainId, session);
-                if (source.origin !== BASE_DEPLOYMENT_MIGRATION_CANDIDATE.verifiedSourceDeployment.rpcOrigin ||
-                    destination.origin !== BASE_DEPLOYMENT_MIGRATION_CANDIDATE.newDestinationDeployment.rpcOrigin) {
-                    bridgeFailure("APN_OPERATION_BLOCKED", "migration_rpc_origin_mismatch");
-                }
-                const effect = raw.effects.find((entry) => entry.role === "bridge");
-                if (effect?.transactionHash !== BASE_DEPLOYMENT_MIGRATION_CANDIDATE.sourceTransactionHash)
-                    bridgeFailure("APN_OPERATION_BLOCKED", "migration_source_transaction_missing");
-                const checkpoint = await this.records.baseMigrationSourceCheckpoint(raw);
-                if (checkpoint === null) {
-                    const sourceObserved = await source.observe(effect.transactionHash, effect.envelope, undefined, { legacyBaseFees: true });
-                    if (sourceObserved === null)
-                        bridgeFailure("APN_OPERATION_BLOCKED", "migration_transaction_missing");
-                    const sourceDeployment = await source.deployment("across", request.toChainId, request.fromToken, sourceObserved.transaction.block);
-                    await this.records.saveBaseMigrationSourceCheckpoint(raw, sourceObserved, sourceDeployment);
-                    return { status: "pending", proof_class: "local_journal_migration", operation_id: raw.operationId,
-                        next_actions: [`apn operation repair-deployment --operation ${raw.operationId}`] };
-                }
-                const destinationObserved = await destination.observe(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationTransactionHash, undefined, undefined, { legacyBaseFees: true });
-                if (destinationObserved === null)
-                    bridgeFailure("APN_OPERATION_BLOCKED", "migration_transaction_missing");
-                const destinationDeployment = await destination.deployment("across", request.fromChainId, request.toToken, destinationObserved.transaction.block);
-                const [sourceFinalityBlock, destinationFinalityBlock] = await Promise.all([
-                    source.block(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.sourceSafeBlock.numberAtomic),
-                    destination.block(BASE_DEPLOYMENT_MIGRATION_CANDIDATE.destinationSafeBlock.numberAtomic),
-                ]);
-                const destinationProof = assertBaseDeploymentMigrationProof(raw, checkpoint.observation, checkpoint.deployment, destinationObserved, destinationDeployment, sourceFinalityBlock, destinationFinalityBlock);
-                const migration = migrateBaseDeploymentOperation(raw, destinationProof);
-                await this.records.migrateLegacyDeployment(raw, migration.operation, migration.audit);
-                return migrationProjection(migration.operation, migration.audit, false);
-            }
-            if (isLegacyBridgeOperation(op))
-                bridgeFailure("APN_OPERATION_BLOCKED", "migration_operation_kind");
-            const eligible = migrateLineaDeploymentOperation(op, LINEA_DEPLOYMENT_MIGRATION_CANDIDATE.newDeployment);
-            if (eligible.alreadyCurrent) {
-                await this.records.repairMigratedDeployment(eligible.previousOperation, eligible.operation, eligible.audit);
-                return migrationProjection(eligible.operation, eligible.audit, true);
-            }
-            const d = this.context.bridge;
-            if (d === undefined)
-                bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bridge_runtime_unavailable");
-            const rpc = d.rpcFor(op.intent.materialization.request.toChainId, session), request = op.intent.materialization.request;
-            if (rpc.origin !== op.intent.destinationRpcOrigin)
-                bridgeFailure("APN_OPERATION_BLOCKED", "migration_rpc_origin_mismatch");
-            const hash = op.providerObservation?.destinationTransactionHash;
-            if (typeof hash !== "string" || !hash.startsWith("0x"))
-                bridgeFailure("APN_OPERATION_BLOCKED", "migration_destination_transaction_missing");
-            const observed = await rpc.observe(hash, undefined, {
-                recipient: request.recipient, from: bridgeProtocolEmitter(request.toChainId, "across", request.toToken),
-                amountAtomic: op.sourceProof?.correlation.kind === "across" ? op.sourceProof.correlation.outputAmountAtomic : "0",
-            });
-            if (observed === null)
-                bridgeFailure("APN_OPERATION_BLOCKED", "migration_destination_transaction_missing");
-            const deployment = await rpc.deployment("across", request.fromChainId, request.toToken, observed.transaction.block);
-            assertLineaDeploymentMigrationProof(observed.transaction, deployment);
-            const migration = migrateLineaDeploymentOperation(op, deployment);
-            await this.records.migrateDeployment(op, migration.operation, migration.audit);
-            return migrationProjection(migration.operation, migration.audit, false);
-        });
-    }
     dependencies() {
         if (this.context.bridge === undefined)
             bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "bridge_runtime_unavailable");
@@ -206,21 +125,5 @@ export class BridgeService {
             return await work(current.record);
         }));
     }
-    async deploymentMigrationLocked(input, work) {
-        const operationId = canonicalOperationId(input), first = await this.operations.required(operationId);
-        if (first.kind !== "bridge_route")
-            bridgeFailure("APN_OPERATION_BLOCKED", "migration_operation_kind");
-        return await this.context.state.withLocks([walletCustodyLock(this.context.state, first.record.intent.profile)], async () => await this.context.state.withLocks([`profile:${first.record.profileHash}`, `profile:${allowlistProfileHash(first.record.intent.profile)}`, `operation:${operationId}`, evmAddressLock(first.record.intent.owner.address)], async () => {
-            const current = await this.operations.required(operationId);
-            if (current.kind !== "bridge_route")
-                bridgeFailure("APN_STATE_CORRUPT", "migration_operation_kind_changed");
-            return await work(current.record);
-        }));
-    }
-}
-function migrationProjection(operation, audit, alreadyCurrent) {
-    return { schema_version: audit.schemaVersion, status: alreadyCurrent ? "already_current" : "migrated",
-        proof_class: "local_journal_migration", operation: publicBridgeOperation(operation), audit,
-        next_actions: operation.terminal ? [] : [`apn operation resume --operation ${operation.operationId}`] };
 }
 //# sourceMappingURL=service.js.map

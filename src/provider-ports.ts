@@ -86,7 +86,6 @@ export interface ProviderLifecyclePort {
   readonly authenticationMethods?: readonly string[];
   connect(foreground: ForegroundAuthenticationPort, options?: ProviderConnectOptions): Promise<void>;
   probeStatus(): Promise<void>;
-  logout(): Promise<void>;
 }
 
 export interface ProviderBalanceObservation {
@@ -288,22 +287,10 @@ export interface ProviderX402SellerResult {
   readonly sha256: string;
 }
 
-export interface EvidencePort {
-  readonly owner: "apn" | "provider";
-}
-
 export interface ProviderProfileRepositoryPort {
   load(profileHash: string): Promise<ProviderProfileRecord | null>;
   save(profile: ProviderProfileRecord): Promise<void>;
   remove(profileHash: string): Promise<void>;
-}
-
-export interface OperationRepositoryPort {
-  readonly kind: "operation_repository";
-}
-
-export interface ReceiptRepositoryPort {
-  readonly kind: "receipt_repository";
 }
 
 export interface ProviderAdapterBundle {
@@ -316,7 +303,6 @@ export interface ProviderAdapterBundle {
   readonly x402?: X402ExecutionPort;
   readonly x402Signer?: X402SigningPort;
   readonly x402Material?: X402PaymentMaterialPort;
-  readonly evidence?: EvidencePort;
   readonly permissions?: ProviderPermissionLifecyclePort;
   readonly profileMigration?: ProviderProfileMigrationPort;
 }

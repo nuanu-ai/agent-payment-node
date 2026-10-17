@@ -1,8 +1,6 @@
 /** Pure funding-v2 metadata only. No custody, reservation, network, CLI or execution authority. */
 import { type Address } from "viem";
 import { type CircleDestinationChain } from "./catalog.js";
-import type { CircleAccountPreflight } from "./preflight.js";
-export declare const CIRCLE_FUNDING_OPERATION_V2: "apn.circle-v2-evm-operation.v2";
 export interface CircleFundingParameters {
     readonly recipient: Address;
     readonly amountAtomic: string;
@@ -38,17 +36,6 @@ export interface CircleFundingFeeV2 {
     readonly responseHash: string;
     readonly integrityHash: string;
 }
-/** A sealed intent is not an executable operation or authorization grant. Phase B owns those boundaries. */
-export interface CircleFundingIntentV2 {
-    readonly schemaVersion: "apn.circle-v2-evm-operation-intent.v2";
-    readonly operationSchemaVersion: typeof CIRCLE_FUNDING_OPERATION_V2;
-    readonly binding: CircleFundingBindingV2;
-    readonly feeQuote: CircleFundingFeeV2;
-    readonly deploymentDigest: string;
-    readonly preparedAt: string;
-    readonly expiresAt: string;
-    readonly integrityHash: string;
-}
 /** All absent means the unchanged legacy input. A partial or unknown field set cannot select v2. */
 export declare function deriveCircleFundingParameters(value: unknown): CircleFundingParameters | null;
 /** Who signs: the source profile and its custody wallet, and the destination gas profile and its custody wallet. */
@@ -66,16 +53,3 @@ export declare function circleFundingBinding(chain: CircleDestinationChain, iden
 export declare function validateCircleFundingBinding(value: unknown): CircleFundingBindingV2;
 export declare function quoteCircleFundingFee(bindingValue: unknown, response: unknown, fetchedAtMs: number, nowMs: number): CircleFundingFeeV2;
 export declare function assertCircleFundingFee(bindingValue: unknown, value: unknown, nowMs: number): CircleFundingFeeV2;
-export declare function sealCircleFundingIntent(binding: unknown, feeQuote: unknown, deploymentDigest: string, preparedAtMs: number): CircleFundingIntentV2;
-export declare function validateCircleFundingIntent(value: unknown): CircleFundingIntentV2;
-/** Evaluate fresh inputs using the normal owner registry. This returns metadata, never a reservation or grant. */
-export declare function admitCircleFundingAssets(bindingValue: unknown, input: {
-    readonly source: CircleAccountPreflight;
-    readonly destination: CircleAccountPreflight;
-    readonly sourceRegistry: unknown;
-    readonly destinationRegistry: unknown;
-    readonly sourceTokenUsageAtomic: string;
-    readonly sourceNativeUsageAtomic: string;
-    readonly destinationNativeUsageAtomic: string;
-    readonly nowMs: number;
-}): void;

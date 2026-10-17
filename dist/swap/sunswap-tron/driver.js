@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { validateSwapOperation } from "../model.js";
-import { requireSwapProtocol, validateSwapProtocolRegistry } from "../protocol-registry.js";
+import { assertOperationProtocolRegistry } from "../family-guards.js";
 import { createSunSwapTronExecutionBinding } from "./execution-binding.js";
 import { validateSunSwapPreparedMaterial } from "./prepared.js";
 import { validateSunSwapExecutionBinding } from "./signer.js";
@@ -22,7 +22,7 @@ export class SunSwapTronExecutionDriver {
         let material, effect, binding;
         try {
             material = validateSunSwapPreparedMaterial(input.material, "stored");
-            assertInjectedProtocol(operation, this.d.protocolRegistry);
+            assertOperationProtocolRegistry(operation, this.d.protocolRegistry, "sunswap");
             const admission = await this.d.admission.assert(operation);
             effect = { account: admission.account, intent: material.execution.intent, transaction: material.execution.transaction,
                 simulation: material.execution.simulation };
@@ -107,13 +107,6 @@ export class SunSwapTronExecutionDriver {
         }
         catch { /* A persisted marker or concurrent change keeps the reservation; resume only observes. */ }
     }
-}
-function assertInjectedProtocol(operation, registryValue) {
-    const registry = validateSwapProtocolRegistry(registryValue);
-    if (registry.registryDigest !== operation.protocolRegistryDigest || registry.registryVersion !== operation.protocolRegistryVersion) {
-        blocked("Injected SunSwap protocol registry does not match the prepared operation.", "sunswap_protocol_registry_drift");
-    }
-    requireSwapProtocol(registry, operation.mechanismDigest);
 }
 function signingWindowLive(material, now) {
     if (!(now instanceof Date) || !Number.isFinite(now.getTime()))

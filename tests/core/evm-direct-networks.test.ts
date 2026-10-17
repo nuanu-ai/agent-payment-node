@@ -125,47 +125,6 @@ test("BNB Smart Chain's zero base fee prices at the priority fee, and a zero tot
   await assert.rejects(rpc.estimate({ chainId: 56, from: WALLET, to: RECIPIENT, valueAtomic: "1", data: "0x" }), { code: "APN_RPC_PROTOCOL" });
 });
 
-test("supersession scans start at the safe head on safe-finality networks and at latest on inclusion networks", async () => {
-  for (const [chainId, tag] of [[143, "safe"], [43114, "safe"], [59144, "latest"], [10, "latest"]] as const) {
-    const { calls, rpc } = wire(chainId, { baseFee: 1n, priority: 1n });
-    assert.equal(await rpc.confirmedAtNonce(chainId, WALLET, "7", "12345"), null);
-    assert.equal(calls.find(({ method }) => method === "eth_getBlockByNumber")?.params[0], tag, String(chainId));
-  }
-});
-
-for (const chainId of EIGHT) test(`chain ${chainId}: native and list tokens prepare within owner caps, sign for the chain and complete`, async (context) => {
-  const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root);
-  setup.rpc.chainId = chainId;
-  if (chainId !== 10 && chainId !== 130) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
-  const wallet = await setup.core.wallet.ensure("default") as { address: Address };
-  setup.rpc.sender = wallet.address;
-  const chain = `eip155:${chainId}`, assets: readonly (Address | "native")[] = ["native", ...LIST_TOKENS[chainId].map(([, address]) => address)];
-  const caps = { maximumPerTransferAtomic: "2000000", dailyLimitAtomic: "2500000" };
-  await activateDirectPolicy(temporary.root, "default", { accounts: { evm: wallet.address }, now: setup.clock.now(),
-    admissions: assets.map((asset) => directAdmission(chain, asset === "native" ? null : asset, caps)) });
-  for (const [index, token] of assets.entries()) {
-    const request = { ...EVM_REQUEST, asset: { chainId, token }, amount: token === "native" ? "0.0000000000015" : "1.5", idempotencyKey: `evm8-${chainId}-${index}-ok` };
-    const calls = setup.rpc.genericBalanceCalls;
-    await assert.rejects(setup.core.transfer.prepare({ ...request, amount: token === "native" ? "0.000000000002000001" : "2.000001", idempotencyKey: `evm8-${chainId}-${index}-cap` }),
-      refused("allowlist_per_transfer_cap_exceeded"));
-    assert.equal(setup.rpc.genericBalanceCalls, calls, "caps refuse before any RPC read");
-    const prepared = await setup.core.transfer.prepare(request) as { operation_id: string; state: string };
-    assert.equal(prepared.state, "awaiting_approval");
-    const approved = await setup.core.transfer.approve(prepared.operation_id) as { state: string };
-    assert.equal(approved.state, "completed", `${chain} ${token}`);
-    const transaction = parseTransaction(setup.rpc.submissions.at(-1)!);
-    assert.equal(transaction.chainId, chainId);
-    assert.equal(transaction.to?.toLowerCase(), (token === "native" ? EVM_REQUEST.recipient : token).toLowerCase());
-    assert.equal(await directUsage(temporary.root, wallet.address, chain, token === "native" ? null : token, setup.clock.now()), "1500000");
-    await assert.rejects(setup.core.transfer.prepare({ ...request, idempotencyKey: `evm8-${chainId}-${index}-day` }), refused("allowlist_daily_cap_exceeded"));
-  }
-  if (chainId === 56) {
-    await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d" }, amount: "1", idempotencyKey: "evm8-56-unlisted" }),
-      refused("allowlist_asset_unlisted"));
-  }
-});
-
 test("an asset admitted on one new network is not admitted on another, and an amount above the balance refuses before estimating gas", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root);

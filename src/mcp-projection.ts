@@ -1,14 +1,14 @@
 import {
   COMMAND_MANIFEST,
-  validateCommandManifest,
   type CommandDefinition,
   type CommandOption,
 } from "./command-catalog.js";
 import { mcpFieldName } from "./command-binder.js";
 import { ApnError } from "./errors.js";
+import { projectForegroundHandoff, type ForegroundHandoffTool } from "./mcp-foreground-handoff.js";
 
 const SELECTED_PATHS = [
-  "circle evm adopt-external-mint", "circle evm prepare", "circle evm approve-source", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm cleanup-nonce", "circle evm cleanup85-prepare", "circle evm cleanup85-cancel", "circle evm cleanup86-approve", "circle evm status",
+  "circle evm adopt-external-mint", "circle evm prepare", "circle evm approve-source", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm status",
   "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare",
   "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
   "swap ethereum uniswap-token inventory", "swap ethereum uniswap-token quote", "swap ethereum uniswap-token prepare",
@@ -37,7 +37,6 @@ const SELECTED_PATHS = [
   "wallet permission forget",
   "wallet status",
   "wallet balance",
-  "wallet balance-asset",
   "wallet portfolio",
   "wallet ensure-solana",
   "wallet balance-solana",
@@ -60,21 +59,21 @@ const SELECTED_PATHS = [
   "pay transfer prepare-asset",
   "pay transfer approve",
   "operation status",
-  "operation repair-deployment",
   "operation abandon",
   "operation resume",
   "operation recover-provider-request",
   "operation recover-transaction-settlement",
   "receipt get",
-  "wallet policy show-network",
-  "wallet policy set-network",
-  "x402 inspect-network",
-  "x402 fetch prepare-network",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
   "gasless usdt prepare", "gasless usdt status", "gasless usdt resume",
   "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer approve-sealed",
   "oneclick source submit", "oneclick source status",
 ] as const;
+
+/** Foreground commands MCP still runs: their non-interactive part (a pure policy decrease) needs no consent, and the
+ * consent part is refused by RejectingMcpPolicyApproval with a CLI handoff. Every other selected foreground command is
+ * reachable only through the single foreground handoff tool, which never executes anything. */
+const MCP_RUNS_FOREGROUND = new Set(["wallet policy set"]);
 
 export interface ProjectedMcpTool {
   readonly name: string;
@@ -92,29 +91,37 @@ export interface ProjectedMcpTool {
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 export function projectMcpTools(manifest: unknown = COMMAND_MANIFEST): readonly ProjectedMcpTool[] {
-  validateCommandManifest(manifest);
-  const commands = (manifest as { readonly commands: readonly CommandDefinition[] }).commands;
-  const byPath = new Map(commands.map((command) => [command.path.join(" "), command]));
   const names = new Set<string>();
-  const projected = SELECTED_PATHS.map((path) => {
-    const command = byPath.get(path);
-    if (command === undefined) throw projectionFailure("A selected command is absent from the manifest.");
+  return selectedCommands(manifest).filter(runsInMcp).map((command) => {
     if (command.output.contract !== "apn.cli.v1") throw projectionFailure("A selected command has unsupported output metadata.");
     const name = toolName(command.path);
     if (names.has(name)) throw projectionFailure("Selected commands collide after MCP name projection.");
     names.add(name);
-    return {
-      name,
-      description: toolDescription(command),
-      inputSchema: inputSchema(command),
-      command,
-    };
+    return { name, description: toolDescription(command), inputSchema: inputSchema(command), command };
   });
-  if (projected.length !== SELECTED_PATHS.length) throw projectionFailure("The selected MCP tool set is incomplete.");
-  return projected;
+}
+
+/** The one tool that names the exact foreground CLI command for every selected command MCP cannot run. */
+export function projectMcpForegroundHandoff(manifest: unknown = COMMAND_MANIFEST): ForegroundHandoffTool {
+  return projectForegroundHandoff(selectedCommands(manifest).filter((command) => !runsInMcp(command)));
+}
+
+function selectedCommands(manifest: unknown): readonly CommandDefinition[] {
+  const commands = (manifest as { readonly commands: readonly CommandDefinition[] }).commands;
+  const byPath = new Map(commands.map((command) => [command.path.join(" "), command]));
+  return SELECTED_PATHS.map((path) => {
+    const command = byPath.get(path);
+    if (command === undefined) throw projectionFailure("A selected command is absent from the manifest.");
+    return command;
+  });
+}
+
+function runsInMcp(command: CommandDefinition): boolean {
+  return command.approval.class !== "foreground_tty" || MCP_RUNS_FOREGROUND.has(command.path.join(" "));
 }
 
 export const MCP_TOOLS = projectMcpTools();
+export const MCP_FOREGROUND_HANDOFF = projectMcpForegroundHandoff();
 
 function toolName(path: readonly string[]): string {
   if (path.length === 1 && path[0] === "--version") return "apn_version";
@@ -125,17 +132,15 @@ function toolName(path: readonly string[]): string {
 }
 
 function toolDescription(command: CommandDefinition): string {
-  const recovery = command.recovery.length === 0
-    ? "none"
-    : command.recovery.map((item) => `apn ${item.command_path.join(" ")} when ${item.when}`).join("; ");
-  return [
-    command.summary,
-    `Effect: ${command.effect.class} — ${command.effect.summary}`,
-    `Approval: ${command.approval.class} — ${command.approval.when}`,
-    `Terminal states: ${command.states.terminal.join(", ") || "none"}`,
-    `Non-terminal states: ${command.states.non_terminal.join(", ") || "none"}`,
-    `Recovery: ${recovery}`,
-  ].join("\n");
+  const lines = [command.summary, `Effect: ${command.effect.class} — ${command.effect.summary}`];
+  if (command.approval.class !== "none") lines.push(`Approval: ${command.approval.class} — ${command.approval.when}`);
+  if (command.states.terminal.length + command.states.non_terminal.length > 0) {
+    lines.push(`States: terminal ${command.states.terminal.join(", ") || "none"}; non-terminal ${command.states.non_terminal.join(", ") || "none"}.`);
+  }
+  if (command.recovery.length > 0) {
+    lines.push(`Next: ${command.recovery.map((item) => `apn ${item.command_path.join(" ")} (${item.when})`).join("; ")}`);
+  }
+  return lines.join("\n");
 }
 
 function inputSchema(command: CommandDefinition): ProjectedMcpTool["inputSchema"] {
@@ -161,7 +166,7 @@ function optionSchema(option: CommandOption): { [key: string]: JsonValue } {
   const pattern = scalarPattern(option);
   return {
     type: option.type === "boolean" ? "boolean" : "string",
-    description: `Catalog type ${option.type}; constraints ${option.constraints.join(", ") || "none"}; sensitivity ${option.sensitivity}.`,
+    description: `${option.type}${option.constraints.length === 0 ? "" : `: ${option.constraints.join(", ")}`}`,
     ...(pattern === undefined ? {} : { pattern }),
     ...(option.default.kind === "literal" ? { default: option.type === "boolean" ? option.default.value === "true" : option.default.value } : {}),
   };

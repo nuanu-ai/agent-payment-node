@@ -88,11 +88,6 @@ export function metaMaskGaslessObservationRoom(operation) {
     return current.transitions.length < MM_NONTERMINAL_HISTORY_LIMIT &&
         Buffer.byteLength(canonicalJson(current), "utf8") + 1 + MM_DISPATCH_RESERVE_BYTES <= MM_FILE_LIMIT;
 }
-export function assertMetaMaskGaslessObservationCapacity(operation) {
-    assertMetaMaskGaslessObservable(operation);
-    if (!metaMaskGaslessObservationRoom(operation))
-        capacity();
-}
 /**
  * A re-observation that differs only in when it was taken is not a new transition: the read times and, outside a
  * proof phase, the evidence digest of the same unchanged result. State, reason, cursor, candidate, provider status

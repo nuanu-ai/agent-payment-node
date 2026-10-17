@@ -269,12 +269,12 @@ and raw provider responses never appear in public operation or receipt output.
 
 The same binder and core expose dedicated tools
 `apn_wallet_ensure_tron`, `apn_wallet_balance_tron`,
-`apn_wallet_capabilities_tron`, `apn_policy_admit_tron` and
-`apn_pay_transfer_prepare_tron`. Common tools provide
-`apn_pay_transfer_approve`, `apn_operation_status`, `apn_operation_resume` and
-`apn_receipt_get`. MCP field names use underscores. Policy admission and transfer
-approval return a foreground CLI handoff; MCP does not type the consent phrase or
-approve a payment.
+`apn_wallet_capabilities_tron` and `apn_pay_transfer_prepare_tron`. Common tools
+provide `apn_operation_status`, `apn_operation_resume` and `apn_receipt_get`.
+MCP field names use underscores. Policy admission (`policy admit-tron`) and
+transfer approval (`pay transfer approve`) are reachable only through
+`apn_foreground_handoff`, which returns the exact foreground CLI command; MCP does
+not type the consent phrase or approve a payment.
 
 Deterministic tests exercise synthetic TRX and USDT preparation, signing,
 solidified success/revert evidence, fee accounting, restart and no-replay

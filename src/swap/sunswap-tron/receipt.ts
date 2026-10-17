@@ -1,7 +1,6 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { TRON_TRANSFER_TOPIC, tronAddress, tronHex } from "../../tron/codec.js";
-import type { TronRpcPort } from "../../tron/rpc.js";
 import { SUNSWAP_USDT, SUNSWAP_V2_ROUTER, SUNSWAP_V2_WTRX_USDT_PAIR, SUNSWAP_WTRX } from "./catalog.js";
 import { normalizeTronEvidence } from "./tron-call.js";
 
@@ -20,16 +19,6 @@ export interface SunSwapReceiptValidation {
   readonly transactionHash: string; readonly blockNumber: string; readonly solidifiedHeadNumber: string;
   readonly inputAmountAtomic: string; readonly outputAmountAtomic: string; readonly feeSun: string; readonly trxDebitSun: string;
   readonly finalized: true; readonly receiptHash: string;
-}
-
-export async function observeSunSwapReceipt(rpc: TronRpcPort, expected: SunSwapReceiptExpectation): Promise<SunSwapReceiptValidation> {
-  const [transaction, info, head] = await Promise.all([
-    rpc.call("walletsolidity/gettransactionbyid", { value: expected.transactionHash }),
-    rpc.call("walletsolidity/gettransactioninfobyid", { value: expected.transactionHash }),
-    rpc.call("walletsolidity/getnowblock", {}),
-  ]);
-  const headRecord = record(record(record(head).block_header).raw_data); const solid = integer(headRecord.number);
-  return validateSunSwapReceipt(transaction, info, solid.toString(), expected);
 }
 
 /**

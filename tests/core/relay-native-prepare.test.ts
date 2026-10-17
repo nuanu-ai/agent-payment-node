@@ -40,7 +40,7 @@ test("BNB native prepare is policy bound, durable, unsigned and replayed without
     activePolicy: async () => policy(), publicAccount: async () => RELAY_BNB_SOURCE, dailyUsage: async () => "0",
     nativeQuote: async intent => { calls++; return validateRelayNativeQuote(await fixture(), intent); },
   });
-  assert.deepEqual(bindArgv(["relay", "native", "prepare", "--profile", input.profile, "--source-chain", input.sourceChain,
+  assert.deepEqual(bindArgv(["relay", "prepare", "--profile", input.profile, "--source-chain", input.sourceChain, "--asset", "native",
     "--destination-chain", input.destinationChain, "--recipient", input.recipient,
     "--amount-atomic", input.amountAtomic, "--min-output-atomic", input.minOutputAtomic,
     "--max-deposit-network-fee-wei", input.maxDepositNetworkFeeWei, "--idempotency-key", input.idempotencyKey]).request,

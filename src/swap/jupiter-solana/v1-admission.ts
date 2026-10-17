@@ -15,7 +15,6 @@ export interface JupiterV1OwnerBinding {
  readonly account: ChainAccount; readonly accountBindingHash: string;
  readonly policyDigest: string; readonly activationDigest: string; readonly admissionHash: string;
 }
-export const JUPITER_V1_MECHANISM_DIGEST = swapMechanismDigest(JUPITER_V1_WHIRLPOOL_MECHANISM_PIN);
 /** Resolves the owner-activated sealed policy and both public/envelope identities before any custody access. */
 export class JupiterV1OwnerAdmission {
  constructor(private readonly accounts: Pick<ChainWalletStoragePort,"account"|"ownerBinding">,

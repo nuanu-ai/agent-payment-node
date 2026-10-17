@@ -5,10 +5,10 @@ import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { COMMANDS } from "../../src/command-catalog.js";
 import { ApnCore } from "../../src/core.js";
 import { createApnCore } from "../../src/runtime-factory.js";
-import { MCP_TOOLS } from "../../src/mcp-projection.js";
+import { MCP_FOREGROUND_HANDOFF, MCP_TOOLS } from "../../src/mcp-projection.js";
 import { StateStore } from "../../src/state.js";
 import {
-  JUPITER_SWAP_API_V2, JUPITER_V6_PROGRAM, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, SUNSWAP_PIN_CATALOG,
+  JUPITER_V6_PROGRAM, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, SUNSWAP_PIN_CATALOG,
   SUNSWAP_USDT, SUNSWAP_V2_ROUTER, WRAPPED_SOL_MINT,
 } from "../../src/swap/index.js";
 import { temporaryState } from "./helpers.js";
@@ -34,16 +34,18 @@ test("guarded swap families expose six parity actions plus explicit token cleanu
     [...("stableReads" in family ? STABLE_ACTIONS : []), ...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])]
       .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
-  assert.equal(tools.length, 40);
-  assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_execute"), true);
+  const foreground = MCP_FOREGROUND_HANDOFF.commands.filter((row) => row.path[0] === "swap");
+  assert.equal(tools.length, 26); assert.equal(foreground.length, 14);
+  assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_execute"), false);
+  assert.equal(foreground.some((row) => row.path.join(" ") === "swap solana orca stable-execute"), true);
   assert.equal(bindArgv(["swap", "solana", "orca", "stable-execute", "--operation", H("a")]).request.command,
     "swap.orca.stable-execute");
-  assert.deepEqual(tools.map((row) => row.command), catalog);
+  assert.deepEqual([...tools.map((row) => row.command), ...foreground].sort((a, b) => catalog.indexOf(a) - catalog.indexOf(b)), catalog);
   for (const command of catalog) {
-    const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "))!;
+    const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "));
     const fields = command.options.map((option) => option.name.slice(2).replaceAll("-", "_"));
-    assert.deepEqual(Object.keys(tool.inputSchema.properties), fields);
-    assert.deepEqual(tool.inputSchema.required, fields);
+    if (tool === undefined) assert.equal(command.approval.class, "foreground_tty");
+    else { assert.deepEqual(Object.keys(tool.inputSchema.properties), fields); assert.deepEqual(tool.inputSchema.required, fields); }
     const input = Object.fromEntries(command.options.map((option) => [option.name.slice(2).replaceAll("-", "_"), sample(option.name, command.path[1]!) ]));
     assert.deepEqual(bindMcpInput(command, input), bindArgv([...command.path, ...command.options.flatMap((option) => [option.name, String(input[option.name.slice(2).replaceAll("-", "_")])]) ]));
   }
@@ -83,7 +85,7 @@ test("chain binders reject excess fields, inherited objects, malformed integers,
 test("inventories expose frozen chain identities without admission and runtime factory installs no swap dependency", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const uniswap = createApnCore(bindArgv(["swap", "ethereum", "uniswap", "inventory"]), { stateRoot: temporary.root });
-  assert.equal(uniswap.context.uniswap, undefined); assert.equal(uniswap.context.sunswap, undefined); assert.equal(uniswap.context.jupiter, undefined);
+  assert.equal(uniswap.context.sunswapRuntime, undefined); assert.equal(uniswap.context.jupiterV1Runtime, undefined);
   const core = new ApnCore({ state: new StateStore(temporary.root) });
   const sun = await core.execute({ command: "swap.sunswap.inventory" });
   assert.equal(sun.ok, true); assert.equal((sun.data as any).ownerAdmission.evaluated, false); assert.equal((sun.data as any).execution, "dormant");
@@ -91,50 +93,45 @@ test("inventories expose frozen chain identities without admission and runtime f
   assert.deepEqual((sun.data as any).catalog, SUNSWAP_PIN_CATALOG);
   const jupiter = await core.execute({ command: "swap.jupiter.inventory" });
   assert.equal(jupiter.ok, true); assert.equal((jupiter.data as any).ownerAdmission.evaluated, false); assert.equal((jupiter.data as any).execution, "dormant");
-  assert.equal((jupiter.data as any).catalog.genesis, SOLANA_MAINNET_GENESIS); assert.equal((jupiter.data as any).catalog.api, JUPITER_SWAP_API_V2);
+  assert.equal((jupiter.data as any).catalog.genesis, SOLANA_MAINNET_GENESIS); assert.equal(Object.hasOwn(jupiter.data as object, "v2Quantum"), false);
   assert.equal((jupiter.data as any).catalog.program, JUPITER_V6_PROGRAM); assert.equal((jupiter.data as any).catalog.nativeInput, WRAPPED_SOL_MINT);
   assert.equal((jupiter.data as any).catalog.outputToken, SOLANA_USDC_MINT);
 });
 
-test("quote uses only an explicit read-only builder while all state-changing surfaces refuse without side effects", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); let sunQuotes = 0, jupiterQuotes = 0;
-  const core = new ApnCore({ state: new StateStore(temporary.root), clock: { now: () => new Date("2026-09-17T00:00:00.000Z") },
-    sunswap: { quote: async (request) => { sunQuotes++; return { family: "sunswap", request }; } },
-    jupiter: { quote: async (request) => { jupiterQuotes++; return { family: "jupiter", request }; } } });
+test("without the installed keyless runtimes quote and every state-changing surface refuse without side effects", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  // No injectable read-only builder exists any more: the runtime factory installs the keyless runtime per command.
+  const core = new ApnCore({ state: new StateStore(temporary.root), clock: { now: () => new Date("2026-09-17T00:00:00.000Z") } });
   const sunQuote = await core.execute({ command: "swap.sunswap.quote", profile: "swap-test", account: TRON_OWNER,
     recipient: TRON_RECIPIENT, amountAtomic: "1000000", slippageBps: 100, ownerSlippageCapBps: 200, feeLimitSun: "30000000", deadline: 1790000600 });
   const jupiterQuote = await core.execute({ command: "swap.jupiter.quote", profile: "swap-test", account: SOLANA_OWNER,
     recipient: SOLANA_OWNER, amountAtomic: "1000000", slippageBps: 100, ownerSlippageCapBps: 200 });
-  assert.equal(sunQuote.ok, true); assert.equal(jupiterQuote.ok, true); assert.equal(sunQuotes, 1); assert.equal(jupiterQuotes, 1);
+  assert.equal(sunQuote.ok, false); assert.equal(sunQuote.error?.details?.reason, "sunswap_runtime_unavailable");
+  assert.equal(jupiterQuote.ok, false); assert.equal(jupiterQuote.error?.details?.reason, "jupiter_runtime_unavailable");
   for (const [command, reason] of [
     ["swap.sunswap.prepare", "sunswap_owner_admission_required"], ["swap.sunswap.approve", "sunswap_native_no_approval"],
-    ["swap.sunswap.execute", "sunswap_execution_dormant"], ["swap.jupiter.prepare", "jupiter_owner_admission_required"],
-    ["swap.jupiter.approve", "jupiter_v6_instruction_unverified"], ["swap.jupiter.execute", "jupiter_v6_instruction_unverified"],
+    ["swap.sunswap.execute", "sunswap_execution_dormant"], ["swap.jupiter.prepare", "jupiter_runtime_unavailable"],
+    ["swap.jupiter.approve", "jupiter_runtime_unavailable"], ["swap.jupiter.execute", "jupiter_runtime_unavailable"],
   ] as const) {
     const request = command.endsWith("prepare") ? { command, profile: "swap-test", quoteHash: H("a"), idempotencyKey: "swap-test-0001" }
       : { command, operationId: H("b") };
     const result = await core.execute(request as never);
     assert.equal(result.ok, false); assert.equal(result.error?.details?.reason, reason);
   }
-  assert.equal(sunQuotes, 1); assert.equal(jupiterQuotes, 1);
-  const noRuntime = new ApnCore({ state: new StateStore(temporary.root) });
-  for (const command of ["swap.sunswap.quote", "swap.jupiter.quote"] as const) {
-    const result = await noRuntime.execute(command === "swap.sunswap.quote" ? { command, profile: "swap-test", account: TRON_OWNER,
-      recipient: TRON_RECIPIENT, amountAtomic: "1", slippageBps: 0, ownerSlippageCapBps: 0, feeLimitSun: "1", deadline: 1790000600 } : { command, profile: "swap-test",
-      account: SOLANA_OWNER, recipient: SOLANA_OWNER, amountAtomic: "1", slippageBps: 0, ownerSlippageCapBps: 0 });
-    assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
-  }
+  for (const result of [sunQuote, jupiterQuote]) assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
+  await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
 });
 
 test("status performs only a durable read and returns a stable missing-operation classification", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
-  const core = new ApnCore({ state: new StateStore(temporary.root), sunswap: { quote: async () => { throw new Error("quote canary"); } },
-    jupiter: { quote: async () => { throw new Error("quote canary"); } } });
-  for (const command of ["swap.uniswap.status", "swap.sunswap.status", "swap.jupiter.status"] as const) {
+  const core = new ApnCore({ state: new StateStore(temporary.root) });
+  for (const command of ["swap.uniswap.status", "swap.sunswap.status"] as const) {
     const result = await core.execute({ command, operationId: H("c") });
     assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_NOT_FOUND");
   }
+  const jupiter = await core.execute({ command: "swap.jupiter.status", operationId: H("c") });
+  assert.equal(jupiter.ok, false); assert.equal(jupiter.error?.details?.reason, "jupiter_runtime_unavailable");
   await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
 });
 

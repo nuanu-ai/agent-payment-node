@@ -3,7 +3,7 @@ import { finiteFundingRuntime } from "./runtime-factory-finite-rails.js";
 import { executeMerchantCli } from "./x402-merchant/cli.js";
 import { createSpecialApnCore } from "./runtime-factory-special.js";
 import { RelayUnsignedPrepareService } from "./relay/prepare.js";
-import { RelayReadOnlyPreflightService } from "./relay/preflight.js";
+import { executeRelayRoute } from "./relay/command-route.js";
 import { RelayRetireService, TtyRelayAbandonConfirmation } from "./relay/retire.js";
 import { RelayKeylessStatusService } from "./relay/status.js";
 import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
@@ -52,7 +52,6 @@ import { TtyBridgeApproval } from "./lifi/tty.js";
 import { GaslessUsdtOperationService } from "./gasless-usdt/service.js";
 import { GaslessUsdtCommandPrepare } from "./gasless-usdt/command-prepare.js";
 import { GaslessUsdtCommandExecute } from "./gasless-usdt/command-execute.js";
-import { UsdtOperationRepository } from "./gasless-usdt/operation.js";
 import { LocalGaslessCustody } from "./gasless/custody.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
 import { gaslessObservationRpcFactory } from "./gasless/observation-rpc.js";
@@ -132,7 +131,6 @@ export function createApnCore(bound, options = {}) {
     const effectiveRpcUrl = bound.rpcUrl;
     // Every direct EVM network is capped and paced the same way, so every transfer prepare carries the guard state.
     const directGuardCommand = bound.request.command === "transfer.approve" || bound.request.command === "operation.resume" ||
-        bound.request.command === "wallet.balance" && bound.request.asset?.chainId === 1329 && bound.request.asset.token === "native" ||
         bound.request.command === "transfer.prepare";
     const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl, directGuardCommand ? { directGuardState: state } : {}));
     const coinbaseRpc = options.rpc;
@@ -187,7 +185,7 @@ export function createApnCore(bound, options = {}) {
         ? new StargateTokenService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
     // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
     // MCP intercepts approve/execute with a CLI handoff before this factory runs.
-    const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
+    const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.")
         ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, verifySendPins: verifyUniswapV3MutablePins, clock,
             // The owner's activated allowlist revision; none active means preparation refuses with swap_owner_admission_required.
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
@@ -200,7 +198,7 @@ export function createApnCore(bound, options = {}) {
                 isUniswapTokenCleanup(bound.request.command) ? "cleanup" : "refuse" })
         : undefined);
     // Keyless SunSwap likewise, over APN_TRON_RPC_URL and the profile's encrypted local TRON wallet.
-    const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.") && options.sunswap === undefined
+    const sunswapRuntime = options.sunswapRuntime ?? (bound.request.command.startsWith("swap.sunswap.")
         ? createSunSwapKeylessRuntime({ state, rpc: tronRpc, accounts: chainAccounts, clock,
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
             foreground: bound.request.command === "swap.sunswap.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
@@ -212,7 +210,7 @@ export function createApnCore(bound, options = {}) {
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
             foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
         : undefined);
-    const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.") && options.jupiter === undefined
+    const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.")
         ? createJupiterV1Runtime({ state, clock, rpc: solanaRpc, wrappingSecret,
             foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" }) : undefined);
     const stablePorts = () => ({ state, clock, accounts: chainAccounts, rpc: solanaRpc, verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
@@ -230,15 +228,6 @@ export function createApnCore(bound, options = {}) {
         ...(bound.request.command === "relay.retire" ? { relayRetire: new RelayRetireService(state, clock, wrappingSecret, new TtyRelayAbandonConfirmation(options.relayExecuteTtyOptions)) } : {}),
         ...(bound.request.command === "relay.status" || options.relayStatus !== undefined ? {
             relayStatus: options.relayStatus ?? new RelayKeylessStatusService(state, options.relayStatusFetch),
-        } : {}),
-        ...(bound.request.command === "relay.preflight" || options.relayPreflight !== undefined ? {
-            relayPreflight: options.relayPreflight ?? new RelayReadOnlyPreflightService(state, clock, options.relayPreflightPorts ?? {
-                batch: calls => {
-                    if (rpc === undefined || !(rpc instanceof HttpsBaseRpc))
-                        throw new ApnError("APN_RPC_CONFIG", "Relay preflight requires its explicit HTTPS RPC.");
-                    return rpc.batchCall(calls);
-                },
-            }),
         } : {}),
         ...(bound.request.command === "wallet.portfolio" || options.portfolio !== undefined ? {
             portfolio: options.portfolio ?? { environment: process.env, http: new PortfolioHttps(), wait: portfolioPause },
@@ -288,9 +277,6 @@ export function createApnCore(bound, options = {}) {
             orcaStableObserve: async (operationId) => await new OrcaStableFinalizedObserver(new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)), new SavedOrcaStableMaterialStore(state.root), new OrcaStableExecutionBindingStore(state.root), chainAccounts, solanaRpc, () => clock.now()).observe(operationId),
             orcaStableRelease: async (operationId) => await releaseOrcaStableNoEffect(new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)), new SavedOrcaStableMaterialStore(state.root), operationId, clock.now()),
         } : {}),
-        ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
-        ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
-        ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
         ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
             circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state, circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)), new LocalCircleApprovalSigner(state, wrappingSecret), approvalLimits, () => options.clock?.now().getTime() ?? Date.now()),
         } : {}),
@@ -318,10 +304,10 @@ export function createApnCore(bound, options = {}) {
             custody: new LocalGaslessCustody(state, wrappingSecret, () => options.clock?.now().getTime() ?? Date.now()),
             ...(["gasless.transfer.approve", "gasless.transfer.approve-sealed"].includes(bound.request.command) ? { approval: new TtyGaslessApproval() } : {}) },
         ...(bound.request.command.startsWith("gasless.usdt.") || options.gaslessUsdt !== undefined ? {
-            gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)),
+            gaslessUsdt: options.gaslessUsdt ?? new GaslessUsdtOperationService(state.root),
         } : {}),
         ...(bound.request.command === "gasless.usdt.prepare" || options.gaslessUsdtPrepare !== undefined ? {
-            gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock, options.gaslessUsdt ?? new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)), options.gaslessUsdtPrepareOptions),
+            gaslessUsdtPrepare: options.gaslessUsdtPrepare ?? new GaslessUsdtCommandPrepare(state, clock, options.gaslessUsdt ?? new GaslessUsdtOperationService(state.root), options.gaslessUsdtPrepareOptions),
         } : {}),
         ...(["gasless.usdt.execute", "gasless.usdt.execution-status", "gasless.usdt.observe", "gasless.usdt.resume"].includes(bound.request.command) ||
             options.gaslessUsdtExecute !== undefined ? {
@@ -380,6 +366,8 @@ function uniswapTokenRpcBudget(command) {
 export async function executeBoundCommand(bound, options = {}) {
     if (bound.request.command.startsWith("x402.merchant."))
         return executeMerchantCli(bound, options, options.stateRoot ?? effectiveStateRoot());
+    if (bound.request.command === "relay.route")
+        return executeRelayRoute(bound, options.stateRoot ?? effectiveStateRoot(), (internal) => executeBoundCommand(internal, options));
     if (bound.request.command === "x402.permit2.approve" || bound.request.command === "x402.permit2.observe")
         return executePermit2ProductionCli(bound, options, options.stateRoot ?? effectiveStateRoot());
     if (bound.request.command === "x402.permit2.preflight") {

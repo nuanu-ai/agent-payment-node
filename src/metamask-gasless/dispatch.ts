@@ -1,4 +1,4 @@
-import type { MetaMaskGaslessDispatch, MetaMaskGaslessIntent, MetaMaskGaslessQuote } from "./model.js";
+import type { MetaMaskGaslessDispatch, MetaMaskGaslessIntent } from "./model.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 
 /** Either the prepared material or the material the guard repriced inside the owner's maximum. */
@@ -14,6 +14,3 @@ export function mmDispatchIntent(op: MetaMaskGaslessDispatched): MetaMaskGasless
 }
 
 /** The quote every post-dispatch proof must match: delivered, fee and debit are read against this one. */
-export function mmDispatchedQuote(op: MetaMaskGaslessDispatched): MetaMaskGaslessQuote {
-  return mmDispatchIntent(op).quote;
-}

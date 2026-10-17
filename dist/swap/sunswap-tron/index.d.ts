@@ -11,8 +11,6 @@ export * from "./keyless-builder.js";
 export * from "./command-catalog.js";
 export * from "./command-service.js";
 export * from "./signer.js";
-export * from "./observer.js";
-export * from "./execution.js";
 export * from "./mechanism.js";
 export * from "./admission.js";
 export * from "./tty.js";

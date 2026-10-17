@@ -4,7 +4,7 @@ import { ApnError } from "../../errors.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
 import { validateSwapQuote, type SwapQuoteSnapshot } from "../quote.js";
 import type { GuardedSwapPreparedMaterial } from "../runtime.js";
-import type { UniswapTransactionEnvelope } from "../uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "./envelope.js";
 import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../uniswap-pin.js";
 import { decodeUniswapRouterCalldataFor } from "../uniswap-router.js";
 import { encodeUniswapV3ExactInput } from "./encoder.js";

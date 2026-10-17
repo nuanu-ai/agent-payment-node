@@ -34,7 +34,6 @@ export interface ValidatedSmartAccountGrant {
 }
 
 export const BASE_CHAIN_HEX = "0x2105" as const;
-export const UINT256_MAX_HEX = `0x${"f".repeat(64)}` as Hex;
 
 export function smartAccountEnvironment() {
   return getSmartAccountsEnvironment(CHAIN_ID);
@@ -99,7 +98,7 @@ export function assertSmartAccountPreflight(value: unknown): SmartAccountProvide
 
 function assertPreflight(observation: SmartAccountProviderObservation): void {
   if (observation.chain_id.toLowerCase() !== BASE_CHAIN_HEX) mismatch("MetaMask is not connected to Base chain 8453.");
-  const owner = canonicalAddress(observation.owner_address, "owner");
+  canonicalAddress(observation.owner_address, "owner");
   const implementation = requiredAddress(smartAccountEnvironment().implementations.EIP7702StatelessDeleGatorImpl);
   const expectedCode = `0xef0100${implementation.slice(2)}`.toLowerCase();
   if (observation.account_code.toLowerCase() !== expectedCode) {
@@ -114,7 +113,6 @@ function assertPreflight(observation: SmartAccountProviderObservation): void {
     !Array.isArray(allowance.ruleTypes) || !allowance.ruleTypes.includes("expiry")) {
     mismatch("MetaMask does not advertise Base ERC-20 allowance permissions for the selected account.");
   }
-  void owner;
 }
 
 function validateCaveats(

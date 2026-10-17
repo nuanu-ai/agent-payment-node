@@ -7,7 +7,7 @@ import type { ChainAccount } from "../../src/direct-rail-ports.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { GuardedSwapService } from "../../src/swap/service.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
-import { requireSwapProtocol, requireUnambiguousSwapProtocol } from "../../src/swap/protocol-registry.js";
+import { requireSwapProtocol } from "../../src/swap/protocol-registry.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { admitOrcaStableOwner, assertOrcaStableQuoteAdmission, recheckOrcaStableOwner,
   type OrcaStableAdmissionPorts } from "../../src/swap/orca-solana/stable-admission.js";
@@ -51,8 +51,6 @@ test("stable Orca selection is exact while legacy family/chain lookup refuses am
   assert.equal(requireSwapProtocol(ORCA_PROTOCOL_REGISTRY, ORCA_STABLE_MECHANISM_DIGEST).pin, ORCA_STABLE_MECHANISM_PIN);
   assert.equal(requireSwapProtocol(ORCA_PROTOCOL_REGISTRY, swapMechanismDigest(ORCA_KEYLESS_MECHANISM_PIN)).pin,
     ORCA_KEYLESS_MECHANISM_PIN);
-  assert.throws(() => requireUnambiguousSwapProtocol(ORCA_PROTOCOL_REGISTRY, ORCA_SOLANA_CHAIN, "orca_solana"),
-    { code: "APN_OPERATION_BLOCKED" });
 });
 
 test("stable admission binds both canonical mints, exact revision, owner and quote", async () => {

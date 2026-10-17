@@ -1,8 +1,4 @@
-import { recheckCircleNativeAdmission } from "./circle-native-admission.js";
-import { OperationService } from "./operation-service.js";
 import { assertFreshDirectEffect, publishDirectPublicEffect } from "./direct-public-attestation.js";
-import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
-import { evmAllowlistSubject } from "./evm-direct-allowlist.js";
 import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
 import { assertSigningTime } from "./x402-permit2/production-signing-facts.js";
 import { Permit2ProductionSigningFence, type Permit2MetadataLockScope } from "./x402-permit2/production-signing-fence.js";
@@ -14,7 +10,7 @@ import { parseDirectIntent, parseDirectRecovery } from "./local-wallet-direct-pa
 import { signedDirectTransaction } from "./local-wallet-direct-signed.js";
 import type { Permit2NativeDispatchExecution, Permit2NativeRequestExecution, Permit2NativeRequestGrant, Permit2NativeSigningOrigin, Permit2NativeSigningExecution, Permit2LocalCapability } from "./x402-permit2/production-native-capability.js";
 import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization } from "./local-wallet-native-x402-fields.js";
-import { assertWallet, ensureX402Live, effectSlot, requestProfile, exactRecord, addressEqual, x402Address, protocol, rejected } from "./local-wallet-native-fields.js";
+import { assertWallet, ensureX402Live, effectSlot, requestProfile, protocol, rejected } from "./local-wallet-native-fields.js";
 import { performance } from "node:perf_hooks";
 import { Permit2ProductionHttps } from "./x402-permit2/production-http.js";
 import { constants } from "node:fs";
@@ -37,7 +33,7 @@ import { ApnError } from "./errors.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "./evm-asset.js";
 import { evmNativeCustody, assertEvmNativeCustody } from "./evm-native-custody.js";
 import { parseEvmNativeIntent, snapshotEvmNativePayload } from "./evm-native-intent.js";
-import type { Address, Hex } from "./model.js";
+import type { Hex } from "./model.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { NativePort, NativeRequest } from "./ports.js";
 import type { StateStore } from "./state.js";
@@ -339,7 +335,8 @@ export class LocalWalletNative implements NativePort {
   }
   private async approveAndSign(payload: Readonly<Record<string, unknown>>): Promise<unknown> {
     const intent = payload.evm === undefined ? Object.freeze(parseDirectIntent(payload)) : parseEvmNativeIntent(payload);
-    if (intent.evm?.cleanup85Cancellation !== undefined) throw protocol("Finite cleanup85 signing requires its private scoped controller.");
+    // Read-only historical shapes: the cleanup85 cancellation and the 0.5.41 Circle native rider never sign again.
+    if (intent.evm?.cleanup85Cancellation !== undefined || intent.evm?.circleNativeAdmission !== undefined) throw protocol("A retired historical direct transfer cannot be signed.");
     const frozen = await this.state.findOperation(intent.operationId), journal = new DirectPublicEffectJournal(this.state);
     if (frozen === null || frozen.profile !== intent.profile || frozen.state !== "started" ||
         hashObject(directCustodyPayload(frozen)) !== hashObject(payload)) throw protocol("Native request differs from its saved fresh operation.");
@@ -369,8 +366,6 @@ export class LocalWalletNative implements NativePort {
       if (latest === null || latest.state !== "started" || hashObject(directCustodyPayload(latest)) !== hashObject(payload)) throw protocol("Fresh direct operation changed before signing.");
       const binding = await journal.prepared(latest);
       await assertEvmNativeCustody(this.state, intent.profile, binding.custody, identity);
-      const admission = await recheckCircleNativeAdmission(this.state, latest);
-      if (admission !== null) await new OperationService(this.state).assertFinalizedCircleNativeAccountAvailable(latest.profileHash, latest.walletAddress, admission, latest);
       const account = privateKeyToAccount(secret.privateKey);
       const rawTransaction = await account.signTransaction({
         type: "eip1559",

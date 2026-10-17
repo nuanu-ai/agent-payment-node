@@ -169,7 +169,7 @@ export async function postJson(
     });
     request.on("close", () => {
       if (abortSignal?.aborted) reject(new ApnError("APN_RPC_BUDGET_EXCEEDED",
-        "Relay execution reached its wall deadline; resume the saved operation explicitly.", { reason: "relay_wall_deadline" }));
+        "The command reached its wall deadline; rerun it or resume the saved operation explicitly.", { reason: "wall_deadline" }));
       else if (requestTimedOut) reject(new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out.", { reason: "request_deadline" }));
     });
     if (beforeSend === undefined) request.end(body);

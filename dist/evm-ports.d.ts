@@ -48,7 +48,6 @@ export interface EvmRpcPort {
     evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence>;
     /** One POST, so one node answers: the sender's finalized nonce, and whether it knows this hash as a receipt or a pending transaction. */
     unlandedEvidence?(chainId: DirectEvmChainId, address: Address, transactionHash: Hex): Promise<EvmUnlandedEvidence>;
-    confirmedAtNonce(chainId: DirectEvmChainId, address: Address, nonce: string, startBlock: string): Promise<Hex | null>;
 }
 export interface EvmUnlandedEvidence {
     readonly finalizedNonce: string;

@@ -10,7 +10,6 @@ export interface JupiterV1OwnerBinding {
     readonly activationDigest: string;
     readonly admissionHash: string;
 }
-export declare const JUPITER_V1_MECHANISM_DIGEST: string;
 /** Resolves the owner-activated sealed policy and both public/envelope identities before any custody access. */
 export declare class JupiterV1OwnerAdmission {
     private readonly accounts;

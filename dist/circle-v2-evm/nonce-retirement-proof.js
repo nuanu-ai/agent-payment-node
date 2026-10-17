@@ -1,7 +1,5 @@
-import { validateCleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
-import { validateConsumedBurnProof } from "./consumed-burn-proof.js";
-import { validateSealedBurnProof } from "./burn-retirement-proof.js";
-import { isSealedBurnRetirement, isConsumedBurnRetirement } from "./burn-retirement.js";
+import { validateCleanup85RecoveryProof } from "../legacy/circle-cleanup85-retirement-proof.js";
+import { isConsumedBurnRetirement, isSealedBurnRetirement, validateConsumedBurnProof, validateSealedBurnProof } from "../legacy/circle-sealed-burn-retirement.js";
 import { exactKeys, isPlainRecord, hashObject } from "../canonical.js";
 import { circleBlocked } from "./operation-model.js";
 export function validateCircleNonceRetirementProof(proof, op) {

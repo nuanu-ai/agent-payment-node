@@ -127,11 +127,11 @@ test("MCP provides exact foreground rail and policy handoffs without entering ap
   const client = new Client({ name: "synthetic-solana-acceptance", version: "1" }); const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport); await client.connect(clientTransport); t.after(async () => { await client.close(); await server.close(); });
   const calls = s.rpc.calls.length;
-  const result = await client.callTool({ name: "apn_pay_transfer_approve", arguments: { operation: id } });
+  const result = await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "pay transfer approve", arguments: { operation: id } } });
   const envelope = result.structuredContent as { error: { code: string }; next_actions: string[] };
   assert.equal(envelope.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.deepEqual(envelope.next_actions, [`apn pay transfer approve --operation ${id}`]);
   assert.equal(s.rpc.calls.length, calls); assert.equal(s.approval.calls.length, 0); assert.equal(s.rpc.submissions.length, 0);
-  const policy = await client.callTool({ name: "apn_policy_admit_solana", arguments: { profile: s.account.profile, asset: "usdc", max_per_transfer: "1", daily_limit: "3", max_fee_sol: "0.003" } });
+  const policy = await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "policy admit-solana", arguments: { profile: s.account.profile, asset: "usdc", max_per_transfer: "1", daily_limit: "3", max_fee_sol: "0.003" } } });
   assert.equal((policy.structuredContent as { error: { code: string } }).error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.equal(s.rpc.calls.length, calls);
 });

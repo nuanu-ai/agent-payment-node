@@ -1,8 +1,6 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
-import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
-import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayObserveService } from "./relay/observe.js";
@@ -45,10 +43,7 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
-import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
-import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
-import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
@@ -78,7 +73,6 @@ export interface RelayExecuteHandler { execute(profile: string, operationId: str
 
 export interface CoreDependencies {
   readonly relayPrepare?: RelayUnsignedPrepareService;
-  readonly relayPreflight?: RelayReadOnlyPreflightService;
   readonly relayRetire?: RelayRetireService;
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayObserve?: RelayObserveService;
@@ -91,7 +85,6 @@ export interface CoreDependencies {
   readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
-  readonly circleEvm?: CircleEvmService;
   readonly circleFundingEvm?: CircleFundingEvmService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -107,9 +100,6 @@ export interface CoreDependencies {
   readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
   readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
   readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
-  readonly uniswap?: UniswapGuardedSwapBuilder;
-  readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-  readonly jupiter?: JupiterReadOnlyQuoteBuilder;
   readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
@@ -154,7 +144,6 @@ export interface CoreDependencies {
 
 export class RuntimeContext {
   readonly relayPrepare?: RelayUnsignedPrepareService;
-  readonly relayPreflight?: RelayReadOnlyPreflightService;
   readonly relayRetire?: RelayRetireService;
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayObserve?: RelayObserveService;
@@ -167,7 +156,6 @@ export class RuntimeContext {
   readonly relayNativeExecute?: RelayNativeSourceRuntime;
   readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
   readonly stargateNative?: StargateNativeService;
-  readonly circleEvm?: CircleEvmService;
   readonly circleFundingEvm?: CircleFundingEvmService;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
@@ -183,9 +171,6 @@ export class RuntimeContext {
   readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
   readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
   readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
-  readonly uniswap?: UniswapGuardedSwapBuilder;
-  readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-  readonly jupiter?: JupiterReadOnlyQuoteBuilder;
   readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
@@ -231,7 +216,6 @@ export class RuntimeContext {
 
   constructor(dependencies: CoreDependencies) {
     if (dependencies.relayPrepare !== undefined) this.relayPrepare = dependencies.relayPrepare;
-    if (dependencies.relayPreflight !== undefined) this.relayPreflight = dependencies.relayPreflight;
     if (dependencies.relayRetire !== undefined) this.relayRetire = dependencies.relayRetire;
     if (dependencies.relayStatus !== undefined) this.relayStatus = dependencies.relayStatus;
     if (dependencies.relayObserve !== undefined) this.relayObserve = dependencies.relayObserve;
@@ -244,7 +228,6 @@ export class RuntimeContext {
     if (dependencies.relayNativeExecute !== undefined) this.relayNativeExecute = dependencies.relayNativeExecute;
     if (dependencies.relayExecuteConfirmation !== undefined) this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
     if (dependencies.stargateNative !== undefined) this.stargateNative = dependencies.stargateNative;
-    if (dependencies.circleEvm !== undefined) this.circleEvm = dependencies.circleEvm;
     if (dependencies.circleFundingEvm !== undefined) this.circleFundingEvm = dependencies.circleFundingEvm;
     if (dependencies.stargateToken !== undefined) this.stargateToken = dependencies.stargateToken;
     if (dependencies.portfolio !== undefined) this.portfolio = dependencies.portfolio;
@@ -260,9 +243,6 @@ export class RuntimeContext {
     if (dependencies.orcaStableRecoverNoSend !== undefined) this.orcaStableRecoverNoSend = dependencies.orcaStableRecoverNoSend;
     if (dependencies.orcaStableRelease !== undefined) this.orcaStableRelease = dependencies.orcaStableRelease;
     if (dependencies.orcaStableObserve !== undefined) this.orcaStableObserve = dependencies.orcaStableObserve;
-    if (dependencies.uniswap !== undefined) this.uniswap = dependencies.uniswap;
-    if (dependencies.sunswap !== undefined) this.sunswap = dependencies.sunswap;
-    if (dependencies.jupiter !== undefined) this.jupiter = dependencies.jupiter;
     if (dependencies.jupiterV1Runtime !== undefined) this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
     if (dependencies.facilitatorGasless !== undefined) this.facilitatorGasless = dependencies.facilitatorGasless;
     if (dependencies.smartAccountGasless !== undefined) this.smartAccountGasless = dependencies.smartAccountGasless;

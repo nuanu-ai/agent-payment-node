@@ -61,13 +61,13 @@ test("generic CLI and MCP bind the same explicit core request without changing l
   const argv = ["pay", "transfer", "prepare-asset", ...Object.entries(input).flatMap(([name, value]) => [`--${name.replaceAll("_", "-")}`, value])];
   assert.deepEqual(bindArgv(argv), bindMcpInput(tool.command, input));
   assert.equal(bindArgv(argv).request.command, "transfer.prepare");
-  assert.equal((bindArgv(argv).request as { batchRpcReads?: true }).batchRpcReads, undefined);
-  assert.equal((bindArgv([...argv, "--rpc-read-mode", "batch"]).request as { batchRpcReads?: true }).batchRpcReads, true);
-  assert.throws(() => bindArgv([...argv, "--rpc-read-mode", "scalar"]), { code: "APN_INVALID_INPUT" });
+  // Manifest v2 dropped the no-op --rpc-read-mode flag: every direct network reads in batches.
+  assert.throws(() => bindArgv([...argv, "--rpc-read-mode", "batch"]), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindMcpInput(tool.command, { ...input, chain: "eip155:42170" }), { code: "APN_ALLOWLIST_REFUSED" });
   assert.throws(() => bindMcpInput(tool.command, { ...input, decimals: "256" }), { code: "APN_INVALID_INPUT" });
   assert.throws(() => bindArgv(["pay", "transfer", "prepare", "--profile", "default"]));
-  assert.ok(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance_asset"));
+  assert.ok(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance"));
+  assert.equal(MCP_TOOLS.some((entry) => entry.name === "apn_wallet_balance_asset"), false);
 });
 
 for (const chainId of [1, 8453, 42161, 59144, 130, 1329] as const) test(`chain ${chainId} native prepare refuses insufficient balance before nonce and estimate`, async (context) => {
@@ -82,7 +82,7 @@ for (const chainId of [1, 8453, 42161, 59144, 130, 1329] as const) test(`chain $
     nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
     feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
   }) });
-  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: "native" }, batchRpcReads: true }), { code: "APN_INSUFFICIENT_ASSET" });
+  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId, token: "native" } }), { code: "APN_INSUFFICIENT_ASSET" });
   assert.equal(downstreamReads, 0);
 });
 
@@ -101,7 +101,7 @@ test("Unichain USDC routes through the batched direct reader and refuses insuffi
     nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
     feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
   }) });
-  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 130, token }, amount: "1", batchRpcReads: true }),
+  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 130, token }, amount: "1" }),
     { code: "APN_INSUFFICIENT_ASSET" });
   assert.equal(groupedReads, 1); assert.equal(downstreamReads, 0);
 });
@@ -121,7 +121,7 @@ test("Polygon USDC routes through the batched direct reader and refuses insuffic
     nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
     feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
   }) });
-  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 137, token }, amount: "1", batchRpcReads: true }),
+  await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 137, token }, amount: "1" }),
     { code: "APN_INSUFFICIENT_ASSET" });
   assert.equal(groupedReads, 1); assert.equal(downstreamReads, 0);
 });
@@ -138,9 +138,9 @@ test("Ethereum canonical USDC uses the batched direct reader with or without the
     nonceEstimate: async () => { downstreamReads += 1; throw new Error("nonce and estimate should not run"); },
     feeQuote: async () => { downstreamReads += 1; throw new Error("fee quote should not run"); },
   }) });
-  for (const batchRpcReads of [undefined, true] as const) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
     await assert.rejects(setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: EVM_USDC[1] },
-      amount: "1", ...(batchRpcReads ? { batchRpcReads } : {}) }), { code: "APN_INSUFFICIENT_ASSET" });
+      amount: "1" }), { code: "APN_INSUFFICIENT_ASSET" });
   }
   assert.equal(groupedReads, 2); assert.equal(downstreamReads, 0);
 });
@@ -155,7 +155,7 @@ test("Ethereum canonical WETH9 signs once and completes only through exact obser
     admissions: [...evmDirectAdmissions(), directAdmission("eip155:1", weth,
       { maximumPerTransferAtomic: "1000000000000", dailyLimitAtomic: "1000000000000" })], now: setup.clock.now() });
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { chainId: 1, token: weth },
-    amount: "0.0000000001", batchRpcReads: true }) as { operation_id: string; state: string };
+    amount: "0.0000000001" }) as { operation_id: string; state: string };
   assert.equal(prepared.state, "awaiting_approval");
   setup.rpc.receiptEnabled = false;
   const approved = await setup.core.transfer.approve(prepared.operation_id) as { state: string };

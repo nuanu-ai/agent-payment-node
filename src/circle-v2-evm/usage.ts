@@ -1,15 +1,7 @@
 import { CircleFundingExternalStore } from "./funding-external-store.js";
 import { validateCircleFundingBinding } from "./funding-binding.js";
-import type { CircleFundingOperationV2, CircleKnownOperation } from "./funding-operation.js";
-import { assertHeldCleanup85Scope, type HeldCleanup85Scope } from "../circle-cleanup85-financial-scope.js";
-import type { Cleanup85CancellationRequest } from "../circle-cleanup85-cancellation-contract.js";
-import { consumeHistoricalPaidClosure, type VerifiedHistoricalPaidClosure } from "./historical-paid-closure.js";
-import { consumeCleanup85Settlement, type VerifiedCleanup85Settlement } from "./cleanup85-settlement-authority.js";
-import { validateCleanup85RecoveryProof } from "./cleanup85-recovery-proof.js";
-import { Cleanup85RecoveryStore } from "./cleanup85-recovery-store.js";
-import type { CircleNonceRetirementProof } from "./nonce-retirement-proof.js";
+import type { CircleFundingOperationV2 } from "./funding-operation.js";
 import { CircleRepository } from "./repository.js";
-import { CircleExternalStore } from "./external-store.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
@@ -19,21 +11,21 @@ import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger, assetUsageReservationId, validateAssetUsageReservation, type AssetUsageReservation, type AssetUsageIdentity } from "../asset-usage-ledger.js";
 import { canonicalJson, hashObject } from "../canonical.js";
 import type { StateStore } from "../state.js";
-import { CIRCLE_RECIPIENT, CIRCLE_SOURCE_TOKEN, circleRoute, type CircleDestinationChain } from "./catalog.js";
-import { circleBlocked, circleCorrupt, type CircleOperationV1, type CirclePolicy } from "./operation-model.js";
-export const circleMechanism = (chain: CircleDestinationChain) => ({ provider: "circle-cctp-v2", reference: `circle-v2-evm-fast-42161-${chain}.v1` });
-const ordinaryMechanism = (op: CircleKnownOperation) => op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? validateCircleFundingBinding(op.funding).mechanism : circleMechanism(op.destinationChain);
+import { CIRCLE_SOURCE_TOKEN, circleRoute } from "./catalog.js";
+import { circleBlocked, circleCorrupt, type CirclePolicy } from "./operation-model.js";
+// Only funding-v2 operations execute; v1 journals are read-only and never reach usage admission or settlement.
+const ordinaryMechanism = (op: CircleFundingOperationV2) => validateCircleFundingBinding(op.funding).mechanism;
 /** The burned USDC is the asset that reaches the beneficiary; the native holds only pay the signers' own gas. */
-const beneficiary = (op: CircleKnownOperation) => op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? validateCircleFundingBinding(op.funding).recipient : CIRCLE_RECIPIENT;
+const beneficiary = (op: CircleFundingOperationV2) => validateCircleFundingBinding(op.funding).recipient;
 /** OD-1: an owner recipient pin on the source USDC bridge admission must list the beneficiary. */
-function assertBeneficiaryAdmitted(op: CircleKnownOperation, lease: Lease, admission: AssetPolicyAdmission): void {
+function assertBeneficiaryAdmitted(op: CircleFundingOperationV2, lease: Lease, admission: AssetPolicyAdmission): void {
   if (lease.key === "usdc") assertRecipientAdmitted({ admission, mechanism: ordinaryMechanism(op), recipient: beneficiary(op) });
 }
-const ordinaryNamespace = (op: CircleKnownOperation) => op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? "circle-v2-evm.v2" : "circle-v2-evm.v1";
+const ordinaryNamespace = "circle-v2-evm.v2";
 interface Lease { readonly key: string; readonly profile: string; readonly identity: AssetUsageIdentity; readonly amount: string; }
-function leases(op: CircleKnownOperation): readonly Lease[] {
+function leases(op: CircleFundingOperationV2): readonly Lease[] {
   const source = op.sourceCustody.walletAddress, destination = op.destinationCustody.walletAddress;
-  return [{ key: "usdc", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "token", identifier: CIRCLE_SOURCE_TOKEN } }, amount: op.schemaVersion === "apn.circle-v2-evm-operation.v2" ? validateCircleFundingBinding(op.funding).amountAtomic : "40100" },
+  return [{ key: "usdc", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "token", identifier: CIRCLE_SOURCE_TOKEN } }, amount: validateCircleFundingBinding(op.funding).amountAtomic },
     { key: "approval-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "30000000000000" },
     { key: "burn-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "30000000000000" },
     { key: "cleanup-native", profile: op.profile, identity: { account: source, chain: "eip155:42161", asset: { kind: "native", identifier: null } }, amount: "15000000000000" },
@@ -42,7 +34,7 @@ function leases(op: CircleKnownOperation): readonly Lease[] {
 export class CircleUsage {
   private readonly ledger: AssetUsageLedger;
   private readonly policiesStore: AllowlistPolicyStore;
-  private readonly policyScope = new AsyncLocalStorage<{ readonly profiles: ReadonlySet<string>; active: boolean; guard?: () => void }>();
+  private readonly policyScope = new AsyncLocalStorage<{ readonly profiles: ReadonlySet<string>; active: boolean }>();
   constructor(private readonly state: StateStore, private readonly now: () => number) { this.ledger = new AssetUsageLedger(state.root); this.policiesStore = new AllowlistPolicyStore(state.root); }
   /** Wallet/operation/address locks are outermost; policy locks are held through every effect. */
   async withPolicyLocks<T>(profiles: readonly string[], action: () => Promise<T>): Promise<T> {
@@ -53,22 +45,15 @@ export class CircleUsage {
       return this.policyScope.run(scope, async () => { try { return await action(); } finally { scope.active = false; } });
     });
   }
-  /** Finite cleanup scope only: the private wrapper already owns every policy lock. */
-  async withCleanup85HeldPolicyScope<T>(held:HeldCleanup85Scope,request:Cleanup85CancellationRequest,operationId:string,action:()=>Promise<T>):Promise<T>{
-    if(this.policyScope.getStore()!==undefined)circleBlocked("policy_lock_scope_reentry");
-    const guard=()=>assertHeldCleanup85Scope(held,this.state,request,operationId);guard();
-    const scope={profiles:new Set(["evm-live-buyer","evm-live-seller","default"]),active:true,guard};
-    return this.policyScope.run(scope,async()=>{try{return await action();}finally{scope.active=false;}});
-  }
   private async active(profile: string, account: string): Promise<ActiveAssetPolicy> {
     const scope = this.policyScope.getStore();
     if (scope?.active !== true || !scope.profiles.has(profile)) circleBlocked("owner_policy_lock_required");
-    scope.guard?.(); const stored = await this.policiesStore.readUnderProfileLock(profile); scope.guard?.();
+    const stored = await this.policiesStore.readUnderProfileLock(profile);
     if (!scope.active) circleBlocked("owner_policy_lock_required");
     const active = activeAssetPolicyFromState(stored, new Date(this.now()));
     if (active === null || active.accounts.evm !== account) circleBlocked("active_owner_asset_policy_required"); return active;
   }
-  async policies(op: CircleKnownOperation): Promise<readonly CirclePolicy[]> {
+  async policies(op: CircleFundingOperationV2): Promise<readonly CirclePolicy[]> {
     const result: CirclePolicy[] = [];
     for (const lease of leases(op)) {
       const active = await this.active(lease.profile, lease.identity.account), at = new Date(this.now()), current = await this.ledger.usageReadOnly(lease.identity, at);
@@ -81,18 +66,8 @@ export class CircleUsage {
     }
     return result;
   }
-  /** Capture new cleanup authority without reserving or counting historical holds twice. */
-  async retirementPolicies(op: CircleOperationV1): Promise<readonly CirclePolicy[]> {
-    const result: CirclePolicy[] = [];
-    for (const profile of [op.profile, op.destinationProfile]) {
-      const account = profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
-      const active = await this.active(profile, account);
-      result.push({ profile, profileHash: this.state.profileHash(profile), policyDigest: active.digest, revision: active.revision, activationDigest: active.activationDigest });
-    }
-    return result;
-  }
   /** Readonly authority window from both exact owner activations while their locks remain held. */
-  async authorizationDeadline(op: CircleKnownOperation, policies = op.policies): Promise<string | null> {
+  async authorizationDeadline(op: CircleFundingOperationV2, policies = op.policies): Promise<string | null> {
     let end = Infinity;
     for (const profile of new Set([op.profile, op.destinationProfile])) {
       const frozen = policies.find(p => p.profile === profile), account = profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
@@ -104,7 +79,7 @@ export class CircleUsage {
     if (this.now() >= end) circleBlocked("owner_policy_window_expired");
     return end === Infinity ? null : new Date(end).toISOString();
   }
-  async confirm(op: CircleKnownOperation, policies = op.policies): Promise<void> {
+  async confirm(op: CircleFundingOperationV2, policies = op.policies): Promise<void> {
     for (const policy of policies) {
       const account = policy.profile === op.profile ? op.sourceCustody.walletAddress : op.destinationCustody.walletAddress;
       const active = await this.active(policy.profile, account);
@@ -124,7 +99,7 @@ export class CircleUsage {
       assertBeneficiaryAdmitted(op, lease, admission);
     }
   }
-  async reserve(op: CircleKnownOperation): Promise<readonly AssetUsageReservation[]> {
+  async reserve(op: CircleFundingOperationV2): Promise<readonly AssetUsageReservation[]> {
     const result: AssetUsageReservation[] = [];
     for (const lease of leases(op)) {
       const active = await this.active(lease.profile, lease.identity.account), frozen = op.policies.find(p => p.profile === lease.profile);
@@ -136,42 +111,8 @@ export class CircleUsage {
           amountAtomic: lease.amount, dailyUsageAtomic: "0", asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() }));
       }
       const reservation = await this.ledger.reserve({ ...lease.identity, registry: active.registry, rail: "bridge", mechanism: ordinaryMechanism(op), amountAtomic: lease.amount,
-        idempotencyKey: `${ordinaryNamespace(op)}:${op.operationId}:${lease.key}`, now: new Date(this.now()) });
+        idempotencyKey: `${ordinaryNamespace}:${op.operationId}:${lease.key}`, now: new Date(this.now()) });
       if (reservation.state !== "reserved") circleBlocked("reserve_replay_already_exposed"); result.push(reservation);
-    }
-    return result;
-  }
-  /** Finite historical completion consumes fresh private source+destination provenance before ledger access. */
-  async closeHistoricalPaid(op: CircleOperationV1, authority: VerifiedHistoricalPaidClosure): Promise<readonly AssetUsageReservation[]> {
-    const bound = await consumeHistoricalPaidClosure(authority, this.state, op), frame = bound.closure;
-    const rows: AssetUsageReservation[] = [];
-    for (const planned of frame.outcomes) {
-      const row = planned.reservation, current = await this.ledger.load(row, row.reservationId); if (current === null) circleBlocked("historical_paid_ledger_missing");
-      for (const key of ["schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "rail", "amountAtomic", "account", "chain", "reservedAt"] as const) if (current[key] !== row[key]) circleBlocked("historical_paid_ledger_binding");
-      if (canonicalJson(current.asset) !== canonicalJson(row.asset)) circleBlocked("historical_paid_ledger_binding");
-      if (current.state === planned.state) { if (current.outcomeDigest !== planned.outcomeDigest || (current.consumedAtomic ?? null) !== planned.consumedAtomic) circleBlocked("historical_paid_ledger_outcome"); }
-      else if (bound.operation.terminal || !["reserved", "submitted", "unknown_finality"].includes(current.state)) circleBlocked("historical_paid_ledger_state");
-      rows.push(current);
-    }
-    const result: AssetUsageReservation[] = [];
-    for (const [index, planned] of frame.outcomes.entries()) {
-      if (rows[index]!.state === planned.state) { result.push(rows[index]!); continue; }
-      const row = planned.reservation;
-      result.push(await this.ledger.transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state: planned.state, now: new Date(this.now()), outcomeDigest: planned.outcomeDigest, ...(planned.consumedAtomic === null ? {} : { consumedAtomic: planned.consumedAtomic }), expectedCurrentStates: ["reserved", "submitted", "unknown_finality"] }));
-    }
-    return result;
-  }
-  async followExternalFulfillment(op: CircleOperationV1): Promise<readonly AssetUsageReservation[]> {
-    if (op.externalFulfillment === undefined || op.source?.finalityTag !== "finalized" || op.residualAllowanceAtomic !== "0" || op.usage.length !== 5) circleBlocked("external_settlement_proof_required");
-    const durable = await new CircleRepository(this.state.root).load(op.operationId), claim = await new CircleExternalStore(this.state.root).readClaim(op);
-    if(durable?.externalFulfillment === undefined || claim === null || hashObject(durable.externalFulfillment) !== hashObject(op.externalFulfillment) || hashObject(claim) !== hashObject(op.externalFulfillment)) circleBlocked("external_durable_settlement_binding");
-    const result: AssetUsageReservation[] = [];
-    for (const [index,row] of op.usage.entries()) {
-      const current = await this.ledger.load(row,row.reservationId); if(current === null) circleCorrupt("external_usage_missing");
-      const state = index < 3 ? "finalized" as const : "released_unsubmitted" as const;
-      const outcomeDigest = hashObject({kind:"circle_external_mint_fulfillment",operationId:op.operationId,fingerprint:op.fingerprint,proofHash:op.externalFulfillment.proofHash,reservationId:row.reservationId,index,state});
-      if(current.state === state){if(current.outcomeDigest !== outcomeDigest || current.consumedAtomic !== undefined)circleBlocked("external_usage_outcome_changed");result.push(current);continue;}
-      result.push(await this.ledger.transition({account:row.account,chain:row.chain,asset:row.asset,reservationId:row.reservationId,policyDigest:row.policyDigest,state,now:new Date(this.now()),outcomeDigest,expectedCurrentStates:index < 3 ? ["reserved","submitted","unknown_finality"] : ["reserved","unknown_finality"]}));
     }
     return result;
   }
@@ -193,27 +134,12 @@ export class CircleUsage {
     }
     return result;
   }
-  /** Only a fully verified versioned recovery chooses the new86 fee; old cleanup85 stays unknown. */
-  async closeCleanup85Recovery(op: CircleOperationV1, proof: CircleNonceRetirementProof, authority: VerifiedCleanup85Settlement): Promise<readonly AssetUsageReservation[]> {
-    const bound = await consumeCleanup85Settlement(authority, this.state, op, proof);
-    op = bound.operation; proof = bound.proof; validateCleanup85RecoveryProof(proof, op); if (op.usage.length !== 5) circleBlocked("cleanup85_usage_missing");
-    const durable = await new Cleanup85RecoveryStore(this.state.root).publicRecord(op, proof.cleanup85Recovery!.mode === "observed_original" ? "observed-original-proof" : "cleanup86-finalized-proof");
-    if (durable === null || canonicalJson(durable) !== canonicalJson(proof)) circleBlocked("cleanup85_durable_settlement_proof_required");
-    const result: AssetUsageReservation[] = [];
-    for (const [index, row] of op.usage.entries()) {
-      const saved = await this.ledger.load(row, row.reservationId); if (saved === null || saved.policyDigest !== row.policyDigest || saved.amountAtomic !== row.amountAtomic) circleBlocked("cleanup85_usage_hold_changed");
-      const consumedAtomic = index === 1 ? "1116903336000" : index === 3 ? proof.actualCleanupFeeAtomic : "0", outcomeDigest = hashObject({ version: "apn.circle-cleanup85-retirement-usage.v1", proofHash: proof.proofHash, operationId: op.operationId, reservationId: row.reservationId, index });
-      if (saved.state === "failed_confirmed_revert") { if (saved.consumedAtomic !== consumedAtomic || saved.outcomeDigest !== outcomeDigest) circleBlocked("cleanup85_usage_outcome_changed"); result.push(saved); continue; }
-      result.push(await this.ledger.transition({ account: row.account, chain: row.chain, asset: row.asset, reservationId: row.reservationId, policyDigest: row.policyDigest, state: "failed_confirmed_revert", consumedAtomic, outcomeDigest, now: new Date(this.now()), expectedCurrentStates: ["reserved", "submitted", "unknown_finality"] }));
-    }
-    return result;
-  }
-  async follow(op: CircleKnownOperation, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect" | "released_unsubmitted"): Promise<readonly AssetUsageReservation[]> {
+  async follow(op: CircleFundingOperationV2, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect" | "released_unsubmitted"): Promise<readonly AssetUsageReservation[]> {
     let rows = op.usage;
     if (target === "failed_before_effect" && rows.length === 0) {
       const existing: AssetUsageReservation[] = [];
       for (const lease of leases(op)) {
-        const saved = await this.ledger.load(lease.identity, assetUsageReservationId(lease.identity, `${ordinaryNamespace(op)}:${op.operationId}:${lease.key}`));
+        const saved = await this.ledger.load(lease.identity, assetUsageReservationId(lease.identity, `${ordinaryNamespace}:${op.operationId}:${lease.key}`));
         if (saved === null) break;
         const policy = op.policies.find(p => p.profile === lease.profile);
         if (saved.policyDigest !== policy?.policyDigest || saved.amountAtomic !== lease.amount || !["reserved", "failed_before_effect"].includes(saved.state)) circleBlocked("unsubmitted_reserve_exposed_or_drifted");

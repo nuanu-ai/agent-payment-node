@@ -11,12 +11,12 @@ import { hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import type { ActiveAssetPolicy } from "../../src/allowlist-active-policy.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
-import { preparePolicyBoundUsdt, type UsdtPolicyPrepared, type UsdtPolicyPrepareRequest, type UsdtPreparePort } from "../../src/gasless-usdt/policy-prepare.js";
+import { preparePolicyBoundUsdt } from "./gasless-usdt-v1-prepare-fixture.js";
+import { type UsdtPolicyPrepared, type UsdtPolicyPrepareRequest, type UsdtPreparePort } from "../../src/gasless-usdt/policy-prepare.js";
 import type { UsdtSponsorPort } from "../../src/gasless-usdt/engine.js";
 import type { UsdtUserOperation } from "../../src/gasless-usdt/userop.js";
 import type { Hex } from "../../src/model.js";
 import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
-import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { USDT_BOUND_OPERATION_SCHEMA, UsdtBoundOperationRepository, validateUsdtBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
 import { UsdtExecutionJournal, usdtExecutionIntent } from "../../src/gasless-usdt/execution-journal.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
@@ -365,11 +365,11 @@ test("policy prepare refuses a signed rate that differs from the quote, expired 
   assert.equal(wrongChain.offered.length, 0);
 });
 
-test("bound journal persists the complete preparation and classifies revocation and nonce drift without effects", async t => {
+test("bound journal persists the complete preparation without effects and refuses tampering", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = fixture();
   const binding = await preparePolicyBoundUsdt(f.ports, request());
-  const service = new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root)).forProfile("a".repeat(64));
+  const service = new GaslessUsdtOperationService(temporary.root).forProfile("a".repeat(64));
   const saved = await service.prepareBound(binding, "bound-001", NOW);
   const path = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64), `${saved.operationId}.json`);
   const bytes = await readFile(path, "utf8");
@@ -378,17 +378,6 @@ test("bound journal persists the complete preparation and classifies revocation 
   assert.equal(saved.binding.unsignedOperation.callData, binding.callData);
   assert.equal(saved.binding.account.entryPointNonce, "7");
   assert.equal((await service.statusBound(saved.operationId)).integrityHash, saved.integrityHash);
-  assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare), { state: "prepared", operation: saved });
-  const preparedSnapshot = f.ports.prepare.safeSnapshot;
-  // The safe head moves every epoch and incoming USDT raises the balance; neither needs recovery.
-  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_982n, blockHash: `0x${"34".repeat(32)}`,
-    account: { usdtBalanceAtomic: 1_500_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
-  assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare), { state: "prepared", operation: saved });
-  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n, blockHash: `0x${"34".repeat(32)}`,
-    account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n, eoaNonce: 31n, delegation: "empty" } });
-  assert.deepEqual(await service.resumeBound(saved.operationId, f.ports.prepare),
-    { state: "recovery_required", reason: "safe_block_changed", operation: saved });
-  f.ports.prepare.safeSnapshot = preparedSnapshot;
   const alternate = fixture();
   alternate.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_950n,
     blockHash: `0x${"14".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 7n,
@@ -396,13 +385,6 @@ test("bound journal persists the complete preparation and classifies revocation 
   const alternateBinding = await preparePolicyBoundUsdt(alternate.ports, request());
   await assert.rejects(() => service.prepareBound(alternateBinding, "bound-001", NOW),
     { code: "APN_IDEMPOTENCY_CONFLICT" });
-  f.setPolicy(null);
-  assert.equal((await service.resumeBound(saved.operationId, f.ports.prepare)).state, "capability_unavailable");
-  f.setPolicy(active());
-  f.ports.prepare.safeSnapshot = async () => ({ chainId: 1n, blockNumber: 26_002_951n,
-    blockHash: `0x${"13".repeat(32)}`, account: { usdtBalanceAtomic: 1_000_000n, entryPointNonce: 8n,
-      eoaNonce: 31n, delegation: "empty" } });
-  assert.equal((await service.resumeBound(saved.operationId, f.ports.prepare)).state, "capability_unavailable");
   assert.equal(await readFile(path, "utf8"), bytes);
   assert.equal(f.offered.length, 1);
   const resealed = JSON.parse(bytes) as Record<string, unknown>;
@@ -425,7 +407,7 @@ test("bound journal persists the complete preparation and classifies revocation 
 test("bound journal replays the first complete record after time advances and repairs claim-only publication", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = fixture(), binding = await preparePolicyBoundUsdt(f.ports, request());
-  const service = new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root)).forProfile("a".repeat(64));
+  const service = new GaslessUsdtOperationService(temporary.root).forProfile("a".repeat(64));
   const first = await service.prepareBound(binding, "replay-001", NOW);
   const profile = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64));
   const path = join(profile, `${first.operationId}.json`);
@@ -454,8 +436,7 @@ test("independent services serialize competing same-key bindings through one ato
   const [firstBinding, secondBinding] = await Promise.all([
     preparePolicyBoundUsdt(firstFixture.ports, request()), preparePolicyBoundUsdt(secondFixture.ports, request()),
   ]);
-  const services = Array.from({ length: 12 }, () => new GaslessUsdtOperationService(
-    new UsdtOperationRepository(temporary.root)).forProfile("a".repeat(64)));
+  const services = Array.from({ length: 12 }, () => new GaslessUsdtOperationService(temporary.root).forProfile("a".repeat(64)));
   const outcomes = await Promise.allSettled(services.map((service, index) => service.prepareBound(
     index % 2 === 0 ? firstBinding : secondBinding, "race-001", NOW)));
   const winners = outcomes.filter(result => result.status === "fulfilled").map(result => result.value);
@@ -467,7 +448,7 @@ test("independent services serialize competing same-key bindings through one ato
   const profile = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64));
   assert.equal((await readdir(join(temporary.root, "gasless-usdt-bound-operations", "claims"))).filter(name => name.endsWith(".json")).length, 1);
   assert.equal((await readdir(profile)).filter(name => name.endsWith(".json")).length, 1);
-  await assert.rejects(() => new GaslessUsdtOperationService(new UsdtOperationRepository(temporary.root))
+  await assert.rejects(() => new GaslessUsdtOperationService(temporary.root)
     .forProfile("b".repeat(64)).prepareBound(firstBinding, "race-001", NOW), { code: "APN_IDEMPOTENCY_CONFLICT" });
 });
 

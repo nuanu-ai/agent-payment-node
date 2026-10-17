@@ -35,7 +35,7 @@ export interface StargateNativeEnvelope {
     readonly maxPriorityFeePerGasAtomic: string;
 }
 export interface StargateNativeOperation {
-    readonly schemaVersion: "apn.stargate-v2-native-operation.v1" | "apn.stargate-v2-native-operation.v2" | "apn.stargate-v2-native-operation.v3";
+    readonly schemaVersion: "apn.stargate-v2-native-operation.v2" | "apn.stargate-v2-native-operation.v3";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;

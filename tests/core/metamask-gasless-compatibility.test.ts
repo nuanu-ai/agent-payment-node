@@ -67,7 +67,6 @@ test("pending MM preparation blocks wallet lifecycle mutations before effects or
       authenticationMethods: ["browser"],
       async connect() { return forbidden("provider.connect"); },
       async probeStatus() { return forbidden("provider.status"); },
-      async logout() { return forbidden("provider.logout"); },
     },
     reads: {
       async observeBalance() { return forbidden("provider.balance"); },
@@ -141,7 +140,6 @@ test("pending MM preparation never blocks wallet status, balance or permission l
     lifecycle: {
       async connect() { throw new Error("forbidden connect"); },
       async probeStatus() { reads.push("status"); },
-      async logout() { throw new Error("forbidden logout"); },
     },
     reads: {
       async observeBalance() { reads.push("balance"); return observation as never; },
@@ -396,7 +394,7 @@ async function providerFixture(root: string, profile: string) {
   const adapter: ProviderAdapterBundle = { provider_id: stored.provider_id, trust_class: stored.trust_class,
     capabilities, lifecycle: reads, reads, direct: { mode: "provider_atomic_send" },
     x402: { mode: "provider_atomic_paid_fetch", assertCompatibleIntent() {}, async prime() {},
-      async execute() { throw new Error("not called during prepare"); } }, evidence: { owner: "apn" } };
+      async execute() { throw new Error("not called during prepare"); } } };
   const registry = new ProviderRegistry([{ provider_id: stored.provider_id, create: () => adapter }]);
   const core = new ApnCore({ state, profileRepository: new StateProfileRepository(state), providerRegistry: registry,
     policy: new TestProfilePolicy(), rpc: new TestRpc(), http: new TestHttp(), rpcUrl: "https://rpc.example",

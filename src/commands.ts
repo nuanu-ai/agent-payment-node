@@ -15,7 +15,7 @@ export type CommandRequest =
   | { readonly command: "sei.funding.approve" | "sei.funding.status"; readonly operationId: string }
   | { readonly command: "circle.evm.adopt-external-mint"; readonly operationId: string; readonly transactionHash: `0x${string}` }
   | { readonly command: "circle.evm.prepare"; readonly profile: string; readonly destinationProfile: string; readonly destinationChain: 1329 | 59144 | 143; readonly idempotencyKey: string; readonly funding: CircleFundingParameters }
-  | { readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.cleanup85-prepare" | "circle.evm.cleanup85-cancel" | "circle.evm.cleanup86-approve" | "circle.evm.status"; readonly operationId: string }
+  | { readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.status"; readonly operationId: string }
   | { readonly command: "mega.funding.approve" | "mega.funding.status"; readonly operationId: string }
   | { readonly command: "x402.merchant.prepare"; readonly profile: string; readonly url: string; readonly asset?: string; readonly maximumNativeFee: string; readonly nativeFeeReserveWei?: string; readonly idempotencyKey: string }
   | { readonly command: "x402.merchant.approve" | "x402.merchant.status" | "x402.merchant.retire-unsent"; readonly operationId: string }
@@ -35,7 +35,8 @@ export type CommandRequest =
   | { readonly command: "relay.arbitrum.approval-execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.deposit-dispatch"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.native.prepare"; readonly profile: string; readonly sourceChain: string; readonly destinationChain: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
-  | { readonly command: "relay.preflight"; readonly profile: string; readonly operationId: string }
+  /** `relay execute` and `relay observe` before the saved operation names their route (relay/command-route.ts). */
+  | { readonly command: "relay.route"; readonly action: "execute" | "observe"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.native.execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.retire"; readonly profile: string; readonly operationId: string }
@@ -188,7 +189,6 @@ export type CommandRequest =
     /** Owner tip per gas; replaces the RPC suggestion. */
     readonly priorityFeeWei?: string;
     /** Explicit Linea native, Unichain native or USDC, or Polygon USDC prepare read batching; default is scalar RPC. */
-    readonly batchRpcReads?: true;
   }
   | { readonly command: "transfer.approve"; readonly operationId: string }
   | { readonly command: "operation.resume"; readonly operationId: string; readonly waitSeconds?: number;
@@ -206,7 +206,6 @@ export type CommandRequest =
     readonly idempotencyKey: string;
   }
   | { readonly command: "operation.status"; readonly operationId: string }
-  | { readonly command: "operation.repair-deployment"; readonly operationId: string }
   | { readonly command: "receipt.get"; readonly operationId: string };
 
 export interface CommandOutcome {

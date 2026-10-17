@@ -345,7 +345,6 @@ export class ProviderX402Service {
     const rpc = remaining === undefined
       ? providerX402ReadPort(this.context.requireRpc())
       : boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining));
-    if (rpc === null) throw new ApnError("APN_OPERATION_BLOCKED", "Provider settlement wait requires bounded x402 RPC.");
     const observation = await observeProviderSettlement(operation, rpc, this.context.clock.now().getTime());
     if (observation.kind === "pending") return operation;
     if (observation.kind === "ambiguous") {

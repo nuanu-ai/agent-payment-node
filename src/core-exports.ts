@@ -13,7 +13,6 @@ export {
   ALLOWLIST_DATASET_SHA256,
   ALLOWLIST_DATASET_VERSION,
   ALLOWLIST_INVENTORY_SCHEMA,
-  assertAllowlistExecutionConfigured,
   compileAllowlistInventory,
   loadAllowlistInventory,
   resolveAllowlistAsset,
@@ -72,4 +71,3 @@ export type {
   DirectAssetUsageLease,
 } from "./direct-asset-usage.js";
 export * from "./swap/index.js";
-export * from "./stargate-v2/index.js";

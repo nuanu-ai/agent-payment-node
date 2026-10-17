@@ -1,8 +1,6 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
-import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
-import type { RelayReadOnlyPreflightService } from "./relay/preflight.js";
 import type { RelayRetireService } from "./relay/retire.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayObserveService } from "./relay/observe.js";
@@ -36,10 +34,7 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
-import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
 import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
-import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
-import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
@@ -69,7 +64,6 @@ export interface RelayExecuteHandler {
 }
 export interface CoreDependencies {
     readonly relayPrepare?: RelayUnsignedPrepareService;
-    readonly relayPreflight?: RelayReadOnlyPreflightService;
     readonly relayRetire?: RelayRetireService;
     readonly relayStatus?: RelayKeylessStatusService;
     readonly relayObserve?: RelayObserveService;
@@ -82,7 +76,6 @@ export interface CoreDependencies {
     readonly relayNativeExecute?: RelayNativeSourceRuntime;
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
     readonly stargateNative?: StargateNativeService;
-    readonly circleEvm?: CircleEvmService;
     readonly circleFundingEvm?: CircleFundingEvmService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
@@ -104,9 +97,6 @@ export interface CoreDependencies {
     readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
     readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
     readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
-    readonly uniswap?: UniswapGuardedSwapBuilder;
-    readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-    readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.jupiter.quote";
     }>>;
@@ -152,7 +142,6 @@ export interface CoreDependencies {
 }
 export declare class RuntimeContext {
     readonly relayPrepare?: RelayUnsignedPrepareService;
-    readonly relayPreflight?: RelayReadOnlyPreflightService;
     readonly relayRetire?: RelayRetireService;
     readonly relayStatus?: RelayKeylessStatusService;
     readonly relayObserve?: RelayObserveService;
@@ -165,7 +154,6 @@ export declare class RuntimeContext {
     readonly relayNativeExecute?: RelayNativeSourceRuntime;
     readonly relayExecuteConfirmation?: RelayExecuteConfirmation;
     readonly stargateNative?: StargateNativeService;
-    readonly circleEvm?: CircleEvmService;
     readonly circleFundingEvm?: CircleFundingEvmService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;
@@ -187,9 +175,6 @@ export declare class RuntimeContext {
     readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
     readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
     readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
-    readonly uniswap?: UniswapGuardedSwapBuilder;
-    readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-    readonly jupiter?: JupiterReadOnlyQuoteBuilder;
     readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.jupiter.quote";
     }>>;

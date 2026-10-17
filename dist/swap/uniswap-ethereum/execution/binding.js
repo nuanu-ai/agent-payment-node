@@ -3,7 +3,6 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../
 import { ApnError } from "../../../errors.js";
 import { parseAtomic } from "../../../money.js";
 import { validateSwapOperation } from "../../model.js";
-import { requireSwapProtocol, validateSwapProtocolRegistry } from "../../protocol-registry.js";
 import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../../uniswap-pin.js";
 import { decodeUniswapRouterCalldataFor } from "../../uniswap-router.js";
 const BINDING_VERSION = "apn.uniswap-ethereum.execution-binding.v1";
@@ -14,14 +13,6 @@ const HEX_BYTES = /^0x(?:[a-fA-F0-9]{2})+$/u;
 const MAX_UINT256 = (1n << 256n) - 1n;
 const MAX_UINT64 = (1n << 64n) - 1n;
 const MAX_FRESHNESS_AGE_MS = 30_000;
-export function assertInjectedProtocol(operationValue, registryValue) {
-    const operation = validateSwapOperation(operationValue), registry = validateSwapProtocolRegistry(registryValue);
-    if (registry.registryDigest !== operation.protocolRegistryDigest || registry.registryVersion !== operation.protocolRegistryVersion) {
-        blocked("Injected Uniswap protocol registry does not match the prepared operation.", "uniswap_protocol_registry_drift");
-    }
-    requireSwapProtocol(registry, operation.mechanismDigest);
-    return registry;
-}
 export function createUniswapApprovalRequest(operationValue, envelope, freshness, now) {
     const operation = validateSwapOperation(operationValue);
     validateEnvelope(operation, envelope, Math.floor(Date.parse(operation.quote.expiresAt) / 1000));

@@ -1,6 +1,5 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256, parseAbi, type Address, type Hex } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { archiveReadInterval, circleArchiveReadPacer, type CircleArchiveReadPacer } from "../circle-archive-read-pacing.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ApnError } from "../errors.js";
 import { BridgeHttps } from "../lifi/https.js";
@@ -26,11 +25,12 @@ const READ_METHODS = new Set([...METHODS].filter(method => method !== "eth_sendR
  * the attester set (head, threshold, count, at most 20 attesters); one account; one envelope (head, tip, estimate);
  * one effect preflight (two nonces, balance, allowance, estimate, simulation, mint head and used nonce); one
  * observation (transaction, receipt, finality head, canonical block). */
-export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23, account: 5, envelope: 3, preflight: 8, observation: 4, single: 1 } as const;
+export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23, account: 5, envelope: 3, preflight: 8, observation: 4, single: 1, ambiguous: 4 } as const;
 /** The longest live command: identity, configuration, attesters, two accounts, two envelopes, three effect preflights,
- * eight observations and four single reads (allowance, used nonce, cleanup nonce, mint head), each retried once. */
+ * eight observations, one ambiguous-send check (two nonces, transaction, receipt) and four single reads (allowance,
+ * used nonce, cleanup nonce, mint head), each retried once. */
 export const CIRCLE_COMMAND_REQUEST_BUDGET = 2 * (CIRCLE_READ_PLAN.identity + CIRCLE_READ_PLAN.configuration + CIRCLE_READ_PLAN.attesters +
-  2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + 4 * CIRCLE_READ_PLAN.single);
+  2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + CIRCLE_READ_PLAN.ambiguous + 4 * CIRCLE_READ_PLAN.single);
 const transient = (e: unknown) => e instanceof ApnError && typeof e.details?.status === "number" && [429, 500, 502, 503, 504].includes(e.details.status);
 interface CircleQueuedRead { readonly method: string; readonly params: readonly unknown[]; readonly gate: () => void; readonly resolve: (value: unknown) => void; readonly reject: (error: unknown) => void; }
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
@@ -40,19 +40,17 @@ interface CircleQueuedRead { readonly method: string; readonly params: readonly 
  * keeps the historical one-call-per-POST sequence for the frozen recovery paths. */
 export class CircleRpc {
   private sequence = 0; private requests = 0; private posts = 0; private readonly endpoint: string;
-  private readonly archiveInterval: number; private chainVerified = false; private queued: CircleQueuedRead[] = [];
-  private readonly scopes = new AsyncLocalStorage<{ readonly guard: (() => void) | undefined; readonly retryRead: boolean }>();
-  constructor(url: string, readonly chainId: number, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps(), private readonly maxRequests = 256, archiveMinimumIntervalMs = process.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS, private readonly archivePacer: CircleArchiveReadPacer = circleArchiveReadPacer, readonly mode: "lean" | "anchored" = "anchored") {
-    this.archiveInterval = archiveReadInterval(archiveMinimumIntervalMs);
+  private chainVerified = false; private queued: CircleQueuedRead[] = [];
+  private readonly scopes = new AsyncLocalStorage<{ readonly retryRead: boolean }>();
+  constructor(url: string, readonly chainId: number, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps(), private readonly maxRequests = 256, readonly mode: "lean" | "anchored" = "anchored") {
     const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Circle RPC", 2048);
     if (parsed.search !== "" || parsed.hash !== "") circleBlocked("rpc_url"); this.endpoint = parsed.toString();
   }
   /** Read calls counted against the budget, and physical POSTs sent (a batch is one POST). */
   get requestCount(): number { return this.requests; }
   get postCount(): number { return this.posts; }
-  guarded<T>(guard: () => void, action: () => Promise<T>): Promise<T> { return this.scopes.run({ guard, retryRead: this.scopes.getStore()?.retryRead ?? true }, action); }
   async call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown> {
-    const guard = this.scopes.getStore()?.guard, gate = () => { guard?.(); beforeSend?.(); }, retry = READ_METHODS.has(method) && this.scopes.getStore()?.retryRead !== false;
+    const gate = () => { beforeSend?.(); }, retry = READ_METHODS.has(method) && this.scopes.getStore()?.retryRead !== false;
     for (let attempt = 0; ; attempt++) {
       try { return await this.physicalCall(method, params, gate, beforeSend !== undefined); }
       catch (error) { if (!retry || attempt >= 1 || !transient(error)) throw error; gate(); await new Promise(resolve => setTimeout(resolve, 100)); gate(); }
@@ -86,7 +84,7 @@ export class CircleRpc {
     const origin = new URL(this.endpoint).origin;
     let response: Awaited<ReturnType<BridgeHttps["request"]>>;
     this.posts++;
-    try { response = await this.archivePacer.start(this.endpoint, method, this.archiveInterval, gate, () => this.https.request(this.endpoint, "POST", body, 1024 * 1024, "APN_RPC_CONFIG", gate)); }
+    try { response = await this.https.request(this.endpoint, "POST", body, 1024 * 1024, "APN_RPC_CONFIG", gate); }
     catch (error) { if (error instanceof ApnError) throw new ApnError(error.code, "Circle RPC transport failed.", { method, origin, stage: "transport" }); throw error; }
     gate();
     if (response.status !== 200) throw new ApnError("APN_RPC_CONFIG", "Circle RPC returned an unsuccessful HTTP response.", { method, origin, status: response.status, stage: "response" });
@@ -112,8 +110,8 @@ export class CircleRpc {
   async block(tag: string) { return circleRecord(await this.call("eth_getBlockByNumber", [tag, false])); }
   async observation(transactionHash: Hex, finalityTag: "included" | "safe" | "finalized"): Promise<CircleObservation | null> {
     for (let attempt = 0; ; attempt++) {
-      try { return await this.scopes.run({ guard: this.scopes.getStore()?.guard, retryRead: false }, () => this.mode === "lean" ? this.leanObservation(transactionHash, finalityTag) : this.anchoredObservation(transactionHash, finalityTag)); }
-      catch (error) { if (attempt >= 1 || !transient(error)) throw error; this.scopes.getStore()?.guard?.(); await new Promise(resolve => setTimeout(resolve, 100)); this.scopes.getStore()?.guard?.(); }
+      try { return await this.scopes.run({ retryRead: false }, () => this.mode === "lean" ? this.leanObservation(transactionHash, finalityTag) : this.anchoredObservation(transactionHash, finalityTag)); }
+      catch (error) { if (attempt >= 1 || !transient(error)) throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
     }
   }
   /** Two POSTs: transaction and receipt, then the finality head with the canonical block at the receipt height. A head

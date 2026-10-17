@@ -67,7 +67,7 @@ export class RelayArbitrumApprovalDecisionService {
     if (first.approvalRequired) return output("approval_required", first, null);
     if (!first.readOnlyConditionsSatisfied) return output("preflight_blocked", first, null);
     const verified: { value: typeof first | null } = { value: null };
-    const journal = await new ArbitrumSourceEffectJournalRepository(this.state.root, undefined, undefined,
+    const journal = await new ArbitrumSourceEffectJournalRepository(this.state.root, undefined,
       this.ports.now).skipApprovalIfVerified(profileHash, operationId, existing?.integrityHash ?? null,
       async input => {
         if (input.operation.integrityHash !== operation.integrityHash ||
