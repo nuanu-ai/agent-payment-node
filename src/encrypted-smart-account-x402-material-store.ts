@@ -1,8 +1,7 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { TextDecoder } from "node:util";
 import { decodeDelegations, encodeDelegations } from "./metamask-smart-account-vendor.js";
 import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
+import { openNested, sealNested, type EnvelopeSpec, type NestedHeader } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { Address, Hex } from "./model.js";
@@ -50,6 +49,15 @@ export interface SmartAccountX402MaterialStorePort {
   markExposed(operationId: string, updatedAt: string): Promise<SmartAccountX402MaterialRecord>;
 }
 
+const ENVELOPE: EnvelopeSpec<{ readonly schema_version: typeof ENVELOPE_VERSION; readonly operation_id: string } & NestedHeader> = {
+  info: header => `${ENVELOPE_VERSION}\0${header.operation_id}`,
+  aad: header => header,
+  maxFieldBytes: null,
+  fail: failure => corrupt(failure === "authentication" ? "Smart Account x402 material authentication or decryption failed."
+    : failure === "canonical_plaintext" ? "Smart Account x402 material plaintext is not canonical."
+      : "Smart Account x402 material envelope encoding is invalid."),
+};
+
 export class EncryptedSmartAccountX402MaterialStore implements SmartAccountX402MaterialStorePort {
   private readonly files: MaterialEnvelopeState;
 
@@ -63,7 +71,7 @@ export class EncryptedSmartAccountX402MaterialStore implements SmartAccountX402M
     const envelope = parseEnvelope(value, operationId);
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) corrupt("The Smart Account x402 wrapping secret is missing.");
-    try { return decrypt(envelope, wrapping); }
+    try { return await openNested(wrapping, ENVELOPE, envelope, validateRecord); }
     finally { wrapping.fill(0); }
   }
 
@@ -98,33 +106,10 @@ export class EncryptedSmartAccountX402MaterialStore implements SmartAccountX402M
 
   private async write(record: SmartAccountX402MaterialRecord): Promise<void> {
     const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
-    const salt = randomBytes(32);
-    const nonce = randomBytes(12);
-    const key = deriveKey(wrapping, salt, record.operation_id);
-    const header = {
-      schema_version: ENVELOPE_VERSION,
-      operation_id: record.operation_id,
-      kdf: { name: "HKDF-SHA-256", salt: salt.toString("base64") },
-      cipher: { name: "AES-256-GCM", nonce: nonce.toString("base64") },
-    } as const;
-    const plaintext = Buffer.from(canonicalJson(record), "utf8");
     try {
-      const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      cipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-      const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-      try {
-        await this.files.write(record.operation_id, {
-          ...header,
-          cipher: {
-            ...header.cipher,
-            ciphertext: ciphertext.toString("base64"),
-            tag: cipher.getAuthTag().toString("base64"),
-          },
-        });
-      } finally { ciphertext.fill(0); }
-    } finally {
-      plaintext.fill(0); key.fill(0); salt.fill(0); nonce.fill(0); wrapping.fill(0);
-    }
+      await this.files.write(record.operation_id,
+        sealNested(wrapping, ENVELOPE, { schema_version: ENVELOPE_VERSION, operation_id: record.operation_id }, record));
+    } finally { wrapping.fill(0); }
   }
 }
 
@@ -151,35 +136,6 @@ interface MaterialEnvelope {
     readonly ciphertext: string;
     readonly tag: string;
   };
-}
-
-function decrypt(envelope: MaterialEnvelope, wrapping: Buffer): SmartAccountX402MaterialRecord {
-  const salt = decodeBase64(envelope.kdf.salt, 32);
-  const nonce = decodeBase64(envelope.cipher.nonce, 12);
-  const ciphertext = decodeBase64(envelope.cipher.ciphertext);
-  const tag = decodeBase64(envelope.cipher.tag, 16);
-  const key = deriveKey(wrapping, salt, envelope.operation_id);
-  let plaintext = Buffer.alloc(0);
-  try {
-    const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-    decipher.setAAD(Buffer.from(canonicalJson({
-      schema_version: envelope.schema_version,
-      operation_id: envelope.operation_id,
-      kdf: envelope.kdf,
-      cipher: { name: envelope.cipher.name, nonce: envelope.cipher.nonce },
-    }), "utf8"));
-    decipher.setAuthTag(tag);
-    plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
-    const value = JSON.parse(text) as unknown;
-    if (canonicalJson(value) !== text) corrupt("Smart Account x402 material plaintext is not canonical.");
-    return validateRecord(value);
-  } catch (error) {
-    if (error instanceof ApnError) throw error;
-    corrupt("Smart Account x402 material authentication or decryption failed.");
-  } finally {
-    salt.fill(0); nonce.fill(0); ciphertext.fill(0); tag.fill(0); key.fill(0); plaintext.fill(0);
-  }
 }
 
 function validateRecord(value: unknown): SmartAccountX402MaterialRecord {
@@ -259,18 +215,6 @@ function parseEnvelope(value: unknown, operationId: string): MaterialEnvelope {
     corrupt("Smart Account x402 material envelope is invalid.");
   }
   return value as unknown as MaterialEnvelope;
-}
-
-function deriveKey(wrapping: Buffer, salt: Buffer, operationId: string): Buffer {
-  return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(`${ENVELOPE_VERSION}\0${operationId}`), 32));
-}
-
-function decodeBase64(value: string, length?: number): Buffer {
-  const decoded = Buffer.from(value, "base64");
-  if (decoded.toString("base64") !== value || decoded.length === 0 || (length !== undefined && decoded.length !== length)) {
-    decoded.fill(0); corrupt("Smart Account x402 material envelope encoding is invalid.");
-  }
-  return decoded;
 }
 
 function hashes(...values: readonly string[]): boolean { return values.every((value) => /^[a-f0-9]{64}$/u.test(value)); }

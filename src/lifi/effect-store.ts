@@ -1,6 +1,5 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
-import { canonicalJson, hashObject } from "../canonical.js";
-import { ApnError } from "../errors.js";
+import { hashObject } from "../canonical.js";
+import { openNested, sealNested, type EnvelopeSpec } from "../custody-envelope.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import type { BridgeOperationRecord } from "./operation-model.js";
@@ -14,6 +13,13 @@ interface Header { readonly schemaVersion: typeof VERSION; readonly profileHash:
   readonly kdf: { readonly name: "HKDF-SHA-256"; readonly salt: string };
   readonly cipher: { readonly name: "AES-256-GCM"; readonly nonce: string } }
 interface Envelope extends Omit<Header, "cipher"> { readonly cipher: Header["cipher"] & { readonly ciphertext: string; readonly tag: string } }
+const ENVELOPE: EnvelopeSpec<Header> = {
+  info: e => `${VERSION}\0${e.profileHash}\0${e.operationId}\0${e.role}\0${e.fingerprint}\0${e.envelopeHash}`,
+  aad: e => e,
+  maxFieldBytes: 64 * 1024,
+  fail: failure => failure === "authentication" ? bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_effect_authentication")
+    : bridgeFailure("APN_STATE_CORRUPT", failure === "canonical_plaintext" ? "bridge_effect_canonical_plaintext" : "bridge_effect_encoding"),
+};
 export class BridgeEffectStore extends SecureStateStore {
   constructor(root: string, private readonly wrappingSecret: WrappingSecretPort) { super(root); }
   async load(op: BridgeOperationRecord, role: "approval" | "bridge"): Promise<BridgeSealedMaterial | null> {
@@ -22,21 +28,8 @@ export class BridgeEffectStore extends SecureStateStore {
     const envelope = parseEnvelope(raw, op, role);
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_wrapping_secret_missing");
-    const salt = base64(envelope.kdf.salt, 32), nonce = base64(envelope.cipher.nonce, 12),
-      tag = base64(envelope.cipher.tag, 16), ciphertext = base64(envelope.cipher.ciphertext);
-    const key = deriveKey(wrapping, salt, envelope);
-    let plaintext = Buffer.alloc(0);
-    try {
-      const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      decipher.setAAD(Buffer.from(canonicalJson(headerOf(envelope)), "utf8")); decipher.setAuthTag(tag);
-      plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext), value: unknown = JSON.parse(text);
-      if (canonicalJson(value) !== text) bridgeFailure("APN_STATE_CORRUPT", "bridge_effect_canonical_plaintext");
-      return await validateMaterial(value, op, role);
-    } catch (error) {
-      if (error instanceof ApnError) throw error;
-      return bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_effect_authentication");
-    } finally { wrapping.fill(0); key.fill(0); salt.fill(0); nonce.fill(0); tag.fill(0); ciphertext.fill(0); plaintext.fill(0); }
+    try { return await openNested(wrapping, ENVELOPE, envelope, async value => await validateMaterial(value, op, role)); }
+    finally { wrapping.fill(0); }
   }
   async seal(op: BridgeOperationRecord, material: BridgeSealedMaterial): Promise<BridgeSealedMaterial> {
     await validateMaterial(material, op, material.role);
@@ -47,21 +40,13 @@ export class BridgeEffectStore extends SecureStateStore {
     }
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_wrapping_secret_missing");
-    const salt = randomBytes(32), nonce = randomBytes(12);
-    const header: Header = { schemaVersion: VERSION, profileHash: op.profileHash, operationId: op.operationId,
-      role: material.role, fingerprint: op.fingerprint, envelopeHash: material.envelopeHash,
-      kdf: { name: "HKDF-SHA-256", salt: salt.toString("base64") }, cipher: { name: "AES-256-GCM", nonce: nonce.toString("base64") } };
-    const key = deriveKey(wrapping, salt, header), plaintext = Buffer.from(canonicalJson(material), "utf8");
-    let ciphertext = Buffer.alloc(0);
     try {
-      const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      cipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-      ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const envelope = sealNested(wrapping, ENVELOPE, { schemaVersion: VERSION, profileHash: op.profileHash, operationId: op.operationId,
+        role: material.role, fingerprint: op.fingerprint, envelopeHash: material.envelopeHash }, material);
       await this.initialize(); await this.ensureDirectory(`bridge-effects/${op.profileHash}`);
-      await this.writeJson(this.path(op, material.role), { ...header,
-        cipher: { ...header.cipher, ciphertext: ciphertext.toString("base64"), tag: cipher.getAuthTag().toString("base64") } });
+      await this.writeJson(this.path(op, material.role), envelope);
       return material;
-    } finally { wrapping.fill(0); salt.fill(0); nonce.fill(0); key.fill(0); plaintext.fill(0); ciphertext.fill(0); }
+    } finally { wrapping.fill(0); }
   }
   private path(op: BridgeOperationRecord, role: "approval" | "bridge"): string {
     stateIdentifier(op.profileHash, "bridge effect profile"); stateIdentifier(op.operationId, "bridge effect operation");
@@ -89,15 +74,4 @@ function parseEnvelope(value: unknown, op: BridgeOperationRecord, role: "approva
     k.name !== "HKDF-SHA-256" || c.name !== "AES-256-GCM" ||
     [k.salt, c.nonce, c.ciphertext, c.tag].some((v) => typeof v !== "string")) bridgeFailure("APN_STATE_CORRUPT", "bridge_effect_envelope");
   return e as unknown as Envelope;
-}
-function headerOf(e: Envelope): Header { return { ...e, cipher: { name: e.cipher.name, nonce: e.cipher.nonce } }; }
-function deriveKey(wrapping: Buffer, salt: Buffer, e: Header): Buffer {
-  return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(`${VERSION}\0${e.profileHash}\0${e.operationId}\0${e.role}\0${e.fingerprint}\0${e.envelopeHash}`), 32));
-}
-function base64(value: string, length?: number): Buffer {
-  const b = Buffer.from(value, "base64");
-  if (b.length === 0 || b.length > 64 * 1024 || b.toString("base64") !== value || (length !== undefined && b.length !== length)) {
-    b.fill(0); bridgeFailure("APN_STATE_CORRUPT", "bridge_effect_encoding");
-  }
-  return b;
 }

@@ -1,9 +1,9 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
-import { TextDecoder } from "node:util";
+import { randomBytes } from "node:crypto";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
+import { domainHash, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { CHAIN_ID } from "./constants.js";
+import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { listEncryptedWalletEnvelopes, listLocalProviderProfiles, listLocalWallets } from "./wallet-import-collision.js";
@@ -22,6 +22,13 @@ const DECIMAL = /^(?:0|[1-9][0-9]*)$/u;
 export function walletCustodyLock(state, profileInput) {
     return `custody:${state.profileHash(canonicalProfile(profileInput))}`;
 }
+const ENVELOPE = {
+    info: header => `${ENVELOPE_VERSION}\0${header.identity.profile}`,
+    aad: header => header,
+    maxFieldBytes: null,
+    fail: (failure, field) => corrupt(failure === "authentication" ? "Wallet authentication or decryption failed."
+        : failure === "canonical_plaintext" ? "Wallet plaintext is not canonical." : `Wallet ${field} encoding is invalid.`),
+};
 export class EncryptedWalletStore {
     state;
     wrappingSecret;
@@ -52,7 +59,7 @@ export class EncryptedWalletStore {
             if (beforeKeyLoad !== undefined)
                 await beforeKeyLoad(envelope.identity);
             beforeDecrypt?.();
-            return { identity: envelope.identity, secret: decryptEnvelope(envelope, wrapping) };
+            return { identity: envelope.identity, secret: await decryptEnvelope(envelope, wrapping) };
         }
         finally {
             wrapping.fill(0);
@@ -142,39 +149,14 @@ export class EncryptedWalletStore {
         if (!createOnly)
             await releaseSettledWalletEffects(this.state, identity.profile, secret, Date.now());
         const wrapping = wrappingInput === undefined ? await this.requiredWrappingSecret() : Buffer.from(wrappingInput);
-        const salt = randomBytes(32);
-        const nonce = randomBytes(12);
-        const key = deriveKey(wrapping, salt, identity.profile);
-        const header = {
-            schemaVersion: ENVELOPE_VERSION,
-            identity,
-            kdf: { name: KDF_NAME, salt: salt.toString("base64") },
-            cipher: { name: CIPHER_NAME, nonce: nonce.toString("base64") },
-        };
-        const plaintext = Buffer.from(canonicalJson(secret), "utf8");
         try {
-            const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-            cipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-            const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-            const envelope = {
-                ...header,
-                cipher: {
-                    ...header.cipher,
-                    ciphertext: ciphertext.toString("base64"),
-                    tag: cipher.getAuthTag().toString("base64"),
-                },
-            };
+            const envelope = sealNested(wrapping, ENVELOPE, { schemaVersion: ENVELOPE_VERSION, identity }, secret);
             if (createOnly)
                 await this.state.writeNewEncryptedWalletEnvelope(identity.profile, envelope);
             else
                 await this.state.writeEncryptedWalletEnvelope(identity.profile, envelope);
-            ciphertext.fill(0);
         }
         finally {
-            plaintext.fill(0);
-            key.fill(0);
-            salt.fill(0);
-            nonce.fill(0);
             wrapping.fill(0);
         }
     }
@@ -190,47 +172,14 @@ export class EncryptedWalletStore {
         return wrapping;
     }
 }
-function decryptEnvelope(envelope, wrapping) {
-    const salt = decodeBase64(envelope.kdf.salt, 32, "salt");
-    const nonce = decodeBase64(envelope.cipher.nonce, 12, "nonce");
-    const ciphertext = decodeBase64(envelope.cipher.ciphertext, undefined, "ciphertext");
-    const tag = decodeBase64(envelope.cipher.tag, 16, "tag");
-    const key = deriveKey(wrapping, salt, envelope.identity.profile);
-    const header = {
-        schemaVersion: envelope.schemaVersion,
-        identity: envelope.identity,
-        kdf: envelope.kdf,
-        cipher: { name: envelope.cipher.name, nonce: envelope.cipher.nonce },
-    };
-    let plaintext = Buffer.alloc(0);
-    try {
-        const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-        decipher.setAAD(Buffer.from(canonicalJson(header), "utf8"));
-        decipher.setAuthTag(tag);
-        plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-        const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext);
-        const value = JSON.parse(text);
-        if (canonicalJson(value) !== text)
-            corrupt("Wallet plaintext is not canonical.");
+async function decryptEnvelope(envelope, wrapping) {
+    return await openNested(wrapping, ENVELOPE, envelope, value => {
         const secret = parseSecret(value);
         if (privateKeyToAccount(secret.privateKey).address !== envelope.identity.address) {
             corrupt("Wallet key does not match authenticated identity.");
         }
         return secret;
-    }
-    catch (error) {
-        if (error instanceof ApnError)
-            throw error;
-        corrupt("Wallet authentication or decryption failed.");
-    }
-    finally {
-        salt.fill(0);
-        nonce.fill(0);
-        ciphertext.fill(0);
-        tag.fill(0);
-        key.fill(0);
-        plaintext.fill(0);
-    }
+    });
 }
 function parseEnvelope(value, profile) {
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "identity", "kdf", "cipher"]))
@@ -326,17 +275,6 @@ function validStoredAuthorization(value) {
     catch {
         return false;
     }
-}
-function deriveKey(wrapping, salt, profile) {
-    return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(`${ENVELOPE_VERSION}\0${profile}`, "utf8"), 32));
-}
-function decodeBase64(value, length, label) {
-    const decoded = Buffer.from(value, "base64");
-    if (decoded.toString("base64") !== value || (length !== undefined ? decoded.length !== length : decoded.length === 0)) {
-        decoded.fill(0);
-        corrupt(`Wallet ${label} encoding is invalid.`);
-    }
-    return decoded;
 }
 function randomPrivateKey() {
     for (let attempt = 0; attempt < 32; attempt += 1) {

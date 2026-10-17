@@ -1,0 +1,1904 @@
+{
+ "schemaVersion": "apn.custody-envelope-golden.v1",
+ "producedBy": "APN 0.5.45 (73d73bad) stores",
+ "secret": "3czen4aLuWKzLgM4Wrm7TcB/kCgj4uGkguNNt1GqRFI=",
+ "cases": {
+  "wallet": {
+   "files": {
+    "wallets/golden.json": {
+     "cipher": {
+      "ciphertext": "P0kUCOVdGPX4zs8O35mxkcE6Wnq9ISn3SNYhF8JIU0ETj/7BikloKN5526OjOXWYdSs8FXl2I/rqYxBv0UN3TAP+N4XhZB1TNiI2zKZuCu2wtyWOm8S98D0NN/4gI+oqjtaIpLWZoUmfJQ6xEA1W731SALfohn4BSnUi8uD17b4u00+M46ZDO7IfkRP84S6VrFAbEijm0Bg=",
+      "name": "AES-256-GCM",
+      "nonce": "xVTX6qn4XZuOnG/3",
+      "tag": "azxtkZ6Y58LFG+98zcQhrg=="
+     },
+     "identity": {
+      "address": "0x4F2D795107A75976Ea5bb44165500685698079E4",
+      "bindingHash": "2a71982f9ed6e5f7b70518e3c27a42ec34a358471204a87e15f263351cc42dff",
+      "chainId": 8453,
+      "createdAt": "2026-10-17T09:03:54.614Z",
+      "profile": "golden"
+     },
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "3PyeJyqVIIHXasoovYOG1TLzC7wl6KbrL156ehXfQHI="
+     },
+     "schemaVersion": "apn.wallet-envelope.v1"
+    }
+   },
+   "envelopePath": "wallets/golden.json",
+   "context": {
+    "profile": "golden"
+   },
+   "plaintext": "{\"directEffects\":{},\"privateKey\":\"0x4444444444444444444444444444444444444444444444444444444444444441\",\"version\":\"apn.wallet-secret.v1\",\"x402Effects\":{}}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"directEffects\":{},\"privateKey\":\"0x4444444444444444444444444444444444444444444444444444444444444441\",\"version\":\"apn.wallet-secret.v1\",\"x402Effects\":{}}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet authentication or decryption failed.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The encrypted wallet exists but its wrapping secret is missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet authentication or decryption failed.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet authentication or decryption failed.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet authentication or decryption failed.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet authentication or decryption failed.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet tag encoding is invalid.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet tag encoding is invalid.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet nonce encoding is invalid.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet ciphertext encoding is invalid.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet plaintext is not canonical.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet authentication or decryption failed.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet authentication or decryption failed.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Wallet authentication or decryption failed.",
+     "details": null
+    }
+   }
+  },
+  "profilePolicy": {
+   "files": {
+    "policies/golden.json": {
+     "binding": {
+      "profile": "golden",
+      "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+      "walletAddress": "0x4F2D795107A75976Ea5bb44165500685698079E4",
+      "walletBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "cipher": {
+      "ciphertext": "mWIwBVMp4D8AFxydczg8xkgXVFbcTSs80R9LPVqofQEMV9JAilVECFuMen0K83TaOO0ze43ziFTtWYtzW67LTY78N1IrqTTe9IRIyodvKb35+rmgr5eKFgIrMOZi4VSjLXIHBuIPwYpaIzg2iCU/4bhn4rCqisPz20y+YXWi1d+iEL8iTCPdMEJIhFDDbzrHLoANAzspEH4MWSkmbysQ0mXkIHrSObPZn2HeCIb+LEwiPtJHGCC7lwHlqQv1tTyx9J9oVPyTqAJvxo97EIJgNhBzGTAL8KdZyKxbG30ygyMaYgJmsw7+fPL457JXSH+jDZLPKpeCMHqHwVHS8k7D4GnUvRC86Lc7JDkpvsZQmC25PffTzOYETafu1m+JlhWrGtuGqBeDAqfM2T+uirWut/493wd0iT7a3P1/BSi11SkZ3QFKh2udpEHzAS+cxbZPmT5CuF4/SO7qGE3jww4lM3tEuKI8LMtKNidDHXKtov6ub1+bgwhAVH++vZTrD48mewS1+DmyMQdUa6h81uh0x/Q6ht6j/aaw1XN2++h4tRwQYcJAFTpsGt4nnRIdgUU8s5IPzoldMpOQOExcoQFvQCcNGyGa/gt84zABxv2v6g+26hHdJvC/X4BswFzpo7+8IP7/HJorsAoA03xzFfAGdoaLYRk6fmEX1R74vSFpEzwTggAU2A==",
+      "name": "AES-256-GCM",
+      "nonce": "1O5Nnxh5Y5Wqe6pT",
+      "tag": "AR16Me4TOplnlgmdHZhSKQ=="
+     },
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "ifv1EDpTP4YnmTegMefhlGDTd0Tc1Qa3oks9e4iCcwg="
+     },
+     "schemaVersion": "apn.profile-policy-envelope.v1"
+    }
+   },
+   "envelopePath": "policies/golden.json",
+   "context": {
+    "binding": {
+     "profile": "golden",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "walletAddress": "0x4F2D795107A75976Ea5bb44165500685698079E4",
+     "walletBindingHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+   },
+   "plaintext": "{\"approvedAt\":\"2026-10-17T10:00:00.000Z\",\"integrityHash\":\"d4e0600e9b2283e8c0113e9342c51c04a3cdadeecd8a16781104aa97c0b5e7a4\",\"maxBalanceUsdcAtomic\":\"60000000\",\"maxX402AmountAtomic\":\"2000000\",\"profile\":\"golden\",\"profileHash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"schemaVersion\":\"apn.profile-policy.v1\",\"updatedAt\":\"2026-10-17T10:00:00.000Z\",\"walletAddress\":\"0x4F2D795107A75976Ea5bb44165500685698079E4\",\"walletBindingHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"approvedAt\":\"2026-10-17T10:00:00.000Z\",\"integrityHash\":\"d4e0600e9b2283e8c0113e9342c51c04a3cdadeecd8a16781104aa97c0b5e7a4\",\"maxBalanceUsdcAtomic\":\"60000000\",\"maxX402AmountAtomic\":\"2000000\",\"profile\":\"golden\",\"profileHash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"schemaVersion\":\"apn.profile-policy.v1\",\"updatedAt\":\"2026-10-17T10:00:00.000Z\",\"walletAddress\":\"0x4F2D795107A75976Ea5bb44165500685698079E4\",\"walletBindingHash\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The encrypted profile policy exists but its wrapping secret is missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy tag encoding is invalid.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy tag length is invalid.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy nonce length is invalid.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy plaintext is not canonical.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Profile policy authentication or decryption failed.",
+     "details": null
+    }
+   }
+  },
+  "providerAuthorization": {
+   "files": {
+    "provider-authorizations/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111.json": {
+     "binding": {
+      "accountBindingHash": "5555555555555555555555555555555555555555555555555555555555555555",
+      "capabilityHash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+      "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+      "profile": "golden",
+      "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+      "profileRevision": 1,
+      "providerId": "golden-provider",
+      "wallet": "0x4f2d795107a75976ea5bb44165500685698079e4"
+     },
+     "cipher": {
+      "ciphertext": "h2ocnSKdCPsr6JoAAGQZzynt+xWXdtJSe/h5rXGt6CWBfUSh266xqUYr0sF5TCtI64DoxBuZja34+mhjerGWiB8zkfrqfacvbNDS0sklYW4QmtZbKKCAUsL2EwWd+xoJ+Y+K8JjHTT+YfyeoEiQ7cWjDfY8nyGUH97DaTpafzxXKxVC2rIld9lvaOo6kEuCqoqzDjdL1z4BQxWqabzsSL0qcz2It1pPgrJK/a6ksaZ9fpw3gcCEExvShRrUP+nL3Vw9c236Fap7TDdFwwIJ6u3aWDvICRQ5UfNOLfYNN8YT3f7ZkNtAkuSOkj7fEfhP7s6okIPNapNeSh7IOfwGk0jlMGSUOBggx9X1AFtNZXCoIi1Xe78+bkRK5v27wr+XvLn4HB4cQ+auFbMgLlAnYl0A/gXsw+l7jW+SrFBfkpYClZKV5cxJCfQu8jwom1iooxyK0dZfzgABZSs4E8YmppAu0Ha/cGbIzCnNaWfbWJwEAKFYn5fB3gP6cmRXTpckYOVXdaUtlM/sgsVfOq1SZ3FA9FUhCMVEKB1LjtqEDxUw=",
+      "name": "AES-256-GCM",
+      "nonce": "NURDn6BgawkRyLPP",
+      "tag": "dYQ1iesr48nAxhwQLUwnIg=="
+     },
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "hZOF6yTPEvW5yMtNr1ulK/u61wCmGzHNjdvNW6MSzV0="
+     },
+     "schemaVersion": "apn.provider-authorization-envelope.v1"
+    }
+   },
+   "envelopePath": "provider-authorizations/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111.json",
+   "context": {
+    "binding": {
+     "profile": "golden",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "wallet": "0x4f2d795107a75976ea5bb44165500685698079e4",
+     "providerId": "golden-provider",
+     "profileRevision": 1,
+     "capabilityHash": "4444444444444444444444444444444444444444444444444444444444444444",
+     "accountBindingHash": "5555555555555555555555555555555555555555555555555555555555555555"
+    }
+   },
+   "plaintext": "{\"phase\":\"signed\",\"requestHash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"schemaVersion\":\"apn.provider-authorization.v1\",\"signature\":\"0x1212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212\",\"signatureHash\":\"cd868463cc114255fdf315535450e45b1ba6845f2edf46257964adb1757072e9\",\"updatedAt\":\"2026-10-17T10:00:00.000Z\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"phase\":\"signed\",\"requestHash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"schemaVersion\":\"apn.provider-authorization.v1\",\"signature\":\"0x1212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212121212\",\"signatureHash\":\"cd868463cc114255fdf315535450e45b1ba6845f2edf46257964adb1757072e9\",\"updatedAt\":\"2026-10-17T10:00:00.000Z\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization authentication or decryption failed.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The provider authorization wrapping secret is missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization authentication or decryption failed.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization authentication or decryption failed.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization authentication or decryption failed.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization authentication or decryption failed.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization tag encoding is invalid.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization tag encoding is invalid.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization nonce encoding is invalid.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization ciphertext encoding is invalid.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization plaintext is not canonical.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization authentication or decryption failed.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization authentication or decryption failed.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Provider authorization authentication or decryption failed.",
+     "details": null
+    }
+   }
+  },
+  "smartAccountDirectEffect": {
+   "files": {
+    "smart-account-effects/1111111111111111111111111111111111111111111111111111111111111111.json": {
+     "cipher": {
+      "ciphertext": "y2ZYaEo4pc17xiWTKkWgUSa2+9Q8g/6I7kPW+BX+ZP8UqjDK+w3iXYCnGiyrmmIZwWYnhhCYlDTDQQD0UHKWmyGPNmPH3ZOG6/8rAwgOubznL6lblPanKCm+VlVe2bk917C3lFoana1NmwLCpdGK/RXE0JYNcpGHUSG8pf8O/s5ls07cTblwlLjKOxjMa08Ct6o6eSKoQAZApECigFCDE74DGcMTBQZtZZxubxqY0p98aAuJuqMk05lqlGm+eh+FQSu0tgEmST+lMFO8S/SymZ4h0eyoqc8X8PiuawULWF2o2RE1ziimZCND50NRByu8+FqIPpHKOV1k74BN0PEurDxiBz2uC8c5+URgCdjNJupGZjFn/CGieXw8Hzbb88V09NBombhIjj0Kq6oNVNJefYQ38/csQSqYjF0EumlfAX/k//dGbM4tzAKxGBqroKQPdUuVejWpeTA83/y2MD0IxBrK4XDBhEprErp/o+CifoToiFWmf9ex7tLA1BXKflAuLXmXKXRZn4ylH92NnKV4y5WIVEk/MB0g5PxaTBBhyQLVcFfmNrvdvVX1W1eCrlMVSJ+BfJ/gTbRGLssBplGhUNmo3O9hXFD2MvMP5unbzfavdNa9U8/QUz3BZjVlxpz7/iGSPYiQW15wDXgFRXZ8K35bz7sQTVr7vvQWjWQzX0L00nkwSBzY1kiOXLQb4+GPhkykeZxZ7yrwbRnlY+pQo1C61e1IIyCc7TjcsD+dMldrjQ4Ksnuayb3L29mEs2TQkT3S/Be8znKE2y9d4y81XFN57gp5TKnm79QypZeL2bM4fHgbhFyEiLXta1oBp+atAH3GrO3o72Q3Pur1VyNZPVIw4DCBkUDll3zgdNIHuAtzFLWoa0SLgA6S0e5Nos4yvo83deln0aoj+S78kuOf0A55E71frHlFSXs5paEl/mIEXII2BEMg7joovRX+W6Z8xM9GpjDVrXeaSYs1pgyl7lrAL0G0PydGZ/1IayNWzIX/ugyYlsmZGYJBWZMeCy7qat+ZYSwesXzoknvVtnp+Zlw7o7Agy9C9FyXI9A27BJJqpkYkW5LZhBEZglGeb274+LCIoEMCrWMMsvTs5i1PrzlaqbJX6VznjZ63dddHAGA/d+a8kXLKH6aclqjSLp0im2mnfTPYcZsUEe3KGuOGg3GbcnKgEhztwcmWwXLRwiEDFRlI0uHQgIyWDKYfzIBAokxYLBRcQh72y51OVIdaTbEAFhV+/Ufinyr17FD4Kp6YiQDTGDODhiPG5KxB8MzsTZfhRxGcM/WhOy6HIf3rhtUr7v8jks8VbtHQRlLUpJjTUkvDevuOLcmamo0gjF813qyBjBE82SdGtzF3EubjyWTyQH0HuswVU0S+DvMvTAzeTDA7svZQtQUUuXsAgD/YhHoxWXSi0aXGqHGUp/TRaYrHuIJBx4VcEhN1ukVnoUhZvvbnfLEyD6gYR7EvQe8FS0JGuqiPfg8wh69fIIThh/hX7qnsKPJ/pSIvSEHWPZKvx/QjDId8tVbURpmLD1AAaebsRYWm24NFKxuqCgogwfTeeibIRCysBeQ32DFGl731yds/4BWVfzCf33RpfogcWM4QDKTRb6yR8JePlbcimF1PmmPoHKaHjB2k7fDeqTMD5TnT4YmGQBHo2O9gh6GCmS5X0HgDsbWfgeNojoZamlHfnygAEtN0nb0TlAjHTfOucNFjHyQHGBmM8XHfbQhyjeojQRMMXo1pR2mvF1RyyZiUzYDnISL1iXn2XT9/fUFgp/6wHEmzW/rraq8nAVAec6EyEgDQilOV2POt7ryDUyqIKpF97GNZ9y07AtbeM/k2wVyLlPLepHJe+yaSyeyoB0s=",
+      "name": "AES-256-GCM",
+      "nonce": "/g7teeZ8c8CzloBa",
+      "tag": "tkulIJhWUIf6aWXQ6LOrbw=="
+     },
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "6EOx8tizxybt6sY/+SVpsC9xuzzATvfRBIzuml4K54I="
+     },
+     "operation_id": "1111111111111111111111111111111111111111111111111111111111111111",
+     "schema_version": "apn.metamask-smart-account-direct-effect-envelope.v1"
+    }
+   },
+   "envelopePath": "smart-account-effects/1111111111111111111111111111111111111111111111111111111111111111.json",
+   "context": {
+    "operationId": "1111111111111111111111111111111111111111111111111111111111111111"
+   },
+   "plaintext": "{\"amount_atomic\":\"1000000\",\"child_context\":\"0xc0ffee\",\"child_fingerprint\":\"4ed30d6dea7ea0bdac6c44195d7cfa2a7a01715903719d9dbdc5c17a5a0c759c\",\"delegation_manager\":\"0x4444444444444444444444444444444444444444\",\"economics\":{\"gasLimitAtomic\":\"100000\",\"maxFeePerGasAtomic\":\"3\",\"maxPriorityFeePerGasAtomic\":\"1\",\"maximumGasCostAtomic\":\"300000\",\"nonceAtomic\":\"5\"},\"integrity_hash\":\"f96ba389f71490b15e9450da399e8c7b7a3ac26c8cce55aeffae4f68d33ade88\",\"intent_fingerprint\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"nonce_atomic\":\"5\",\"operation_id\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"owner_address\":\"0x4F2D795107A75976Ea5bb44165500685698079E4\",\"phase\":\"sealed\",\"profile_hash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"raw_transaction\":\"0x02abababababababababababababababababababababababababababababababababababababababab\",\"recipient\":\"0x3333333333333333333333333333333333333333\",\"redemption_calldata\":\"0xdeadbeef\",\"root_grant_fingerprint\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"schema_version\":\"apn.metamask-smart-account-direct-effect.v1\",\"sealed_at\":\"2026-10-17T10:00:00.000Z\",\"session_address\":\"0x2222222222222222222222222222222222222222\",\"submission_attempts\":0,\"transaction_hash\":\"0xfeecccfa7b5096aa1f0fb2cfde57b2e763aee4d253e6cd3319e6949ff4009570\",\"updated_at\":\"2026-10-17T10:00:00.000Z\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"amount_atomic\":\"1000000\",\"child_context\":\"0xc0ffee\",\"child_fingerprint\":\"4ed30d6dea7ea0bdac6c44195d7cfa2a7a01715903719d9dbdc5c17a5a0c759c\",\"delegation_manager\":\"0x4444444444444444444444444444444444444444\",\"economics\":{\"gasLimitAtomic\":\"100000\",\"maxFeePerGasAtomic\":\"3\",\"maxPriorityFeePerGasAtomic\":\"1\",\"maximumGasCostAtomic\":\"300000\",\"nonceAtomic\":\"5\"},\"integrity_hash\":\"f96ba389f71490b15e9450da399e8c7b7a3ac26c8cce55aeffae4f68d33ade88\",\"intent_fingerprint\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"nonce_atomic\":\"5\",\"operation_id\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"owner_address\":\"0x4F2D795107A75976Ea5bb44165500685698079E4\",\"phase\":\"sealed\",\"profile_hash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"raw_transaction\":\"0x02abababababababababababababababababababababababababababababababababababababababab\",\"recipient\":\"0x3333333333333333333333333333333333333333\",\"redemption_calldata\":\"0xdeadbeef\",\"root_grant_fingerprint\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"schema_version\":\"apn.metamask-smart-account-direct-effect.v1\",\"sealed_at\":\"2026-10-17T10:00:00.000Z\",\"session_address\":\"0x2222222222222222222222222222222222222222\",\"submission_attempts\":0,\"transaction_hash\":\"0xfeecccfa7b5096aa1f0fb2cfde57b2e763aee4d253e6cd3319e6949ff4009570\",\"updated_at\":\"2026-10-17T10:00:00.000Z\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect authentication or decryption failed.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The Smart Account effect wrapping secret is missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect authentication or decryption failed.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect authentication or decryption failed.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect authentication or decryption failed.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect authentication or decryption failed.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect envelope encoding is invalid.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect envelope encoding is invalid.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect envelope encoding is invalid.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect envelope encoding is invalid.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect plaintext is not canonical.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect authentication or decryption failed.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect authentication or decryption failed.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account effect authentication or decryption failed.",
+     "details": null
+    }
+   }
+  },
+  "smartAccountX402Material": {
+   "files": {
+    "smart-account-x402-materials/1111111111111111111111111111111111111111111111111111111111111111.json": {
+     "cipher": {
+      "ciphertext": "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",
+      "name": "AES-256-GCM",
+      "nonce": "MpN0jt7MtKUKKwFe",
+      "tag": "6soic5p2+jgJtc5SXkLjcQ=="
+     },
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "V1M0VhuFG5bOTNo9UkZacT0Pc8/+uBlBFpfSgnRf/rI="
+     },
+     "operation_id": "1111111111111111111111111111111111111111111111111111111111111111",
+     "schema_version": "apn.metamask-smart-account-x402-material-envelope.v1"
+    }
+   },
+   "envelopePath": "smart-account-x402-materials/1111111111111111111111111111111111111111111111111111111111111111.json",
+   "context": {
+    "operationId": "1111111111111111111111111111111111111111111111111111111111111111"
+   },
+   "plaintext": "{\"child_hash\":\"677eeb4a565e28ce16d2fa6aeaf18464624dafb877e7c719778c3441288b4ff9\",\"child_permission_context\":\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000022222222222222222222222222222222222222220000000000000000000000004f2d795107a75976ea5bb44165500685698079e4ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\",\"delegation_manager\":\"0x4444444444444444444444444444444444444444\",\"delegator\":\"0x4f2d795107a75976ea5bb44165500685698079e4\",\"effective_expiry_unix\":\"1792000000\",\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"integrity_hash\":\"bc824d1464a15c0857af019af722c186e9f5084595966efba9d8891722824939\",\"material_identity_hash\":\"3f413cc049da61c8f50d535f71b0fac23ee9d7c1d8470c6970d60f85e4b49522\",\"offer_hash\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"operation_id\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"payment_header\":\"eyJ4NDAyVmVyc2lvbiI6MiwiYWNjZXB0ZWQiOnsic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiZWlwMTU1Ojg0NTMifSwicGF5bG9hZCI6eyJkZWxlZ2F0aW9uTWFuYWdlciI6IjB4NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NCIsImRlbGVnYXRvciI6IjB4NGYyZDc5NTEwN2E3NTk3NmVhNWJiNDQxNjU1MDA2ODU2OTgwNzllNCIsInBlcm1pc3Npb25Db250ZXh0IjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwNGYyZDc5NTEwN2E3NTk3NmVhNWJiNDQxNjU1MDA2ODU2OTgwNzllNGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmYwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGMwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwZTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA0MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCJ9fQ==\",\"payment_header_hash\":\"cae7c7d6f12a4944f90395b999ede0afb382364c404dff1bdbca0e2e099b9d5f\",\"payment_payload_canonical_json\":\"{\\\"accepted\\\":{\\\"network\\\":\\\"eip155:8453\\\",\\\"scheme\\\":\\\"exact\\\"},\\\"payload\\\":{\\\"delegationManager\\\":\\\"0x4444444444444444444444444444444444444444\\\",\\\"delegator\\\":\\\"0x4f2d795107a75976ea5bb44165500685698079e4\\\",\\\"permissionContext\\\":\\\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000022222222222222222222222222222222222222220000000000000000000000004f2d795107a75976ea5bb44165500685698079e4ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\\\"},\\\"x402Version\\\":2}\",\"payment_payload_hash\":\"014a0ab4f9cc432a0b84a1eb3744b5030b6a7b564f321e37d4a2f60339bc622d\",\"permission_context_hash\":\"ec652e245121a4827630987b5a36ec3530a444f1132bb43cda7ffa3e39763ac6\",\"phase\":\"sealed\",\"profile_hash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"request_hash\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"root_grant_fingerprint\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"schema_version\":\"apn.metamask-smart-account-x402-material.v1\",\"sealed_at\":\"2026-10-17T10:00:00.000Z\",\"updated_at\":\"2026-10-17T10:00:00.000Z\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"child_hash\":\"677eeb4a565e28ce16d2fa6aeaf18464624dafb877e7c719778c3441288b4ff9\",\"child_permission_context\":\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000022222222222222222222222222222222222222220000000000000000000000004f2d795107a75976ea5bb44165500685698079e4ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\",\"delegation_manager\":\"0x4444444444444444444444444444444444444444\",\"delegator\":\"0x4f2d795107a75976ea5bb44165500685698079e4\",\"effective_expiry_unix\":\"1792000000\",\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"integrity_hash\":\"bc824d1464a15c0857af019af722c186e9f5084595966efba9d8891722824939\",\"material_identity_hash\":\"3f413cc049da61c8f50d535f71b0fac23ee9d7c1d8470c6970d60f85e4b49522\",\"offer_hash\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"operation_id\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"payment_header\":\"eyJ4NDAyVmVyc2lvbiI6MiwiYWNjZXB0ZWQiOnsic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiZWlwMTU1Ojg0NTMifSwicGF5bG9hZCI6eyJkZWxlZ2F0aW9uTWFuYWdlciI6IjB4NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NCIsImRlbGVnYXRvciI6IjB4NGYyZDc5NTEwN2E3NTk3NmVhNWJiNDQxNjU1MDA2ODU2OTgwNzllNCIsInBlcm1pc3Npb25Db250ZXh0IjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDIwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMjAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwNGYyZDc5NTEwN2E3NTk3NmVhNWJiNDQxNjU1MDA2ODU2OTgwNzllNGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmYwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGMwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwZTAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA0MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMCJ9fQ==\",\"payment_header_hash\":\"cae7c7d6f12a4944f90395b999ede0afb382364c404dff1bdbca0e2e099b9d5f\",\"payment_payload_canonical_json\":\"{\\\"accepted\\\":{\\\"network\\\":\\\"eip155:8453\\\",\\\"scheme\\\":\\\"exact\\\"},\\\"payload\\\":{\\\"delegationManager\\\":\\\"0x4444444444444444444444444444444444444444\\\",\\\"delegator\\\":\\\"0x4f2d795107a75976ea5bb44165500685698079e4\\\",\\\"permissionContext\\\":\\\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000022222222222222222222222222222222222222220000000000000000000000004f2d795107a75976ea5bb44165500685698079e4ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\\\"},\\\"x402Version\\\":2}\",\"payment_payload_hash\":\"014a0ab4f9cc432a0b84a1eb3744b5030b6a7b564f321e37d4a2f60339bc622d\",\"permission_context_hash\":\"ec652e245121a4827630987b5a36ec3530a444f1132bb43cda7ffa3e39763ac6\",\"phase\":\"sealed\",\"profile_hash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"request_hash\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"root_grant_fingerprint\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"schema_version\":\"apn.metamask-smart-account-x402-material.v1\",\"sealed_at\":\"2026-10-17T10:00:00.000Z\",\"updated_at\":\"2026-10-17T10:00:00.000Z\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material authentication or decryption failed.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The Smart Account x402 wrapping secret is missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material authentication or decryption failed.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material authentication or decryption failed.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material authentication or decryption failed.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material authentication or decryption failed.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material envelope encoding is invalid.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material envelope encoding is invalid.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material envelope encoding is invalid.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material envelope encoding is invalid.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material plaintext is not canonical.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material authentication or decryption failed.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material authentication or decryption failed.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account x402 material authentication or decryption failed.",
+     "details": null
+    }
+   }
+  },
+  "smartAccountGaslessMaterial": {
+   "files": {
+    "smart-account-gasless-materials/1111111111111111111111111111111111111111111111111111111111111111.json": {
+     "cipher": {
+      "ciphertext": "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",
+      "iv": "wXhB+arOMlyQzZ80",
+      "name": "AES-256-GCM",
+      "tag": "uQ4pIHV/cYN6BB56DJ6BXQ=="
+     },
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "SRb2FenizyNRG+kY4buwGcHw5Kj0NKDWuR2uRs2tLCo="
+     },
+     "operation_id": "1111111111111111111111111111111111111111111111111111111111111111",
+     "schema_version": "apn.smart-account-gasless-material-envelope.v1"
+    }
+   },
+   "envelopePath": "smart-account-gasless-materials/1111111111111111111111111111111111111111111111111111111111111111.json",
+   "context": {
+    "operationId": "1111111111111111111111111111111111111111111111111111111111111111"
+   },
+   "plaintext": "{\"childDelegationHash\":\"0x91449f3bf46ca8d08dfb8d3525d310171977c8560bd1ab73ee48db405e5e6b47\",\"delegation_manager\":\"0xdb9b1e94b5b69df7e401ddbede43491141047db3\",\"delegator\":\"0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a\",\"encodedChildHash\":\"cbc0029cfe2020daaa91101acf68c8c8da1447d237941149ff715f20d5e5aad1\",\"encodedRootHash\":\"5352162098dd4d18a2988ed20fe494b587d303fccce58638fbca47dc62f2941c\",\"encoded_child\":\"0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000a110000000000000000000000001563915e194d8cfba1943570603f7606a31155084d0fd4e2906114f10e733c642621e306961ad6d587de1df9eba9e2ea56f872f800000000000000000000000000000000000000000000000000000000000000c03544b38010e0e1d91abb338937d3f246e14eb8f60d8e53a2539bba0699d133ae00000000000000000000000000000000000000000000000000000000000005e0000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000002800000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000042000000000000000000000000092bf12322527caa612fd31a0e810472bbb106a8f000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f100b0819427117ecf76ed94b358b1a5b5c6d2fc000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000034833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000002710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000001046bb45c8d673d4ea75321280db34899413c069000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006aa313480000000000000000000000006aa3147400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e144b0b2618071b4e56f746313528a669c7e65c5000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014b4827a2a066cd2ef88560efdf063dd05c6c41cc70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c2b0d624c1c4319760c96503ba27c347f3260f55000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000004000000000000000000000000333333333333333333333333333333333333333300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041bd2c14452f080e4d7e142be1c1a9a2f13f185ce1d2936ce72c5778ed524db2af1d5e98ab68aaae628b63b694c29463718f7bbd325efdd632be4be8e961d8654a1c00000000000000000000000000000000000000000000000000000000000000\",\"fingerprint\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"integrity_hash\":\"6588a9d6e21a3f3d585d9c5d9e8d1eaf6cbfbb1a2c32937e503f84eb5170319a\",\"materialHash\":\"687fa781dde3075dfad0ad6ed9e243e69447816d65bfe59b71a24a047c875641\",\"operation_id\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"payloadHash\":\"82f0abe59e74d2f56735e002cb1fd0633c5fa86a6377f4d4c9e2ef1e9c500cfa\",\"payment_payload_canonical_json\":\"{\\\"accepted\\\":{\\\"amount\\\":\\\"10000\\\",\\\"asset\\\":\\\"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913\\\",\\\"extra\\\":{\\\"assetTransferMethod\\\":\\\"erc7710\\\",\\\"facilitatorAddresses\\\":[\\\"0xb4827a2a066cd2ef88560efdf063dd05c6c41cc7\\\"]},\\\"maxTimeoutSeconds\\\":300,\\\"network\\\":\\\"eip155:8453\\\",\\\"payTo\\\":\\\"0x3333333333333333333333333333333333333333\\\",\\\"scheme\\\":\\\"exact\\\"},\\\"payload\\\":{\\\"delegationManager\\\":\\\"0xdb9b1e94b5b69df7e401ddbede43491141047db3\\\",\\\"delegator\\\":\\\"0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a\\\",\\\"permissionContext\\\":\\\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000006a00000000000000000000000000000000000000000000000000000000000000a110000000000000000000000001563915e194d8cfba1943570603f7606a31155084d0fd4e2906114f10e733c642621e306961ad6d587de1df9eba9e2ea56f872f800000000000000000000000000000000000000000000000000000000000000c03544b38010e0e1d91abb338937d3f246e14eb8f60d8e53a2539bba0699d133ae00000000000000000000000000000000000000000000000000000000000005e0000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000002800000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000042000000000000000000000000092bf12322527caa612fd31a0e810472bbb106a8f000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f100b0819427117ecf76ed94b358b1a5b5c6d2fc000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000034833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000002710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000001046bb45c8d673d4ea75321280db34899413c069000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006aa313480000000000000000000000006aa3147400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e144b0b2618071b4e56f746313528a669c7e65c5000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014b4827a2a066cd2ef88560efdf063dd05c6c41cc70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c2b0d624c1c4319760c96503ba27c347f3260f55000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000004000000000000000000000000333333333333333333333333333333333333333300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041bd2c14452f080e4d7e142be1c1a9a2f13f185ce1d2936ce72c5778ed524db2af1d5e98ab68aaae628b63b694c29463718f7bbd325efdd632be4be8e961d8654a1c000000000000000000000000000000000000000000000000000000000000000000000000000000000000001563915e194d8cfba1943570603f7606a311550800000000000000000000000019e7e376e7c213b7e7e7e46cc70a5dd086daff2affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\\\"},\\\"x402Version\\\":2}\",\"permissionContextHash\":\"ea37467528690e1f3cf998bf1500273a5ae1d0d1e8d6f11f3030c2f5e0d9187c\",\"permission_context\":\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000006a00000000000000000000000000000000000000000000000000000000000000a110000000000000000000000001563915e194d8cfba1943570603f7606a31155084d0fd4e2906114f10e733c642621e306961ad6d587de1df9eba9e2ea56f872f800000000000000000000000000000000000000000000000000000000000000c03544b38010e0e1d91abb338937d3f246e14eb8f60d8e53a2539bba0699d133ae00000000000000000000000000000000000000000000000000000000000005e0000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000002800000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000042000000000000000000000000092bf12322527caa612fd31a0e810472bbb106a8f000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f100b0819427117ecf76ed94b358b1a5b5c6d2fc000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000034833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000002710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000001046bb45c8d673d4ea75321280db34899413c069000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006aa313480000000000000000000000006aa3147400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e144b0b2618071b4e56f746313528a669c7e65c5000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014b4827a2a066cd2ef88560efdf063dd05c6c41cc70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c2b0d624c1c4319760c96503ba27c347f3260f55000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000004000000000000000000000000333333333333333333333333333333333333333300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041bd2c14452f080e4d7e142be1c1a9a2f13f185ce1d2936ce72c5778ed524db2af1d5e98ab68aaae628b63b694c29463718f7bbd325efdd632be4be8e961d8654a1c000000000000000000000000000000000000000000000000000000000000000000000000000000000000001563915e194d8cfba1943570603f7606a311550800000000000000000000000019e7e376e7c213b7e7e7e46cc70a5dd086daff2affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\",\"phase\":\"sealed\",\"profile_hash\":\"d179bdefbbcae11f0b2f305be37e624d6bccb4f4d2328e6d3b6d44a609a2926e\",\"request_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"requirementsHash\":\"eaa787782f48321e4951300102574907e03e08a6a689bd3f070f180e6d253d99\",\"rootDelegationHash\":\"0x4d0fd4e2906114f10e733c642621e306961ad6d587de1df9eba9e2ea56f872f8\",\"root_context\":\"0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000001563915e194d8cfba1943570603f7606a311550800000000000000000000000019e7e376e7c213b7e7e7e46cc70a5dd086daff2affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\",\"root_grant_fingerprint\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"schema_version\":\"apn.smart-account-gasless-material.v1\",\"sealed_at\":\"2026-09-10T20:30:00.000Z\",\"updated_at\":\"2026-09-10T20:30:00.000Z\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"childDelegationHash\":\"0x91449f3bf46ca8d08dfb8d3525d310171977c8560bd1ab73ee48db405e5e6b47\",\"delegation_manager\":\"0xdb9b1e94b5b69df7e401ddbede43491141047db3\",\"delegator\":\"0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a\",\"encodedChildHash\":\"cbc0029cfe2020daaa91101acf68c8c8da1447d237941149ff715f20d5e5aad1\",\"encodedRootHash\":\"5352162098dd4d18a2988ed20fe494b587d303fccce58638fbca47dc62f2941c\",\"encoded_child\":\"0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000a110000000000000000000000001563915e194d8cfba1943570603f7606a31155084d0fd4e2906114f10e733c642621e306961ad6d587de1df9eba9e2ea56f872f800000000000000000000000000000000000000000000000000000000000000c03544b38010e0e1d91abb338937d3f246e14eb8f60d8e53a2539bba0699d133ae00000000000000000000000000000000000000000000000000000000000005e0000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000002800000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000042000000000000000000000000092bf12322527caa612fd31a0e810472bbb106a8f000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f100b0819427117ecf76ed94b358b1a5b5c6d2fc000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000034833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000002710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000001046bb45c8d673d4ea75321280db34899413c069000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006aa313480000000000000000000000006aa3147400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e144b0b2618071b4e56f746313528a669c7e65c5000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014b4827a2a066cd2ef88560efdf063dd05c6c41cc70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c2b0d624c1c4319760c96503ba27c347f3260f55000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000004000000000000000000000000333333333333333333333333333333333333333300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041bd2c14452f080e4d7e142be1c1a9a2f13f185ce1d2936ce72c5778ed524db2af1d5e98ab68aaae628b63b694c29463718f7bbd325efdd632be4be8e961d8654a1c00000000000000000000000000000000000000000000000000000000000000\",\"fingerprint\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"integrity_hash\":\"6588a9d6e21a3f3d585d9c5d9e8d1eaf6cbfbb1a2c32937e503f84eb5170319a\",\"materialHash\":\"687fa781dde3075dfad0ad6ed9e243e69447816d65bfe59b71a24a047c875641\",\"operation_id\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"payloadHash\":\"82f0abe59e74d2f56735e002cb1fd0633c5fa86a6377f4d4c9e2ef1e9c500cfa\",\"payment_payload_canonical_json\":\"{\\\"accepted\\\":{\\\"amount\\\":\\\"10000\\\",\\\"asset\\\":\\\"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913\\\",\\\"extra\\\":{\\\"assetTransferMethod\\\":\\\"erc7710\\\",\\\"facilitatorAddresses\\\":[\\\"0xb4827a2a066cd2ef88560efdf063dd05c6c41cc7\\\"]},\\\"maxTimeoutSeconds\\\":300,\\\"network\\\":\\\"eip155:8453\\\",\\\"payTo\\\":\\\"0x3333333333333333333333333333333333333333\\\",\\\"scheme\\\":\\\"exact\\\"},\\\"payload\\\":{\\\"delegationManager\\\":\\\"0xdb9b1e94b5b69df7e401ddbede43491141047db3\\\",\\\"delegator\\\":\\\"0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a\\\",\\\"permissionContext\\\":\\\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000006a00000000000000000000000000000000000000000000000000000000000000a110000000000000000000000001563915e194d8cfba1943570603f7606a31155084d0fd4e2906114f10e733c642621e306961ad6d587de1df9eba9e2ea56f872f800000000000000000000000000000000000000000000000000000000000000c03544b38010e0e1d91abb338937d3f246e14eb8f60d8e53a2539bba0699d133ae00000000000000000000000000000000000000000000000000000000000005e0000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000002800000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000042000000000000000000000000092bf12322527caa612fd31a0e810472bbb106a8f000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f100b0819427117ecf76ed94b358b1a5b5c6d2fc000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000034833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000002710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000001046bb45c8d673d4ea75321280db34899413c069000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006aa313480000000000000000000000006aa3147400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e144b0b2618071b4e56f746313528a669c7e65c5000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014b4827a2a066cd2ef88560efdf063dd05c6c41cc70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c2b0d624c1c4319760c96503ba27c347f3260f55000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000004000000000000000000000000333333333333333333333333333333333333333300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041bd2c14452f080e4d7e142be1c1a9a2f13f185ce1d2936ce72c5778ed524db2af1d5e98ab68aaae628b63b694c29463718f7bbd325efdd632be4be8e961d8654a1c000000000000000000000000000000000000000000000000000000000000000000000000000000000000001563915e194d8cfba1943570603f7606a311550800000000000000000000000019e7e376e7c213b7e7e7e46cc70a5dd086daff2affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\\\"},\\\"x402Version\\\":2}\",\"permissionContextHash\":\"ea37467528690e1f3cf998bf1500273a5ae1d0d1e8d6f11f3030c2f5e0d9187c\",\"permission_context\":\"0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000006a00000000000000000000000000000000000000000000000000000000000000a110000000000000000000000001563915e194d8cfba1943570603f7606a31155084d0fd4e2906114f10e733c642621e306961ad6d587de1df9eba9e2ea56f872f800000000000000000000000000000000000000000000000000000000000000c03544b38010e0e1d91abb338937d3f246e14eb8f60d8e53a2539bba0699d133ae00000000000000000000000000000000000000000000000000000000000005e0000000000000000000000000000000000000000000000000000000000000000500000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000002800000000000000000000000000000000000000000000000000000000000000360000000000000000000000000000000000000000000000000000000000000042000000000000000000000000092bf12322527caa612fd31a0e810472bbb106a8f000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f100b0819427117ecf76ed94b358b1a5b5c6d2fc000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000034833589fcd6edb6e08f4c7c32d4f71b54bda029130000000000000000000000000000000000000000000000000000000000002710000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000001046bb45c8d673d4ea75321280db34899413c069000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000200000000000000000000000006aa313480000000000000000000000006aa3147400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e144b0b2618071b4e56f746313528a669c7e65c5000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000014b4827a2a066cd2ef88560efdf063dd05c6c41cc70000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c2b0d624c1c4319760c96503ba27c347f3260f55000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000004000000000000000000000000333333333333333333333333333333333333333300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041bd2c14452f080e4d7e142be1c1a9a2f13f185ce1d2936ce72c5778ed524db2af1d5e98ab68aaae628b63b694c29463718f7bbd325efdd632be4be8e961d8654a1c000000000000000000000000000000000000000000000000000000000000000000000000000000000000001563915e194d8cfba1943570603f7606a311550800000000000000000000000019e7e376e7c213b7e7e7e46cc70a5dd086daff2affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\",\"phase\":\"sealed\",\"profile_hash\":\"d179bdefbbcae11f0b2f305be37e624d6bccb4f4d2328e6d3b6d44a609a2926e\",\"request_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"requirementsHash\":\"eaa787782f48321e4951300102574907e03e08a6a689bd3f070f180e6d253d99\",\"rootDelegationHash\":\"0x4d0fd4e2906114f10e733c642621e306961ad6d587de1df9eba9e2ea56f872f8\",\"root_context\":\"0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000200000000000000000000000001563915e194d8cfba1943570603f7606a311550800000000000000000000000019e7e376e7c213b7e7e7e46cc70a5dd086daff2affffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000e000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000041111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111100000000000000000000000000000000000000000000000000000000000000\",\"root_grant_fingerprint\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"schema_version\":\"apn.smart-account-gasless-material.v1\",\"sealed_at\":\"2026-09-10T20:30:00.000Z\",\"updated_at\":\"2026-09-10T20:30:00.000Z\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_OPERATION_BLOCKED",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_material_unavailable"
+     }
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account gasless operation could not advance safely.",
+     "details": {
+      "reason": "sa_gasless_state_corrupt"
+     }
+    }
+   }
+  },
+  "smartAccountPermission": {
+   "files": {
+    "smart-account-permissions/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950.json": {
+     "cipher": {
+      "ciphertext": "xnq3GB2+zm59dLpmr0+WNuufa65jYROU5qhD55vnyZnC0SMARkwtOFoWXYCmobZx+JAig/r0nXrtqs5Z+uNKnPMigHd+YBXGDRg1HVabEo84CNsQpmBswGUxXzZLLedeHDUbI0O2f4OjEvuAtCkYirZdjuiu18Ur2iq12NA8Ge/t9Ug5s7XfUOVgdv37Z+D876GET9f5OVxP4DydbgUimjQTG+6ybz3Zw+g//7/RhpcyFKrFs4LwuEmSo3uulTLk5A0wFgfpX84O/PKTV9aCvxmWM39XfUeqJa7BBFoSMT2dbeO22CXeqQlKXMNY0JCyRvIRBfIaXnIsIUXFRPlu/VlXbnrxV3C3XNIZocO2XNLX6bT7A7OtyFVT4pn/Frm4dNBOZrTtqD39tRCvaSQKBZUkUs/bD6HGtEavIlno1a+y3kMJ8jb/R9pSPqXsmtR87lJx3Q7IlWF5J+lD/f/LB8gB0Sp+rMPURwgD3yNE0J6ZNpHlXKI5xMaAT8GH91wwPOvQcIcReYsd5viijfnacRR3JAW8LcWlt80vppADdbkMchDa6HgeVJoeoN9Eklea7MNke3EPq+q8Rzo22M5byHCiQbeXDAgRLd2cbS2+lX1a0O9ZnDuESQ2cqqcZwwngxouD8cEsehatp8lXlb+kagZCbgsPDzo0pp+St3MAHf5z2p/VaiJpVV3oRmnALuN5YI7UxsEni6yXBV3J3fltdQ5mbBbdVDL+YqdWK8V5aEVmTNwvKaUeJSyW8TfgQelp4jNhndnXpE9h4Q/fWICgSbN8+ovSFNqdIw7WSEDadUvyi78i8RUyreO/AqMqN/PwOjcScvLhBHk/3bAzqDO7guvLfcouC33d9Vn6GcrOXaq1nhHb0yXoeXAxC8nfpEjFNxQkpeovpjwWsc5N7G9UiMlmpDtJrnC9m5lDrC/RP53ApzezaP7hQ3eIBpJujxj3RN9nd0hcT/ml3dJ3/Fhz8apXpyd3F8YUqr9bamWtwSZwEs+khtUsD+YqhWfJISTyhqiVrdcIQ0MUQ4FH0COsYJ6Mpry/XZejNtQOzXqKu87Ed9qzormpM9dNMQy/pJD8BQ==",
+      "name": "AES-256-GCM",
+      "nonce": "8H84g58hoktA+WJV",
+      "tag": "pownD/UMwKyBdENlAKz4nw=="
+     },
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "BgAU4fUR+kdg7XkNyRPObkOEzDlIX3D292nuk+zRVe4="
+     },
+     "profile_hash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "schema_version": "apn.metamask-smart-account-permission-envelope.v1"
+    }
+   },
+   "envelopePath": "smart-account-permissions/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950.json",
+   "context": {
+    "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950"
+   },
+   "plaintext": "{\"created_at\":\"2026-10-17T10:00:00.000Z\",\"idempotency_hash\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"intent_fingerprint\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"max_observed_unix\":1791000000,\"phase\":\"pending_consent\",\"profile\":\"golden\",\"profile_hash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"provider_id\":\"metamask-smart-account\",\"requested_cap_atomic\":\"1000000\",\"requested_expires_at_unix\":1792000000,\"revision\":1,\"revocation_freshness\":\"never_synced\",\"schema_version\":\"apn.metamask-smart-account-permission.v1\",\"session_address\":\"0xe1fAE9b4fAB2F5726677ECfA912d96b0B683e6a9\",\"session_private_key\":\"0x5555555555555555555555555555555555555555555555555555555555555555\",\"starts_at_unix\":1791000000,\"updated_at\":\"2026-10-17T10:00:00.000Z\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"created_at\":\"2026-10-17T10:00:00.000Z\",\"idempotency_hash\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"intent_fingerprint\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"max_observed_unix\":1791000000,\"phase\":\"pending_consent\",\"profile\":\"golden\",\"profile_hash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"provider_id\":\"metamask-smart-account\",\"requested_cap_atomic\":\"1000000\",\"requested_expires_at_unix\":1792000000,\"revision\":1,\"revocation_freshness\":\"never_synced\",\"schema_version\":\"apn.metamask-smart-account-permission.v1\",\"session_address\":\"0xe1fAE9b4fAB2F5726677ECfA912d96b0B683e6a9\",\"session_private_key\":\"0x5555555555555555555555555555555555555555555555555555555555555555\",\"starts_at_unix\":1791000000,\"updated_at\":\"2026-10-17T10:00:00.000Z\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission authentication or decryption failed.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The Smart Account wrapping secret is missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission authentication or decryption failed.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission authentication or decryption failed.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission authentication or decryption failed.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission authentication or decryption failed.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission envelope encoding is invalid.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission envelope encoding is invalid.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission envelope encoding is invalid.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission envelope encoding is invalid.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission plaintext is not canonical.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission authentication or decryption failed.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission authentication or decryption failed.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Smart Account permission authentication or decryption failed.",
+     "details": null
+    }
+   }
+  },
+  "chainAccount": {
+   "files": {
+    "chain-accounts/solana/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950.json": {
+     "address": "GoLdEn1111111111111111111111111111111111111",
+     "createdAt": "2026-10-17T09:03:56.720Z",
+     "custody": "local_software",
+     "identityHash": "2e6c4439554f6debca420d7b0494e48e7d6f3e631998b5da7309d01c5467ff13",
+     "network": "mainnet",
+     "profile": "golden",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "provider": "local",
+     "rail": "solana",
+     "schemaVersion": "apn.chain-account.v1"
+    },
+    "chain-wallets/solana/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950.json": {
+     "account": {
+      "address": "GoLdEn1111111111111111111111111111111111111",
+      "createdAt": "2026-10-17T09:03:56.720Z",
+      "custody": "local_software",
+      "identityHash": "2e6c4439554f6debca420d7b0494e48e7d6f3e631998b5da7309d01c5467ff13",
+      "network": "mainnet",
+      "profile": "golden",
+      "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+      "provider": "local",
+      "rail": "solana",
+      "schemaVersion": "apn.chain-account.v1"
+     },
+     "ciphertext": "tbyONjAmJ9r9Vwr7Pic4zoGa3VSSnaOAFb6ERlyLktfkcLmrdR2hEV7dg5cJVZlyz3urCnUTjgFTJ8bzRgDAgC5w/65y5yJ0InHamhhLG2SBMuDlSS9mOZfEp9XGd8Pi8smbMrP+g6dmNvhzh12qm2kXds2AXF4nqKI7r4OIJOe/VuMz17+Llu2ljVYKtMkSUpjJ8j9ORfuA7MIwFSJEujTztLjv5nTJxQAP1iP7d9THCs92wpMApJ+K46z5Il4ljCxe+MZCl8bZ4KeHL3NezwGbS4v9elKvUtTPqgU9Q07wymPO9vSNLK9sfBHrxTzlSJFZGsk1kc1D4/9mZZAknwJJ8tj/+sG9fhaC64QwXzuBZYjQEflkNK6LkyjHRYokI4x9FMDtXJ1eTLJl7NR0K3XvmKyVXp04gjRVhp+Hd8HWCfqhl+JSfp4SU7IzBl0K0qC7T7kBzMikgo/VRCuMKYi1Rup8LUyhBsVLu1lvxZQZLc5hsENlucn6Ddd+6WcV3BZNIFv4XlXfdEjz1RYBpLXhyXOBMGCwY7sRRs95G15avMBxI7g/lCq4DHu5dx3ymld0X0KLxrnEqKmtFJmmxG0k8NniSqD0L7LkR/QSnB226mtbtFuj0oza2LYI7RXP58CSILVUCcmNUltafZStaYiRgsLT1IYRxRGZoQqDTctXyNOg9bzUI9X+9nLflt1lpwoX5TVPmiBYrHudNOfn1LtkY0zZzkk=",
+     "nonce": "sSTo5vJ9aZdwFE1v",
+     "salt": "UQ1WIwEepg4JeZDz44zH6bU1YjfdRbW2uLjjBs/3FZc=",
+     "schemaVersion": "apn.chain-wallet-envelope.v1",
+     "tag": "9ZT1M26jLYbRZM1a/zaCVA=="
+    }
+   },
+   "envelopePath": "chain-wallets/solana/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950.json",
+   "context": {
+    "account": {
+     "schemaVersion": "apn.chain-account.v1",
+     "profile": "golden",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "rail": "solana",
+     "network": "mainnet",
+     "provider": "local",
+     "custody": "local_software",
+     "address": "GoLdEn1111111111111111111111111111111111111",
+     "createdAt": "2026-10-17T09:03:56.720Z",
+     "identityHash": "2e6c4439554f6debca420d7b0494e48e7d6f3e631998b5da7309d01c5467ff13"
+    },
+    "operationId": "1111111111111111111111111111111111111111111111111111111111111111"
+   },
+   "plaintext": "{\"effects\":{\"1111111111111111111111111111111111111111111111111111111111111111\":{\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"rawPayload\":\"c2lnbmVk\",\"rawPayloadHash\":\"a86d1038c0fbdb127e85dd371b2a9668e88ab0f9d3df55a685c3dd78911c4873\",\"transactionId\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}},\"seedHex\":\"0909090909090909090909090909090909090909090909090909090909090909\",\"version\":\"apn.chain-wallet-secret.v1\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"effects\":{\"1111111111111111111111111111111111111111111111111111111111111111\":{\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"rawPayload\":\"c2lnbmVk\",\"rawPayloadHash\":\"a86d1038c0fbdb127e85dd371b2a9668e88ab0f9d3df55a685c3dd78911c4873\",\"transactionId\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}},\"seedHex\":\"0909090909090909090909090909090909090909090909090909090909090909\",\"version\":\"apn.chain-wallet-secret.v1\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet wrapping secret is unavailable.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": true,
+     "plaintext": "{\"effects\":{\"1111111111111111111111111111111111111111111111111111111111111111\":{\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"rawPayload\":\"c2lnbmVk\",\"rawPayloadHash\":\"a86d1038c0fbdb127e85dd371b2a9668e88ab0f9d3df55a685c3dd78911c4873\",\"transactionId\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}},\"seedHex\":\"0909090909090909090909090909090909090909090909090909090909090909\",\"version\":\"apn.chain-wallet-secret.v1\"}"
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "The chain wallet state or effect binding is invalid.",
+     "details": null
+    }
+   }
+  },
+  "circleFunding": {
+   "files": {
+    "circle-v2-evm-funding-effects/1111111111111111111111111111111111111111111111111111111111111111-burn.json": {
+     "ciphertext": "+sGlioCoYrUUT/HoshZP/13V6OGKoleXpGGnVSBIPZRhFKp+ueoWZoF36BnuWCzTI02sl1cFreooWmW+Ubh+xmf0SeRuPEsW2FBwjCksmXcWiv1cm1by3BRNTAb75JRp5GsjRpD3hRuF6BetCpp1XlwOXofQLQZ/Y+3acA+a96XQKx/TaCa+LaiHFu67w+UaEZ1D2A1FgpVy31nPurodWAgdz2fL2vNsG78LJghUi63Dc8MinotSuTovU4A98I7cPaLZKP37GH07sJbFhjJ9avzKQo+YhW+bpjqPh3S49POmZrAVDyC/x82Okpy8MazY78i+f27AfVdc6fKope+8vQf9Y0HVGaKUJ7jVbwNjYuV/MgDRP8fiEQik4e2RAAIx+saRQ+P3V3pEtxF+QCwmUX//DI27xGXvgP+MAsBkj/86cP3XpYk0xSl7X8VoE9L7jcMnazR/x9c3A9XR4WZvDjW03XWfJWPfgcLvyrMc9R+SSUWMPstHvi41hOmcWuWry4KU54OkEaa0ldWOLtMNAPJEkfwtT9j5d0bjLPxCoWGbHK+e9A2EoKqM+LfeA/gnF19oMi4UP+bMO6LXnWWsqmITbHI5/j/yc4bTj83WY2z3buX6B3BJOsvCwpd4unPLprD+ZQiD9kk2En01wcV7rOTgebcCVH1Tku/B4jCNsFURDga3hKUDirYVM5pquahWFdXsnmrUbCi0kcisUs3CLzf0C5cKX59Y20ADexWEP/5Esb0aor9jbqo6u47MtxUFKyAIqeGh171po4wk5LZGUGZ+9QEodnGjNCBeXLOrru+ot7LvOVaE/+Z9+ILxV4HNbg5MABVa+aSA47iqPmCyDkJfS0cJRs9NGU6dEGe7rYK8Z2RYMloS6sytDAP8bGFGz3ryl7edlPojJjQES2Vd5YCp1fOt/BDMmI41Ytp1vx025Kf7zjK3C0nNPrfZijOFZc0=",
+     "envelopeHash": "2d88b1d80788d4e42c9314e8be85bce6a0c1ad942959a3120d07b3aa10f60ddd",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "nonce": "kz9wRQ6gHpBcOcup",
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "role": "burn",
+     "salt": "Gf90v20f0GsNKDipHC9geH/5i/XWzK9Cy5CK9rAAoq8=",
+     "schemaVersion": "apn.circle-v2-evm-effect-envelope.v2",
+     "tag": "klWIM0DgO/U4CquYQ99ujQ=="
+    }
+   },
+   "envelopePath": "circle-v2-evm-funding-effects/1111111111111111111111111111111111111111111111111111111111111111-burn.json",
+   "context": {
+    "op": {
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "effect": {
+     "role": "burn",
+     "envelope": {
+      "chainId": 42161,
+      "from": "0x4F2D795107A75976Ea5bb44165500685698079E4",
+      "to": "0x6666666666666666666666666666666666666666",
+      "data": "0x1234",
+      "valueAtomic": "0",
+      "nonceAtomic": "7",
+      "gasLimitAtomic": "100000",
+      "maxFeePerGasAtomic": "2000000000",
+      "maxPriorityFeePerGasAtomic": "1000000",
+      "envelopeHash": "2d88b1d80788d4e42c9314e8be85bce6a0c1ad942959a3120d07b3aa10f60ddd"
+     },
+     "transactionHash": null,
+     "materialHash": null
+    }
+   },
+   "plaintext": "{\"envelopeHash\":\"2d88b1d80788d4e42c9314e8be85bce6a0c1ad942959a3120d07b3aa10f60ddd\",\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"materialHash\":\"e846add6817bdd1b356776e140ae02c7b0a98500f62aa7f6bbf4a9ae6cad1f5b\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"rawTransaction\":\"0x02f86e82a4b107830f42408477359400830186a094666666666666666666666666666666666666666680821234c001a0501aa1fb493739b612ae2d846548a068aff4fa11f5849e0fa9d2d34d0b7fe712a048ca2c0d9fdd84cb8c90f46e3a20a6d167dab33990988b7f03e0b6e0cca49619\",\"role\":\"burn\",\"schemaVersion\":\"apn.circle-v2-evm-effect.v2\",\"transactionHash\":\"0x115092c2d1749e2c1dc623e466a2807006c34695d2c5b12635c1654535d0e5a4\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"envelopeHash\":\"2d88b1d80788d4e42c9314e8be85bce6a0c1ad942959a3120d07b3aa10f60ddd\",\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"materialHash\":\"e846add6817bdd1b356776e140ae02c7b0a98500f62aa7f6bbf4a9ae6cad1f5b\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"rawTransaction\":\"0x02f86e82a4b107830f42408477359400830186a094666666666666666666666666666666666666666680821234c001a0501aa1fb493739b612ae2d846548a068aff4fa11f5849e0fa9d2d34d0b7fe712a048ca2c0d9fdd84cb8c90f46e3a20a6d167dab33990988b7f03e0b6e0cca49619\",\"role\":\"burn\",\"schemaVersion\":\"apn.circle-v2-evm-effect.v2\",\"transactionHash\":\"0x115092c2d1749e2c1dc623e466a2807006c34695d2c5b12635c1654535d0e5a4\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "Error",
+     "code": null,
+     "message": "Unsupported state or unable to authenticate data",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_OPERATION_BLOCKED",
+     "message": "Circle EVM operation blocked: wrapping_secret_missing.",
+     "details": {
+      "reason": "wrapping_secret_missing"
+     }
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "Error",
+     "code": null,
+     "message": "Unsupported state or unable to authenticate data",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "Error",
+     "code": null,
+     "message": "Unsupported state or unable to authenticate data",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "Error",
+     "code": null,
+     "message": "Unsupported state or unable to authenticate data",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "Error",
+     "code": null,
+     "message": "Unsupported state or unable to authenticate data",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Circle EVM journal is invalid: material_encoding.",
+     "details": {
+      "reason": "material_encoding"
+     }
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Circle EVM journal is invalid: material_encoding.",
+     "details": {
+      "reason": "material_encoding"
+     }
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Circle EVM journal is invalid: material_encoding.",
+     "details": {
+      "reason": "material_encoding"
+     }
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Circle EVM journal is invalid: material_encoding.",
+     "details": {
+      "reason": "material_encoding"
+     }
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Circle EVM journal is invalid: material_plaintext.",
+     "details": {
+      "reason": "material_plaintext"
+     }
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "TypeError",
+     "code": "ERR_ENCODING_INVALID_ENCODED_DATA",
+     "message": "The encoded data was not valid for encoding utf-8",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "SyntaxError",
+     "code": null,
+     "message": "Expected property name or '}' in JSON at position 1 (line 1 column 2)",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "Error",
+     "code": null,
+     "message": "Unsupported state or unable to authenticate data",
+     "details": null
+    }
+   }
+  },
+  "gaslessBootstrap": {
+   "files": {
+    "gasless-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111-bootstrap.json": {
+     "bootstrapMaterialHash": null,
+     "cipher": {
+      "ciphertext": "SkoiP6EiamLohg1DBCESOWPc+KfH9tsqknn5elkfMY9qgub7GTaRmIqCUXzFLdhyvksPoEQ=",
+      "name": "AES-256-GCM",
+      "nonce": "1fLtk75oAZ/kZ40Z",
+      "tag": "FIUt3c32P5uUDTmMIkmjhA=="
+     },
+     "envelopeHash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "estimateHash": null,
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "EYLVB74Q7QnTFKWFYynYcLWGxZXNCQc3WUYcBXCUnQY="
+     },
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "role": "bootstrap",
+     "schemaVersion": "apn.gasless-effect-envelope.v1"
+    },
+    "gasless-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111-user_operation.json": {
+     "bootstrapMaterialHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "cipher": {
+      "ciphertext": "xwDdnQAWxa9hrhsyMLZ3VD5UYl9Xr6vIg4Zp1+npUCUEXVOJayKyRKawGY84RcoLwHcSPtdAMHWG2yQz1Ximf4dyyj89IaPd+XLeH3aoxf9r/L1WtLP1eFfNAo8wQBXvliiN0j/dyEt6E0jiN1POGDrsWiRyMBX+3hwVFuYXDyy7Ev7DOfTQsSYzKKFb+flqnM4y1MdxmKf0GsgTj6N/7J6BpnFn1DmslZ/D6nqMmlck9F6VcfZYQBMkoNIKaeN9Ln4XdwIiQNOoxT7V3zC+NIJ2dQeb6ssgpdlsibpp7nyGy2E=",
+      "name": "AES-256-GCM",
+      "nonce": "FlMC3/5Wy/oO3bnd",
+      "tag": "j+71a6xbsjEhQhS2nDfASQ=="
+     },
+     "envelopeHash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "estimateHash": "c82768b9a62041f937be0b50ca3fadc9f30662a22a2bfa30b3f2688c370051a3",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "wvrji6mnU9tTjiHYt8bVxfjibzJ4w5qsPmZaNNCQAYY="
+     },
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "role": "user_operation",
+     "schemaVersion": "apn.gasless-effect-envelope.v1"
+    }
+   },
+   "envelopePath": "gasless-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111-bootstrap.json",
+   "context": {
+    "operation": {
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "intent": {
+      "unsignedEnvelopeHash": "3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "bootstrap": {
+      "materialHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "estimate": {
+       "gasAtomic": "21000"
+      }
+     }
+    },
+    "role": "bootstrap"
+   },
+   "plaintext": "{\"material\":\"synthetic-bootstrap\",\"role\":\"bootstrap\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"material\":\"synthetic-bootstrap\",\"role\":\"bootstrap\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_wrapping_secret_missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_encoding.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_encoding.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_encoding.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_encoding.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_canonical_plaintext.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    }
+   }
+  },
+  "gaslessUserOperation": {
+   "files": {
+    "gasless-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111-bootstrap.json": {
+     "bootstrapMaterialHash": null,
+     "cipher": {
+      "ciphertext": "Xn9wMaXcADek4ZR45HE3DeQNw3zCaulEa6bwdSZx4d6iv2+sHjVuH4y+QKp0u7saUZcCCvQ=",
+      "name": "AES-256-GCM",
+      "nonce": "RsWXpk3fmHvLsKSl",
+      "tag": "U7LgDT4MRmfb+gMyEZ2DSg=="
+     },
+     "envelopeHash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "estimateHash": null,
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "olv0717/qKlDKZPSO9zUP2sRoqovqbg35MeTDS2Nl/0="
+     },
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "role": "bootstrap",
+     "schemaVersion": "apn.gasless-effect-envelope.v1"
+    },
+    "gasless-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111-user_operation.json": {
+     "bootstrapMaterialHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "cipher": {
+      "ciphertext": "rBSlhPy1lSbfB6/mx9JB6nVGbGb4fVaQIDgFAwtbZxfpX8/hYGxSExN7QRn+W3SU2BwgNiP4JaH5an3Z3mhmdhg7UZG+LfRrLxv/cnstpQtt25HdRlNXucWtQMT9Ncdiw6afHlSCSIsTKuuK3jLADEZHKyBhl5XRbeQXPZCAZm9Wpss96K0v5vo200cACEQ/70KPx3a35y+u8QFKwIqN/DIRK9ctGl2GToaahmKTZ8ZZZfHg3GvqB/0Sfks7FDWD8lb2X0zTsCT4Xk45DgsXKrSt5iGtZEviyKqNtG0EUr0h5pQ=",
+      "name": "AES-256-GCM",
+      "nonce": "qK+Mh//lL9cAawSz",
+      "tag": "tSwjSCQmz47zGS2/LSQmkA=="
+     },
+     "envelopeHash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "estimateHash": "c82768b9a62041f937be0b50ca3fadc9f30662a22a2bfa30b3f2688c370051a3",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "UZPtPBG9+F4gA9SKWEiXbir7jONl/HnYv1KKuj82Gbs="
+     },
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "role": "user_operation",
+     "schemaVersion": "apn.gasless-effect-envelope.v1"
+    }
+   },
+   "envelopePath": "gasless-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111-user_operation.json",
+   "context": {
+    "operation": {
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "intent": {
+      "unsignedEnvelopeHash": "3333333333333333333333333333333333333333333333333333333333333333"
+     },
+     "bootstrap": {
+      "materialHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "estimate": {
+       "gasAtomic": "21000"
+      }
+     }
+    },
+    "role": "user_operation"
+   },
+   "plaintext": "{\"bootstrapMaterialHash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"estimateHash\":\"c82768b9a62041f937be0b50ca3fadc9f30662a22a2bfa30b3f2688c370051a3\",\"material\":\"synthetic-final\",\"role\":\"user_operation\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"bootstrapMaterialHash\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"estimateHash\":\"c82768b9a62041f937be0b50ca3fadc9f30662a22a2bfa30b3f2688c370051a3\",\"material\":\"synthetic-final\",\"role\":\"user_operation\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_wrapping_secret_missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_encoding.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_encoding.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_encoding.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_encoding.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Gasless validation failed: gasless_effect_canonical_plaintext.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Gasless validation failed: gasless_effect_authentication.",
+     "details": null
+    }
+   }
+  },
+  "bridgeEffect": {
+   "files": {
+    "bridge-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111-bridge.json": {
+     "cipher": {
+      "ciphertext": "YSjb4h4RHMlKab8uUeWiCXwaFmgcpuA0yOkwCxpnS+MwDtL5NG1QdYlAgdcsPpOHxeiMvAtwpF0N09ySRSjDtC6d9+fd3WBrtVssL8fYHMiSELP40Mo+3QGbSdXw1rcuiP1gJWb3tiK+sF8jMCGIekRqxkQJuPMuCIeVU6kCCsJPT0Ov/gW/9SO2pMlmZgA3ffeKFlXz24ePpf6xQ6TaBMuVNmfk7hoXsohcZFu+8vcXLZPkypuF4oi0qyTPDuui0vjEo5yOrhaLJO4oOiA1mIZRUYkJlhox98IhZMMkjREUpBz1R3zjk/fMkkK6aZxKaYFYDbhRBHckoLGfPxN3KUrvS7ZW1hP2frcQBp8I1Rsrv/frkwWzk9UoFy3OP/hrVLftU+l34HBa0XKfKvwvnn01nyy/lMT9OWUmv0E6jvEvxO6A7biZmYZYjoqGyWHRd4S7jxNP0OQ+f6W5i8ah7mHzaHIti+X0iIMaIO4sOlklcC+iGmhGuToEB34GnlRKJNNFxvcabmrlU4qIl02g7ehf/XcL/CT03ZmEXWjnvnIQOoz6/eKVIv7B6Hsp+s4eDm9jZIVgLWkN4wi7PmFbSeKb9z+UoHy12yLoOiYDDOI/5OZTs19yO+dyxze098Z2KRaD2cpGhn8Vx72jFIwuibgS7QZkBzGKbS2mM1xkvb8K3sh5U1Vi9YLztcsQcJ66M/EVTXsBx+fDDvCQo/DMR7hkGfBulMpNGlXNJPJjxHoAWVOwK0p3YGftFxJnzHPD3QX+VxX3L9ulTLH18G2/eFtRjbDlLQz62Yohq1d/lGAhSo/nJpgoLbAP22Ei/L1rqfotqBwJsvfFTAKC092IrB5dZgdCkZCshK94lbfB",
+      "name": "AES-256-GCM",
+      "nonce": "IYeRDwt8twFPi6io",
+      "tag": "lPXtW8RHvSvdP8XnklzHTQ=="
+     },
+     "envelopeHash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "0ZmOLpYaD0JmSwhVN9iuPDFRKECPbzsVQhL7k+5XzNQ="
+     },
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "role": "bridge",
+     "schemaVersion": "apn.bridge-effect-envelope.v1"
+    }
+   },
+   "envelopePath": "bridge-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111-bridge.json",
+   "context": {
+    "op": {
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "effects": [
+      {
+       "role": "bridge",
+       "envelope": {
+        "envelopeHash": "3333333333333333333333333333333333333333333333333333333333333333"
+       },
+       "transactionHash": null,
+       "sealedMaterialHash": null
+      }
+     ]
+    },
+    "role": "bridge"
+   },
+   "plaintext": "{\"envelopeHash\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"materialHash\":\"e0e92d62432a8e32a2b09e9131fd14439e4ac3b60762e055d1a564e0fcf70b2a\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"profileHash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"rawTransaction\":\"0x02abababababababababababababababababababababababababababababababababababababababab\",\"role\":\"bridge\",\"schemaVersion\":\"apn.bridge-effect.v1\",\"transactionHash\":\"0xfeecccfa7b5096aa1f0fb2cfde57b2e763aee4d253e6cd3319e6949ff4009570\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"envelopeHash\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"fingerprint\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"materialHash\":\"e0e92d62432a8e32a2b09e9131fd14439e4ac3b60762e055d1a564e0fcf70b2a\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"profileHash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"rawTransaction\":\"0x02abababababababababababababababababababababababababababababababababababababababab\",\"role\":\"bridge\",\"schemaVersion\":\"apn.bridge-effect.v1\",\"transactionHash\":\"0xfeecccfa7b5096aa1f0fb2cfde57b2e763aee4d253e6cd3319e6949ff4009570\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_effect_authentication.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_wrapping_secret_missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_effect_authentication.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_effect_authentication.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_effect_authentication.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_effect_authentication.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Bridge validation failed: bridge_effect_encoding.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Bridge validation failed: bridge_effect_encoding.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Bridge validation failed: bridge_effect_encoding.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Bridge validation failed: bridge_effect_encoding.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Bridge validation failed: bridge_effect_canonical_plaintext.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_effect_authentication.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_effect_authentication.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_PROVIDER_EFFECT_UNAVAILABLE",
+     "message": "Bridge validation failed: bridge_effect_authentication.",
+     "details": null
+    }
+   }
+  },
+  "uniswapExecution": {
+   "files": {
+    "uniswap-execution-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111.json": {
+     "bindingHash": "4444444444444444444444444444444444444444444444444444444444444444",
+     "cipher": {
+      "ciphertext": "Mm5+mQTLXPV73i/9tOio/p3mem6Aor1n4rr2yUB7A2km+SgTksihY4OLv8CA3DNqJzKx/K5etdjjR9MllCN76jmVxiX/TVhW25R6reYWxTD0bmhk6q0FkYtQ7MSMyc7LX4BWlCb384eLLsvEISiJZ/+yTGPxALVLG0/uSjPWJLLTKuPmBAazia6B1FBpcnGv4pghotVll7jYcRzYEkFMiH2FajfzsgqpG7tUHe12VMuiVEDlLCfveQbEIuGfLB3uEq1t0tbVSLT/gOmLOJdjnfAHxSYfdcpvzrXEVz4WXI928YvMh37jcfZnE4/GHj64dmomVMusPmp+MVvi+BdsdmMzgn7eg6IvrltmYsgTDoRpnwd4MJ1PmVussQSIj6DIc4YZRV1LqXYjSXIjf3HXjLqiCnSy2h1dmljeSsiKYt73kPZM1k4akWxFicka46Bqw6tC5WGjzH+Lt0UK04pufgVFS4UAbticdLl3mnd1Up39rHhMYO4yBaJhNkxaI0SMDqnMdwb+wIa+AJGuxeqkkPC2Y7Up4sIp6rcQpJTTSDeEqkJz3vmUr9jV/YPALM6HT5rQ5HTj6399ErTJt34h5n/jvLE3HYiWayLF8G3fB2yTerxskB82ZLzYz6zGYuA2uPDlxuVu86wfq8+yQTCgqdvw/HaSkUV7Ad2mduY3HBSR2l8Q+xDrBE/hjVa/aS4bDy/jMj5073SpR7pKAdaAdmUCTO0SHDP5BuFITicc6+zP1IMZ3TH1mJN10Jmrk0fyQXV7JhHBbBQN/yW2ODDwyHuRmVLnCrjlWbz7DnJTQtDqo0BwfA0/qN0YbrrCEuG6xRrOOCHVkF6ovI5NUyu4/vVMMZol0nzUabr7cinJmOFQ12oaKccXIohKei4f20kqylnUndN7iHX7mCvcjJ8mcDv34rJY73SvF4QpQczSFhK7c5cydEoTLod/E+MFkepAgjOlQfRduSH9aDlNJWMe4ef7/kGZJMDNKRIcZgK1txQVSAbV2YGbyDj3oykpxCN+rjOLhQxB28aBuLMBDRIyx4fR/UbSUgKXa7emQBfDx39QeJWM8BNZpLpBXOY9SYuLCQPSKxZXuqEdW21Z3M4+nixkybi2ar4XkEIGiyBPRMEBhm9UK8kZK22inGQ=",
+      "name": "AES-256-GCM",
+      "nonce": "zcvwa1PnSsmfxdZa",
+      "tag": "wCi5YcDNtIp9ZfKh5G0ywQ=="
+     },
+     "envelopeHash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "kdf": {
+      "name": "HKDF-SHA-256",
+      "salt": "fa3Mls25esXSALZ4VW9AfOaGI/6SdoHyphoE7N7UwCg="
+     },
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "schemaVersion": "apn.uniswap-ethereum.execution-effect-envelope.v1",
+     "submissionMarkerHash": "5555555555555555555555555555555555555555555555555555555555555555",
+     "transactionHash": "0xfeecccfa7b5096aa1f0fb2cfde57b2e763aee4d253e6cd3319e6949ff4009570"
+    }
+   },
+   "envelopePath": "uniswap-execution-effects/c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950/1111111111111111111111111111111111111111111111111111111111111111.json",
+   "context": {
+    "operation": {
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "ownerProfileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950"
+    },
+    "binding": {
+     "bindingHash": "4444444444444444444444444444444444444444444444444444444444444444",
+     "envelopeHash": "3333333333333333333333333333333333333333333333333333333333333333",
+     "submissionMarkerHash": "5555555555555555555555555555555555555555555555555555555555555555"
+    }
+   },
+   "plaintext": "{\"bindingHash\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"envelopeHash\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"integrityHash\":\"9086dcc13f19726156346c70cfd07233d0b20dee8ed12902ad318947964e5471\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"phase\":\"sealed\",\"profileHash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"rawTransaction\":\"0x02abababababababababababababababababababababababababababababababababababababababab\",\"schemaVersion\":\"apn.uniswap-ethereum.execution-effect.v1\",\"sealedAt\":\"2026-10-17T10:00:00.000Z\",\"sendAttempts\":0,\"submissionMarkerHash\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"transactionHash\":\"0xfeecccfa7b5096aa1f0fb2cfde57b2e763aee4d253e6cd3319e6949ff4009570\",\"updatedAt\":\"2026-10-17T10:00:00.000Z\"}",
+   "outcomes": {
+    "golden": {
+     "ok": true,
+     "plaintext": "{\"bindingHash\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"envelopeHash\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"integrityHash\":\"9086dcc13f19726156346c70cfd07233d0b20dee8ed12902ad318947964e5471\",\"operationId\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"phase\":\"sealed\",\"profileHash\":\"c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950\",\"rawTransaction\":\"0x02abababababababababababababababababababababababababababababababababababababababab\",\"schemaVersion\":\"apn.uniswap-ethereum.execution-effect.v1\",\"sealedAt\":\"2026-10-17T10:00:00.000Z\",\"sendAttempts\":0,\"submissionMarkerHash\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"transactionHash\":\"0xfeecccfa7b5096aa1f0fb2cfde57b2e763aee4d253e6cd3319e6949ff4009570\",\"updatedAt\":\"2026-10-17T10:00:00.000Z\"}"
+    },
+    "wrong-secret": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect authentication failed.",
+     "details": null
+    },
+    "secret-missing": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution wrapping secret is missing.",
+     "details": null
+    },
+    "tag-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect authentication failed.",
+     "details": null
+    },
+    "salt-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect authentication failed.",
+     "details": null
+    },
+    "nonce-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect authentication failed.",
+     "details": null
+    },
+    "ciphertext-flipped": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect authentication failed.",
+     "details": null
+    },
+    "tag-outside-base64": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect encoding is invalid.",
+     "details": null
+    },
+    "tag-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect encoding is invalid.",
+     "details": null
+    },
+    "nonce-wrong-length": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect encoding is invalid.",
+     "details": null
+    },
+    "ciphertext-empty": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect encoding is invalid.",
+     "details": null
+    },
+    "plaintext-not-canonical": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect plaintext is not canonical.",
+     "details": null
+    },
+    "plaintext-not-utf8": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect authentication failed.",
+     "details": null
+    },
+    "plaintext-not-json": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect authentication failed.",
+     "details": null
+    },
+    "aad-changed": {
+     "ok": false,
+     "name": "ApnError",
+     "code": "APN_STATE_CORRUPT",
+     "message": "Uniswap execution effect authentication failed.",
+     "details": null
+    }
+   }
+  },
+  "merchantMaterial": {
+   "files": {
+    "merchant-material/1111111111111111111111111111111111111111111111111111111111111111.json": {
+     "ciphertext": "5HvMoKTITBaAPU4Js3veIs2BqU03rujnaFt7bm+kbH6svShAXu9+1/nRR5ioLp8xLiaTJSgKHPQF6lx95LnJDWjnWmq/QIRrUyQtzoZO5TO/X7tWok+byYe+97v/WqKBBoGNYoWJZKFtL2sDTHwrqRiB6cZKXYRF+dR8v6QWZn5XXjM9md/oMCJ5PsvPNcKTtO8jQ0FBGf6/mBrVf/tZ38f2EB/VKUWI+vEJNbvfizB7KSTJ5DQJ0eNPRpdjaHMo7uQaAhMn0hP63Ar6fFulJfANeeymvgbf95Ix2Q6FoIe8R/KjDNJut4drQU9HpX6ia7zsDHO9WJXtYXR01ZhZXxVXc2Gz7C+JF2TmjmhcUI0YhnebJ7bZcoeNv6apn/zlhizEmkRlmE6AL0it4S0F05YXJ7Ca20NmdE6zH+AEzbJy+aIgMdtu9cisWj9yl6EYHPFxD+BYISUATXq2Sgegtuh0",
+     "fingerprint": "2222222222222222222222222222222222222222222222222222222222222222",
+     "materialHash": "7d1ad8c0e14112636fd001ea2c039638548481b9b8a56a1931deaef675c049bb",
+     "nonce": "fuS6t2QFXDNyWO8B",
+     "operationId": "1111111111111111111111111111111111111111111111111111111111111111",
+     "profileHash": "c493dcd80758742caa57b6d06627c6c9265633a5070005960de8761bd98a2950",
+     "salt": "O45LM9KRUeU1K0PloZL2dNuWdmVbVirjHQRsOtUO9CQ=",
+     "schemaVersion": "apn.merchant-material.v1",
+     "tag": "1Cn44W0kabliXxddgDAycg==",
+     "txHash": "0x57809cec79785d396156b0876e044fed440d50ee13109d6038d58655ff10e6d6"
+    }
+   },
+   "envelopePath": "merchant-material/1111111111111111111111111111111111111111111111111111111111111111.json",
+   "context": {
+    "operationId": "1111111111111111111111111111111111111111111111111111111111111111"
+   },
+   "plaintext": "0x02f8ad8210e60380843b9aca0082ea6094777777777777777777777777777777777777777780b844a9059cbb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c001a0250740da72a9b53da99e106c60683e4e75ab072813c2a9274fe9aace8cda36bea008c5a3d0ad6bb8e7c6c53271f2cbdc32bc258e51d60dc2d06fea5a184575f39e",
+   "outcomes": {}
+  }
+ }
+}
