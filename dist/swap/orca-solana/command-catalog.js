@@ -14,24 +14,12 @@ export const ORCA_COMMAND_GROUPS = [
     { path: ["swap", "solana", "orca"], summary: "Keyless Orca Whirlpool exact input against pinned pools: native SOL to USDC (sol-usdc) and USDC to USDT (usdc-usdt).", kind: "group" },
 ];
 export const ORCA_COMMANDS = [
-    command("stable-inventory", [], "Read the pinned USDC/USDT Whirlpool identity without admission or signing.", "none"),
-    command("stable-quote", [option("--amount", "atomic_usdc", ["positive_usdc_atomic"]),
-        option("--slippage-bps", "string", ["integer_0_through_9999"]),
-        option("--maximum-price-impact-bps", "string", ["integer_0_through_10000"])], "Read a guarded exact-input USDC to USDT quote from one Whirlpool snapshot. No transaction is built.", "network_read"),
-    command("stable-prepare", [profile, option("--policy-revision", "string", ["positive_active_revision"]),
-        option("--owner", "string", ["canonical_32_byte_base58_solana_address"]),
-        option("--amount", "atomic_usdc", ["positive_usdc_atomic"]), option("--slippage-bps", "string", ["integer_0_through_9999"]),
-        option("--maximum-price-impact-bps", "string", ["integer_0_through_10000"]),
-        option("--compute-unit-limit", "string", ["integer_1_through_1400000"]),
-        option("--compute-unit-price", "string", ["micro_lamports_per_compute_unit"]),
-        option("--create-usdt-ata", "string", ["true_or_false"]), option("--maximum-ata-rent", "string", ["atomic_lamports_or_zero"]),
-        option("--maximum-total-fee", "string", ["positive_lamports"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"])], "Simulate the exact unsigned stable transaction and persist owner-bound prepared material. Never signs or broadcasts.", "payment_prepare"),
-    command("stable-status", [operation], "Read a stable operation and reconcile an expired unsigned principal lease. Never signs or broadcasts.", "local_write"),
-    command("stable-approve", [operation], "Confirm the exact stable swap once in the foreground: reserve USDC principal, refresh preflight, sign once and make at most one send attempt.", "payment_submit", { class: "foreground_tty", when: "Each stable swap requires one exact foreground consent." }),
-    command("stable-execute", [operation], "For a reservation left unexecuted, confirm again, refresh preflight, sign once and make at most one send attempt.", "payment_submit", { class: "foreground_tty", when: "Every stable execution requires separate exact foreground consent; MCP returns the CLI handoff only." }),
+    // Finish-only exits of stable USDC to USDT operations prepared by APN 0.5.45 or earlier (SWAP-10). New USDC to USDT
+    // swaps use quote --pool usdc-usdt; nothing here quotes, prepares, approves, signs or sends.
+    command("stable-status", [operation], "Read a stable USDC to USDT operation prepared by APN 0.5.45 or earlier; an expired unsigned preparation is released. Never signs or broadcasts.", "local_write"),
     command("stable-release", [operation], "Retire an unsigned stable preparation and release its exact principal reservation. Never signs or broadcasts.", "local_write"),
     command("stable-recover-no-send", [operation], "Prove a marked stable operation has neither send claim nor signed effect, then release only its exact principal lease.", "local_write", { class: "foreground_tty", when: "A marked no-send recovery requires separate exact owner consent; MCP returns the CLI handoff only." }),
-    command("stable-observe", [operation], "Read a claimed stable signature; durably record possible send, finalized proof and principal lease outcome. Never signs or sends.", "local_write"),
+    command("stable-observe", [operation], "Observe a signed or claimed stable operation: record a possible send, a finalized or reverted proof, or expiry of its bound blockhash lifetime, and settle the principal lease. Never signs or sends.", "local_write"),
     command("inventory", [], "Read the pinned Whirlpool program, every pinned pool and its keyless mechanism pin and route without admitting them.", "none"),
     command("quote", [option("--pool", "string", ["sol-usdc_or_usdc-usdt"]), profile,
         option("--account", "string", ["canonical_32_byte_base58_solana_address_of_the_profile"]),
@@ -57,41 +45,7 @@ export function bindOrcaCommand(path, options) {
         exact(options, []);
         return { command: "swap.orca.inventory" };
     }
-    if (action === "stable-inventory") {
-        exact(options, []);
-        return { command: "swap.orca.stable-inventory" };
-    }
-    if (action === "stable-quote") {
-        exact(options, ["--amount", "--slippage-bps", "--maximum-price-impact-bps"]);
-        const amount = options["--amount"];
-        if (amount === undefined || !/^[1-9][0-9]{0,19}$/u.test(amount))
-            invalid("Stable Orca amount must be positive canonical USDC atomic units.");
-        return { command: "swap.orca.stable-quote", amountAtomic: amount, slippageBps: integer(options["--slippage-bps"], 9_999),
-            maximumPriceImpactBps: integer(options["--maximum-price-impact-bps"], 10_000) };
-    }
-    if (action === "stable-prepare") {
-        exact(options, ["--profile", "--policy-revision", "--owner", "--amount", "--slippage-bps", "--maximum-price-impact-bps",
-            "--compute-unit-limit", "--compute-unit-price", "--create-usdt-ata", "--maximum-ata-rent", "--maximum-total-fee", "--idempotency-key"]);
-        const amount = options["--amount"], price = options["--compute-unit-price"], rent = options["--maximum-ata-rent"], fee = options["--maximum-total-fee"];
-        if (amount === undefined || !/^[1-9][0-9]{0,19}$/u.test(amount) ||
-            price === undefined || !/^(?:0|[1-9][0-9]{0,19})$/u.test(price) ||
-            rent === undefined || !/^(?:0|[1-9][0-9]{0,19})$/u.test(rent) ||
-            fee === undefined || !/^[1-9][0-9]{0,19}$/u.test(fee) ||
-            !["true", "false"].includes(options["--create-usdt-ata"] ?? ""))
-            invalid("Stable prepare amount, fee, rent or ATA option is invalid.");
-        const createUsdtAta = options["--create-usdt-ata"] === "true";
-        if (createUsdtAta ? rent === "0" : rent !== "0")
-            invalid("Stable ATA rent cap must match the requested creation mode.");
-        const slippageBps = integer(options["--slippage-bps"], 9_999), maximumPriceImpactBps = integer(options["--maximum-price-impact-bps"], 10_000);
-        if (slippageBps > maximumPriceImpactBps)
-            invalid("Stable slippage exceeds the price impact cap.");
-        return { command: "swap.orca.stable-prepare", profile: options["--profile"], policyRevision: positiveInteger(options["--policy-revision"]),
-            owner: canonicalAccount(options["--owner"]), amountAtomic: amount, slippageBps, maximumPriceImpactBps,
-            computeUnitLimit: positiveInteger(options["--compute-unit-limit"], 1_400_000), computeUnitPriceMicroLamports: price,
-            createUsdtAta, ...(createUsdtAta ? { maximumAtaRentLamports: rent } : {}), maximumTotalFeeLamports: fee,
-            idempotencyKey: options["--idempotency-key"] };
-    }
-    if (action === "stable-status" || action === "stable-approve" || action === "stable-execute" || action === "stable-release" || action === "stable-recover-no-send" || action === "stable-observe") {
+    if (action === "stable-status" || action === "stable-release" || action === "stable-recover-no-send" || action === "stable-observe") {
         exact(options, ["--operation"]);
         return { command: `swap.orca.${action}`, operationId: hash(options["--operation"]) };
     }
@@ -127,11 +81,6 @@ function exact(value, keys) {
 function integer(value, maximum) {
     if (value === undefined || !/^(?:0|[1-9][0-9]{0,6})$/u.test(value) || Number(value) > maximum)
         invalid("Orca integer option is not canonical or exceeds its bound.");
-    return Number(value);
-}
-function positiveInteger(value, maximum = Number.MAX_SAFE_INTEGER) {
-    if (value === undefined || !/^[1-9][0-9]{0,15}$/u.test(value) || Number(value) > maximum || !Number.isSafeInteger(Number(value)))
-        invalid("Orca positive integer option is invalid.");
     return Number(value);
 }
 function canonicalAccount(value) {

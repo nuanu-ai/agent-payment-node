@@ -5,8 +5,8 @@ import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { assetAdmitsSwapMechanism, swapRouteDigest, swapRouteOf } from "../../src/swap/route-admission.js";
 import { ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_PROTOCOL_REGISTRY, USDC_MINT } from "../../src/swap/orca-solana/pins.js";
 import { isOrcaKeylessMechanismDigest, ORCA_POOLS, orcaPoolOfMechanism, orcaPoolRoute } from "../../src/swap/orca-solana/pools.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_PIN, ORCA_STABLE_MECHANISM_PIN, ORCA_STABLE_MECHANISM_PIN_SLOT_440170207 } from "../../src/swap/orca-solana/stable-mechanism.js";
-import { ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A, ORCA_STABLE_VAULT_B } from "../../src/swap/orca-solana/stable-readonly.js";
+import { ORCA_STABLE_GUARDED_MECHANISM_PIN, ORCA_STABLE_MECHANISM_PIN, ORCA_STABLE_MECHANISM_PIN_SLOT_440170207, ORCA_STABLE_POOL, ORCA_STABLE_VAULT_A,
+  ORCA_STABLE_VAULT_B } from "../../src/legacy/orca-stable/mechanism.js";
 
 /** SWAP-10 hard requirement: an owner policy written for the former stable lane keeps admitting USDC to USDT. */
 test("the usdc-usdt pool route equals the former stable guarded route exactly, so existing owner admissions keep working", () => {

@@ -41,8 +41,7 @@ import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
 import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
-import type { OrcaProgramPinVerifier } from "./swap/orca-solana/pins.js";
-import type { OrcaStableConsentPort } from "./swap/orca-solana/stable-approval.js";
+import type { OrcaStableConsentPort } from "./legacy/orca-stable/recovery-consent.js";
 import type { Permit2PreflightPorts } from "./x402-permit2/preflight.js";
 import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
@@ -114,12 +113,6 @@ export interface RuntimeFactoryOptions {
     readonly solanaRpcFetch?: typeof fetch;
     readonly solanaRpcNow?: () => number;
     readonly solanaRpcWait?: (milliseconds: number) => Promise<void>;
-    /** Offline acceptance only; the CLI exposes no option to replace pinned program proof. */
-    readonly orcaStablePinVerifier?: OrcaProgramPinVerifier;
-    /** Offline acceptance only; production reads exact consent from the owner TTY. */
-    readonly orcaStableExecuteConsent?: OrcaStableConsentPort;
-    /** Offline acceptance only; production reads the single approve-and-execute consent from the owner TTY. */
-    readonly orcaStableApproveConsent?: OrcaStableConsentPort;
     /** Offline acceptance only; production reads separate recovery consent from the owner TTY. */
     readonly orcaStableRecoveryConsent?: OrcaStableConsentPort;
     readonly tronRpcUrl?: string;

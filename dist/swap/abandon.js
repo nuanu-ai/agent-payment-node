@@ -10,7 +10,7 @@ import { JUPITER_V1_KNOWN_ROUTES } from "./jupiter-solana/v1-route-config.js";
 import { OrcaExecutionBindingStore } from "./orca-solana/effects.js";
 import { SavedOrcaQuoteStore } from "./orca-solana/material.js";
 import { isOrcaKeylessMechanismDigest } from "./orca-solana/pools.js";
-import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 /**
  * Owner exit (R4) for a swap marked for sending whose outcome no chain proof can settle: no transaction lifetime, router
  * deadline or expiration was recorded that `expired_unlanded` could use. It refuses while any chain proof is possible,

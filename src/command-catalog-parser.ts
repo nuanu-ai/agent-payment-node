@@ -120,8 +120,9 @@ export function catalogNextActions(argv: readonly string[]): readonly string[] {
   const removed = removedV1Command(candidate, COMMAND_MANIFEST.removed_v1_commands);
   // A command removed without a successor gets ordinary discovery guidance, never an invented replacement.
   if (removed !== undefined && removed.replacement !== null) {
-    const path = removed.replacement.split(" ").slice(1);
-    return [removed.replacement, `apn help ${path.slice(0, path.findIndex((token) => /^[-[<]/u.test(token))).join(" ")}`];
+    const path = removed.replacement.split(" ").slice(1), options = path.findIndex((token) => /^[-[<]/u.test(token));
+    // A replacement without options is all command path.
+    return [removed.replacement, `apn help ${path.slice(0, options === -1 ? path.length : options).join(" ")}`];
   }
   const prefix = longestCatalogPrefix(candidate);
   return prefix === undefined ? ["apn help"] : [`apn help ${prefix.path.join(" ")}`, "apn help"];

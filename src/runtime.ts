@@ -49,7 +49,7 @@ import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapRuntime } from "./swap/runtime.js";
 import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
-import type { OrcaStableQuoteRequest } from "./swap/orca-solana/stable-readonly.js";
+import type { OrcaStableLegacyFinisher } from "./legacy/orca-stable/finisher.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
@@ -92,14 +92,8 @@ export interface CoreDependencies {
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
-  readonly orcaStableQuote?: (request: OrcaStableQuoteRequest) => Promise<unknown>;
-  readonly orcaStablePrepare?: (request: Extract<CommandRequest, { readonly command: "swap.orca.stable-prepare" }>) => Promise<unknown>;
-  readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableExecute?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
+  /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
+  readonly orcaStableLegacy?: OrcaStableLegacyFinisher;
   readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
@@ -163,14 +157,8 @@ export class RuntimeContext {
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: OrcaRuntimeSelector;
-  readonly orcaStableQuote?: (request: OrcaStableQuoteRequest) => Promise<unknown>;
-  readonly orcaStablePrepare?: (request: Extract<CommandRequest, { readonly command: "swap.orca.stable-prepare" }>) => Promise<unknown>;
-  readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableExecute?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
-  readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
+  /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
+  readonly orcaStableLegacy?: OrcaStableLegacyFinisher;
   readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
@@ -235,14 +223,7 @@ export class RuntimeContext {
     if (dependencies.uniswapTokenRuntime !== undefined) this.uniswapTokenRuntime = dependencies.uniswapTokenRuntime;
     if (dependencies.sunswapRuntime !== undefined) this.sunswapRuntime = dependencies.sunswapRuntime;
     if (dependencies.orcaRuntime !== undefined) this.orcaRuntime = dependencies.orcaRuntime;
-    if (dependencies.orcaStableQuote !== undefined) this.orcaStableQuote = dependencies.orcaStableQuote;
-    if (dependencies.orcaStablePrepare !== undefined) this.orcaStablePrepare = dependencies.orcaStablePrepare;
-    if (dependencies.orcaStableStatus !== undefined) this.orcaStableStatus = dependencies.orcaStableStatus;
-    if (dependencies.orcaStableApprove !== undefined) this.orcaStableApprove = dependencies.orcaStableApprove;
-    if (dependencies.orcaStableExecute !== undefined) this.orcaStableExecute = dependencies.orcaStableExecute;
-    if (dependencies.orcaStableRecoverNoSend !== undefined) this.orcaStableRecoverNoSend = dependencies.orcaStableRecoverNoSend;
-    if (dependencies.orcaStableRelease !== undefined) this.orcaStableRelease = dependencies.orcaStableRelease;
-    if (dependencies.orcaStableObserve !== undefined) this.orcaStableObserve = dependencies.orcaStableObserve;
+    if (dependencies.orcaStableLegacy !== undefined) this.orcaStableLegacy = dependencies.orcaStableLegacy;
     if (dependencies.jupiterV1Runtime !== undefined) this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
     if (dependencies.facilitatorGasless !== undefined) this.facilitatorGasless = dependencies.facilitatorGasless;
     if (dependencies.smartAccountGasless !== undefined) this.smartAccountGasless = dependencies.smartAccountGasless;
