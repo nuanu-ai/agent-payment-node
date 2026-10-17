@@ -1,4 +1,4 @@
-import { UniswapTokenJournal, type UniswapTokenOperation } from "../../swap/uniswap-v3/token-operation.js";
+import { UNISWAP_TOKEN_TERMINAL_PHASES, UniswapTokenJournal, type UniswapTokenOperation } from "../../swap/uniswap-v3/token-operation.js";
 import { field, readableClaims, requiredRecordPath, salvageEvm, type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
 import { evmClaim, namedProfileHash, pastUnstartedDeadline, salvageNamedRecord } from "./family-claims.js";
 import { OPERATION_STATUS } from "./family-commands.js";
@@ -17,7 +17,7 @@ export const uniswapTokenAdapter: OperationFamilyAdapter<UniswapTokenOperation> 
   async load(root, recordPath) { return await new UniswapTokenJournal(root).read(requiredRecordPath(recordPath, STORE).operationId); },
   identity: record => ({ profileHash: namedProfileHash(record.profile), operationId: record.operationId, idempotencyHash: null, requestHash: null }),
   claims: record => readableClaims(() => [evmClaim(UNISWAP_TOKEN_CHAIN_ID, record.account)]),
-  terminal: record => record.phase === "observed" || record.phase === "cleaned" ||
+  terminal: record => UNISWAP_TOKEN_TERMINAL_PHASES.includes(record.phase) ||
     record.phase === "prepared" && pastUnstartedDeadline(record.route.deadline * 1000),
   state: record => record.phase,
   salvage: raw => salvageNamedRecord(raw, value => [salvageEvm(UNISWAP_TOKEN_CHAIN_ID, field(value, "account"))], "profile"),

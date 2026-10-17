@@ -1,5 +1,6 @@
 import { circleSourceSettled } from "../../circle-native-admission.js";
-import { publicKnownCircle, validateKnownCircle, type CircleKnownOperation } from "../../circle-v2-evm/funding-operation.js";
+import { CIRCLE_V2_TERMINAL_STATES, publicKnownCircle, validateKnownCircle, type CircleKnownOperation } from "../../circle-v2-evm/funding-operation.js";
+import { CIRCLE_V1_TERMINAL_STATES } from "../../circle-v2-evm/operation-model.js";
 import { CircleRepository } from "../../circle-v2-evm/repository.js";
 import { receiptOutcome } from "../../core-outcome.js";
 import { ApnError } from "../../errors.js";
@@ -14,9 +15,15 @@ export function circleDomains(record: CircleKnownOperation): readonly MoneyConfl
   return [evmConflictDomain(42161, record.sourceCustody.walletAddress),
     evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)];
 }
+/** The outcome list of the record's own version, which its validator ties the record's `terminal` flag to. */
+export const circleTerminal = (record: Pick<CircleKnownOperation, "schemaVersion" | "state">): boolean =>
+  (record.schemaVersion === "apn.circle-v2-evm-operation.v1" ? CIRCLE_V1_TERMINAL_STATES : CIRCLE_V2_TERMINAL_STATES).includes(record.state);
 const sourceKey = (record: CircleKnownOperation) => conflictDomainKey(evmConflictDomain(42161, record.sourceCustody.walletAddress));
 
-/** Circle v2 routes and v1 routes (finish-only), one file per operation; both signing profiles hold the route. */
+/**
+ * Circle v2 routes and v1 routes, one file per operation; both signing profiles hold the route. A v1 route is read-only
+ * (its commands refuse it except status), so a non-terminal one holds its accounts and both profiles until it is closed.
+ */
 export const circleAdapter: OperationFamilyAdapter<CircleKnownOperation> = {
   family: "circle_route",
   stores: [STORE],
@@ -25,7 +32,7 @@ export const circleAdapter: OperationFamilyAdapter<CircleKnownOperation> = {
   },
   identity: standardIdentity,
   claims: record => readableClaims(() => [...domainClaims(circleDomains(record)), profileClaim(record.destinationProfileHash)]),
-  terminal: record => record.terminal,
+  terminal: circleTerminal,
   state: record => record.state,
   admits(record, wanted, held) {
     if (held.key !== sourceKey(record)) return false;
@@ -42,7 +49,7 @@ export const circleAdapter: OperationFamilyAdapter<CircleKnownOperation> = {
     profileClaim(salvageHash(field(value, "destinationProfileHash")))], ["profileHash", "destinationProfileHash"]),
   view: async record => publicKnownCircle(record),
   async receipt(_context, record) {
-    if (!record.terminal) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.",
+    if (!circleTerminal(record)) throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.",
       { operationId: record.operationId, nextActions: [`apn circle evm observe --operation ${record.operationId}`] });
     return receiptOutcome(publicKnownCircle(validateKnownCircle(record)));
   },

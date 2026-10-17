@@ -9,6 +9,10 @@ import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute 
 import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, encodeCircleBurn, encodeCircleMint } from "./protocol.js";
 import { circleBlocked, circleCorrupt, circleSame, validateCircle, publicCircle } from "./operation-model.js";
 import { validateCircleFundingBinding, assertCircleFundingFee } from "./funding-binding.js";
+/** Every state a v2 (funding) Circle route may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export const CIRCLE_V2_STATES = ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality",
+    "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"];
+export const CIRCLE_V2_TERMINAL_STATES = ["completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"];
 /** Initial source envelopes and the economic/authority context remain immutable through every transition. */
 export function circleFundingFingerprint(op) {
     return hashObject({ schemaVersion: "apn.circle-v2-evm-operation.v2", requestHash: op.requestHash, funding: op.funding, feeQuote: op.feeQuote,
@@ -61,7 +65,7 @@ export function validateCircleFundingOperation(value) {
     assertStoredFieldsEqual(funding, { sourceProfile: op.profile, sourceOwner: op.sourceCustody.walletAddress, destinationProfile: op.destinationProfile,
         gasPayer: op.destinationCustody.walletAddress }, () => circleCorrupt("funding_identity_binding"));
     if (op.profileHash !== sha256(`profile\0${op.profile}`) || op.destinationProfileHash !== sha256(`profile\0${op.destinationProfile}`) || op.profileHash !== op.sourceCustody.profileHash || op.destinationProfileHash !== op.destinationCustody.profileHash || !/^(?:0|[1-9][0-9]*)$/u.test(op.feeQuoteAtomic) || BigInt(op.feeQuoteAtomic) > BigInt(funding.maxFeeAtomic) ||
-        !["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"].includes(op.state) || op.terminal !== ["completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"].includes(op.state) ||
+        !CIRCLE_V2_STATES.includes(op.state) || op.terminal !== CIRCLE_V2_TERMINAL_STATES.includes(op.state) ||
         !Number.isFinite(Date.parse(op.preparedAt)) || !Number.isFinite(Date.parse(op.expiresAt)) || Date.parse(op.expiresAt) <= Date.parse(op.preparedAt) ||
         !["0", funding.amountAtomic].includes(op.residualAllowanceAtomic) || typeof op.usageFinalized !== "boolean" || !Array.isArray(op.usage) || !Array.isArray(op.policies))
         circleCorrupt("intent");

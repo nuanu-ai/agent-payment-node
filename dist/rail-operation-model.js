@@ -7,7 +7,9 @@ import { TRON_GENESIS } from "./tron/constants.js";
 import { publicDirectAllowlist } from "./direct-allowlist-gate.js";
 import { RAIL_LEASE_STATES, railAllowlistSubject, validateRailAllowlist } from "./rail-direct-allowlist.js";
 import { validateTronFinalResources, validateTronResources } from "./tron/resource-model.js";
-const TERMINAL = ["completed", "failed_before_effect", "failed_confirmed_revert", "abandoned_unknown"];
+/** A rail transfer's outcomes: its record's `terminal` flag must equal membership. */
+export const RAIL_TERMINAL_STATES = ["completed", "failed_before_effect", "failed_confirmed_revert", "abandoned_unknown"];
+const TERMINAL = RAIL_TERMINAL_STATES;
 const EDGES = {
     awaiting_approval: ["signing_started", "submitting", "failed_before_effect"],
     signing_started: ["signed_not_submitted", "failed_before_effect"],
@@ -17,6 +19,8 @@ const EDGES = {
     unknown_finality: ["completed", "failed_confirmed_revert", "abandoned_unknown"],
     completed: [], failed_before_effect: [], failed_confirmed_revert: [], abandoned_unknown: [],
 };
+/** Every state a rail transfer record may hold (its validator refuses any other). */
+export const RAIL_STATES = Object.keys(EDGES);
 const HASH = /^[a-f0-9]{64}$/u;
 const RECORD_KEYS = ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash",
     "account", "prepared", "policyHash", "fingerprint", "state", "terminal", "reason", "proofClass", "transactionId",

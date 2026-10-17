@@ -25,6 +25,8 @@ const EDGES: Readonly<Record<SmartAccountGaslessState, readonly SmartAccountGasl
   unknown_finality: ["unknown_finality", "completed", "expired_unused", "abandoned_unknown"],
   failed_before_effect: [], completed: [], expired_unused: [], abandoned_unknown: [],
 };
+/** Every state a Smart Account gasless journal may hold (its transition check refuses any other). */
+export const SA_STATES = Object.keys(EDGES) as readonly SmartAccountGaslessState[];
 const MATERIAL_HASH_KEYS = ["encodedRootHash", "encodedChildHash", "permissionContextHash", "payloadHash",
   "requirementsHash", "materialHash", "rootDelegationHash", "childDelegationHash"] as const;
 function corrupt(): never { return saFail("sa_gasless_state_corrupt"); }

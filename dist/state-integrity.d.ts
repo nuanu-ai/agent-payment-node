@@ -1,4 +1,4 @@
-import type { OperationRecord, OperationState, ReceiptRecord, Transition, WalletRecord } from "./model.js";
+import { type OperationRecord, type OperationState, type ReceiptRecord, type Transition, type WalletRecord } from "./model.js";
 export declare function appendTransition(previous: readonly Transition[], input: {
     readonly at: string;
     readonly state: OperationState;

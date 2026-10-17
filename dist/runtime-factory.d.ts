@@ -9,5 +9,10 @@ export type { RuntimeFactoryOptions } from "./runtime-factory-options.js";
  * request's own command.
  */
 export declare function createApnCore(bound: BoundCommand, options?: RuntimeFactoryOptions, runtimeCommand?: CommandRequest["command"]): ApnCore;
+/**
+ * Every command, CLI or MCP. A command that names an operation has just read (or closed) that operation's record, or
+ * at least looked it up to build its runtime, so its operation-index entry follows the record right after it, whatever
+ * the command answered and even when its runtime could not be built (best effort; the next admission re-verifies).
+ */
 export declare function executeBoundCommand(bound: BoundCommand, options?: RuntimeFactoryOptions): Promise<OutputEnvelope>;
 export declare function effectiveStateRoot(): string;

@@ -11,6 +11,11 @@ import { validateProviderHttpRequest } from "./provider-x402-http-request.js";
 import { x402HttpRequestBinding } from "./x402-http-request.js";
 export const PROVIDER_X402_STATE_VERSION = "apn.provider-x402.state.v1";
 export const PROVIDER_X402_HTTP_STATE_VERSION = "apn.provider-x402.state.v2";
+/** Every state a provider-atomic x402 record may hold. */
+export const PROVIDER_X402_STATES = ["preparing", "awaiting_approval", "started", "settlement_pending", "ambiguous_effect", "completed",
+    "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"];
+/** Its outcomes: the record's `terminal` flag, and a receipt's terminal state, are exactly these. */
+export const PROVIDER_X402_TERMINAL_STATES = ["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"];
 export function providerX402RequestHash(input) {
     return hashObject({
         method: "x402.fetch.prepare",
@@ -60,7 +65,7 @@ export function validateProviderX402Operation(value) {
         !Array.isArray(operation.transitions) || operation.transitions.length === 0 ||
         operation.transitions.at(-1)?.state !== operation.state || operation.transitions.at(-1)?.reason !== operation.reason ||
         operation.transitions.at(-1)?.proofClass !== operation.proofClass ||
-        operation.terminal !== ["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(operation.state))
+        operation.terminal !== PROVIDER_X402_TERMINAL_STATES.includes(operation.state))
         corrupt();
     validateProviderHttpRequest(operation.request);
     validateTransitions(operation.transitions);
@@ -112,7 +117,7 @@ export function validateProviderX402Receipt(value) {
     if (receipt.schemaVersion !== "apn.provider-x402.receipt.v1" || receipt.kind !== "x402_fetch" ||
         !hash(receipt.operationId) || !hash(receipt.fingerprint) || !hash(receipt.requestDigest) ||
         !hash(receipt.requirementDigest) || receipt.integrityHash !== hashObject(without) ||
-        !["completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"].includes(receipt.terminalState) ||
+        !PROVIDER_X402_TERMINAL_STATES.includes(receipt.terminalState) ||
         receipt.network !== CHAIN_CAIP2 || receipt.token !== BASE_USDC.toLowerCase())
         corrupt();
     if (receipt.result !== undefined && (receipt.result.classification !== "normalized_provider_json" || !hash(receipt.result.sha256) ||

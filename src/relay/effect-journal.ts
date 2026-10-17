@@ -7,6 +7,9 @@ import type { RelayQuoteTransaction } from "./quote.js";
 
 export type RelayEffectRole = "approval" | "deposit";
 export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "abandoned_unsent";
+/** Every phase of a token-lane effect, and the observed ones no transition leaves (a confirmed approval is followed by its deposit). */
+export const RELAY_EFFECT_PHASES: readonly RelayEffectPhase[] = ["pending", "signing_started", "sealed", "submitting", "confirmed", "failed", "abandoned_unsent"];
+export const RELAY_EFFECT_OBSERVED_PHASES: readonly RelayEffectPhase[] = ["confirmed", "failed", "abandoned_unsent"];
 export interface RelayEffect {
   readonly role: RelayEffectRole;
   readonly phase: RelayEffectPhase;
@@ -51,8 +54,7 @@ function prepared(op: RelayUnsignedOperation): asserts op is RelayUnsignedOperat
   if (op.quote === undefined || op.quote.quoteDigest !== op.quoteDigest) blocked("prepared quote required");
 }
 function validateEffect(effect: RelayEffect, role: RelayEffectRole): void {
-  if (effect.role !== role || !["pending", "signing_started", "sealed", "submitting", "confirmed", "failed",
-    "abandoned_unsent"].includes(effect.phase)) corrupt("effect role or phase");
+  if (effect.role !== role || !RELAY_EFFECT_PHASES.includes(effect.phase)) corrupt("effect role or phase");
   if (effect.phase === "pending") {
     if (effect.attempt !== null || effect.observedAt !== null) corrupt("pending attempt");
     return;
@@ -64,7 +66,7 @@ function validateEffect(effect: RelayEffect, role: RelayEffectRole): void {
     effect.attempt.attemptNumber !== 1) corrupt("effect attempt number");
   if (effect.phase === "signing_started" && (effect.attempt.transactionHash !== null || effect.observedAt !== null)) corrupt("marked state");
   if (["sealed", "submitting"].includes(effect.phase) && (effect.attempt.transactionHash === null || effect.observedAt !== null)) corrupt("known transaction");
-  if ((effect.phase === "confirmed" || effect.phase === "failed" || effect.phase === "abandoned_unsent") &&
+  if (RELAY_EFFECT_OBSERVED_PHASES.includes(effect.phase) &&
     (!iso(effect.observedAt) || Date.parse(effect.observedAt) < Date.parse(effect.attempt.markedAt))) corrupt("observation");
   if (effect.phase === "abandoned_unsent" && (effect.attempt.transactionHash === null || effect.attempt.attemptNumber !== 1)) corrupt("never landed attempt");
 }

@@ -17,6 +17,8 @@ export declare class OperationCommands {
     resume(request: ResumeRequest): Promise<CommandOutcome>;
     receipt(operationId: string): Promise<CommandOutcome>;
     abandon(operationIdInput: string): Promise<CommandOutcome>;
+    /** The family's own terminal rule on the record just read; a lifecycle that cannot be decided is not terminal. */
+    private terminal;
     /** The family's saved record behind an ID; the index holds every family's operations. */
     private found;
     /** Every family's operations are indexed except a gasless USDT preparation that never executed, which has its own status. */

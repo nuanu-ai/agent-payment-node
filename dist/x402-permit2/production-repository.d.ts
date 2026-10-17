@@ -2,7 +2,10 @@ import { SecureStateStore } from "../secure-state-store.js";
 import type { ClockPort } from "../ports.js";
 import { PERMIT2_PRODUCTION_SCHEMA, type Permit2ProductionMaterial } from "./production-material.js";
 import { type Permit2ExposureJournal } from "./production-journal-codec.js";
-export type Permit2ProductionState = "prepared" | "reserving" | "reserved" | "release_pending" | "released_unsubmitted" | "exposure_unknown" | "request_pending" | "terminal_pending" | "settled" | "expired_no_effect";
+/** Every state a Permit2 production record may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export declare const PERMIT2_PRODUCTION_STATES: readonly ["prepared", "reserving", "reserved", "release_pending", "released_unsubmitted", "exposure_unknown", "request_pending", "terminal_pending", "settled", "expired_no_effect"];
+export declare const PERMIT2_PRODUCTION_TERMINAL_STATES: readonly Permit2ProductionState[];
+export type Permit2ProductionState = typeof PERMIT2_PRODUCTION_STATES[number];
 export interface Permit2ProductionRecord {
     readonly schemaVersion: typeof PERMIT2_PRODUCTION_SCHEMA;
     readonly operationId: string;
@@ -53,7 +56,7 @@ export declare function publicPermit2Production(record: Permit2ProductionRecord)
     lifecycle: string;
     observeOnly: boolean;
     operationId: string;
-    state: Permit2ProductionState;
+    state: "prepared" | "reserved" | "released_unsubmitted" | "settled" | "reserving" | "release_pending" | "exposure_unknown" | "request_pending" | "terminal_pending" | "expired_no_effect";
     terminal: boolean;
     capability: string;
     chain: "eip155:43114";

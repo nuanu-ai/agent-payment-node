@@ -6,7 +6,7 @@ import { evmUint, validateEvmAmount, validateEvmAsset, type EvmAsset } from "./e
 import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, type DirectEvmChainId } from "./evm-direct-networks.js";
 import { directEvmStepBudget, type DirectEvmStep } from "./evm-direct-reads.js";
 import type { EvmBalanceSnapshot, EvmDirectReads, EvmFeeQuote, EvmRpcPort, EvmTransactionInput } from "./evm-ports.js";
-import type { Address, Economics, Hex, OperationRecord } from "./model.js";
+import { LOCAL_DIRECT_TERMINAL_STATES, type Address, type Economics, type Hex, type OperationRecord } from "./model.js";
 import type { RpcPort } from "./ports.js";
 import { canonicalAddress } from "./wallet-policy.js";
 import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
@@ -141,7 +141,7 @@ export function validateEvmOperation(operation: OperationRecord): void {
     completed: [], failed_before_effect: [], failed_confirmed_revert: [], failed_proven_superseded: [], abandoned_unknown: [],
   };
   if (operation.transitions[0]?.state !== "awaiting_approval" ||
-      operation.terminal !== ["completed", "failed_before_effect", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"].includes(operation.state)) {
+      operation.terminal !== LOCAL_DIRECT_TERMINAL_STATES.includes(operation.state)) {
     throw new ApnError("APN_STATE_CORRUPT", "EVM operation state is invalid.");
   }
   for (let index = 1; index < operation.transitions.length; index += 1) {

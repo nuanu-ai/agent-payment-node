@@ -8,14 +8,15 @@ import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 import { evmUint } from "./evm-asset.js";
 import { validateCoinbaseGaslessAllowlist } from "./coinbase-gasless-policy.js";
 import { formatAtomic, parseAtomic } from "./money.js";
-import type {
-  OperationRecord,
-  OperationState,
-  ProviderDirectBinding,
-  ProviderEffectReference,
-  ReceiptRecord,
-  Transition,
-  WalletRecord,
+import {
+  PROVIDER_DIRECT_TERMINAL_STATES,
+  type OperationRecord,
+  type OperationState,
+  type ProviderDirectBinding,
+  type ProviderEffectReference,
+  type ReceiptRecord,
+  type Transition,
+  type WalletRecord,
 } from "./model.js";
 
 const ZERO_HASH = "0".repeat(64);
@@ -223,10 +224,7 @@ function validateProviderDirect(operation: OperationRecord, binding: ProviderDir
     "abandoned_unknown", "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
   ];
   if (!providerStates.includes(operation.state)) stateCorrupt("Provider direct operation state is invalid.");
-  const terminalStates: readonly OperationState[] = [
-    "abandoned_unknown", "completed", "failed_before_effect", "failed_provider_rejected", "failed_confirmed_revert",
-  ];
-  if (operation.terminal !== terminalStates.includes(operation.state)) {
+  if (operation.terminal !== PROVIDER_DIRECT_TERMINAL_STATES.includes(operation.state)) {
     stateCorrupt("Provider direct terminal posture is invalid.");
   }
   if (

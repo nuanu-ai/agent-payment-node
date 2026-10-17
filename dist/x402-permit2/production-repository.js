@@ -8,6 +8,10 @@ import { assetUsageReservationId } from "../asset-usage-ledger.js";
 import { PERMIT2_PRODUCTION_SCHEMA, validatePermit2ProductionMaterial, reconstructPermit2ProductionMaterial } from "./production-material.js";
 import { validateExposureJournal, assertExposureAppend } from "./production-journal-codec.js";
 import { validatePermit2ProductionSigned } from "./production-signed.js";
+/** Every state a Permit2 production record may hold, and its outcomes (the record's `terminal` flag must equal membership). */
+export const PERMIT2_PRODUCTION_STATES = ["prepared", "reserving", "reserved", "release_pending", "released_unsubmitted", "exposure_unknown",
+    "request_pending", "terminal_pending", "settled", "expired_no_effect"];
+export const PERMIT2_PRODUCTION_TERMINAL_STATES = ["released_unsubmitted", "settled", "expired_no_effect"];
 const HASH = /^[a-f0-9]{64}$/u;
 export function permit2ProductionId(profile, key) {
     return sha256(`operation\0x402-permit2-production.v2\0${canonicalProfile(profile)}\0${canonicalIdempotencyKey(key)}`);
@@ -55,8 +59,8 @@ export function validatePermit2ProductionRecord(value) {
         corrupt();
     if (v.profileHash !== v.material.wallet.profileHash || !instant(v.createdAt) || !instant(v.updatedAt) || v.updatedAt < v.createdAt ||
         Date.parse(v.createdAt) !== v.material.signingSecond * 1000 ||
-        !["prepared", "reserving", "reserved", "release_pending", "released_unsubmitted", "exposure_unknown", "request_pending", "terminal_pending", "settled", "expired_no_effect"].includes(v.state) ||
-        v.terminal !== (["released_unsubmitted", "settled", "expired_no_effect"].includes(v.state)) ||
+        !PERMIT2_PRODUCTION_STATES.includes(v.state) ||
+        v.terminal !== PERMIT2_PRODUCTION_TERMINAL_STATES.includes(v.state) ||
         (["release_pending", "released_unsubmitted"].includes(v.state) && Date.parse(v.updatedAt) < Number(prepared.expiresAtUnix) * 1000) || typeof v.reservationStarted !== "boolean" ||
         (["reserving", "reserved", "exposure_unknown"].includes(v.state) && !v.reservationStarted) ||
         (v.state === "prepared" && v.reservationStarted) ||

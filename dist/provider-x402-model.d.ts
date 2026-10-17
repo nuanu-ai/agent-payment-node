@@ -8,7 +8,11 @@ import { type X402HttpRequestV1 } from "./x402-http-request.js";
 export type { ProviderX402TransactionRecoveryBinding } from "./provider-x402-transaction-recovery-model.js";
 export declare const PROVIDER_X402_STATE_VERSION: "apn.provider-x402.state.v1";
 export declare const PROVIDER_X402_HTTP_STATE_VERSION: "apn.provider-x402.state.v2";
-export type ProviderX402State = "preparing" | "awaiting_approval" | "started" | "settlement_pending" | "ambiguous_effect" | "completed" | "failed_before_effect" | "failed_settled_without_result" | "abandoned_unknown";
+/** Every state a provider-atomic x402 record may hold. */
+export declare const PROVIDER_X402_STATES: readonly ["preparing", "awaiting_approval", "started", "settlement_pending", "ambiguous_effect", "completed", "failed_before_effect", "failed_settled_without_result", "abandoned_unknown"];
+export type ProviderX402State = typeof PROVIDER_X402_STATES[number];
+/** Its outcomes: the record's `terminal` flag, and a receipt's terminal state, are exactly these. */
+export declare const PROVIDER_X402_TERMINAL_STATES: readonly ProviderX402State[];
 export interface ProviderX402Transition {
     readonly sequence: string;
     readonly at: string;

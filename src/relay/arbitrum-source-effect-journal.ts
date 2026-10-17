@@ -74,8 +74,10 @@ const HASH = /^[a-f0-9]{64}$/u;
 const TX = /^0x(?:[a-fA-F0-9]{2})+$/u;
 const UINT = /^(0|[1-9][0-9]*)$/u;
 const BLOCK_HASH = /^0x[a-f0-9]{64}$/u;
-const phases: readonly ArbitrumEffectPhase[] = ["pending", "signing_started", "sealed", "submitting",
+/** Every phase of an Arbitrum source effect. */
+export const ARBITRUM_EFFECT_PHASES: readonly ArbitrumEffectPhase[] = ["pending", "signing_started", "sealed", "submitting",
   "submitted", "unknown_finality", "confirmed", "failed", "approval_skipped", "abandoned_unsent"];
+const phases = ARBITRUM_EFFECT_PHASES;
 const iso = (value: unknown): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value)) &&
   new Date(value).toISOString() === value;
 const exact = (value: object, names: readonly string[]) => Object.keys(value).sort().join() === [...names].sort().join();

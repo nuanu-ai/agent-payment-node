@@ -16,7 +16,10 @@ import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridg
 import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
 
-export type CircleApprovalPhase = "prepared" | "signing_started" | "sealed" | "submitting" | "unknown_finality" | "completed" | "confirmed_revert" | "failed_before_effect";
+/** Every phase of a Circle Base USDC approval, and its outcomes (a safe receipt either way, or proven never sent). */
+export const CIRCLE_APPROVAL_PHASES = ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect"] as const;
+export type CircleApprovalPhase = typeof CIRCLE_APPROVAL_PHASES[number];
+export const CIRCLE_APPROVAL_RESOLVED_PHASES: readonly CircleApprovalPhase[] = ["completed", "confirmed_revert", "failed_before_effect"];
 export interface CircleApprovalRecord {
   readonly schemaVersion: "apn.circle-v2-approval.v1";
   readonly id: string;
@@ -270,7 +273,7 @@ export class CircleV2ApprovalExecutor {
     await this.journal.save(r); return r;
   }
   private async observe(r: CircleApprovalRecord): Promise<CircleApprovalRecord> {
-    if (r.phase === "completed" || r.phase === "confirmed_revert" || r.phase === "failed_before_effect" || r.phase === "prepared") return r;
+    if (CIRCLE_APPROVAL_RESOLVED_PHASES.includes(r.phase) || r.phase === "prepared") return r;
     if (r.submissionAttempts === 0 || r.transactionHash === null || r.rawTransaction === null) return await this.unknown(r, "no_submission_marker");
     try {
       if (await verifySigned(r.rawTransaction, r) !== r.transactionHash) throw new Error("signed hash");

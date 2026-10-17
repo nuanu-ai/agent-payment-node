@@ -1,10 +1,9 @@
-import { loadCircleApproval, type CircleApprovalRecord } from "../../lifi/circle-v2-approval-executor.js";
+import { CIRCLE_APPROVAL_RESOLVED_PHASES, loadCircleApproval, type CircleApprovalRecord } from "../../lifi/circle-v2-approval-executor.js";
 import { field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
 import { evmClaim, pastUnstartedDeadline } from "./family-claims.js";
 import { OPERATION_STATUS } from "./family-commands.js";
 
 const STORE: OperationStore = { directory: "circle-approvals", perProfile: false };
-const RESOLVED: readonly CircleApprovalRecord["phase"][] = ["completed", "confirmed_revert", "failed_before_effect"];
 
 /**
  * Circle Base USDC allowance effects. Execute refuses a `prepared` approval past its preparation expiry before signing;
@@ -17,7 +16,7 @@ export const circleApprovalAdapter: OperationFamilyAdapter<CircleApprovalRecord>
   // The ID is the digest of the profile and the exact prepared intent; there is no idempotency key.
   identity: record => ({ profileHash: record.profileHash, operationId: record.id, idempotencyHash: null, requestHash: null }),
   claims: record => readableClaims(() => [evmClaim(8453, record.preparation.transaction.from)]),
-  terminal: record => RESOLVED.includes(record.phase) || record.phase === "prepared" && pastUnstartedDeadline(record.preparation.expiresAt),
+  terminal: record => CIRCLE_APPROVAL_RESOLVED_PHASES.includes(record.phase) || record.phase === "prepared" && pastUnstartedDeadline(record.preparation.expiresAt),
   state: record => record.phase,
   salvage: raw => salvageRecord(raw, value => [salvageEvm(8453, field(value, "preparation", "transaction", "from"))]),
   view: async record => record,

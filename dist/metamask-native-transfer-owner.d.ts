@@ -40,6 +40,12 @@ export declare function runMetaMaskNativeTransfer(stateRoot: string, input: Meta
     effect_attempts: 0 | 1;
     proof_class: string;
 }>;
+/**
+ * Before a new transfer is admitted, every transfer of this account and chain that can never start is closed under its
+ * own operation lock. Best effort: one that cannot be closed now no longer blocks (the family's own rule reads it as
+ * resolved), and its next status closes it.
+ */
+export declare function closeExpiredNativeTransfersOf(stateRoot: string, chainId: number, payer: string): Promise<void>;
 export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean): Promise<{
     read_observation?: MetaMaskNativeReadObservation;
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
@@ -60,7 +66,8 @@ export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: s
 }>;
 /**
  * Owner release (R4) of a native transfer whose outcome stayed unknown after its quote expired. It observes once,
- * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed.
+ * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed. A transfer that
+ * never reached its effect marker and whose consent has passed is closed as failed before effect instead (no consent).
  */
 export declare function abandonMetaMaskNativeTransfer(stateRoot: string, idInput: string, approve: (intent: OperationAbandonIntent) => Promise<void>, now: () => Date): Promise<{
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
