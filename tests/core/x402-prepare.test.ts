@@ -2261,7 +2261,7 @@ test("payment identifier required true or false freezes exact declaration/value 
   }
 });
 
-test("x402 list and global scans bind each record to its profile directory and exact filename", async (t) => {
+test("x402 reads bind each record to its profile directory and exact filename", async (t) => {
   const renamedState = await temporaryState();
   t.after(renamedState.cleanup);
   await ensureWallet(makeCore({ root: renamedState.root, native: new TestNative() }));
@@ -2274,8 +2274,7 @@ test("x402 list and global scans bind each record to its profile directory and e
   const profileHash = store.profileHash("default");
   const directory = join(renamedState.root, "x402-operations", profileHash);
   await rename(join(directory, `${operationId}.json`), join(directory, `${"e".repeat(64)}.json`));
-  await assert.rejects(store.listX402Operations(profileHash), { code: "APN_STATE_CORRUPT" });
-  await assert.rejects(store.listAllX402Operations(), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(store.loadX402Operation(profileHash, "e".repeat(64)), { code: "APN_STATE_CORRUPT" });
 
   const movedState = await temporaryState();
   t.after(movedState.cleanup);
@@ -2294,8 +2293,7 @@ test("x402 list and global scans bind each record to its profile directory and e
     join(movedState.root, "x402-operations", sourceProfile, `${movedId}.json`),
     join(targetDirectory, `${movedId}.json`),
   );
-  await assert.rejects(movedStore.listX402Operations(targetProfile), { code: "APN_STATE_CORRUPT" });
-  await assert.rejects(movedStore.listAllX402Operations(), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(movedStore.loadX402Operation(targetProfile, movedId), { code: "APN_STATE_CORRUPT" });
 });
 
 test("protected x402 state rejects unsafe identifiers, non-canonical bytes, impossible time, and invalid chronology", async (t) => {

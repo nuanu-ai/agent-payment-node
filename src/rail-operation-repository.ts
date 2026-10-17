@@ -19,9 +19,8 @@ export class RailOperationRepository extends SecureStateStore {
     return operation;
   }
   async findOperation(operationId: string): Promise<RailOperationRecord | null> {
-    const matches = (await this.listAllOperations()).filter((operation) => operation.operationId === operationId);
-    if (matches.length > 1) corrupt();
-    return matches[0] ?? null;
+    stateIdentifier(operationId, "rail operation ID");
+    return await this.findInProfiles("rail-operations", async (profileHash) => await this.loadOperation(profileHash, operationId), corrupt);
   }
   async listOperations(profileHash: string): Promise<readonly RailOperationRecord[]> {
     stateIdentifier(profileHash, "rail profile hash");
@@ -33,15 +32,6 @@ export class RailOperationRepository extends SecureStateStore {
       if (value === null) corrupt();
       result.push(value);
     }
-    return result;
-  }
-  async listAllOperations(): Promise<readonly RailOperationRecord[]> {
-    const result: RailOperationRecord[] = [];
-    for (const entry of await this.readDirectory("rail-operations")) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) corrupt();
-      result.push(...await this.listOperations(entry.name));
-    }
-    if (new Set(result.map((operation) => operation.operationId)).size !== result.length) corrupt();
     return result;
   }
   async writeOperation(operation: RailOperationRecord): Promise<void> {

@@ -37,42 +37,13 @@ export class BridgeOperationRepository extends SecureStateStore {
   }
   async findStoredOperation(operationId: string): Promise<StoredBridgeOperationRecord | null> {
     stateIdentifier(operationId, "bridge operation ID");
-    const matches = (await this.listAllStoredOperations()).filter((op) => op.operationId === operationId);
-    if (matches.length > 1) bridgeCorrupt();
-    return matches[0] ?? null;
-  }
-  async listStoredOperations(profileHash: string): Promise<readonly StoredBridgeOperationRecord[]> {
-    stateIdentifier(profileHash, "bridge profile hash");
-    const directory = `bridge-operations/${profileHash}`;
-    const result: StoredBridgeOperationRecord[] = [];
-    for (const entry of await this.readDirectory(directory)) {
-      if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) bridgeCorrupt();
-      const op = await this.loadStoredOperation(profileHash, entry.name.slice(0, -5));
-      if (op === null) bridgeCorrupt();
-      result.push(op);
-    }
-    return result;
-  }
-  async listAllStoredOperations(): Promise<readonly StoredBridgeOperationRecord[]> {
-    const result: StoredBridgeOperationRecord[] = [];
-    for (const entry of await this.readDirectory("bridge-operations")) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) bridgeCorrupt();
-      result.push(...await this.listStoredOperations(entry.name));
-    }
-    if (new Set(result.map((op) => op.operationId)).size !== result.length) bridgeCorrupt();
-    return result;
+    return await this.findInProfiles("bridge-operations", async (profileHash) => await this.loadStoredOperation(profileHash, operationId), bridgeCorrupt);
   }
   async findOperation(operationId: string): Promise<BridgeOperationRecord | null> {
     const stored = await this.findStoredOperation(operationId);
     if (stored === null) return null;
     if (isLegacyBridgeOperation(stored)) bridgeCorrupt();
     return stored;
-  }
-  async listOperations(profileHash: string): Promise<readonly BridgeOperationRecord[]> {
-    return (await this.listStoredOperations(profileHash)).filter((op): op is BridgeOperationRecord => !isLegacyBridgeOperation(op));
-  }
-  async listAllOperations(): Promise<readonly BridgeOperationRecord[]> {
-    return (await this.listAllStoredOperations()).filter((op): op is BridgeOperationRecord => !isLegacyBridgeOperation(op));
   }
   async writeOperation(op: BridgeOperationRecord): Promise<void> {
     validateBridgeOperation(op); await this.ready();

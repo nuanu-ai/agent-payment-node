@@ -13,15 +13,7 @@ import type { ProfilePolicyApprovalIntent, ProfilePolicyApprovalPort } from "../
 import { TtyProfilePolicyApproval } from "../../src/policy-approval.js";
 import { StateStore } from "../../src/state.js";
 import type { ProfilePolicyBinding, ProfilePolicyPort, ProfilePolicyRecord, ProfilePolicySetInput } from "../../src/profile-policy.js";
-import {
-  TestClock,
-  TestNative,
-  TestProfilePolicy,
-  TestRpc,
-  ensureWallet,
-  makeCore,
-  temporaryState,
-} from "./helpers.js";
+import { TestClock, TestNative, TestProfilePolicy, TestRpc, ensureWallet, makeCore, temporaryState, savedX402Operations } from "./helpers.js";
 import { TestHttp } from "./x402-helpers.js";
 import { X402_URL } from "./x402-vectors.js";
 
@@ -265,7 +257,7 @@ test("new unattended x402 fails before payment effects for missing policy, overf
   });
   assert.equal(overResult.error?.code, "APN_WALLET_OVERFUNDED_FOR_UNATTENDED_X402");
   assert.equal(overHttp.calls.length, 1, "only the unpaid challenge is allowed");
-  assert.equal((await new StateStore(overfunded.root).listAllX402Operations()).length, 0);
+  assert.equal((await savedX402Operations(new StateStore(overfunded.root))).length, 0);
 
   const escalatedHttp = new TestHttp();
   const escalatedRpc = new TestRpc();
@@ -309,7 +301,7 @@ test("new unattended x402 fails before payment effects for missing policy, overf
   assert.equal(failed.error?.code, "APN_RPC_AMBIGUOUS");
   assert.equal(failedHttp.calls.length, 1, "only the unpaid challenge may precede the fresh balance failure");
   const failedState = new StateStore(rpcFailure.root);
-  assert.equal((await failedState.listAllX402Operations()).length, 0);
+  assert.equal((await savedX402Operations(failedState)).length, 0);
   assert.equal((await failedState.listX402Receipts(failedState.profileHash("default"))).length, 0);
 });
 

@@ -24,29 +24,7 @@ export class GaslessOperationRepository extends SecureStateStore {
   }
   async findOperation(operationId: string): Promise<GaslessOperationRecord | null> {
     stateIdentifier(operationId, "gasless operation ID");
-    const matches = (await this.listAllOperations()).filter((op) => op.operationId === operationId);
-    if (matches.length > 1) gaslessCorrupt();
-    return matches[0] ?? null;
-  }
-  async listOperations(profileHash: string): Promise<readonly GaslessOperationRecord[]> {
-    stateIdentifier(profileHash, "gasless profile hash");
-    const directory = `gasless-operations/${profileHash}`;
-    const result: GaslessOperationRecord[] = [];
-    for (const entry of await this.readDirectory(directory)) {
-      if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) gaslessCorrupt();
-      const op = await this.loadOperation(profileHash, entry.name.slice(0, -5));
-      if (op === null) gaslessCorrupt(); result.push(op);
-    }
-    return result;
-  }
-  async listAllOperations(): Promise<readonly GaslessOperationRecord[]> {
-    const result: GaslessOperationRecord[] = [];
-    for (const entry of await this.readDirectory("gasless-operations")) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/u.test(entry.name)) gaslessCorrupt();
-      result.push(...await this.listOperations(entry.name));
-    }
-    if (new Set(result.map((op) => op.operationId)).size !== result.length) gaslessCorrupt();
-    return result;
+    return await this.findInProfiles("gasless-operations", async (profileHash) => await this.loadOperation(profileHash, operationId), gaslessCorrupt);
   }
   async writeOperation(op: GaslessOperationRecord): Promise<void> {
     validateGaslessOperation(op); await this.ready();

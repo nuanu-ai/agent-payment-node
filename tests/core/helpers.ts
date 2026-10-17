@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { keccak256 } from "viem";
@@ -26,6 +26,10 @@ import {
   type ProfilePolicySetInput,
 } from "../../src/profile-policy.js";
 import { StateStore } from "../../src/state.js";
+import type { GaslessOperationRepository } from "../../src/gasless/operation-repository.js";
+import { isLegacyBridgeOperation } from "../../src/lifi/legacy-operation.js";
+import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
+import type { BridgeOperationRepository } from "../../src/lifi/operation-repository.js";
 import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy.js";
 
@@ -275,3 +279,34 @@ export function exactReceipt(): RpcReceipt {
     }],
   };
 }
+
+/**
+ * Every record a per-profile operation store holds (of one profile, or of all), read by name through the family's own
+ * loader; a loader that answers null for a name (another strategy's record) skips it. The stores keep no listing of
+ * their own: production finds operations through the operation index.
+ */
+export async function savedRecords<T>(root: string, store: string, load: (profileHash: string, operationId: string) => Promise<T | null>,
+  profileHash?: string): Promise<readonly T[]> {
+  const names = async (path: string) => {
+    try { return (await readdir(path)).sort(); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
+  };
+  const records: T[] = [];
+  const profiles = profileHash === undefined ? (await names(join(root, store))).filter(name => /^[a-f0-9]{64}$/u.test(name)) : [profileHash];
+  for (const profile of profiles) {
+    for (const name of await names(join(root, store, profile))) {
+      if (!/^[a-f0-9]{64}\.json$/u.test(name)) continue;
+      const record = await load(profile, name.slice(0, -".json".length));
+      if (record !== null) records.push(record);
+    }
+  }
+  return records;
+}
+export const savedGaslessOperations = (records: GaslessOperationRepository, profileHash?: string) =>
+  savedRecords(records.root, "gasless-operations", async (profile, id) => await records.loadOperation(profile, id), profileHash);
+/** Current-shape bridge journals only, as the bridge services read them. */
+export const savedBridgeOperations = async (records: BridgeOperationRepository, profileHash?: string) =>
+  (await savedRecords(records.root, "bridge-operations", async (profile, id) => await records.loadStoredOperation(profile, id), profileHash))
+    .filter((operation): operation is BridgeOperationRecord => !isLegacyBridgeOperation(operation));
+/** Local x402 purchases; a provider purchase saved in the same store is not one. */
+export const savedX402Operations = (state: StateStore, profileHash?: string) =>
+  savedRecords(state.root, "x402-operations", async (profile, id) => await state.loadX402Operation(profile, id), profileHash);
