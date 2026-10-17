@@ -43,6 +43,7 @@ import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js"
 import type { OrcaStableLegacyFinisher } from "./legacy/orca-stable/finisher.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
+import type { FinalizedReader } from "./evm-finalized-proof.js";
 export interface RelayExecutionConfirmationSummary {
     readonly operationId: string;
     readonly sourceChainId: 1;
@@ -131,6 +132,8 @@ export interface CoreDependencies {
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
+    /** Keyless public reads at a chain's finalized tag, for the R4 proofs of operations no family runtime observes. */
+    readonly finalizedRead?: FinalizedReader;
 }
 export declare class RuntimeContext {
     readonly relayPrepare?: RelayUnsignedPrepareService;
@@ -200,6 +203,7 @@ export declare class RuntimeContext {
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
+    readonly finalizedRead?: FinalizedReader;
     private readonly coinbaseRpcFactory?;
     private coinbaseRpcInstance?;
     private initialized;

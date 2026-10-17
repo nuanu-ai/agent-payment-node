@@ -5,54 +5,14 @@ import test from "node:test";
 import { keccak256 } from "viem";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { BRIDGE_DEPLOYMENT_PROOF_POLICY_CUTOVER, bridgeApprovalPolicyBinding, legacyBridgeApprovalPolicyHash } from "../../src/lifi/economics.js";
-import { adaptLegacyBridgeOperation } from "../../src/lifi/legacy-operation.js";
 import { bridgeIntentBinding, type BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import { BridgeOperationRepository } from "../../src/lifi/operation-repository.js";
-import { bridgeReceipt, legacyBridgeReceipt } from "../../src/lifi/receipt.js";
+import { bridgeReceipt } from "../../src/lifi/receipt.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { lifiFixture } from "./lifi-helpers.js";
+import { downgradeFixture, installLegacyFixture } from "./lifi-legacy-support.js";
 import { temporaryState } from "./helpers.js";
 import { findStored } from "./stored-operations.js";
-
-function downgradeFixture(record: BridgeOperationRecord): Record<string, any> {
-  const raw = structuredClone(record) as Record<string, any>;
-  delete raw.usageLease;
-  delete raw.intent.allowlist;
-  if (raw.destinationProof !== null) {
-    delete raw.destinationProof.nativeBalance;
-    delete raw.destinationProof.nativeTransfer;
-  }
-  const binding = { schemaVersion: raw.schemaVersion, kind: raw.kind, profileHash: raw.profileHash,
-    operationId: raw.operationId, idempotencyHash: raw.idempotencyHash, requestHash: raw.requestHash,
-    intent: raw.intent, envelopes: raw.effects.map((effect: any) => effect.envelope) };
-  raw.fingerprint = hashObject(binding);
-  if (raw.approval !== null) raw.approval.fingerprint = raw.fingerprint;
-  let previousHash = raw.fingerprint;
-  for (const transition of raw.transitions) {
-    delete transition.usageLease;
-    if (transition.destinationProof !== null) {
-      delete transition.destinationProof.nativeBalance;
-      delete transition.destinationProof.nativeTransfer;
-    }
-    if (transition.approval !== null) transition.approval.fingerprint = raw.fingerprint;
-    transition.previousHash = previousHash;
-    delete transition.transitionHash;
-    transition.transitionHash = hashObject(transition);
-    previousHash = transition.transitionHash;
-  }
-  delete raw.integrityHash;
-  raw.integrityHash = hashObject(raw);
-  return raw;
-}
-
-async function installLegacyFixture(root: string, record: BridgeOperationRecord) {
-  const raw = downgradeFixture(record), operationPath = join(root, "bridge-operations", raw.profileHash, `${raw.operationId}.json`);
-  const legacy = adaptLegacyBridgeOperation(raw), receipt = legacyBridgeReceipt(legacy);
-  const receiptPath = join(root, "bridge-receipts", raw.profileHash, `${raw.operationId}.json`);
-  await mkdir(dirname(operationPath), { recursive: true }); await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
-  await writeFile(operationPath, `${canonicalJson(raw)}\n`); await writeFile(receiptPath, `${canonicalJson(receipt)}\n`, { mode: 0o600 });
-  return { raw, receipt, operationPath, receiptPath };
-}
 
 function preProofBindingFixture(record: BridgeOperationRecord, policyHash = legacyBridgeApprovalPolicyHash(record.intent.materialization)):
   BridgeOperationRecord {

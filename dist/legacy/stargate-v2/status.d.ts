@@ -1,10 +1,9 @@
-import { BridgeHttps } from "../../lifi/https.js";
+import { type FinalizedChainRead } from "../../evm-finalized-proof.js";
+import type { BridgeHttps } from "../../lifi/https.js";
 import { LEGACY_CLOSURE_REASON, type LegacyStargateClosure } from "./closure.js";
 import { type LegacyStargateFamily, type LegacyStargateRecord } from "./reader.js";
-/** The three public reads the closure check makes, all on the record's own source chain. */
-export interface LegacyChainRead {
-    call(method: "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash", params: readonly unknown[]): Promise<unknown>;
-}
+/** The public reads the closure check makes, all on the record's own source chain (the shared finalized-nonce proof). */
+export type LegacyChainRead = FinalizedChainRead;
 /** The RPC of each record's signing chain; nothing else is read. */
 export declare const LEGACY_CLOSURE_RPC_ENV: Readonly<Record<LegacyStargateFamily, string>>;
 export type LegacyClosureCheck = {

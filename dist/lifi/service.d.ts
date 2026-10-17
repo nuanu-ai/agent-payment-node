@@ -624,7 +624,6 @@ export declare class BridgeService {
             native_principal_admitted: boolean;
         };
     }>;
-    status(operationId: string): Promise<StoredPublicBridgeOperation>;
     receipt(operationId: string): Promise<BridgeReceipt | Record<string, unknown>>;
     private dependencies;
     private preparation;

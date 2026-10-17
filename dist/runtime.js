@@ -65,6 +65,7 @@ export class RuntimeContext {
     providerTransactionEvidence;
     providerAuthorizationStore;
     operationAbandonApproval;
+    finalizedRead;
     coinbaseRpcFactory;
     coinbaseRpcInstance;
     initialized;
@@ -186,6 +187,8 @@ export class RuntimeContext {
             this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
         if (dependencies.operationAbandonApproval !== undefined)
             this.operationAbandonApproval = dependencies.operationAbandonApproval;
+        if (dependencies.finalizedRead !== undefined)
+            this.finalizedRead = dependencies.finalizedRead;
     }
     async ready() {
         this.initialized ??= this.state.initialize();
