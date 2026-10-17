@@ -18,12 +18,16 @@ import { GaszipFundingService } from "../../src/lifi/gaszip-direct-service.js";
 const SEI_ROUTE=GASZIP_DIRECT_ROUTES.sei,MEGA_ROUTE=GASZIP_DIRECT_ROUTES.mega,seiCodec=gaszipCodec(SEI_ROUTE),megaCodec=gaszipCodec(MEGA_ROUTE);
 import { metaMaskNativeOperationExists } from "../../src/metamask-native-transfer-owner.js";
 import { AssetUsageLedger, validateAssetUsageReservation } from "../../src/asset-usage-ledger.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
+import { namedProfileHash } from "../../src/operation-index/adapters/family-claims.js";
+import { StargateNativeService } from "../../src/stargate-v2/native-runtime.js";
+import { StargateTokenService } from "../../src/stargate-v2/token-runtime.js";
 
 /** The directories of the owner-bound families and the ledger rows that reference them; nothing else is kept in a case. */
 export const LEGACY_CORPUS_DIRECTORIES = [
   "relay-unsigned-operations", "relay-retirements", "relay-effect-journals", "relay-native-source-journals",
   "relay-arbitrum-source-effect-journals", "circle-v2-evm", "circle-external-claims", "circle-external-evidence", "circle-v2-nonce-retirements", "merchant-x402", "merchant-retirement", "merchant-effect-claims", "merchant-material", "mega-gaszip", "sei-gaszip",
-  "metamask-native-operations", "asset-usage",
+  "metamask-native-operations", "asset-usage", "stargate-v2-native", "stargate-v2-token",
 ] as const;
 const LEDGER_BASE_KEYS = new Set(["schemaVersion", "reservationId", "idempotencyHash", "policyDigest", "registryVersion", "account", "chain",
   "asset", "rail", "amountAtomic", "state", "reservedAt", "updatedAt", "effectAt", "outcomeDigest", "reservationDigest"]);
@@ -88,6 +92,7 @@ export async function readEveryLegacyRecord(root: string, at: Date): Promise<Rea
     // The native transfer holds its account through the operation index like every other family.
     await allowedOrBlocked(service.assertEvmAccountAvailable(op.context.profileHash, op.context.quote.chainId, op.context.quote.sender));
   }
+  for (const kind of await readStargateLegacy(root, service)) kinds.add(kind);
   for (const profileHash of profiles) await allowedOrBlocked(service.assertProfileAvailable(profileHash));
   const ledger = new AssetUsageLedger(root);
   for (const bucket of await directoryNames(root, "asset-usage")) {
@@ -98,6 +103,30 @@ export async function readEveryLegacyRecord(root: string, at: Date): Promise<Rea
       await ledger.usage(identity, at);
       const extra = Object.keys(record).filter((key) => !LEDGER_BASE_KEYS.has(key)).sort().join("+");
       kinds.add(`ledger:${record.rail}:${extra === "" ? "plain" : extra}:${record.state}`);
+    }
+  }
+  return kinds;
+}
+
+/**
+ * Stargate records of the schemas only unreleased builds wrote, through the operation index (their frozen read-only
+ * reader) and their family status. Without an RPC setting the status answers a terminal record locally and asks for the
+ * chain RPC for an open one (its closure check); it never finds the record corrupt and writes nothing.
+ */
+async function readStargateLegacy(root: string, service: OperationService): Promise<readonly string[]> {
+  const kinds: string[] = [], state = new StateStore(root), index = new OperationIndex(state), wrapping = { load: async () => Buffer.alloc(32) } as never;
+  for (const [directory, family, chainId, status] of [
+    ["stargate-v2-native", "stargate-native", 1, (id: string) => new StargateNativeService(state, wrapping, {}).status(id)],
+    ["stargate-v2-token", "stargate-token", 10, (id: string) => new StargateTokenService(state, wrapping, {}).status(id)],
+  ] as const) {
+    for (const name of await jsonNames(root, directory)) {
+      const entry = await index.find(name.slice(0, -".json".length));
+      assert.ok(entry !== null && entry.state !== "unreadable", `${directory}/${name} is indexed readable`);
+      const record = await index.loadRecord(entry) as { readonly schemaVersion: string; readonly phase: string; readonly profile: string; readonly owner: string };
+      kinds.push(`${family}:${record.schemaVersion}:${record.phase}`);
+      await allowedOrBlocked(service.assertEvmAccountAvailable(namedProfileHash(record.profile), chainId, record.owner));
+      try { assert.equal((await status(entry.operationId)).phase, record.phase); }
+      catch (error) { if (!(error instanceof ApnError) || error.code !== "APN_RPC_CONFIG") throw error; }
     }
   }
   return kinds;

@@ -34,6 +34,12 @@ export interface OperationFamilyAdapter<R = unknown> {
     identity(record: R): RecordIdentity;
     /** Account, provider and extra profile claims held while non-terminal; null when its accounts cannot be read. */
     claims(record: R): readonly OperationClaim[] | null;
+    /**
+     * False for a readable record APN can never advance (a frozen read-only schema): it holds only its `claims`, not its
+     * profile, because no signature of its own can follow and only its accounts may still have a transaction in flight.
+     * Absent means true: every other open record also holds `profile:<profileHash>`.
+     */
+    holdsProfile?(record: R): boolean;
     terminal(record: R, root: string): boolean | Promise<boolean>;
     /** The record's own state, reported as `blockingState`. */
     state(record: R): string;
