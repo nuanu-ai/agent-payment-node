@@ -1,6 +1,3 @@
-export type NormalizedProviderJson = null | boolean | number | string | readonly NormalizedProviderJson[] | {
-    readonly [key: string]: NormalizedProviderJson;
-};
 export declare const NORMALIZED_PROVIDER_JSON_LIMITS: Readonly<{
     maxDepth: 16;
     maxNodes: 4096;
@@ -16,5 +13,4 @@ export declare function canonicalizeNormalizedProviderJson(value: unknown): stri
  * known secret-bearing fields, which are redacted. Text heuristics would discard results the owner paid for.
  */
 export declare function canonicalizeSellerResultJson(value: unknown): string;
-export declare function isSafeNormalizedProviderJson(value: unknown): value is NormalizedProviderJson;
 export declare function isProtectedNormalizedProviderKey(value: string): boolean;

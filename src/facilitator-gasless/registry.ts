@@ -28,4 +28,3 @@ export const AVALANCHE_FACILITATOR = {
   authorizationStateSelector: keccak256(toHex("authorizationState(address,bytes32)")).slice(0, 10) as Hex,
 } as const;
 
-export type FacilitatorRegistry = typeof AVALANCHE_FACILITATOR;

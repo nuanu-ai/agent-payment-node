@@ -38,15 +38,6 @@ export function canonicalizeSellerResultJson(value) {
     appendValue(value, 0, state);
     return state.output.join("");
 }
-export function isSafeNormalizedProviderJson(value) {
-    try {
-        canonicalizeNormalizedProviderJson(value);
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
 function appendValue(value, depth, state) {
     if (depth > NORMALIZED_PROVIDER_JSON_LIMITS.maxDepth)
         invalid();
