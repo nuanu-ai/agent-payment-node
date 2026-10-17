@@ -19,7 +19,7 @@ import { FakeOrcaTokenRpc, POOL, USDC_IN, usdcUsdtPolicy } from "./orca-usdc-usd
 function reason(error: unknown): string { return error instanceof ApnError ? String(error.details?.reason ?? error.code) : String(error); }
 
 async function flow(root: string, mechanism: unknown = ORCA_STABLE_GUARDED_MECHANISM_PIN) {
-  let clockMs = Date.parse("2026-10-17T10:00:00.000Z"); const clock = { now: () => new Date(clockMs) };
+  let clockMs = Date.now(); const clock = { now: () => new Date(clockMs) };
   const owner = await orcaOwner(root), rpc = await FakeOrcaTokenRpc.create(owner.address);
   const policy = usdcUsdtPolicy(owner.address, clock.now(), mechanism as never);
   let printed = "", prompts = 0;
