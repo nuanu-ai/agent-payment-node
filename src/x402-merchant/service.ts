@@ -203,7 +203,8 @@ export class MerchantService {
         }
         o = await this.canonicalAudit(o, "verified", "merchant_canonical_verified", receipt);
         // Never infer new finalization from an old saved receipt. The original receipt and verdict remain immutable.
-        await this.owner.follow(o, receipt.status === "success" ? "finalized" : "failed_confirmed_revert",receipt);
+        // A delivery_failed payment was settled by this same call before it could become delivery_failed (below).
+        if (o.state !== "delivery_failed") await this.owner.follow(o, receipt.status === "success" ? "finalized" : "failed_confirmed_revert",receipt);
         if (!o.terminal && deliveryExhausted(o)) return await this.deliveryFailed(o);
         if (o.terminal || receipt.status !== "success" || !deliver) return o;
         if (o.deliveryAttempts.length % 2 === 1) {
