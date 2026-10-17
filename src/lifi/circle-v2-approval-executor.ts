@@ -5,7 +5,7 @@ import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import type { StateStore } from "../state.js";
-import { encodeFunctionData, getAddress, keccak256, parseAbi, parseTransaction, recoverTransactionAddress, serializeTransaction, type Hex, type TransactionSerialized } from "viem";
+import { encodeFunctionData, formatUnits, getAddress, keccak256, parseAbi, parseTransaction, recoverTransactionAddress, serializeTransaction, type Hex, type TransactionSerialized } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { approvalIncluded } from "./transaction.js";
 import { prepareCircleV2BaseUsdcApprovalReadOnly, type CircleV2ApprovalLimits, type CircleV2ApprovalPreparation, type CircleV2ApprovalStateReader } from "./circle-v2-approval-preparation.js";
@@ -14,12 +14,21 @@ import type { BridgeRpcPort } from "./ports.js";
 import { bridgeOwner } from "./owner.js";
 import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
+import { jsonRpcBatchReader, provesUnlanded, readEvmUnlandedEvidence, type EvmBatchRead, type EvmUnlandedEvidence } from "../evm-unlanded-proof.js";
+import { BridgeHttps } from "./https.js";
+import type { OperationAbandonApprovalPort } from "../operation-abandon-approval.js";
+import { BRIDGE_RPC_ENV } from "./rpc-transport.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
 
-/** Every phase of a Circle Base USDC approval, and its outcomes (a safe receipt either way, or proven never sent). */
-export const CIRCLE_APPROVAL_PHASES = ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect"] as const;
+/**
+ * Every phase of a Circle Base USDC approval, and its outcomes: a safe receipt either way, proven never sent, or proven
+ * never to land (another transaction took its nonce at finality while the node knows neither it nor a receipt).
+ */
+export const CIRCLE_APPROVAL_PHASES = ["prepared", "signing_started", "sealed", "submitting", "unknown_finality", "completed", "confirmed_revert", "failed_before_effect",
+  "failed_proven_superseded", "abandoned_unknown"] as const;
 export type CircleApprovalPhase = typeof CIRCLE_APPROVAL_PHASES[number];
-export const CIRCLE_APPROVAL_RESOLVED_PHASES: readonly CircleApprovalPhase[] = ["completed", "confirmed_revert", "failed_before_effect"];
+export const CIRCLE_APPROVAL_RESOLVED_PHASES: readonly CircleApprovalPhase[] = ["completed", "confirmed_revert", "failed_before_effect", "failed_proven_superseded",
+  "abandoned_unknown"];
 export interface CircleApprovalRecord {
   readonly schemaVersion: "apn.circle-v2-approval.v1";
   readonly id: string;
@@ -36,6 +45,8 @@ export interface CircleApprovalRecord {
   readonly submissionAttempts: 0 | 1;
   readonly observedAllowanceAtomic: string | null;
   readonly failureReason?: string;
+  /** `failed_proven_superseded` only: the payer's nonce at the `finalized` tag when status proved the approval can never land. */
+  readonly finalizedNonceAtomic?: string;
   readonly integrityHash: string;
 }
 export interface CircleApprovalRpc {
@@ -46,13 +57,27 @@ export interface CircleApprovalRpc {
   send(raw: Hex): Promise<Hex>;
   /** Returns a chain-verified receipt at safe finality, or null while unresolved. */
   observe(hash: Hex): Promise<{ readonly receipt: BridgeProtocolReceipt; readonly status: "success" | "reverted"; readonly safe: true } | null>;
+  /** One batch on the same endpoint: the payer's nonce at the `finalized` tag, and whether the node knows the transaction or a receipt. */
+  unlanded(payer: string, hash: Hex): Promise<EvmUnlandedEvidence>;
 }
 export interface CircleApprovalSigner {
   sign(record: CircleApprovalRecord): Promise<Hex>;
 }
 export function publicCircleApproval(record: CircleApprovalRecord) {
   const { rawTransaction: _raw, ...publicRecord } = record;
-  return publicRecord;
+  return { ...publicRecord, allowance: circleApprovalAllowance(record) };
+}
+/**
+ * What the approval leaves on chain. A completed one leaves the Base USDC allowance it set for the Circle V2 wrapper, which
+ * `apn circle source submit` spends; APN has no command that revokes it. Every other outcome changed no allowance.
+ */
+function circleApprovalAllowance(record: CircleApprovalRecord) {
+  const p = record.preparation;
+  if (record.phase === "completed") return { effect: "allowance_set", token: p.token, owner: p.transaction.from, spender: p.spender,
+    approvedAtomic: p.approvalCapAtomic, observedAtCompletionAtomic: record.observedAllowanceAtomic, spentBy: "apn circle source submit",
+    revoke: "none_in_apn: the allowance stays until a Circle source transfer spends it or another approve from this wallet replaces it" };
+  return { effect: record.phase === "abandoned_unknown" ? "unknown_may_still_land"
+    : CIRCLE_APPROVAL_RESOLVED_PHASES.includes(record.phase) ? "allowance_unchanged" : "unknown_until_resolved" };
 }
 
 /**
@@ -60,7 +85,7 @@ export function publicCircleApproval(record: CircleApprovalRecord) {
  * its own command session on the primary endpoint: a state read is one batch (chain identity, head, account, Base fee
  * inputs and the approval's own simulation), and the estimate and fee quote reuse it.
  */
-export function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort)): CircleApprovalRpc {
+export function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort), proofBatch: () => EvmBatchRead): CircleApprovalRpc {
   const rpcFor = typeof input === "function" ? input : () => input, first = rpcFor();
   if (first.chainId !== 8453) bridgeFailure("APN_RPC_CONFIG", "circle_approval_base_only");
   return {
@@ -94,6 +119,16 @@ export function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => Bridge
         receipt.chainId !== 8453 || receipt.transactionHash !== hash) bridgeFailure("APN_RPC_PROTOCOL", "circle_approval_receipt_binding");
       return { receipt, status: tx.status, safe: true };
     },
+    unlanded: async (payer, hash) => await readEvmUnlandedEvidence(proofBatch(), 8453, payer, hash),
+  };
+}
+
+/** The never-lands proof reads the same configured Base endpoint as every other approval read, in one batch. */
+export function circleApprovalProofBatch(environment: Readonly<Record<string, string | undefined>>): () => EvmBatchRead {
+  return () => {
+    const url = environment[BRIDGE_RPC_ENV[8453]];
+    if (url === undefined || url.length === 0) bridgeFailure("APN_RPC_CONFIG", `missing_${BRIDGE_RPC_ENV[8453]}`);
+    return jsonRpcBatchReader(new BridgeHttps(), url);
   };
 }
 
@@ -278,7 +313,13 @@ export class CircleV2ApprovalExecutor {
     try {
       if (await verifySigned(r.rawTransaction, r) !== r.transactionHash) throw new Error("signed hash");
       const found = await this.rpc.observe(r.transactionHash);
-      if (found === null) return await this.unknown(r);
+      if (found === null) {
+        // No safe receipt. Once another transaction took its nonce at finality and the node knows neither this one nor a
+        // receipt, the approval can never land: no allowance changed, and the payer's account is free again.
+        const evidence = await this.rpc.unlanded(r.preparation.transaction.from, r.transactionHash);
+        if (!provesUnlanded(evidence, r.preparation.transaction.nonceAtomic)) return await this.unknown(r);
+        r = update(r, { phase: "failed_proven_superseded", finalizedNonceAtomic: evidence.finalizedNonce }); await this.journal.save(r); return r;
+      }
       const receipt = found.receipt;
       if (found.safe !== true || receipt.chainId !== 8453 || receipt.transactionHash !== r.transactionHash) throw new Error("receipt identity");
       if (found.status === "reverted") {
@@ -296,6 +337,32 @@ export class CircleV2ApprovalExecutor {
       await this.journal.save(r); return r;
     } catch { return await this.unknown(r); }
   }
+}
+/**
+ * The owner exit (R4 exit 3) of an approval whose send may have left APN and that no proof decides yet: once its
+ * preparation expired, TTY consent ends it `abandoned_unknown`. Nothing is signed or sent; the transaction may still land
+ * and set the allowance. Reads only the state root, as `apn operation abandon` does; status remains the proof path.
+ */
+export async function abandonCircleApproval(state: StateStore, id: string, consent: OperationAbandonApprovalPort, now: () => number): Promise<CircleApprovalRecord> {
+  const journal = new CircleApprovalJournal(state.root), initial = await journal.load(id);
+  if (initial === null) bridgeFailure("APN_OPERATION_NOT_FOUND", "circle_approval_missing");
+  return await state.withLocks([`profile:${initial.profileHash}`, `operation:${id}`], async () => {
+    let r = await journal.load(id);
+    if (r === null) bridgeFailure("APN_STATE_CORRUPT", "circle_approval_disappeared");
+    if (r.phase === "abandoned_unknown") return r;
+    const refuse = (reason: string): never => bridgeFailure("APN_OPERATION_BLOCKED", reason, { operationId: id, state: r!.phase,
+      nextActions: [`apn operation status --operation ${id}`] });
+    if (CIRCLE_APPROVAL_RESOLVED_PHASES.includes(r.phase)) refuse("operation_already_terminal");
+    // An approval APN never sent resolves through status as failed_before_effect; only a possibly sent one is unknown.
+    if (r.submissionAttempts !== 1 || r.transactionHash === null) refuse("circle_approval_abandon_not_unknown");
+    if (now() < Date.parse(r.preparation.expiresAt)) refuse("circle_approval_abandon_before_expiry");
+    const p = r.preparation;
+    await consent.approve({ operationId: id, fingerprint: p.intentDigest, profile: r.profile, providerId: "circle-v2-base-usdc-approval",
+      walletAddress: p.transaction.from, recipient: p.spender, amountAtomic: p.approvalCapAtomic, amountDecimal: formatUnits(BigInt(p.approvalCapAtomic), 6),
+      chainLabel: "eip155:8453", assetLabel: `USDC (${p.token}) allowance`, unit: "USDC",
+      outcomeNote: `Approval outcome: UNKNOWN. Transaction ${r.transactionHash} may still land and set this allowance for the Circle V2 wrapper.` });
+    r = update(r, { phase: "abandoned_unknown" }); await journal.save(r); return r;
+  });
 }
 function failureReason(stage: "signing" | "post_sign_guard", error: unknown): string {
   if (error instanceof ApnError) return `${stage}:${error.code}`;

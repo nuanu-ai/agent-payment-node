@@ -83,9 +83,13 @@ function validate(value) {
             tx.maxPriorityFeePerGas?.toString() !== r.sourceCall.maxPriorityFeePerGas || (tx.accessList ?? []).length !== 0 ||
             tx.r === undefined || tx.s === undefined)
             fail();
-        if ((r.phase === "sealed") !== (r.submissionAttempts === 0))
+        // A sealed source was never sent; a superseded one may or may not have been; every other signed phase was sent once.
+        if (r.phase === "sealed" ? r.submissionAttempts !== 0 : r.phase !== "failed_proven_superseded" && r.submissionAttempts !== 1)
             fail();
     }
+    if ((r.phase === "failed_proven_superseded") !== (r.finalizedNonceAtomic !== undefined) || r.finalizedNonceAtomic !== undefined &&
+        (!/^(?:0|[1-9][0-9]*)$/u.test(r.finalizedNonceAtomic) || BigInt(r.finalizedNonceAtomic) <= BigInt(r.sourceCall.nonce)))
+        fail();
     if ((r.phase === "source_observed") !== (r.sourceReceiptStatus !== null && r.sourceReceiptHash !== null))
         fail();
     return r;
@@ -99,12 +103,15 @@ function nonceReservationPath(chainId, profileHash, payer, nonce) {
 function nonceReservation(record) {
     return nonceReservationPath(oneClickRecordLane(record).origin.chainId, record.profileHash, record.payer, record.sourceCall.nonce);
 }
-/** Where each phase may go next; `source_observed` (a safe source receipt, success or revert) is the only outcome. */
+/**
+ * Where each phase may go next. The outcomes: `source_observed` (a safe source receipt, success or revert) and
+ * `failed_proven_superseded` (another transaction took the source nonce at finality; this one can never land).
+ */
 export const ONECLICK_SOURCE_EDGES = {
-    prepared: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting"],
-    submitting: ["submitted_pending", "unknown_finality", "source_observed"],
-    submitted_pending: ["unknown_finality", "source_observed"],
-    unknown_finality: ["source_observed"], source_observed: []
+    prepared: ["signing_started"], signing_started: ["sealed"], sealed: ["submitting", "failed_proven_superseded"],
+    submitting: ["submitted_pending", "unknown_finality", "source_observed", "failed_proven_superseded"],
+    submitted_pending: ["unknown_finality", "source_observed", "failed_proven_superseded"],
+    unknown_finality: ["source_observed", "failed_proven_superseded"], source_observed: [], failed_proven_superseded: []
 };
 export class OneClickSourceJournal extends SecureStateStore {
     path(id) { stateIdentifier(id, "operation ID"); return `oneclick-source/${id}.json`; }
