@@ -26,8 +26,8 @@ for (const sponsor of [false, true]) for (const mode of ["reserved", "exposed"] 
       "two POSTs: no chain/header recheck and no re-read of immutable proxy/Permit2 code or the token domain");
     assert.deepEqual(await f.journal.findOperation(id), before); // Read-only fence never changes journal/lease.
     if (mode === "exposed") assert.notEqual(result.projection.originalLeaseDigest, result.projection.currentLeaseDigest);
-    assert.equal((await f.fence.consume(result.fact, id, mode)).outcome, "checked");
-    await assert.rejects(f.fence.consume(result.fact, id, mode));
+    assert.equal((await f.fence.consume(result.fact!, id, mode)).outcome, "checked");
+    f.advance(7); await assert.rejects(f.fence.consume(result.fact!, id, mode), "an observation older than 5 s is refused");
     const serialized = JSON.stringify(result);
     for (const secret of ["private", f.permit2Signature, f.input.rpcUrl, "bodyBase64"]) assert.equal(serialized.includes(secret), false);
   });
@@ -66,31 +66,20 @@ for (const fault of ["revocation", "wallet", "clock"] as const) test(`owner ${fa
   };
   const result = await f.fence.check(id, "reserved"); assert.equal(result.fact, null); assert.equal(result.projection.outcome, "hold");
 });
-test("raw, clone, serialized, wrong operation/mode and stale private facts refuse consumption", async t => {
-  const f = await setup(t), id = f.record.operationId, checked = await f.fence.check(id, "reserved"); assert.ok(checked.fact);
-  await assert.rejects(f.fence.consume({ ...checked.fact }, id, "reserved"));
-  await assert.rejects(f.fence.consume(JSON.parse(JSON.stringify(checked.fact)), id, "reserved"));
-  await assert.rejects(f.fence.consume(checked.projection as any, id, "reserved"));
-  await assert.rejects(f.fence.consume(checked.fact, "f".repeat(64), "reserved"));
-  await assert.rejects(f.fence.consume(checked.fact, id, "exposed"));
-  f.advance(7); await assert.rejects(f.fence.consume(checked.fact, id, "reserved"));
+test("a fact is a plain observation: a clone is equal, but another operation, mode, record, lease, wallet or a stale one is refused", async t => {
+  const f = await setup(t), id = f.record.operationId, checked = await f.fence.check(id, "reserved"), fact = checked.fact!; assert.ok(fact);
+  assert.equal((await f.fence.consume(structuredClone(fact), id, "reserved")).outcome, "checked");
+  for (const changed of [{ ...fact, recordHash: "f".repeat(64) }, { ...fact, currentLeaseDigest: "f".repeat(64) }, { ...fact, walletHash: "f".repeat(64) },
+    { ...fact, outcome: "hold" as const }, { ...fact, capturedAt: "not-a-time" }] as typeof fact[])
+    await assert.rejects(f.fence.consume(changed, id, "reserved"));
+  await assert.rejects(f.fence.consume(fact, "f".repeat(64), "reserved"));
+  await assert.rejects(f.fence.consume(fact, id, "exposed"));
+  f.advance(7); await assert.rejects(f.fence.consume(fact, id, "reserved"));
   await assert.rejects(f.fence.check({ operationId: id } as any, "reserved"));
-});
-test("runtime-reflected issuance entry cannot admit a clone or duplicate genuine consumption", async t => {
-  const f = await setup(t), id = f.record.operationId, checked = await f.fence.check(id, "reserved"); assert.ok(checked.fact);
-  const clone = Object.freeze({ ...checked.fact });
-  // Try transplanting genuine provenance through any reflected own issuance map, without monkey-patching methods.
-  for (const key of Reflect.ownKeys(f.fence)) {
-    const candidate: unknown = Reflect.get(f.fence, key);
-    if (candidate instanceof WeakMap && candidate.has(checked.fact)) candidate.set(clone, candidate.get(checked.fact));
-  }
-  await assert.rejects(f.fence.consume(clone, id, "reserved"));
-  assert.equal((await f.fence.consume(checked.fact, id, "reserved")).outcome, "checked");
-  await assert.rejects(f.fence.consume(checked.fact, id, "reserved"));
 });
 test("reserved observation cannot cross risk mutation and exposed exact self hold can be freshly checked", async t => {
   const f = await setup(t), id = f.record.operationId, result = await f.fence.check(id, "reserved"); assert.ok(result.fact);
-  await f.journal.markSignatureRisk(id); await assert.rejects(f.fence.consume(result.fact, id, "reserved"));
+  await f.journal.markSignatureRisk(id); await assert.rejects(f.fence.consume(result.fact!, id, "reserved"));
   assert.equal((await f.fence.check(id, "exposed")).projection.outcome, "checked");
 });
 test("exact own exposed hold does not exclude a foreign direct-transfer conflict", async t => {

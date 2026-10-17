@@ -7,6 +7,9 @@ import { assertPermit2OwnerLocked } from "./production-owner-admission.js";
 import { reconstructPermit2ProductionMaterial } from "./production-material.js";
 import { productionUsageIdentity, productionUsageKey } from "./production-repository.js";
 import { assertSigningTime } from "./production-signing-facts.js";
+export function permit2SavedIdentity(record, lease) {
+    return Object.freeze({ recordHash: record.integrityHash, leaseDigest: lease.reservationDigest, walletHash: sha256(canonicalJson(record.material.wallet)) });
+}
 /** Only an owned exact self lease is excluded; no caller record or daily usage is accepted. */
 export async function signingOwnerFence(state, records, id, mode, clock, expected) {
     const record = await records.findOperation(id);
@@ -28,7 +31,7 @@ export async function signingOwnerFence(state, records, id, mode, clock, expecte
         assertSigningTime(current, clock());
     });
     // All returned material is repository-owned; compare canonical records, not caller assertions.
-    if (expected !== undefined && canonicalJson(record.material.wallet) !== canonicalJson(expected.record.material.wallet))
+    if (expected !== undefined && sha256(canonicalJson(record.material.wallet)) !== expected.walletHash)
         blocked();
     return { record, lease };
 }
@@ -40,7 +43,7 @@ export function checkedSigningLease(record, lease, mode, expected) {
         lease.idempotencyHash !== sha256(`asset-usage-idempotency\0${productionUsageKey(id)}`) ||
         lease.state !== (mode === "reserved" ? "reserved" : "unknown_finality") ||
         mode === "reserved" && lease.reservationDigest !== record.usageReservationDigest ||
-        expected !== undefined && (record.integrityHash !== expected.record.integrityHash || lease.reservationDigest !== expected.lease.reservationDigest))
+        expected !== undefined && (record.integrityHash !== expected.recordHash || lease.reservationDigest !== expected.leaseDigest))
         blocked();
     return lease;
 }

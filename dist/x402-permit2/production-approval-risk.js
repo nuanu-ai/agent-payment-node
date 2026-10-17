@@ -6,9 +6,13 @@ import { Permit2ProductionJournal } from "./production-journal.js";
 import { Permit2ProductionPreparation } from "./production-prepare.js";
 import { publicPermit2Production } from "./production-repository.js";
 import { Permit2ProductionSigningFence } from "./production-signing-fence.js";
-import { Permit2ForegroundApprovalAuthority, assertCurrentPermit2ForegroundApproval, revokePermit2ForegroundApproval } from "./production-approval-provenance.js";
+import { sendPermit2Production } from "./production-send.js";
+import { Permit2ForegroundApprovalAuthority, assertPermit2ApprovalCurrent, permit2Now } from "./production-approval-provenance.js";
 import { TtyPermit2ForegroundApproval } from "./production-approval.js";
-/** No-key production wiring. Returned continuation is private provenance, not signing/HTTP authority. */
+/**
+ * The paid Permit2 path in one process: foreground approval, the first exposure (ledger hold), one signature under the
+ * saved record, one request marker and one HTTPS attempt. Each step re-checks the saved record; nothing private escapes.
+ */
 export class Permit2ApprovalRiskCoordinator {
     #journal;
     #preparation;
@@ -17,20 +21,19 @@ export class Permit2ApprovalRiskCoordinator {
     #paidAuthority;
     #native;
     #endpoint;
+    #clock;
     constructor(root, endpoint, native, preparation, clock = () => new Date(), approval = new TtyPermit2ForegroundApproval()) {
-        const capability = LocalWalletNative.resolvePermit2LocalCapability(native, root);
-        if (!(native instanceof LocalWalletNative) || Object.getPrototypeOf(native) !== LocalWalletNative.prototype)
-            blocked();
-        this.#native = native;
+        this.#native = LocalWalletNative.permit2Signer(native, root);
         this.#endpoint = endpoint;
+        this.#clock = clock;
         if (preparation.records.root !== root)
             blocked();
         this.#preparation = preparation;
         this.#journal = new Permit2ProductionJournal(root, preparation, clock);
         this.#fence = new Permit2ProductionSigningFence(root, endpoint, clock);
-        this.#authority = new Permit2ForegroundApprovalAuthority(this.#journal, this, native, capability, approval, clock);
+        this.#authority = new Permit2ForegroundApprovalAuthority(root, approval, clock);
         // New paid CLI closure owns default foreground TTY; lower-level run remains trusted configurable wiring.
-        this.#paidAuthority = new Permit2ForegroundApprovalAuthority(this.#journal, this, native, capability, new TtyPermit2ForegroundApproval(), clock);
+        this.#paidAuthority = new Permit2ForegroundApprovalAuthority(root, new TtyPermit2ForegroundApproval(), clock);
     }
     /** Same-process paid enclosure. No continuation, signer material or HTTP observation escapes. */
     async signAndSubmitOnce(id) {
@@ -48,15 +51,10 @@ export class Permit2ApprovalRiskCoordinator {
                 current = await this.#journal.findOperation(id) ?? current;
                 return status();
             }
-            const signed = await LocalWalletNative.prototype.signPermit2Production.call(this.#native, this.#journal, this.#fence, id, approved.continuation);
-            const begun = await LocalWalletNative.prototype.beginPermit2ProductionRequest.call(this.#native, this.#journal, this.#fence, id, signed.signingOrigin);
-            if (begun.requestGrant === null) {
-                current = await this.#journal.findOperation(id) ?? current;
-                return status();
-            }
-            const sent = await LocalWalletNative.prototype.submitPermit2Production.call(this.#native, this.#journal, this.#fence, id, begun.requestGrant);
+            const signed = await LocalWalletNative.signPermit2Production(this.#native, this.#fence, this.#journal, approved.continuation, this.#clock);
+            const sent = await sendPermit2Production(this.#journal, this.#fence, signed.origin, this.#clock);
             const results = new Permit2ProductionResults(new StateStore(this.#journal.root), this.#journal);
-            if (sent.outcome.kind === "observed") {
+            if (sent.outcome?.kind === "observed") {
                 await results.recordHttp(id, sent.outcome.observation);
                 return await results.observe(id, this.#endpoint);
             }
@@ -73,7 +71,6 @@ export class Permit2ApprovalRiskCoordinator {
     }
     async #runWithAuthority(operationId, purpose, authority) {
         const id = operationId;
-        let proof;
         const owned = await this.#journal.findOperation(id);
         if (owned === null)
             blocked();
@@ -81,28 +78,22 @@ export class Permit2ApprovalRiskCoordinator {
             const record = owned.exposureJournal !== undefined && !owned.terminal ? await this.#journal.confirmHold(id) : owned;
             return Object.freeze({ status: publicPermit2Production(record), continuation: null });
         }
-        try {
-            proof = await authority.approveOwned(id, purpose);
-            const current = await this.#journal.findOperation(id);
-            if (current === null)
-                blocked();
-            if (current.exposureAt !== null || current.exposureJournal !== undefined || current.terminal) {
-                const record = current.exposureJournal !== undefined && !current.terminal ? await this.#journal.confirmHold(id) : current;
-                return Object.freeze({ status: publicPermit2Production(record), continuation: null });
-            }
-            assertCurrentPermit2ForegroundApproval(proof, this.#journal, current);
-            await this.#preparation.assertCurrentOwner(id);
-            const checked = await this.#fence.check(id, "reserved");
-            if (checked.fact === null)
-                blocked();
-            await this.#fence.consume(checked.fact, id, "reserved");
-            const result = await this.#journal.markApprovedSignatureRisk(id, proof);
-            return Object.freeze({ status: publicPermit2Production(result.record), continuation: result.continuation });
+        const approval = await authority.approveOwned(id, purpose);
+        const current = await this.#journal.findOperation(id);
+        if (current === null)
+            blocked();
+        if (current.exposureAt !== null || current.exposureJournal !== undefined || current.terminal) {
+            const record = current.exposureJournal !== undefined && !current.terminal ? await this.#journal.confirmHold(id) : current;
+            return Object.freeze({ status: publicPermit2Production(record), continuation: null });
         }
-        finally {
-            if (proof !== undefined)
-                revokePermit2ForegroundApproval(proof);
-        }
+        assertPermit2ApprovalCurrent(approval, current, permit2Now(this.#clock));
+        await this.#preparation.assertCurrentOwner(id);
+        const checked = await this.#fence.check(id, "reserved");
+        if (checked.fact === null)
+            blocked();
+        await this.#fence.consume(checked.fact, id, "reserved");
+        const result = await this.#journal.markApprovedSignatureRisk(id, approval);
+        return Object.freeze({ status: publicPermit2Production(result.record), continuation: result.continuation });
     }
 }
 function blocked() { throw new ApnError("APN_OPERATION_BLOCKED", "Permit2 foreground continuation is unavailable; existing risk is observe-only."); }

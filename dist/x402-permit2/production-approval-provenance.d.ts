@@ -1,38 +1,27 @@
-import type { NativePort } from "../ports.js";
-import type { Permit2LocalCapability } from "./production-native-capability.js";
 import { type Permit2ProductionRecord } from "./production-repository.js";
-import type { Permit2ProductionJournal } from "./production-journal.js";
 import { type Permit2ApprovalPurpose, type Permit2ForegroundApprovalPort } from "./production-approval.js";
-export interface Permit2ForegroundApprovalProof {
-    readonly kind: "permit2-foreground-approval-proof";
-}
-interface Issued {
-    readonly journal: Permit2ProductionJournal;
-    readonly controller: object;
-    readonly native: NativePort;
-    readonly capability: Permit2LocalCapability;
-    readonly nativeState: object;
-    readonly root: string;
-    readonly purpose: Permit2ApprovalPurpose;
+/** How long a foreground approval may be used after the owner completed it. */
+export declare const PERMIT2_APPROVAL_WINDOW_MS = 60000;
+/**
+ * What the owner approved at the foreground prompt: a plain value. Only the paid CLI path shows the prompt and then
+ * signs, and every later step re-checks the value against the saved record and the clock (assertPermit2ApprovalCurrent).
+ */
+export interface Permit2ForegroundApproval {
     readonly operationId: string;
+    readonly purpose: Permit2ApprovalPurpose;
     readonly materialHash: string;
     readonly displayHash: string;
     readonly fingerprint: string;
     readonly completedAt: number;
-    readonly clock: () => Date;
-    claimed: boolean;
 }
-export type Permit2ApprovalBinding = Readonly<Omit<Issued, "claimed">>;
-/** Trusted wiring; the only UI-proof issuer performs actual owned disclosure and foreground approval. */
+/** Shows one reserved operation at the foreground prompt; no key, signing or transport is involved. */
 export declare class Permit2ForegroundApprovalAuthority {
     #private;
-    constructor(journal: Permit2ProductionJournal, controller: object, native: NativePort, capability: Permit2LocalCapability, approval: Permit2ForegroundApprovalPort, clock: () => Date);
-    approveOwned(id: string, purpose?: Permit2ApprovalPurpose): Promise<Permit2ForegroundApprovalProof>;
+    constructor(root: string, approval: Permit2ForegroundApprovalPort, clock: () => Date);
+    approveOwned(id: string, purpose?: Permit2ApprovalPurpose): Promise<Permit2ForegroundApproval>;
 }
-/** Read-only recognition before fresh RPC. Atomic claiming still occurs only under the journal's first-write locks. */
-export declare function assertCurrentPermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal, record: Permit2ProductionRecord): void;
-/** Recognizes only an actual privately issued UI proof; there is no caller-authoritative time. */
-export declare function claimPermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal, record: Permit2ProductionRecord): Permit2ApprovalBinding;
-export declare function assertClaimedPermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof, journal: Permit2ProductionJournal, record: Permit2ProductionRecord): void;
-export declare function revokePermit2ForegroundApproval(proof: Permit2ForegroundApprovalProof): void;
-export {};
+/** The approval names exactly what `record` displays and is at most 60 s old at `at`; returns `at`. */
+export declare function assertPermit2ApprovalCurrent(approval: Permit2ForegroundApproval, record: Permit2ProductionRecord, at: Date): Date;
+/** The approval is at most 60 s old at `at`, and `at` is not before it. */
+export declare function assertPermit2ApprovalWindow(approval: Permit2ForegroundApproval, at: Date): void;
+export declare function permit2Now(clock: () => Date): Date;

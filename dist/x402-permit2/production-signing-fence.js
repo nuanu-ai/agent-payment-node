@@ -6,13 +6,13 @@ import { permit2ProductionOperationDigest } from "./production-signed.js";
 import { Permit2ObserverRpc } from "./production-observer-rpc.js";
 import { assertObserverChain, observerBlock } from "./production-observer-facts.js";
 import { signingCalls, assertSigningReads, assertSigningTime } from "./production-signing-facts.js";
-import { signingOwnerFence } from "./production-signing-owner.js";
+import { permit2SavedIdentity, signingOwnerFence } from "./production-signing-owner.js";
 import { Permit2MetadataLockOwner } from "./production-signing-scope.js";
+export const PERMIT2_SIGNING_FACT_MAX_AGE_MS = 5_000;
 /** Actual read-only observation only. Never human approval, custody permission, or transport authority. */
 export class Permit2ProductionSigningFence {
     #state;
     #records;
-    #facts = new WeakMap();
     #scopes;
     #endpoint;
     #clock;
@@ -25,68 +25,20 @@ export class Permit2ProductionSigningFence {
         this.#records = new Permit2ProductionRepository(root);
         this.#scopes = new Permit2MetadataLockOwner(this.#state, this.#records);
     }
+    get root() { return this.#state.root; }
     #now = () => {
         const now = this.#clock();
         if (!(now instanceof Date) || !Number.isSafeInteger(now.getTime()) || now.getTime() < 0)
             invalid();
         return new Date(now.getTime());
     };
-    static assertNativeScope(fence, scope, root, id) {
-        if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)
-            invalid();
-        fence.#scopes.assert(scope, id, "exposed");
-    }
-    static async withNativeScope(fence, root, id, action) {
-        identity(id, "exposed");
-        if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)
-            invalid();
-        return fence.#scopes.within(id, "exposed", fence.#now, action);
-    }
-    static async nativeScopeOwner(fence, scope, root, id) {
-        this.assertNativeScope(fence, scope, root, id);
-        const owned = await fence.#scopes.owner(scope, id, "exposed", fence.#now);
-        this.assertNativeScope(fence, scope, root, id);
-        freeze(owned);
-        return owned;
-    }
-    static async checkNativeScoped(fence, scope, root, id) {
-        this.assertNativeScope(fence, scope, root, id);
-        return fence.#runCheck(id, "exposed", scope);
-    }
-    static async consumeNativeScoped(fence, scope, fact, root, id) {
-        this.assertNativeScope(fence, scope, root, id);
-        return fence.#consumeOwned(fact, id, "exposed", scope);
-    }
-    static assertNativeDispatchScope(fence, scope, root, id) {
-        identity(id, "exposed");
-        if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)
-            invalid();
-        fence.#scopes.assert(scope, id, "dispatch");
-    }
-    static assertNativeDispatchTime(fence, scope, root, id, at) {
-        this.assertNativeDispatchScope(fence, scope, root, id);
-        fence.#scopes.assertTime(scope, id, "dispatch", at);
-    }
-    static async withNativeDispatchScope(fence, root, id, action) {
-        identity(id, "exposed");
-        if (Object.getPrototypeOf(fence) !== Permit2ProductionSigningFence.prototype || fence.#state.root !== root)
-            invalid();
-        return fence.#scopes.within(id, "dispatch", fence.#now, action);
-    }
-    static async nativeDispatchScopeOwner(fence, scope, root, id) {
-        this.assertNativeDispatchScope(fence, scope, root, id);
-        const owned = await fence.#scopes.owner(scope, id, "dispatch", fence.#now);
-        this.assertNativeDispatchScope(fence, scope, root, id);
-        freeze(owned);
-        return owned;
-    }
     async check(operationId, mode) {
         return this.#runCheck(operationId, mode);
     }
-    /** Scope owns actual metadata locks only; the callback receives no key/signing grant. */
+    /** Holds the operation's metadata locks around `action`; the scope grants no key, signing or transport. */
     async withScope(operationId, mode, action) {
         const id = operationId, selected = mode;
-        identity(id, selected);
+        identity(id, selected, true);
         return this.#scopes.within(id, selected, this.#now, action);
     }
     async checkScoped(scope, operationId, mode) {
@@ -94,6 +46,20 @@ export class Permit2ProductionSigningFence {
         identity(id, selected);
         this.#scopes.assert(scope, id, selected);
         return this.#runCheck(id, selected, scope);
+    }
+    /** The saved operation and lease, re-read under the held scope, optionally required to equal `expected`. */
+    async scopeOwner(scope, operationId, mode, expected) {
+        const id = operationId, selected = mode;
+        identity(id, selected, true);
+        const owned = await this.#scopes.owner(scope, id, selected, this.#now, expected);
+        this.#scopes.assert(scope, id, selected);
+        freeze(owned);
+        return owned;
+    }
+    /** Owner identity, policy, caps and the signing window at `at`, against what the held scope last read. */
+    assertScopeTime(scope, operationId, mode, at) {
+        identity(operationId, mode, true);
+        this.#scopes.assertTime(scope, operationId, mode, at);
     }
     async #runCheck(operationId, mode, scope) {
         const id = operationId, selected = mode;
@@ -113,7 +79,7 @@ export class Permit2ProductionSigningFence {
                 const block = observerBlock(first[1], "finalized");
                 assertSigningTime(context.record, this.#now(), block);
                 assertSigningReads(context.record, await rpc.batch(signingCalls(context.record, block)));
-                await this.#owner(id, selected, scope, context);
+                await this.#owner(id, selected, scope, permit2SavedIdentity(context.record, context.lease));
                 open(rpc.signal);
                 const captured = this.#now();
                 assertSigningTime(context.record, captured, block);
@@ -135,9 +101,7 @@ export class Permit2ProductionSigningFence {
                 challengeHash: record.material.checked.challengeHash, originalLeaseDigest: record.usageReservationDigest,
                 currentLeaseDigest: lease.reservationDigest, capturedAt: checked.captured.toISOString(), blockNumber: checked.block.number,
                 blockHash: checked.block.hash, rpc: rpc.metrics() });
-            const fact = Object.freeze({ kind: "checked-permit2-signing-observation" });
-            this.#facts.set(fact, { context: checked.context, projection, ...(scope === undefined ? {} : { scope }) });
-            return Object.freeze({ projection, fact });
+            return Object.freeze({ projection, fact: projection });
         }
         catch {
             return Object.freeze({ projection: Object.freeze({ operationId: id, mode: selected, outcome: "hold", operationDigest: null,
@@ -151,45 +115,48 @@ export class Permit2ProductionSigningFence {
             rpc.close();
         }
     }
-    /** Single-use private provenance; owned lifecycle/lease/owner and trusted age are rechecked, never caller facts. */
+    /** Re-checks a fact: the saved record, lease and wallet binding are unchanged and the observation is under 5 s old. */
     async consume(fact, operationId, mode) {
-        return this.#consumeOwned(fact, operationId, mode);
+        return this.#confirm(fact, operationId, mode);
     }
     async consumeScoped(scope, fact, operationId, mode) {
         const id = operationId, selected = mode;
         identity(id, selected);
         this.#scopes.assert(scope, id, selected);
-        return this.#consumeOwned(fact, id, selected, scope);
+        return this.#confirm(fact, id, selected, scope);
     }
-    async #consumeOwned(fact, operationId, mode, scope) {
+    async #confirm(fact, operationId, mode, scope) {
         const id = operationId, selected = mode;
         identity(id, selected);
-        const saved = this.#facts.get(fact);
-        if (saved === undefined || saved.scope !== scope || saved.projection.operationId !== id || saved.projection.mode !== selected)
+        if (!isFact(fact) || fact.operationId !== id || fact.mode !== selected)
             invalid();
         const assertAge = () => {
-            const now = this.#now(), at = Date.parse(saved.projection.capturedAt);
-            if (now.getTime() < at || now.getTime() - at > 5_000)
+            const now = this.#now().getTime(), at = Date.parse(fact.capturedAt);
+            if (!Number.isSafeInteger(at) || now < at || now - at > PERMIT2_SIGNING_FACT_MAX_AGE_MS)
                 invalid();
-            assertSigningTime(saved.context.record, now);
         };
         assertAge();
-        await this.#owner(id, selected, scope, saved.context);
+        const owned = await this.#owner(id, selected, scope, { recordHash: fact.recordHash, leaseDigest: fact.currentLeaseDigest, walletHash: fact.walletHash });
         if (scope !== undefined)
             this.#scopes.assert(scope, id, selected);
         assertAge();
-        if (this.#facts.get(fact) !== saved)
-            invalid();
-        this.#facts.delete(fact);
-        return saved.projection;
+        assertSigningTime(owned.record, this.#now());
+        return fact;
     }
     async #owner(id, mode, scope, expected) {
         return scope === undefined ? signingOwnerFence(this.#state, this.#records, id, mode, this.#now, expected) :
             this.#scopes.owner(scope, id, mode, this.#now, expected);
     }
 }
-function identity(id, mode) { if (typeof id !== "string" || !/^[a-f0-9]{64}$/u.test(id) || !["reserved", "exposed"].includes(mode))
-    invalid(); }
+function isFact(value) {
+    const fact = value;
+    return typeof fact === "object" && fact !== null && fact.outcome === "checked" && typeof fact.capturedAt === "string" &&
+        typeof fact.recordHash === "string" && typeof fact.currentLeaseDigest === "string" && typeof fact.walletHash === "string";
+}
+function identity(id, mode, dispatch = false) {
+    if (typeof id !== "string" || !/^[a-f0-9]{64}$/u.test(id) || !(["reserved", "exposed", ...(dispatch ? ["dispatch"] : [])]).includes(mode))
+        invalid();
+}
 function open(signal) { if (signal.aborted)
     invalid(); }
 function freeze(value) { if (value !== null && typeof value === "object") {
