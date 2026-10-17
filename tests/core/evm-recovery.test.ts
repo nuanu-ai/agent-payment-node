@@ -73,7 +73,7 @@ for (const { chainId, kind, approvalState } of mcpLifecycleScenarios) test(`MCP 
   context.after(async () => { await client.close(); await server.close(); });
   const invoke = async (name: string, input: Record<string, unknown>) => (await client.callTool({ name, arguments: input })).structuredContent as unknown as OutputEnvelope;
   const selection = { profile: "default", chain: `eip155:${chainId}`, asset, rpc_url: "https://rpc.example" };
-  const balance = await invoke("apn_wallet_balance_asset", selection); assert.equal(balance.ok, true, JSON.stringify(balance));
+  const balance = await invoke("apn_wallet_balance", selection); assert.equal(balance.ok, true, JSON.stringify(balance));
   const prepared = await invoke("apn_pay_transfer_prepare_asset", { ...selection, to: EVM_REQUEST.recipient, amount: EVM_REQUEST.amount, max_fee_wei: EVM_REQUEST.maxFeeWei, idempotency_key: EVM_REQUEST.idempotencyKey });
   assert.equal(prepared.ok, true, JSON.stringify(prepared));
   const operation = prepared.operation as { operation_id: string };

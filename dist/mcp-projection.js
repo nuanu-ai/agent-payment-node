@@ -32,7 +32,6 @@ const SELECTED_PATHS = [
     "wallet permission forget",
     "wallet status",
     "wallet balance",
-    "wallet balance-asset",
     "wallet portfolio",
     "wallet ensure-solana",
     "wallet balance-solana",
@@ -61,10 +60,6 @@ const SELECTED_PATHS = [
     "operation recover-provider-request",
     "operation recover-transaction-settlement",
     "receipt get",
-    "wallet policy show-network",
-    "wallet policy set-network",
-    "x402 inspect-network",
-    "x402 fetch prepare-network",
     "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
     "gasless usdt prepare", "gasless usdt status", "gasless usdt resume",
     "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer approve-sealed",
@@ -73,7 +68,7 @@ const SELECTED_PATHS = [
 /** Foreground commands MCP still runs: their non-interactive part (a pure policy decrease) needs no consent, and the
  * consent part is refused by RejectingMcpPolicyApproval with a CLI handoff. Every other selected foreground command is
  * reachable only through the single foreground handoff tool, which never executes anything. */
-const MCP_RUNS_FOREGROUND = new Set(["wallet policy set", "wallet policy set-network"]);
+const MCP_RUNS_FOREGROUND = new Set(["wallet policy set"]);
 export function projectMcpTools(manifest = COMMAND_MANIFEST) {
     const names = new Set();
     return selectedCommands(manifest).filter(runsInMcp).map((command) => {

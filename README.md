@@ -797,8 +797,8 @@ apn stargate token cleanup --operation <operation-id>
 apn stargate token observe --operation <operation-id>
 apn stargate token status --operation <operation-id>
 apn stargate token receipt --operation <operation-id>
-apn wallet balance-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>]
-apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] --to <address> --amount <decimal> --max-fee-wei <wei> [--priority-fee-wei <wei>] [--rpc-read-mode batch] --idempotency-key <key>
+apn wallet balance --profile <profile> [--chain <caip2> --asset <native-or-contract> [--decimals <integer>]] --rpc-url <https-url>
+apn pay transfer prepare-asset --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url> [--decimals <integer>] --to <address> --amount <decimal> --max-fee-wei <wei> [--priority-fee-wei <wei>] --idempotency-key <key>
 apn --version
 apn mcp serve
 apn mcp config
@@ -814,11 +814,10 @@ apn wallet metamask native-transfer --profile <profile> --chain <chain> --recipi
 apn wallet metamask native-transfer-status --operation <id>
 apn wallet metamask native-transfer-observe --operation <id>
 apn wallet status [--profile <profile>]
-apn wallet balance [--profile <profile>] --rpc-url <https-url>
-apn wallet policy show --profile <profile>
-apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
-apn x402 inspect --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
-apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
+apn wallet policy show --profile <profile> [--chain <caip2>]
+apn wallet policy set --profile <profile> [--chain <caip2>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
+apn x402 inspect [--chain <caip2>] --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
+apn x402 fetch prepare --profile <profile> [--chain <caip2>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
@@ -828,10 +827,6 @@ apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
-apn wallet policy show-network --chain <caip2> --profile <profile>
-apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
-apn x402 inspect-network --chain <caip2> --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
-apn x402 fetch prepare-network --chain <caip2> --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true]
 apn wallet balance-solana --profile <profile> --asset <sol-usdc-or-usdt>
 apn wallet capabilities-solana [--profile <profile>]

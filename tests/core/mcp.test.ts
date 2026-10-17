@@ -61,7 +61,6 @@ const TOOL_NAMES = [
   "apn_wallet_permission_forget",
   "apn_wallet_status",
   "apn_wallet_balance",
-  "apn_wallet_balance_asset",
   "apn_wallet_portfolio",
   "apn_wallet_ensure_solana",
   "apn_wallet_balance_solana",
@@ -86,10 +85,6 @@ const TOOL_NAMES = [
   "apn_operation_recover_provider_request",
   "apn_operation_recover_transaction_settlement",
   "apn_receipt_get",
-  "apn_wallet_policy_show_network",
-  "apn_wallet_policy_set_network",
-  "apn_x402_inspect_network",
-  "apn_x402_fetch_prepare_network",
   "apn_bridge_capabilities", "apn_bridge_inventory", "apn_bridge_routes", "apn_bridge_prepare",
   "apn_gasless_usdt_prepare", "apn_gasless_usdt_status", "apn_gasless_usdt_resume",
   "apn_gasless_capabilities", "apn_gasless_balance", "apn_gasless_transfer_quote", "apn_gasless_transfer_prepare",
@@ -188,8 +183,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_wallet_permission_disable", properties: ["profile", "expected_revision"], required: ["profile", "expected_revision"], defaults: {} },
       { name: "apn_wallet_permission_forget", properties: ["profile", "expected_revision"], required: ["profile", "expected_revision"], defaults: {} },
       { name: "apn_wallet_status", properties: ["profile"], required: [], defaults: { profile: "default" } },
-      { name: "apn_wallet_balance", properties: ["profile", "rpc_url"], required: ["rpc_url"], defaults: { profile: "default" } },
-      { name: "apn_wallet_balance_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url"], required: ["profile", "chain", "asset", "rpc_url"], defaults: {} },
+      { name: "apn_wallet_balance", properties: ["profile", "chain", "asset", "decimals", "rpc_url"], required: ["profile", "rpc_url"], defaults: {} },
       { name: "apn_wallet_portfolio", properties: ["profile", "refresh"], required: [], defaults: { profile: "default", refresh: false } },
       { name: "apn_wallet_ensure_solana", properties: ["profile", "provider", "accept_risk"], required: ["profile", "provider"], defaults: {} },
       { name: "apn_wallet_balance_solana", properties: ["profile", "asset"], required: ["profile", "asset"], defaults: {} },
@@ -199,10 +193,10 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_wallet_balance_tron", properties: ["profile", "asset"], required: ["profile", "asset"], defaults: {} },
       { name: "apn_wallet_capabilities_tron", properties: ["profile"], required: [], defaults: {} },
       { name: "apn_pay_transfer_prepare_tron", properties: ["profile", "asset", "to", "amount", "max_fee_trx", "idempotency_key"], required: ["profile", "asset", "to", "amount", "max_fee_trx", "idempotency_key"], defaults: {} },
-      { name: "apn_wallet_policy_show", properties: ["profile"], required: ["profile"], defaults: {} },
+      { name: "apn_wallet_policy_show", properties: ["profile", "chain"], required: ["profile"], defaults: {} },
       {
         name: "apn_wallet_policy_set",
-        properties: ["profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei", "x402_payees"],
+        properties: ["profile", "chain", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei", "x402_payees"],
         required: ["profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"],
         defaults: {},
       },
@@ -211,11 +205,11 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_x402_merchant_observe", properties: ["operation", "deliver"], required: ["operation"], defaults: {} },
       { name: "apn_x402_merchant_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_x402_merchant_retire_unsent", properties: ["operation"], required: ["operation"], defaults: {} },
-      { name: "apn_x402_inspect", properties: ["method", "headers_json", "body_base64", "payer", "url"], required: ["url"], defaults: {} },
-      { name: "apn_x402_fetch_prepare", properties: ["profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
+      { name: "apn_x402_inspect", properties: ["chain", "method", "headers_json", "body_base64", "payer", "url"], required: ["url"], defaults: {} },
+      { name: "apn_x402_fetch_prepare", properties: ["profile", "chain", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
       { name: "apn_x402_fetch_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
       { name: "apn_pay_transfer_prepare", properties: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], required: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], defaults: {} },
-      { name: "apn_pay_transfer_prepare_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url", "to", "amount", "max_fee_wei", "priority_fee_wei", "rpc_read_mode", "idempotency_key"], required: ["profile", "chain", "asset", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], defaults: {} },
+      { name: "apn_pay_transfer_prepare_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url", "to", "amount", "max_fee_wei", "priority_fee_wei", "idempotency_key"], required: ["profile", "chain", "asset", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], defaults: {} },
       { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_repair_deployment", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_operation_resume", properties: ["operation", "rpc_url", "coinbase_observation_rpc", "wait_seconds", "observe_only", "observation_rpc_env"], required: ["operation"], defaults: {} },
@@ -232,10 +226,6 @@ test("official MCP client proves production stdio descriptor, the exact tool set
         defaults: {},
       },
       { name: "apn_receipt_get", properties: ["operation"], required: ["operation"], defaults: {} },
-      { name: "apn_wallet_policy_show_network", properties: ["chain", "profile"], required: ["chain", "profile"], defaults: {} },
-      { name: "apn_wallet_policy_set_network", properties: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei", "x402_payees"], required: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"], defaults: {} },
-      { name: "apn_x402_inspect_network", properties: ["chain", "method", "headers_json", "body_base64", "payer", "url"], required: ["chain", "url"], defaults: {} },
-      { name: "apn_x402_fetch_prepare_network", properties: ["chain", "profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["chain", "profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
       { name: "apn_bridge_capabilities", properties: ["profile"], required: [], defaults: {} },
       { name: "apn_bridge_inventory", properties: [], required: [], defaults: {} },
       { name: "apn_bridge_routes", properties: ["profile", "from_chain", "to_chain", "from_token", "to_token", "amount", "to", "min_output", "max_native_debit_wei", "max_route_fee", "slippage_bps"], required: ["profile", "from_chain", "to_chain", "from_token", "to_token", "amount", "to", "min_output", "max_native_debit_wei", "max_route_fee", "slippage_bps"], defaults: {} },
@@ -363,12 +353,12 @@ test("MCP runtime preserves wallet lifecycle, reads, balance and one core execut
 
   const balance = decodeResult(await connection.client.callTool({
     name: "apn_wallet_balance",
-    arguments: { rpc_url: "https://rpc.example" },
+    arguments: { profile: "default", rpc_url: "https://rpc.example" },
   }));
   assert.equal(balance.ok, true);
   assert.equal((balance.data as { funding_address: string }).funding_address, address);
   const cliBalance = await runCli([
-    "wallet", "balance", "--rpc-url", "https://rpc.example",
+    "wallet", "balance", "--profile", "default", "--rpc-url", "https://rpc.example",
   ], {}, { stateRoot: temporary.root, wrappingSecret, native, rpc });
   assert.deepEqual(cliBalance.data, balance.data);
   assert.equal(rpc.balanceCalls, 2);
@@ -732,7 +722,7 @@ function cloneManifest(): {
 test("MCP runs no foreground command except a policy set; one handoff tool names every other one and never executes", async t => {
   const projected = projectMcpTools(), handoff = projectMcpForegroundHandoff();
   assert.deepEqual(projected.filter(tool => tool.command.approval.class === "foreground_tty").map(tool => tool.name),
-    ["apn_wallet_policy_set", "apn_wallet_policy_set_network"]);
+    ["apn_wallet_policy_set"]);
   assert.equal(handoff.commands.every(command => command.approval.class === "foreground_tty"), true);
   assert.deepEqual(handoff.inputSchema.properties.command!.enum, handoff.commands.map(command => command.path.join(" ")));
   let entries = 0;

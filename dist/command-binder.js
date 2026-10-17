@@ -274,18 +274,19 @@ function bindParsedCatalog(parsed) {
         case "wallet metamask native-transfer-status": return { request: { command: "wallet.metamask.native-transfer-status", operationId: value(options, "--operation") } };
         case "wallet metamask native-transfer-observe": return { request: { command: "wallet.metamask.native-transfer-observe", operationId: value(options, "--operation") } };
         case "wallet status": return { request: { command: "wallet.status", profile: value(options, "--profile") } };
-        case "wallet balance": return {
-            request: { command: "wallet.balance", profile: value(options, "--profile") },
-            rpcUrl: value(options, "--rpc-url"),
-        };
+        case "wallet balance": {
+            // One asset is selected by --chain and --asset together; neither keeps the Base ETH and USDC read.
+            if ((options["--chain"] === undefined) !== (options["--asset"] === undefined) ||
+                (options["--chain"] === undefined && options["--decimals"] !== undefined)) {
+                throw new ApnError("APN_INVALID_INPUT", "Select one asset with both --chain and --asset, or omit --chain, --asset and --decimals for Base ETH and USDC.");
+            }
+            return {
+                request: { command: "wallet.balance", profile: value(options, "--profile"), ...(options["--chain"] === undefined ? {} : { asset: bindAsset(options) }) },
+                rpcUrl: value(options, "--rpc-url"),
+            };
+        }
         case "wallet portfolio": return { request: { command: "wallet.portfolio", profile: value(options, "--profile"), ...(value(options, "--refresh") === "true" ? { refresh: true } : {}) } };
-        case "wallet balance-asset": return {
-            request: { command: "wallet.balance", profile: value(options, "--profile"), asset: bindAsset(options) },
-            rpcUrl: value(options, "--rpc-url"),
-        };
-        case "wallet policy show-network":
         case "wallet policy show": return { request: { command: "wallet.policy.show", profile: value(options, "--profile"), ...bindNetwork(options) } };
-        case "wallet policy set-network":
         case "wallet policy set": return {
             request: {
                 command: "wallet.policy.set",
@@ -297,7 +298,6 @@ function bindParsedCatalog(parsed) {
                 ...(options["--x402-payees"] === undefined ? {} : { x402Payees: options["--x402-payees"] === X402_PAYEES_UNRESTRICTED ? null : options["--x402-payees"].split(",") }),
             },
         };
-        case "x402 inspect-network":
         case "x402 inspect": return { request: {
                 command: "x402.inspect",
                 url: value(options, "--url"),
@@ -305,7 +305,6 @@ function bindParsedCatalog(parsed) {
                 ...bindNetwork(options),
                 ...(options["--payer"] === undefined ? {} : { payer: options["--payer"] }),
             } };
-        case "x402 fetch prepare-network":
         case "x402 fetch prepare": return {
             request: {
                 command: "x402.fetch.prepare",
@@ -337,7 +336,6 @@ function bindParsedCatalog(parsed) {
                 command: "transfer.prepare", profile: value(options, "--profile"), asset: bindListedAsset(options),
                 recipient: value(options, "--to"), amount: value(options, "--amount"), maxFeeWei: value(options, "--max-fee-wei"),
                 ...(options["--priority-fee-wei"] === undefined ? {} : { priorityFeeWei: value(options, "--priority-fee-wei") }),
-                ...(options["--rpc-read-mode"] === undefined ? {} : { batchRpcReads: nativeBatchMode(options["--rpc-read-mode"]) }),
                 idempotencyKey: value(options, "--idempotency-key"),
             },
             rpcUrl: value(options, "--rpc-url"),
@@ -430,11 +428,6 @@ function value(options, name) {
     if (selected === undefined)
         throw new ApnError("APN_INTERNAL", "The command catalog omitted a required request binding.");
     return selected;
-}
-function nativeBatchMode(value) {
-    if (value !== "batch")
-        throw new ApnError("APN_INVALID_INPUT", "RPC read mode must be batch when supplied.");
-    return true;
 }
 /** Public names of the MetaMask native transfer networks; journals and quotes retain numeric IDs. */
 function metaMaskNativeChain(name) {

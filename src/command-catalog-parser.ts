@@ -11,6 +11,7 @@ import { renderHelp } from "./command-help.js";
 import { containsRawControlCharacters } from "./cli-handoff.js";
 import { ApnError, asApnError } from "./errors.js";
 import { decodeX402RequestBody } from "./x402-http-request.js";
+import { removedV1Command } from "./command-manifest-migration.js";
 
 export interface ParsedCatalogCommand {
   readonly command: CommandDefinition;
@@ -32,7 +33,11 @@ export type DiscoveryDispatch = {
 
 export function parseCatalogArgv(argv: readonly string[]): ParsedCatalogCommand {
   const definition = longestCommandPrefix(argv);
-  if (definition === undefined) throw new ApnError("APN_UNSUPPORTED_COMMAND", "Unsupported APN command.");
+  if (definition === undefined) {
+    const removed = removedV1Command(argv);
+    throw new ApnError("APN_UNSUPPORTED_COMMAND", removed === undefined ? "Unsupported APN command."
+      : `This command was replaced in command manifest v2; use: ${removed.replacement}`);
+  }
   const values: Record<string, unknown> = {};
   const tail = argv.slice(definition.path.length);
   for (let index = 0; index < tail.length; index += 1) {
@@ -112,6 +117,11 @@ export function renderDiscoveryOutput(dispatch: DiscoveryDispatch): string {
 
 export function catalogNextActions(argv: readonly string[]): readonly string[] {
   const candidate = argv[0] === "help" ? argv.slice(1) : argv.at(-1) === "--help" ? argv.slice(0, -1) : argv;
+  const removed = removedV1Command(candidate);
+  if (removed !== undefined) {
+    const path = removed.replacement.split(" ").slice(1);
+    return [removed.replacement, `apn help ${path.slice(0, path.findIndex((token) => /^[-[<]/u.test(token))).join(" ")}`];
+  }
   const prefix = longestCatalogPrefix(candidate);
   return prefix === undefined ? ["apn help"] : [`apn help ${prefix.path.join(" ")}`, "apn help"];
 }

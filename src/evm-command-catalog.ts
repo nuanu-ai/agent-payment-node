@@ -20,20 +20,22 @@ const balanceSelection: readonly CommandOption[] = selection.map((option) => opt
 
 export const EVM_COMMANDS: readonly CommandDefinition[] = [
   {
-    path: ["wallet", "balance-asset"],
-    synopsis: `apn wallet balance-asset ${selectorSynopsis}`,
-    summary: "Read one explicitly selected local-wallet EVM asset and native gas balance.",
-    options: balanceSelection,
-    effect: { class: "network_read", summary: "Reads chain-verified balances and metadata without signing or submitting." },
+    path: ["wallet", "balance"],
+    synopsis: "apn wallet balance --profile <profile> [--chain <caip2> --asset <native-or-contract> [--decimals <integer>]] --rpc-url <https-url>",
+    summary: "Read one profile's EVM balances: with --chain and --asset one selected asset plus native gas, without them Base ETH and canonical Base USDC.",
+    options: balanceSelection.map((option) => option.name === "--chain" || option.name === "--asset"
+      ? { ...option, required: false, constraints: [...option.constraints, "chain_and_asset_together_or_neither"] } : option),
+    effect: { class: "network_read", summary: "Reads chain-verified balances and metadata through the explicit RPC; never signs or submits." },
     approval: { class: "none", when: "Never." },
     output: { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1, success: "Exact asset, atomic and decimal balances, RPC provenance and asset-specific funding posture.", failures },
     states: { terminal: ["completed", "classified_failure"], non_terminal: [] },
     recovery: [],
-    examples: ["apn wallet balance-asset --profile default --chain eip155:8453 --asset native --rpc-url <https-base-rpc-url>"],
+    examples: ["apn wallet balance --profile default --chain eip155:8453 --asset native --rpc-url <https-base-rpc-url>",
+      "apn wallet balance --profile default --rpc-url <https-base-rpc-url>"],
   },
   {
     path: ["pay", "transfer", "prepare-asset"],
-    synopsis: `apn pay transfer prepare-asset ${selectorSynopsis} --to <address> --amount <decimal> --max-fee-wei <wei> [--priority-fee-wei <wei>] [--rpc-read-mode batch] --idempotency-key <key>`,
+    synopsis: `apn pay transfer prepare-asset ${selectorSynopsis} --to <address> --amount <decimal> --max-fee-wei <wei> [--priority-fee-wei <wei>] --idempotency-key <key>`,
     summary: "Freeze a local-wallet native-coin or frozen-allowlist token direct transfer within the owner's active allowlist caps and an explicit fee quote budget.",
     options: [
       ...selection.map((option) => option.name === "--asset" ? { ...option, constraints: ["native_or_frozen_allowlist_contract"] }
@@ -44,8 +46,6 @@ export const EVM_COMMANDS: readonly CommandDefinition[] = [
       required("--max-fee-wei", "wei", ["positive_canonical_integer", "total_presubmission_quote_budget_not_onchain_total_cap"]),
       { ...required("--priority-fee-wei", "wei", ["canonical_integer", "owner_tip_per_gas_replaces_rpc_suggestion", "max_fee_per_gas_is_twice_base_fee_plus_tip",
         "counts_toward_max_fee_wei", "refused_on_arbitrum_inclusive_fees", "part_of_idempotency"]), required: false },
-      // Every direct network now reads in batches; the flag stays accepted so manifest v1 never loses an option.
-      { ...required("--rpc-read-mode", "string", ["batch_only", "every_direct_network_reads_in_batches", "accepted_for_compatibility"]), required: false },
       required("--idempotency-key", "idempotency_key", ["8_to_200_safe_ascii_characters"]),
     ],
     effect: { class: "payment_prepare", summary: "Persists one exact chain, asset, amount, fee budget and transaction intent; never signs or submits." },

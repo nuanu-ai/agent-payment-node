@@ -189,12 +189,12 @@ for (const chainId of [8453, 1, 42161] as const) {
       (await client.callTool({ name, arguments: input })).structuredContent as unknown as OutputEnvelope;
     const input = { profile: "default", chain: x402Network(chainId).network, url: X402_URL,
       idempotency_key: "multi-offer-parity", rpc_url: "https://rpc.example", method: "POST", body_base64: "" };
-    const prepared = await invoke("apn_x402_fetch_prepare_network", input);
+    const prepared = await invoke("apn_x402_fetch_prepare", input);
     assert.equal(prepared.ok, true, JSON.stringify(prepared));
     const operationId = (prepared.operation as { operationId: string }).operationId;
     const operation = (await fixture.state.findX402Operation(operationId))!;
     assert.equal(operation.selectedOffer.index, "20");
-    const replay = await runCli(["x402", "fetch", "prepare-network",
+    const replay = await runCli(["x402", "fetch", "prepare",
       ...Object.entries(input).flatMap(([key, value]) => [`--${key.replaceAll("_", "-")}`, value])], {}, options);
     assert.deepEqual(replay.operation, prepared.operation);
     assert.equal(fixture.http.calls.length, 1);

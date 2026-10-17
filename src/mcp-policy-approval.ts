@@ -36,8 +36,7 @@ export class RejectingMcpPolicyApproval implements ProfilePolicyApprovalPort {
 }
 
 function policyHandoff(request: PolicySetRequest): CliHandoff {
-  const path = request.chainId === undefined ? "wallet policy set" : "wallet policy set-network";
-  const definition = COMMANDS.find((command) => command.path.join(" ") === path);
+  const definition = COMMANDS.find((command) => command.path.join(" ") === "wallet policy set");
   if (definition === undefined) throw new ApnError("APN_INTERNAL", "The policy command is absent from the command manifest.");
   const values: Readonly<Record<string, string | undefined>> = {
     "--chain": request.chainId === undefined ? undefined : x402Network(request.chainId).network,

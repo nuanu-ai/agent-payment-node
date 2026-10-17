@@ -88,7 +88,8 @@ test("CLI argv preserves Slice 1, adds bounded x402 commands, and contains no ap
   assert.deepEqual(parseArgv(["doctor", "keychain", "--profile", "agent"]), { request: { command: "doctor.keychain", profile: "agent" } });
   assert.deepEqual(parseArgv(["wallet", "ensure"]), { request: { command: "wallet.ensure", profile: "default" } });
   assert.deepEqual(parseArgv(["wallet", "status", "--profile", "bot_1"]), { request: { command: "wallet.status", profile: "bot_1" } });
-  assert.deepEqual(parseArgv(["wallet", "balance", "--rpc-url", "https://rpc.example/private?token=redacted"]), {
+  assert.throws(() => parseArgv(["wallet", "balance", "--rpc-url", "https://rpc.example/private?token=redacted"]), { code: "APN_INVALID_INPUT" });
+  assert.deepEqual(parseArgv(["wallet", "balance", "--profile", "default", "--rpc-url", "https://rpc.example/private?token=redacted"]), {
     request: { command: "wallet.balance", profile: "default" },
     rpcUrl: "https://rpc.example/private?token=redacted",
   });
