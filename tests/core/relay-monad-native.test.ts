@@ -7,9 +7,10 @@ import { ApnCore } from "../../src/core.js";
 import { OperationService } from "../../src/operation-service.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
-import { RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE, RELAY_BNB_DEFAULT_SOURCE,
-  RELAY_BNB_SOURCE, relayNativeQuoteRequest, relayNativeRoute,
+import { RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE, relayNativeQuoteRequest,
   validateRelayNativeQuote } from "../../src/relay/native-quote.js";
+import { relayNativeRouteByReference, relayNativeRouteFor } from "../../src/relay/native-routes.js";
+import { RELAY_BNB_DEFAULT_SOURCE, RELAY_BNB_SOURCE } from "./relay-legacy-accounts.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 
@@ -20,8 +21,9 @@ const defaultFixture = async (): Promise<any> => JSON.parse(await readFile(
 const instant = new Date("2026-09-25T12:00:00.000Z");
 const intent = { payer: RELAY_BNB_SOURCE, recipient: RELAY_BNB_SOURCE,
   amountAtomic: "1500000000000000", minimumOutputWei: "40000000000000000000",
-  nowSeconds: Math.floor(instant.getTime() / 1000) };
-const input = { profile: "evm-live-buyer", recipient: RELAY_BNB_SOURCE, amountAtomic: intent.amountAtomic,
+  nowSeconds: Math.floor(instant.getTime() / 1000), routeReference: RELAY_BNB_MONAD_ROUTE_REFERENCE,
+  maximumNetworkFeeWei: "30000000000000" };
+const input = { profile: "evm-live-buyer", sourceChain: "eip155:56", destinationChain: "eip155:143", recipient: RELAY_BNB_SOURCE, amountAtomic: intent.amountAtomic,
   minOutputAtomic: intent.minimumOutputWei, maxDepositNetworkFeeWei: "30000000000000",
   idempotencyKey: "relay-bnb-mon-0001" };
 function policy(reference = RELAY_BNB_MONAD_ROUTE_REFERENCE) {
@@ -36,59 +38,55 @@ function policy(reference = RELAY_BNB_MONAD_ROUTE_REFERENCE) {
     accounts: { evm: RELAY_BNB_SOURCE }, activationDigest: "a".repeat(64), activatedAt: instant.toISOString() };
 }
 
-test("default BNB to Monad is a second fixed route with an exact payer and recipient", () => {
-  const route = relayNativeRoute(RELAY_BNB_DEFAULT_SOURCE, RELAY_BNB_DEFAULT_SOURCE);
-  assert.equal(route.profile, "default");
-  assert.equal(route.reference, RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE);
-  assert.equal(route.chainId, 143);
-  const request = relayNativeQuoteRequest({ payer: RELAY_BNB_DEFAULT_SOURCE,
-    recipient: RELAY_BNB_DEFAULT_SOURCE, amountAtomic: "1200000000000000",
-    minimumOutputWei: "1", nowSeconds: intent.nowSeconds });
-  assert.equal(request.user, RELAY_BNB_DEFAULT_SOURCE);
-  assert.equal(request.refundTo, RELAY_BNB_DEFAULT_SOURCE);
-  assert.equal(request.destinationChainId, 143);
-  for (const pair of [
+test("the owner-named default Monad reference decodes the same physical route; new prepares use the owner-free one", () => {
+  const legacy = relayNativeRouteByReference(RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE);
+  const current = relayNativeRouteFor(56, 143);
+  assert.equal(legacy?.legacy, true); assert.equal(current?.reference, RELAY_BNB_MONAD_ROUTE_REFERENCE);
+  assert.deepEqual({ ...legacy, reference: undefined, legacy: undefined }, { ...current, reference: undefined, legacy: undefined });
+  assert.equal(relayNativeRouteFor(56, 4326), null); assert.equal(relayNativeRouteFor(8453, 143), null);
+  // Any payer and any recipient: identity is the caller's, the route only names chains and currencies (OWNR-03).
+  for (const pair of [{ payer: RELAY_BNB_DEFAULT_SOURCE, recipient: RELAY_BNB_DEFAULT_SOURCE },
     { payer: RELAY_BNB_DEFAULT_SOURCE, recipient: RELAY_BNB_SOURCE },
-    { payer: RELAY_BNB_SOURCE, recipient: "0x1111111111111111111111111111111111111111" },
-  ]) {
-    assert.throws(() => relayNativeQuoteRequest({ ...pair, amountAtomic: "1200000000000000",
-      minimumOutputWei: "1", nowSeconds: intent.nowSeconds }), /Relay native quote rejected:/u);
+    { payer: RELAY_BNB_SOURCE, recipient: "0x1111111111111111111111111111111111111111" }]) {
+    const request = relayNativeQuoteRequest({ ...intent, ...pair, amountAtomic: "1200000000000000", minimumOutputWei: "1" });
+    assert.equal(request.user, pair.payer); assert.equal(request.refundTo, pair.payer);
+    assert.equal(request.recipient, pair.recipient); assert.equal(request.destinationChainId, 143);
   }
-  assert.equal(relayNativeRoute(RELAY_BNB_SOURCE, RELAY_BNB_DEFAULT_SOURCE).reference,
-    "bnb-native-polygon-native-v1");
 });
 
-test("default native prepare requires its own exact policy pin and owner", async t => {
+test("native prepare of the default profile names the owner-free route; a legacy-only pin admits no new prepare", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root);
   const defaultInput = { ...input, profile: "default", recipient: RELAY_BNB_DEFAULT_SOURCE,
     amountAtomic: "1200000000000000", idempotencyKey: "relay-bnb-mon-default-0001" };
-  let quotes = 0;
-  const service = (reference: string, account = RELAY_BNB_DEFAULT_SOURCE) => new RelayUnsignedPrepareService(
+  const intents: { routeReference: string; payer: string; recipient: string }[] = [];
+  const service = (reference: string, account = RELAY_BNB_DEFAULT_SOURCE, wallet = account) => new RelayUnsignedPrepareService(
     state, { now: () => instant }, undefined, { activePolicy: async () => ({ ...policy(reference),
-      profile: "default", accounts: { evm: account } }), publicAccount: async () => account,
-      dailyUsage: async () => "0", nativeQuote: async () => { quotes++; throw new Error("quote should not be requested"); } });
-  await assert.rejects(service(RELAY_BNB_MONAD_ROUTE_REFERENCE).prepareNative(defaultInput),
-    { code: "APN_ALLOWLIST_REFUSED" });
-  await assert.rejects(service(RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE, RELAY_BNB_SOURCE).prepareNative(defaultInput),
-    { code: "APN_ALLOWLIST_REFUSED" });
-  await assert.rejects(service(RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE).prepareNative({ ...defaultInput,
-    recipient: RELAY_BNB_SOURCE }), { code: "APN_INVALID_INPUT" });
-  assert.equal(quotes, 0);
+      profile: "default", accounts: { evm: account } }), publicAccount: async () => wallet,
+      dailyUsage: async () => "0", nativeQuote: async i => { intents.push(i); throw new Error("stop after the quote intent"); } });
+  await assert.rejects(service(RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE).prepareNative(defaultInput),
+    { code: "APN_ALLOWLIST_REFUSED", details: { reason: "relay_native_route_pin_required" } });
+  await assert.rejects(service(RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BNB_DEFAULT_SOURCE, RELAY_BNB_SOURCE).prepareNative(defaultInput),
+    { code: "APN_ALLOWLIST_REFUSED", details: { reason: "relay_public_profile_owner_mismatch" } });
+  assert.equal(intents.length, 0);
+  await assert.rejects(service(RELAY_BNB_MONAD_ROUTE_REFERENCE).prepareNative({ ...defaultInput, recipient: RELAY_BNB_SOURCE }),
+    /stop after the quote intent/u);
+  assert.deepEqual(intents.map(i => [i.routeReference, i.payer, i.recipient]),
+    [[RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BNB_DEFAULT_SOURCE.toLowerCase(), RELAY_BNB_SOURCE.toLowerCase()]]);
 });
 
-test("default Monad quote validates the signed order and prepares only under its own policy", async t => {
+test("the default profile's Monad quote prepares under the owner-free reference (RELAY-004 is RELAY-003's route)", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root), raw = await defaultFixture();
   const defaultInput = { ...input, profile: "default", recipient: RELAY_BNB_DEFAULT_SOURCE,
     amountAtomic: "1200000000000000", minOutputAtomic: "32000000000000000000",
     idempotencyKey: "relay-bnb-mon-default-0002" };
-  const quote = await validateRelayNativeQuote(raw, { payer: RELAY_BNB_DEFAULT_SOURCE,
+  const quote = await validateRelayNativeQuote(raw, { ...intent, payer: RELAY_BNB_DEFAULT_SOURCE,
     recipient: RELAY_BNB_DEFAULT_SOURCE, amountAtomic: defaultInput.amountAtomic,
-    minimumOutputWei: defaultInput.minOutputAtomic, nowSeconds: Math.floor(instant.getTime() / 1000) });
-  assert.equal(quote.routeReference, RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE);
+    minimumOutputWei: defaultInput.minOutputAtomic });
+  assert.equal(quote.routeReference, RELAY_BNB_MONAD_ROUTE_REFERENCE);
   assert.equal(quote.deposit.value, "1200000000000000");
-  const p = policy(RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE);
+  const p = policy(RELAY_BNB_MONAD_ROUTE_REFERENCE);
   const active = { ...p, profile: "default", accounts: { evm: RELAY_BNB_DEFAULT_SOURCE } };
   let calls = 0;
   const service = new RelayUnsignedPrepareService(state, { now: () => instant }, undefined,
@@ -97,7 +95,7 @@ test("default Monad quote validates the signed order and prepares only under its
   const first = await service.prepareNative(defaultInput);
   assert.equal(first.sourceAccount, RELAY_BNB_DEFAULT_SOURCE.toLowerCase());
   assert.equal(first.recipient, RELAY_BNB_DEFAULT_SOURCE.toLowerCase());
-  assert.equal(first.nativeQuote?.routeReference, RELAY_BNB_MONAD_DEFAULT_ROUTE_REFERENCE);
+  assert.equal(first.nativeQuote?.routeReference, RELAY_BNB_MONAD_ROUTE_REFERENCE);
   assert.equal(JSON.stringify(first).includes(raw.requestId), false);
   assert.deepEqual(await service.prepareNative(defaultInput), first);
   assert.equal(calls, 1);

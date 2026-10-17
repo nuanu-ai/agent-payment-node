@@ -25,3 +25,15 @@ export async function evmUnsentOutcome(read: EvmUnsentOutcomeRead, input: Readon
   if (quantity(await read("eth_getTransactionCount", [input.account, "safe"])) <= input.nonce) return "nonce_not_consumed";
   return await read("eth_getTransactionByHash", [input.transactionHash]) === null ? "never_lands" : "own_transaction_known";
 }
+
+/**
+ * The same proof for bytes that MAY have been broadcast (an ambiguous send): the nonce at the safe head is past the
+ * signed nonce, and the node knows neither the transaction nor a receipt for its hash. Another transaction then took
+ * that nonce, so these bytes can never land. A known transaction or receipt means observe only.
+ */
+export async function evmSentOutcome(read: (method: "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt",
+  params: readonly unknown[]) => Promise<unknown>, input: Readonly<{ account: string; nonce: bigint; transactionHash: string }>): Promise<EvmUnsentOutcome> {
+  const outcome = await evmUnsentOutcome(read, input);
+  if (outcome !== "never_lands") return outcome;
+  return await read("eth_getTransactionReceipt", [input.transactionHash]) === null ? "never_lands" : "own_transaction_known";
+}

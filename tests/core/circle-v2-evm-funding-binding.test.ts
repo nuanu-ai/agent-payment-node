@@ -3,15 +3,16 @@ import test from "node:test";
 import { getAddress } from "viem";
 import { hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry, type AssetPolicyRow } from "../../src/asset-policy-registry.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_SOURCE_TOKEN, circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { quoteCircleFastFee } from "../../src/circle-v2-evm/preflight.js";
 import { admitCircleFundingAssets, assertCircleFundingFee, circleFundingBinding, deriveCircleFundingParameters,
   quoteCircleFundingFee, sealCircleFundingIntent, validateCircleFundingBinding, validateCircleFundingIntent } from "../../src/circle-v2-evm/funding-binding.js";
 const now = Date.parse("2026-10-11T06:00:00.000Z");
-// Synthetic beneficiary, unrelated to any live wallet or policy.
+// Synthetic beneficiary and signers, unrelated to any live wallet, profile or policy.
 const p = { recipient: getAddress(`0x${"55".repeat(20)}`), amountAtomic: "1000000", maxFeeAtomic: "1000", minMintAtomic: "999000" };
+const id = { sourceProfile: "cctp-source", sourceOwner: getAddress(`0x${"a1".repeat(20)}`), destinationProfile: "cctp-gas", gasPayer: getAddress(`0x${"b2".repeat(20)}`) };
 const response = [{ finalityThreshold: 1000, minimumFee: 1.234567 }];
-const binding = () => circleFundingBinding(1329, "evm-live-seller", p);
+const binding = () => circleFundingBinding(1329, id, p);
 const row = (kind: "token" | "native", identifier: string | null, decimals: number, reference: string, cap = "1000000000000000000"): AssetPolicyRow => ({
   kind, identifier, symbol: kind === "token" ? "USDC" : "ETH", decimals,
   rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
@@ -23,7 +24,7 @@ function policy(chain: number, assets: AssetPolicyRow[]) {
 }
 function admission() {
   const b = binding(), ref = b.mechanism.reference;
-  return { source: { chainId: 42161, address: CIRCLE_SOURCE_OWNER, nativeBalanceAtomic: "75000000000000", usdcBalanceAtomic: p.amountAtomic, allowanceAtomic: "0", latestNonceAtomic: "10", pendingNonceAtomic: "10" },
+  return { source: { chainId: 42161, address: id.sourceOwner, nativeBalanceAtomic: "75000000000000", usdcBalanceAtomic: p.amountAtomic, allowanceAtomic: "0", latestNonceAtomic: "10", pendingNonceAtomic: "10" },
     destination: { chainId: 1329, address: b.gasPayer, nativeBalanceAtomic: circleRoute(1329).destinationNativeCap, usdcBalanceAtomic: "0", allowanceAtomic: "0", latestNonceAtomic: "3", pendingNonceAtomic: "3" },
     sourceRegistry: policy(42161, [row("token", CIRCLE_SOURCE_TOKEN, 6, ref), row("native", null, 18, ref)]), destinationRegistry: policy(1329, [row("native", null, 18, ref)]),
     sourceTokenUsageAtomic: "0", sourceNativeUsageAtomic: "0", destinationNativeUsageAtomic: "0", nowMs: now };
@@ -34,10 +35,11 @@ test("all absent is legacy; partial and unknown funding fields refuse", () => {
   for (const k of Object.keys(p)) { const x: Record<string, unknown> = { ...p }; delete x[k]; assert.throws(() => deriveCircleFundingParameters(x)); }
   assert.throws(() => deriveCircleFundingParameters({ ...p, skipConsent: true }));
 });
-for (const [chain, profile] of [[1329, "evm-live-buyer"], [1329, "evm-live-seller"], [59144, "evm-live-buyer"], [143, "default"]] as const) {
-  test(`funding metadata binds exact ${chain}/${profile} independently from beneficiary`, () => {
-    const b = circleFundingBinding(chain, profile, p), r = circleRoute(chain, profile);
-    assert.equal(b.gasPayer, r.gasPayer); assert.notEqual(b.recipient, b.gasPayer); assert.equal(b.destinationToken, r.token);
+for (const [chain, profiles] of [[1329, ["cctp-source", "cctp-gas"]], [1329, ["one-profile", "one-profile"]], [59144, ["alice", "bob"]], [143, ["carol", "dave.gas"]]] as const) {
+  test(`funding metadata binds any profiles' ${chain}/${profiles.join("/")} wallets independently from beneficiary`, () => {
+    const identity = { ...id, sourceProfile: profiles[0], destinationProfile: profiles[1] }, b = circleFundingBinding(chain, identity, p), r = circleRoute(chain);
+    assert.equal(b.sourceProfile, profiles[0]); assert.equal(b.destinationProfile, profiles[1]); assert.equal(b.sourceOwner, id.sourceOwner);
+    assert.equal(b.gasPayer, id.gasPayer); assert.notEqual(b.recipient, b.gasPayer); assert.equal(b.destinationToken, r.token);
     assert.equal(b.sourceDomain, 3); assert.equal(b.destinationDomain, r.domain); assert.equal(b.decimals, 6);
     assert.equal(b.mechanism.reference, `circle-v2-evm-fast-42161-${chain}.v2`); assert.ok(Object.isFrozen(b));
     assert.deepEqual(validateCircleFundingBinding(b), b);
@@ -50,16 +52,22 @@ for (const [chain, profile] of [[1329, "evm-live-buyer"], [1329, "evm-live-selle
 test("canonical quantities and beneficiary reject ambiguous or invalid input", () => {
   for (const x of [{ ...p, recipient: `0x${"0".repeat(40)}` }, { ...p, recipient: "bad" }, { ...p, amountAtomic: "01" },
     { ...p, amountAtomic: "0" }, { ...p, amountAtomic: "1.0" }, { ...p, amountAtomic: (1n << 256n).toString() }, { ...p, maxFeeAtomic: "0" },
-    { ...p, maxFeeAtomic: p.amountAtomic }, { ...p, minMintAtomic: "999001" }, { ...p, minMintAtomic: "0" }]) assert.throws(() => circleFundingBinding(1329, "evm-live-buyer", x));
-  assert.throws(() => circleFundingBinding(1329, "default", p));
-  assert.throws(() => circleFundingBinding(1 as 1329, "evm-live-buyer", p));
+    { ...p, maxFeeAtomic: p.amountAtomic }, { ...p, minMintAtomic: "999001" }, { ...p, minMintAtomic: "0" }]) assert.throws(() => circleFundingBinding(1329, id, x));
+  for (const bad of [{ sourceProfile: "Bad Profile" }, { destinationProfile: "" }, { sourceOwner: `0x${"0".repeat(40)}` }, { gasPayer: id.gasPayer.toLowerCase() }])
+    assert.throws(() => circleFundingBinding(1329, { ...id, ...bad } as typeof id, p));
+  assert.throws(() => circleFundingBinding(1 as 1329, id, p));
 });
-test("binding rejects recomputed caller changes to source, assets, decimals, domains, gas payer or mechanism", () => {
+test("stored binding: its own seal, and protocol fields from the route row; identity is bound by the operation, not here", () => {
   const b = binding();
-  for (const [key, value] of Object.entries({ sourceChain: 1, sourceDomain: 0, sourceOwner: p.recipient, sourceToken: p.recipient, decimals: 18, destinationDomain: 15, destinationToken: p.recipient, gasPayer: p.recipient,
-    mechanism: { provider: "circle-cctp-v2", reference: "circle-v2-evm-fast-42161-1329.v1" } })) {
+  for (const [key, value] of Object.entries({ sourceChain: 1, sourceDomain: 0, sourceToken: p.recipient, decimals: 18, destinationDomain: 15, destinationToken: p.recipient,
+    mechanism: { provider: "circle-cctp-v2", reference: "circle-v2-evm-fast-42161-1329.v1" }, destinationChain: 1 })) {
     const { bindingHash: _hash, ...body } = { ...b, [key]: value }; assert.throws(() => validateCircleFundingBinding({ ...body, bindingHash: hashObject(body) }));
   }
+  assert.throws(() => validateCircleFundingBinding({ ...b, amountAtomic: "999999" }), /funding_binding_changed|funding metadata/i);
+  assert.throws(() => validateCircleFundingBinding({ ...b, extra: 1 }));
+  // A self-consistent re-seal with other signers is a well-formed binding; the operation validator refuses it unless the
+  // operation's own custody records name the same wallets (circle-v2-evm-any-profile.test.ts).
+  const { bindingHash: _hash, ...body } = { ...b, gasPayer: p.recipient }; assert.equal(validateCircleFundingBinding({ ...body, bindingHash: hashObject(body) }).gasPayer, p.recipient);
 });
 test("fresh fee binds tuple, exact rational ceiling, cap and original 30 second window", () => {
   const b = binding(), f = quoteCircleFundingFee(b, response, now, now + 29_999);
@@ -70,7 +78,7 @@ test("fresh fee binds tuple, exact rational ceiling, cap and original 30 second 
   assert.throws(() => quoteCircleFundingFee(b, [{ finalityThreshold: 2000, minimumFee: 0 }], now, now));
   const { integrityHash: _hash, ...body } = f;
   assert.throws(() => assertCircleFundingFee(b, { ...body, quotedFeeAtomic: "123", integrityHash: hashObject({ ...body, quotedFeeAtomic: "123" }) }, now));
-  assert.throws(() => assertCircleFundingFee(circleFundingBinding(1329, "evm-live-seller", { ...p, recipient: getAddress(`0x${"66".repeat(20)}`) }), f, now));
+  assert.throws(() => assertCircleFundingFee(circleFundingBinding(1329, id, { ...p, recipient: getAddress(`0x${"66".repeat(20)}`) }), f, now));
 });
 test("intent keeps exact expiry/digest without treating metadata as an execution grant", () => {
   const b = binding(), f = quoteCircleFundingFee(b, response, now, now), i = sealCircleFundingIntent(b, f, "a".repeat(64), now);

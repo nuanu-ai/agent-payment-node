@@ -8,7 +8,8 @@ import { bindArgv } from "../../src/command-binder.js";
 import { ApnCore } from "../../src/core.js";
 import { OperationService } from "../../src/operation-service.js";
 import { RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
-import { RELAY_ARBITRUM_USDC, RELAY_ETHEREUM_USDC_RECIPIENT } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
+import { RELAY_ARBITRUM_USDC } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
+import { RELAY_ETHEREUM_USDC_RECIPIENT } from "./relay-legacy-accounts.js";
 import { RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } from "../../src/relay/arbitrum-usdc-source-draft.js";
 import { relayExecutionRoute } from "../../src/relay/execution-route.js";
 import { RelayUnsignedPrepareService } from "../../src/relay/prepare.js";
@@ -19,11 +20,11 @@ import { temporaryState } from "./helpers.js";
 const owner = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const now = new Date(1790347296 * 1000);
 const quoteFile = resolve("tests/core/relay-fixtures/arbitrum-usdc-ethereum-usdc-quote-20260925.json");
-const input = { profile: "default", owner, amountAtomic: "500000", minOutputAtomic: "94065",
+const input = { profile: "default", owner, recipient: RELAY_ETHEREUM_USDC_RECIPIENT, amountAtomic: "500000", minOutputAtomic: "94065",
   maxProviderFeeAtomic: "401482", maxApprovalNetworkFeeWei: "2000000000000",
   maxDepositNetworkFeeWei: "2000000000000", quoteFile, idempotencyKey: "relay-arb-prepare-0001" };
 
-function active(profile = "default", account = owner) {
+function active(profile = "default", account = owner, recipients?: readonly string[]) {
   const registry = sealAssetPolicyRegistry({ schemaVersion: "apn.asset-policy-registry.v2",
     registryVersion: "test.relay.arb.1", publishedAt: "2026-09-25T00:00:00.000Z",
     effectiveDate: "2026-09-25", effectiveAt: "2026-09-25T00:00:00.000Z",
@@ -31,7 +32,8 @@ function active(profile = "default", account = owner) {
       name: "Arbitrum One", assets: [{ kind: "token", identifier: RELAY_ARBITRUM_USDC, symbol: "USDC", decimals: 6,
         rails: { direct: false, gasless: false, x402: false, bridge: true, swap: false },
         railCaps: { bridge: { maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "2000000" } },
-        mechanismPins: { bridge: { provider: "relay", reference: RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } } }] }] });
+        mechanismPins: { bridge: { provider: "relay", reference: RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE } },
+        ...(recipients === undefined ? {} : { recipients: { bridge: recipients } }) }] }] });
   return { profile, registry, digest: registry.policyDigest, revision: 1,
     accounts: { evm: account }, activationDigest: "a".repeat(64), activatedAt: now.toISOString() };
 }
@@ -71,7 +73,7 @@ test("offline command prepares one durable unsigned Arbitrum operation and repla
     arbitrumQuoteFile: async () => { reads++; if (reads > 1) throw new Error("replay must not read quote file");
       return JSON.parse(await readFile(quoteFile, "utf8")) as unknown; },
   });
-  const argv = ["relay", "arbitrum", "prepare", "--profile", "default", "--owner", owner,
+  const argv = ["relay", "arbitrum", "prepare", "--profile", "default", "--owner", owner, "--recipient", RELAY_ETHEREUM_USDC_RECIPIENT,
     "--amount-atomic", input.amountAtomic, "--min-output-atomic", input.minOutputAtomic,
     "--max-provider-fee-atomic", input.maxProviderFeeAtomic,
     "--max-approval-network-fee-wei", input.maxApprovalNetworkFeeWei,
@@ -149,4 +151,24 @@ test("default quote-file reader persists offline and rejects signed-order corrup
   await writeFile(path, JSON.stringify(saved), { mode: 0o600 });
   await assert.rejects(new RelayUnsignedOperationRepository(temporary.root).loadOperation(state.profileHash("default"), prepared.operationId),
     { code: "APN_STATE_CORRUPT" });
+});
+
+test("the Ethereum recipient is the caller's: a quote paying anyone else is refused, and an owner pin admits only listed recipients", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  let selected = active();
+  const service = new RelayUnsignedPrepareService(state, { now: () => now }, undefined,
+    { activePolicy: async () => selected, dailyUsage: async () => "0" });
+  // The signed order of the fixture pays RELAY_ETHEREUM_USDC_RECIPIENT; naming another recipient cannot adopt it.
+  await assert.rejects(service.prepareArbitrum({ ...input, recipient: owner, idempotencyKey: "relay-arb-recipient-0001" }),
+    /Relay Arbitrum quote rejected/u);
+  // OD-1: a pin without this recipient refuses before the quote is read; a pin with it admits.
+  selected = active("default", owner, [owner]);
+  await assert.rejects(service.prepareArbitrum({ ...input, idempotencyKey: "relay-arb-recipient-0002" }),
+    { code: "APN_ALLOWLIST_REFUSED", details: { reason: "allowlist_recipient_not_admitted", chain: "eip155:42161", rail: "bridge",
+      recipient: RELAY_ETHEREUM_USDC_RECIPIENT } });
+  selected = active("default", owner, [RELAY_ETHEREUM_USDC_RECIPIENT]);
+  const prepared = await service.prepareArbitrum({ ...input, idempotencyKey: "relay-arb-recipient-0003" });
+  assert.equal(prepared.recipient, RELAY_ETHEREUM_USDC_RECIPIENT.toLowerCase());
+  assert.equal((await new RelayUnsignedOperationRepository(temporary.root).listAllOperations()).length, 1);
 });

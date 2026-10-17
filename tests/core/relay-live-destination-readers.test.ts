@@ -13,11 +13,13 @@ async function polygon() {
     before: BigInt(result(balances, 1)), after: BigInt(result(balances, 2)) };
 }
 for (const mega of [true, false]) test(`full live ${mega ? "USDm" : "POL"} reader proves credit from the real receipt in two POSTs and rejects wrong chain/unsafe receipt`, async () => {
-  const { validateRelayNativeQuote, RELAY_BASE_SOURCE, RELAY_POLYGON_RECIPIENT, RELAY_BNB_SOURCE } = await import("../../src/relay/native-quote.js");
+  const { validateRelayNativeQuote, RELAY_LEGACY_BASE_MEGA_REFERENCE, RELAY_LEGACY_BASE_POLYGON_REFERENCE } = await import("../../src/relay/native-quote.js");
+  const { RELAY_BASE_SOURCE, RELAY_POLYGON_RECIPIENT, RELAY_BNB_SOURCE } = await import("./relay-legacy-accounts.js");
   const { freezeRelayUnsignedOperation } = await import("../../src/relay-unsigned-operation.js");
   const { proveRelayNativeDestination } = await import("../../src/relay/destination-proof.js");
   const q = await validateRelayNativeQuote(JSON.parse(await readFile(`tests/core/relay-fixtures/relay-base-${mega ? "mega-usdm" : "polygon-pol"}-quote-20261009.json`, "utf8")),
-    { payer: RELAY_BASE_SOURCE, recipient: mega ? RELAY_POLYGON_RECIPIENT : RELAY_BNB_SOURCE, amountAtomic: "50000000000000", minimumOutputWei: mega ? "90000000000000000" : "700000000000000000", nowSeconds: 1791517419 });
+    { payer: RELAY_BASE_SOURCE, recipient: mega ? RELAY_POLYGON_RECIPIENT : RELAY_BNB_SOURCE, amountAtomic: "50000000000000", minimumOutputWei: mega ? "90000000000000000" : "700000000000000000", nowSeconds: 1791517419,
+      routeReference: mega ? RELAY_LEGACY_BASE_MEGA_REFERENCE : RELAY_LEGACY_BASE_POLYGON_REFERENCE, maximumNetworkFeeWei: "1000000000000" });
   const op = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned", state: "prepared", terminal: false,
     profileHash: "1".repeat(64), operationId: "2".repeat(64), idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64), sourceChainId: 8453, destinationChainId: mega ? 4326 : 137,
     sourceAccount: q.payer, recipient: q.recipient, quoteDigest: q.quoteDigest, nativeQuote: q, statusLocator: q.statusLocator!, policyDigest: "5".repeat(64), policyRevision: 7, policyActivationDigest: "a".repeat(64),

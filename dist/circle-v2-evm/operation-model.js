@@ -5,7 +5,7 @@ import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "../
 import { ApnError } from "../errors.js";
 import { validateEvmNativeCustody } from "../evm-native-custody.js";
 import { validateAssetUsageReservation } from "../asset-usage-ledger.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleLegacyRoute } from "./catalog.js";
 import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, encodeCircleBurn, encodeCircleMint } from "./protocol.js";
 export function circleBlocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", `Circle EVM operation blocked: ${reason}.`, { reason }); }
 export function circleCorrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Circle EVM journal is invalid: ${reason}.`, { reason }); }
@@ -22,7 +22,7 @@ export function circleEnvelope(input) { return { ...input, envelopeHash: hashObj
 export function validateCircleEnvelope(e, role, chain, attestation, destinationProfile) {
     if (!isPlainRecord(e) || !exactKeys(e, ["chainId", "from", "to", "data", "valueAtomic", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "envelopeHash"]))
         circleCorrupt("envelope_shape");
-    const { envelopeHash, ...body } = e, route = circleRoute(chain, destinationProfile), destination = role === "mint";
+    const { envelopeHash, ...body } = e, route = circleLegacyRoute(chain, destinationProfile), destination = role === "mint";
     const data = destination ? attestation === null ? null : encodeCircleMint(attestation) : role === "burn" ? encodeCircleBurn(chain) : encodeCircleApproval(role === "cleanup");
     if (envelopeHash !== hashObject(body) || e.chainId !== (destination ? chain : 42161) || e.from !== (destination ? route.gasPayer : CIRCLE_SOURCE_OWNER) ||
         e.to !== (destination ? CIRCLE_TRANSMITTER : role === "burn" ? CIRCLE_MESSENGER : CIRCLE_SOURCE_TOKEN) || e.data !== data || e.valueAtomic !== "0")
@@ -41,7 +41,7 @@ export function validateCircle(value) {
     const op = value, { integrityHash, ...body } = op;
     if (op.schemaVersion !== "apn.circle-v2-evm-operation.v1" || hashObject(body) !== integrityHash || ![op.operationId, op.profileHash, op.destinationProfileHash, op.idempotencyHash, op.requestHash, op.fingerprint, op.deploymentDigest].every(x => typeof x === "string" && /^[a-f0-9]{64}$/u.test(x)))
         circleCorrupt("integrity");
-    const route = circleRoute(op.destinationChain, op.destinationProfile);
+    const route = circleLegacyRoute(op.destinationChain, op.destinationProfile);
     validateEvmNativeCustody(op.sourceCustody);
     validateEvmNativeCustody(op.destinationCustody);
     if (op.profile !== "evm-live-buyer" || op.destinationProfile !== route.gasPayerProfile || op.sourceCustody.walletAddress !== CIRCLE_SOURCE_OWNER || op.destinationCustody.walletAddress !== route.gasPayer ||

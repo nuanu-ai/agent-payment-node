@@ -1,7 +1,7 @@
 import { validateRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { verifyDepositObservation } from "./deposit-effect.js";
 import { BNB_NATIVE } from "./quote.js";
-import { relayNativeRoute, RELAY_MEGA_USDM } from "./native-quote.js";
+import { relayNativeRouteByReference, RELAY_MEGA_USDM } from "./native-routes.js";
 const HASH = /^0x[0-9a-fA-F]{64}$/u;
 const same = (left, right) => left.toLowerCase() === right.toLowerCase();
 const pending = (reason) => ({ status: "pending", reason,
@@ -98,8 +98,8 @@ export async function proveRelayBaseDestination(operation, candidateHashes, port
 /** A provider candidate is only a discovery hint; even a real native credit is not causal proof. */
 export async function proveRelayNativeDestination(operation, sourceHash, candidateHashes, ports) {
     const op = validateRelayUnsignedOperation(operation), quote = op.nativeQuote;
-    if (!quote || op.sourceChainId !== relayNativeRoute(op.sourceAccount, op.recipient).sourceChainId || ![137, 143, 4326].includes(op.destinationChainId) ||
-        quote.routeReference !== relayNativeRoute(op.sourceAccount, op.recipient).reference ||
+    const route = quote === undefined ? null : relayNativeRouteByReference(quote.routeReference);
+    if (!quote || route === null || op.sourceChainId !== route.sourceChainId || op.destinationChainId !== route.chainId ||
         quote.recipient.toLowerCase() !== op.recipient.toLowerCase() ||
         BigInt(quote.minimumOutputWei) < BigInt(op.minOutputAtomic))
         return mismatch("saved_native_quote_binding");
@@ -108,7 +108,9 @@ export async function proveRelayNativeDestination(operation, sourceHash, candida
     return inspectCandidate(op, sourceHash.toLowerCase(), candidateHashes[0].toLowerCase(), ports, op.destinationChainId);
 }
 async function inspectCandidate(op, sourceHash, hash, ports, expectedChainId) {
-    const polygonMilestone = op.sourceChainId === 8453 && expectedChainId === 137;
+    // One proof per destination chain (OWNR R2): Polygon is always proven at its milestone-finalized checkpoint and the
+    // credit is always filtered by this operation's own recipient, whatever the source chain.
+    const polygonMilestone = expectedChainId === 137;
     if (polygonMilestone && !ports.polygonFinalizedCheckpoint)
         return unproven("polygon_consensus_finality_unavailable");
     // P3: chain, transaction, receipt and checkpoint are requested together; the inclusion block is requested as soon

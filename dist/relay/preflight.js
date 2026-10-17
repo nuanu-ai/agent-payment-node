@@ -3,6 +3,7 @@ import { ApnError } from "../errors.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { evmRpcQuantity, evmRpcWord, evmRpcRecord, evmRpcHex } from "../evm-rpc-codec.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
@@ -22,8 +23,8 @@ export class RelayReadOnlyPreflightService {
         this.ports = ports;
     }
     async preflight(input) {
-        if (input.profile !== "default" || !/^[a-f0-9]{64}$/u.test(input.operationId)) {
-            throw new ApnError("APN_INVALID_INPUT", "Relay preflight requires the default profile and an operation ID.");
+        if (!/^[a-f0-9]{64}$/u.test(input.operationId)) {
+            throw new ApnError("APN_INVALID_INPUT", "Relay preflight requires a profile and an operation ID.");
         }
         allowlistProfileHash(input.profile);
         const operation = await new RelayUnsignedOperationRepository(this.state.root)
@@ -61,8 +62,10 @@ export class RelayReadOnlyPreflightService {
             asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: operation.amountAtomic,
             dailyUsageAtomic: usage, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(),
             mechanism: { provider: "relay", reference: relayExecutionRoute(operation) } });
-        if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: relayExecutionRoute(operation) }))
+        const mechanism = { provider: "relay", reference: relayExecutionRoute(operation) };
+        if (!bridgeMechanismAdmitted(admission, mechanism))
             blocked("relay_route_pin_changed");
+        assertRecipientAdmitted({ admission, mechanism, recipient: operation.recipient });
         if (quote.paymentDetails.depository.toLowerCase() !== ETHEREUM_DEPOSITORY ||
             quote.approval.to.toLowerCase() !== ETHEREUM_USDC.toLowerCase() ||
             quote.deposit.to.toLowerCase() !== ETHEREUM_DEPOSITORY ||

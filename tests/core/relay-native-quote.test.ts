@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { relayNativeQuoteRequest, requestRelayNativeQuote, validateRelayNativeQuote,
-  RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT } from "../../src/relay/native-quote.js";
+  RELAY_BNB_POLYGON_ROUTE_REFERENCE } from "../../src/relay/native-quote.js";
+import { RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT } from "./relay-legacy-accounts.js";
 
 const fixture = async (): Promise<any> => JSON.parse(await readFile("tests/core/relay-fixtures/bnb-native-polygon-native-quote-20260925.json", "utf8"));
 const intent = { payer: RELAY_BNB_SOURCE, recipient: RELAY_POLYGON_RECIPIENT,
-  amountAtomic: "1500000000000000", minimumOutputWei: "9000000000000000000", nowSeconds: 1790909529 };
+  amountAtomic: "1500000000000000", minimumOutputWei: "9000000000000000000", nowSeconds: 1790909529,
+  routeReference: RELAY_BNB_POLYGON_ROUTE_REFERENCE, maximumNetworkFeeWei: "30000000000000" };
 
 test("BNB native to Polygon native POL request and captured quote bind one unsigned native deposit", async () => {
   assert.deepEqual(relayNativeQuoteRequest(intent), { user: RELAY_BNB_SOURCE, originChainId: 56,
@@ -34,11 +36,14 @@ test("BNB native to Polygon native POL request and captured quote bind one unsig
   assert.equal(calls, 1);
 });
 
-test("BNB native route refuses other accounts, currencies, native value, calldata and order mutations", async () => {
-  assert.throws(() => relayNativeQuoteRequest({ ...intent, payer: RELAY_POLYGON_RECIPIENT,
-    recipient: RELAY_BNB_SOURCE }));
-  assert.throws(() => relayNativeQuoteRequest({ ...intent, recipient: "0x1111111111111111111111111111111111111111" }));
+test("BNB native route takes any accounts but refuses currencies, native value, calldata and order mutations", async () => {
+  assert.equal(relayNativeQuoteRequest({ ...intent, payer: RELAY_POLYGON_RECIPIENT, recipient: RELAY_BNB_SOURCE }).user, RELAY_POLYGON_RECIPIENT);
+  assert.equal(relayNativeQuoteRequest({ ...intent, recipient: "0x1111111111111111111111111111111111111111" }).recipient,
+    "0x1111111111111111111111111111111111111111");
   assert.throws(() => relayNativeQuoteRequest({ ...intent, amountAtomic: "1.5" }));
+  // The signed order binds payer and recipient: the same fixture cannot be adopted for another pair.
+  await assert.rejects(validateRelayNativeQuote(await fixture(), { ...intent, recipient: RELAY_BNB_SOURCE }), /order identity/u);
+  await assert.rejects(validateRelayNativeQuote(await fixture(), { ...intent, payer: RELAY_POLYGON_RECIPIENT }), /Relay native quote rejected/u);
   const edits: Array<[string, (q: any) => void]> = [
     ["approval step", q => { q.steps.unshift(q.steps[0]); }],
     ["source chain", q => { q.steps[0].items[0].data.chainId = 1; }],

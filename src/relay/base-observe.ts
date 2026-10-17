@@ -2,6 +2,7 @@
 import { ApnError } from "../errors.js";
 import { getAddress, type Hex } from "viem";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import { proveRelayBaseDestination, type RelayBnbProofPorts } from "./destination-proof.js";
@@ -45,10 +46,12 @@ export class RelayBaseObserveService {
     });
   }
 
-  async observe(operationId: string) {
+  /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+  async observe(profile: string, operationId: string) {
     if (!/^[a-f0-9]{64}$/u.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay Base observe requires an operation ID.");
-    const op = await new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId);
-    if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
+    allowlistProfileHash(profile);
+    const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(this.state.profileHash(profile), operationId);
+    if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found for this profile.");
     if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
       throw new ApnError("APN_OPERATION_BLOCKED", "Relay operation is retired.");
     if (op.sourceChainId !== 1 || op.destinationChainId !== 8453 || op.quote?.routeReference !== "ethereum-usdc-base-eth-v1")
@@ -88,7 +91,7 @@ export class RelayBaseObserveService {
     const usageBound = sourceFinalized && sourceHash ? await this.reconcileFinalizedSource(op, sourceHash) : false;
     if (op.statusLocator === undefined) return result("prepared_waiting", "status_locator_missing");
     let provider: Awaited<ReturnType<RelayKeylessStatusService["status"]>>;
-    try { provider = await this.status.status(operationId); }
+    try { provider = await this.status.statusOf(op); }
     catch { return result("provider_candidate_unproven", "provider_status_unavailable_or_ambiguous"); }
     const sourceBound = sourceHash !== null && sourceHash !== undefined && provider.inTxHashes.includes(sourceHash.toLowerCase());
     if (!provider.chainIdentityObserved || provider.txHashes.length !== 1)

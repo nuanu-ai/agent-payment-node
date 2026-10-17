@@ -1,6 +1,7 @@
 /** Relay cross-chain observation; native source reconciliation may update local state. */
 import type { Hex } from "viem";
 import { ApnError } from "../errors.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import { verifyDepositObservation, type RelayDepositObservation } from "./deposit-effect.js";
@@ -43,10 +44,12 @@ export class RelayObserveService {
     this.bnbInvocation = bnbInvocation;
   }
 
-  async observe(operationId: string): Promise<RelayObserveResult> {
+  /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+  async observe(profile: string, operationId: string): Promise<RelayObserveResult> {
     if (!OPERATION.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay observe requires an operation ID.");
-    const op = await new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId);
-    if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
+    allowlistProfileHash(profile);
+    const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(this.state.profileHash(profile), operationId);
+    if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found for this profile.");
     if (await new RelayRetirementRepository(this.state.root).load(op) !== null)
       throw new ApnError("APN_OPERATION_BLOCKED", "Relay operation is retired.");
     if (op.nativeQuote !== undefined) {
@@ -86,7 +89,7 @@ export class RelayObserveService {
     } catch { return result("source_unproven", "source_receipt_binding_failed"); }
     if (op.statusLocator === undefined) return result("source_finalized", "status_locator_missing", true);
     let provider: Awaited<ReturnType<RelayKeylessStatusService["status"]>>;
-    try { provider = await this.status.status(operationId); }
+    try { provider = await this.status.statusOf(op); }
     catch { return result("source_finalized", "provider_status_unavailable_or_ambiguous", true); }
     const sourceBound = provider.chainIdentityObserved && provider.inTxHashes.includes(sourceHash.toLowerCase());
     // One candidate fits the two-POST destination proof budget. Multiple provider

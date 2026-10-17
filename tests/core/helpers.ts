@@ -223,10 +223,12 @@ export function makeCore(input: {
 }
 
 function policyRecord(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): ProfilePolicyRecord {
+  const { x402Payees, ...limits } = input;
   return sealProfilePolicy({
     schemaVersion: "apn.profile-policy.v1",
     ...binding,
-    ...input,
+    ...limits,
+    ...(x402Payees === undefined || x402Payees === null ? {} : { x402Payees: x402Payees as readonly Address[] }),
     approvedAt: "2026-08-25T00:00:00.000Z",
     updatedAt: "2026-08-25T00:00:00.000Z",
   });

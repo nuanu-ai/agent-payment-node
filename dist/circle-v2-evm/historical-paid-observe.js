@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 import { externalClaimKey } from "./external-proof.js";
 import { HistoricalPaidRpc } from "./historical-paid-rpc.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
-import { circleRoute } from "./catalog.js";
+import { circleLegacyRoute as circleRoute } from "./catalog.js";
 import { advanceCircle, circleBlocked } from "./operation-model.js";
 import { CircleRepository } from "./repository.js";
 import { CircleExternalRpcBudget } from "./external-rpc.js";

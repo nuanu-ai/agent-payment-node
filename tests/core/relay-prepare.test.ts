@@ -438,7 +438,8 @@ test("Relay retirement rejects foreign IDs, profile mismatch, and malformed prep
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root), first = await serviceFor(state, () => {}).prepare(input);
   const retire = new RelayRetireService(state, { now: () => instant });
-  await assert.rejects(retire.retire({ profile: "other", operationId: first.operationId }), { code: "APN_INVALID_INPUT" });
+  // Any profile may retire its own operations; another profile's operation is invisible to it (OWNR-08).
+  await assert.rejects(retire.retire({ profile: "other", operationId: first.operationId }), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(retire.retire({ profile: "default", operationId: "f".repeat(64) }), { code: "APN_OPERATION_NOT_FOUND" });
   const repo = new RelayUnsignedOperationRepository(temporary.root);
   const original = await repo.loadOperation(first.profileHash, first.operationId);

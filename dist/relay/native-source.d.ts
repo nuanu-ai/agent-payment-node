@@ -34,24 +34,21 @@ export declare class RelayNativeSourceRuntime {
     private readonly journals;
     private readonly usage;
     constructor(state: StateStore, wrapping: WrappingSecretPort, ports: RelayNativeSourcePorts, clock?: ClockPort, origin?: string | undefined);
-    execute(operationId: string): Promise<RelayNativeSourceJournal>;
+    /** `profile` is the caller's explicit profile; the operation is found only under its hash (OWNR 4.1). */
+    execute(profile: string, operationId: string): Promise<RelayNativeSourceJournal>;
     private assertLane;
     private owner;
     private usageIdentity;
     private active;
+    /** Owner admission at every gate (prepare-of-execute, reservation, signing, first send): owner, policy, caps, mechanism
+     * and the owner's optional recipient pin (OD-1). */
     private admission;
     /** Chain and head, then the balance pinned to the head hash (EIP-1898 requireCanonical) and the pending nonce; Base
      * adds its exact simulation and OP fee reads at that height. No header is re-read around pinned reads (P2). */
     private funding;
-    private custody;
     private observe;
     private run;
     private settleUsage;
     private unsentOutcome;
-    /** Only after the journal records the sealed bytes as never landing. */
-    private discardCustody;
-    /** The only closure without a chain result: journal has no hash or send marker,
-     * and encrypted custody is proven empty under its mutation lock. */
-    private closeUnsignedAttempt;
 }
 export declare function createRelayNativeSourceRuntime(state: StateStore, wrapping: WrappingSecretPort, rpcUrl: string, confirm: RelayNativeSourcePorts["confirm"], clock?: ClockPort, transport?: Rpc): RelayNativeSourceRuntime;

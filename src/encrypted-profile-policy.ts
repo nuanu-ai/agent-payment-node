@@ -4,6 +4,7 @@ import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical
 import { ApnError } from "./errors.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { ClockPort } from "./ports.js";
+import type { Address } from "./model.js";
 import {
   canonicalPolicyInput,
   policyIncrease,
@@ -59,12 +60,15 @@ export class EncryptedProfilePolicy implements ProfilePolicyPort {
 
   async set(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): Promise<ProfilePolicyRecord> {
     const current = await this.loadForSet(binding);
-    const supplied = canonicalPolicyInput(input);
-    const effective: ProfilePolicySetInput = {
+    const { x402Payees: suppliedPayees, ...supplied } = canonicalPolicyInput(input);
+    // An omitted payee pin keeps the current one; null removes it.
+    const x402Payees = suppliedPayees === undefined ? current?.x402Payees : suppliedPayees ?? undefined;
+    const effective: Omit<ProfilePolicySetInput, "x402Payees"> & { readonly x402Payees?: readonly Address[] } = {
       ...supplied,
       ...(supplied.maxBalanceEthWei === undefined && current?.maxBalanceEthWei !== undefined
         ? { maxBalanceEthWei: current.maxBalanceEthWei }
         : {}),
+      ...(x402Payees === undefined ? {} : { x402Payees: x402Payees as readonly Address[] }),
     };
     const increase = policyIncrease(current, effective);
     const now = this.clock.now().toISOString();

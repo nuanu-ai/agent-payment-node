@@ -11,7 +11,7 @@ import { CircleRpc, CIRCLE_RPC_ABI } from "../../src/circle-v2-evm/rpc.js";
 import { circleMechanism } from "../../src/circle-v2-evm/usage.js";
 import { verifyCleanup85RecoveryAdmission, verifiedCleanup85RecoveryAdmission } from "../../src/circle-v2-evm/cleanup85-recovery-admission.js";
 import { Cleanup85RecoveryStore } from "../../src/circle-v2-evm/cleanup85-recovery-store.js";
-import { CIRCLE_SOURCE_TOKEN, CIRCLE_SOURCE_OWNER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_SOURCE_TOKEN, CIRCLE_SOURCE_OWNER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { approvalObservationFixture } from "./circle-v2-evm-approval-public-fixture.js";
 import { consumerTransaction, consumerReceipt } from "./circle-v2-evm-consumed-public-fixture.js";
 import { installCleanup85PublicFixture } from "./circle-cleanup85-public-fixture.js";

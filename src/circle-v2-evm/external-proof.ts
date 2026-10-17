@@ -1,7 +1,7 @@
 import { decodeCircleMintEvents } from "./mint-events.js";
 import { getAddress, keccak256, recoverTransactionAddress, serializeTransaction, toRlp, type Address, type Hex } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "../canonical.js";
-import { CIRCLE_AMOUNT, CIRCLE_MESSENGER, CIRCLE_MIN_MINT, CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_AMOUNT, CIRCLE_MESSENGER, CIRCLE_MIN_MINT, CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleLegacyRoute } from "./catalog.js";
 import { assertCircleAttestation, assertCircleSource, circleFail, circleHex, circleRecord, circleUint, circleWord, encodeCircleMint, oneEvent,
   type CircleObservation, type CircleReceiptProof, type CircleSourceProof } from "./protocol.js";
 import type { CircleOperationV1 } from "./operation-model.js";
@@ -51,7 +51,7 @@ export async function circleExternalTransaction(value: unknown): Promise<{ hash:
 }
 export async function decodeCircleExternalDestination(op: CircleOperationV1, input: CircleObservation, usedNonce: unknown, feeRecipient?: Address): Promise<CircleReceiptProof & { caller: Address }> {
   if (op.source === null || op.attestation === null) circleFail("external_source_attestation_required");
-  assertCircleAttestation(op.source, op.attestation); const route = circleRoute(op.destinationChain, op.destinationProfile), a = op.attestation;
+  assertCircleAttestation(op.source, op.attestation); const route = circleLegacyRoute(op.destinationChain, op.destinationProfile), a = op.attestation;
   const t = circleRecord(input.transaction), r = circleRecord(input.receipt), b = circleRecord(input.canonicalBlock), h = circleRecord(input.finalityHead);
   const signed = await circleExternalTransaction(t), blockHash = circleExternalHeader(b); circleExternalHeader(input.recheckedBlock); circleExternalHeader(h);
   const number = circleUint(b.number), index = circleUint(t.transactionIndex), gas = circleUint(t.gas), used = circleUint(r.gasUsed), price = circleUint(r.effectiveGasPrice);
@@ -74,7 +74,7 @@ export async function decodeCircleExternalDestination(op: CircleOperationV1, inp
     received.finalityThresholdExecuted !== a.finalityExecuted || circleHex(received.messageBody) !== a.body ||
     BigInt(a.expirationBlock) !== 0n && BigInt(a.expirationBlock) <= number || CIRCLE_AMOUNT - BigInt(a.feeExecutedAtomic) !== BigInt(a.receivedAtomic) || BigInt(a.receivedAtomic) < CIRCLE_MIN_MINT) circleFail("external_message_binding");
   return { caller:signed.caller,transactionHash:signed.hash,blockHash,blockNumberAtomic:number.toString(),finalityBlockHash:circleHex(h.hash,32),finalityBlockNumberAtomic:circleUint(h.number).toString(),
-    transactionHashBinding:hashObject(t),finalityTag:"safe",receiptHash:hashObject(r),logsHash:hashObject(r.logs),actualFeeAtomic:((route.chainId === 143 ? gas : used)*price).toString() };
+    transactionHashBinding:hashObject(t),finalityTag:"safe",receiptHash:hashObject(r),logsHash:hashObject(r.logs),actualFeeAtomic:((route.gasBilling === "limit" ? gas : used)*price).toString() };
 }
 export function externalClaimKey(op: CircleOperationV1): string {
   if (op.attestation === null || op.source === null) circleFail("external_claim_source");
@@ -83,7 +83,7 @@ export function externalClaimKey(op: CircleOperationV1): string {
 export function validateExternalFulfillment(p: CircleExternalFulfillment, op: CircleOperationV1): void {
   if (!isPlainRecord(p) || !exactKeys(p,["schemaVersion","operationId","fingerprint","sourceTransactionHash","sourceMessageHash","attestedMessageHash","nonce","destinationChain","recipient","token","grossAtomic","issuerFeeAtomic","netAtomic","caller","controlledDestinationNativeAtomic","sourceApprovalActualFeeAtomic","sourceBurnActualFeeAtomic","destinationReceipt","sourceFinality","recipientBalance","historicalDeploymentDigest","claimDigest","evidenceHash","proofHash"])) circleFail("external_proof_shape");
   assertCircleSource(p.sourceFinality);
-  const {proofHash,...body}=p, route=circleRoute(op.destinationChain,op.destinationProfile), balance=p.recipientBalance;
+  const {proofHash,...body}=p, route=circleLegacyRoute(op.destinationChain,op.destinationProfile), balance=p.recipientBalance;
   if (p.schemaVersion !== "apn.circle-external-fulfillment.v1" || proofHash !== hashObject(body) || p.operationId !== op.operationId || p.fingerprint !== op.fingerprint ||
     p.sourceTransactionHash !== op.source?.transactionHash || p.sourceMessageHash !== op.source?.sourceMessageHash || p.attestedMessageHash !== op.attestation?.hash || p.nonce !== op.attestation?.nonce ||
     p.destinationChain !== op.destinationChain || p.recipient !== CIRCLE_RECIPIENT || p.token !== route.token || p.grossAtomic !== "40100" || p.issuerFeeAtomic !== op.attestation?.feeExecutedAtomic || p.netAtomic !== op.attestation?.receivedAtomic ||

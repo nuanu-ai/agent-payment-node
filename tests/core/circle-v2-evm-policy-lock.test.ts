@@ -7,7 +7,7 @@ import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { CircleUsage, circleMechanism } from "../../src/circle-v2-evm/usage.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, circleRoute, type CircleDestinationChain } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, circleLegacyRoute as circleRoute, type CircleDestinationChain } from "../../src/circle-v2-evm/catalog.js";
 import type { CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

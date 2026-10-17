@@ -1,37 +1,48 @@
-/** Finite mainnet funding lane. Pins refreshed at safe blocks on 2026-10-09; see reports/.../mm-usdc-bridges/fresh-deployment-pins.json.
+/** CCTP V2 Fast from Arbitrum USDC (domain 3). Pins refreshed at safe blocks on 2026-10-09; see reports/.../mm-usdc-bridges/fresh-deployment-pins.json.
  * Primary contracts: https://developers.circle.com/cctp/references/contract-addresses */
 import { getAddress } from "viem";
-export const CIRCLE_AMOUNT = 40100n;
-export const CIRCLE_MAX_FEE = 100n;
-export const CIRCLE_MIN_MINT = 40000n;
-export const CIRCLE_SOURCE_OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
-export const CIRCLE_SEI_SELLER = getAddress("0x991e254B5C8e0AAf6c244eaa2706BAd059809b04");
 export const CIRCLE_SOURCE_TOKEN = getAddress("0xaf88d065e77c8cC2239327C5EDb3A432268e5831");
-export const CIRCLE_RECIPIENT = getAddress("0xf41170df51aab52aaa04fbc3ff325cf051644aca");
 export const CIRCLE_MESSENGER = getAddress("0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d");
 export const CIRCLE_TRANSMITTER = getAddress("0x81D40F21F12A8F0E3252Bccb954D722d4c464B64");
 export const CIRCLE_MINTER = getAddress("0xfd78EE919681417d192449715b2594ab58f5D002");
 export const CIRCLE_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 export const CIRCLE_TOKEN_IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
-const routes = {
-    1329: { chainId: 1329, domain: 16, token: getAddress("0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"), gasPayer: CIRCLE_SOURCE_OWNER,
-        gasPayerProfile: "evm-live-buyer", destinationNativeCap: "50000000000000000", rpcEnvironment: "APN_SEI_RPC_URL", rpcDefault: "https://evm-rpc.sei-apis.com" },
-    59144: { chainId: 59144, domain: 11, token: getAddress("0x176211869cA2b568f2A7D4EE941E073a821EE1ff"), gasPayer: CIRCLE_SOURCE_OWNER,
-        gasPayerProfile: "evm-live-buyer", destinationNativeCap: "100000000000000", rpcEnvironment: "APN_LINEA_RPC_URL", rpcDefault: "https://linea-rpc.publicnode.com" },
-    143: { chainId: 143, domain: 15, token: getAddress("0x754704Bc059F8C67012fEd69BC8A327a5aafb603"), gasPayer: getAddress("0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"),
-        gasPayerProfile: "default", destinationNativeCap: "100000000000000000", rpcEnvironment: "APN_MONAD_RPC_URL", rpcDefault: "https://rpc.monad.xyz" },
+export const CIRCLE_ROUTES = Object.freeze({
+    1329: { chainId: 1329, domain: 16, token: getAddress("0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"), gasBilling: "used", destinationNativeCap: "50000000000000000", rpcEnvironment: "APN_SEI_RPC_URL", rpcDefault: "https://evm-rpc.sei-apis.com" },
+    59144: { chainId: 59144, domain: 11, token: getAddress("0x176211869cA2b568f2A7D4EE941E073a821EE1ff"), gasBilling: "used", destinationNativeCap: "100000000000000", rpcEnvironment: "APN_LINEA_RPC_URL", rpcDefault: "https://linea-rpc.publicnode.com" },
+    143: { chainId: 143, domain: 15, token: getAddress("0x754704Bc059F8C67012fEd69BC8A327a5aafb603"), gasBilling: "limit", destinationNativeCap: "100000000000000000", rpcEnvironment: "APN_MONAD_RPC_URL", rpcDefault: "https://rpc.monad.xyz" },
+});
+export function isCircleDestinationChain(chain) {
+    return typeof chain === "number" && Object.hasOwn(CIRCLE_ROUTES, String(chain));
+}
+export function circleRoute(chain) {
+    if (!isCircleDestinationChain(chain))
+        throw new Error("Unsupported Circle destination.");
+    return CIRCLE_ROUTES[chain];
+}
+/** The policy mechanism of one destination. The `.v2` reference names protocol shape only, so it admits any profile. */
+export const circleFundingMechanism = (chain) => Object.freeze({ provider: "circle-cctp-v2", reference: `circle-v2-evm-fast-42161-${chain}.v2` });
+/** Frozen v1 schema (`apn.circle-v2-evm-operation.v1`, written by 0.5.40-0.5.42; read-only since 0.5.43). Its records
+ * fixed this source wallet, beneficiary and 40100/100/40000 economics, and each destination's gas wallet by profile.
+ * Only v1 readers, v1 recoveries and the historical modules use this section; no new operation does. */
+export const CIRCLE_AMOUNT = 40100n;
+export const CIRCLE_MAX_FEE = 100n;
+export const CIRCLE_MIN_MINT = 40000n;
+export const CIRCLE_SOURCE_OWNER = getAddress("0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7");
+export const CIRCLE_SEI_SELLER = getAddress("0x991e254B5C8e0AAf6c244eaa2706BAd059809b04");
+export const CIRCLE_RECIPIENT = getAddress("0xf41170df51aab52aaa04fbc3ff325cf051644aca");
+const legacyGas = {
+    1329: { gasPayer: CIRCLE_SOURCE_OWNER, gasPayerProfile: "evm-live-buyer" }, 59144: { gasPayer: CIRCLE_SOURCE_OWNER, gasPayerProfile: "evm-live-buyer" },
+    143: { gasPayer: getAddress("0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"), gasPayerProfile: "default" },
 };
-const seiSeller = { ...routes[1329], gasPayer: CIRCLE_SEI_SELLER, gasPayerProfile: "evm-live-seller" };
-/** An omitted selector retains the historical buyer route. Only Sei has a second finite owner. */
-export function circleRoute(chain, destinationProfile) {
-    const route = routes[chain];
-    if (route === undefined)
-        throw new Error("Unsupported finite Circle destination.");
+/** The v1 record's destination gas wallet. An omitted selector is the historical buyer route; Sei also had a seller one. */
+export function circleLegacyRoute(chain, destinationProfile) {
+    const route = { ...circleRoute(chain), ...legacyGas[chain] };
     if (destinationProfile === undefined || destinationProfile === route.gasPayerProfile)
         return route;
     if (chain === 1329 && destinationProfile === "evm-live-seller")
-        return seiSeller;
-    throw new Error("Unsupported finite Circle destination profile.");
+        return { ...route, gasPayer: CIRCLE_SEI_SELLER, gasPayerProfile: "evm-live-seller" };
+    throw new Error("Unsupported v1 Circle destination profile.");
 }
 export const CIRCLE_DEPLOYMENT_PINS = {
     "42161": {

@@ -19,6 +19,8 @@ import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
 import { walletCustodyLock } from "./encrypted-wallet-store.js";
 import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
+import { listLocalWallets } from "./wallet-import-collision.js";
+import type { StateStore } from "./state.js";
 
 /** The shared networks keep their existing profile rule; a direct-only network is local-wallet only. */
 export async function assertDirectEvmProfile(context: RuntimeContext, profile: string, chainId: DirectEvmChainId | undefined): Promise<void> {
@@ -69,12 +71,15 @@ export async function prepareEvmTransfer(
     const wallet = await state.loadWallet(profileHash);
     if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
     await retireExpired(profileHash, selection.chainId, wallet.address);
-    // Every direct EVM transfer waits for unresolved operations on its own chain and account only; no other profile is read or locked.
-    await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
+    // Every direct EVM transfer waits for unresolved operations on its own chain and account only; no other profile is locked.
+    // R8 (OWNR-16): native Arbitrum ETH to the wallet of any local custody profile need not wait for a Circle route of this
+    // account whose source burn is final; that route never signs on Arbitrum again. Any other recipient waits for it.
+    if (selection.chainId === 42161 && selection.token === "native" && await localCustodyRecipient(state, recipient)) await operations.assertEvmNativeAccountAvailableBesideSettledCircle(profileHash, wallet.address);
+    else await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
     const amount = evmAmount(request.amount, listed.decimals);
     // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.
     const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
-      chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic,
+      chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic, recipient,
       asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
     const rpcPort = context.requireRpc();
     armDirectEvmStep(rpcPort, selection.chainId, "prepare");
@@ -126,4 +131,11 @@ function withOwnerPriorityFee(fees: FeeEstimate, priorityFeeWei: string): FeeEst
       { reason: "zero_gas_price" });
   }
   return { ...fees, maxFeePerGasAtomic: maximum.toString(), maxPriorityFeePerGasAtomic: priorityFeeWei };
+}
+/** True when `recipient` is the custody wallet of a local profile (verified local key, bound provider identity). */
+async function localCustodyRecipient(state: StateStore, recipient: string): Promise<boolean> {
+  const wallet = (await listLocalWallets(state)).find((candidate) => candidate.address.toLowerCase() === recipient.toLowerCase());
+  if (wallet === undefined) return false;
+  try { return (await evmNativeCustody(state, wallet.profile)).walletAddress === recipient; }
+  catch (error) { if (error instanceof ApnError) return false; throw error; }
 }

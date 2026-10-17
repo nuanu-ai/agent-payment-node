@@ -1,0 +1,551 @@
+[
+ {
+  "name": "01-v0538-mega-gaszip",
+  "writtenBy": "0.5.38",
+  "origin": "mega-gaszip",
+  "kinds": [
+   "mega-gaszip:signing_started"
+  ]
+ },
+ {
+  "name": "02-v0538-sei-gaszip",
+  "writtenBy": "0.5.38",
+  "origin": "sei-gaszip",
+  "kinds": [
+   "ledger:bridge:plain:finalized",
+   "sei-gaszip:completed"
+  ]
+ },
+ {
+  "name": "03-v0538-sei-gaszip",
+  "writtenBy": "0.5.38",
+  "origin": "sei-gaszip",
+  "kinds": [
+   "ledger:bridge:plain:failed_confirmed_revert",
+   "sei-gaszip:failed_confirmed_revert"
+  ]
+ },
+ {
+  "name": "04-v0538-sei-gaszip",
+  "writtenBy": "0.5.38",
+  "origin": "sei-gaszip",
+  "kinds": [
+   "ledger:bridge:plain:unknown_finality",
+   "sei-gaszip:unknown_finality"
+  ]
+ },
+ {
+  "name": "05-v0543-asset-usage-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "asset-usage-ledger",
+  "kinds": [
+   "ledger:bridge:plain:reserved",
+   "ledger:direct:plain:reserved",
+   "ledger:gasless:plain:reserved",
+   "ledger:swap:plain:reserved",
+   "ledger:x402:plain:reserved"
+  ]
+ },
+ {
+  "name": "06-v0543-asset-usage-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "asset-usage-ledger",
+  "kinds": [
+   "ledger:direct:plain:submitted"
+  ]
+ },
+ {
+  "name": "07-v0543-asset-usage-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "asset-usage-ledger",
+  "kinds": [
+   "ledger:direct:plain:reserved",
+   "ledger:gasless:plain:failed_before_effect"
+  ]
+ },
+ {
+  "name": "08-v0543-asset-usage-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "asset-usage-ledger",
+  "kinds": [
+   "ledger:gasless:plain:unknown_finality"
+  ]
+ },
+ {
+  "name": "09-v0543-asset-usage-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "asset-usage-ledger",
+  "kinds": [
+   "ledger:gasless:plain:released_unsubmitted"
+  ]
+ },
+ {
+  "name": "10-v0543-asset-usage-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "asset-usage-ledger",
+  "kinds": [
+   "ledger:direct:plain:failed_confirmed_revert",
+   "ledger:gasless:consumedAtomic:failed_confirmed_revert"
+  ]
+ },
+ {
+  "name": "11-v0543-asset-usage-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "asset-usage-ledger",
+  "kinds": [
+   "ledger:swap:plain:submitted"
+  ]
+ },
+ {
+  "name": "12-v0543-circle-external-adoption",
+  "writtenBy": "0.5.43",
+  "origin": "circle-external-adoption",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:59144:awaiting_source"
+  ]
+ },
+ {
+  "name": "13-v0543-circle-external-adoption",
+  "writtenBy": "0.5.43",
+  "origin": "circle-external-adoption",
+  "kinds": [
+   "circle-sidecar:v2:external-claim",
+   "circle:apn.circle-v2-evm-operation.v2:143:external_fulfilled",
+   "ledger:bridge:plain:finalized",
+   "ledger:bridge:plain:released_unsubmitted"
+  ]
+ },
+ {
+  "name": "14-v0543-circle-external-adoption",
+  "writtenBy": "0.5.43",
+  "origin": "circle-external-adoption",
+  "kinds": [
+   "circle-sidecar:v2:external-claim",
+   "circle:apn.circle-v2-evm-operation.v2:143:awaiting_mint",
+   "ledger:bridge:plain:unknown_finality"
+  ]
+ },
+ {
+  "name": "15-v0543-circle-historical-paid-closure",
+  "writtenBy": "0.5.43",
+  "origin": "circle-historical-paid-closure",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:59144:completed",
+   "ledger:bridge:consumedAtomic:failed_confirmed_revert",
+   "ledger:bridge:plain:finalized"
+  ]
+ },
+ {
+  "name": "16-v0543-circle-historical-paid-closure",
+  "writtenBy": "0.5.43",
+  "origin": "circle-historical-paid-closure",
+  "kinds": [
+   "circle-sidecar:v1:external-claim",
+   "circle-sidecar:v1:external-evidence",
+   "circle:apn.circle-v2-evm-operation.v1:143:external_fulfilled",
+   "ledger:bridge:plain:finalized",
+   "ledger:bridge:plain:released_unsubmitted"
+  ]
+ },
+ {
+  "name": "17-v0543-circle-historical-paid-source",
+  "writtenBy": "0.5.43",
+  "origin": "circle-historical-paid-source",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:59144:mint_unknown"
+  ]
+ },
+ {
+  "name": "18-v0543-circle-v2-evm-burn-retirement-runtime",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-burn-retirement-runtime",
+  "kinds": [
+   "circle-sidecar:v1:retirement-authority",
+   "circle-sidecar:v1:retirement-claim:send",
+   "circle-sidecar:v1:retirement-claim:sign",
+   "circle-sidecar:v1:retirement-intent:apn.circle-burn-nonce-retirement.v1",
+   "circle:apn.circle-v2-evm-operation.v1:1329:nonce_retired",
+   "ledger:bridge:consumedAtomic:failed_confirmed_revert"
+  ]
+ },
+ {
+  "name": "19-v0543-circle-v2-evm-burn-retirement-runtime",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-burn-retirement-runtime",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:1329:awaiting_source",
+   "circle:apn.circle-v2-evm-operation.v1:1329:source_unknown",
+   "ledger:bridge:plain:reserved"
+  ]
+ },
+ {
+  "name": "20-v0543-circle-v2-evm-funding-public-dispatch",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-funding-public-dispatch",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:143:awaiting_source"
+  ]
+ },
+ {
+  "name": "21-v0543-circle-v2-evm-funding-public-dispatch",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-funding-public-dispatch",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v2:143:awaiting_source"
+  ]
+ },
+ {
+  "name": "22-v0543-circle-v2-evm-funding-public-receipt",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-funding-public-receipt",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:143:cancelled_unsubmitted"
+  ]
+ },
+ {
+  "name": "23-v0543-circle-v2-evm-funding-runtime",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-funding-runtime",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v2:1329:awaiting_source"
+  ]
+ },
+ {
+  "name": "24-v0543-circle-v2-evm-nonce-runtime",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-nonce-runtime",
+  "kinds": [
+   "circle-sidecar:v1:retirement-authority",
+   "circle-sidecar:v1:retirement-intent:apn.circle-nonce-retirement.v1",
+   "circle:apn.circle-v2-evm-operation.v1:143:cleanup_required",
+   "ledger:bridge:plain:reserved"
+  ]
+ },
+ {
+  "name": "25-v0543-circle-v2-evm-nonce-runtime",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-nonce-runtime",
+  "kinds": [
+   "circle-sidecar:v1:retirement-authority",
+   "circle-sidecar:v1:retirement-claim:send",
+   "circle-sidecar:v1:retirement-claim:sign",
+   "circle-sidecar:v1:retirement-intent:apn.circle-nonce-retirement.v1",
+   "circle:apn.circle-v2-evm-operation.v1:143:nonce_retired",
+   "ledger:bridge:consumedAtomic:failed_confirmed_revert"
+  ]
+ },
+ {
+  "name": "26-v0543-circle-v2-evm-runtime",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-runtime",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:143:awaiting_mint"
+  ]
+ },
+ {
+  "name": "27-v0543-circle-v2-evm-runtime",
+  "writtenBy": "0.5.43",
+  "origin": "circle-v2-evm-runtime",
+  "kinds": [
+   "circle:apn.circle-v2-evm-operation.v1:143:source_unknown",
+   "circle:apn.circle-v2-evm-operation.v1:59144:awaiting_mint",
+   "circle:apn.circle-v2-evm-operation.v1:59144:source_unknown"
+  ]
+ },
+ {
+  "name": "28-v0543-cleanup85-native-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "cleanup85-native-ledger",
+  "kinds": [
+   "ledger:direct:plain:unknown_finality"
+  ]
+ },
+ {
+  "name": "29-v0543-cleanup85-native-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "cleanup85-native-ledger",
+  "kinds": [
+   "ledger:direct:cleanup85NativeActual+cleanup85NativeReservation+consumedAtomic:finalized"
+  ]
+ },
+ {
+  "name": "30-v0543-cleanup85-native-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "cleanup85-native-ledger",
+  "kinds": [
+   "ledger:direct:plain:finalized"
+  ]
+ },
+ {
+  "name": "31-v0543-cleanup85-native-ledger",
+  "writtenBy": "0.5.43",
+  "origin": "cleanup85-native-ledger",
+  "kinds": [
+   "ledger:direct:cleanup85NativeReservation:unknown_finality"
+  ]
+ },
+ {
+  "name": "32-v0543-cleanup85-native-successor-production",
+  "writtenBy": "0.5.43",
+  "origin": "cleanup85-native-successor-production",
+  "kinds": [
+   "circle-sidecar:v1:retirement-authority",
+   "circle-sidecar:v1:retirement-claim:sign",
+   "circle-sidecar:v1:retirement-intent:apn.circle-consumed-burn-retirement.v1",
+   "circle:apn.circle-v2-evm-operation.v1:1329:cleanup_required",
+   "ledger:bridge:plain:unknown_finality",
+   "ledger:direct:cleanup85NativeReservation:reserved",
+   "ledger:direct:plain:failed_before_effect"
+  ]
+ },
+ {
+  "name": "33-v0543-mega-gaszip",
+  "writtenBy": "0.5.43",
+  "origin": "mega-gaszip",
+  "kinds": [
+   "mega-gaszip:prepared"
+  ]
+ },
+ {
+  "name": "34-v0543-mega-gaszip",
+  "writtenBy": "0.5.43",
+  "origin": "mega-gaszip",
+  "kinds": [
+   "mega-gaszip:failed_before_effect"
+  ]
+ },
+ {
+  "name": "35-v0543-merchant-canonical-receipt",
+  "writtenBy": "0.5.43",
+  "origin": "merchant-canonical-receipt",
+  "kinds": [
+   "ledger:x402:plain:finalized",
+   "merchant:payment_finalized"
+  ]
+ },
+ {
+  "name": "36-v0543-merchant-canonical-receipt",
+  "writtenBy": "0.5.43",
+  "origin": "merchant-canonical-receipt",
+  "kinds": [
+   "ledger:x402:plain:finalized",
+   "merchant:delivered"
+  ]
+ },
+ {
+  "name": "37-v0543-merchant-corrective",
+  "writtenBy": "0.5.43",
+  "origin": "merchant-corrective",
+  "kinds": [
+   "ledger:x402:plain:unknown_finality",
+   "merchant:unknown_finality"
+  ]
+ },
+ {
+  "name": "38-v0543-merchant-corrective",
+  "writtenBy": "0.5.43",
+  "origin": "merchant-corrective",
+  "kinds": [
+   "ledger:x402:plain:released_unsubmitted",
+   "merchant:prepared"
+  ]
+ },
+ {
+  "name": "39-v0543-merchant-corrective",
+  "writtenBy": "0.5.43",
+  "origin": "merchant-corrective",
+  "kinds": [
+   "ledger:x402:plain:released_unsubmitted",
+   "merchant:retired_unsent"
+  ]
+ },
+ {
+  "name": "40-v0543-merchant-corrective",
+  "writtenBy": "0.5.43",
+  "origin": "merchant-corrective",
+  "kinds": [
+   "ledger:x402:consumedAtomic+merchantNativeActualFee:finalized",
+   "ledger:x402:plain:finalized"
+  ]
+ },
+ {
+  "name": "41-v0543-merchant-x402",
+  "writtenBy": "0.5.43",
+  "origin": "merchant-x402",
+  "kinds": [
+   "ledger:x402:plain:finalized",
+   "merchant:delivery_unknown"
+  ]
+ },
+ {
+  "name": "42-v0543-merchant-x402",
+  "writtenBy": "0.5.43",
+  "origin": "merchant-x402",
+  "kinds": [
+   "ledger:x402:consumedAtomic:failed_confirmed_revert",
+   "ledger:x402:plain:failed_confirmed_revert",
+   "merchant:reverted"
+  ]
+ },
+ {
+  "name": "43-v0543-metamask-native-driver-native-crosschain",
+  "writtenBy": "0.5.43",
+  "origin": "metamask-native-driver-native-crosschain",
+  "kinds": [
+   "ledger:direct:consumedAtomic+metamaskNativeActualFee+metamaskNativeReservation:finalized",
+   "ledger:direct:metamaskNativeReservation:finalized",
+   "ledger:direct:metamaskNativeReservation:submitted",
+   "metamask-native:acknowledged",
+   "metamask-native:confirmed"
+  ]
+ },
+ {
+  "name": "44-v0543-metamask-native-driver-no-rid",
+  "writtenBy": "0.5.43",
+  "origin": "metamask-native-driver-no-rid",
+  "kinds": [
+   "ledger:direct:metamaskNativeReservation:unknown_finality",
+   "metamask-native:abandoned_unknown",
+   "metamask-native:unknown"
+  ]
+ },
+ {
+  "name": "45-v0543-metamask-native-driver-resolver-late",
+  "writtenBy": "0.5.43",
+  "origin": "metamask-native-driver-resolver-late",
+  "kinds": [
+   "ledger:direct:metamaskNativeReservation:failed_before_effect",
+   "metamask-native:failed_before_effect"
+  ]
+ },
+ {
+  "name": "46-v0543-metamask-native-driver-reverted",
+  "writtenBy": "0.5.43",
+  "origin": "metamask-native-driver-reverted",
+  "kinds": [
+   "ledger:direct:consumedAtomic+metamaskNativeActualFee+metamaskNativeReservation:finalized",
+   "ledger:direct:consumedAtomic+metamaskNativeReservation:failed_confirmed_revert",
+   "metamask-native:confirmed"
+  ]
+ },
+ {
+  "name": "47-v0543-relay-approval-effect",
+  "writtenBy": "0.5.43",
+  "origin": "relay-approval-effect",
+  "kinds": [
+   "relay-lifecycle:failed_before_effect",
+   "relay:erc20:ethereum-usdc-bnb-native-v1"
+  ]
+ },
+ {
+  "name": "48-v0543-relay-arbitrum-approval-execute",
+  "writtenBy": "0.5.43",
+  "origin": "relay-arbitrum-approval-execute",
+  "kinds": [
+   "ledger:bridge:plain:submitted",
+   "relay-lifecycle:active",
+   "relay:arbitrum-draft"
+  ]
+ },
+ {
+  "name": "49-v0543-relay-base-source-execution",
+  "writtenBy": "0.5.43",
+  "origin": "relay-base-source-execution",
+  "kinds": [
+   "relay-lifecycle:active",
+   "relay:erc20:ethereum-usdc-base-eth-v1"
+  ]
+ },
+ {
+  "name": "50-v0543-relay-native-prepare",
+  "writtenBy": "0.5.43",
+  "origin": "relay-native-prepare",
+  "kinds": [
+   "relay-lifecycle:active",
+   "relay:native:bnb-native-polygon-native-v1"
+  ]
+ },
+ {
+  "name": "51-v0543-relay-native-source",
+  "writtenBy": "0.5.43",
+  "origin": "relay-native-source",
+  "kinds": [
+   "ledger:bridge:plain:failed_before_effect",
+   "relay-lifecycle:retired",
+   "relay:native:bnb-native-monad-native-v1"
+  ]
+ },
+ {
+  "name": "52-v0543-relay-native-source",
+  "writtenBy": "0.5.43",
+  "origin": "relay-native-source",
+  "kinds": [
+   "relay-lifecycle:active",
+   "relay:native:bnb-native-monad-native-default-v1"
+  ]
+ },
+ {
+  "name": "53-v0543-relay-observation-proof",
+  "writtenBy": "0.5.43",
+  "origin": "relay-observation-proof",
+  "kinds": [
+   "ledger:bridge:plain:finalized",
+   "relay-lifecycle:source_confirmed",
+   "relay:native:base-native-polygon-native-buyer-v1"
+  ]
+ },
+ {
+  "name": "54-v0543-relay-observation-proof",
+  "writtenBy": "0.5.43",
+  "origin": "relay-observation-proof",
+  "kinds": [
+   "ledger:bridge:plain:failed_confirmed_revert",
+   "relay-lifecycle:failed_confirmed_revert",
+   "relay:native:base-native-mega-usdm-default-v1"
+  ]
+ },
+ {
+  "name": "55-v0543-relay-unsigned-operation",
+  "writtenBy": "0.5.43",
+  "origin": "relay-unsigned-operation",
+  "kinds": [
+   "relay-lifecycle:active",
+   "relay:quote-less:56:policy-unbound"
+  ]
+ },
+ {
+  "name": "56-v0543-sei-gaszip",
+  "writtenBy": "0.5.43",
+  "origin": "sei-gaszip",
+  "kinds": [
+   "ledger:bridge:plain:finalized",
+   "sei-gaszip:destination_failed"
+  ]
+ },
+ {
+  "name": "57-v0543-sei-gaszip",
+  "writtenBy": "0.5.43",
+  "origin": "sei-gaszip",
+  "kinds": [
+   "ledger:bridge:plain:released_unsubmitted",
+   "sei-gaszip:failed_before_effect"
+  ]
+ },
+ {
+  "name": "58-v0543-sei-gaszip",
+  "writtenBy": "0.5.43",
+  "origin": "sei-gaszip",
+  "kinds": [
+   "sei-gaszip:prepared"
+  ]
+ },
+ {
+  "name": "59-v0543-sei-gaszip",
+  "writtenBy": "0.5.43",
+  "origin": "sei-gaszip",
+  "kinds": [
+   "ledger:bridge:plain:unknown_finality",
+   "sei-gaszip:submitted"
+  ]
+ }
+]

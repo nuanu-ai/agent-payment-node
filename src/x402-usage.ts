@@ -9,7 +9,7 @@ const PROFILE_POLICY_SOURCE = "profile-x402-policy.v1";
 const OUTCOME_DOMAIN = "apn.rail-usage-outcome.v1";
 type Target = Exclude<AssetUsageState, "reserved" | "failed_confirmed_revert">;
 
-/** The same key the shared rail gate uses, so one operation can never hold two x402 reservations. */
+/** Persisted reservation key; stored holds are found by it, so it never changes. One operation holds one x402 reservation. */
 export function x402UsageKey(operationId: string): string { return `apn.rail-usage:x402:${operationId}`; }
 
 /**

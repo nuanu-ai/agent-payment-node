@@ -1,3 +1,4 @@
+import { getAddress } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "./canonical.js";
 import { validPolicyNetwork, x402Network, type X402PolicyNetwork } from "./x402-network.js";
 import type { EvmChainId } from "./evm-asset.js";
@@ -23,6 +24,12 @@ export interface ProfilePolicyRecord extends ProfilePolicyBinding {
   readonly maxBalanceUsdcAtomic: string;
   readonly maxX402AmountAtomic: string;
   readonly maxBalanceEthWei?: string;
+  /**
+   * Optional owner payee pin for x402 (1-16 canonical non-zero EVM addresses). Absent means this policy does not restrict
+   * payees: the payee stays the seller's offer, shown and bound into the authorization. Checked at prepare, before
+   * signing and before the first paid request.
+   */
+  readonly x402Payees?: readonly Address[];
   readonly approvedAt: string;
   readonly updatedAt: string;
   readonly integrityHash: string;
@@ -32,6 +39,52 @@ export interface ProfilePolicySetInput {
   readonly maxBalanceUsdcAtomic: string;
   readonly maxX402AmountAtomic: string;
   readonly maxBalanceEthWei?: string;
+  /** Omitted keeps the current pin; null removes it (payees not restricted); a list sets it. */
+  readonly x402Payees?: readonly string[] | null;
+}
+
+export const MAX_X402_PAYEES = 16;
+/** CLI spelling that removes the pin (`--x402-payees unrestricted`). */
+export const X402_PAYEES_UNRESTRICTED = "unrestricted";
+/** The canonical pin a request sets: null when it removes the pin. */
+export function canonicalX402Payees(value: readonly string[] | null): readonly Address[] | null {
+  return value === null ? null : x402PayeeList(value);
+}
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+/** 1-16 unique non-zero EVM addresses in checksum form, or null when the list is invalid. `exact` refuses other spellings. */
+export function x402PayeeList(value: unknown, exact = false): readonly Address[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_X402_PAYEES) return null;
+  const out: Address[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(entry)) return null;
+    let address: Address;
+    try { address = getAddress(entry) as Address; } catch { return null; }
+    if (address === ZERO_ADDRESS || out.includes(address) || exact && address !== entry) return null;
+    out.push(address);
+  }
+  return out;
+}
+
+/** Seller offers whose payee the optional pin admits (all of them without a pin); none admitted refuses before selection. */
+export function x402PayeeAdmittedOffers<T extends { readonly payTo: string }>(policy: Pick<ProfilePolicyRecord, "x402Payees">, offers: readonly T[]): readonly T[] {
+  const pinned = policy.x402Payees;
+  if (pinned === undefined) return offers;
+  const admitted = offers.filter((offer) => { try { return pinned.includes(getAddress(offer.payTo) as Address); } catch { return false; } });
+  if (admitted.length === 0) {
+    throw new ApnError("APN_OPERATION_BLOCKED", "The owner's x402 policy pins payees; no seller offer pays one of them.", { reason: "x402_payee_not_admitted" });
+  }
+  return admitted;
+}
+/** Refuse a payee outside the profile's optional x402 payee pin. Returns when admitted or when the policy has no pin. */
+export function assertX402PayeeAdmitted(policy: Pick<ProfilePolicyRecord, "x402Payees">, payee: string): void {
+  if (policy.x402Payees === undefined) return;
+  let canonical: string | null = null;
+  try { canonical = getAddress(payee); } catch { /* not an EVM payee */ }
+  if (canonical === null || !policy.x402Payees.includes(canonical as Address)) {
+    throw new ApnError("APN_OPERATION_BLOCKED", "The owner's x402 policy pins payees; this payee is not one of them.",
+      { reason: "x402_payee_not_admitted", payee: String(payee) });
+  }
 }
 
 export interface ProfilePolicyPort {
@@ -62,6 +115,10 @@ export function canonicalPolicyInput(input: ProfilePolicySetInput): ProfilePolic
   const maxBalanceEthWei = input.maxBalanceEthWei === undefined
     ? undefined
     : canonicalPositive(input.maxBalanceEthWei, "selected-network ETH balance limit");
+  const x402Payees = input.x402Payees === undefined || input.x402Payees === null ? input.x402Payees : x402PayeeList(input.x402Payees);
+  if (x402Payees === null && input.x402Payees !== null) {
+    throw new ApnError("APN_INVALID_INPUT", `The x402 payee pin must list 1 to ${MAX_X402_PAYEES} unique non-zero EVM addresses.`);
+  }
   if (BigInt(maxX402AmountAtomic) > BigInt(maxBalanceUsdcAtomic)) {
     throw new ApnError("APN_INVALID_INPUT", "The per-x402 limit cannot exceed the selected-network USDC balance limit.");
   }
@@ -69,6 +126,7 @@ export function canonicalPolicyInput(input: ProfilePolicySetInput): ProfilePolic
     maxBalanceUsdcAtomic,
     maxX402AmountAtomic,
     ...(maxBalanceEthWei === undefined ? {} : { maxBalanceEthWei }),
+    ...(x402Payees === undefined ? {} : { x402Payees }),
   };
 }
 
@@ -84,7 +142,7 @@ export function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBin
     "schemaVersion", "profile", "profileHash", "walletAddress", "walletBindingHash",
     "maxBalanceUsdcAtomic", "maxX402AmountAtomic", "approvedAt", "updatedAt", "integrityHash",
   ];
-  const allowed = [...required, "maxBalanceEthWei", "x402Network"];
+  const allowed = [...required, "maxBalanceEthWei", "x402Network", "x402Payees"];
   if (required.some((key) => !(key in value)) || Object.keys(value).some((key) => !allowed.includes(key))) {
     corrupt("Profile policy has an unexpected schema.");
   }
@@ -105,6 +163,9 @@ export function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBin
     });
   } catch {
     corrupt("Profile policy limits are invalid.");
+  }
+  if (policy.x402Payees !== undefined && x402PayeeList(policy.x402Payees, true) === null) {
+    corrupt("Profile policy x402 payee pin is invalid.");
   }
   if (Date.parse(policy.approvedAt) > Date.parse(policy.updatedAt)) {
     corrupt("Profile policy approval time is newer than its update time.");
@@ -130,6 +191,7 @@ export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord
         max_x402_amount_atomic: null,
         max_balance_eth_wei: null,
       },
+      x402_payees: null,
       approved_at: null,
       updated_at: null,
       integrity_status: "not_present",
@@ -147,6 +209,7 @@ export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord
       max_x402_amount_atomic: policy.maxX402AmountAtomic,
       max_balance_eth_wei: policy.maxBalanceEthWei ?? null,
     },
+    x402_payees: policy.x402Payees ?? null,
     approved_at: policy.approvedAt,
     updated_at: policy.updatedAt,
     integrity_status: "authenticated",
@@ -249,6 +312,9 @@ export function policyIncrease(
   if (current === null) return true;
   if (BigInt(next.maxBalanceUsdcAtomic) > BigInt(current.maxBalanceUsdcAtomic)) return true;
   if (BigInt(next.maxX402AmountAtomic) > BigInt(current.maxX402AmountAtomic)) return true;
+  // Removing the payee pin, or adding a payee to it, widens who may be paid; pinning where there was none narrows.
+  const pinned = current.x402Payees;
+  if (pinned !== undefined && (next.x402Payees === undefined || next.x402Payees === null || next.x402Payees.some((payee) => !pinned.includes(payee as Address)))) return true;
   if (next.maxBalanceEthWei === undefined) return false;
   return current.maxBalanceEthWei === undefined || BigInt(next.maxBalanceEthWei) > BigInt(current.maxBalanceEthWei);
 }

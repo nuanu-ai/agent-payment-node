@@ -9,6 +9,7 @@ import { RelayRetirementRepository, RelayUnsignedOperationRepository, validateRe
 import type { StateStore } from "../state.js";
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { RelayEffectJournalRepository, type RelayEffectJournal } from "./effect-journal.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator } from "./quote.js";
 import { relayExecutionRoute } from "./execution-route.js";
@@ -34,15 +35,19 @@ function depositBinding(op: RelayUnsignedOperation): string {
 function depositKey(op: RelayUnsignedOperation): string {
   return domainHash("apn.relay-deposit-custody.v1", canonicalJson({ operationId: op.operationId }));
 }
-/** Encrypted, hash-bound signed material for the one permitted deposit attempt. */
+/** Encrypted, hash-bound signed material for the one permitted deposit attempt, in the operation's own profile envelope. */
 export class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
   private readonly wallets: EncryptedWalletStore;
-  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort) {
+  constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly profile: string) {
     this.wallets = new EncryptedWalletStore(state, wrapping);
   }
+  private owned(op: RelayUnsignedOperation): string {
+    if (this.state.profileHash(this.profile) !== op.profileHash) blocked("custody_profile_mismatch");
+    return this.profile;
+  }
   async load(op: RelayUnsignedOperation): Promise<RelaySignedDeposit | null> {
-    return this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
-      const wallet = await this.wallets.describe("default");
+    return this.state.withLocks([walletCustodyLock(this.state, this.owned(op))], async () => {
+      const wallet = await this.wallets.describe(this.owned(op));
       if (wallet === null) return null;
       try {
         if (!same(wallet.identity.address, op.sourceAccount)) corrupt("deposit custody owner");
@@ -55,8 +60,8 @@ export class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
     });
   }
   async discard(op: RelayUnsignedOperation): Promise<void> {
-    await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
-      const wallet = await this.wallets.describe("default"); if (wallet === null) return;
+    await this.state.withLocks([walletCustodyLock(this.state, this.owned(op))], async () => {
+      const wallet = await this.wallets.describe(this.owned(op)); if (wallet === null) return;
       try {
         if (!same(wallet.identity.address, op.sourceAccount)) corrupt("deposit custody owner");
         if (wallet.secret.directEffects[depositKey(op)] === undefined) return;
@@ -65,8 +70,8 @@ export class RelayEncryptedDepositCustody implements RelayDepositCustodyPort {
     });
   }
   async seal(op: RelayUnsignedOperation, signed: RelaySignedDeposit): Promise<void> {
-    await this.state.withLocks([walletCustodyLock(this.state, "default")], async () => {
-      const wallet = await this.wallets.describe("default");
+    await this.state.withLocks([walletCustodyLock(this.state, this.owned(op))], async () => {
+      const wallet = await this.wallets.describe(this.owned(op));
       if (wallet === null) blocked("encrypted_custody_missing");
       try {
         if (!same(wallet.identity.address, op.sourceAccount)) corrupt("deposit custody owner");
@@ -87,8 +92,8 @@ export interface RelayDepositObservation {
 }
 export interface RelayDepositPorts {
   now(): Date;
-  activePolicy(profile: "default"): Promise<ActiveAssetPolicy | null>;
-  publicAccount(profile: "default"): Promise<string | null>;
+  activePolicy(profile: string): Promise<ActiveAssetPolicy | null>;
+  publicAccount(profile: string): Promise<string | null>;
   dailyUsage(account: string, now: Date): Promise<string>;
   executionAdmission(op: RelayUnsignedOperation): Promise<null | Readonly<{
     requestId: string; operationIntegrityHash: string; quoteDigest: string }>>;
@@ -153,9 +158,10 @@ export class RelayDepositEffectService {
     this.operations = new RelayUnsignedOperationRepository(state.root);
     this.effects = new RelayEffectJournalRepository(state.root);
   }
-  async run(operationId: string): Promise<RelayEffectJournal> {
+  /** The operation is found only under the caller's explicit profile; no profile is assumed. */
+  async run(profile: string, operationId: string): Promise<RelayEffectJournal> {
     if (!/^[a-f0-9]{64}$/u.test(operationId)) blocked("operation_id");
-    const profileHash = this.state.profileHash("default");
+    const profileHash = this.state.profileHash(profile);
     return this.state.withLocks([`relay-deposit:${profileHash}:${operationId}`], async () => {
       const op = await this.operations.loadOperation(profileHash, operationId);
       if (op === null) blocked("prepared_operation_missing");
@@ -171,7 +177,7 @@ export class RelayDepositEffectService {
       // P2: bytes signed in this invocation, under these held locks, go out on the nonce and admission just checked.
       let signedNonce: bigint | null = null;
       if (effect.phase === "pending") {
-        const nonce = await this.revalidate(op, approvalHash); signedNonce = nonce;
+        const nonce = await this.revalidate(op, profile, approvalHash); signedNonce = nonce;
         journal = await this.effects.transition(profileHash, operationId, journal.integrityHash,
           { kind: "mark_signing", role: "deposit", marker: randomBytes(32).toString("hex"), at: this.ports.now().toISOString() });
         const raw = await this.ports.sign(op);
@@ -203,7 +209,7 @@ export class RelayDepositEffectService {
         effect = journal.effects[1];
       }
       if (effect.phase === "sealed") {
-        const nonce = signedNonce ?? await this.revalidate(op, approvalHash);
+        const nonce = signedNonce ?? await this.revalidate(op, profile, approvalHash);
         const signed = await this.ports.custody.load(op);
         if (signed === null || !same(signed.transactionHash, effect.attempt!.transactionHash!)) corrupt("sealed custody missing");
         await verifySignedEnvelope(op, signed.rawTransaction, signed.transactionHash, nonce);
@@ -244,23 +250,25 @@ export class RelayDepositEffectService {
         !same(encodeFunctionData({ abi: DEPOSIT_ABI, functionName: "depositErc20", args: [...decoded.args] }), deposit.data)) blocked("saved_deposit_order_binding");
     } catch { blocked("saved_deposit_order_binding"); }
   }
-  private async revalidate(op: RelayUnsignedOperation, approvalHash: Hex): Promise<bigint> {
+  private async revalidate(op: RelayUnsignedOperation, profile: string, approvalHash: Hex): Promise<bigint> {
     this.assertEnvelope(op);
     const now = this.ports.now();
     if (!Number.isFinite(now.getTime()) || now.getTime() + 60_000 >= Date.parse(op.deadline)) blocked("quote_deadline");
     const approval = await this.ports.observeApproval(approvalHash);
     if (approval === null || verifyApprovalObservation(op, approvalHash, approval) !== "confirmed") blocked("canonical_approval_effect_required");
-    const active = await this.ports.activePolicy("default");
-    if (active === null || active.profile !== "default" || active.digest !== op.policyDigest ||
+    const active = await this.ports.activePolicy(profile);
+    if (active === null || active.profile !== profile || active.digest !== op.policyDigest ||
       active.revision !== op.policyRevision || !same(active.accounts.evm ?? "", op.sourceAccount) ||
       (active.registry.expiresAt !== undefined && now.toISOString() >= active.registry.expiresAt)) blocked("active_policy_or_owner");
-    if (!same(await this.ports.publicAccount("default") ?? "", op.sourceAccount)) blocked("public_owner");
+    if (!same(await this.ports.publicAccount(profile) ?? "", op.sourceAccount)) blocked("public_owner");
     const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:1",
       asset: { kind: "token", identifier: ETHEREUM_USDC }, rail: "bridge", amountAtomic: op.amountAtomic,
       dailyUsageAtomic: await this.ports.dailyUsage(op.sourceAccount, now),
       asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString(),
       mechanism: { provider: "relay", reference: relayExecutionRoute(op) } });
-    if (!bridgeMechanismAdmitted(admission, { provider: "relay", reference: relayExecutionRoute(op) })) blocked("route_pin");
+    const mechanism = { provider: "relay", reference: relayExecutionRoute(op) };
+    if (!bridgeMechanismAdmitted(admission, mechanism)) blocked("route_pin");
+    assertRecipientAdmitted({ admission, mechanism, recipient: op.recipient });
     const execution = await this.ports.executionAdmission(op);
     if (execution === null || execution.requestId !== op.statusLocator!.requestId ||
       execution.operationIntegrityHash !== op.integrityHash || execution.quoteDigest !== op.quoteDigest) blocked("saved_request_id_execution_admission_required");

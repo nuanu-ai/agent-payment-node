@@ -3,8 +3,12 @@ import { tmpdir } from "node:os";
 import type { Hex } from "viem";
 import { StateStore } from "../../src/state.js";
 import { advanceCircle, circleEnvelope, sealCircle, type CircleOperationV1 } from "../../src/circle-v2-evm/operation-model.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { encodeCircleApproval, encodeCircleBurn } from "../../src/circle-v2-evm/protocol.js";
+/** The v2 binding identity of a fixture: its own profiles and custody wallets (never constants). */
+export function fundingIdentity(op: Pick<CircleOperationV1, "profile" | "destinationProfile" | "sourceCustody" | "destinationCustody">) {
+  return { sourceProfile: op.profile, sourceOwner: op.sourceCustody.walletAddress, destinationProfile: op.destinationProfile, gasPayer: op.destinationCustody.walletAddress };
+}
 export const at = Date.parse("2026-10-09T01:00:00.000Z"), tx = `0x${"11".repeat(32)}` as Hex, cleanupTx = `0x${"cc".repeat(32)}` as Hex;
 export function initial(root = join(tmpdir(), "circle-fixture"), chain: 143 | 1329 | 59144 = 143, destinationProfile?: string): CircleOperationV1 {
   const selected = circleRoute(chain, destinationProfile);

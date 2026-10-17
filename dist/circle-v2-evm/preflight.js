@@ -73,9 +73,10 @@ export function verifyCircleSourceAccount(account) {
     circleUint(account.latestNonceAtomic);
     return { approvalRequired: allowance === 0n, nonceAtomic: account.latestNonceAtomic };
 }
-export function verifyCircleDestinationAccount(account, chain, destinationProfile) {
-    const route = circleRoute(chain, destinationProfile);
-    if (account.chainId !== chain || account.address !== route.gasPayer ||
+/** `gasPayer` is the operation's own destination custody wallet, which signs and pays the mint. */
+export function verifyCircleDestinationAccount(account, chain, gasPayer) {
+    const route = circleRoute(chain);
+    if (account.chainId !== chain || account.address !== gasPayer ||
         circleUint(account.nativeBalanceAtomic) < BigInt(route.destinationNativeCap) || account.latestNonceAtomic !== account.pendingNonceAtomic)
         circleFail("destination_account");
     circleUint(account.latestNonceAtomic);

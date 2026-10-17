@@ -1,8 +1,8 @@
-import { MERCHANT_CHAIN, MERCHANT_TOKEN, MERCHANT_MECHANISM } from "./x402-merchant/pins.js";
 import { address as solanaAddress } from "@solana/kit";
 import { getAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
+import { recipientPinList, rowRecipientPinsValid, type AssetRecipientPins } from "./allowlist-recipient-pins.js";
 import { parseAtomic } from "./money.js";
 import { tronAddress } from "./tron/codec.js";
 import { MAX_SWAP_ADMISSION_OPTIONS, swapRouteDigest, validateSwapAdmissionMechanism, type SwapAdmissionMechanism } from "./swap/route-admission.js";
@@ -35,6 +35,8 @@ export interface AssetMechanismOption {
   readonly provider: string;
   readonly reference: string;
   readonly maximumPerTransferAtomic: string;
+  /** Optional owner pin (OD-1) for this bridge alternative: 1-16 recipients of any family. Absent: not restricted. */
+  readonly recipients?: readonly string[];
 }
 
 export interface AssetPolicyRow {
@@ -59,6 +61,8 @@ export interface AssetPolicyRow {
   readonly mechanismOptions?: Readonly<{ bridge?: readonly AssetMechanismOption[]; swap?: readonly SwapAdmissionMechanism[] }>;
   /** Optional canonical recipient bound to Ethereum/Base local or Base Coinbase gasless admission. */
   readonly gaslessRecipient?: string;
+  /** Optional owner pins (OD-1) per direct, x402 or single-pin bridge rail; see `allowlist-recipient-pins.ts`. */
+  readonly recipients?: AssetRecipientPins;
 }
 
 export interface AssetPolicyChain {
@@ -250,7 +254,7 @@ function validateChain(value: unknown, schema: AssetPolicyRegistrySchema): asser
   }
   const identities = new Set<string>();
   for (const asset of value.assets) {
-    validateAsset(value.family, asset, schema, String(value.chain));
+    validateAsset(value.family, asset, schema);
     if (asset.gaslessRecipient !== undefined && value.chain !== "eip155:1" && value.chain !== "eip155:8453") {
       invalid("A gasless recipient pin requires Ethereum or Base.");
     }
@@ -264,14 +268,15 @@ function validateChain(value: unknown, schema: AssetPolicyRegistrySchema): asser
   }
 }
 
-function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: AssetPolicyRegistrySchema, chain: string): asserts value is AssetPolicyRow {
+function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: AssetPolicyRegistrySchema): asserts value is AssetPolicyRow {
   const perRail = schema === ASSET_POLICY_REGISTRY_SCHEMA_V2;
   if (!isPlainRecord(value) || !exactKeys(value, ["kind", "identifier", "symbol", "decimals", "rails", perRail ? "railCaps" : "caps",
     ...(value.mechanismPins === undefined ? [] : ["mechanismPins"]),
     ...(value.mechanismOptions === undefined ? [] : ["mechanismOptions"]),
-    ...(value.gaslessRecipient === undefined ? [] : ["gaslessRecipient"])]) ||
+    ...(value.gaslessRecipient === undefined ? [] : ["gaslessRecipient"]),
+    ...(value.recipients === undefined ? [] : ["recipients"])]) ||
       (value.kind !== "native" && value.kind !== "token") ||
-      typeof value.symbol !== "string" || (!/^[A-Z0-9][A-Z0-9._-]{0,15}$/u.test(value.symbol) && !(value.symbol === "USDm" && family === "evm" && chain === MERCHANT_CHAIN && value.kind === "token" && value.identifier === MERCHANT_TOKEN && isPlainRecord(value.mechanismPins) && canonicalJson(value.mechanismPins.x402 ?? null) === canonicalJson(MERCHANT_MECHANISM))) ||
+      typeof value.symbol !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,15}$/u.test(value.symbol) ||
       typeof value.decimals !== "number" || !Number.isSafeInteger(value.decimals) || value.decimals < 0 || value.decimals > 255) {
     invalid("An asset policy asset row is invalid.");
   }
@@ -303,8 +308,9 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
       options.bridge.length > 16 || (value.mechanismPins as AssetPolicyRow["mechanismPins"])?.bridge !== undefined) invalid("Bridge mechanism alternatives are invalid.");
     const keys = new Set<string>();
     for (const option of options.bridge) {
-      if (!isPlainRecord(option) || !exactKeys(option, ["provider", "reference", "maximumPerTransferAtomic"]))
-        invalid("Bridge mechanism alternative is invalid.");
+      if (!isPlainRecord(option) || !exactKeys(option, ["provider", "reference", "maximumPerTransferAtomic",
+        ...(option.recipients === undefined ? [] : ["recipients"])]) ||
+        (option.recipients !== undefined && recipientPinList(option.recipients, null) === null)) invalid("Bridge mechanism alternative is invalid.");
       validateMechanismPins({ bridge: { provider: option.provider, reference: option.reference } });
       const cap = atomic(option.maximumPerTransferAtomic, true, "Bridge mechanism cap");
       if (cap > BigInt((value.railCaps as AssetPolicyRow["railCaps"])!.bridge!.maximumPerTransferAtomic)) invalid("Bridge mechanism cap exceeds rail cap.");
@@ -313,6 +319,8 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
       keys.add(key);
     }
   }
+  if (value.recipients !== undefined && !rowRecipientPinsValid(value.recipients, value.rails, family,
+    isPlainRecord(value.mechanismOptions) && value.mechanismOptions.bridge !== undefined)) invalid("Asset recipient pins are invalid.");
   const mechanismPins = value.mechanismPins as Record<string, unknown> | undefined;
   const swapPin = mechanismPins?.swap;
   if (value.rails.swap !== (swapPin !== undefined || swapOptions !== undefined)) invalid("Swap admission requires exactly one immutable swap mechanism pin.");

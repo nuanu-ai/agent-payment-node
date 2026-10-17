@@ -1,6 +1,7 @@
 import { approvalCode } from "./approval-code.js";
 import { canonicalJson, domainHash } from "./canonical.js";
 import { ASSET_POLICY_REGISTRY_SCHEMA_V2, } from "./asset-policy-registry.js";
+import { isRecipientPinRail } from "./allowlist-recipient-pins.js";
 import { swapMechanismDigest } from "./swap/pin.js";
 import { swapRouteDigest } from "./swap/route-admission.js";
 import { exactChainConsent, TTY_APPROVAL_DEADLINE_MS } from "./tty-approval.js";
@@ -14,6 +15,7 @@ export function allowlistAdmissions(registry) {
             decimals: asset.decimals, rail, maximumPerTransferAtomic: caps.maximumPerTransferAtomic, dailyLimitAtomic: caps.dailyLimitAtomic,
             mechanism: mechanism ?? null,
             ...(rail === "gasless" && asset.gaslessRecipient !== undefined ? { recipient: asset.gaslessRecipient } : {}),
+            ...(isRecipientPinRail(rail) && asset.recipients?.[rail] !== undefined ? { recipients: asset.recipients[rail] } : {}),
             ...(rail === "bridge" && asset.mechanismOptions?.bridge !== undefined ? { mechanismOptions: asset.mechanismOptions.bridge } : {}),
             ...(rail === "swap" && asset.mechanismOptions?.swap !== undefined ? { swapMechanisms: asset.mechanismOptions.swap } : {}) };
     })));
@@ -50,7 +52,8 @@ export function allowlistDecisionLines(intent, approvalWindowClosesAt) {
             `   Daily (UTC): ${display(row.dailyLimitAtomic, row.decimals)} ${row.symbol} (${row.dailyLimitAtomic} atomic)`,
             ...(row.mechanism === null ? [] : [`   Mechanism pin: ${mechanismText(row.mechanism)}`]),
             ...(row.recipient === undefined ? [] : [`   Exact recipient: ${row.recipient}`]),
-            ...(row.mechanismOptions === undefined ? [] : row.mechanismOptions.map((option) => `   Mechanism pin: provider ${option.provider}; reference ${option.reference}; per operation ${display(option.maximumPerTransferAtomic, row.decimals)} ${row.symbol} (${option.maximumPerTransferAtomic} atomic)`)),
+            ...(row.recipients === undefined ? [] : [`   Recipients pinned (${row.recipients.length}): ${row.recipients.join(", ")}`]),
+            ...(row.mechanismOptions === undefined ? [] : row.mechanismOptions.map((option) => `   Mechanism pin: provider ${option.provider}; reference ${option.reference}; per operation ${display(option.maximumPerTransferAtomic, row.decimals)} ${row.symbol} (${option.maximumPerTransferAtomic} atomic)${option.recipients === undefined ? "" : `; recipients pinned (${option.recipients.length}): ${option.recipients.join(", ")}`}`)),
             ...(row.swapMechanisms === undefined ? [] : row.swapMechanisms.map((mechanism) => `   Mechanism pin: ${mechanismText(mechanism)}`)),
         ]),
         "Daily caps count this asset's combined usage on every rail during the UTC day.",

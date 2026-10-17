@@ -1,31 +1,49 @@
-/** Finite mainnet funding lane. Pins refreshed at safe blocks on 2026-10-09; see reports/.../mm-usdc-bridges/fresh-deployment-pins.json.
+/** CCTP V2 Fast from Arbitrum USDC (domain 3). Pins refreshed at safe blocks on 2026-10-09; see reports/.../mm-usdc-bridges/fresh-deployment-pins.json.
  * Primary contracts: https://developers.circle.com/cctp/references/contract-addresses */
 import { type Address } from "viem";
 export type CircleDestinationChain = 1329 | 59144 | 143;
-export declare const CIRCLE_AMOUNT = 40100n;
-export declare const CIRCLE_MAX_FEE = 100n;
-export declare const CIRCLE_MIN_MINT = 40000n;
-export declare const CIRCLE_SOURCE_OWNER: `0x${string}`;
-export declare const CIRCLE_SEI_SELLER: `0x${string}`;
 export declare const CIRCLE_SOURCE_TOKEN: `0x${string}`;
-export declare const CIRCLE_RECIPIENT: `0x${string}`;
 export declare const CIRCLE_MESSENGER: `0x${string}`;
 export declare const CIRCLE_TRANSMITTER: `0x${string}`;
 export declare const CIRCLE_MINTER: `0x${string}`;
 export declare const CIRCLE_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 export declare const CIRCLE_TOKEN_IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
+/** Protocol data of one destination: chain, CCTP domain, destination USDC, the destination mint gas budget and its RPC.
+ * No profile, wallet, recipient or amount: those are per-operation inputs (`--profile`, `--destination-profile`,
+ * `--beneficiary`, `--gross-atomic`, `--max-issuer-fee-atomic`, `--min-mint-atomic`). Adding a destination is table data. */
 export interface CircleRoute {
     readonly chainId: CircleDestinationChain;
     readonly domain: 16 | 11 | 15;
     readonly token: Address;
-    readonly gasPayer: Address;
-    readonly gasPayerProfile: "evm-live-buyer" | "evm-live-seller" | "default";
+    /** `limit`: the chain bills the full signed gas limit (Monad); `used`: gas used. */
+    readonly gasBilling: "limit" | "used";
     readonly destinationNativeCap: string;
     readonly rpcEnvironment: string;
     readonly rpcDefault: string;
 }
-/** An omitted selector retains the historical buyer route. Only Sei has a second finite owner. */
-export declare function circleRoute(chain: CircleDestinationChain, destinationProfile?: string): CircleRoute;
+export declare const CIRCLE_ROUTES: Readonly<Record<CircleDestinationChain, CircleRoute>>;
+export declare function isCircleDestinationChain(chain: unknown): chain is CircleDestinationChain;
+export declare function circleRoute(chain: CircleDestinationChain): CircleRoute;
+/** The policy mechanism of one destination. The `.v2` reference names protocol shape only, so it admits any profile. */
+export declare const circleFundingMechanism: (chain: CircleDestinationChain) => Readonly<{
+    provider: "circle-cctp-v2";
+    reference: "circle-v2-evm-fast-42161-59144.v2" | "circle-v2-evm-fast-42161-143.v2" | "circle-v2-evm-fast-42161-1329.v2";
+}>;
+/** Frozen v1 schema (`apn.circle-v2-evm-operation.v1`, written by 0.5.40-0.5.42; read-only since 0.5.43). Its records
+ * fixed this source wallet, beneficiary and 40100/100/40000 economics, and each destination's gas wallet by profile.
+ * Only v1 readers, v1 recoveries and the historical modules use this section; no new operation does. */
+export declare const CIRCLE_AMOUNT = 40100n;
+export declare const CIRCLE_MAX_FEE = 100n;
+export declare const CIRCLE_MIN_MINT = 40000n;
+export declare const CIRCLE_SOURCE_OWNER: `0x${string}`;
+export declare const CIRCLE_SEI_SELLER: `0x${string}`;
+export declare const CIRCLE_RECIPIENT: `0x${string}`;
+export interface CircleLegacyRoute extends CircleRoute {
+    readonly gasPayer: Address;
+    readonly gasPayerProfile: "evm-live-buyer" | "evm-live-seller" | "default";
+}
+/** The v1 record's destination gas wallet. An omitted selector is the historical buyer route; Sei also had a seller one. */
+export declare function circleLegacyRoute(chain: CircleDestinationChain, destinationProfile?: string): CircleLegacyRoute;
 export declare const CIRCLE_DEPLOYMENT_PINS: {
     readonly "42161": {
         readonly messenger: {

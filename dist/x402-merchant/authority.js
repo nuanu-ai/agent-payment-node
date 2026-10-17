@@ -1,6 +1,7 @@
 import { validateMerchantFeeContext } from "./mega-fee.js";
 import { hashObject } from "../canonical.js";
 import { refuse } from "./protocol.js";
+import { merchantTerms } from "./terms.js";
 const grants = new WeakMap();
 /** This in-memory authority exists only during the foreground approval under its policy lock. */
 export function issueMerchantAuthority(controller, o, tokenHold, nativeHold, approvalEndsAt) {
@@ -31,7 +32,7 @@ export function bindMerchantFeeAdmission(grant, controller, o, fresh, started, n
     const b = grants.get(grant.opaque);
     if (b === undefined || !b.live || b.controller !== controller || b.frame !== o.fingerprint || o.feeContext === undefined || now.toISOString() >= b.endsAt)
         refuse("merchant_fee_authority_required");
-    validateMerchantFeeContext(fresh, o.envelope);
+    validateMerchantFeeContext(fresh, o.envelope, merchantTerms(o));
     if (BigInt(fresh.admissionEstimatedUpper) > BigInt(o.envelope.nativeFeeReserveWei ?? o.feeContext.admissionEstimatedUpper) || now.getTime() < started.getTime() || now.getTime() - started.getTime() >= 10000)
         refuse("merchant_fee_witness_expired");
     b.feeWitness = { startedAt: started.toISOString(), endsAt: new Date(Math.min(started.getTime() + 10000, Date.parse(b.endsAt))).toISOString(), digest: hashObject(fresh) };

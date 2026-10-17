@@ -4,7 +4,7 @@ import { mkdtemp, realpath, rm, readdir, mkdir, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent,
-  runFixedMetaMaskNativeTransfer, readFixedMetaMaskNativeTransfer, readMetaMaskNativeSettlement,
+  runMetaMaskNativeTransfer, readMetaMaskNativeTransfer, readMetaMaskNativeSettlement,
   type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "../../src/metamask-native-transfer-owner.js";
 import { StateStore } from "../../src/state.js";
 import { OperationService } from "../../src/operation-service.js";
@@ -21,8 +21,13 @@ test("public DTOs, clones and arbitrary empty objects cannot claim or assert for
     await assert.rejects(()=>assertMetaMaskNativeOwnedContextCurrent(candidate as MetaMaskNativeOwnedScope,context), /scope/);
   }
 });
-test("finite normal command rejects arbitrary chains before any state or provider read",async()=>{
-  for(const chain of [0,8453,42161,NaN,Infinity,1.5]) await assert.rejects(()=>runFixedMetaMaskNativeTransfer("/does-not-exist",chain,"fixed-0001"),/fixed MetaMask/);
+const RECIPIENT="0x5555555555555555555555555555555555555555";
+const request=(change:Record<string,unknown>={})=>({profile:"mm-owned-test",chainId:1,recipient:RECIPIENT,amountAtomic:"2500",idempotencyKey:"native-0001",...change});
+test("the command rejects other chains, recipients and amounts before any state or provider read",async()=>{
+  for(const chainId of [0,8453,42161,NaN,Infinity,1.5]) await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({chainId}) as never),/Ethereum, Optimism, Monad, Linea and Sei/);
+  for(const recipient of ["0x0000000000000000000000000000000000000000","0x555","not-an-address","So11111111111111111111111111111111111111112"])
+    await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({recipient}) as never),{code:"APN_INVALID_INPUT"});
+  for(const amountAtomic of ["0","01","1.5","-1","",`1${"0".repeat(78)}`]) await assert.rejects(()=>runMetaMaskNativeTransfer("/does-not-exist",request({amountAtomic}) as never),{code:"APN_INVALID_INPUT"});
 });
 test("settlement and reserve do not accept forged operation identities or a quote DTO",async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),"apn-native-boundary-")));
@@ -31,13 +36,15 @@ test("settlement and reserve do not accept forged operation identities or a quot
     await assert.rejects(()=>ledger.reserveMetaMaskNative(id,"native",new Date()),/normal journal/);
     await assert.rejects(()=>ledger.settleMetaMaskNativeActual(id,new Date()),/settlement is absent/);
     await assert.rejects(()=>readMetaMaskNativeSettlement(root,id),/settlement is absent/);
-    await assert.rejects(()=>readFixedMetaMaskNativeTransfer(root,id),/does not exist/);
+    await assert.rejects(()=>readMetaMaskNativeTransfer(root,id),/does not exist/);
   } finally {await rm(root,{recursive:true,force:true});}
 });
-test("native CLI admits connected profile selection and rejects recipient, token, RPC and raw transaction parameters",()=>{
-  const base=["wallet","metamask","native-transfer","--chain","ethereum","--idempotency-key","native-0001"];
-  assert.deepEqual(bindArgv([...base,"--profile","mm-owned-test"]).request,{command:"wallet.metamask.native-transfer",profile:"mm-owned-test",chainId:1,idempotencyKey:"native-0001"});
-  for(const flag of ["--recipient","--token","--raw-tx","--rpc-url","--wallet"]) assert.throws(()=>parseCatalogArgv([...base,flag,"arbitrary"]));
+test("native CLI requires profile, recipient and amount, and rejects token, RPC and raw transaction parameters",()=>{
+  const base=["wallet","metamask","native-transfer","--profile","mm-owned-test","--chain","ethereum","--recipient",RECIPIENT,"--amount-atomic","2500","--idempotency-key","native-0001"];
+  assert.deepEqual(bindArgv(base).request,{command:"wallet.metamask.native-transfer",...request()});
+  for(const flag of ["--profile","--recipient","--amount-atomic"]) {const at=base.indexOf(flag);assert.throws(()=>bindArgv([...base.slice(0,at),...base.slice(at+2)]));}
+  for(const flag of ["--token","--raw-tx","--rpc-url","--wallet"]) assert.throws(()=>parseCatalogArgv([...base,flag,"arbitrary"]));
+  for(const amount of ["0","1.5","-1"]) assert.throws(()=>bindArgv([...base.slice(0,9),amount,...base.slice(10)]));
 });
 
 test("normal central EVM guard reads existing native journals only and cannot hide malformed financial state",async()=>{
@@ -46,7 +53,8 @@ test("normal central EVM guard reads existing native journals only and cannot hi
     const state=new StateStore(root),operations=new OperationService(state),profileHash=state.profileHash("native-test-alias"),payer="0xf41170df51aab52aaa04fbc3ff325cf051644aca";
     await operations.assertEvmAccountAvailable(profileHash,1,payer);
     assert.deepEqual(await readdir(root),[]);
-    await assert.rejects(()=>operations.assertMetaMaskNativeOwnedAccountAvailable(scope,context),/scope/);
+    // The owner's own-journal exclusion names an exact operation id; a malformed id is refused before any read.
+    await assert.rejects(()=>operations.assertEvmAccountAvailableExcept(profileHash,1,payer,"not-an-operation-id"),{code:"APN_INVALID_INPUT"});
     await mkdir(join(root,"metamask-native-operations"),{mode:0o700});
     await writeFile(join(root,"metamask-native-operations",`${"a".repeat(64)}.json`),JSON.stringify({schemaVersion:"forged"}),{mode:0o600});
     await assert.rejects(()=>operations.assertEvmAccountAvailable(profileHash,1,payer),{code:"APN_STATE_CORRUPT"});
@@ -55,12 +63,11 @@ test("normal central EVM guard reads existing native journals only and cannot hi
   } finally {await rm(root,{recursive:true,force:true});}
 });
 
-test("fixed public chain names bind intrinsically and reject numeric IDs or aliases",()=>{
+test("public chain names bind intrinsically and reject numeric IDs or aliases",()=>{
+  const argv=(chain:string)=>["wallet","metamask","native-transfer","--profile","mm-owned-test","--chain",chain,"--recipient",RECIPIENT,"--amount-atomic","2500","--idempotency-key","native-0001"];
   for (const [name,chainId] of Object.entries({ethereum:1,optimism:10,monad:143,linea:59144,sei:1329})) {
-    assert.deepEqual(bindArgv(["wallet","metamask","native-transfer","--chain",name,"--idempotency-key","native-0001"]).request,
-      {command:"wallet.metamask.native-transfer",chainId,idempotencyKey:"native-0001"});
+    assert.deepEqual(bindArgv(argv(name)).request,{command:"wallet.metamask.native-transfer",...request({chainId})});
   }
-  for (const name of ["1","10","143","59144","1329","base","eth","Ethereum","eip155:1","arbitrum"])
-    assert.throws(()=>bindArgv(["wallet","metamask","native-transfer","--chain",name,"--idempotency-key","native-0001"]));
-  assert.throws(()=>bindArgv(["wallet","metamask","native-transfer","--chain-id","1","--idempotency-key","native-0001"]));
+  for (const name of ["1","10","143","59144","1329","base","eth","Ethereum","eip155:1","arbitrum"]) assert.throws(()=>bindArgv(argv(name)));
+  assert.throws(()=>bindArgv(["wallet","metamask","native-transfer","--profile","mm-owned-test","--chain-id","1","--recipient",RECIPIENT,"--amount-atomic","2500","--idempotency-key","native-0001"]));
 });

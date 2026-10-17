@@ -3,7 +3,7 @@ import { canonicalJson, hashObject } from "../canonical.js";
 import type { StateStore } from "../state.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { listLocalWallets } from "../wallet-import-collision.js";
-import { CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleLegacyRoute as circleRoute } from "./catalog.js";
 import { CircleEffectStore, verifyCircleMaterial } from "./custody.js";
 import { circleBlocked, type CircleOperationV1 } from "./operation-model.js";
 import { circleHex, circleRecord, circleUint, decodeCircleDestination, circleAttesterConfigurationHash, verifyCircleAttestationSigners, type CircleObservation, type CircleReceiptProof } from "./protocol.js";

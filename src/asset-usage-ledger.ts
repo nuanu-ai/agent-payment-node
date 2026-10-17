@@ -1,6 +1,6 @@
 import { JupiterHistoricalRetirementReader } from "./swap/jupiter-solana/historical-retirement-reader.js";
 import { historicalRetirementUsage } from "./swap/jupiter-solana/historical-retirement-record.js";
-import { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease } from "./metamask-native-transfer-owner.js";
+import { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease } from "./metamask-native-journal.js";
 import { cleanup85OperationEnvelope } from "./circle-cleanup85-native-binding.js";
 import { assertCleanup85GenericCapacityRelease, cleanup85NativeReservationMarker, sameCleanup85NativeMarker } from "./asset-usage-ledger-cleanup85-native.js";
 import { AllowlistPolicyStore } from "./allowlist-policy-store.js";
@@ -91,7 +91,7 @@ export class AssetUsageLedger extends SecureStateStore {
   async reserveMetaMaskNative(operationId:string,kind:"native"|"token",now:Date):Promise<AssetUsageReservation> {
     const p=await readMetaMaskNativeReservation(this.root,operationId);
     if(kind!=="native"&&kind!=="token")throw blocked("MetaMask reserve asset is invalid.");
-    return this.reserveBound({account:p.quote.sender,chain:`eip155:${p.quote.chainId}`,asset:kind==="native"?{kind:"native",identifier:null}:{kind:"token",identifier:p.quote.token},registry:p.registry,rail:"direct",amountAtomic:kind==="native"?p.quote.feeQuote.totalQuoteWei:"1000",idempotencyKey:`apn.metamask-native:${operationId}:${kind}`,now},undefined,{operationId,quoteHash:p.quote.quoteHash});
+    return this.reserveBound({account:p.quote.sender,chain:`eip155:${p.quote.chainId}`,asset:kind==="native"?{kind:"native",identifier:null}:{kind:"token",identifier:p.quote.token},registry:p.registry,rail:"direct",amountAtomic:kind==="native"?p.quote.feeQuote.totalQuoteWei:p.tokenAmountAtomic,idempotencyKey:`apn.metamask-native:${operationId}:${kind}`,now},undefined,{operationId,quoteHash:p.quote.quoteHash});
   }
 
   async reserveCleanup85Native(authority: VerifiedCleanup85NativeReservation, now: Date): Promise<AssetUsageReservation> {
@@ -288,7 +288,7 @@ export class AssetUsageLedger extends SecureStateStore {
     const proof=merchantNativeActualFee(o,receipt),durable=await new MerchantRepository(this.root).findOperation(o.operationId);
     if(durable===null||canonicalJson(durable)!==canonicalJson(o)||durable.submissionAttempts!==1||durable.signingAttempts!==1||durable.txHash!==receipt.transactionHash||durable.receipt===null||canonicalJson(durable.receipt)!==canonicalJson(o.receipt)||!["payment_finalized","delivery_unknown","delivered"].includes(durable.state))throw blocked("Merchant actual fee is not bound to this ledger root durable paid operation.");
     const identity:AssetUsageIdentity={account:o.custody.walletAddress,chain:"eip155:4326",asset:{kind:"native",identifier:null}},key=`apn.merchant-native:${o.operationId}`;
-    if(identity.account!=="0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14"||o.profile!=="default")throw blocked("Finite merchant native owner mismatch.");
+    // The payer is the operation's own custody (validated with it above); any local profile may pay a merchant.
     const reservationId=assetUsageReservationId(identity,key),at=instant(now);await this.ready();
     return this.withLocks([this.bucketLock(identity)],async()=>{
       const value=await this.readJson(this.recordPath(identity,reservationId));if(value===null)throw blocked("Merchant native hold missing.");
@@ -311,7 +311,7 @@ export class AssetUsageLedger extends SecureStateStore {
         if(current.reservationId!==expected.reservationId||current.idempotencyHash!==expected.idempotencyHash||current.policyDigest!==p.policyDigest||current.amountAtomic!==expected.amountAtomic||canonicalJson(current.metamaskNativeReservation)!==canonicalJson(expected.metamaskNativeReservation)||current.rail!=="direct"||at<current.updatedAt)throw blocked("MetaMask settlement prior hold changed.");
         if(current.state==="finalized"||current.state==="failed_confirmed_revert") {if(current.outcomeDigest!==outcomeDigest)throw blocked("MetaMask settlement outcome changed.");return;}
         if(!["submitted","unknown_finality"].includes(current.state))throw blocked("MetaMask settlement has no durable effect hold.");
-        const consumed=native?p.receipt.nativeFeeAtomic:p.receipt.transferAccepted?"1000":"0";
+        const consumed=native?p.receipt.nativeFeeAtomic:p.receipt.transferAccepted?p.tokenAmountAtomic:"0";
         if(BigInt(consumed)>BigInt(current.amountAtomic))throw blocked("MetaMask consumption exceeds hold.");
         const next=seal({...withoutDigest(current),state:native||p.receipt.transferAccepted?"finalized":"failed_confirmed_revert",updatedAt:at,effectAt:at,outcomeDigest,
           ...(native?{consumedAtomic:consumed,metamaskNativeActualFee:p.proof}:p.receipt.transferAccepted?{}:{consumedAtomic:"0"})});

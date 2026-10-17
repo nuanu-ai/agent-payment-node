@@ -166,7 +166,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       };
     }), [
       { name: "apn_circle_evm_adopt_external_mint", properties: ["operation", "transaction_hash"], required: ["operation", "transaction_hash"], defaults: {} },
-      { name: "apn_circle_evm_prepare", properties: ["profile", "destination_profile", "destination_chain", "idempotency_key", "beneficiary", "gross_atomic", "max_issuer_fee_atomic", "min_mint_atomic"], required: ["profile", "destination_profile", "destination_chain", "idempotency_key"], defaults: {} },
+      { name: "apn_circle_evm_prepare", properties: ["profile", "destination_profile", "destination_chain", "idempotency_key", "beneficiary", "gross_atomic", "max_issuer_fee_atomic", "min_mint_atomic"], required: ["profile", "destination_profile", "destination_chain", "idempotency_key", "beneficiary", "gross_atomic", "max_issuer_fee_atomic", "min_mint_atomic"], defaults: {} },
       { name: "apn_circle_evm_approve_source", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_approve_mint", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_circle_evm_observe", properties: ["operation"], required: ["operation"], defaults: {} },
@@ -254,12 +254,12 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_wallet_policy_show", properties: ["profile"], required: ["profile"], defaults: {} },
       {
         name: "apn_wallet_policy_set",
-        properties: ["profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei"],
+        properties: ["profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei", "x402_payees"],
         required: ["profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"],
         defaults: {},
       },
       { name: "apn_x402_permit2_status", properties: ["profile", "operation"], required: ["profile", "operation"], defaults: {} },
-      { name: "apn_x402_merchant_prepare", properties: ["profile", "max_native_fee_wei", "native_fee_reserve_wei", "idempotency_key"], required: ["profile", "max_native_fee_wei", "idempotency_key"], defaults: {} },
+      { name: "apn_x402_merchant_prepare", properties: ["profile", "url", "asset", "max_native_fee_wei", "native_fee_reserve_wei", "idempotency_key"], required: ["profile", "url", "max_native_fee_wei", "idempotency_key"], defaults: {} },
       { name: "apn_x402_merchant_approve", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_x402_merchant_observe", properties: ["operation", "deliver"], required: ["operation"], defaults: {} },
       { name: "apn_x402_merchant_status", properties: ["operation"], required: ["operation"], defaults: {} },
@@ -288,7 +288,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       },
       { name: "apn_receipt_get", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_wallet_policy_show_network", properties: ["chain", "profile"], required: ["chain", "profile"], defaults: {} },
-      { name: "apn_wallet_policy_set_network", properties: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei"], required: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"], defaults: {} },
+      { name: "apn_wallet_policy_set_network", properties: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic", "max_balance_eth_wei", "x402_payees"], required: ["chain", "profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"], defaults: {} },
       { name: "apn_x402_inspect_network", properties: ["chain", "method", "headers_json", "body_base64", "payer", "url"], required: ["chain", "url"], defaults: {} },
       { name: "apn_x402_fetch_prepare_network", properties: ["chain", "profile", "method", "headers_json", "body_base64", "url", "idempotency_key", "rpc_url", "max_amount_atomic"], required: ["chain", "profile", "url", "idempotency_key", "rpc_url"], defaults: {} },
       { name: "apn_bridge_capabilities", properties: ["profile"], required: [], defaults: {} },

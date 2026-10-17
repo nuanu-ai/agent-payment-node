@@ -12,7 +12,9 @@ export interface CircleNonceRetirementPorts extends CircleLifecyclePorts {
 export function assertCircleNonceRetirementCase(op: CircleOperationV1, now: number): void {
   if (isSealedBurnRetirement(op)) { if (isConsumedBurnRetirement(op)) assertConsumedBurnIdentity(op); else assertSealedBurnRetirement(op); if (op.terminal || op.usageFinalized || op.residualAllowanceAtomic !== "40100") circleBlocked("sealed_burn_holds_or_allowance_changed"); return; }
   const approval = op.effects[0]!, burn = op.effects[1]!;
-  if (op.destinationChain !== 143 || op.destinationProfile !== "default" || op.terminal || now < Date.parse(op.expiresAt) ||
+  // Shape-based for every destination (OWNR-14): an expired operation whose approval is sealed and unknown and whose burn
+  // was never signed. The replacement takes the approval's own nonce, so the original can never land after it.
+  if (op.terminal || now < Date.parse(op.expiresAt) ||
     approval.phase !== "unknown" || approval.transactionHash === null || approval.materialHash === null || approval.proof !== null ||
     burn.phase !== "prepared" || burn.transactionHash !== null || burn.materialHash !== null || burn.proof !== null ||
     op.source !== null || op.attestation !== null || op.destination !== null || op.effects.some(x => x.role === "mint") || op.residualAllowanceAtomic !== "0" || op.usageFinalized || op.usage.length !== 5 ||
