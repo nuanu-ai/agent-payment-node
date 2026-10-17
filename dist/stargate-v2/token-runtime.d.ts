@@ -5,16 +5,18 @@ import type { StateStore } from "../state.js";
 import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtime.js";
 import { type StargateTokenDestinationEvidence, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
 import { type StargateScanCursor } from "./destination-scan.js";
+import { type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 export declare class StargateTokenService {
     private readonly state;
     private readonly env;
     private readonly now;
+    private readonly legacyRpc?;
     private source?;
     private destination?;
     private readonly journal;
     private readonly local;
     private readonly usage;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, env: Readonly<Record<string, string | undefined>>, now?: () => number, legacyRpc?: ((url: string) => LegacyChainRead) | undefined);
     prepare(input: Readonly<{
         profile: string;
         amountAtomic: string;
@@ -28,7 +30,8 @@ export declare class StargateTokenService {
     execute(id: string): Promise<StargateTokenOperation>;
     cleanup(id: string): Promise<StargateTokenOperation>;
     observe(id: string): Promise<StargateTokenOperation>;
-    status(id: string): Promise<StargateTokenOperation>;
+    /** A record of an unreleased token schema (v1..v4) is read by its frozen reader; its status may close it by a chain proof. */
+    status(id: string): Promise<StargateTokenOperation | LegacyStargateStatus>;
     receipt(id: string): Promise<Readonly<{
         evidenceHash: string;
         schemaVersion: "apn.stargate-v2-token-receipt.v2";
@@ -93,6 +96,7 @@ export declare class StargateTokenService {
         source: import("./token-model.js").StargateTokenSourceReceipt;
         destination: StargateTokenDestinationEvidence;
     }>>;
+    private reconciled;
     private required;
     private ports;
     private reserveUsage;

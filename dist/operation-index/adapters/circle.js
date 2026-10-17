@@ -4,7 +4,7 @@ import { CircleRepository } from "../../circle-v2-evm/repository.js";
 import { receiptOutcome } from "../../core-outcome.js";
 import { ApnError } from "../../errors.js";
 import { conflictDomainKey, evmConflictDomain } from "../../operation-conflict-domain.js";
-import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity } from "../adapter.js";
+import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageHash, salvageRecord, standardIdentity } from "../adapter.js";
 import { profileClaim } from "../types.js";
 const STORE = { directory: "circle-v2-evm", perProfile: false };
 export function circleDomains(record) {
@@ -34,8 +34,10 @@ export const circleAdapter = {
         return wanted.tag?.kind === "native_beside_settled_circle" && wanted.profileHash !== null &&
             circleSourceSettled(record, wanted.profileHash, wanted.tag.account);
     },
+    // The destination profile is a claim of the family itself (above), so an unreadable route keeps it beside its two accounts.
     salvage: raw => salvageRecord(raw, value => [salvageEvm(42161, field(value, "sourceCustody", "walletAddress")),
-        salvageEvm(field(value, "destinationChain"), field(value, "destinationCustody", "walletAddress"))], ["profileHash", "destinationProfileHash"]),
+        salvageEvm(field(value, "destinationChain"), field(value, "destinationCustody", "walletAddress")),
+        profileClaim(salvageHash(field(value, "destinationProfileHash")))], ["profileHash", "destinationProfileHash"]),
     view: async (record) => publicKnownCircle(record),
     async receipt(_context, record) {
         if (!record.terminal)

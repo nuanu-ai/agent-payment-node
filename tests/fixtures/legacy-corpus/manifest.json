@@ -541,5 +541,74 @@
    "circle:apn.circle-v2-evm-operation.v1:1329:nonce_retired",
    "ledger:bridge:consumedAtomic:failed_confirmed_revert"
   ]
+ },
+ {
+  "name": "61-unreleased-stargate-native-v1",
+  "writtenBy": "60b247d5^ writer, unreleased 2026-09-20 schema",
+  "origin": "stargate-native",
+  "kinds": [
+   "stargate-native:apn.stargate-v2-native-operation.v1:approved",
+   "stargate-native:apn.stargate-v2-native-operation.v1:failed_confirmed_revert",
+   "stargate-native:apn.stargate-v2-native-operation.v1:observed",
+   "stargate-native:apn.stargate-v2-native-operation.v1:prepared",
+   "stargate-native:apn.stargate-v2-native-operation.v1:submission_started",
+   "stargate-native:apn.stargate-v2-native-operation.v1:unknown_finality"
+  ]
+ },
+ {
+  "name": "62-unreleased-stargate-token-v1",
+  "writtenBy": "60b247d5^ writer, unreleased 2026-09-20 schema",
+  "origin": "stargate-token",
+  "kinds": [
+   "stargate-token:apn.stargate-v2-token-operation.v1:allowance_submitted",
+   "stargate-token:apn.stargate-v2-token-operation.v1:approved",
+   "stargate-token:apn.stargate-v2-token-operation.v1:cleaned",
+   "stargate-token:apn.stargate-v2-token-operation.v1:cleanup_required",
+   "stargate-token:apn.stargate-v2-token-operation.v1:observed",
+   "stargate-token:apn.stargate-v2-token-operation.v1:prepared",
+   "stargate-token:apn.stargate-v2-token-operation.v1:unknown_finality"
+  ]
+ },
+ {
+  "name": "63-unreleased-stargate-token-v2",
+  "writtenBy": "60b247d5^ writer, unreleased 2026-09-20 schema",
+  "origin": "stargate-token",
+  "kinds": [
+   "stargate-token:apn.stargate-v2-token-operation.v2:allowance_submitted",
+   "stargate-token:apn.stargate-v2-token-operation.v2:approved",
+   "stargate-token:apn.stargate-v2-token-operation.v2:cleaned",
+   "stargate-token:apn.stargate-v2-token-operation.v2:cleanup_required",
+   "stargate-token:apn.stargate-v2-token-operation.v2:observed",
+   "stargate-token:apn.stargate-v2-token-operation.v2:prepared",
+   "stargate-token:apn.stargate-v2-token-operation.v2:unknown_finality"
+  ]
+ },
+ {
+  "name": "64-unreleased-stargate-token-v3",
+  "writtenBy": "60b247d5^ writer, unreleased 2026-09-20 schema",
+  "origin": "stargate-token",
+  "kinds": [
+   "stargate-token:apn.stargate-v2-token-operation.v3:allowance_submitted",
+   "stargate-token:apn.stargate-v2-token-operation.v3:approved",
+   "stargate-token:apn.stargate-v2-token-operation.v3:cleaned",
+   "stargate-token:apn.stargate-v2-token-operation.v3:cleanup_required",
+   "stargate-token:apn.stargate-v2-token-operation.v3:observed",
+   "stargate-token:apn.stargate-v2-token-operation.v3:prepared",
+   "stargate-token:apn.stargate-v2-token-operation.v3:unknown_finality"
+  ]
+ },
+ {
+  "name": "65-unreleased-stargate-token-v4",
+  "writtenBy": "60b247d5^ writer, unreleased 2026-09-20 schema",
+  "origin": "stargate-token",
+  "kinds": [
+   "stargate-token:apn.stargate-v2-token-operation.v4:allowance_submitted",
+   "stargate-token:apn.stargate-v2-token-operation.v4:approved",
+   "stargate-token:apn.stargate-v2-token-operation.v4:cleaned",
+   "stargate-token:apn.stargate-v2-token-operation.v4:cleanup_required",
+   "stargate-token:apn.stargate-v2-token-operation.v4:observed",
+   "stargate-token:apn.stargate-v2-token-operation.v4:prepared",
+   "stargate-token:apn.stargate-v2-token-operation.v4:unknown_finality"
+  ]
  }
 ]

@@ -28,6 +28,11 @@ const REQUIRED_KINDS = [
   "metamask-native:confirmed", "metamask-native:unknown",
   "ledger:x402:consumedAtomic+merchantNativeActualFee:finalized", "ledger:direct:cleanup85NativeReservation:reserved",
   "ledger:direct:metamaskNativeReservation:finalized", "ledger:direct:consumedAtomic+metamaskNativeActualFee+metamaskNativeReservation:finalized",
+  // Unreleased 2026-09-20 Stargate schemas: no release wrote them, but owners' machines hold them (0.5.47 regression).
+  ...["prepared", "approved", "submission_started", "unknown_finality", "observed", "failed_confirmed_revert"]
+    .map((phase) => `stargate-native:apn.stargate-v2-native-operation.v1:${phase}`),
+  ...["v1", "v2", "v3", "v4"].flatMap((schema) => ["prepared", "approved", "allowance_submitted", "unknown_finality", "cleanup_required", "cleaned", "observed"]
+    .map((phase) => `stargate-token:apn.stargate-v2-token-operation.${schema}:${phase}`)),
 ] as const;
 
 test("every stored owner-bound record kind loads through every reader, unchanged and without a corrupt-state refusal", async (t) => {

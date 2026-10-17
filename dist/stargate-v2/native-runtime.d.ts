@@ -5,6 +5,7 @@ import type { StateStore } from "../state.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { type StargateConfirmedReceipt, type StargateNativeExecutionPorts, type StargateNativeOperation } from "./native-execution.js";
 import { type StargateScanCursor } from "./destination-scan.js";
+import { type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 export type StargateRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getTransactionCount" | "eth_getCode" | "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "eth_sendRawTransaction" | "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getLogs";
 export declare class StargateJsonRpc {
     private readonly https;
@@ -22,12 +23,13 @@ export declare class StargateNativeService {
     private readonly state;
     private readonly environment;
     private readonly now;
+    private readonly legacyRpc?;
     private source?;
     private destination?;
     private readonly journal;
     private readonly local;
     private readonly usage;
-    constructor(state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>, now?: () => number);
+    constructor(state: StateStore, wrapping: WrappingSecretPort, environment: Readonly<Record<string, string | undefined>>, now?: () => number, legacyRpc?: ((url: string) => LegacyChainRead) | undefined);
     prepare(input: Readonly<{
         profile: string;
         amountAtomic: string;
@@ -36,7 +38,8 @@ export declare class StargateNativeService {
     }>): Promise<StargateNativeOperation>;
     execute(operationId: string): Promise<StargateNativeOperation>;
     observe(operationId: string): Promise<StargateNativeOperation>;
-    status(operationId: string): Promise<StargateNativeOperation>;
+    /** A record of the unreleased native schema v1 is read by its frozen reader; its status may close it by a chain proof. */
+    status(operationId: string): Promise<StargateNativeOperation | LegacyStargateStatus>;
     receipt(operationId: string): Promise<import("./native-record.js").StargateNativeCanonicalReceipt>;
     private required;
     private ports;
