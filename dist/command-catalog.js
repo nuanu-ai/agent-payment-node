@@ -18,7 +18,7 @@ import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-c
 import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";
 import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
 import { EVM_NETWORKS } from "./evm-asset.js";
-import { REMOVED_V1_COMMANDS } from "./command-manifest-migration.js";
+import { removedV1Commands } from "./command-manifest-migration.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
 import { assertCompatibleManifestEvolution, COMMAND_MANIFEST_SCHEMA, validateCommandManifest } from "./command-manifest-validation.js";
@@ -277,7 +277,7 @@ export const COMMAND_MANIFEST = {
     },
     groups: COMMAND_GROUPS,
     commands: COMMANDS,
-    removed_v1_commands: REMOVED_V1_COMMANDS,
+    removed_v1_commands: removedV1Commands(new Set(COMMANDS.map((entry) => entry.path.join(" ")))),
 };
 validateCommandManifest(COMMAND_MANIFEST);
 //# sourceMappingURL=command-catalog.js.map

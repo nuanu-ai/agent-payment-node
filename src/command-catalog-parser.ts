@@ -11,7 +11,7 @@ import { renderHelp } from "./command-help.js";
 import { containsRawControlCharacters } from "./cli-handoff.js";
 import { ApnError, asApnError } from "./errors.js";
 import { decodeX402RequestBody } from "./x402-http-request.js";
-import { removedV1Command } from "./command-manifest-migration.js";
+import { removedV1Command, removedV1CommandMessage } from "./command-manifest-migration.js";
 
 export interface ParsedCatalogCommand {
   readonly command: CommandDefinition;
@@ -34,9 +34,9 @@ export type DiscoveryDispatch = {
 export function parseCatalogArgv(argv: readonly string[]): ParsedCatalogCommand {
   const definition = longestCommandPrefix(argv);
   if (definition === undefined) {
-    const removed = removedV1Command(argv);
-    throw new ApnError("APN_UNSUPPORTED_COMMAND", removed === undefined ? "Unsupported APN command."
-      : `This command was replaced in command manifest v2; use: ${removed.replacement}`);
+    const removed = removedV1Command(argv, COMMAND_MANIFEST.removed_v1_commands);
+    throw new ApnError("APN_UNSUPPORTED_COMMAND", removed === undefined ? "Unsupported APN command." : removedV1CommandMessage(removed),
+      removed === undefined ? undefined : { reason: removed.replacement === null ? "command_removed_in_manifest_v2" : "command_replaced_in_manifest_v2" });
   }
   const values: Record<string, unknown> = {};
   const tail = argv.slice(definition.path.length);
@@ -117,8 +117,9 @@ export function renderDiscoveryOutput(dispatch: DiscoveryDispatch): string {
 
 export function catalogNextActions(argv: readonly string[]): readonly string[] {
   const candidate = argv[0] === "help" ? argv.slice(1) : argv.at(-1) === "--help" ? argv.slice(0, -1) : argv;
-  const removed = removedV1Command(candidate);
-  if (removed !== undefined) {
+  const removed = removedV1Command(candidate, COMMAND_MANIFEST.removed_v1_commands);
+  // A command removed without a successor gets ordinary discovery guidance, never an invented replacement.
+  if (removed !== undefined && removed.replacement !== null) {
     const path = removed.replacement.split(" ").slice(1);
     return [removed.replacement, `apn help ${path.slice(0, path.findIndex((token) => /^[-[<]/u.test(token))).join(" ")}`];
   }

@@ -1,4 +1,4 @@
-export const REMOVED_V1_COMMANDS = [
+const REPLACED_V1_COMMANDS = [
     { path: ["wallet", "policy", "show-network"], replacement: "apn wallet policy show --profile <profile> --chain <caip2>" },
     { path: ["wallet", "policy", "set-network"], replacement: "apn wallet policy set --profile <profile> --chain <caip2> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>" },
     { path: ["x402", "inspect-network"], replacement: "apn x402 inspect --chain <caip2> --url <https-url>" },
@@ -16,8 +16,27 @@ export const REMOVED_V1_COMMANDS = [
     { path: ["relay", "base", "observe"], replacement: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <ethereum-rpc> --destination-rpc-url <base-rpc>" },
     { path: ["relay", "arbitrum", "observe"], replacement: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc> [--destination-rpc-url <ethereum-rpc>]" },
 ];
+const HISTORICAL_CIRCLE = "Historical Circle CCTP recovery for operations that are now terminal.";
+/** v1 commands that the phase-4a pruning deletes without a successor. Each is listed once its command has left the
+ * catalog; while it is still a command it stays out of the list, and the validator refuses a listed current path. */
+const RETIRED_V1_COMMANDS = [
+    { path: ["circle", "evm", "cleanup85-prepare"], replacement: null, reason: HISTORICAL_CIRCLE },
+    { path: ["circle", "evm", "cleanup85-cancel"], replacement: null, reason: HISTORICAL_CIRCLE },
+    { path: ["circle", "evm", "cleanup86-approve"], replacement: null, reason: HISTORICAL_CIRCLE },
+    { path: ["operation", "repair-deployment"], replacement: null, reason: "Historical LI.FI deployment repair for an operation that is now terminal." },
+];
+/** The manifest's removed list for the given current command paths: every merged command, and each retired command
+ * that is no longer current. */
+export function removedV1Commands(currentPaths) {
+    return [...REPLACED_V1_COMMANDS, ...RETIRED_V1_COMMANDS.filter((entry) => !currentPaths.has(entry.path.join(" ")))];
+}
 /** The removed v1 command an argv names, if any. */
-export function removedV1Command(argv) {
-    return REMOVED_V1_COMMANDS.find((entry) => entry.path.every((token, index) => argv[index] === token));
+export function removedV1Command(argv, removed) {
+    return removed.find((entry) => entry.path.every((token, index) => argv[index] === token));
+}
+/** The failure message for an invocation of a removed v1 command. */
+export function removedV1CommandMessage(entry) {
+    return entry.replacement === null ? `This command was removed in command manifest v2: ${entry.reason}`
+        : `This command was replaced in command manifest v2; use: ${entry.replacement}`;
 }
 //# sourceMappingURL=command-manifest-migration.js.map
