@@ -31,10 +31,25 @@ function strongSource(observation) {
     if (circleUint(r.transactionIndex) !== i || !Array.isArray(b.transactions) || b.transactions[Number(i)] !== t.hash)
         circleBlocked("external_source_index_binding");
 }
+/** An owned mint or cleanup attempt is closed when the chain proved it can never land (`abandoned_unsent`), or when a fresh
+ * envelope re-armed after such a proof has not been signed since. A closed attempt cannot mint, so an external one may be adopted. */
+function closedOwnedRoles(op) {
+    const closed = new Set();
+    for (const role of ["mint", "cleanup"]) {
+        const e = op.effects.find(x => x.role === role);
+        if (e === undefined)
+            continue;
+        const lastPrivate = op.transitions.findLastIndex(t => new RegExp(`^${role}_(signing|submission|material|submitted|fenced)`, "u").test(t.reason)), lastRearm = op.transitions.findLastIndex(t => t.reason.startsWith(`${role}_fresh_envelope_after_never_landed:`));
+        if (e.phase === "abandoned_unsent" && e.proof === null || e.phase === "prepared" && e.transactionHash === null && e.materialHash === null && e.proof === null && lastRearm > lastPrivate)
+            closed.add(role);
+    }
+    return closed;
+}
 async function noPrivate(state, op) {
-    if (op.usage.length !== 5 || op.destination !== null || op.effects.some(e => ["mint", "cleanup"].includes(e.role) && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)) || op.transitions.some(t => /^(mint|cleanup)_(signing|submission|material|submitted|fenced)/u.test(t.reason)))
+    const closed = closedOwnedRoles(op);
+    if (op.usage.length !== 5 || op.destination !== null || op.effects.some(e => (e.role === "mint" || e.role === "cleanup") && !closed.has(e.role) && (e.phase !== "prepared" || e.transactionHash !== null || e.materialHash !== null || e.proof !== null)) || op.transitions.some(t => { const m = /^(mint|cleanup)_(signing|submission|material|submitted|fenced)/u.exec(t.reason); return m !== null && !closed.has(m[1]); }))
         circleBlocked("external_owned_private_entry");
-    await new CircleFundingEffectStore(state.root, { load: async () => { circleBlocked("external_private_wallet_forbidden"); }, create: async () => { circleBlocked("external_private_wallet_forbidden"); } }).assertExternalAbsent(op);
+    await new CircleFundingEffectStore(state.root, { load: async () => { circleBlocked("external_private_wallet_forbidden"); }, create: async () => { circleBlocked("external_private_wallet_forbidden"); } }).assertExternalAbsent(op, closed);
     await assertEvmNativeCustody(state, op.profile, op.sourceCustody);
     await assertEvmNativeCustody(state, op.destinationProfile, op.destinationCustody);
 }

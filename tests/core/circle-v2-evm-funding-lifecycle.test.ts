@@ -85,3 +85,74 @@ test("cleanup requires independent finalized approve-zero before settling",async
 test("full effect fields cannot change while retaining the declared envelope hash",async()=>{let c:ReturnType<typeof controller>;let checked=0;c=controller(reserved(),{seal:async(o,e,g)=>{for(const [key,value] of Object.entries({chainId:1,nonceAtomic:"44",to:recipient,valueAtomic:"1",data:"0x",gasLimitAtomic:"99999",maxFeePerGasAtomic:"999999",maxPriorityFeePerGasAtomic:"1"})){assert.throws(()=>assertCircleFundingEffectGuard(o,{...e,envelope:{...e.envelope,[key]:value}},g));checked++;}let getters=0;const envelope={...e.envelope};Object.defineProperty(envelope,"to",{enumerable:true,get:()=>{getters++;return recipient;}});assert.throws(()=>assertCircleFundingEffectGuard(o,{...e,envelope},g));assert.equal(getters,0);assert.ok(Object.isFrozen(o));assert.ok(Object.isFrozen(o.funding));assert.ok(Object.isFrozen(e.envelope));assert.throws(()=>{(e.envelope as {nonceAtomic:string}).nonceAtomic="9";});throw Error("STOP_AFTER_GUARD_NEGATIVES");}});await assert.rejects(approveCircleFundingSource(c.current(),c.ports),/STOP_AFTER_GUARD_NEGATIVES/);assert.equal(checked,8);assert.equal(c.current().effects[0]!.phase,"signing_started");assert.equal(c.sends(),0);});
 test("accessor and proxy operation inputs refuse before any consent or preflight",async()=>{const op=reserved(),c=controller(op);let getters=0;const accessor={...op};Object.defineProperty(accessor,"funding",{enumerable:true,get:()=>{getters++;return op.funding;}});await assert.rejects(approveCircleFundingSource(accessor,c.ports));await assert.rejects(approveCircleFundingSource(new Proxy(op,{}),c.ports));assert.equal(getters,0);assert.equal(c.consents(),0);assert.equal(c.signs(),0);assert.equal(c.sends(),0);});
 test("a resumed sealed funding approval whose nonce was consumed elsewhere ends as never sent and releases holds",async()=>{let op=reserved();op=advanceCircleFundingOperation(op,{effects:op.effects.map(e=>e.role==="approval"?{...e,phase:"sealed",transactionHash:tx,materialHash:"9".repeat(64)}:e),state:"source_unknown"},"sealed",at);let discards=0;const c=controller(op,{unsent:{outcome:async()=>"never_lands",discard:async()=>{discards++;}}});const done=await approveCircleFundingSource(op,c.ports);assert.equal(done.state,"cancelled_unsubmitted");assert.equal(done.terminal,true);assert.equal(done.effects[0]!.phase,"abandoned_unsent");assert.equal(discards,1);assert.equal(c.sends(),0);assert.equal(c.signs(),0);assert.ok(done.usage.every(u=>u.state==="failed_before_effect"));});
+
+/** R4 for a possibly-broadcast mint: the real lifecycle up to a mint whose broadcast answer is lost after its fence. */
+async function lostMint(ambiguous: (e: CircleEffect) => Promise<"own_transaction_known" | "never_lands" | "resend_identical" | "other_transaction_pending">, overrides: Partial<CircleFundingLifecyclePorts> = {}) {
+  const start = reserved(143, "default"), raw = source(start), included = decodeCircleSource(raw, 143, start.funding);
+  const attested = await bindCircleAttestation(included, await issuer(start, included), snapshot(143), start.funding);
+  const proof = { transactionHash: tx, blockHash: tx, blockNumberAtomic: "10", receiptHash: "a".repeat(64), actualFeeAtomic: "1", finalityBlockHash: tx, finalityBlockNumberAtomic: "10", transactionHashBinding: "a".repeat(64), logsHash: "b".repeat(64), finalityTag: "included" as const };
+  const counts = { resends: [] as string[], discards: 0, outcomes: 0, mintEnvelopes: 0 }; let lose = true;
+  // The command that lost the answer already sent these bytes once: as the runtime does, it does not send them again.
+  const c = controller(start, { observeEffect: async (_o, e) => e.phase === "submitted" && e.role !== "mint" ? e.role === "burn" ? included : proof : null,
+    observeSource: async o => ["confirmed", "submitted"].includes(o.effects[1]!.phase) ? included : null, attestation: async () => attested,
+    broadcast: async (e, _raw, g) => { g(); if (e.role === "mint" && lose) throw Error("TEST lost mint answer after its submission fence"); return tx; },
+    mintEnvelope: async o => circleEnvelope({ chainId: o.destinationChain, from: o.funding.gasPayer, to: CIRCLE_TRANSMITTER, data: encodeCircleMint(o.attestation!), valueAtomic: "0",
+      nonceAtomic: String(10 + counts.mintEnvelopes++), gasLimitAtomic: "500000", maxFeePerGasAtomic: "102000000000", maxPriorityFeePerGasAtomic: "0" }),
+    unsent: { outcome: async () => "nonce_not_consumed", ambiguous: async (_o, e) => { counts.outcomes++; return lose ? "own_transaction_known" : ambiguous(e); },
+      resend: async (_o, e, rawTransaction) => { assert.equal(e.role, "mint"); counts.resends.push(rawTransaction); return true; }, discard: async () => { counts.discards++; } }, ...overrides });
+  let op = await approveCircleFundingSource(start, c.ports); assert.equal(op.state, "awaiting_mint"); assert.notEqual(op.attestation, null);
+  op = await approveCircleFundingMint(op, c.ports); lose = false;
+  assert.equal(op.effects.find(e => e.role === "mint")!.phase, "unknown"); assert.equal(op.state, "mint_unknown"); assert.equal(c.signs(), 3);
+  return { op, c, counts };
+}
+
+test("R4: a lost mint the node does not know, whose nonce is unconsumed, is sent again once per resume as the identical sealed bytes", async () => {
+  const s = await lostMint(async () => "resend_identical");
+  let op = await observeCircleFunding(s.op, s.c.ports);
+  assert.deepEqual(s.counts.resends, ["0x02"]); assert.equal(s.c.signs(), 3);
+  assert.equal(op.effects.find(e => e.role === "mint")!.phase, "unknown"); assert.equal(op.transitions.at(-1)!.reason, "mint_identical_sealed_bytes_rebroadcast");
+  // approve-mint on the same ambiguous mint only observes: one more identical send for this resume, still no signature.
+  op = await approveCircleFundingMint(op, s.c.ports); assert.deepEqual(s.counts.resends, ["0x02", "0x02"]); assert.equal(s.c.signs(), 3); assert.equal(s.c.consents(), 2);
+  validateCircleFundingOperation(op);
+});
+
+test("R4: a lost mint whose nonce another transaction consumed is abandoned; re-arming a fresh envelope needs fresh foreground consent", async () => {
+  let refuse = false;
+  const s = await lostMint(async e => e.envelope.nonceAtomic === "10" ? "never_lands" : "own_transaction_known",
+    { approve: async (_o, role) => { if (role === "mint" && refuse) throw Error("TEST owner refused the fresh mint"); }, messageNonceUsed: async () => false });
+  refuse = true; let op = await observeCircleFunding(s.op, s.c.ports);
+  const mint = op.effects.find(e => e.role === "mint")!;
+  assert.equal(mint.phase, "abandoned_unsent"); assert.equal(mint.transactionHash, tx); assert.equal(op.state, "awaiting_mint"); assert.equal(s.counts.discards, 1);
+  assert.deepEqual(s.counts.resends, []); assert.equal(op.transitions.at(-1)!.reason, "mint_sent_bytes_never_land");
+  // The fresh envelope is frozen, but nothing is signed while the owner refuses.
+  await assert.rejects(approveCircleFundingMint(op, s.c.ports), /owner refused/);
+  op = s.c.current(); const fresh = op.effects.find(e => e.role === "mint")!;
+  assert.equal(fresh.phase, "prepared"); assert.equal(fresh.envelope.nonceAtomic, "11"); assert.equal(fresh.transactionHash, null); assert.equal(s.c.signs(), 3);
+  assert.equal(op.transitions.at(-1)!.reason, `mint_fresh_envelope_after_never_landed:${tx}`);
+  refuse = false; op = await approveCircleFundingMint(op, s.c.ports);
+  assert.equal(s.c.signs(), 4); assert.equal(op.effects.find(e => e.role === "mint")!.phase, "submitted"); assert.equal(op.effects.find(e => e.role === "mint")!.envelope.nonceAtomic, "11");
+  validateCircleFundingOperation(op);
+});
+
+test("R4: when the abandoned mint's issuer message is already used on the destination, approve-mint refuses and points to external adoption", async () => {
+  let consents = 0;
+  const s = await lostMint(async () => "never_lands", { approve: async () => { consents++; }, messageNonceUsed: async () => true });
+  const op = await observeCircleFunding(s.op, s.c.ports), before = consents;
+  await assert.rejects(approveCircleFundingMint(op, s.c.ports), /mint_message_used_external_adoption_required/);
+  assert.equal(consents, before); assert.equal(s.c.signs(), 3); assert.equal(s.c.current().integrityHash, op.integrityHash);
+});
+
+test("R4: a lost approve-zero cleanup whose nonce another transaction took is abandoned and re-armed at a fresh nonce under fresh consent", async () => {
+  let op = reserved(); op = advanceCircleFundingOperation(op, { effects: op.effects.map(e => e.role === "approval" ? { ...e, phase: "confirmed", transactionHash: tx, materialHash: "9".repeat(64), proof: { transactionHash: tx, blockHash: tx, blockNumberAtomic: "10", receiptHash: "a".repeat(64), actualFeeAtomic: "1", finalityBlockHash: tx, finalityBlockNumberAtomic: "10", transactionHashBinding: "a".repeat(64), logsHash: "b".repeat(64), finalityTag: "included" as const } } : e), residualAllowanceAtomic: op.funding.amountAtomic, state: "cleanup_required" }, "approval_confirmed", at);
+  let lose = true, nonce = 3, consents = 0, discards = 0;
+  const c = controller(op, { allowance: async () => op.funding.amountAtomic, approve: async () => { consents++; },
+    broadcast: async (e, _raw, g) => { g(); if (lose) throw Error("TEST lost cleanup answer"); assert.equal(e.envelope.nonceAtomic, "4"); return tx; },
+    cleanupEnvelope: async o => circleEnvelope({ chainId: 42161, from: CIRCLE_SOURCE_OWNER, to: CIRCLE_SOURCE_TOKEN, data: encodeCircleApproval(true, o.funding), valueAtomic: "0", nonceAtomic: String(nonce++), gasLimitAtomic: "50000", maxFeePerGasAtomic: "20000000", maxPriorityFeePerGasAtomic: "0" }),
+    unsent: { outcome: async () => "nonce_not_consumed", ambiguous: async (_o, e) => lose ? "own_transaction_known" : e.envelope.nonceAtomic === "3" ? "never_lands" : "own_transaction_known", discard: async () => { discards++; } } });
+  op = await cleanupCircleFunding(op, c.ports); assert.equal(op.effects.find(e => e.role === "cleanup")!.phase, "unknown"); lose = false;
+  op = await observeCircleFunding(op, c.ports); assert.equal(op.effects.find(e => e.role === "cleanup")!.phase, "abandoned_unsent"); assert.equal(op.state, "cleanup_required"); assert.equal(discards, 1);
+  op = await cleanupCircleFunding(op, c.ports);
+  const cleanup = op.effects.find(e => e.role === "cleanup")!;
+  assert.equal(cleanup.envelope.nonceAtomic, "4"); assert.equal(cleanup.phase, "submitted"); assert.equal(c.signs(), 2); assert.equal(consents, 2);
+  assert.ok(op.transitions.some(t => t.reason === `cleanup_fresh_envelope_after_never_landed:${tx}`)); validateCircleFundingOperation(op);
+});

@@ -95,6 +95,9 @@ export function validateCircleFundingAdvance(previous: CircleFundingOperationV2,
   if (next.transitions.at(-1)!.snapshotHash !== hashObject(snapshot)) circleCorrupt("snapshot_binding");
   for (const old of previous.effects) {
     const effect = next.effects.find(e => e.role === old.role);
+    // R4 re-arm: a mint or cleanup proven never to land is replaced by a fresh, unsigned envelope; the transition names it.
+    if ((old.role === "mint" || old.role === "cleanup") && old.phase === "abandoned_unsent" && effect?.phase === "prepared" && effect.transactionHash === null &&
+      effect.materialHash === null && effect.proof === null && next.transitions.at(-1)!.reason === `${old.role}_fresh_envelope_after_never_landed:${old.transactionHash ?? "none"}`) continue;
     if (effect === undefined || (!circleSame(old.envelope, effect.envelope) && !(old.role === "mint" && old.phase === "prepared" && effect.phase === "prepared")) || old.transactionHash !== null && old.transactionHash !== effect.transactionHash ||
       old.materialHash !== null && old.materialHash !== effect.materialHash || old.phase !== effect.phase && !(phases[old.phase] as readonly string[]).includes(effect.phase)) circleCorrupt("effect_continuity");
     if (old.proof !== null && (effect.proof === null || old.proof.blockHash !== effect.proof.blockHash || old.proof.receiptHash !== effect.proof.receiptHash ||

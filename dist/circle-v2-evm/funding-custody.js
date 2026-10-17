@@ -20,11 +20,12 @@ export class CircleFundingEffectStore extends SecureStateStore {
         this.wrapping = wrapping;
     }
     path(op, role) { validateCircle(op); return `circle-v2-evm-funding-effects/${op.operationId}-${role}.json`; }
-    /** Presence-only refusal; this never decrypts material or loads a wrapping secret. */
-    async assertExternalAbsent(op) {
+    /** Presence-only refusal; this never decrypts material or loads a wrapping secret. A role whose owned attempt is closed
+     * (proven never to land) keeps its permanent claims, but its signed bytes must be gone. */
+    async assertExternalAbsent(op, closed = new Set()) {
         validateCircle(op);
         for (const role of ["mint", "cleanup"])
-            for (const suffix of ["", "-sign", "-send"])
+            for (const suffix of closed.has(role) ? [""] : ["", "-sign", "-send"])
                 if (await this.readJson(`circle-v2-evm-funding-effects/${op.operationId}-${role}${suffix}.json`) !== null)
                     circleBlocked("external_owned_private_entry");
     }
@@ -89,7 +90,12 @@ export class CircleFundingEffectStore extends SecureStateStore {
         await this.initialize();
         await this.ensureDirectory("circle-v2-evm-funding-effects");
         guard();
-        const path = `circle-v2-evm-funding-effects/${op.operationId}-${effect.role}-${kind}.json`;
+        // A re-armed effect (a fresh envelope after the previous one was proven never to land) claims under its envelope hash;
+        // the first claim of a role stays at its original path and still refuses a second signature of the same role.
+        const base = `circle-v2-evm-funding-effects/${op.operationId}-${effect.role}-${kind}.json`, prior = await this.readJson(base);
+        const rearmed = prior !== null && isPlainRecord(prior) && typeof prior.envelopeHash === "string" && prior.envelopeHash !== effect.envelope.envelopeHash &&
+            op.transitions.some(t => t.reason.startsWith(`${effect.role}_fresh_envelope_after_never_landed:`));
+        const path = rearmed ? `circle-v2-evm-funding-effects/${op.operationId}-${effect.role}-${kind}-${effect.envelope.envelopeHash}.json` : base;
         if (await this.readJson(path) !== null)
             circleBlocked("funding_effect_permanently_claimed");
         guard();

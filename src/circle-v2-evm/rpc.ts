@@ -25,11 +25,12 @@ const READ_METHODS = new Set([...METHODS].filter(method => method !== "eth_sendR
  * the attester set (head, threshold, count, at most 20 attesters); one account; one envelope (head, tip, estimate);
  * one effect preflight (two nonces, balance, allowance, estimate, simulation, mint head and used nonce); one
  * observation (transaction, receipt, finality head, canonical block). */
-export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23, account: 5, envelope: 3, preflight: 8, observation: 4, single: 1 } as const;
+export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23, account: 5, envelope: 3, preflight: 8, observation: 4, single: 1, ambiguous: 4 } as const;
 /** The longest live command: identity, configuration, attesters, two accounts, two envelopes, three effect preflights,
- * eight observations and four single reads (allowance, used nonce, cleanup nonce, mint head), each retried once. */
+ * eight observations, one ambiguous-send check (two nonces, transaction, receipt) and four single reads (allowance,
+ * used nonce, cleanup nonce, mint head), each retried once. */
 export const CIRCLE_COMMAND_REQUEST_BUDGET = 2 * (CIRCLE_READ_PLAN.identity + CIRCLE_READ_PLAN.configuration + CIRCLE_READ_PLAN.attesters +
-  2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + 4 * CIRCLE_READ_PLAN.single);
+  2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + CIRCLE_READ_PLAN.ambiguous + 4 * CIRCLE_READ_PLAN.single);
 const transient = (e: unknown) => e instanceof ApnError && typeof e.details?.status === "number" && [429, 500, 502, 503, 504].includes(e.details.status);
 interface CircleQueuedRead { readonly method: string; readonly params: readonly unknown[]; readonly gate: () => void; readonly resolve: (value: unknown) => void; readonly reject: (error: unknown) => void; }
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
