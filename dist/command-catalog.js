@@ -20,9 +20,7 @@ import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
 import { networkCommandVariants } from "./network-command-catalog.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
-import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
 export { renderHelp, renderReadmeCommandReference };
-export { assertCompatibleManifestEvolution, validateCommandManifest };
 export * from "./command-catalog-parser.js";
 const noDefault = { kind: "none" };
 const defaultProfile = { kind: "literal", value: "default" };
@@ -271,5 +269,4 @@ export const COMMAND_MANIFEST = {
     groups: COMMAND_GROUPS,
     commands: COMMANDS,
 };
-validateCommandManifest(COMMAND_MANIFEST);
 //# sourceMappingURL=command-catalog.js.map
