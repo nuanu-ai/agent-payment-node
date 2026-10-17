@@ -3,7 +3,7 @@ import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
-import { provesUnlanded, readEvmUnlandedEvidence } from "../evm-unlanded-proof.js";
+import { checkNeverLands } from "../evm-finalized-proof.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { canonicalOperationId } from "../transfer-policy.js";
 import { merchantMove } from "./model.js";
@@ -77,10 +77,10 @@ export class MerchantExits {
             return { next: await this.finish(o, "failed_before_effect", { reason: fence.sign ? "signature_never_left_process" : "never_signed" }), landed: false };
         }
         const hash = o.txHash ?? fence.signed;
-        const evidence = await readEvmUnlandedEvidence(async (calls) => await this.rpc.batch(calls), 4326, merchantTerms(o).payer, hash);
-        if (!provesUnlanded(evidence, o.envelope.nonce))
-            return { next: null, landed: evidence.receiptFound };
-        return { next: await this.finish(o, "failed_proven_superseded", { reason: "finalized_nonce_superseded", finalizedNonce: evidence.finalizedNonce,
+        const check = await checkNeverLands({ chainId: 4326, account: merchantTerms(o).payer, nonce: BigInt(o.envelope.nonce), transactionHash: hash }, async (calls) => await this.rpc.batch(calls));
+        if (!check.neverLands)
+            return { next: null, landed: check.receiptFound };
+        return { next: await this.finish(o, "failed_proven_superseded", { reason: "finalized_nonce_superseded", finalizedNonce: check.finalizedNonce.toString(),
                 transactionHash: hash }), landed: false };
     }
     async abandon(idInput, consent) {

@@ -1,8 +1,9 @@
-import { canonicalJson, isPlainRecord } from "./canonical.js";
+import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
+import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "./evm-rpc-codec.js";
 import { BridgeHttps } from "./lifi/https.js";
 import { parsePublicHttpsUrl } from "./network-policy.js";
-import { parseRpcResultEnvelope } from "./rpc-envelope.js";
+import { parseRpcBatchResultEnvelope, parseRpcResultEnvelope } from "./rpc-envelope.js";
 
 /**
  * The public reads that prove, at the FINALIZED tag, that nothing more of an operation can land on its signing account
@@ -12,24 +13,31 @@ import { parseRpcResultEnvelope } from "./rpc-envelope.js";
 export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" |
   "eth_getBlockByNumber";
 export interface FinalizedChainRead { call(method: FinalizedReadMethod, params: readonly unknown[]): Promise<unknown> }
+export interface FinalizedReadCall { readonly method: FinalizedReadMethod; readonly params: readonly unknown[] }
+/** One JSON-RPC batch: one POST, so one node answers every call in it. */
+export type FinalizedBatchRead = (calls: readonly FinalizedReadCall[]) => Promise<readonly unknown[]>;
+/** A public endpoint answers single calls and one-node batches. */
+export interface PublicFinalizedRead extends FinalizedChainRead { readonly batch: FinalizedBatchRead }
 
-export function finalizedQuantity(value: unknown): bigint {
-  if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(value)) throw new ApnError("APN_RPC_PROTOCOL", "Malformed RPC quantity.");
-  return BigInt(value);
-}
-
-/** A keyless public HTTPS JSON-RPC endpoint, one exact result envelope per call, through the shared bounded transport. */
-export function publicFinalizedRead(url: string, label: string, https: Pick<BridgeHttps, "request"> = new BridgeHttps()): FinalizedChainRead {
+/** A keyless public HTTPS JSON-RPC endpoint, exact result envelopes, through the shared bounded transport. */
+export function publicFinalizedRead(url: string, label: string, https: Pick<BridgeHttps, "request"> = new BridgeHttps()): PublicFinalizedRead {
   const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", `${label} endpoint`, 2048);
   if (parsed.search !== "") throw new ApnError("APN_RPC_CONFIG", `${label} endpoint must not carry a query.`);
   const endpoint = parsed.toString();
   let sequence = 0;
+  const post = async (body: unknown) => {
+    const response = await https.request(endpoint, "POST", canonicalJson(body), 1024 * 1024, "APN_RPC_CONFIG");
+    if (response.status !== 200) throw new ApnError("APN_RPC_PROTOCOL", `${label} answered a non-200 status.`, { status: response.status });
+    return response.body;
+  };
   return {
     async call(method, params) {
       const id = String(++sequence);
-      const response = await https.request(endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG");
-      if (response.status !== 200) throw new ApnError("APN_RPC_PROTOCOL", `${label} answered a non-200 status.`, { status: response.status });
-      return parseRpcResultEnvelope(response.body, id, method);
+      return parseRpcResultEnvelope(await post({ jsonrpc: "2.0", id, method, params }), id, method);
+    },
+    async batch(calls) {
+      const ids = calls.map(() => ++sequence);
+      return parseRpcBatchResultEnvelope(await post(calls.map((call, i) => ({ jsonrpc: "2.0", id: ids[i], method: call.method, params: call.params }))), ids);
     },
   };
 }
@@ -41,7 +49,7 @@ export const FINALIZED_RPC_ENV: Readonly<Record<number, string>> = Object.freeze
   56: "APN_BNB_RPC_URL", 143: "APN_MONAD_RPC_URL", 8453: "APN_BASE_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" });
 
 /** The production reader: the chain's own APN_<CHAIN>_RPC_URL, read keyless; a missing setting is named in the refusal. */
-export function environmentFinalizedReader(environment: Readonly<Record<string, string | undefined>>): FinalizedReader {
+export function environmentFinalizedReader(environment: Readonly<Record<string, string | undefined>>): (chainId: number) => PublicFinalizedRead {
   return chainId => {
     const variable = FINALIZED_RPC_ENV[chainId];
     if (variable === undefined) throw new ApnError("APN_RPC_CONFIG", `No public RPC setting is known for chain ${chainId}.`, { chainId: String(chainId) });
@@ -54,24 +62,32 @@ export function environmentFinalizedReader(environment: Readonly<Record<string, 
   };
 }
 
-export async function assertFinalizedChain(rpc: FinalizedChainRead, chainId: number): Promise<void> {
-  if (finalizedQuantity(await rpc.call("eth_chainId", [])) !== BigInt(chainId)) {
-    throw new ApnError("APN_CHAIN_MISMATCH", "The closure RPC does not serve the record's signing chain.", { chainId: String(chainId) });
+function assertChain(value: unknown, chainId: number): void {
+  if (evmRpcQuantity(value) !== BigInt(chainId)) {
+    throw new ApnError("APN_CHAIN_MISMATCH", "The finalized-read RPC does not serve the operation's signing chain.", { chainId: String(chainId) });
   }
+}
+export async function assertFinalizedChain(rpc: FinalizedChainRead, chainId: number): Promise<void> {
+  assertChain(await rpc.call("eth_chainId", []), chainId);
 }
 
 const nonceWait = (account: string, chainId: number, nonce: bigint, finalized: bigint) =>
   `the finalized nonce of ${account} on chain ${chainId} to pass ${nonce} (it is ${finalized})`;
 
-/** A transaction by hash: null when the node does not know it, else whether it is in a block. */
+/** A lookup by hash answers null (unknown) or that hash's own record; any other record is a protocol violation. */
+function ownLookup(value: unknown, field: "hash" | "transactionHash", transactionHash: string): Record<string, unknown> | null {
+  if (value === null) return null;
+  const found = evmRpcRecord(value);
+  if (evmRpcHex(found[field], 32) !== transactionHash.toLowerCase()) throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered another transaction than the one asked for.");
+  return found;
+}
+
+/** A transaction by hash: whether the node knows it, and whether it is in a block. */
 async function transactionSeen(rpc: FinalizedChainRead, transactionHash: string): Promise<"not_found" | "pending" | "included"> {
-  const found = await rpc.call("eth_getTransactionByHash", [transactionHash]);
+  const found = ownLookup(await rpc.call("eth_getTransactionByHash", [transactionHash]), "hash", transactionHash);
   if (found === null) return "not_found";
-  if (!isPlainRecord(found) || typeof found.hash !== "string" || found.hash.toLowerCase() !== transactionHash.toLowerCase()) {
-    throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered another transaction than the one asked for.");
-  }
   if (found.blockNumber === null || found.blockNumber === undefined) return "pending";
-  finalizedQuantity(found.blockNumber);
+  evmRpcQuantity(found.blockNumber);
   return "included";
 }
 
@@ -91,7 +107,7 @@ export type NonceClosureCheck = { readonly closed: true; readonly finalizedNonce
  */
 export async function checkNonceClosure(facts: NonceClosureFacts, rpc: FinalizedChainRead): Promise<NonceClosureCheck> {
   await assertFinalizedChain(rpc, facts.chainId);
-  const finalized = finalizedQuantity(await rpc.call("eth_getTransactionCount", [facts.account, "finalized"]));
+  const finalized = evmRpcQuantity(await rpc.call("eth_getTransactionCount", [facts.account, "finalized"]));
   if (finalized <= facts.highestNonce) return { closed: false, waitingFor: nonceWait(facts.account, facts.chainId, facts.highestNonce, finalized) };
   const ownTransactions: { transactionHash: string; seen: OwnTransactionSeen }[] = [];
   for (const transactionHash of facts.ownHashes) {
@@ -104,22 +120,24 @@ export async function checkNonceClosure(facts: NonceClosureFacts, rpc: Finalized
 
 /** One signed effect: its chain, signer, nonce and transaction hash. */
 export interface SignedEffectFacts { readonly chainId: number; readonly account: string; readonly nonce: bigint; readonly transactionHash: string }
-export type NeverLandsCheck = { readonly neverLands: true; readonly finalizedNonce: bigint } | { readonly neverLands: false; readonly waitingFor: string };
+/** Not proven: `receiptFound` says the node holds a receipt, so the effect's observation (not an exit) decides it. */
+export type NeverLandsCheck = { readonly neverLands: true; readonly finalizedNonce: bigint } | { readonly neverLands: false; readonly receiptFound: boolean };
 
 /**
- * R4 exit 2 for one signed effect: at the finalized tag the signer's nonce is past the effect's nonce (so the nonce is
- * spent by a finalized transaction) and the node knows neither the effect's transaction nor a receipt for it, so that
- * transaction was not the one and can never be included. The nonce is read first, then the hash.
+ * R4 exit 2 for one signed effect, the one rule every family uses: at the finalized tag the signer's nonce is past the
+ * effect's nonce (a finalized transaction spent it) and the node knows neither the effect's transaction nor a receipt
+ * for it, so that transaction was not the one and can never be included. A nonce not yet past proves nothing. Chain id,
+ * nonce, receipt and transaction are one batch: a load balancer could route separate requests to a node behind the
+ * finalized head, which would not know a transaction the finalized nonce already covers. Current state only, never a
+ * historical (archive) read.
  */
-export async function checkNeverLands(effect: SignedEffectFacts, rpc: FinalizedChainRead): Promise<NeverLandsCheck> {
-  await assertFinalizedChain(rpc, effect.chainId);
-  const finalized = finalizedQuantity(await rpc.call("eth_getTransactionCount", [effect.account, "finalized"]));
-  if (finalized <= effect.nonce) return { neverLands: false, waitingFor: nonceWait(effect.account, effect.chainId, effect.nonce, finalized) };
-  if (await transactionSeen(rpc, effect.transactionHash) !== "not_found") {
-    return { neverLands: false, waitingFor: `transaction ${effect.transactionHash} is known to the node; its receipt decides it` };
-  }
-  if (await rpc.call("eth_getTransactionReceipt", [effect.transactionHash]) !== null) {
-    return { neverLands: false, waitingFor: `transaction ${effect.transactionHash} has a receipt; its observation decides it` };
-  }
-  return { neverLands: true, finalizedNonce: finalized };
+export async function checkNeverLands(effect: SignedEffectFacts, batch: FinalizedBatchRead): Promise<NeverLandsCheck> {
+  const hash = effect.transactionHash;
+  const [chain, nonce, receipt, transaction] = await batch([
+    { method: "eth_chainId", params: [] }, { method: "eth_getTransactionCount", params: [effect.account, "finalized"] },
+    { method: "eth_getTransactionReceipt", params: [hash] }, { method: "eth_getTransactionByHash", params: [hash] }]);
+  assertChain(chain, effect.chainId);
+  const finalized = evmRpcQuantity(nonce), receiptFound = ownLookup(receipt, "transactionHash", hash) !== null;
+  const transactionKnown = ownLookup(transaction, "hash", hash) !== null;
+  return finalized > effect.nonce && !receiptFound && !transactionKnown ? { neverLands: true, finalizedNonce: finalized } : { neverLands: false, receiptFound };
 }

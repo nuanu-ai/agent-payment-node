@@ -153,7 +153,7 @@ async function circleSource(t: TestContext): Promise<FamilyRecord> {
 /** A prepared Circle Base USDC allowance (its preparation reads come from a fixed RPC). */
 async function circleApproval(t: TestContext): Promise<FamilyRecord> {
   const state = await root(t), store = new StateStore(state);
-  const rpc: CircleApprovalRpc = { chainId: 8453, origin: "https://base.example.org", send: unreached("send"), observe: unreached("observe"), unlanded: unreached("unlanded"),
+  const rpc: CircleApprovalRpc = { chainId: 8453, origin: "https://base.example.org", send: unreached("send"), observe: unreached("observe"), finalizedBatch: unreached("finalizedBatch"),
     read: async () => ({ chainId: 8453, payer: ACCOUNT.address, token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
       spender: "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408", blockNumber: "12345", blockHash: `0x${H("a")}`, latestNonceAtomic: "7",
       pendingNonceAtomic: "7", usdcBalanceAtomic: "434611", usdcAllowanceAtomic: "0", nativeBalanceWei: "200000000000000", gasLimitAtomic: "100000",

@@ -1,6 +1,7 @@
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { assertFinalizedChain, finalizedQuantity, type FinalizedReader } from "../evm-finalized-proof.js";
+import { assertFinalizedChain, type FinalizedReader } from "../evm-finalized-proof.js";
+import { evmRpcQuantity } from "../evm-rpc-codec.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { pastUnstartedDeadline } from "../unstarted-deadline.js";
 import { CIRCLE_V2_SOURCE_TTL_MS } from "./circle-v2-source-service.js";
@@ -81,7 +82,7 @@ export async function circleSourceStatus(root: string, journal: NonEvmSourceJour
   if (raw === null) return view(null, `the burn transaction ${hash} to have a receipt`, "chain_verified_public_read");
   const receipt = receiptOf(raw, journal), head = await rpc.call("eth_getBlockByNumber", ["finalized", false]);
   if (!isPlainRecord(head)) throw new ApnError("APN_RPC_PROTOCOL", "The finalized block is malformed.");
-  const finalized = finalizedQuantity(head.number);
+  const finalized = evmRpcQuantity(head.number);
   if (receipt.blockNumber > finalized) {
     return view(null, `the burn receipt in block ${receipt.blockNumber} to be finalized (the finalized block is ${finalized})`, "chain_verified_public_read");
   }
@@ -100,7 +101,7 @@ function receiptOf(value: unknown, journal: NonEvmSourceJournal): { readonly blo
     typeof value.blockHash !== "string" || !WORD.test(value.blockHash.toLowerCase()) || (value.status !== "0x1" && value.status !== "0x0")) {
     throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered a receipt that is not this operation's burn.");
   }
-  return { blockNumber: finalizedQuantity(value.blockNumber), blockHash: value.blockHash.toLowerCase(), status: value.status === "0x1" ? "success" : "reverted" };
+  return { blockNumber: evmRpcQuantity(value.blockNumber), blockHash: value.blockHash.toLowerCase(), status: value.status === "0x1" ? "success" : "reverted" };
 }
 
 function proofCorrupt(): never {

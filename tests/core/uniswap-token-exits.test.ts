@@ -53,7 +53,7 @@ async function fixture(root: string, allowanceAtPrepare = "0") {
     observe: async (_op: unknown, _kind: TokenEffectKind, hash: string) => observations.get(hash) ?? null,
     // The real R4 check against a finalized-tag stand-in: unknown hashes are not found.
     neverLands: async (op: UniswapTokenOperation, _kind: TokenEffectKind, attempt: { nonce: string; transactionHash: string | null }) =>
-      await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash! }, mockChain(1, finalizedNonce).rpc) };
+      await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash! }, mockChain(1, finalizedNonce).batch) };
   // One execution per command, as each CLI process builds its own runtime.
   const execution = () => new UniswapTokenExecution(journal, ports);
   const runtime: UniswapTokenCommandRuntime = { inventory: () => ({}), quote: async () => ({}), prepare: async () => { throw new Error("unused"); },

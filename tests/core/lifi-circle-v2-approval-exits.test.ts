@@ -10,8 +10,8 @@ import { keccak256, pad, toHex, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { runCli } from "../../src/cli.js";
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
-import { readEvmUnlandedEvidence } from "../../src/evm-unlanded-proof.js";
-import { CircleV2ApprovalExecutor, circleApprovalProofBatch, type CircleApprovalRecord, type CircleApprovalRpc } from "../../src/lifi/circle-v2-approval-executor.js";
+import { checkNeverLands, environmentFinalizedReader } from "../../src/evm-finalized-proof.js";
+import { CircleV2ApprovalExecutor, type CircleApprovalRecord, type CircleApprovalRpc } from "../../src/lifi/circle-v2-approval-executor.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
 import { sealWallet, StateStore } from "../../src/state.js";
@@ -35,8 +35,10 @@ async function setup(t: test.TestContext) {
     observe: async hash => chain.include ? { status: "success", safe: true, receipt: { chainId: 8453, transactionHash: hash, blockNumberAtomic: "12345",
       blockHash: `0x${"a".repeat(64)}` as Hex, logs: [{ address: token as Hex, topics: [keccak256(Buffer.from("Approval(address,address,uint256)")),
         pad(account.address).toLowerCase() as Hex, pad(spender).toLowerCase() as Hex], data: toHex(430000n, { size: 32 }) }] } } : null,
-    unlanded: async (payer, hash) => { chain.unlandedReads++; assert.equal(payer, account.address); assert.equal(hash, keccak256(sent[0]!));
-      return { finalizedNonce: chain.finalizedNonce, receiptFound: false, transactionKnown: chain.known }; } };
+    finalizedBatch: async calls => { chain.unlandedReads++; const hash = keccak256(sent[0]!);
+      assert.deepEqual(calls.map(c => [c.method, c.params]), [["eth_chainId", []], ["eth_getTransactionCount", [account.address, "finalized"]],
+        ["eth_getTransactionReceipt", [hash]], ["eth_getTransactionByHash", [hash]]]);
+      return ["0x2105", toHex(BigInt(chain.finalizedNonce)), null, chain.known ? { hash } : null]; } };
   const signer = { sign: async (r: CircleApprovalRecord) => { const e = r.preparation.transaction;
     return await account.signTransaction({ type: "eip1559", chainId: 8453, to: token, data: e.data as Hex, value: 0n, nonce: Number(e.nonceAtomic),
       gas: BigInt(e.gasLimitAtomic), maxFeePerGas: BigInt(e.maxFeePerGasWei), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGasWei), accessList: [] }); } };
@@ -85,11 +87,12 @@ test("the production proof reads one batch on APN_BASE_RPC_URL at the finalized 
     const values: Record<string, unknown> = { eth_chainId: "0x2105", eth_getTransactionCount: "0x8", eth_getTransactionReceipt: null, eth_getTransactionByHash: null };
     return { status: 200, body: JSON.stringify(rows.map(row => ({ jsonrpc: "2.0", id: row.id, result: values[row.method] }))) };
   });
-  const evidence = await readEvmUnlandedEvidence(circleApprovalProofBatch({ APN_BASE_RPC_URL: "https://base.example/rpc" })(), 8453, account.address, hash);
-  assert.deepEqual(evidence, { finalizedNonce: "8", receiptFound: false, transactionKnown: false });
+  const check = await checkNeverLands({ chainId: 8453, account: account.address, nonce: 7n, transactionHash: hash },
+    environmentFinalizedReader({ APN_BASE_RPC_URL: "https://base.example/rpc" })(8453).batch);
+  assert.deepEqual(check, { neverLands: true, finalizedNonce: 8n });
   assert.deepEqual(posts, [{ url: "https://base.example/rpc", rows: [["eth_chainId", []], ["eth_getTransactionCount", [account.address, "finalized"]],
     ["eth_getTransactionReceipt", [hash]], ["eth_getTransactionByHash", [hash]]] }]);
-  assert.throws(() => circleApprovalProofBatch({})(), { code: "APN_RPC_CONFIG" });
+  assert.throws(() => environmentFinalizedReader({})(8453), { code: "APN_RPC_CONFIG" });
 });
 
 test("owner abandon of an ambiguous approval: refused before expiry, TTY consent after it ends abandoned_unknown; a replay asks nothing", async t => {
