@@ -14,6 +14,7 @@ import { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNat
 import { TtyStargateNativeApproval } from "./native-tty.js";
 import { StargateNativeUsage } from "./native-usage.js";
 import { scanStargateLogs, StargateDestinationScanStore, STARGATE_UNICHAIN_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
+import { legacyStargateStatusAfter, type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 
 const DESTINATION_POOL = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
 function blocked(reason: string): never { throw new ApnError("APN_RPC_CONFIG", `Stargate native runtime unavailable: ${reason}.`, { reason }); }
@@ -92,7 +93,7 @@ export class StargateNativeService {
   private readonly journal: FileStargateNativeJournal; private readonly local: LocalStargateNativeSigner; private readonly usage: StargateNativeUsage;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort,
     private readonly environment: Readonly<Record<string, string | undefined>>,
-    private readonly now: () => number = Date.now) {
+    private readonly now: () => number = Date.now, private readonly legacyRpc?: (url: string) => LegacyChainRead) {
     this.journal = new FileStargateNativeJournal(state.root, state); this.local = new LocalStargateNativeSigner(state, wrapping);
     this.usage = new StargateNativeUsage(state, now);
   }
@@ -111,7 +112,14 @@ export class StargateNativeService {
       throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted Stargate operation can be observed.");
     return await executeStargateV2NativeEth(operationId, await this.ports(operation.profile, operation.owner, operationId), this.journal);
   }
-  async status(operationId: string): Promise<StargateNativeOperation> { return await this.required(operationId); }
+  /** A record of the unreleased native schema v1 is read by its frozen reader; its status may close it by a chain proof. */
+  async status(operationId: string): Promise<StargateNativeOperation | LegacyStargateStatus> {
+    try { return await this.required(operationId); }
+    catch (error) {
+      return await legacyStargateStatusAfter(error, { root: this.state.root, family: "stargate_native", operationId, environment: this.environment,
+        now: this.now, ...(this.legacyRpc === undefined ? {} : { rpc: this.legacyRpc }) });
+    }
+  }
   async receipt(operationId: string) { return stargateV2NativeCanonicalReceipt(await this.required(operationId)); }
   private async required(id: string): Promise<StargateNativeOperation> {
     const found = await this.journal.load(id); if (found === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Stargate native operation was not found."); return found;

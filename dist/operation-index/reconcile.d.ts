@@ -21,8 +21,11 @@ export declare class OperationIndexReconciler {
     derive(adapter: OperationFamilyAdapter, name: StoredRecordName): Promise<OperationIndexEntry | null>;
     fromRecord(adapter: OperationFamilyAdapter, name: StoredRecordName, record: unknown): Promise<OperationIndexEntry | null>;
     /**
-     * An unreadable record keeps the accounts its raw JSON still names canonically. Unknown accounts quarantine every
-     * profile the path or the bytes name, or the whole family when nothing names a profile.
+     * An unreadable record holds exactly the claims its raw JSON still names canonically: its accounts (and a profile only
+     * where the family's own claims name one, as Circle names its destination profile). It can never be advanced, so the
+     * account claims are what keeps another signer off its nonces; it does not take its profile from profile-wide work.
+     * Unknown accounts quarantine every profile the path or the bytes name (holding those profiles), or the whole family
+     * when nothing names a profile.
      */
     quarantine(adapter: OperationFamilyAdapter, name: StoredRecordName, reason: UnreadableReason): Promise<OperationIndexEntry | null>;
     /** Pointer first, then the open copy, then the entry: presence in `entries/` means fully indexed. */
