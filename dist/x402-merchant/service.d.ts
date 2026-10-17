@@ -20,6 +20,7 @@ export declare class MerchantService {
     readonly records: MerchantRepository;
     private readonly operations;
     private readonly owner;
+    private readonly exits;
     constructor(state: StateStore, ports: MerchantPorts);
     prepare(input: {
         profile: string;
@@ -35,6 +36,12 @@ export declare class MerchantService {
     retireUnsent(id: string): Promise<MerchantOperation>;
     status(id: string): Promise<MerchantOperation>;
     private observeLocked;
+    /**
+     * A finalized payment whose proof the merchant never answered with a delivery in the allowed GETs ends here on its own,
+     * as `delivered` and `reverted` do: the payment is final and charged, no command could change the record any more,
+     * and an owner consent would decide nothing. The receipt and every proof hash stay in the record.
+     */
+    private deliveryFailed;
     private refreshCanonical;
     private canonicalAudit;
     private revalidate;

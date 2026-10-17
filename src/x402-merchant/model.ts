@@ -17,9 +17,27 @@ export interface MerchantEnvelope {
     readonly nativeFeeReserveWei?: string;
 }
 /** Every phase a merchant payment may hold, and its outcomes (the record's `terminal` flag must equal membership). */
-export const MERCHANT_PHASES = ["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent"] as const;
-export const MERCHANT_TERMINAL_PHASES: readonly MerchantPhase[] = ["delivered", "reverted", "retired_unsent"];
+export const MERCHANT_PHASES = ["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent",
+    "failed_before_effect", "failed_proven_superseded", "abandoned_unknown", "delivery_failed"] as const;
+export const MERCHANT_TERMINAL_PHASES: readonly MerchantPhase[] = ["delivered", "reverted", "retired_unsent", "failed_before_effect", "failed_proven_superseded", "abandoned_unknown", "delivery_failed"];
 export type MerchantPhase = typeof MERCHANT_PHASES[number];
+/** The most merchant GETs that may carry one payment's proof (started and outcome rows, two per GET). */
+export const MERCHANT_DELIVERY_ATTEMPT_LIMIT = 16;
+/**
+ * Why a payment ended without a merchant delivery (phase 4c exits). `never_signed`: custody was never asked to sign;
+ * `signature_never_left_process`: a signature may have existed only inside a process that died before sealing it, and
+ * nothing is sent before the durable submission fence; `finalized_nonce_superseded`: another transaction took the
+ * payment's nonce at the finalized tag and the node knows neither this transaction nor a receipt; `owner_abandoned`:
+ * the owner's TTY consent ended an attempt no proof could decide; `delivery_attempts_exhausted`: the finalized payment's
+ * proof was offered to the merchant the maximum number of times without an HTTP 200 delivery.
+ */
+export interface MerchantExit {
+    readonly reason: "never_signed" | "signature_never_left_process" | "finalized_nonce_superseded" | "owner_abandoned" | "delivery_attempts_exhausted";
+    readonly finalizedNonce?: string;
+    readonly transactionHash?: Hex;
+}
+const EXIT_REASONS: Readonly<Partial<Record<MerchantPhase, readonly MerchantExit["reason"][]>>> = { failed_before_effect: ["never_signed", "signature_never_left_process"],
+    failed_proven_superseded: ["finalized_nonce_superseded"], abandoned_unknown: ["owner_abandoned"], delivery_failed: ["delivery_attempts_exhausted"] };
 export interface MerchantReceipt {
     readonly transactionHash: Hex;
     readonly blockNumber: string;
@@ -101,6 +119,8 @@ export interface MerchantOperation {
     readonly events: readonly MerchantEvent[];
     readonly integrityHash: string;
     readonly canonicalObservations?: readonly MerchantCanonicalObservation[];
+    /** Present exactly in the phase 4c exit states. */
+    readonly exit?: MerchantExit;
 }
 export function merchantFingerprint(o: Omit<MerchantOperation, "fingerprint" | "integrityHash">): string {
     return hashObject({ schemaVersion: o.schemaVersion, kind: o.kind, operationId: o.operationId, profile: o.profile, profileHash: o.profileHash,
@@ -108,7 +128,7 @@ export function merchantFingerprint(o: Omit<MerchantOperation, "fingerprint" | "
 }
 export function sealMerchant(o: Omit<MerchantOperation, "integrityHash">): MerchantOperation { return validateMerchant({ ...o, integrityHash: hashObject(o) }); }
 export function merchantSnapshot(o: Pick<MerchantOperation, "state" | "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts">): string { return hashObject({ state: o.state, signingAttempts: o.signingAttempts, submissionAttempts: o.submissionAttempts, txHash: o.txHash, receipt: o.receipt, deliveryAttempts: o.deliveryAttempts }); }
-export function merchantMove(o: MerchantOperation, state: MerchantPhase, at: string, changes: Partial<Pick<MerchantOperation, "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts" | "retirementDigest">> = {}): MerchantOperation {
+export function merchantMove(o: MerchantOperation, state: MerchantPhase, at: string, changes: Partial<Pick<MerchantOperation, "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts" | "retirementDigest" | "exit">> = {}): MerchantOperation {
     const base = { at, state, snapshotHash: merchantSnapshot({ ...o, ...changes, state }), previousHash: o.events.at(-1)?.eventHash ?? null };
     const event = { ...base, eventHash: hashObject(base) };
     const { integrityHash: _, ...body } = o;
@@ -116,7 +136,7 @@ export function merchantMove(o: MerchantOperation, state: MerchantPhase, at: str
 }
 export function validateMerchant(v: unknown): MerchantOperation {
     const v2 = isPlainRecord(v) && v.schemaVersion === "apn.x402-merchant.v2";
-    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", ...(v2 ? ["url", "asset"] : []), "envelope", "policy", ...(v.failures===undefined?[]:["failures"]), ...(v.retirementDigest===undefined?[]:["retirementDigest"]), ...(v.feeContext===undefined?[]:["feeContext"]), ...(v.effectBinding === undefined ? [] : ["effectBinding"]), "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"])]))
+    if (!isPlainRecord(v) || !exactKeys(v, ["schemaVersion", "kind", "operationId", "profile", "profileHash", "idempotencyHash", "requestHash", "fingerprint", "custody", "frozen", ...(v2 ? ["url", "asset"] : []), "envelope", "policy", ...(v.failures===undefined?[]:["failures"]), ...(v.retirementDigest===undefined?[]:["retirementDigest"]), ...(v.feeContext===undefined?[]:["feeContext"]), ...(v.effectBinding === undefined ? [] : ["effectBinding"]), "createdAt", "expiresAt", "state", "terminal", "signingAttempts", "submissionAttempts", "txHash", "receipt", "deliveryAttempts", "events", "integrityHash", ...(v.canonicalObservations === undefined ? [] : ["canonicalObservations"]), ...(v.exit === undefined ? [] : ["exit"])]))
         refuse("merchant_state_schema");
     const o = v as unknown as MerchantOperation, { integrityHash, ...body } = o;
     if (!(MERCHANT_PHASES as readonly string[]).includes(o.state) || !exactKeys(o.policy as unknown as Record<string,unknown>, ["digest", "revision", "activationDigest"]) || o.schemaVersion !== "apn.x402-merchant.v1" && o.schemaVersion !== "apn.x402-merchant.v2" || o.kind !== "merchant_x402" || hashObject(body) !== integrityHash || merchantFingerprint(o) !== o.fingerprint ||
@@ -154,7 +174,7 @@ export function validateMerchant(v: unknown): MerchantOperation {
     }
     if (o.events.at(-1)?.snapshotHash !== merchantSnapshot(o) || o.events.at(-1)?.state !== o.state || o.txHash !== null && !/^0x[0-9a-f]{64}$/u.test(o.txHash) || o.submissionAttempts === 1 && o.txHash === null)
         refuse("merchant_state_attempt");
-    if (o.state === "prepared" && (o.signingAttempts !== 0 || o.submissionAttempts !== 0 || o.txHash !== null || o.receipt !== null || o.deliveryAttempts.length !== 0) || o.state === "signing_started" && (o.signingAttempts !== 1 || o.submissionAttempts !== 0) || ["submission_started", "payment_finalized", "delivery_unknown", "delivered", "reverted"].includes(o.state) && o.submissionAttempts !== 1 || o.state === "unknown_finality" && o.signingAttempts !== 1)
+    if (o.state === "prepared" && (o.signingAttempts !== 0 || o.submissionAttempts !== 0 || o.txHash !== null || o.receipt !== null || o.deliveryAttempts.length !== 0) || o.state === "signing_started" && (o.signingAttempts !== 1 || o.submissionAttempts !== 0) || ["submission_started", "payment_finalized", "delivery_unknown", "delivered", "reverted", "delivery_failed"].includes(o.state) && o.submissionAttempts !== 1 || o.state === "unknown_finality" && o.signingAttempts !== 1)
         refuse("merchant_phase_attempt_binding");
     if (o.receipt !== null && (!exactKeys(o.receipt as unknown as Record<string,unknown>, ["transactionHash", "blockNumber", "blockHash", "finality", "status", "evidenceHash", "networkFeeWei", ...(o.receipt.fullFee===undefined?[]:["fullFee"]), ...(o.receipt.canonical === undefined ? [] : ["canonical"])]) || !/^[0-9]+$/u.test(o.receipt.blockNumber) || !/^0x[0-9a-f]{64}$/u.test(o.receipt.blockHash) || !/^(0|[1-9][0-9]*)$/u.test(o.receipt.networkFeeWei) || !["success", "reverted"].includes(o.receipt.status) || o.receipt.transactionHash !== o.txHash || o.receipt.finality !== "finalized" || !/^[a-f0-9]{64}$/u.test(o.receipt.evidenceHash)))
         refuse("merchant_state_receipt");
@@ -171,9 +191,10 @@ export function validateMerchant(v: unknown): MerchantOperation {
             !/^(0|[1-9][0-9]*)$/u.test(c.transactionIndex) || !/^(0|[1-9][0-9]*)$/u.test(c.finalizedNumber) ||
             ![c.blockHeaderHash, c.finalizedHeaderHash].every(h => /^[a-f0-9]{64}$/u.test(h)) || !/^0x[0-9a-f]{64}$/u.test(c.finalizedHash) || BigInt(c.finalizedNumber) < BigInt(o.receipt.blockNumber)) refuse("merchant_canonical_receipt_shape");
     }
-    if (["payment_finalized", "delivery_unknown", "delivered"].includes(o.state) && o.receipt?.status !== "success" || o.state === "reverted" && o.receipt?.status !== "reverted" || o.state === "delivered" && o.deliveryAttempts.at(-1)?.outcome !== "delivered")
+    validateMerchantExit(o);
+    if (["payment_finalized", "delivery_unknown", "delivered", "delivery_failed"].includes(o.state) && o.receipt?.status !== "success" || o.state === "reverted" && o.receipt?.status !== "reverted" || o.state === "delivered" && o.deliveryAttempts.at(-1)?.outcome !== "delivered")
         refuse("merchant_state_completion");
-    if (o.deliveryAttempts.length > 16)
+    if (o.deliveryAttempts.length > MERCHANT_DELIVERY_ATTEMPT_LIMIT)
         refuse("merchant_delivery_attempt_bound");
     for (let i = 0; i < o.deliveryAttempts.length; i++) {
         const a = o.deliveryAttempts[i]!;
@@ -207,6 +228,23 @@ export function validateMerchant(v: unknown): MerchantOperation {
     }
     return o;
 }
+/** The exit record belongs to its exit state, and each exit state to the attempts it can follow. */
+function validateMerchantExit(o: MerchantOperation): void {
+    const allowed = EXIT_REASONS[o.state], x = o.exit;
+    if (allowed === undefined ? x !== undefined : x === undefined || !isPlainRecord(x) || !allowed.includes(x.reason)) refuse("merchant_exit_binding");
+    if (x === undefined) return;
+    const superseded = x.reason === "finalized_nonce_superseded";
+    if (!exactKeys(x as unknown as Record<string, unknown>, ["reason", ...(superseded ? ["finalizedNonce", "transactionHash"] : [])])) refuse("merchant_exit_binding");
+    if (superseded && (!/^(0|[1-9][0-9]*)$/u.test(x.finalizedNonce ?? "") || BigInt(x.finalizedNonce!) <= BigInt(o.envelope.nonce) ||
+        !/^0x[0-9a-f]{64}$/u.test(x.transactionHash ?? "") || o.txHash !== null && o.txHash !== x.transactionHash)) refuse("merchant_exit_binding");
+    // Delivery stops only after the last allowed GET left no delivery; every other exit has no payment and no delivery.
+    const attempts = o.state === "delivery_failed"
+        ? o.deliveryAttempts.length === MERCHANT_DELIVERY_ATTEMPT_LIMIT && o.deliveryAttempts.at(-1)?.outcome === "unknown"
+        : o.receipt === null && o.deliveryAttempts.length === 0 && (o.state === "failed_before_effect"
+            ? o.submissionAttempts === 0 && o.txHash === null && (x.reason === "never_signed" || o.signingAttempts === 1)
+            : o.signingAttempts === 1);
+    if (!attempts) refuse("merchant_exit_binding");
+}
 function canonicalUrl(url: string): boolean { try { return canonicalMerchantUrl(url) === url; } catch { return false; } }
 export function publicMerchant(o: MerchantOperation) {
     validateMerchant(o);
@@ -216,5 +254,5 @@ export function publicMerchant(o: MerchantOperation) {
         url: t.url, payer: t.payer, payee: t.payee, asset: { chain: t.chain, token: t.token, symbol: t.asset.symbol, decimals: t.asset.decimals }, legacyMechanism: t.legacy ? LEGACY_MERCHANT_MECHANISM : null, paymentFinalized: o.receipt?.status === "success", merchantDelivered: o.state === "delivered", transactionHash: o.txHash,
         challengeHash: o.frozen.challengeHash, paymentWindowSeconds: o.frozen.accepted.maxTimeoutSeconds, expiresAt: o.expiresAt, amountAtomic: o.frozen.accepted.amount, feeCeilingWei: o.envelope.maximumNativeFee,...(o.feeContext===undefined?{}:{feeBudgetSemantics:"pre_submission_full_fee_estimate_not_onchain_l1_cap",signedExecutionCapWei:o.feeContext.executionUpper,admissionEstimatedUpperWei:o.feeContext.admissionEstimatedUpper,l1EstimatedUpperWei:o.feeContext.l1EstimatedUpper,operatorEstimatedUpperWei:o.feeContext.operatorEstimatedUpper,feeRule:o.feeContext.schemaVersion}),
         failures:o.failures??[],retirementDigest:o.retirementDigest??null,retirementReceipt:o.state==="retired_unsent"?{kind:"merchant_unsent_retirement",tombstoneDigest:o.retirementDigest,consumedAtomic:"0",payment:false,delivery:false}:null,...(o.envelope.nativeFeeReserveWei===undefined?{}:{nativeFeeReserveWei:o.envelope.nativeFeeReserveWei}),
-        currentCanonicalProof: o.canonicalObservations?.at(-1) ?? null, result: o.state === "delivered" ? o.deliveryAttempts.at(-1)?.result : null, receipt: o.receipt };
+        exit: o.exit ?? null, currentCanonicalProof: o.canonicalObservations?.at(-1) ?? null, result: o.state === "delivered" ? o.deliveryAttempts.at(-1)?.result : null, receipt: o.receipt };
 }

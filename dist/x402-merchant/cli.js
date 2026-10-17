@@ -23,12 +23,26 @@ export async function executeMerchantCli(bound, options, root) {
         const o = request.command === "x402.merchant.prepare" ? await service.prepare(request) : request.command === "x402.merchant.approve" ? await service.approve(request.operationId) : request.command === "x402.merchant.observe" ? await service.observe(request.operationId, request.deliver) : request.command === "x402.merchant.retire-unsent" ? await service.retireUnsent(request.operationId) : request.command === "x402.merchant.status" ? await service.status(request.operationId) : null;
         if (o === null)
             throw new ApnError("APN_UNSUPPORTED_COMMAND", "Merchant command is unavailable.");
-        return successEnvelope(request, requestId, { proofClass: o.state === "retired_unsent" ? "merchant_unsent_retired" : o.state === "delivered" ? (o.schemaVersion === "apn.x402-merchant.v1" ? "external_merchant_price_delivered" : "external_merchant_delivered") : o.receipt?.status === "success" ? "canonical_finalized_erc20_payment" : "merchant_local_journal", data: publicMerchant(o), operation: null, receipt: null, nextActions: [] });
+        return successEnvelope(request, requestId, { proofClass: merchantProofClass(o), data: publicMerchant(o), operation: null, receipt: null, nextActions: [] });
     }
     catch (error) {
         // Only the asset-choice refusals keep their message: APN builds it from registry data (symbols and addresses) to list the offer.
         const actionable = error instanceof ApnError && ["merchant_asset_choice_required", "merchant_asset_not_offered"].includes(String(error.details?.reason));
         return failureEnvelope(request.command, requestId, new ApnError(error instanceof ApnError ? error.code : "APN_INTERNAL", actionable ? error.message : "Merchant transfer-proof command could not proceed.", error instanceof ApnError ? error.details : undefined));
     }
+}
+/** What proves the state a merchant command answers with. */
+function merchantProofClass(o) {
+    if (o.state === "retired_unsent")
+        return "merchant_unsent_retired";
+    if (o.state === "delivered")
+        return o.schemaVersion === "apn.x402-merchant.v1" ? "external_merchant_price_delivered" : "external_merchant_delivered";
+    if (o.state === "failed_before_effect")
+        return "merchant_attempt_never_sent";
+    if (o.state === "failed_proven_superseded")
+        return "finalized_nonce_superseded_without_receipt";
+    if (o.state === "abandoned_unknown")
+        return "owner_acknowledgement_only";
+    return o.receipt?.status === "success" ? "canonical_finalized_erc20_payment" : "merchant_local_journal";
 }
 //# sourceMappingURL=cli.js.map
