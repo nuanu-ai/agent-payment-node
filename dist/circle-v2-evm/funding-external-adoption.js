@@ -18,7 +18,6 @@ import { decodeCircleFundingExternalDestination, fundingExternalStableIdentity, 
 import { CircleFundingExternalStore } from "./funding-external-store.js";
 import { CircleFundingEffectStore } from "./funding-custody.js";
 function publicLog(l) { return { address: getAddress(String(l.address)), topics: l.topics, data: circleHex(l.data), blockHash: circleHex(l.blockHash, 32), blockNumber: circleUint(l.blockNumber).toString(), transactionHash: circleHex(l.transactionHash, 32), transactionIndex: circleUint(l.transactionIndex).toString(), logIndex: circleUint(l.logIndex).toString(), removed: l.removed }; }
-function canonicalTag(b) { return { blockHash: circleHex(b.hash, 32), requireCanonical: true }; }
 function sourceEnvelope(effect, input) {
     const t = circleRecord(input), e = effect.envelope;
     if (circleHex(t.hash, 32) !== effect.transactionHash || circleUint(t.nonce).toString() !== e.nonceAtomic || circleUint(t.gas).toString() !== e.gasLimitAtomic || circleUint(t.maxFeePerGas).toString() !== e.maxFeePerGasAtomic || circleUint(t.maxPriorityFeePerGas).toString() !== e.maxPriorityFeePerGasAtomic || circleHex(t.input) !== e.data || getAddress(String(t.from)) !== e.from || getAddress(String(t.to)) !== e.to || circleUint(t.value) !== 0n || circleUint(t.chainId) !== BigInt(e.chainId))

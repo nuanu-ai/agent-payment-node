@@ -58,10 +58,6 @@ export interface CircleAccountPreflight {
     readonly latestNonceAtomic: string;
     readonly pendingNonceAtomic: string;
 }
-export declare function verifyCircleSourceAccount(account: CircleAccountPreflight): {
-    readonly approvalRequired: boolean;
-    readonly nonceAtomic: string;
-};
 /** `gasPayer` is the operation's own destination custody wallet, which signs and pays the mint. */
 export declare function verifyCircleDestinationAccount(account: CircleAccountPreflight, chain: CircleDestinationChain, gasPayer: Address): string;
 export interface CircleGasEnvelope {

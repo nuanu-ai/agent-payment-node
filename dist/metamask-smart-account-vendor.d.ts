@@ -47,10 +47,10 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     [x: `int256[${string}]`]: undefined;
     [x: `int32[${string}]`]: undefined;
     [x: `int56[${string}]`]: undefined;
+    [x: `int40[${string}]`]: undefined;
     [x: `int8[${string}]`]: undefined;
     [x: `int80[${string}]`]: undefined;
     [x: `int24[${string}]`]: undefined;
-    [x: `int40[${string}]`]: undefined;
     [x: `int48[${string}]`]: undefined;
     [x: `int72[${string}]`]: undefined;
     [x: `int88[${string}]`]: undefined;
@@ -78,10 +78,10 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     [x: `uint64[${string}]`]: undefined;
     [x: `uint32[${string}]`]: undefined;
     [x: `uint56[${string}]`]: undefined;
+    [x: `uint40[${string}]`]: undefined;
     [x: `uint8[${string}]`]: undefined;
     [x: `uint80[${string}]`]: undefined;
     [x: `uint24[${string}]`]: undefined;
-    [x: `uint40[${string}]`]: undefined;
     [x: `uint48[${string}]`]: undefined;
     [x: `uint72[${string}]`]: undefined;
     [x: `uint88[${string}]`]: undefined;
@@ -147,10 +147,10 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     int256?: never;
     int32?: never;
     int56?: never;
+    int40?: never;
     int8?: never;
     int80?: never;
     int24?: never;
-    int40?: never;
     int48?: never;
     int72?: never;
     int88?: never;
@@ -178,10 +178,10 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     uint64?: never;
     uint32?: never;
     uint56?: never;
+    uint40?: never;
     uint8?: never;
     uint80?: never;
     uint24?: never;
-    uint40?: never;
     uint48?: never;
     uint72?: never;
     uint88?: never;
