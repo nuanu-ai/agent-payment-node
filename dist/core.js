@@ -1,8 +1,5 @@
 import { runMetaMaskNativeTransfer, readMetaMaskNativeTransfer } from "./metamask-native-transfer-owner.js";
-import { explainOperationNotFound } from "./operation-coverage.js";
-import { assertCoinbaseObservationRequest } from "./coinbase-gasless-observation-source.js";
 import { readPermit2ProductionStatus } from "./x402-permit2/status.js";
-import { publicKnownCircle, validateKnownCircle } from "./circle-v2-evm/funding-operation.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { failureEnvelope, successEnvelope } from "./output.js";
 import { dataOutcome, operationOutcome, receiptOutcome } from "./core-outcome.js";
@@ -29,18 +26,15 @@ import { executeCircleCommand } from "./circle-command-service.js";
 import { GaslessService } from "./gasless/service.js";
 import { gaslessCapabilities } from "./gasless/catalog.js";
 import { gaslessChain } from "./gasless/validation.js";
-import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
 import { mmAddress, mmChain } from "./metamask-gasless/validation.js";
 import { mmFail } from "./metamask-gasless/reasons.js";
 import { gaslessProvider } from "./core-gasless-provider.js";
 import { publicRelayNativeSourceJournal } from "./relay/native-source.js";
-import { OperationAbandonService } from "./operation-abandon-service.js";
+import { OperationCommands } from "./operation-commands.js";
 import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
 import { saRequest } from "./smart-account-gasless/schema.js";
-import { saFail } from "./smart-account-gasless/reasons.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
-import { facilitatorFail } from "./facilitator-gasless/failure.js";
 import { loadAllowlistInventory, resolveAllowlistAsset } from "./allowlist-inventory.js";
 import { executeAllowlistPolicyCommand } from "./allowlist-policy-command.js";
 import { executeUniswapCommand } from "./swap/uniswap-command-service.js";
@@ -63,7 +57,7 @@ export class ApnCore {
     metaMaskGasless;
     smartAccountGasless;
     facilitatorGasless;
-    operationAbandon;
+    operationCommands;
     constructor(dependencies) {
         this.context = new RuntimeContext(dependencies);
         this.wallet = new WalletService(this.context);
@@ -79,7 +73,7 @@ export class ApnCore {
         this.metaMaskGasless = new MetaMaskGaslessService(this.context);
         this.smartAccountGasless = new SmartAccountGaslessService(this.context);
         this.facilitatorGasless = new FacilitatorGaslessService(this.context);
-        this.operationAbandon = new OperationAbandonService(this.context, this.rails, this.gasless, this.metaMaskGasless, this.facilitatorGasless);
+        this.operationCommands = new OperationCommands(this.context);
     }
     async execute(request) {
         const requestId = this.context.ids.next();
@@ -87,7 +81,7 @@ export class ApnCore {
             return successEnvelope(request, requestId, await this.dispatch(request));
         }
         catch (error) {
-            return failureEnvelope(request.command, requestId, await explainOperationNotFound(this.context.state.root, request, error));
+            return failureEnvelope(request.command, requestId, error);
         }
     }
     async dispatch(request) {
@@ -460,73 +454,9 @@ export class ApnCore {
                     });
                 return operationOutcome(operation.kind === "rail_transfer" ? await this.rails.approve(request.operationId) : await this.transfer.approve(request.operationId));
             }
-            case "operation.resume": {
-                if (request.observeOnly !== undefined && request.observeOnly !== true)
-                    throw new ApnError("APN_INVALID_INPUT", "observeOnly must be true.");
-                if (request.observeOnly && (request.waitSeconds !== undefined || request.observationRpcEnv !== undefined)) {
-                    throw new ApnError("APN_INVALID_INPUT", "Observation-only direct recovery cannot be combined with wait or gasless observation options.");
-                }
-                if (request.observationRpcEnv !== undefined) {
-                    gaslessObservationRpcEnv(request.observationRpcEnv);
-                    if (request.waitSeconds !== undefined || this.context.rpcUrl !== undefined)
-                        throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery cannot be combined with --rpc-url or --wait-seconds.", { reason: "gasless_observation_rpc_options" });
-                }
-                await this.context.ready();
-                const operation = await this.operations.required(request.operationId);
-                if (request.coinbaseObservationRpc !== undefined)
-                    assertCoinbaseObservationRequest(operation.kind === "direct_transfer" ? operation.record : {}, request.coinbaseObservationRpc, request.observeOnly !== undefined || request.waitSeconds !== undefined || request.observationRpcEnv !== undefined);
-                if (operation.kind === "circle_route")
-                    throw new ApnError("APN_OPERATION_BLOCKED", "Use the separate Circle EVM approval, observation or cleanup command.");
-                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production")
-                    throw new ApnError("APN_OPERATION_BLOCKED", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no resume or execution path." : operation.kind === "merchant_x402" ? "Use x402 merchant observe for this USDm operation; it never pays again." : "Permit2 production execution remains unavailable.");
-                if (request.observeOnly && (operation.kind !== "direct_transfer" || operation.record.providerDirect !== undefined)) {
-                    throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local direct transfer.");
-                }
-                if (request.observationRpcEnv !== undefined && operation.kind !== "gasless_transfer" && operation.kind !== "metamask_gasless_transfer" &&
-                    operation.kind !== "smart_account_gasless_transfer") {
-                    throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery requires a saved Local, MetaMask or Smart Account gasless operation.", { reason: "gasless_observation_operation_kind" });
-                }
-                if (operation.kind === "facilitator_gasless_transfer") {
-                    if (request.waitSeconds !== undefined)
-                        facilitatorFail("facilitator_gasless_input");
-                    return operationOutcome(await this.facilitatorGasless.resume(request.operationId));
-                }
-                if (operation.kind === "smart_account_gasless_transfer") {
-                    if (request.waitSeconds !== undefined)
-                        saFail("sa_gasless_input");
-                    return operationOutcome(await this.smartAccountGasless.resume(request.operationId, request.observationRpcEnv));
-                }
-                if (operation.kind === "metamask_gasless_transfer") {
-                    if (request.waitSeconds !== undefined)
-                        throw new ApnError("APN_INVALID_INPUT", "MetaMask gasless recovery performs one bounded observation; omit --wait-seconds.", { reason: "mm_gasless_input" });
-                    return operationOutcome(await this.metaMaskGasless.resume(request.operationId, request.observationRpcEnv));
-                }
-                if (operation.kind === "gasless_transfer") {
-                    if (request.waitSeconds !== undefined)
-                        throw new ApnError("APN_INVALID_INPUT", "Gasless recovery performs one bounded observation; omit --wait-seconds.");
-                    return operationOutcome(await this.gasless.resume(request.operationId, request.observationRpcEnv));
-                }
-                if (operation.kind === "bridge_route") {
-                    if (request.waitSeconds !== undefined)
-                        throw new ApnError("APN_INVALID_INPUT", "Bridge recovery performs one bounded observation; omit --wait-seconds.");
-                    return operationOutcome(await this.bridges.resume(request.operationId));
-                }
-                if (operation.kind === "rail_transfer") {
-                    if (request.waitSeconds !== undefined)
-                        throw new ApnError("APN_INVALID_INPUT", "Solana resume performs one bounded observation; omit --wait-seconds.");
-                    return operationOutcome(await this.rails.resume(request.operationId));
-                }
-                if (operation.kind === "x402_fetch") {
-                    const settlementWait = await this.x402.resume(request.operationId, request.waitSeconds);
-                    return await this.operations.x402Outcome(request.operationId, {
-                        exposeSellerResult: true,
-                        exposeTerminalReceipt: true,
-                        ...(settlementWait === undefined ? {} : { settlementWait }),
-                    });
-                }
-                return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly, request.coinbaseObservationRpc));
-            }
-            case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
+            // Every family through its operation-index adapter (src/operation-commands.ts).
+            case "operation.resume": return await this.operationCommands.resume(request);
+            case "operation.abandon": return await this.operationCommands.abandon(request.operationId);
             case "operation.recover-provider-request": return operationOutcome(await this.transfer.recoverProviderRequest(request.operationId, request.providerRequestId));
             case "operation.recover-transaction-settlement": {
                 const recovered = await this.providerTransactionRecovery.recover(request);
@@ -538,62 +468,8 @@ export class ApnCore {
                     nextActions: recovered.operation.nextActions,
                 };
             }
-            case "operation.status": {
-                canonicalOperationId(request.operationId);
-                await this.context.ready();
-                await this.x402.recoverRead(request.operationId);
-                const operation = await this.operations.required(request.operationId);
-                if (operation.kind === "circle_route")
-                    return operationOutcome(await this.operations.status(request.operationId));
-                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production")
-                    return operationOutcome(await this.operations.status(request.operationId));
-                if (operation.kind === "smart_account_gasless_transfer")
-                    return operationOutcome(await this.smartAccountGasless.status(request.operationId));
-                if (operation.kind === "facilitator_gasless_transfer")
-                    return operationOutcome(await this.facilitatorGasless.status(request.operationId));
-                if (operation.kind === "bridge_route")
-                    return operationOutcome(await this.bridges.status(request.operationId));
-                if (operation.kind === "gasless_transfer")
-                    return operationOutcome(await this.gasless.status(request.operationId));
-                if (operation.kind === "metamask_gasless_transfer")
-                    return operationOutcome(await this.metaMaskGasless.status(request.operationId));
-                if (operation.kind === "rail_transfer")
-                    return operationOutcome(await this.operations.status(request.operationId));
-                return operation.kind === "x402_fetch"
-                    ? await this.operations.x402Outcome(request.operationId, {
-                        exposeSellerResult: false,
-                        exposeTerminalReceipt: false,
-                    })
-                    : operationOutcome(await this.transfer.status(request.operationId));
-            }
-            case "receipt.get": {
-                canonicalOperationId(request.operationId);
-                await this.context.ready();
-                await this.x402.recoverRead(request.operationId);
-                const operation = await this.operations.required(request.operationId);
-                if (operation.kind === "circle_route") {
-                    if (!operation.record.terminal)
-                        throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.");
-                    return receiptOutcome(publicKnownCircle(validateKnownCircle(operation.record)));
-                }
-                if (operation.kind === "merchant_x402" || operation.kind === "relay_unsigned" || operation.kind === "permit2_production")
-                    throw new ApnError("APN_RECEIPT_NOT_FOUND", operation.kind === "relay_unsigned" ? "Unsigned Relay operation has no receipt." : operation.kind === "merchant_x402" ? "Use x402 merchant status for its payment and delivery evidence." : "Permit2 production has no paid receipt.");
-                if (operation.kind === "smart_account_gasless_transfer")
-                    return receiptOutcome(await this.smartAccountGasless.receipt(request.operationId));
-                if (operation.kind === "facilitator_gasless_transfer")
-                    return receiptOutcome(await this.facilitatorGasless.receipt(request.operationId));
-                if (operation.kind === "bridge_route")
-                    return receiptOutcome(await this.bridges.receipt(request.operationId));
-                if (operation.kind === "gasless_transfer")
-                    return receiptOutcome(await this.gasless.receipt(request.operationId));
-                if (operation.kind === "metamask_gasless_transfer")
-                    return receiptOutcome(await this.metaMaskGasless.receipt(request.operationId));
-                if (operation.kind === "rail_transfer")
-                    return receiptOutcome(await this.rails.receipt(request.operationId));
-                return operation.kind === "x402_fetch"
-                    ? await this.operations.x402ReceiptOutcome(request.operationId)
-                    : receiptOutcome(await this.transfer.receipt(request.operationId));
-            }
+            case "operation.status": return await this.operationCommands.status(request.operationId);
+            case "receipt.get": return await this.operationCommands.receipt(request.operationId);
         }
     }
     async prepareGasless(request) {

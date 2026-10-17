@@ -21,6 +21,8 @@ function gaszipAdapter(lane, domains) {
         state: record => record.state,
         salvage: raw => salvageRecord(raw, value => chains.map(chain => salvageEvm(chain, field(value, "owner", "address")))),
         view: async (record) => publicGaszipFunding(route(), record),
+        // Funding status observes the safe source and the correlated destination; there is no owner abandon.
+        commands: { status: `apn ${lane} funding status --operation <operation-id>`, resume: `apn ${lane} funding status --operation <operation-id>` },
     };
 }
 export const seiGaszipAdapter = gaszipAdapter("sei", seiGaszipDomains);

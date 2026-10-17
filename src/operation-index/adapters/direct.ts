@@ -1,7 +1,12 @@
+import { assertCoinbaseObservationRequest } from "../../coinbase-gasless-observation-source.js";
+import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
 import type { OperationRecord } from "../../model.js";
+import { abandonDirectTransfer } from "../../operation-abandon-service.js";
+import { refuseObservationRpc, refuseObserveOnly } from "../../operation-command-options.js";
 import { evmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { StateStore } from "../../state.js";
 import { publicOperation } from "../../transfer-policy.js";
+import { TransferService } from "../../transfer-service.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageHash, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
 import { providerClaims, UNREADABLE_PROVIDER_CLAIM, type OperationClaim } from "../types.js";
@@ -42,4 +47,16 @@ export const directAdapter: OperationFamilyAdapter<OperationRecord> = {
   ]),
   unknownClaims: [UNREADABLE_PROVIDER_CLAIM],
   view: async record => publicOperation(record),
+  status: async (context, record) => operationOutcome(await new TransferService(context).status(record.operationId)),
+  // The terminal receipt's authority over its operation is checked here, by the one command that returns it.
+  receipt: async (context, record) => receiptOutcome(await new TransferService(context).receipt(record.operationId)),
+  async resume(context, record, options) {
+    if (options.coinbaseObservationRpc !== undefined) assertCoinbaseObservationRequest(record, options.coinbaseObservationRpc,
+      options.observeOnly !== undefined || options.waitSeconds !== undefined || options.observationRpcEnv !== undefined);
+    if (options.observeOnly && record.providerDirect !== undefined) refuseObserveOnly();
+    if (options.observationRpcEnv !== undefined) refuseObservationRpc();
+    return operationOutcome(await new TransferService(context).resume(record.operationId, options.waitSeconds, options.observeOnly,
+      options.coinbaseObservationRpc));
+  },
+  abandon: async (context, record) => await abandonDirectTransfer(context, record.operationId),
 };
