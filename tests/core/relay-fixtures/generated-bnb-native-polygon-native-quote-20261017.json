@@ -1,0 +1,372 @@
+{
+  "requestId": "0x1792190424041042d044794b4ec9c883550b739528ede05bf2c8582656136e39",
+  "steps": [
+    {
+      "id": "deposit",
+      "action": "Confirm transaction in your wallet",
+      "description": "Depositing funds to the relayer to execute the swap for POL",
+      "kind": "transaction",
+      "items": [
+        {
+          "status": "incomplete",
+          "data": {
+            "from": "0xFe977d99C35B344F63A91523D59489492b5468c0",
+            "to": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+            "data": "0x49290c1c000000000000000000000000fe977d99c35b344f63a91523d59489492b5468c02a95ac634d326b577d152ddc2ec1153b10959880c7723cc9a1019ba2bc1b71d6",
+            "value": "1500000000000000",
+            "chainId": 56,
+            "gas": "32713",
+            "maxFeePerGas": "60000000",
+            "maxPriorityFeePerGas": "60000000"
+          },
+          "check": {
+            "endpoint": "/intents/status/v3?requestId=0x1792190424041042d044794b4ec9c883550b739528ede05bf2c8582656136e39",
+            "method": "GET"
+          }
+        }
+      ],
+      "requestId": "0x1792190424041042d044794b4ec9c883550b739528ede05bf2c8582656136e39",
+      "depositAddress": ""
+    }
+  ],
+  "fees": {
+    "gas": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "1962780000000",
+      "amountFormatted": "0.00000196278",
+      "amountUsd": "0.001416",
+      "minimumAmount": "1962780000000"
+    },
+    "relayer": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "66234748103540",
+      "amountFormatted": "0.00006623474810354",
+      "amountUsd": "0.047785",
+      "minimumAmount": "66234748103540"
+    },
+    "relayerGas": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "34616386636426",
+      "amountFormatted": "0.000034616386636426",
+      "amountUsd": "0.024974",
+      "minimumAmount": "34616386636426"
+    },
+    "relayerService": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "31618361467114",
+      "amountFormatted": "0.000031618361467114",
+      "amountUsd": "0.022811",
+      "minimumAmount": "31618361467114"
+    },
+    "app": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "0",
+      "amountFormatted": "0.0",
+      "amountUsd": "0",
+      "minimumAmount": "0"
+    },
+    "subsidized": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "0",
+      "amountFormatted": "0.0",
+      "amountUsd": "0",
+      "minimumAmount": "0"
+    }
+  },
+  "details": {
+    "operation": "swap",
+    "sender": "0xFe977d99C35B344F63A91523D59489492b5468c0",
+    "recipient": "0x1CA099Be15d7B55225317Bf10407B77f672e21f6",
+    "currencyIn": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "1500000000000000",
+      "amountFormatted": "0.0015",
+      "amountUsd": "1.082168",
+      "minimumAmount": "1500000000000000"
+    },
+    "currencyOut": {
+      "currency": {
+        "chainId": 137,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "POL",
+        "name": "POL",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.coingecko.com/coins/images/4713/thumb/matic-token-icon.png?1624446912",
+          "verified": true
+        }
+      },
+      "amount": "10934355954853953383",
+      "amountFormatted": "10.934355954853953383",
+      "amountUsd": "1.032542",
+      "minimumAmount": "10493701409873339061"
+    },
+    "refundCurrency": {
+      "currency": {
+        "chainId": 56,
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "name": "Binance Coin",
+        "decimals": 18,
+        "metadata": {
+          "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+          "verified": true
+        }
+      },
+      "amount": "1500000000000000",
+      "amountFormatted": "0.0015",
+      "amountUsd": "1.082168",
+      "minimumAmount": "1500000000000000"
+    },
+    "totalImpact": {
+      "usd": "-0.049626",
+      "percent": "-4.59"
+    },
+    "swapImpact": {
+      "usd": "-0.001841",
+      "percent": "-0.17"
+    },
+    "expandedPriceImpact": {
+      "swap": {
+        "usd": "-0.003029"
+      },
+      "execution": {
+        "usd": "-0.044974"
+      },
+      "relay": {
+        "usd": "-0.001623"
+      },
+      "app": {
+        "usd": "0"
+      },
+      "sponsored": {
+        "usd": "0"
+      }
+    },
+    "rate": "7289.570636569302",
+    "slippageTolerance": {
+      "total": "403",
+      "origin": {
+        "usd": "0.000000",
+        "value": "0",
+        "percent": "0.00"
+      },
+      "destination": {
+        "usd": "0.041611",
+        "value": "440654544980614322",
+        "percent": "4.03"
+      }
+    },
+    "timeEstimate": 1,
+    "userBalance": "0",
+    "isFixedRate": false,
+    "route": {
+      "origin": {
+        "inputCurrency": {
+          "currency": {
+            "chainId": 56,
+            "address": "0x0000000000000000000000000000000000000000",
+            "symbol": "BNB",
+            "name": "Binance Coin",
+            "decimals": 18,
+            "metadata": {
+              "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+              "verified": true
+            }
+          },
+          "amount": "1500000000000000",
+          "amountFormatted": "0.0015",
+          "amountUsd": "1.082168",
+          "minimumAmount": "1500000000000000"
+        },
+        "outputCurrency": {
+          "currency": {
+            "chainId": 56,
+            "address": "0x0000000000000000000000000000000000000000",
+            "symbol": "BNB",
+            "name": "Binance Coin",
+            "decimals": 18,
+            "metadata": {
+              "logoURI": "https://assets.relay.link/icons/currencies/bnb.png",
+              "verified": true
+            }
+          },
+          "amount": "1500000000000000",
+          "amountFormatted": "0.0015",
+          "amountUsd": "1.082168",
+          "minimumAmount": "1500000000000000"
+        },
+        "router": "relay"
+      },
+      "destination": {
+        "inputCurrency": {
+          "currency": {
+            "chainId": 137,
+            "address": "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+            "symbol": "USDC",
+            "name": "USD Coin",
+            "decimals": 6,
+            "metadata": {
+              "logoURI": "https://ethereum-optimism.github.io/data/USDC/logo.png",
+              "verified": true
+            }
+          },
+          "amount": "1032885",
+          "amountFormatted": "1.032885",
+          "amountUsd": "1.032748",
+          "minimumAmount": "1032885"
+        },
+        "outputCurrency": {
+          "currency": {
+            "chainId": 137,
+            "address": "0x0000000000000000000000000000000000000000",
+            "symbol": "POL",
+            "name": "POL",
+            "decimals": 18,
+            "metadata": {
+              "logoURI": "https://assets.coingecko.com/coins/images/4713/thumb/matic-token-icon.png?1624446912",
+              "verified": true
+            }
+          },
+          "amount": "10934355954853953383",
+          "amountFormatted": "10.934355954853953383",
+          "amountUsd": "1.032542",
+          "minimumAmount": "10493701409873339061"
+        },
+        "router": "fynd-hosted"
+      }
+    }
+  },
+  "protocol": {
+    "v2": {
+      "orderId": "0x2a95ac634d326b577d152ddc2ec1153b10959880c7723cc9a1019ba2bc1b71d6",
+      "hubType": "onchain",
+      "orderData": {
+        "version": "v1",
+        "solverChainId": "base",
+        "solver": "0xf70da97812cb96acdf810712aa562db8dfa3dbef",
+        "salt": "0x862237037a993ecff0d02bd94464c392f8e4aa4770bc7d5c9345df52171e180a",
+        "inputs": [
+          {
+            "payment": {
+              "chainId": "bnb",
+              "currency": "0x0000000000000000000000000000000000000000",
+              "amount": "1500000000000000",
+              "weight": "1"
+            },
+            "refunds": [
+              {
+                "chainId": "bnb",
+                "recipient": "0xFe977d99C35B344F63A91523D59489492b5468c0",
+                "currency": "0x0000000000000000000000000000000000000000",
+                "minimumAmount": "0",
+                "deadline": 1792795225,
+                "extraData": "0x000000000000000000000000b92fe925dc43a0ecde6c8b1a2709c170ec4fff4f"
+              },
+              {
+                "chainId": "polygon",
+                "recipient": "0x1CA099Be15d7B55225317Bf10407B77f672e21f6",
+                "currency": "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359",
+                "minimumAmount": "0",
+                "deadline": 1792795225,
+                "extraData": "0x000000000000000000000000b92fe925dc43a0ecde6c8b1a2709c170ec4fff4f"
+              }
+            ]
+          }
+        ],
+        "output": {
+          "chainId": "polygon",
+          "payments": [
+            {
+              "recipient": "0x1CA099Be15d7B55225317Bf10407B77f672e21f6",
+              "currency": "0x0000000000000000000000000000000000000000",
+              "minimumAmount": "10493701409873339061",
+              "expectedAmount": "10934355954853953383"
+            }
+          ],
+          "calls": [],
+          "deadline": 1792795225,
+          "extraData": "0x000000000000000000000000b92fe925dc43a0ecde6c8b1a2709c170ec4fff4f"
+        },
+        "fees": []
+      },
+      "orderSignature": "0x58be3116673ba041d77d5afda4076ccf15512f5591aac949c3de72e58b118c2706c66ec22f8e47425ef48feb33f6370fbac61bcc8fd959f0f2b337e697072bde1b",
+      "paymentDetails": {
+        "chainId": "bnb",
+        "depository": "0x4cd00e387622c35bddb9b4c962c136462338bc31",
+        "currency": "0x0000000000000000000000000000000000000000",
+        "amount": "1500000000000000"
+      }
+    }
+  }
+}

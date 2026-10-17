@@ -94,7 +94,7 @@ export class CircleV2SourceService {
     if (loaded.identity.address !== payer || loaded.identity.profile !== profile ||
       privateKeyToAccount(loaded.secret.privateKey).address !== payer) fail("wallet_owner");
     // Owner allowlist admission before any quote or prompt; the hold itself is taken after consent, before signing.
-    const admission = new CircleV2SourceAdmission(this.state, profile, payer, amount.toString(), operationId, () => new Date());
+    const admission = new CircleV2SourceAdmission(this.state, profile, payer, amount.toString(), operationId, () => new Date(), request.recipientOwner);
     await admission.admit();
     const ata = await associatedUsdc(request.recipientOwner);
     const bytes = getBase58Encoder().encode(ata);

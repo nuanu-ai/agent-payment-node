@@ -4,7 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { getAddress, type Hex } from "viem";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
-import { validateRelayNativeQuote, RELAY_BASE_SOURCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT } from "../../src/relay/native-quote.js";
+import { validateRelayNativeQuote, RELAY_LEGACY_BASE_MEGA_REFERENCE, RELAY_LEGACY_BASE_POLYGON_REFERENCE } from "../../src/relay/native-quote.js";
+import { RELAY_BASE_SOURCE, RELAY_BNB_SOURCE, RELAY_POLYGON_RECIPIENT } from "./relay-legacy-accounts.js";
 import { proveRelayNativeDestination, type RelayBnbProofPorts, type RelayBnbRecipientCreditEvidence } from "../../src/relay/destination-proof.js";
 import { RelayDestinationClaimRepository } from "../../src/relay/destination-claim.js";
 import { decodeRelayBaseReceiptFee, verifyRelayBaseReceiptFee } from "../../src/relay/source-fee-proof.js";
@@ -22,7 +23,8 @@ import { temporaryState } from "./helpers.js";
 const hash = (c: string) => `0x${c.repeat(64)}`;
 async function operation(state: StateStore, mega = false) {
   const quote = await validateRelayNativeQuote(JSON.parse(await readFile(`tests/core/relay-fixtures/relay-base-${mega ? "mega-usdm" : "polygon-pol"}-quote-20261009.json`, "utf8")),
-    { payer: RELAY_BASE_SOURCE, recipient: mega ? RELAY_POLYGON_RECIPIENT : RELAY_BNB_SOURCE, amountAtomic: "50000000000000", minimumOutputWei: mega ? "90000000000000000" : "700000000000000000", nowSeconds: 1791517419 });
+    { payer: RELAY_BASE_SOURCE, recipient: mega ? RELAY_POLYGON_RECIPIENT : RELAY_BNB_SOURCE, amountAtomic: "50000000000000", minimumOutputWei: mega ? "90000000000000000" : "700000000000000000", nowSeconds: 1791517419,
+      routeReference: mega ? RELAY_LEGACY_BASE_MEGA_REFERENCE : RELAY_LEGACY_BASE_POLYGON_REFERENCE, maximumNetworkFeeWei: "1000000000000" });
   return freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned", state: "prepared", terminal: false,
     profileHash: state.profileHash("evm-live-seller"), operationId: "2".repeat(64), idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64),
     sourceChainId: 8453, destinationChainId: mega ? 4326 : 137, sourceAccount: quote.payer, recipient: quote.recipient,
@@ -182,7 +184,7 @@ const validReceiptFees = { gasUsed: "0x64", effectiveGasPrice: "0xa", l1Fee: "0x
 test("execute source observer settles only a complete under-cap canonical Base fee", async t => {
   for (const mega of [false, true]) for (const status of ["0x1", "0x0"]) {
     const f = await executeObservationFixture(validReceiptFees, status, mega); t.after(f.tmp.cleanup);
-    const result = await f.runtime.execute(f.op.operationId); assert.equal(result.phase, status === "0x1" ? "confirmed" : "failed");
+    const result = await f.runtime.execute("evm-live-seller", f.op.operationId); assert.equal(result.phase, status === "0x1" ? "confirmed" : "failed");
     assert.equal((await f.usage())?.state, status === "0x1" ? "finalized" : "failed_confirmed_revert");
     assert.deepEqual(f.counts(), { posts: 3, sends: 0, confirms: 0 });
   }
@@ -193,7 +195,7 @@ test("execute missing malformed unsupported or over-cap Base fee preserves charg
     { l1Fee: "0xe8d4a51001" }, { operatorFeeScalar: "0xffffffff" }, { operatorFee: "0xe8d4a51001" }];
   for (const mega of [false, true]) for (const change of changes) for (const status of ["0x1", "0x0"]) {
     const f = await executeObservationFixture({ ...validReceiptFees, ...change }, status, mega); t.after(f.tmp.cleanup);
-    const result = await f.runtime.execute(f.op.operationId); assert.deepEqual(result, f.before);
+    const result = await f.runtime.execute("evm-live-seller", f.op.operationId); assert.deepEqual(result, f.before);
     assert.equal((await f.journals.load(f.op))?.phase, "submitting"); assert.equal((await f.usage())?.state, "reserved");
     assert.equal((await f.usage())?.amountAtomic, "50000000000000");
     assert.deepEqual(f.counts(), { posts: 3, sends: 0, confirms: 0 });

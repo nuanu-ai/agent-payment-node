@@ -1,10 +1,8 @@
 import { type CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
-import { type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
 import { type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
 import { type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
-import { SeiFundingJournal, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
+import { GaszipFundingJournal, type GaszipFundingRecord } from "./lifi/gaszip-direct-journal.js";
 import { type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operation-model.js";
-import { MegaFundingJournal, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { type MerchantOperation } from "./x402-merchant/model.js";
 import { type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import type { CommandOutcome } from "./commands.js";
@@ -28,13 +26,13 @@ import type { FacilitatorOperationRecord } from "./facilitator-gasless/operation
 import { RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "./relay-unsigned-operation.js";
 export type StoredMoneyOperation = {
     readonly kind: "sei_gaszip";
-    readonly record: SeiFundingRecord;
+    readonly record: GaszipFundingRecord;
 } | {
     readonly kind: "circle_route";
     readonly record: CircleKnownOperation;
 } | {
     readonly kind: "mega_gaszip";
-    readonly record: MegaFundingRecord;
+    readonly record: GaszipFundingRecord;
 } | {
     readonly kind: "merchant_x402";
     readonly record: MerchantOperation;
@@ -86,7 +84,7 @@ export declare class OperationService {
     private readonly relayUnsigned;
     private readonly seiFunding;
     private readonly megaFunding;
-    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository, seiFunding?: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation">, megaFunding?: Pick<MegaFundingJournal, "listAllOperations" | "listOperations" | "findOperation">);
+    constructor(state: StateStore, providerX402?: ProviderX402Repository, rails?: RailOperationRepository, bridges?: BridgeOperationRepository, gasless?: GaslessOperationRepository, metaMaskGasless?: MetaMaskGaslessRepositoryPort, smartAccountGasless?: SmartAccountGaslessRepositoryPort, facilitatorGasless?: FacilitatorGaslessRepositoryPort, relayUnsigned?: RelayUnsignedOperationRepository, seiFunding?: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation">, megaFunding?: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation">);
     /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
      * locks are acquired together so owner validation and durable write are atomic. */
     persistRelayUnsigned(operation: RelayUnsignedOperation): Promise<RelayUnsignedOperation>;
@@ -102,10 +100,12 @@ export declare class OperationService {
     assertProfileAvailable(profileHash: string): Promise<void>;
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
+    /** R8 (OWNR-16): a native Arbitrum move to a local custody wallet does not wait for this account's Circle routes whose source burn is final. */
+    assertEvmNativeAccountAvailableBesideSettledCircle(profileHash: string, account: string): Promise<void>;
     /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
     assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
-    /** Only the real current foreground owner may exclude its exact own native journal claim. */
-    assertMetaMaskNativeOwnedAccountAvailable(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void>;
+    /** The account check of one saved operation, excluding only that operation's own claim; its owner holds the account locks. */
+    assertEvmAccountAvailableExcept(profileHash: string, chainId: number | string, account: string, exceptOperationId: string): Promise<void>;
     assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void>;
     assertCleanup85NativeAccountAvailable(proof: VerifiedCleanup85RecoveryAdmission, request: Cleanup85CancellationRequest, exceptOperation?: OperationRecord): Promise<void>;
     /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */

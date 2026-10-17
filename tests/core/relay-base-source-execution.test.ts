@@ -7,7 +7,8 @@ import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "
 import { RelayApprovalEffectService, type RelayApprovalPorts } from "../../src/relay/approval-effect.js";
 import { RelayDepositEffectService, type RelayDepositPorts } from "../../src/relay/deposit-effect.js";
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
-import { RELAY_BASE_ACCOUNT, relayExecutionRoute } from "../../src/relay/execution-route.js";
+import { relayExecutionRoute } from "../../src/relay/execution-route.js";
+import { RELAY_BASE_ACCOUNT } from "./relay-legacy-accounts.js";
 import { ETHEREUM_USDC, relayStatusLocator, validateRelayQuote, type ValidatedRelayQuote } from "../../src/relay/quote.js";
 import { RELAY_BASE_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
 import { RelayEthereumSourceRuntime } from "../../src/relay/source-runtime.js";
@@ -43,7 +44,7 @@ async function savedBaseOperation(profileHash = "1".repeat(64)) {
     createdAt: now.toISOString(), deadline: new Date(quote.deadline * 1000).toISOString() });
 }
 
-test("Base source admits only the saved fixed route, recipient, depository, and call shape", async () => {
+test("Base source admits only the saved route, its own payer and recipient, depository, and call shape", async () => {
   const op = await savedBaseOperation();
   assert.equal(relayExecutionRoute(op), RELAY_BASE_ROUTE_REFERENCE);
   const quote = op.quote!;
@@ -65,7 +66,7 @@ test("Base source admits only the saved fixed route, recipient, depository, and 
     { code: "APN_OPERATION_BLOCKED" });
 });
 
-test("Base source rejects a changed saved recipient before any RPC, signing, or journal effect", async t => {
+test("Base source admits a recipient other than the payer: no owner address pins the route (OWNR-02)", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root);
   const good = await savedBaseOperation(state.profileHash("default"));
@@ -80,13 +81,16 @@ test("Base source rejects a changed saved recipient before any RPC, signing, or 
   const newQuote = { ...newQuoteBody, quoteDigest: hashObject(newQuoteBody) } as ValidatedRelayQuote;
   const changed = { ...body, recipient: oldRecipient, quote: newQuote, quoteDigest: newQuote.quoteDigest };
   const op = freezeRelayUnsignedOperation(changed);
+  assert.equal(relayExecutionRoute(op), RELAY_BASE_ROUTE_REFERENCE);
   await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
   let rpc = 0, confirmations = 0;
   const runtime = new RelayEthereumSourceRuntime(state,
     { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) },
     { batchCall: async () => { rpc++; return []; }, submitRawTransaction: async () => { rpc++; return "0x"; } },
     { confirm: async () => { confirmations++; return true; } }, { now: () => now });
-  await assert.rejects(runtime.execute(op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  // The route is admitted; this profile simply has no active owner policy, which refuses before consent or any RPC.
+  await assert.rejects(runtime.execute("default", op.operationId), { code: "APN_OPERATION_BLOCKED", details: { reason: "active_policy_or_owner" } });
+  await assert.rejects(runtime.execute("alice", op.operationId), { code: "APN_OPERATION_BLOCKED", details: { reason: "prepared_operation_missing" } });
   assert.equal(rpc, 0); assert.equal(confirmations, 0);
   assert.equal(await new RelayEffectJournalRepository(temp.root).load(op.profileHash, op.operationId), null);
 });
@@ -120,13 +124,13 @@ test("Base approval revalidation requires the Base policy pin", async t => {
     custody: { load: async () => null, seal: async () => {} },
     sign: async () => { throw new Error("unexpected signing"); },
     send: async () => { throw new Error("unexpected send"); }, observe: async () => null });
-  await assert.rejects(new RelayApprovalEffectService(state, ports("ethereum-usdc-bnb-native-v1")).run(op.operationId),
+  await assert.rejects(new RelayApprovalEffectService(state, ports("ethereum-usdc-bnb-native-v1")).run("default", op.operationId),
     { code: "APN_OPERATION_BLOCKED", details: { reason: "route_pin" } });
   assert.equal(fundingReads, 0);
-  await assert.rejects(new RelayApprovalEffectService(state, ports(RELAY_BASE_ROUTE_REFERENCE)).run(op.operationId),
+  await assert.rejects(new RelayApprovalEffectService(state, ports(RELAY_BASE_ROUTE_REFERENCE)).run("default", op.operationId),
     /funding reached/u);
   assert.equal(fundingReads, 1);
-  await assert.rejects(new RelayApprovalEffectService(state, ports("both")).run(op.operationId), /funding reached/u);
+  await assert.rejects(new RelayApprovalEffectService(state, ports("both")).run("default", op.operationId), /funding reached/u);
   assert.equal(fundingReads, 2);
 });
 
@@ -147,7 +151,7 @@ test("interrupted Base approval and deposit markers resume without a second sign
     send: async () => { sends++; return "0x"; } };
   const approval = { ...common, custody: { load: async () => null, seal: async () => {} },
     observe: async () => null } as RelayApprovalPorts;
-  const resumedApproval = await new RelayApprovalEffectService(state, approval).run(op.operationId);
+  const resumedApproval = await new RelayApprovalEffectService(state, approval).run("default", op.operationId);
   assert.equal(resumedApproval.effects[0].phase, "signing_started");
   assert.deepEqual({ signs, sends }, { signs: 0, sends: 0 });
   journal = await effects.transition(op.profileHash, op.operationId, journal.integrityHash,
@@ -160,7 +164,7 @@ test("interrupted Base approval and deposit markers resume without a second sign
     { kind: "mark_signing", role: "deposit", marker: "e".repeat(64), at: now.toISOString() });
   const deposit = { ...common, custody: { load: async () => null, seal: async () => {} },
     observeApproval: async () => null, observe: async () => null } as RelayDepositPorts;
-  const resumedDeposit = await new RelayDepositEffectService(state, deposit).run(op.operationId);
+  const resumedDeposit = await new RelayDepositEffectService(state, deposit).run("default", op.operationId);
   assert.equal(resumedDeposit.effects[1].phase, "signing_started");
   assert.deepEqual({ signs, sends }, { signs: 0, sends: 0 });
 });

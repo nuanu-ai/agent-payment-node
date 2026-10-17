@@ -1,4 +1,4 @@
-/** Offline decoding of one observed Relay quote shape. This module has no prepare or execution route. */
+/** Offline decoding of one Relay Arbitrum USDC to Ethereum USDC quote shape for any payer and recipient. */
 import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import type { Hex } from "viem";
@@ -6,7 +6,6 @@ import { hashObject } from "../canonical.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
 
 export const RELAY_ARBITRUM_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as const;
-export const RELAY_ETHEREUM_USDC_RECIPIENT = "0x991e254B5C8e0AAf6c244eaa2706BAd059809b04" as const;
 // The captured signed order has no calls and names this exact router in all extraData fields.
 const ROUTER_DATA = "0x000000000000000000000000b92fe925dc43a0ecde6c8b1a2709c170ec4fff4f";
 const CHAINS = { arbitrum: "ethereum-vm", ethereum: "ethereum-vm", base: "ethereum-vm" } as const;
@@ -45,17 +44,19 @@ function frozen<T>(value: T): T {
 
 export interface RelayArbitrumQuoteIntent {
   readonly payer: string;
+  /** The Ethereum recipient the caller names (OWNR-07); the signed order must pay exactly this address. */
+  readonly recipient: string;
   readonly amountAtomic: string;
   readonly minimumOutputAtomic: string;
   readonly nowSeconds: number;
 }
 
 export function relayArbitrumUsdcEthereumUsdcQuoteRequest(intent: RelayArbitrumQuoteIntent): Record<string, unknown> {
-  const payer = address(intent.payer, "payer");
+  const payer = address(intent.payer, "payer"), recipient = address(intent.recipient, "recipient");
   if (atomic(intent.amountAtomic, "amount") <= 0n || atomic(intent.minimumOutputAtomic, "minimum") <= 0n) fail("amount");
   return { user: payer, originChainId: 42161, destinationChainId: 1,
     originCurrency: RELAY_ARBITRUM_USDC, destinationCurrency: ETHEREUM_USDC,
-    amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient: RELAY_ETHEREUM_USDC_RECIPIENT,
+    amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient,
     refundTo: payer, includeProtocolData: true, usePermit: false, useDepositAddress: false };
 }
 
@@ -85,7 +86,7 @@ function transaction(value: unknown, id: "approve" | "deposit", payer: string) {
 export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknown, intent: RelayArbitrumQuoteIntent) {
   relayArbitrumUsdcEthereumUsdcQuoteRequest(intent);
   if (!Number.isSafeInteger(intent.nowSeconds) || intent.nowSeconds < 0) fail("clock");
-  const payer = address(intent.payer, "payer"), recipient = RELAY_ETHEREUM_USDC_RECIPIENT.toLowerCase();
+  const payer = address(intent.payer, "payer"), recipient = address(intent.recipient, "recipient");
   const quote = object(value, "quote");
   keys(quote, ["steps", "details", "protocol", "fees", "requestId"], "quote extension");
   const steps = array(quote.steps, "steps"); if (steps.length !== 2) fail("steps");

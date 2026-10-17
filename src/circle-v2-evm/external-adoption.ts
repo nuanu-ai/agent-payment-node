@@ -8,7 +8,7 @@ import { evmAddressLock } from "../evm-address-ownership.js";
 import { listLocalWallets } from "../wallet-import-collision.js";
 import type { StateStore } from "../state.js";
 import type { BridgeHttps } from "../lifi/https.js";
-import { CIRCLE_RECIPIENT, CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleLegacyRoute } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, decodeCircleSource, verifyCircleApproval, verifyCircleAttestationSigners, circleAttesterConfigurationHash, type CircleObservation } from "./protocol.js";
 import { verifyCircleDeployments } from "./preflight.js";
 import { readCircleAttesters, readCircleDeployment } from "./rpc.js";
@@ -43,21 +43,21 @@ async function notControlled(state:StateStore,caller:string):Promise<void>{
 }
 export async function adoptCircleExternalMint(state:StateStore,repo:CircleRepository,usage:CircleUsage,env:NodeJS.ProcessEnv,now:()=>number,https:Pick<BridgeHttps,"request">,id:string,txHash:Hex):Promise<CircleOperationV1>{
  if(id===HISTORICAL_MONAD_OPERATION)return observeHistoricalPaidCircle(state,repo,usage,env,now,https,id,txHash);
- const initial=await repo.load(id);if(initial===null)circleBlocked("external_operation_not_found");if(initial.destinationChain!==143)circleBlocked("external_monad_only");if(initial.source===null||initial.attestation===null)circleBlocked("external_verified_source_required");
+ const initial=await repo.load(id);if(initial===null)circleBlocked("external_operation_not_found");if(initial.source===null||initial.attestation===null)circleBlocked("external_verified_source_required");
  const key=externalClaimKey(initial),sourceKey=hashObject({sourceTransactionHash:initial.source.transactionHash,sourceMessageHash:initial.source.sourceMessageHash});
  await state.initialize();return state.withLocks([`profile:${initial.profileHash}`,`profile:${initial.destinationProfileHash}`,`custody:${initial.profileHash}`,`custody:${initial.destinationProfileHash}`,`operation:${id}`,`operation:idempotency:${initial.idempotencyHash}`,evmAddressLock(initial.sourceCustody.walletAddress),evmAddressLock(initial.destinationCustody.walletAddress),`circle-external-nonce:${key}`,`circle-external-message:${sourceKey}`],async()=>{
   let op=(await repo.load(id))!;await noPrivate(state,op);if(op.terminal){if(op.state!=="external_fulfilled"||op.externalFulfillment?.destinationReceipt.transactionHash!==txHash)circleBlocked("external_terminal_conflict");return op;}
-  const route=circleRoute(op.destinationChain,op.destinationProfile),budget=new CircleExternalRpcBudget(now,now()+120000,https),source=new CircleExternalRpc(env.APN_ARBITRUM_RPC_URL??"https://arbitrum-one-rpc.publicnode.com",42161,budget),destination=new CircleExternalRpc(env[route.rpcEnvironment]??route.rpcDefault,op.destinationChain,budget);
+  const route=circleLegacyRoute(op.destinationChain,op.destinationProfile),budget=new CircleExternalRpcBudget(now,now()+120000,https),source=new CircleExternalRpc(env.APN_ARBITRUM_RPC_URL??"https://arbitrum-one-rpc.publicnode.com",42161,budget),destination=new CircleExternalRpc(env[route.rpcEnvironment]??route.rpcDefault,op.destinationChain,budget);
   const approval=op.effects[0]!,burn=op.effects[1]!;if(approval.phase!=="confirmed"||burn.phase!=="confirmed"||approval.transactionHash===null||burn.transactionHash===null)circleBlocked("external_source_not_confirmed");
   const [approvalObservation,burnObservation,destinationObservation]=await Promise.all([source.observation(approval.transactionHash,"finalized"),source.observation(burn.transactionHash,"finalized"),destination.observation(txHash,"safe")]);
   if(approvalObservation===null||burnObservation===null||destinationObservation===null)circleBlocked("external_finality_unresolved");
   strongSource(approvalObservation);strongSource(burnObservation);sourceEnvelope(approval,approvalObservation.transaction);sourceEnvelope(burn,burnObservation.transaction);
   const sourceHead=circleRecord(burnObservation.finalityHead);
-  // P1: the exact Approval event proves the approved allowance; the zero allowance is read at the latest head.
+  // P1: the exact Approval event proves the approved allowance, and the burn at the next nonce consumed exactly it, so
+  // the allowance at the burn block is zero without a state read that a later, unrelated approval could change.
   const approvalProof=verifyCircleApproval(approvalObservation,false,null);
   const sourceProof=decodeCircleSource(burnObservation,op.destinationChain);
   if(op.source===null||sourceProof.sourceMessageHash!==op.source.sourceMessageHash||sourceProof.blockHash!==op.source.blockHash||sourceProof.receiptHash!==op.source.receiptHash||approval.proof?.receiptHash!==approvalProof.receiptHash)circleBlocked("external_source_reorg");
-  if(String(await source.read(CIRCLE_SOURCE_TOKEN,"allowance",[CIRCLE_SOURCE_OWNER,CIRCLE_MESSENGER],"latest"))!=="0")circleBlocked("external_source_allowance");
   const proofOp={...op,source:sourceProof},destBlock=circleRecord(destinationObservation.canonicalBlock),parent=await destination.block(`0x${(circleUint(destBlock.number)-1n).toString(16)}`);
   const parentHash=circleExternalHeader(parent);if(parentHash!==circleHex(destBlock.parentHash,32))circleBlocked("external_parent_binding");
   const destinationHead=circleRecord(destinationObservation.finalityHead);circleExternalHeader(destinationHead);

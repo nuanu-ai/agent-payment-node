@@ -1,4 +1,4 @@
-import { assertCurrentNetworkPolicy } from "./x402-network-policy.js";
+import { assertCurrentNetworkPolicy, assertCurrentX402Payee } from "./x402-network-policy.js";
 import { sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import {
@@ -139,6 +139,7 @@ export class X402PaidRequest extends X402Lifecycle {
       return publicX402Operation(await this.closeExpiredUnexposed(operation) ?? operation);
     }
     await assertCurrentNetworkPolicy(this.context, operation);
+    await assertCurrentX402Payee(this.context, operation);
     if (operation.delegatedMaterial !== undefined) {
       await this.assertDelegatedPolicy(operation);
       const port = this.delegatedMaterialPort(operation);
@@ -206,7 +207,10 @@ export class X402PaidRequest extends X402Lifecycle {
     callerDeadlineMs?: number,
   ): Promise<unknown> {
     if (operation.attempts.length >= 64) return publicX402Operation(operation);
-    if (purpose === "payment" && !operation.attempts.some((attempt) => attempt.purpose === "payment")) await assertCurrentNetworkPolicy(this.context, operation);
+    if (purpose === "payment" && !operation.attempts.some((attempt) => attempt.purpose === "payment")) {
+      await assertCurrentNetworkPolicy(this.context, operation);
+      await assertCurrentX402Payee(this.context, operation);
+    }
     try {
       const requestTimeoutMs = (): number | undefined => {
         const nowMs = this.context.clock.now().getTime();

@@ -15,7 +15,7 @@ import { CircleRpc } from "../../src/circle-v2-evm/rpc.js";
 import { CircleRetirementAuthorityStore } from "../../src/circle-v2-evm/nonce-retirement-authority.js";
 import { CircleNonceRetirementStore } from "../../src/circle-v2-evm/nonce-retirement-store.js";
 import { advanceCircle, sealCircle, circleEnvelope, validateCircle, type CircleOperationV1, type CircleEffect } from "../../src/circle-v2-evm/operation-model.js";
-import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, circleRoute } from "../../src/circle-v2-evm/catalog.js";
+import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { encodeCircleApproval } from "../../src/circle-v2-evm/protocol.js";
 import type { LocalCircleCustody, CircleMaterial } from "../../src/circle-v2-evm/custody.js";
 import type { CircleNonceRetirementPorts } from "../../src/circle-v2-evm/nonce-retirement.js";

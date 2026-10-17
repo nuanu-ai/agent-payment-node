@@ -2,6 +2,7 @@ import { validateMerchantFeeContext, type MerchantFeeContext } from "./mega-fee.
 import { hashObject } from "../canonical.js";
 import type { MerchantOperation } from "./model.js";
 import { refuse } from "./protocol.js";
+import { merchantTerms } from "./terms.js";
 export type MerchantEffect = "sign" | "send";
 export interface MerchantAuthority { readonly opaque: object; }
 interface Binding { controller: object; frame: string; endsAt: string; live: boolean; sign: boolean; send: boolean; tokenHold: string; nativeHold: string; material: string|null;feeWitness:{startedAt:string;endsAt:string;digest:string}|null; }
@@ -24,7 +25,7 @@ export function assertMerchantAuthority(grant: MerchantAuthority | undefined, co
 /** Actual RPC check timestamp is anchored before its awaits, never renewed by a delayed wallet/queue/TLS step. */
 export function bindMerchantFeeAdmission(grant:MerchantAuthority,controller:object,o:MerchantOperation,fresh:MerchantFeeContext,started:Date,now:Date):void {
     const b=grants.get(grant.opaque);if(b===undefined||!b.live||b.controller!==controller||b.frame!==o.fingerprint||o.feeContext===undefined||now.toISOString()>=b.endsAt)refuse("merchant_fee_authority_required");
-    validateMerchantFeeContext(fresh,o.envelope);
+    validateMerchantFeeContext(fresh,o.envelope,merchantTerms(o));
     if(BigInt(fresh.admissionEstimatedUpper)>BigInt(o.envelope.nativeFeeReserveWei??o.feeContext.admissionEstimatedUpper)||now.getTime()<started.getTime()||now.getTime()-started.getTime()>=10000)refuse("merchant_fee_witness_expired");
     b.feeWitness={startedAt:started.toISOString(),endsAt:new Date(Math.min(started.getTime()+10000,Date.parse(b.endsAt))).toISOString(),digest:hashObject(fresh)};
 }

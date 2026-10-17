@@ -1,7 +1,6 @@
 import { coinbaseObservationPreset } from "./coinbase-gasless-observation-source.js";
-import { bindSeiFundingCommand } from "./lifi/sei-gaszip-command-catalog.js";
+import { bindGaszipFundingCommand } from "./lifi/gaszip-direct-command-catalog.js";
 import { bindCircleEvmCommand } from "./circle-v2-evm/command-catalog.js";
-import { bindMegaFundingCommand } from "./lifi/mega-gaszip-command-catalog.js";
 import { isPlainRecord } from "./canonical.js";
 import { parseCatalogArgv, parseCatalogInput, } from "./command-catalog.js";
 import { ApnError } from "./errors.js";
@@ -10,6 +9,7 @@ import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { directEvmChain } from "./evm-direct-networks.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
 import { chainDecimal } from "./chain-policy.js";
+import { X402_PAYEES_UNRESTRICTED } from "./profile-policy.js";
 import { solanaAddress } from "./solana/rpc.js";
 import { tronAddress } from "./tron/codec.js";
 import { bindBridgeCommand } from "./lifi/command-catalog.js";
@@ -78,7 +78,7 @@ function bindParsedCatalog(parsed) {
             },
             rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "x402 merchant prepare")
-        return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"] === undefined ? {} : { nativeFeeReserveWei: value(options, "--native-fee-reserve-wei") }), idempotencyKey: value(options, "--idempotency-key") } };
+        return { request: { command: "x402.merchant.prepare", profile: value(options, "--profile"), url: value(options, "--url"), ...(options["--asset"] === undefined ? {} : { asset: options["--asset"] }), maximumNativeFee: value(options, "--max-native-fee-wei"), ...(options["--native-fee-reserve-wei"] === undefined ? {} : { nativeFeeReserveWei: value(options, "--native-fee-reserve-wei") }), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "x402 merchant approve")
         return { request: { command: "x402.merchant.approve", operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "x402 merchant observe")
@@ -94,9 +94,9 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path.join(" ") === "relay base prepare")
         return { request: { command: "relay.base.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay arbitrum prepare")
-        return { request: { command: "relay.arbitrum.prepare", profile: value(options, "--profile"), owner: value(options, "--owner"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxProviderFeeAtomic: value(options, "--max-provider-fee-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), quoteFile: value(options, "--quote-file"), idempotencyKey: value(options, "--idempotency-key") } };
+        return { request: { command: "relay.arbitrum.prepare", profile: value(options, "--profile"), owner: value(options, "--owner"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxProviderFeeAtomic: value(options, "--max-provider-fee-atomic"), maxApprovalNetworkFeeWei: value(options, "--max-approval-network-fee-wei"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), quoteFile: value(options, "--quote-file"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay arbitrum observe")
-        return { request: { command: "relay.arbitrum.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+        return { request: { command: "relay.arbitrum.observe", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
     if (parsed.command.path.join(" ") === "relay arbitrum approval-check")
         return { request: { command: "relay.arbitrum.approval-check", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay arbitrum approval-execute")
@@ -104,21 +104,21 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path.join(" ") === "relay arbitrum deposit-dispatch")
         return { request: { command: "relay.arbitrum.deposit-dispatch", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay native prepare")
-        return { request: { command: "relay.native.prepare", profile: value(options, "--profile"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
+        return { request: { command: "relay.native.prepare", profile: value(options, "--profile"), sourceChain: value(options, "--source-chain"), destinationChain: value(options, "--destination-chain"), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), minOutputAtomic: value(options, "--min-output-atomic"), maxDepositNetworkFeeWei: value(options, "--max-deposit-network-fee-wei"), idempotencyKey: value(options, "--idempotency-key") } };
     if (parsed.command.path.join(" ") === "relay preflight")
         return { request: { command: "relay.preflight", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay execute")
-        return { request: { command: "relay.execute", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+        return { request: { command: "relay.execute", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay native execute")
-        return { request: { command: "relay.native.execute", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
+        return { request: { command: "relay.native.execute", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url") };
     if (parsed.command.path.join(" ") === "relay retire")
         return { request: { command: "relay.retire", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "relay status")
-        return { request: { command: "relay.status", operationId: value(options, "--operation") } };
+        return { request: { command: "relay.status", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
     if (parsed.command.path.join(" ") === "relay observe")
-        return { request: { command: "relay.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), bnbRpcUrl: value(options, "--bnb-rpc-url") };
+        return { request: { command: "relay.observe", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), bnbRpcUrl: value(options, "--bnb-rpc-url") };
     if (parsed.command.path.join(" ") === "relay base observe")
-        return { request: { command: "relay.base.observe", operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
+        return { request: { command: "relay.base.observe", profile: value(options, "--profile"), operationId: value(options, "--operation") }, rpcUrl: value(options, "--rpc-url"), ...(options["--ethereum-rpc-url"] === undefined ? {} : { ethereumRpcUrl: options["--ethereum-rpc-url"] }) };
     if (parsed.command.path[0] === "stargate") {
         switch (parsed.command.path.join(" ")) {
             case "stargate native prepare": return { request: { command: "stargate.native.prepare", profile: value(options, "--profile"),
@@ -166,11 +166,11 @@ function bindParsedCatalog(parsed) {
     if (parsed.command.path[0] === "oneclick")
         return { request: bindOneClickCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "sei")
-        return { request: bindSeiFundingCommand(parsed.command.path.join(" "), options) };
+        return { request: bindGaszipFundingCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path.slice(0, 2).join(" ") === "circle evm")
         return { request: bindCircleEvmCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "mega")
-        return { request: bindMegaFundingCommand(parsed.command.path.join(" "), options) };
+        return { request: bindGaszipFundingCommand(parsed.command.path.join(" "), options) };
     if (parsed.command.path[0] === "circle")
         return { request: bindCircleCommand(parsed.command.path.join(" "), options) };
     switch (parsed.command.path.join(" ")) {
@@ -270,7 +270,7 @@ function bindParsedCatalog(parsed) {
                 expectedRevision: Number(value(options, "--expected-revision")),
             },
         };
-        case "wallet metamask native-transfer": return { request: { command: "wallet.metamask.native-transfer", ...(options["--profile"] !== undefined ? { profile: value(options, "--profile") } : {}), chainId: fixedMetaMaskNativeChain(value(options, "--chain")), idempotencyKey: value(options, "--idempotency-key") } };
+        case "wallet metamask native-transfer": return { request: { command: "wallet.metamask.native-transfer", profile: value(options, "--profile"), chainId: metaMaskNativeChain(value(options, "--chain")), recipient: value(options, "--recipient"), amountAtomic: value(options, "--amount-atomic"), idempotencyKey: value(options, "--idempotency-key") } };
         case "wallet metamask native-transfer-status": return { request: { command: "wallet.metamask.native-transfer-status", operationId: value(options, "--operation") } };
         case "wallet metamask native-transfer-observe": return { request: { command: "wallet.metamask.native-transfer-observe", operationId: value(options, "--operation") } };
         case "wallet status": return { request: { command: "wallet.status", profile: value(options, "--profile") } };
@@ -294,6 +294,7 @@ function bindParsedCatalog(parsed) {
                 maxBalanceUsdcAtomic: value(options, "--max-balance-usdc-atomic"),
                 maxX402AmountAtomic: value(options, "--max-x402-amount-atomic"),
                 ...(options["--max-balance-eth-wei"] === undefined ? {} : { maxBalanceEthWei: options["--max-balance-eth-wei"] }),
+                ...(options["--x402-payees"] === undefined ? {} : { x402Payees: options["--x402-payees"] === X402_PAYEES_UNRESTRICTED ? null : options["--x402-payees"].split(",") }),
             },
         };
         case "x402 inspect-network":
@@ -435,15 +436,15 @@ function nativeBatchMode(value) {
         throw new ApnError("APN_INVALID_INPUT", "RPC read mode must be batch when supplied.");
     return true;
 }
-/** Public names map only to the five fixed owner chains; journals and quotes retain numeric IDs. */
-function fixedMetaMaskNativeChain(name) {
+/** Public names of the MetaMask native transfer networks; journals and quotes retain numeric IDs. */
+function metaMaskNativeChain(name) {
     switch (name) {
         case "ethereum": return 1;
         case "optimism": return 10;
         case "monad": return 143;
         case "linea": return 59144;
         case "sei": return 1329;
-        default: throw new ApnError("APN_INVALID_INPUT", "Only the fixed MetaMask native transfer chains are admitted.");
+        default: throw new ApnError("APN_INVALID_INPUT", "MetaMask native transfers run on ethereum, optimism, monad, linea and sei only.");
     }
 }
 //# sourceMappingURL=command-binder.js.map

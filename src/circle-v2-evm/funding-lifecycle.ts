@@ -47,9 +47,11 @@ export interface CircleFundingLifecyclePorts {
   attestation(op: CircleFundingOperationV2): Promise<CircleAttestation | null>;
   mintEnvelope(op: CircleFundingOperationV2): Promise<CircleEnvelope>;
   cleanupEnvelope(op: CircleFundingOperationV2): Promise<CircleEnvelope>;
-  usage(op: CircleFundingOperationV2, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect"): Promise<CircleFundingOperationV2["usage"]>;
-  /** Never-lands proof and discard for signed-but-unsent bytes. Production runtimes always provide it; injected test ports may omit it. */
-  unsent?: Readonly<{ outcome(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>; discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void> }>;
+  usage(op: CircleFundingOperationV2, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect" | "released_unsubmitted"): Promise<CircleFundingOperationV2["usage"]>;
+  /** Never-lands proof and discard for signed-but-unsent bytes (`outcome`) and for possibly-sent bytes (`sentOutcome`, which
+   * also requires no receipt). Production runtimes always provide it; injected test ports may omit it. */
+  unsent?: Readonly<{ outcome(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>; sentOutcome?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
+    discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void> }>;
 }
 type Consent = () => void;
 /** Phases whose signed bytes, if any, never crossed the submission fence: resumable with fresh consent (R3). */
@@ -189,7 +191,8 @@ export async function observeCircleFunding(input: CircleFundingOperationV2, port
       effect = op.effects.find(e => e.role === initial.role)!;
     }
     if (effect.transactionHash === null || ["prepared", "sealed", "abandoned_unsent", "confirmed", "reverted"].includes(effect.phase)) continue;
-    const proof = await ports.observeEffect(op, effect); if (proof === null) continue;
+    const proof = await ports.observeEffect(op, effect);
+    if (proof === null) { if (effect.role === "approval" || effect.role === "burn") { op = await sentNeverLanded(op, effect.role, ports); if (op.terminal) return op; } continue; }
     if (proof.outcome === "reverted") {
       op = await persist(op, { effects: updateEffect(op, effect.role, { phase: "reverted", proof }), state: "cleanup_required" }, `${effect.role}_finalized_revert_requires_explicit_cleanup`, ports);
       continue;
@@ -208,7 +211,10 @@ export async function observeCircleFunding(input: CircleFundingOperationV2, port
     if (source !== null) {
       freshSource = true;
       if (op.source !== null && (source.transactionHash !== op.source.transactionHash || source.blockHash !== op.source.blockHash || source.receiptHash !== op.source.receiptHash || source.sourceMessageHash !== op.source.sourceMessageHash)) circleBlocked("source_reorg_holds_required");
-      const allowance = await ports.allowance(op); if (allowance !== "0") circleBlocked("burn_residual_allowance");
+      // The allowance at the burn block, from receipts (OWNR-14, P1): the confirmed approval at nonce n set it to exactly the
+      // burn amount (its Approval event), and the burn at nonce n+1 moved that amount (its DepositForBurn event). No owner
+      // transaction lies between consecutive nonces, so the burn left zero. A later, unrelated approval cannot change that.
+      if (op.effects[0]!.phase !== "confirmed") circleBlocked("burn_residual_allowance");
       if (!circleSame(op.source, source) || op.residualAllowanceAtomic !== "0") op = await persist(op, { source, residualAllowanceAtomic: "0", effects: updateEffect(op, "burn", { phase: "confirmed", proof: source }), state: op.destination === null ? "awaiting_mint" : "awaiting_finality" }, "source_message_verified", ports);
       if (op.attestation === null) {
         const attestation = await ports.attestation(op); if (attestation !== null) op = await persist(op, { attestation }, "issuer_attestation_verified", ports);
@@ -264,7 +270,8 @@ export async function cleanupCircleFunding(input: CircleFundingOperationV2, port
   cleanup = op.effects.find(e => e.role === "cleanup")!;
   if (["prepared", ...UNSENT_SIGNING].includes(cleanup.phase)) { await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "cleanup", ports); checkConsent(token, op, ports); op = await executeCircleFundingEffect(op, "cleanup", ports, token); }
   op = await observeCircleFunding(op, ports); cleanup = op.effects.find(e => e.role === "cleanup")!;
-  if (cleanup.phase === "confirmed" && cleanup.proof?.finalityTag === "finalized" && await ports.allowance(op) === "0") {
+  // The finalized cleanup receipt's Approval event proves the zero it set; a later approval is a different allowance.
+  if (cleanup.phase === "confirmed" && cleanup.proof?.finalityTag === "finalized") {
     const usage = await ports.usage(op, "failed_confirmed_revert");
     op = await persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cleaned", terminal: true }, "explicit_zero_allowance_cleanup_finalized", ports);
   }
@@ -311,4 +318,21 @@ async function abandonNeverLanding(input: CircleFundingOperationV2, ports: Circl
     if (op.state !== "cleanup_required") op = await persist(op, { state: "cleanup_required" }, "burn_never_landed_explicit_cleanup_required", ports);
   }
   return op;
+}
+
+/** R4 for an ambiguous send: an approval or burn whose bytes may have been broadcast (submission fence crossed) and which
+ * no receipt proves. When another transaction consumed its nonce at safe depth and the node knows neither its
+ * transaction nor a receipt, it can never land: the approval ends the route (every hold released, nothing counted),
+ * the burn leaves the confirmed approval to the explicit approve-zero cleanup. A known hash keeps observing; an
+ * unconsumed nonce keeps the effect as it is. */
+async function sentNeverLanded(input: CircleFundingOperationV2, role: "approval" | "burn", ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
+  let op = input; const effect = op.effects.find(e => e.role === role)!;
+  if (op.terminal || op.source !== null || ports.unsent?.sentOutcome === undefined || effect.transactionHash === null ||
+    !["submission_started", "submitted", "unknown"].includes(effect.phase) || await ports.unsent.sentOutcome(op, effect) !== "never_lands") return op;
+  op = await persist(op, { effects: updateEffect(op, role, { phase: "abandoned_unsent" }) }, `${role}_sent_bytes_never_land`, ports);
+  if (effect.materialHash !== null) await ports.unsent.discard(op, op.effects.find(e => e.role === role)!);
+  if (role === "burn") return op.state === "cleanup_required" ? op : persist(op, { state: "cleanup_required" }, "burn_never_landed_explicit_cleanup_required", ports);
+  // The submission fence exposed every hold (`unknown_finality`); released, not counted, is the ledger's terminal for them.
+  const usage = await ports.usage(op, "released_unsubmitted");
+  return persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "approval_never_landed_holds_released", ports);
 }

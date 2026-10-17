@@ -1,39 +1,18 @@
 # LI.FI EVM cross-chain assets
 
-## Sei native quote and calldata inspection (C2-08 Phases 1–2)
+## Sei through LI.FI
 
-`src/lifi/sei-gaszip-quote.ts` inspects one LI.FI `GET /v1/quote` response for
-0.0002 native ETH on Ethereum chain 1 to native SEI on Sei EVM chain 1329, with
-the C2-08 buyer as both owner and recipient. It binds the `gasZipBridge` tool,
-native token metadata, action and included steps, quoted output and fixed LI.FI
-fee, plus the Ethereum transaction request's sender, chain, target, value,
-calldata and transaction ID. The complete response and transaction request have
-separate digests. Revalidation reparses the response and rejects any changed
-field or an age of 60 seconds or more since the caller's trusted fetch time.
-
-Phase 2 decodes and canonically re-encodes the exact `swapAndStartBridgeTokensViaGasZip`
-(`0x606326ff`) ABI from the [Etherscan exact-match verified GasZipFacet](https://etherscan.io/address/0x65d6b9a368be49bca4964b66e54f828cab64b8f9#code),
-whose source declares version 2.0.4. It binds all BridgeData fields, exactly one
-native FeeForwarder step with the pinned fee beneficiary, and GasZipData's
-right-padded buyer receiver and destination short ID 246. The latter was also
-observed in the official read-only [GasZip `/v2/chains`](https://backend.gas.zip/v2/chains)
-response for Sei EVM chain 1329 on 2026-09-26. The Diamond target, transaction
-value, quote amount and fee must agree. A token row marked `flagged` or carrying
-a provider `deny` is refused. The 2026-09-26 public LI.FI quote currently marks
-native SEI `flagged` with Hypernative `deny`, so that response fails inspection.
-
-The LI.FI response has no provider expiry or deadline. The 60 second rule is a
-local freshness limit, **not** a provider validity guarantee. The result always
-has `signable: false`, `execution_blocked: true` and `providerExpiry: null`.
-The decoded source amount is in Ethereum wei; the quote's SEI output floor is
-provider metadata and is not enforced by this source calldata. Static ABI
-decoding does not establish the current Diamond selector-to-facet mapping, fee
-beneficiary authority, destination credit, or recovery. Sei and `gasZipBridge` remain outside the executable LI.FI
-chain, asset, tool, allowlist, signer, sender and observer paths. Source and
-destination contract proofs, observer and recovery behavior, and active owner
-policy are still required before any execution design or funding attempt.
+Sei and LI.FI's `gasZipBridge` tool stay outside the executable LI.FI chain, asset,
+tool, allowlist, signer, sender and observer paths. The offline C2-08 LI.FI Sei quote
+inspector (`src/lifi/sei-gaszip-quote.ts`) had no caller and was removed; Sei is funded
+through the GasZip direct route below.
 
 ## Finite GasZip direct funding for Sei
+
+The Sei and Mega GasZip direct routes are one implementation (`src/lifi/gaszip-direct-*.ts`)
+driven by a protocol table keyed by destination chain (chain id, GasZip short id, calldata,
+mechanism reference, destination RPC variable). Each route keeps its own commands, journal
+directory, schema version and reference, so stored operations of either route load unchanged.
 
 `sei funding` adds one separate local-wallet funding route: native Base ETH
 (chain 8453) to the same owner's native Sei SEI (chain 1329). The source sends
@@ -41,10 +20,11 @@ the amount the asset policy and usage ledger admit to the official GasZip V2 dir
 `0x391E7C679d29bD940d63be94AD22A25d25b5A604` with exactly `0x0100f6`.
 APN requires that target to have empty code. The calldata selects the source
 sender as recipient and GasZip short chain ID 246. No approval is involved.
-The LI.FI Sei inspection described above keeps its existing execution block.
+LI.FI does not execute this route.
 
 The active Base native bridge admission must name exactly
-`{ "provider": "gaszip", "reference": "v2-direct-base-sei-self-0100f6.1" }`.
+`{ "provider": "gaszip", "reference": "v2-direct-base-sei-self-0100f6.1" }`; an owner
+`recipients` pin on it must list the payer, who is also the recipient.
 The owner's `--minimum-output-atomic` floor and `--maximum-fee-atomic` ceiling are
 the only output and fee bounds; no lane constant caps them. Base fee quotes include L2 gas,
 the OP GasPriceOracle L1 data fee upper bound for 512 signed bytes, and the
@@ -1177,17 +1157,19 @@ including rate limits, recoverable.
 
 `apn mega funding prepare`, `approve` and `status` use an independent GasZip
 journal and mechanism pin. They preserve existing Sei operation hashes and do
-not enable LI.FI GasZip execution. Only profile `default`, owner and SELF
-recipient `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14`, Base source chain 8453 and
-Mega destination chain 4326 are admitted. The direct target is the official
-EOA `0x391E7C679d29bD940d63be94AD22A25d25b5A604`, whose code must be empty;
-calldata is exactly `0x010202` (short 514). Input is exactly 10000000000000 wei.
+not enable LI.FI GasZip execution. Any local profile may use it: the payer is the
+profile's own wallet, `--expected-payer` must equal it, and the deposit pays that same
+address on Mega (SELF). The route is Base source chain 8453 to Mega destination chain
+4326. The direct target is the official EOA `0x391E7C679d29bD940d63be94AD22A25d25b5A604`,
+whose code must be empty; calldata is exactly `0x010202` (short 514). The amount is the
+caller's `--amount-atomic`, bounded by the admission's per-transfer and daily caps.
 The owner's Base network fee ceiling includes L1 and operator
 fees. A fresh balance must cover the frozen signed envelope's full fee upper
 bound even when a later estimate is lower.
 
 The active Base native bridge policy must admit
-`{ "provider": "gaszip", "reference": "v2-direct-base-mega-self-010202.1" }`.
+`{ "provider": "gaszip", "reference": "v2-direct-base-mega-self-010202.1" }`. An owner
+`recipients` pin on that admission must list the payer, because the payer is the recipient.
 `APN_BASE_RPC_URL` and `APN_MEGA_RPC_URL` must be public HTTPS RPC URLs. Production
 Mega mainnet RPC is `https://mainnet.megaeth.com/rpc`; chain identity and safe
 receipt inclusion are independently checked. Minimum delivered Mega ETH is the
@@ -1196,7 +1178,7 @@ calldata cannot enforce it. Quote expiry, owner binding, custody, usage and
 shared Base owner conflicts are checked before the single signature/send attempt.
 
 ```sh
-apn mega funding prepare --profile default --expected-payer 0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14 --amount-atomic 10000000000000 --minimum-output-atomic 8000000000000 --maximum-fee-atomic 1000000000000 --idempotency-key mega-self-funding-01
+apn mega funding prepare --profile <profile> --expected-payer <profile-wallet-address> --amount-atomic 10000000000000 --minimum-output-atomic 8000000000000 --maximum-fee-atomic 1000000000000 --idempotency-key mega-self-funding-01
 apn mega funding approve --operation <operation-id>
 apn mega funding status --operation <operation-id>
 ```

@@ -1,7 +1,7 @@
 /** An immutable Relay quote projection. Its transactions are unsigned and have no execution path. */
 import { hashObject, sha256 } from "./canonical.js";
 import { ETHEREUM_USDC, relayStatusLocator } from "./relay/quote.js";
-import { relayNativeRoute } from "./relay/native-quote.js";
+import { relayNativeRouteByReference } from "./relay/native-routes.js";
 import { RELAY_ARBITRUM_USDC, validateRelayArbitrumUsdcEthereumUsdcQuote } from "./relay/arbitrum-usdc-ethereum-quote.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
@@ -83,16 +83,13 @@ export function validateRelayUnsignedOperation(value) {
     }
     else if (operation.nativeQuote !== undefined) {
         const quote = operation.nativeQuote;
-        let route;
-        try {
-            route = relayNativeRoute(operation.sourceAccount, operation.recipient);
-        }
-        catch {
+        // OWNR 5.2: the route is the protocol row the stored quote names (current or frozen legacy); payer and recipient
+        // are the operation's own fields, bound below to the stored quote and its hash. No owner address selects a route.
+        const route = typeof quote.routeReference === "string" ? relayNativeRouteByReference(quote.routeReference) : null;
+        if (route === null)
             return corrupt();
-        }
         if (operation.quote !== undefined || operation.sourceChainId !== route.sourceChainId || operation.destinationChainId !== route.chainId ||
-            operation.sourceAccount.toLowerCase() !== route.payer.toLowerCase() ||
-            quote.routeReference !== route.reference || quote.schemaVersion !== "apn.relay-native-quote.v1" ||
+            quote.schemaVersion !== "apn.relay-native-quote.v1" ||
             operation.approvalNetworkFeeCeilingWei !== undefined || operation.policyDigest === undefined ||
             operation.policyRevision === undefined || operation.depositNetworkFeeCeilingWei === undefined ||
             quote.payer !== operation.sourceAccount.toLowerCase() || quote.recipient !== operation.recipient.toLowerCase() ||
@@ -214,8 +211,9 @@ export class RelayUnsignedOperationRepository extends SecureStateStore {
         if (draft === undefined)
             return;
         try {
+            // The recipient is the draft's own (OWNR-07): drafts written before it became a parameter project byte-identically.
             const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(draft.rawQuote, {
-                payer: draft.owner, amountAtomic: draft.amountAtomic,
+                payer: draft.owner, recipient: draft.recipient, amountAtomic: draft.amountAtomic,
                 minimumOutputAtomic: draft.minimumOutputAtomic,
                 nowSeconds: Math.floor(Date.parse(draft.createdAt) / 1000),
             });

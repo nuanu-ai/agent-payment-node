@@ -1,5 +1,6 @@
 import { canonicalJson } from "../canonical.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { ApnError } from "../errors.js";
 import { reconstructPermit2ProductionMaterial } from "./production-material.js";
 import { X402_PERMIT2_MECHANISM } from "./registry.js";
@@ -15,8 +16,10 @@ export function assertPermit2OwnerCaps(record, now, usage, active) {
     const p = reconstructPermit2ProductionMaterial(record.material);
     if (BigInt(p.expiresAtUnix) <= BigInt(Math.floor(now.getTime() / 1000)))
         blocked("Permit2 authorization expired.");
-    evaluateAssetPolicy(active.registry, { chain: p.chain, asset: { kind: "token", identifier: p.token }, rail: "x402", mechanism: X402_PERMIT2_MECHANISM,
+    const admission = evaluateAssetPolicy(active.registry, { chain: p.chain, asset: { kind: "token", identifier: p.token }, rail: "x402", mechanism: X402_PERMIT2_MECHANISM,
         amountAtomic: p.amountAtomic, dailyUsageAtomic: usage, asOf: now.toISOString(), asOfDate: now.toISOString().slice(0, 10) });
+    // Owner prepare re-checks, reservation and signing time all pass here: the payee must stay inside any owner recipient pin.
+    assertRecipientAdmitted({ admission, recipient: p.payTo });
 }
 function blocked(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
 //# sourceMappingURL=production-owner-validation.js.map

@@ -1,8 +1,10 @@
-/** Saved-operation Arbitrum source observation. No wallet, signer, send, or destination assertion. */
+/** Saved-operation Arbitrum source observation and, once the deposit is final and an Ethereum reader is configured, the
+ * Ethereum USDC credit to the operation's own recipient. No wallet, signer or send. */
 import { getAddress, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
+import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
 import { ArbitrumSourceEffectJournalRepository, type ArbitrumEffectEvent, type ArbitrumEffectRole,
@@ -10,6 +12,7 @@ import { ArbitrumSourceEffectJournalRepository, type ArbitrumEffectEvent, type A
 import { RelayArbitrumSourceFinalityObserver, type RelayArbitrumExpectedEffect, type RelayArbitrumNeverLandedProof,
   type RelayArbitrumRevertProof, type RelayArbitrumSourceProof } from "./arbitrum-source-finality.js";
 import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
+import type { RelayArbitrumDestinationObserver } from "./arbitrum-destination.js";
 
 const HASH = /^[a-f0-9]{64}$/u;
 const observable = new Set(["submitting", "submitted", "unknown_finality"]);
@@ -43,7 +46,7 @@ function boundProof(proof: RelayArbitrumSourceProof, role: ArbitrumEffectRole,
       proof.approval !== null && same(proof.approval.transactionHash, approval.transactionHash));
 }
 export interface RelayArbitrumSourceObservePorts {
-  readonly operation?: (operationId: string) => Promise<RelayUnsignedOperation | null>;
+  readonly operation?: (profileHash: string, operationId: string) => Promise<RelayUnsignedOperation | null>;
   readonly journal?: (profileHash: string, operationId: string) => Promise<ArbitrumSourceEffectJournal | null>;
   readonly transition?: (profileHash: string, operationId: string, expectedHash: string,
     role: ArbitrumEffectRole, proofDigest: string, verify: (input: {
@@ -64,7 +67,18 @@ function boundRevert(proof: RelayArbitrumRevertProof, chosen: RelayArbitrumExpec
 export class RelayArbitrumSourceObserveService {
   constructor(private readonly state: StateStore,
     private readonly observer: Pick<RelayArbitrumSourceFinalityObserver, "observe" | "observeRevert" | "observeUnsent">,
-    private readonly ports: RelayArbitrumSourceObservePorts = {}) {}
+    private readonly ports: RelayArbitrumSourceObservePorts = {},
+    /** Present when the caller supplied an Ethereum RPC: the final deposit then continues to the destination credit. */
+    private readonly destination?: Pick<RelayArbitrumDestinationObserver, "observe">) {}
+
+  /** A final deposit is proven; with an Ethereum reader the same invocation proves (or reads the recorded) credit. */
+  private async withDestination<T extends { readonly state: string; readonly sourceFinalized: boolean }>(op: RelayUnsignedOperation,
+    journal: ArbitrumSourceEffectJournal, source: T) {
+    const hash = journal.effects[1].attempt?.transactionHash;
+    if (this.destination === undefined || journal.effects[1].phase !== "confirmed" || typeof hash !== "string") return source;
+    const destination = await this.destination.observe(op, hash);
+    return { ...source, ...destination, sourceFinalized: true };
+  }
 
   private async finalizeUsage(op: RelayUnsignedOperation, journal: ArbitrumSourceEffectJournal): Promise<void> {
     const proofDigest = journal.effects[1].attempt?.observationDigest;
@@ -101,12 +115,15 @@ export class RelayArbitrumSourceObserveService {
       expectedCurrentStates: ["reserved", "submitted", "unknown_finality"], now: new Date() });
   }
 
-  async observe(operationId: string) {
+  /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
+  async observe(profile: string, operationId: string) {
     if (!HASH.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum observe requires an operation ID.");
-    const op = await (this.ports.operation?.(operationId) ??
-      new RelayUnsignedOperationRepository(this.state.root).findOperation(operationId));
-    if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found.");
-    if (op.operationId !== operationId || op.sourceChainId !== 42161 || op.destinationChainId !== 1 ||
+    allowlistProfileHash(profile);
+    const profileHash = this.state.profileHash(profile);
+    const op = await (this.ports.operation?.(profileHash, operationId) ??
+      new RelayUnsignedOperationRepository(this.state.root).loadOperation(profileHash, operationId));
+    if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Relay operation was not found for this profile.");
+    if (op.operationId !== operationId || op.profileHash !== profileHash || op.sourceChainId !== 42161 || op.destinationChainId !== 1 ||
       op.arbitrumDraft === undefined || op.arbitrumDraft.executionAdmitted !== false) blocked("exact_saved_arbitrum_route");
     if (await new RelayRetirementRepository(this.state.root).load(op) !== null) blocked("operation_retired");
     const repository = new ArbitrumSourceEffectJournalRepository(this.state.root);
@@ -138,7 +155,7 @@ export class RelayArbitrumSourceObserveService {
     }
     if (depositEffect.phase === "confirmed") {
       await this.finalizeUsage(op, journal);
-      return output("deposit_source_confirmed", "saved_deposit_source_confirmation");
+      return this.withDestination(op, journal, output("deposit_source_confirmed", "saved_deposit_source_confirmation"));
     }
     if (approvalEffect.phase === "approval_skipped" && depositEffect.phase === "pending") return output("approval_skipped",
       "canonical_allowance_observed_deposit_recheck_required");
@@ -185,8 +202,9 @@ export class RelayArbitrumSourceObserveService {
     if (next.effects[role === "approval" ? 0 : 1].phase !== "confirmed" ||
       next.effects[role === "approval" ? 0 : 1].attempt?.observationDigest !== proofDigest) corrupt("transition_result");
     if (role === "deposit") await this.finalizeUsage(op, next);
-    return { ...output(role === "approval" ? "approval_source_confirmed" : "deposit_source_confirmed",
+    const observed = { ...output(role === "approval" ? "approval_source_confirmed" : "deposit_source_confirmed",
       "canonical_safe_source_receipt", proof), approvalPhase: next.effects[0].phase, depositPhase: next.effects[1].phase };
+    return role === "deposit" ? this.withDestination(op, next, observed) : observed;
   }
   private async recordRevert<T>(op: RelayUnsignedOperation, journal: ArbitrumSourceEffectJournal, role: ArbitrumEffectRole,
     chosen: RelayArbitrumExpectedEffect, reverted: RelayArbitrumRevertProof,

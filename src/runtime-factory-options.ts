@@ -1,8 +1,7 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
-import type { SeiFundingService } from "./lifi/sei-gaszip-service.js";
+import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
 import type { Cleanup85RecoveryDependencies } from "./circle-v2-evm/cleanup85-recovery-runtime.js";
 import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
-import type { MegaFundingService } from "./lifi/mega-gaszip-service.js";
 import type { RelayUnsignedPrepareService, RelayPreparePorts } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService, RelayPreflightPorts } from "./relay/preflight.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
@@ -74,6 +73,8 @@ export interface RuntimeFactoryOptions {
   readonly relayBaseObserve?: RelayBaseObserveService;
   readonly relayArbitrumObserve?: RelayArbitrumSourceObserveService;
   readonly relayArbitrumObserveRpc?: HttpsBaseRpc;
+  /** Synthetic CLI test seam for the Ethereum reader of `relay arbitrum observe --ethereum-rpc-url`. */
+  readonly relayArbitrumDestinationRpc?: HttpsBaseRpc;
   readonly relayArbitrumApprovalDecision?: RelayArbitrumApprovalDecisionService;
   readonly relayArbitrumApprovalExecute?: RelayArbitrumApprovalExecuteService;
   readonly relayArbitrumDepositDispatch?: RelayArbitrumDepositDispatchService;
@@ -111,8 +112,8 @@ export interface RuntimeFactoryOptions {
   readonly circleApproval?: CircleApprovalService;
   readonly circleSource?: CircleV2SourceService;
   readonly oneClickSource?: OneClickSourceService;
-  readonly seiFunding?: SeiFundingService;
-  readonly megaFunding?: MegaFundingService;
+  readonly seiFunding?: GaszipFundingService;
+  readonly megaFunding?: GaszipFundingService;
   readonly chainAccounts?: ChainWalletStoragePort;
   readonly directRails?: readonly DirectRailPort[];
   readonly railApproval?: RailApprovalPort;

@@ -1,5 +1,5 @@
 import type { ValidatedRelayQuote } from "./relay/quote.js";
-import { type ValidatedRelayNativeQuote } from "./relay/native-quote.js";
+import type { ValidatedRelayNativeQuote } from "./relay/native-quote.js";
 import type { RelayArbitrumSourceDraft } from "./relay/arbitrum-usdc-source-draft.js";
 import { SecureStateStore } from "./secure-state-store.js";
 import { z } from "zod";

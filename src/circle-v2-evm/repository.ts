@@ -65,7 +65,8 @@ const immutable = (op: CircleOperationV1) => ({ schemaVersion: op.schemaVersion,
   sourceCustody: op.sourceCustody, destinationCustody: op.destinationCustody, policies: op.policies, preparedAt: op.preparedAt,
   expiresAt: op.expiresAt, deploymentDigest: op.deploymentDigest, feeQuoteAtomic: op.feeQuoteAtomic });
 const phases = { prepared: ["signing_started"], signing_started: ["sealed", "unknown", "abandoned_unsent"], sealed: ["submission_started", "unknown", "abandoned_unsent"],
-  submission_started: ["submitted", "unknown", "confirmed", "reverted"], submitted: ["unknown", "confirmed", "reverted"], unknown: ["unknown", "confirmed", "reverted"], confirmed: [], reverted: [],
+  // A possibly-sent effect proven never to land (nonce consumed at safe depth, hash and receipt unknown) is abandoned.
+  submission_started: ["submitted", "unknown", "confirmed", "reverted", "abandoned_unsent"], submitted: ["unknown", "confirmed", "reverted", "abandoned_unsent"], unknown: ["unknown", "confirmed", "reverted", "abandoned_unsent"], confirmed: [], reverted: [],
   abandoned_unsent: [] } as const;
 export function validateCircleAdvance(previous: CircleOperationV1, next: CircleOperationV1): void {
   if (previous.terminal || !circleSame(immutable(previous), immutable(next)) || next.transitions.length !== previous.transitions.length + 1 ||

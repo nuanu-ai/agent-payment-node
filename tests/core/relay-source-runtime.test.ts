@@ -134,12 +134,12 @@ function wrongChainRpc(f: Awaited<ReturnType<typeof setup>>) {
 
 test("explicit authorization seals exact admission and sends the signed approval once", async t => {
   const f = await setup(t);
-  let journal = await f.runtime.execute(f.op.operationId);
+  let journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
   assert.equal(f.evidence.sends, 1);
   assert.equal(f.evidence.summary?.requestId, requestId);
   assert.equal(f.evidence.summary?.recipient, recipient.toLowerCase());
-  journal = await f.runtime.execute(f.op.operationId);
+  journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
   assert.equal(f.evidence.sends, 1);
   assert.equal(f.evidence.confirms, 2);
@@ -149,7 +149,7 @@ test("declined foreground authorization makes no source RPC request or effect", 
   const f = await setup(t);
   const denied = new RelayEthereumSourceRuntime(f.state, f.wrapping,
     f.rpc, { confirm: async () => false }, { now: () => now });
-  await assert.rejects(denied.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(denied.execute("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.evidence.sends, 0);
   assert.equal(f.evidence.batches, 0);
 });
@@ -164,7 +164,7 @@ test("TTY Relay authorization declines before source RPC, signing, or journal ef
   const authorization = new TtyRelayExecuteConfirmation({ openTerminal: async () => terminal,
     isTerminal: () => true });
   const runtime = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc, authorization, { now: () => now });
-  await assert.rejects(runtime.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(runtime.execute("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.ok(screen.includes(f.op.amountAtomic));
   assert.ok(screen.includes(f.op.recipient));
   assert.ok(!screen.includes(requestId));
@@ -175,7 +175,7 @@ test("TTY Relay authorization declines before source RPC, signing, or journal ef
   const noTerminal = new TtyRelayExecuteConfirmation({ openTerminal: async () => terminal,
     isTerminal: () => false });
   const noninteractive = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc, noTerminal, { now: () => now });
-  await assert.rejects(noninteractive.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(noninteractive.execute("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal(f.evidence.batches, 0);
   assert.equal(f.evidence.sends, 0);
   assert.equal(await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId), null);
@@ -188,7 +188,7 @@ test("installed Relay execute CLI refuses decline and non-TTY before source RPC"
   let screen = "";
   const terminal = { fd: 0, write: async (value: string) => { screen += value; },
     read: async function* () { yield Buffer.from("decline\n"); }, close: async () => {} };
-  const args = ["relay", "execute", "--operation", f.op.operationId, "--rpc-url", "https://rpc.example"];
+  const args = ["relay", "execute", "--profile", "default", "--operation", f.op.operationId, "--rpc-url", "https://rpc.example"];
   for (const isTerminal of [true, false]) {
     const result = await runCli(args, {}, { stateRoot: f.state.root, wrappingSecret: f.wrapping,
       clock: { now: () => now }, relayExecuteTransport: f.rpc,
@@ -214,7 +214,7 @@ test("installed Relay execute CLI confirms exact saved operation and explicit re
   const terminal = { fd: 0, write: async () => { prompts++; },
     read: async function* () { yield Buffer.from(`${approvalCode("bridge", f.op.operationId, f.op.quoteDigest)}\n`); },
     close: async () => {} };
-  const args = ["relay", "execute", "--operation", f.op.operationId, "--rpc-url", "https://rpc.example"];
+  const args = ["relay", "execute", "--profile", "default", "--operation", f.op.operationId, "--rpc-url", "https://rpc.example"];
   const options = { stateRoot: f.state.root, wrappingSecret: f.wrapping,
     clock: { now: () => new Date(fixtureNow()) }, relayExecuteTransport: f.rpc, relayApprovalInclusionWait: { polls: 0, delayMs: 0 },
     relayExecuteTtyOptions: { openTerminal: async () => terminal, isTerminal: () => true } };
@@ -232,29 +232,29 @@ test("installed Relay execute CLI confirms exact saved operation and explicit re
 
 test("finalized canonical approval advances to one deposit send", async t => {
   const f = await setup(t);
-  await f.runtime.execute(f.op.operationId);
+  await f.runtime.execute("default", f.op.operationId);
   f.showApproval();
-  const journal = await f.runtime.execute(f.op.operationId);
+  const journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "confirmed");
   assert.equal(journal.effects[1].phase, "submitting");
   assert.equal(f.evidence.sends, 2);
-  await f.runtime.execute(f.op.operationId);
+  await f.runtime.execute("default", f.op.operationId);
   assert.equal(f.evidence.sends, 2);
 });
 
 test("approval inclusion and deposit finality use two-POST observations and preserve journal phases", async t => {
   const f = await setup(t);
-  let journal = await f.runtime.execute(f.op.operationId);
+  let journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
   assert.equal(journal.effects[1].phase, "pending");
   const pendingApprovalPosts = f.evidence.batches;
   f.showApproval();
-  journal = await f.runtime.execute(f.op.operationId);
+  journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "confirmed");
   assert.equal(journal.effects[1].phase, "submitting");
   const pendingDepositPosts = f.evidence.batches;
   f.showDeposit();
-  journal = await f.runtime.execute(f.op.operationId);
+  journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "confirmed");
   assert.equal(journal.effects[1].phase, "confirmed");
   assert.equal(f.evidence.sends, 2);
@@ -269,23 +269,23 @@ test("paced source runtime reaches the included approval and finalized deposit t
   const f = await setup(t);
   const runtime = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc,
     { confirm: async () => true }, { now: () => now }, "https://ethereum-rpc.publicnode.com");
-  let journal = await runtime.execute(f.op.operationId);
+  let journal = await runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
   f.showApproval();
-  journal = await runtime.execute(f.op.operationId);
+  journal = await runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "confirmed");
   assert.equal(journal.effects[1].phase, "submitting");
   f.showDeposit();
-  journal = await runtime.execute(f.op.operationId);
+  journal = await runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[1].phase, "confirmed");
   assert.deepEqual({ batches: f.evidence.batches, sends: f.evidence.sends }, { batches: 10, sends: 2 });
 });
 
 test("recheck reorg preserves the submitting approval and never resends", async t => {
   const f = await setup(t);
-  await f.runtime.execute(f.op.operationId);
+  await f.runtime.execute("default", f.op.operationId);
   f.showApproval(); f.reorgOnRecheck();
-  const journal = await f.runtime.execute(f.op.operationId);
+  const journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
   assert.equal(journal.effects[1].phase, "pending");
   assert.equal(f.evidence.sends, 1);
@@ -294,14 +294,14 @@ test("recheck reorg preserves the submitting approval and never resends", async 
 
 test("an included approval with confirmations lets the deposit go out; the deposit confirms only at finality (BRDG-22)", async t => {
   const f = await setup(t);
-  await f.runtime.execute(f.op.operationId);
+  await f.runtime.execute("default", f.op.operationId);
   f.showApproval(); f.notFinal();
-  let journal = await f.runtime.execute(f.op.operationId);
+  let journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "confirmed");
   assert.equal(journal.effects[1].phase, "submitting");
   assert.equal(f.evidence.sends, 2);
   f.showDeposit();
-  journal = await f.runtime.execute(f.op.operationId);
+  journal = await f.runtime.execute("default", f.op.operationId);
   assert.equal(journal.effects[1].phase, "submitting");
   assert.equal(f.evidence.sends, 2);
 });
@@ -311,7 +311,7 @@ test("one confirmed run waits a bounded time for the just-sent approval and then
   const waiting = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc, { confirm: async () => true }, { now: () => now }, undefined, { polls: 3, delayMs: 1 });
   let lookups = 0;
   f.onTransactionLookup(index => { if (index === 0 && ++lookups === 2) f.showApproval(); });
-  const journal = await waiting.execute(f.op.operationId);
+  const journal = await waiting.execute("default", f.op.operationId);
   assert.equal(journal.effects[0].phase, "confirmed");
   assert.equal(journal.effects[1].phase, "submitting");
   assert.equal(f.evidence.sends, 2);
@@ -327,11 +327,11 @@ test("production Relay RPC factory rejects signed paths and query credentials", 
 
 test("changed durable requestId admission blocks observation replay", async t => {
   const f = await setup(t);
-  await f.runtime.execute(f.op.operationId);
+  await f.runtime.execute("default", f.op.operationId);
   const path = join(f.state.root, "relay-execution-admissions", f.op.profileHash, `${f.op.operationId}.json`);
   const saved = JSON.parse(await readFile(path, "utf8"));
   await writeFile(path, JSON.stringify({ ...saved, requestId: `0x${"c".repeat(64)}` }));
-  await assert.rejects(f.runtime.execute(f.op.operationId), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(f.runtime.execute("default", f.op.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(f.evidence.sends, 1);
 });
 
@@ -339,12 +339,12 @@ test("pre-effect refusal releases exact reservation and replay reopens it under 
   const f = await setup(t);
   const bad = new RelayEthereumSourceRuntime(f.state, f.wrapping, wrongChainRpc(f),
     { confirm: async () => true }, { now: () => now });
-  await assert.rejects(bad.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(bad.execute("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   const { ledger, identity, reservationId } = usageFor(f);
   assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
   assert.equal((await ledger.usage(identity, now)).amountAtomic, "0");
   assert.equal(await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId), null);
-  const result = await f.runtime.execute(f.op.operationId);
+  const result = await f.runtime.execute("default", f.op.operationId);
   assert.equal(result.effects[0].phase, "submitting");
   assert.equal((await ledger.load(identity, reservationId))?.state, "submitted");
   assert.equal(f.evidence.sends, 1);
@@ -353,13 +353,13 @@ test("pre-effect refusal releases exact reservation and replay reopens it under 
 test("signer failure after durable marker holds cap and replay never signs or sends", async t => {
   const f = await setup(t);
   Object.defineProperty(f.runtime, "sign", { value: async () => { throw new Error("synthetic signer failure"); } });
-  await assert.rejects(f.runtime.execute(f.op.operationId), /synthetic signer failure/u);
+  await assert.rejects(f.runtime.execute("default", f.op.operationId), /synthetic signer failure/u);
   const { ledger, identity, reservationId } = usageFor(f);
   assert.equal((await ledger.load(identity, reservationId))?.state, "reserved");
   assert.equal((await ledger.usage(identity, now)).amountAtomic, "2500000");
   assert.equal((await new RelayEffectJournalRepository(f.state.root).load(f.op.profileHash, f.op.operationId))?.effects[0].phase,
     "signing_started");
-  const replay = await f.runtime.execute(f.op.operationId);
+  const replay = await f.runtime.execute("default", f.op.operationId);
   assert.equal(replay.effects[0].phase, "signing_started");
   assert.equal(f.evidence.sends, 0);
 });
@@ -371,7 +371,7 @@ test("orphan reservation is reconciled before expired quote rejection after rest
     idempotencyKey: `relay-execute:${f.op.operationId}`, now });
   const expired = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc,
     { confirm: async () => true }, { now: () => new Date(f.op.deadline) });
-  await assert.rejects(expired.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(expired.execute("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
   assert.equal((await ledger.usage(identity, new Date(f.op.deadline))).amountAtomic, "0");
   assert.equal(f.evidence.batches, 0);
@@ -387,7 +387,7 @@ test("unmarked pending journal also permits exact pre-effect recovery", async t 
   await effects.create(f.op.profileHash, f.op.operationId, now.toISOString());
   const expired = new RelayEthereumSourceRuntime(f.state, f.wrapping, f.rpc,
     { confirm: async () => true }, { now: () => new Date(f.op.deadline) });
-  await assert.rejects(expired.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(expired.execute("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
   assert.equal((await ledger.usage(identity, new Date(f.op.deadline))).amountAtomic, "0");
   assert.equal(f.evidence.sends, 0);
@@ -395,7 +395,7 @@ test("unmarked pending journal also permits exact pre-effect recovery", async t 
 
 test("concurrent same-op calls send once", async t => {
   const f = await setup(t);
-  const [a, b] = await Promise.all([f.runtime.execute(f.op.operationId), f.runtime.execute(f.op.operationId)]);
+  const [a, b] = await Promise.all([f.runtime.execute("default", f.op.operationId), f.runtime.execute("default", f.op.operationId)]);
   assert.equal(a.effects[0].phase, "submitting");
   assert.equal(b.effects[0].phase, "submitting");
   assert.equal(f.evidence.sends, 1);
@@ -405,16 +405,16 @@ test("released cap admits an unrelated op, then full cap recheck denies reopenin
   const f = await setup(t);
   const bad = new RelayEthereumSourceRuntime(f.state, f.wrapping, wrongChainRpc(f),
     { confirm: async () => true }, { now: () => now });
-  await assert.rejects(bad.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(bad.execute("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   const { integrityHash: _integrityHash, ...original } = f.op;
   const other = freezeRelayUnsignedOperation({ ...original, operationId: "5".repeat(64),
     idempotencyHash: "6".repeat(64), requestHash: "7".repeat(64) });
   const operations = new RelayUnsignedOperationRepository(f.state.root);
   await operations.persistLocked(other);
-  const journal = await f.runtime.execute(other.operationId);
+  const journal = await f.runtime.execute("default", other.operationId);
   assert.equal(journal.effects[0].phase, "submitting");
   assert.equal(f.evidence.sends, 1);
-  await assert.rejects(f.runtime.execute(f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(f.runtime.execute("default", f.op.operationId), { code: "APN_OPERATION_BLOCKED" });
   const { ledger, identity, reservationId } = usageFor(f);
   assert.equal((await ledger.load(identity, reservationId))?.state, "failed_before_effect");
   assert.equal((await ledger.usage(identity, now)).amountAtomic, "2500000");

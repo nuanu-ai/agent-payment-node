@@ -8,8 +8,10 @@ import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 export type CommandRequest = {
     readonly command: "wallet.metamask.native-transfer";
-    readonly profile?: string;
+    readonly profile: string;
     readonly chainId: number;
+    readonly recipient: string;
+    readonly amountAtomic: string;
     readonly idempotencyKey: string;
 } | {
     readonly command: "wallet.metamask.native-transfer-status" | "wallet.metamask.native-transfer-observe";
@@ -43,7 +45,7 @@ export type CommandRequest = {
     readonly destinationProfile: string;
     readonly destinationChain: 1329 | 59144 | 143;
     readonly idempotencyKey: string;
-    readonly funding?: CircleFundingParameters;
+    readonly funding: CircleFundingParameters;
 } | {
     readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.cleanup85-prepare" | "circle.evm.cleanup85-cancel" | "circle.evm.cleanup86-approve" | "circle.evm.status";
     readonly operationId: string;
@@ -53,6 +55,8 @@ export type CommandRequest = {
 } | {
     readonly command: "x402.merchant.prepare";
     readonly profile: string;
+    readonly url: string;
+    readonly asset?: string;
     readonly maximumNativeFee: string;
     readonly nativeFeeReserveWei?: string;
     readonly idempotencyKey: string;
@@ -107,6 +111,7 @@ export type CommandRequest = {
     readonly command: "relay.arbitrum.prepare";
     readonly profile: string;
     readonly owner: string;
+    readonly recipient: string;
     readonly amountAtomic: string;
     readonly minOutputAtomic: string;
     readonly maxProviderFeeAtomic: string;
@@ -116,6 +121,7 @@ export type CommandRequest = {
     readonly idempotencyKey: string;
 } | {
     readonly command: "relay.arbitrum.observe";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.arbitrum.approval-check";
@@ -132,6 +138,8 @@ export type CommandRequest = {
 } | {
     readonly command: "relay.native.prepare";
     readonly profile: string;
+    readonly sourceChain: string;
+    readonly destinationChain: string;
     readonly recipient: string;
     readonly amountAtomic: string;
     readonly minOutputAtomic: string;
@@ -143,9 +151,11 @@ export type CommandRequest = {
     readonly operationId: string;
 } | {
     readonly command: "relay.execute";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.native.execute";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.retire";
@@ -153,12 +163,15 @@ export type CommandRequest = {
     readonly operationId: string;
 } | {
     readonly command: "relay.status";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.observe";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "relay.base.observe";
+    readonly profile: string;
     readonly operationId: string;
 } | {
     readonly command: "stargate.native.prepare";
@@ -560,6 +573,8 @@ export type CommandRequest = {
     readonly chainId?: EvmChainId;
 } | {
     readonly command: "wallet.policy.set";
+    /** Omitted keeps the current x402 payee pin; null removes it; a list sets it. */
+    readonly x402Payees?: readonly string[] | null;
     readonly chainId?: EvmChainId;
     readonly profile: string;
     readonly maxBalanceUsdcAtomic: string;

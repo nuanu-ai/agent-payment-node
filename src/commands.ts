@@ -8,16 +8,16 @@ import type { BridgeRouteRequest } from "./lifi/model.js";
 import type { GaslessCommandChainId, GaslessCommandRequest } from "./gasless/command-input.js";
 
 export type CommandRequest =
-  | {readonly command:"wallet.metamask.native-transfer";readonly profile?:string;readonly chainId:number;readonly idempotencyKey:string}
+  | {readonly command:"wallet.metamask.native-transfer";readonly profile:string;readonly chainId:number;readonly recipient:string;readonly amountAtomic:string;readonly idempotencyKey:string}
   | {readonly command:"wallet.metamask.native-transfer-status"|"wallet.metamask.native-transfer-observe";readonly operationId:string}
   | { readonly command: "sei.funding.prepare"; readonly profile: string; readonly expectedPayer: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string; readonly maximumFeeAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "mega.funding.prepare"; readonly profile: string; readonly expectedPayer: string; readonly amountAtomic: string; readonly minimumOutputAtomic: string; readonly maximumFeeAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "sei.funding.approve" | "sei.funding.status"; readonly operationId: string }
   | { readonly command: "circle.evm.adopt-external-mint"; readonly operationId: string; readonly transactionHash: `0x${string}` }
-  | { readonly command: "circle.evm.prepare"; readonly profile: string; readonly destinationProfile: string; readonly destinationChain: 1329 | 59144 | 143; readonly idempotencyKey: string; readonly funding?: CircleFundingParameters }
+  | { readonly command: "circle.evm.prepare"; readonly profile: string; readonly destinationProfile: string; readonly destinationChain: 1329 | 59144 | 143; readonly idempotencyKey: string; readonly funding: CircleFundingParameters }
   | { readonly command: "circle.evm.approve-source" | "circle.evm.approve-mint" | "circle.evm.observe" | "circle.evm.refresh-attestation" | "circle.evm.cleanup" | "circle.evm.cleanup-nonce" | "circle.evm.cleanup85-prepare" | "circle.evm.cleanup85-cancel" | "circle.evm.cleanup86-approve" | "circle.evm.status"; readonly operationId: string }
   | { readonly command: "mega.funding.approve" | "mega.funding.status"; readonly operationId: string }
-  | { readonly command: "x402.merchant.prepare"; readonly profile: string; readonly maximumNativeFee: string; readonly nativeFeeReserveWei?: string; readonly idempotencyKey: string }
+  | { readonly command: "x402.merchant.prepare"; readonly profile: string; readonly url: string; readonly asset?: string; readonly maximumNativeFee: string; readonly nativeFeeReserveWei?: string; readonly idempotencyKey: string }
   | { readonly command: "x402.merchant.approve" | "x402.merchant.status" | "x402.merchant.retire-unsent"; readonly operationId: string }
   | { readonly command: "x402.merchant.observe"; readonly operationId: string; readonly deliver: boolean }
   | { readonly command: "x402.permit2.approve"; readonly profile: string; readonly url: string; readonly idempotencyKey: string }
@@ -27,21 +27,21 @@ export type CommandRequest =
   | { readonly command: "x402.permit2.status"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.base.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
-  | { readonly command: "relay.arbitrum.prepare"; readonly profile: string; readonly owner: string; readonly amountAtomic: string;
+  | { readonly command: "relay.arbitrum.prepare"; readonly profile: string; readonly owner: string; readonly recipient: string; readonly amountAtomic: string;
       readonly minOutputAtomic: string; readonly maxProviderFeeAtomic: string; readonly maxApprovalNetworkFeeWei: string;
       readonly maxDepositNetworkFeeWei: string; readonly quoteFile: string; readonly idempotencyKey: string }
-  | { readonly command: "relay.arbitrum.observe"; readonly operationId: string }
+  | { readonly command: "relay.arbitrum.observe"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.approval-check"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.approval-execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.arbitrum.deposit-dispatch"; readonly profile: string; readonly operationId: string }
-  | { readonly command: "relay.native.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
+  | { readonly command: "relay.native.prepare"; readonly profile: string; readonly sourceChain: string; readonly destinationChain: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.preflight"; readonly profile: string; readonly operationId: string }
-  | { readonly command: "relay.execute"; readonly operationId: string }
-  | { readonly command: "relay.native.execute"; readonly operationId: string }
+  | { readonly command: "relay.execute"; readonly profile: string; readonly operationId: string }
+  | { readonly command: "relay.native.execute"; readonly profile: string; readonly operationId: string }
   | { readonly command: "relay.retire"; readonly profile: string; readonly operationId: string }
-  | { readonly command: "relay.status"; readonly operationId: string }
-  | { readonly command: "relay.observe"; readonly operationId: string }
-  | { readonly command: "relay.base.observe"; readonly operationId: string }
+  | { readonly command: "relay.status"; readonly profile: string; readonly operationId: string }
+  | { readonly command: "relay.observe"; readonly profile: string; readonly operationId: string }
+  | { readonly command: "relay.base.observe"; readonly profile: string; readonly operationId: string }
   | { readonly command: "stargate.native.prepare"; readonly profile: string; readonly amountAtomic: string;
       readonly maxNativeDebitAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "stargate.native.execute" | "stargate.native.observe" | "stargate.native.status" | "stargate.native.receipt"; readonly operationId: string }
@@ -158,6 +158,8 @@ export type CommandRequest =
   | { readonly command: "wallet.policy.show"; readonly profile: string; readonly chainId?: EvmChainId }
   | {
     readonly command: "wallet.policy.set";
+    /** Omitted keeps the current x402 payee pin; null removes it; a list sets it. */
+    readonly x402Payees?: readonly string[] | null;
     readonly chainId?: EvmChainId;
     readonly profile: string;
     readonly maxBalanceUsdcAtomic: string;

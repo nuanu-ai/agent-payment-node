@@ -1,16 +1,13 @@
 import { publicKnownCircle, type CircleKnownOperation } from "./circle-v2-evm/funding-operation.js";
-import { assertMetaMaskNativeConflictDomainAvailable, assertMetaMaskNativeOwnedConflictDomainAvailable, assertMetaMaskNativeOwnedScope,
-  type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
-import { listLocalWallets, listEncryptedWalletEnvelopes } from "./wallet-import-collision.js";
-import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
+import { assertMetaMaskNativeConflictDomainAvailable } from "./metamask-native-journal.js";
 import { cleanup85UnsignedResumeExclusion } from "./circle-cleanup85-unsigned-resume.js";
 import { cleanup85ConflictExclusion, type VerifiedCleanup85RecoveryAdmission, type Cleanup85CancellationRequest } from "./circle-cleanup85-native-conflict.js";
-import { circleNativeSourceIdentity, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
+import { circleNativeSourceIdentity, circleSourceSettled, verifiedCircleNativeSources, type VerifiedCircleNativeAdmission } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
-import { SeiFundingJournal, publicSeiFunding, type SeiFundingRecord } from "./lifi/sei-gaszip-journal.js";
+import { GaszipFundingJournal, publicGaszipFunding, type GaszipFundingRecord } from "./lifi/gaszip-direct-journal.js";
+import { GASZIP_DIRECT_ROUTES } from "./lifi/gaszip-direct-route.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { publicCircle, type CircleOperationV1, type CircleRole } from "./circle-v2-evm/operation-model.js";
-import { MegaFundingJournal, publicMegaFunding, type MegaFundingRecord } from "./lifi/mega-gaszip-journal.js";
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant, type MerchantOperation } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
@@ -55,9 +52,9 @@ import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRela
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
 import { relaySourceTerminal, type RelaySourceTerminal } from "./relay/lifecycle.js";
 export type StoredMoneyOperation =
-  | { readonly kind: "sei_gaszip"; readonly record: SeiFundingRecord }
+  | { readonly kind: "sei_gaszip"; readonly record: GaszipFundingRecord }
   | { readonly kind: "circle_route"; readonly record: CircleKnownOperation }
-  | { readonly kind: "mega_gaszip"; readonly record: MegaFundingRecord }
+  | { readonly kind: "mega_gaszip"; readonly record: GaszipFundingRecord }
   | { readonly kind: "merchant_x402"; readonly record: MerchantOperation }
   | { readonly kind: "permit2_production"; readonly record: Permit2ProductionRecord }
   | { readonly kind: "relay_unsigned"; readonly record: RelayUnsignedOperation }
@@ -81,8 +78,8 @@ export class OperationService {
     private readonly smartAccountGasless: SmartAccountGaslessRepositoryPort = new SmartAccountGaslessOperationRepository(state.root),
     private readonly facilitatorGasless: FacilitatorGaslessRepositoryPort = new FacilitatorGaslessOperationRepository(state.root),
     private readonly relayUnsigned = new RelayUnsignedOperationRepository(state.root),
-    private readonly seiFunding: Pick<SeiFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new SeiFundingJournal(state.root),
-    private readonly megaFunding: Pick<MegaFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new MegaFundingJournal(state.root),
+    private readonly seiFunding: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new GaszipFundingJournal(state.root, GASZIP_DIRECT_ROUTES.sei),
+    private readonly megaFunding: Pick<GaszipFundingJournal, "listAllOperations" | "listOperations" | "findOperation"> = new GaszipFundingJournal(state.root, GASZIP_DIRECT_ROUTES.mega),
   ) {}
   /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
    * locks are acquired together so owner validation and durable write are atomic. */
@@ -167,28 +164,18 @@ export class OperationService {
   async assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
     await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)]);
   }
+  /** R8 (OWNR-16): a native Arbitrum move to a local custody wallet does not wait for this account's Circle routes whose source burn is final. */
+  async assertEvmNativeAccountAvailableBesideSettledCircle(profileHash: string, account: string): Promise<void> {
+    const settled = (await this.circleOperations(profileHash)).filter(op => !op.terminal && circleSourceSettled(op, profileHash, account));
+    await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], undefined, false, new Map(settled.map(op => [op.operationId, circleNativeSourceIdentity(op)])));
+  }
   /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
   async assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
     await this.assertConflictDomainsAvailable(profileHash, () => [sharedEvmConflictDomain(chainId, account)]);
   }
-  /** Only the real current foreground owner may exclude its exact own native journal claim. */
-  async assertMetaMaskNativeOwnedAccountAvailable(scope:MetaMaskNativeOwnedScope,context:MetaMaskNativeOwnedContext):Promise<void> {
-    assertMetaMaskNativeOwnedScope(scope,context);
-    if(this.state.root!==context.stateRoot)throw new ApnError("APN_OPERATION_BLOCKED","Native owner conflict guard root changed.");
-    const hashes=new Set([context.profileHash]),target=context.quote.sender.toLowerCase();
-    for(const item of await this.state.profileImportEntries()) {
-      if(!item.isDirectory()||item.isSymbolicLink()||!/^[a-f0-9]{64}$/.test(item.name))throw new ApnError("APN_STATE_CORRUPT","Profiles directory is invalid during native owner conflict guard.");
-      const profile=await this.state.loadProviderProfile(item.name);if(profile===null)throw new ApnError("APN_STATE_CORRUPT","Provider profile disappeared during native owner conflict guard.");
-      if(profile.public_address.toLowerCase()===target)hashes.add(item.name);
-    }
-    for(const wallet of await listLocalWallets(this.state))if(wallet.address.toLowerCase()===target)hashes.add(wallet.profileHash);
-    for(const envelope of await listEncryptedWalletEnvelopes(this.state)) {
-      const identity=walletEnvelopeIdentity(envelope.value,envelope.profile);if(identity.address.toLowerCase()===target)hashes.add(this.state.profileHash(identity.profile));
-    }
-    for(const operation of await this.state.listAllOperations())if(operation.walletAddress.toLowerCase()===target)hashes.add(operation.profileHash);
-    assertMetaMaskNativeOwnedScope(scope,context);
-    for(const hash of hashes)await this.assertConflictDomainsAvailable(hash,()=>[evmConflictDomain(context.quote.chainId,context.quote.sender)],undefined,false,undefined,undefined,{scope,context});
-    assertMetaMaskNativeOwnedScope(scope,context);
+  /** The account check of one saved operation, excluding only that operation's own claim; its owner holds the account locks. */
+  async assertEvmAccountAvailableExcept(profileHash: string, chainId: number | string, account: string, exceptOperationId: string): Promise<void> {
+    await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)], canonicalOperationId(exceptOperationId));
   }
   async assertFinalizedCircleNativeAccountAvailable(profileHash: string, account: string, proof: VerifiedCircleNativeAdmission, exceptOperation?: OperationRecord): Promise<void> {
     const sources = verifiedCircleNativeSources(proof, profileHash, account);
@@ -212,18 +199,14 @@ export class OperationService {
     await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
   }
 
-  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>, cleanup85Parent?: { readonly operationId: string; readonly integrityHash: string }, nativeOwner?: { readonly scope:MetaMaskNativeOwnedScope; readonly context:MetaMaskNativeOwnedContext }): Promise<void> {
+  private async assertConflictDomainsAvailable(profileHash: string, domains: () => readonly MoneyConflictDomain[], exceptOperationId?: string, allowIncludedCircleSource = false, finalizedNativeSources?: ReadonlyMap<string, string>, cleanup85Parent?: { readonly operationId: string; readonly integrityHash: string }): Promise<void> {
     const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
     if (this.state.root !== undefined) await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
     if(this.state.root!==undefined) {
       for(const wantedKey of wanted) {
         const [family,network,account]=wantedKey.split(":");
         if(family!=="evm"||network===undefined||account===undefined)continue;
-        if(nativeOwner!==undefined) {
-          assertMetaMaskNativeOwnedScope(nativeOwner.scope,nativeOwner.context);
-          if(nativeOwner.context.stateRoot!==this.state.root||String(nativeOwner.context.quote.chainId)!==network||nativeOwner.context.quote.sender.toLowerCase()!==account)throw new ApnError("APN_OPERATION_BLOCKED","Native owner conflict domain changed.");
-          await assertMetaMaskNativeOwnedConflictDomainAvailable(nativeOwner.scope,nativeOwner.context);
-        } else await assertMetaMaskNativeConflictDomainAvailable(this.state.root,network,account);
+        await assertMetaMaskNativeConflictDomainAvailable(this.state.root,network,account,exceptOperationId);
       }
     }
     for (const operation of await this.profileOperations(profileHash)) {
@@ -235,7 +218,7 @@ export class OperationService {
         // Only another CCTP operation may queue a source nonce after canonical inclusion. Other rails remain conservative.
         held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       }
-      if (operation.kind === "circle_route" && operation.record.schemaVersion === "apn.circle-v2-evm-operation.v1" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
+      if (operation.kind === "circle_route" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
         held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash) held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
       const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)) &&
@@ -378,9 +361,9 @@ export class OperationService {
 
   async status(operationId: string): Promise<unknown> {
     const operation = await this.required(operationId);
-    if (operation.kind === "sei_gaszip") return publicSeiFunding(operation.record);
+    if (operation.kind === "sei_gaszip") return publicGaszipFunding(GASZIP_DIRECT_ROUTES.sei, operation.record);
     if (operation.kind === "circle_route") return publicKnownCircle(operation.record);
-    if (operation.kind === "mega_gaszip") return publicMegaFunding(operation.record);
+    if (operation.kind === "mega_gaszip") return publicGaszipFunding(GASZIP_DIRECT_ROUTES.mega, operation.record);
     if (operation.kind === "merchant_x402") return publicMerchant(operation.record);
     if (operation.kind === "permit2_production") return publicPermit2Production(operation.record);
     if (operation.kind === "relay_unsigned") return this.relayStatus(operation.record);

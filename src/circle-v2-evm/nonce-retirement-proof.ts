@@ -13,7 +13,7 @@ export function validateCircleNonceRetirementProof(proof: CircleNonceRetirementP
   if (isConsumedBurnRetirement(op)) { validateConsumedBurnProof(proof, op); return; }
   if (isSealedBurnRetirement(op)) { validateSealedBurnProof(proof, op); return; }
   const { proofHash, ...body } = proof, cleanup = op.effects.find(x => x.role === "cleanup"), approval = op.effects[0]!, burn = op.effects[1]!;
-  if (op.destinationChain !== 143 || op.destinationProfile !== "default" || op.source !== null || op.attestation !== null || op.destination !== null || approval.proof !== null || approval.materialHash === null || burn.materialHash !== null || burn.transactionHash !== null || burn.proof !== null ||
+  if (op.source !== null || op.attestation !== null || op.destination !== null || approval.proof !== null || approval.materialHash === null || burn.materialHash !== null || burn.transactionHash !== null || burn.proof !== null ||
     !/^(?:0|[1-9][0-9]*)$/u.test(proof.actualCleanupFeeAtomic) || BigInt(proof.actualCleanupFeeAtomic) > 15000000000000n ||
     hashObject(body) !== proofHash || !/^[a-f0-9]{64}$/u.test(proof.intentHash) || proof.originalApprovalHash !== approval.transactionHash || proof.originalNonceAtomic !== approval.envelope.nonceAtomic ||
     !/^(?:0|[1-9][0-9]*)$/u.test(proof.finalizedNonceAtomic) || BigInt(proof.finalizedNonceAtomic) <= BigInt(proof.originalNonceAtomic) ||

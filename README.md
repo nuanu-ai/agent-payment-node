@@ -5,7 +5,7 @@ profile is a disposable local EVM wallet: APN creates it, reports the public
 address for manual low-value funding, and uses the same durable core for Base
 USDC transfers and standard x402 v2 purchases.
 
-This source tree prepares an unreleased APN 0.5.43 candidate for Apple Silicon
+This source tree prepares an unreleased APN 0.5.44 candidate for Apple Silicon
 macOS. Published packages and the Homebrew Formula have separate provenance.
 A matching version number does not prove that an installed artifact contains
 these source changes: verify its release commit or artifact digest and installed
@@ -246,7 +246,8 @@ does not compile or substitute monetary defaults:
 apn wallet policy set --profile default \
   --max-balance-usdc-atomic <owner-limit-in-6-decimal-units> \
   --max-x402-amount-atomic <owner-limit-in-6-decimal-units> \
-  [--max-balance-eth-wei <optional-owner-limit>]
+  [--max-balance-eth-wei <optional-owner-limit>] \
+  [--x402-payees <address,...|unrestricted>]
 
 apn wallet policy show --profile default
 ```
@@ -261,6 +262,14 @@ starting a new unattended x402 purchase until the owner resolves it. Its
 `funding_guidance` and `next_actions` follow that posture per asset: an asset
 at or above its owner limit is never suggested for funding, and an excess is
 named with its asset, amount and effect on unattended x402.
+
+`--x402-payees` optionally pins which sellers local x402 may pay (1-16 EVM
+addresses). Without a pin the policy does not restrict payees; the payee is the
+seller's offer, shown and bound into the authorization. With a pin, prepare only
+selects offers paying a pinned payee, and approval and the first paid request
+refuse (`x402_payee_not_admitted`) if the pin no longer lists it. Omitting the
+option keeps the current pin, `unrestricted` removes it; removing the pin or
+adding a payee needs the foreground phrase, pinning or narrowing does not.
 
 Prepare and approve a direct transfer:
 
@@ -703,7 +712,7 @@ and a failed read never falls back to an older result. Pass `--refresh` (MCP
 
 Relay prepare commands save only unsigned quotes; `relay preflight` is
 read-only and `relay retire` is local. Retire
-an untouched prepared quote with `apn relay retire --profile default --operation <id>`
+an untouched prepared quote with `apn relay retire --profile <profile> --operation <id>`
 to release the profile for a fresh quote under a new idempotency key. The saved
 quote remains intact; status reports `retired`. Retirement refuses any effect
 journal, matching usage reservation, or encrypted approval custody entry and
@@ -749,7 +758,7 @@ finalized chain time beyond the saved deadline and unused nonce evidence.
 See the [Permit2 guide](docs/x402-non-usdc.md#foreground-production-cli) for exact
 options, saved-hint handling and recovery boundaries.
 
-The finite [x402engine USDm merchant adapter](docs/x402-merchant-usdm.md) uses one foreground local ERC20 transfer on MegaETH and a canonical v2 transaction-hash proof. Payment finality and upstream Bitcoin-price delivery are recorded separately; delivery retries use the same original proof and never create another payment.
+The [x402 ERC-20 transfer-proof merchant adapter](docs/x402-merchant-usdm.md) pays any merchant at `--url` whose challenge names a pinned asset (MegaETH USDm first), from the `--profile` wallet, with one foreground local ERC20 transfer on MegaETH and a canonical v2 transaction-hash proof. Payee and amount come from the challenge and must fit the owner admission (optional payee pin). Payment finality and the merchant's HTTP 200 delivery are recorded separately; delivery retries use the same original proof and never create another payment.
 
 <!-- BEGIN APN COMMAND CATALOG -->
 ```text
@@ -757,26 +766,26 @@ apn x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <pro
 apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> [--profile <profile>] [--transaction <hash> | --expired-unused]
 apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>
 apn x402 permit2 status --profile <profile> --operation <operation-id>
-apn x402 merchant prepare --profile <profile> --max-native-fee-wei <wei> --idempotency-key <key>
+apn x402 merchant prepare --profile <profile> --url <https-url> [--asset <token>] --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]
 apn x402 merchant retire-unsent --operation <operation-id>
 apn x402 merchant status --operation <operation-id>
-apn relay arbitrum prepare --profile default --owner <arbitrum-account> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
-apn relay arbitrum observe --operation <operation-id> --rpc-url <arbitrum-rpc>
-apn relay arbitrum approval-check --profile default --operation <operation-id> --rpc-url <arbitrum-rpc>
-apn relay arbitrum approval-execute --profile default --operation <operation-id> --rpc-url <arbitrum-rpc>
-apn relay arbitrum deposit-dispatch --profile default --operation <operation-id> --rpc-url <arbitrum-rpc>
-apn relay base prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
-apn relay base observe --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]
-apn relay prepare --profile default --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
-apn relay native prepare --profile <fixed-owner-profile> --recipient <pinned-destination-address> --amount-atomic <source-wei> --min-output-atomic <destination-wei> --max-deposit-network-fee-wei <source-wei> --idempotency-key <key>
-apn relay preflight --profile default --operation <operation-id> --rpc-url <ethereum-rpc>
-apn relay execute --operation <operation-id> --rpc-url <ethereum-rpc>
-apn relay native execute --operation <operation-id> --rpc-url <source-rpc>
-apn relay retire --profile <default|evm-live-buyer|evm-live-seller> --operation <operation-id>
-apn relay status --operation <operation-id>
-apn relay observe --operation <operation-id> --rpc-url <source-rpc> --bnb-rpc-url <destination-rpc>
+apn relay arbitrum prepare --profile <profile> --owner <arbitrum-account> --recipient <ethereum-address> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>
+apn relay arbitrum observe --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc> [--ethereum-rpc-url <ethereum-rpc>]
+apn relay arbitrum approval-check --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
+apn relay arbitrum approval-execute --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
+apn relay arbitrum deposit-dispatch --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>
+apn relay base prepare --profile <profile> --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
+apn relay base observe --profile <profile> --operation <operation-id> --rpc-url <base-rpc> [--ethereum-rpc-url <source-rpc>]
+apn relay prepare --profile <profile> --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>
+apn relay native prepare --profile <profile> --source-chain <eip155:56|eip155:8453> --destination-chain <eip155:137|eip155:143|eip155:4326> --recipient <address> --amount-atomic <source-wei> --min-output-atomic <destination-atomic> --max-deposit-network-fee-wei <source-wei> --idempotency-key <key>
+apn relay preflight --profile <profile> --operation <operation-id> --rpc-url <ethereum-rpc>
+apn relay execute --profile <profile> --operation <operation-id> --rpc-url <ethereum-rpc>
+apn relay native execute --profile <profile> --operation <operation-id> --rpc-url <source-rpc>
+apn relay retire --profile <profile> --operation <operation-id>
+apn relay status --profile <profile> --operation <operation-id>
+apn relay observe --profile <profile> --operation <operation-id> --rpc-url <source-rpc> --bnb-rpc-url <destination-rpc>
 apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>
 apn stargate native execute --operation <operation-id>
 apn stargate native observe --operation <operation-id>
@@ -801,13 +810,13 @@ apn wallet permission list --profile <profile>
 apn wallet permission sync --profile <profile> --expected-revision <positive-integer>
 apn wallet permission disable --profile <profile> --expected-revision <positive-integer>
 apn wallet permission forget --profile <profile> --expected-revision <positive-integer>
-apn wallet metamask native-transfer [--profile <profile>] --chain <chain> --idempotency-key <key>
+apn wallet metamask native-transfer --profile <profile> --chain <chain> --recipient <address> --amount-atomic <usdc> --idempotency-key <key>
 apn wallet metamask native-transfer-status --operation <id>
 apn wallet metamask native-transfer-observe --operation <id>
 apn wallet status [--profile <profile>]
 apn wallet balance [--profile <profile>] --rpc-url <https-url>
 apn wallet policy show --profile <profile>
-apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
+apn wallet policy set --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
 apn x402 inspect --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
 apn x402 fetch prepare --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
@@ -820,7 +829,7 @@ apn operation recover-provider-request --operation <operation-id> --provider-req
 apn operation recover-transaction-settlement --operation <operation-id> --transaction-hash <transaction-hash> --idempotency-key <key> --rpc-url <https-url>
 apn receipt get --operation <operation-id>
 apn wallet policy show-network --chain <caip2> --profile <profile>
-apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>]
+apn wallet policy set-network --chain <caip2> --profile <profile> --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
 apn x402 inspect-network --chain <caip2> --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
 apn x402 fetch prepare-network --chain <caip2> --profile <profile> --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true]
@@ -847,7 +856,7 @@ apn circle source submit --profile <profile> --expected-payer <base-address> --r
 apn sei funding prepare --profile <profile> --expected-payer <address> --amount-atomic <wei> --minimum-output-atomic <sei-wei> --maximum-fee-atomic <wei> --idempotency-key <key>
 apn sei funding approve --operation <operation-id>
 apn sei funding status --operation <operation-id>
-apn circle evm prepare --profile <profile> --destination-profile <profile> --destination-chain <string> --idempotency-key <idempotency_key> [--beneficiary <address>] [--gross-atomic <atomic_usdc>] [--max-issuer-fee-atomic <atomic_usdc>] [--min-mint-atomic <atomic_usdc>]
+apn circle evm prepare --profile <profile> --destination-profile <profile> --destination-chain <string> --idempotency-key <idempotency_key> --beneficiary <address> --gross-atomic <atomic_usdc> --max-issuer-fee-atomic <atomic_usdc> --min-mint-atomic <atomic_usdc>
 apn circle evm approve-source --operation <operation_id>
 apn circle evm adopt-external-mint --operation <operation_id> --transaction-hash <string>
 apn circle evm approve-mint --operation <operation_id>
@@ -928,57 +937,80 @@ apn swap solana orca execute --operation <operation_id>
 
 Relay commands are CLI-only: none of them is exposed as an MCP tool.
 
-`relay native prepare` admits exactly five finite native routes. The route is
-resolved from the fixed source profile and the pinned recipient; any other
-profile, payer or recipient is refused.
+Every Relay command names its profile with `--profile`; there is no default
+profile. An operation is visible only to the profile that prepared it, the payer
+is that profile's wallet, and admission is that profile's own active owner
+policy: `accounts.evm` equal to the wallet, the exact source asset on rail
+`bridge` with mechanism `{ provider: "relay", reference: <reference> }`, and its
+per-transfer and daily caps. The recipient, amount, minimum output and fee
+ceilings are required inputs and are shown on the foreground confirmation. A
+policy may optionally pin `recipients` (1 to 16 addresses) on the bridge
+admission; the pin is checked at prepare, approval, reservation and before the
+first send. Refunds are derived: the source refund goes to the payer and the
+destination refund to the recipient.
 
-| Mechanism reference | Profile and source account | Route | Recipient |
-| --- | --- | --- | --- |
-| `bnb-native-polygon-native-v1` | `evm-live-buyer` `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` | BNB → Polygon POL | default `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14` |
-| `bnb-native-monad-native-v1` | `evm-live-buyer` `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` | BNB → Monad MON | the same buyer account |
-| `bnb-native-monad-native-default-v1` | `default` `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14` | BNB → Monad MON | the same default account |
-| `base-native-mega-usdm-default-v1` | `evm-live-seller` `0x991e254B5C8e0AAf6c244eaa2706BAd059809b04` | Base ETH → MegaETH USDm | default `0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14` |
-| `base-native-polygon-native-buyer-v1` | `evm-live-seller` `0x991e254B5C8e0AAf6c244eaa2706BAd059809b04` | Base ETH → Polygon POL | buyer `0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7` |
+| Command | Route | Mechanism reference |
+| --- | --- | --- |
+| `relay prepare` | Ethereum USDC → BNB native | `ethereum-usdc-bnb-native-v1` |
+| `relay base prepare` | Ethereum USDC → Base ETH | `ethereum-usdc-base-eth-v1` |
+| `relay native prepare --source-chain eip155:56 --destination-chain eip155:137` | BNB → Polygon POL | `bnb-native-polygon-native-v1` |
+| `relay native prepare --source-chain eip155:56 --destination-chain eip155:143` | BNB → Monad MON | `bnb-native-monad-native-v1` |
+| `relay native prepare --source-chain eip155:8453 --destination-chain eip155:4326` | Base ETH → MegaETH USDm | `base-native-megaeth-usdm-v1` |
+| `relay native prepare --source-chain eip155:8453 --destination-chain eip155:137` | Base ETH → Polygon POL | `base-native-polygon-native-v1` |
+| `relay arbitrum prepare --recipient <address>` | Arbitrum USDC → Ethereum USDC | `arbitrum-usdc-ethereum-usdc-source-draft-v1` |
 
-Each route requires an active owner policy of that profile whose EVM account is
-the source account and which admits the source native asset on rail `bridge`
-with mechanism `{ provider: "relay", reference: <mechanism reference> }`; it
-saves a verified unsigned deposit. BNB routes refuse a quote whose deposit
-network fee exceeds the operator's `--max-deposit-network-fee-wei`. The two Base seller
-routes require exactly `50000000000000` wei principal and
-`--max-deposit-network-fee-wei 1000000000000` as the full fee budget; see
-[the fixed Base routes and fee checks](docs/relay-base-native.md).
+Operations saved by earlier releases under `bnb-native-monad-native-default-v1`,
+`base-native-mega-usdm-default-v1` or `base-native-polygon-native-buyer-v1`
+still load, execute, observe and retire under the policy pin they were prepared
+with; a new prepare never uses those references, so restage the policy with the
+reference in the table to prepare again.
 
-`relay native execute` accepts a saved operation of any of these five routes.
-It requires the same fixed profile, source account, recipient and route
-reference, the unchanged active policy revision and digest captured at
-preparation and its route pin, the encrypted local wallet of that profile,
-fresh source funding and nonce, and foreground terminal confirmation. It signs
-and marks one exact native deposit before the only send;
-an ambiguous send is observed by its saved hash and never repeated. Its source
-journal proves neither destination delivery nor paid acceptance. A crash before
-signed custody closes the attempt without a source effect, releases its exact
-usage reservation, and permits local retirement; it cannot sign again.
+Native prepares save a verified unsigned deposit. BNB routes refuse a quote
+whose deposit network fee exceeds `--max-deposit-network-fee-wei`. On Base that
+value is the full OP Stack fee budget (L2 gas, the L1 fee upper bound for the
+signed size and the operator fee); execution simulates the exact deposit and
+refuses before signing when the budget does not cover it. See
+[Base native routes](docs/relay-base-native.md).
 
-`relay execute` runs only saved Ethereum USDC source routes: Ethereum USDC to
-BNB native from `relay prepare`, and Ethereum USDC to Base ETH from
-`relay base prepare` with the fixed default account
-`0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14` as both payer and recipient. It
-requires the active route-specific policy pin and foreground terminal
-confirmation.
+`relay native execute` requires the operation's own profile and saved route, the
+unchanged active policy revision and digest captured at preparation and its
+route pin, the profile's encrypted local wallet, fresh source funding and nonce,
+and foreground terminal confirmation. It signs and marks one exact native
+deposit before the only send; an ambiguous send is observed by its saved hash
+and never repeated. Its source journal proves neither destination delivery nor
+paid acceptance. A crash before signed custody closes the attempt without a
+source effect, releases its exact usage reservation, and permits local
+retirement; it cannot sign again.
+
+`relay execute` runs the saved Ethereum USDC source routes (to BNB native from
+`relay prepare`, to Base ETH from `relay base prepare`): one approval, then one
+deposit, each signed once by the profile's wallet after foreground terminal
+confirmation and the active route-specific policy pin.
 
 `relay observe` reads one saved Ethereum USDC to BNB operation or one saved
-native operation of the five routes above; the Base ETH route is observed with
-`relay base observe`. For the Ethereum USDC to BNB operation, supply explicit
-credential-free public HTTPS Ethereum and BNB RPC URLs. It checks the finalized
-source deposit, the saved Relay status locator, and a safe BNB recipient credit
-with at most three Ethereum and eight BNB RPC POSTs. Their physical starts use
-the persisted provider-family scheduler with a minimum 750 ms interval across
-processes. A provider
-success bound to the source hash and one qualifying destination candidate can
-yield `operationalAcceptance: true`. The output always keeps
-`paidAcceptance: false` and `causalLinkCryptographicallyProven: false`.
-The command does not sign, submit, or update operation and effect journals.
+native operation; the Base ETH route is observed with `relay base observe`.
+Supply explicit credential-free public HTTPS source and destination RPC URLs
+(`--bnb-rpc-url` is the destination RPC option name for every route). It checks
+the finalized source deposit, the saved Relay status locator, and a safe credit
+to the operation's own recipient: one proof per destination chain (Polygon at
+its milestone-finalized checkpoint, Monad at 15 blocks, BNB, Base and MegaETH
+at `safe`), with at most two source and two destination RPC POSTs. Their
+physical starts use the persisted provider-family scheduler with a minimum
+750 ms interval across processes. A provider success bound to the source hash
+and one qualifying destination candidate can yield `operationalAcceptance:
+true`; one destination payout can accept one operation only. The output always
+keeps `paidAcceptance: false` and `causalLinkCryptographicallyProven: false`.
+The command does not sign or submit.
+
+`relay arbitrum observe` proves the saved Arbitrum approval and deposit at
+Arbitrum safe finality. With `--ethereum-rpc-url`, a final deposit continues in
+the same invocation: one keyless Relay status read names the candidate payout
+(a discovery hint only), and at most seven Ethereum RPC POSTs prove one canonical
+safe Ethereum USDC Transfer to the operation's own recipient. An accepted credit
+takes the create-only payout claim (one payout accepts one operation) and an
+operation record; the result is `operationalAcceptance: true` with
+`terminal: true`, and later observations return the record without network
+reads. Without `--ethereum-rpc-url` the command reads Arbitrum only, as before.
 
 `apn doctor keychain` performs a read-only query against the ordinary login
 Keychain. An `ok: true` result means the Keychain command path is usable; an
@@ -1085,4 +1117,4 @@ track under `packaging/`; it is not required by the Formula installation.
 
 Licensed under the MIT License.
 
-Finite seller Base ETH funding to MegaETH USDm and Polygon POL uses the existing durable Relay native commands; see [the fixed routes and fee checks](docs/relay-base-native.md).
+Base ETH to MegaETH USDm and Polygon POL use the durable Relay native commands for any profile; see [Base native routes](docs/relay-base-native.md).
