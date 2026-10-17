@@ -9,8 +9,9 @@ import { installLegacyCase } from "./legacy-corpus-readers.js";
 export const GOLDEN_CASES = ["61-unreleased-stargate-native-v1", "62-unreleased-stargate-token-v1", "63-unreleased-stargate-token-v2",
   "64-unreleased-stargate-token-v3", "65-unreleased-stargate-token-v4"] as const;
 export const CORPUS = join("tests", "fixtures", "legacy-corpus");
-/** Read-only copies of the owner's six unreleased-schema records (and one v5 record); owner data, never committed. */
-export const OWNER_COPIES = "<local-path>";
+/** A directory of read-only copies of real unreleased-schema records (owner data, never committed), named by
+ * `APN_STARGATE_LEGACY_COPIES`; the test that reads them skips when it is unset. */
+export const OWNER_COPIES = process.env.APN_STARGATE_LEGACY_COPIES;
 export const DIRECTORY: Readonly<Record<LegacyStargateFamily, string>> = { stargate_native: "stargate-v2-native", stargate_token: "stargate-v2-token" };
 export const TERMINAL_PHASES: Readonly<Record<LegacyStargateFamily, readonly string[]>> = {
   stargate_native: ["observed", "failed_confirmed_revert"], stargate_token: ["observed", "cleaned"] };
@@ -44,12 +45,13 @@ export async function seedRecords(root: string, files: readonly { readonly direc
   }
 }
 export async function ownerCopies(): Promise<readonly { readonly directory: string; readonly name: string; readonly bytes: string }[] | null> {
-  const files: { directory: string; name: string; bytes: string }[] = [];
+  if (OWNER_COPIES === undefined || OWNER_COPIES === "") return null;
+  const root = OWNER_COPIES, files: { directory: string; name: string; bytes: string }[] = [];
   for (const directory of Object.values(DIRECTORY)) {
     let names: string[];
-    try { names = await readdir(join(OWNER_COPIES, directory)); }
+    try { names = await readdir(join(root, directory)); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
-    for (const name of names.filter(file => /^[a-f0-9]{64}\.json$/u.test(file))) files.push({ directory, name, bytes: await readFile(join(OWNER_COPIES, directory, name), "utf8") });
+    for (const name of names.filter(file => /^[a-f0-9]{64}\.json$/u.test(file))) files.push({ directory, name, bytes: await readFile(join(root, directory, name), "utf8") });
   }
   return files;
 }
