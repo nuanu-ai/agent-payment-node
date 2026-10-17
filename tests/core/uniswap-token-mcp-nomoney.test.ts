@@ -76,7 +76,9 @@ async function session(root: string, t: test.TestContext) {
   const client = new Client({ name: "uniswap-token-offline-acceptance", version: "1" }); await client.connect(clientTransport);
   t.after(async () => { await client.close(); await server.close(); });
   const call = async (action: string, args: Record<string, unknown>): Promise<OutputEnvelope> => {
-    const result = await client.callTool({ name: `apn_swap_ethereum_uniswap_token_${action}`, arguments: args });
+    const result = ["approve", "execute", "cleanup"].includes(action)
+      ? await client.callTool({ name: "apn_foreground_handoff", arguments: { command: `swap ethereum uniswap-token ${action}`, arguments: args } })
+      : await client.callTool({ name: `apn_swap_ethereum_uniswap_token_${action}`, arguments: args });
     const content = result.content[0]; if (content?.type !== "text") throw new Error("expected MCP text result");
     return JSON.parse(content.text) as OutputEnvelope;
   };

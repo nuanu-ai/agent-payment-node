@@ -16,13 +16,13 @@ test("Jupiter MCP approval and execution hand off to the foreground CLI without 
   await server.connect(serverTransport);
   const client = new Client({ name: "apn-jupiter-mcp-handoff", version: "1.0.0" }); await client.connect(clientTransport);
   t.after(async () => { await client.close(); await server.close(); });
-  const call = async (name: string): Promise<OutputEnvelope> => {
-    const result = await client.callTool({ name, arguments: { operation: "b".repeat(64) } });
+  const call = async (command: string): Promise<OutputEnvelope> => {
+    const result = await client.callTool({ name: "apn_foreground_handoff", arguments: { command, arguments: { operation: "b".repeat(64) } } });
     const content = result.content[0]; if (content?.type !== "text") throw new Error("expected text");
     return JSON.parse(content.text) as OutputEnvelope;
   };
   for (const action of ["approve", "execute"] as const) {
-    const refused = await call(`apn_swap_solana_jupiter_${action}`);
+    const refused = await call(`swap solana jupiter ${action}`);
     assert.equal(refused.ok, false); assert.equal(refused.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.equal(refused.error?.details?.cli_handoff, `apn swap solana jupiter ${action} --operation ${"b".repeat(64)}`);
     assert.equal(refused.error?.details?.foreground_auth, true);

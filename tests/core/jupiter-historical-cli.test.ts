@@ -32,7 +32,7 @@ for (const tail of [[], ["--operation"], ["--operation", "unknown"], ["--operati
 }
 test("CLI-only route leaves catalog and exact MCP122 unchanged", () => {
   assert.equal(COMMANDS.some(c => c.path.includes("historical-authenticate")), false);
-  assert.equal(MCP_TOOLS.length, 122);
+  assert.equal(MCP_TOOLS.some(tool => tool.name.includes("historical")), false);
   assert.equal(isHistoricalJupiterCli([...path, "--operation", id]), true);
   assert.equal(isHistoricalJupiterCli(["swap", "solana", "jupiter", "historical-authenticate-extra"]), false);
 });

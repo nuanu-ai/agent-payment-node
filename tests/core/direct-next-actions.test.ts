@@ -3,7 +3,6 @@ import test from "node:test";
 import { ApnCore } from "../../src/core.js";
 import { ApnError } from "../../src/errors.js";
 import { failureEnvelope } from "../../src/output.js";
-import { RejectingMcpRailApproval } from "../../src/mcp-transfer-approval.js";
 import { asRateLimited } from "../../src/rpc-rate-limit.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -47,6 +46,4 @@ test("default next actions no longer send every RPC configuration failure to a B
   assert.doesNotMatch(config.next_actions.join(" "), /Base/u);
   assert.match(config.next_actions[0] ?? "", /RPC setting named in the error \(its --rpc-url or APN_\*_RPC_URL\)/u);
   assert.match(failureEnvelope("x", "r", new ApnError("APN_REPREPARE_REQUIRED", "swap quote expired")).next_actions[0] ?? "", /^Prepare a new operation/u);
-  const tron = { account: { rail: "tron", profile: "owner" }, operationId: "a".repeat(64) } as unknown as Parameters<RejectingMcpRailApproval["approve"]>[0];
-  await assert.rejects(new RejectingMcpRailApproval().approve(tron), (error: ApnError) => /APN_TRON_RPC_URL/u.test(error.message));
 });

@@ -921,11 +921,11 @@ test("public stable execute uses persisted owner policy, factory RPC and one phy
   const client = new Client({ name: "stable-execute-handoff", version: "1" });
   await client.connect(clientTransport);
   t.after(async () => { await client.close(); await server.close(); });
-  const handoff = await client.callTool({ name: "apn_swap_solana_orca_stable_execute",
-    arguments: { operation: prepared.operation.operationId } });
+  const handoff = await client.callTool({ name: "apn_foreground_handoff",
+    arguments: { command: "swap solana orca stable-execute", arguments: { operation: prepared.operation.operationId } } });
   assert.equal((handoff.structuredContent as any).error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
-  const recoveryHandoff = await client.callTool({ name: "apn_swap_solana_orca_stable_recover_no_send",
-    arguments: { operation: prepared.operation.operationId } });
+  const recoveryHandoff = await client.callTool({ name: "apn_foreground_handoff",
+    arguments: { command: "swap solana orca stable-recover-no-send", arguments: { operation: prepared.operation.operationId } } });
   assert.equal((recoveryHandoff.structuredContent as any).error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.equal(posts.length, 0, "MCP handoff must never enter the RPC or signer");
   const denied = await runCli(argv, {}, { ...options,

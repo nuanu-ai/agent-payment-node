@@ -219,7 +219,7 @@ test("the installed factory wires the keyless runtime and MCP hands approve and 
   assert.equal((listed.data as any).keyless.mechanismPin.constructorKind, "sdk"); assert.equal((listed.data as any).ownerAdmission.evaluated, false);
   const operation = "c".repeat(64);
   for (const action of ["approve", "execute"]) {
-    const refused = await call(`apn_swap_tron_sunswap_${action}`, { operation });
+    const refused = await call("apn_foreground_handoff", { command: `swap tron sunswap ${action}`, arguments: { operation } });
     assert.equal(refused.ok, false); assert.equal(refused.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.equal(refused.error?.details?.cli_handoff, `apn swap tron sunswap ${action} --operation ${operation}`);
   }

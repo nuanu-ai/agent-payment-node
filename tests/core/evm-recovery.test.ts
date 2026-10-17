@@ -71,7 +71,7 @@ for (const { chainId, kind, approvalState } of mcpLifecycleScenarios) test(`MCP 
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair(); await server.connect(serverTransport);
   const client = new Client({ name: "apn-evm-parity-test", version: "1.0.0" }); await client.connect(clientTransport);
   context.after(async () => { await client.close(); await server.close(); });
-  const invoke = async (name: string, input: Record<string, string>) => (await client.callTool({ name, arguments: input })).structuredContent as unknown as OutputEnvelope;
+  const invoke = async (name: string, input: Record<string, unknown>) => (await client.callTool({ name, arguments: input })).structuredContent as unknown as OutputEnvelope;
   const selection = { profile: "default", chain: `eip155:${chainId}`, asset, rpc_url: "https://rpc.example" };
   const balance = await invoke("apn_wallet_balance_asset", selection); assert.equal(balance.ok, true, JSON.stringify(balance));
   const prepared = await invoke("apn_pay_transfer_prepare_asset", { ...selection, to: EVM_REQUEST.recipient, amount: EVM_REQUEST.amount, max_fee_wei: EVM_REQUEST.maxFeeWei, idempotency_key: EVM_REQUEST.idempotencyKey });
@@ -79,7 +79,7 @@ for (const { chainId, kind, approvalState } of mcpLifecycleScenarios) test(`MCP 
   const operation = prepared.operation as { operation_id: string };
   const before = await setup.state.findOperation(operation.operation_id);
   const loads = setup.wrapping.loads, rpcCalls = setup.rpc.genericBalanceCalls;
-  const handoff = await invoke("apn_pay_transfer_approve", { operation: operation.operation_id, rpc_url: selection.rpc_url });
+  const handoff = await invoke("apn_foreground_handoff", { command: "pay transfer approve", arguments: { operation: operation.operation_id, rpc_url: selection.rpc_url } });
   assert.equal(handoff.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED", JSON.stringify(handoff));
   assert.deepEqual(await setup.state.findOperation(operation.operation_id), before);
   assert.equal(setup.wrapping.loads, loads); assert.equal(setup.rpc.genericBalanceCalls, rpcCalls); assert.equal(setup.rpc.submissions.length, 0);

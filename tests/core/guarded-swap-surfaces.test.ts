@@ -5,7 +5,7 @@ import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
 import { COMMANDS } from "../../src/command-catalog.js";
 import { ApnCore } from "../../src/core.js";
 import { createApnCore } from "../../src/runtime-factory.js";
-import { MCP_TOOLS } from "../../src/mcp-projection.js";
+import { MCP_FOREGROUND_HANDOFF, MCP_TOOLS } from "../../src/mcp-projection.js";
 import { StateStore } from "../../src/state.js";
 import {
   JUPITER_SWAP_API_V2, JUPITER_V6_PROGRAM, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, SUNSWAP_PIN_CATALOG,
@@ -34,16 +34,18 @@ test("guarded swap families expose six parity actions plus explicit token cleanu
     [...("stableReads" in family ? STABLE_ACTIONS : []), ...ACTIONS, ...(family.cleanup ? ["cleanup"] : [])]
       .map((action) => `${family.path} ${action}`)));
   const tools = MCP_TOOLS.filter((row) => row.command.path[0] === "swap");
-  assert.equal(tools.length, 40);
-  assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_execute"), true);
+  const foreground = MCP_FOREGROUND_HANDOFF.commands.filter((row) => row.path[0] === "swap");
+  assert.equal(tools.length, 26); assert.equal(foreground.length, 14);
+  assert.equal(MCP_TOOLS.some((row) => row.name === "apn_swap_solana_orca_stable_execute"), false);
+  assert.equal(foreground.some((row) => row.path.join(" ") === "swap solana orca stable-execute"), true);
   assert.equal(bindArgv(["swap", "solana", "orca", "stable-execute", "--operation", H("a")]).request.command,
     "swap.orca.stable-execute");
-  assert.deepEqual(tools.map((row) => row.command), catalog);
+  assert.deepEqual([...tools.map((row) => row.command), ...foreground].sort((a, b) => catalog.indexOf(a) - catalog.indexOf(b)), catalog);
   for (const command of catalog) {
-    const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "))!;
+    const tool = tools.find((row) => row.command.path.join(" ") === command.path.join(" "));
     const fields = command.options.map((option) => option.name.slice(2).replaceAll("-", "_"));
-    assert.deepEqual(Object.keys(tool.inputSchema.properties), fields);
-    assert.deepEqual(tool.inputSchema.required, fields);
+    if (tool === undefined) assert.equal(command.approval.class, "foreground_tty");
+    else { assert.deepEqual(Object.keys(tool.inputSchema.properties), fields); assert.deepEqual(tool.inputSchema.required, fields); }
     const input = Object.fromEntries(command.options.map((option) => [option.name.slice(2).replaceAll("-", "_"), sample(option.name, command.path[1]!) ]));
     assert.deepEqual(bindMcpInput(command, input), bindArgv([...command.path, ...command.options.flatMap((option) => [option.name, String(input[option.name.slice(2).replaceAll("-", "_")])]) ]));
   }
