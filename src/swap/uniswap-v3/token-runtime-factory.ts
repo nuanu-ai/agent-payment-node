@@ -19,7 +19,8 @@ import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
-import type { TokenRpcCall } from "./token-rpc.js";
+import { tokenFinalizedBatch, type TokenRpcCall } from "./token-rpc.js";
+import { checkNeverLands } from "../../evm-finalized-proof.js";
 
 export function createUniswapTokenRuntime(input: { readonly state: StateStore; readonly wrapping: WrappingSecretPort;
   readonly clock: ClockPort; readonly call: EvmRpcCall; readonly foreground: "approve" | "cleanup" | "refuse";
@@ -42,6 +43,9 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
     recoverSealed: async (op, kind, nonce) => await custody.probeJournaled(op, kind, nonce),
     send: async (op, kind) => await custody.send(op, kind), observe: async (op, kind, hash) => {
       await custody.bindEffectProvider(op, kind, hash); return await observer.observe(op, kind, hash); },
+    neverLands: async (op, kind, attempt) => { await custody.bindEffectProvider(op, kind, attempt.transactionHash!);
+      return await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash! },
+        tokenFinalizedBatch(call as TokenRpcCall)); },
     foregroundApprove: async (op) => { await approveOwner(op); await foreground(input.foreground === "approve", op, false, clock.now(), input.tty); await approveOwner(op); },
     foregroundCleanup: async (op) => { await approveOwner(op); await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty); await approveOwner(op); },
     confirm: async (material) => await guard.confirm(material),
@@ -54,7 +58,9 @@ async function foreground(enabled: boolean, op: UniswapTokenOperation, cleanup: 
   if (!enabled) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Uniswap token approval must continue in the foreground CLI.",
     { reason: "swap_foreground_cli_required" });
   const lines = cleanup ? ["Agent Payment Node Uniswap token allowance cleanup", `Profile: ${op.profile}`, `Operation: ${op.operationId}`,
-    `Token/spender: ${op.route.inputToken} / ${op.route.router}`, "Replacement allowance: 0", `Reason: ${op.cleanupReason ?? "residual_allowance"}`] :
+    `Token/spender: ${op.route.inputToken} / ${op.route.router}`, "Replacement allowance: 0", `Reason: ${op.cleanupReason ?? "residual_allowance"}`,
+    `Native debit so far: ${op.accumulatedNativeDebitWei} wei; aggregate cap with this cleanup: ${op.maximumNativeDebitWei} wei`,
+    ...(op.retiredEffects ?? []).filter((row) => row.kind === "cleanup").map((row) => `Earlier cleanup ${row.attempt.transactionHash}: ${row.reason}`)] :
     ["Agent Payment Node Uniswap V3 token swap approval", `Profile: ${op.profile}`, `Operation: ${op.operationId}`, `Signer: ${op.account}`,
       `Exact input: ${op.route.amountIn} atomic at ${op.route.inputToken}`, `Minimum output: ${op.route.amountOutMinimum} atomic at ${op.route.outputToken}`,
       `Recipient: ${op.route.recipient}`, `Router: ${op.route.router}`, `Exact approval cap: ${op.approvalCapAtomic}`,

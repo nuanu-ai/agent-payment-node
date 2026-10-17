@@ -12,6 +12,7 @@ import { validateBridgeOperation } from "../../src/lifi/operation-validation.js"
 import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import { LIFI_DESTINATION_HASH, LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 function previousCurrentReceipt(op: BridgeOperationRecord): Record<string, any> {
   const previous = structuredClone(bridgeReceipt(op)) as Record<string, any>;
@@ -44,7 +45,7 @@ for (const pair of ["eth-base", "base-arb", "arb-eth"] as const) for (const tool
     assert.equal(operation.effects.length, 2); assert.equal(operation.effects[1]!.envelope.provisionalGas, true);
     assert.equal(s.source.calls.includes("estimate:bridge"), false); assert.equal(s.source.submissions.length, 0);
     const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-    const record = (await s.core.bridges.records.findOperation(id))!;
+    const record = (await findStored(s.core.bridges.records, id))!;
     assert.equal(record.state, "completed"); assert.equal(result.proof_class, "rpc_safe_correlated");
     assert.deepEqual(record.effects.map((e) => [e.role, e.submissionAttempts, e.phase]), [["approval", 1, "safe_success"], ["bridge", 1, "safe_success"]]);
     assert.ok(s.source.calls.indexOf("send") < s.source.calls.indexOf("estimate:bridge"));
@@ -57,7 +58,7 @@ for (const pair of ["eth-base", "base-arb", "arb-eth"] as const) for (const tool
     for (const raw of s.source.submissions) assert.equal(serialized.includes(raw), false);
     const snapshot = JSON.stringify(record), calls = s.source.calls.length;
     await s.core.execute({ command: "operation.resume", operationId: id }); await s.core.execute({ command: "bridge.approve", operationId: id });
-    assert.equal(JSON.stringify(await s.core.bridges.records.findOperation(id)), snapshot); assert.equal(s.source.calls.length, calls);
+    assert.equal(JSON.stringify(await findStored(s.core.bridges.records, id)), snapshot); assert.equal(s.source.calls.length, calls);
   });
 }
 
@@ -78,7 +79,7 @@ test("LI.FI bridge sends after included approval without waiting for safe, and c
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.source.safeApproval = false;
   const { id } = await s.prepare(); const first = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(first.ok, true, first.error?.message); assert.equal(s.source.submissions.length, 2);
-  const pending = (await s.core.bridges.records.findOperation(id))!; assert.equal(pending.state, "source_pending");
+  const pending = (await findStored(s.core.bridges.records, id))!; assert.equal(pending.state, "source_pending");
   assert.equal(pending.effects[0]!.phase, "included_success"); assert.equal(pending.effects[1]!.phase, "safe_success"); assert.equal(pending.destinationProof, null);
   s.source.safeApproval = true;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
@@ -119,7 +120,7 @@ test("LI.FI exhausted invocation budget leaves an effect unsigned for a fresh re
   };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
-  const stored = (await s.core.bridges.records.findOperation(id))!;
+  const stored = (await findStored(s.core.bridges.records, id))!;
   assert.equal(stored.effects[0]!.phase, "unsealed"); assert.equal(s.source.submissions.length, 0);
   const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
   const resumed = await restart.core.execute({ command: "operation.resume", operationId: id });
@@ -141,7 +142,7 @@ test("LI.FI exhausted send slot preserves one durable seal for a fresh resume", 
   };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
-  const stored = (await s.core.bridges.records.findOperation(id))!;
+  const stored = (await findStored(s.core.bridges.records, id))!;
   assert.equal(stored.effects[0]!.phase, "sealed"); assert.equal(stored.effects[0]!.submissionAttempts, 0);
   assert.equal(s.source.submissions.length, 0);
   const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
@@ -156,11 +157,11 @@ test("LI.FI expiry after paid approval preserves its fee and residual allowance,
   const { id } = await s.prepare(); const send = s.source.send.bind(s.source);
   s.source.send = async (raw) => { const hash = await send(raw); s.now.setTime(s.now.getTime() + 301_000); return hash; };
   const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, true, first.error?.message);
-  const pending = (await s.core.bridges.records.findOperation(id))!; assert.equal(pending.state, "unknown_finality");
+  const pending = (await findStored(s.core.bridges.records, id))!; assert.equal(pending.state, "unknown_finality");
   assert.match(pending.failure!.reason, /^unsent_/); assert.equal(pending.effects[1]!.phase, "unsealed"); assert.equal(s.source.submissions.length, 1);
   s.source.safeApproval = true;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!; assert.equal(record.state, "failed_after_approval");
+  const record = (await findStored(s.core.bridges.records, id))!; assert.equal(record.state, "failed_after_approval");
   assert.deepEqual(record.effects.map((effect) => [effect.role, effect.phase, effect.submissionAttempts]),
     [["approval", "safe_success", 1], ["bridge", "unsealed", 0]]);
   assert.ok(BigInt(record.effects[0]!.safeProof!.actualTotalFeeWei) > 0n); assert.equal(record.failure!.residualAllowance!.amountAtomic, s.request.amountAtomic);
@@ -170,7 +171,7 @@ test("LI.FI expiry after paid approval preserves its fee and residual allowance,
 for (const role of ["approval", "bridge"] as const) test(`LI.FI ${role} safe revert retains paid fees without destination success`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.source.reverted.add(role);
   const { id } = await s.prepare(); const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!; assert.equal(record.state, "failed_confirmed_revert");
+  const record = (await findStored(s.core.bridges.records, id))!; assert.equal(record.state, "failed_confirmed_revert");
   assert.equal(record.destinationProof, null); assert.equal(s.source.submissions.length, role === "approval" ? 1 : 2);
   assert.ok(BigInt(record.effects.find((e) => e.role === role)!.safeProof!.actualTotalFeeWei) > 0n);
 });
@@ -191,7 +192,7 @@ for (const reason of ["refusal", "expiry", "last-slot", "nonce", "allowance", "c
     return reason !== "refusal";
   };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!; assert.equal(record.state, "failed_before_effect");
+  const record = (await findStored(s.core.bridges.records, id))!; assert.equal(record.state, "failed_before_effect");
   assert.equal(s.source.submissions.length, 0); assert.equal(s.wrapping.loads, loads);
   assert.ok(record.effects.every((e) => e.phase === "unsealed"));
 });
@@ -201,7 +202,7 @@ for (const boundary of ["signing_started", "sealed", "submitting", "submitted_pe
   const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
   s.core.bridges.records.persist = async (op) => { await persist(op); if (op.effects[0]!.phase === boundary) throw new Error("synthetic interruption after the durable write"); };
   const interrupted = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(interrupted.ok, false);
-  const stored = (await s.core.bridges.records.findOperation(id))!; assert.equal(stored.effects[0]!.phase, boundary);
+  const stored = (await findStored(s.core.bridges.records, id))!; assert.equal(stored.effects[0]!.phase, boundary);
   const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
   const resumed = await restart.core.execute({ command: "operation.resume", operationId: id });
   // signing_started without sealed material or a SEND claim signed nothing: resume re-runs the guard and re-seals the same envelope.
@@ -215,7 +216,7 @@ test("LI.FI ambiguous accepted submission recovers after expiry with the origina
   const { id } = await s.prepare(); const send = s.source.send.bind(s.source);
   s.source.send = async (raw) => { await send(raw); s.source.missingHashes.add(keccak256(raw)); throw new Error("synthetic timeout"); };
   const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, true, first.error?.message);
-  const initial = (await s.core.bridges.records.findOperation(id))!; assert.equal(initial.state, "unknown_finality");
+  const initial = (await findStored(s.core.bridges.records, id))!; assert.equal(initial.state, "unknown_finality");
   const uncertain = bridgeReceipt(initial);
   assert.equal(uncertain.fees.actual_source_fees_wei, null); assert.equal(uncertain.fees.unresolved_source_fee_effects.length, 1);
   assert.equal(uncertain.fees.unresolved_source_fee_effects[0]!.included_fee_wei, null);
@@ -227,7 +228,7 @@ test("LI.FI ambiguous accepted submission recovers after expiry with the origina
   s.source.missingHashes.clear();
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
   assert.equal((result.operation as { state: string }).state, "completed"); assert.equal(s.source.submissions.length, 1);
-  assert.equal((await s.core.bridges.records.findOperation(id))!.effects[0]!.transactionHash, initial.effects[0]!.transactionHash);
+  assert.equal((await findStored(s.core.bridges.records, id))!.effects[0]!.transactionHash, initial.effects[0]!.transactionHash);
 });
 
 test("LI.FI missing sealed material is never regenerated and an expired preserved seal is never submitted", async (t) => {
@@ -235,7 +236,7 @@ test("LI.FI missing sealed material is never regenerated and an expired preserve
   const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
   s.core.bridges.records.persist = async (op) => { await persist(op); if (op.effects[0]!.phase === "sealed") throw new Error("stop at seal"); };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false);
-  const op = (await s.core.bridges.records.findOperation(id))!, path = join(temporary.root, "bridge-effects", op.profileHash, `${id}-bridge.json`);
+  const op = (await findStored(s.core.bridges.records, id))!, path = join(temporary.root, "bridge-effects", op.profileHash, `${id}-bridge.json`);
   const bytes = await readFile(path); await unlink(path); s.core.bridges.records.persist = persist;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).error?.code, "APN_PROVIDER_EFFECT_UNAVAILABLE");
   await writeFile(path, bytes, { mode: 0o600 }); s.now.setTime(s.now.getTime() + 301_000);
@@ -293,7 +294,7 @@ test("LI.FI pre-telemetry receipt is returned as written for its transition and 
   const s = await lifiFixture(temporary.root, "base-arb"); s.source.sendTimeout = true; s.source.failObserve = true;
   const { id } = await s.prepare("stargateV2", "pre-observation-telemetry-receipt");
   const submitted = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(submitted.ok, true, submitted.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!;
+  const current = (await findStored(s.core.bridges.records, id))!;
   assert.deepEqual(current.effects.map((effect) => [effect.role, effect.submissionAttempts]), [["approval", 1], ["bridge", 0]]);
   const historical = beforeObservationTelemetryWriter(current), operationPath = join(temporary.root, "bridge-operations", historical.profileHash, `${id}.json`),
     receiptPath = join(temporary.root, "bridge-receipts", historical.profileHash, `${id}.json`), historicalReceipt = receiptBeforeObservationTelemetry(historical);
@@ -306,7 +307,7 @@ test("LI.FI pre-telemetry receipt is returned as written for its transition and 
   await rm(receiptPath);
   assert.deepEqual((await s.core.bridges.records.loadReceipt(historical.profileHash, id) as any).observation_rpc_telemetry, []);
   await writeFile(receiptPath, `${canonicalJson(historicalReceipt)}\n`, { mode: 0o600 });
-  const loaded = (await s.core.bridges.records.findOperation(id))!;
+  const loaded = (await findStored(s.core.bridges.records, id))!;
   assert.deepEqual(loaded.effects.map((effect) => [effect.role, effect.submissionAttempts, effect.transactionHash]),
     historical.effects.map((effect) => [effect.role, effect.submissionAttempts, effect.transactionHash]));
 

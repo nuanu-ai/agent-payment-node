@@ -8,6 +8,7 @@ import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState, savedBridgeOperations } from "./helpers.js";
 import { LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 for (const [pair, tool] of [["base-arb", "across"], ["arb-eth", "stargateV2"]] as const) {
   test(`common owner policy gates and settles LI.FI ${tool} ${pair}`, async (t) => {
@@ -20,7 +21,7 @@ for (const [pair, tool] of [["base-arb", "across"], ["arb-eth", "stargateV2"]] a
     assert.equal(binding.amountAtomic, s.request.amountAtomic); assert.equal(binding.selfRecipient, s.request.recipient);
     const completed = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
     assert.equal(completed.ok, true, completed.error?.message);
-    const record = (await s.core.bridges.records.findOperation(prepared.id))!;
+    const record = (await findStored(s.core.bridges.records, prepared.id))!;
     assert.equal(record.state, "completed"); assert.equal(s.source.submissions.length, 2);
     const lease = await new AssetUsageLedger(temporary.root).load({ account: binding.account, chain: binding.chain, asset: binding.asset }, record.usageLease!.reservationId);
     assert.equal(lease?.state, "finalized");

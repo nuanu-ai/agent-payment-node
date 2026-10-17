@@ -22,10 +22,6 @@ export class GaslessOperationRepository extends SecureStateStore {
     if (op.profileHash !== profileHash || op.operationId !== operationId) gaslessCorrupt();
     return op;
   }
-  async findOperation(operationId: string): Promise<GaslessOperationRecord | null> {
-    stateIdentifier(operationId, "gasless operation ID");
-    return await this.findInProfiles("gasless-operations", async (profileHash) => await this.loadOperation(profileHash, operationId), gaslessCorrupt);
-  }
   async writeOperation(op: GaslessOperationRecord): Promise<void> {
     validateGaslessOperation(op); await this.ready();
     if (Buffer.byteLength(canonicalJson(op), "utf8") + 1 > 1024 * 1024) gaslessFailure("APN_OPERATION_BLOCKED", "gasless_record_capacity");

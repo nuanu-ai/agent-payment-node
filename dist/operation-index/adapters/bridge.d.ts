@@ -5,6 +5,6 @@ export declare function bridgeDomains(record: StoredBridgeOperationRecord): read
 /**
  * Current and legacy (widen-only) bridge journals, through the repository's version-aware reader. A legacy journal is
  * frozen (resume refuses it, nothing signs for it again), so it holds only its account, not its profile: only a
- * transaction it already sent may still land on that account.
+ * transaction it already sent may still land on that account. It is terminal in its outcome states or by its closure.
  */
 export declare const bridgeAdapter: OperationFamilyAdapter<StoredBridgeOperationRecord>;

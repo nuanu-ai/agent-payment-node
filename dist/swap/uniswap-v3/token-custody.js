@@ -6,7 +6,7 @@ import { ApnError } from "../../errors.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../../evm-address-ownership.js";
 import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
-import { UniswapTokenJournal } from "./token-operation.js";
+import { tokenEffectRound, UniswapTokenJournal } from "./token-operation.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
 import { UniswapTokenNonceStore } from "./token-nonce.js";
 import { tokenBatch, tokenBlock, tokenChain, tokenHex, tokenQuantity } from "./token-rpc.js";
@@ -63,6 +63,9 @@ export class UniswapTokenCustody {
             if (op === null)
                 return null;
             const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
+            // A slot whose attempt was retired (it can no longer land) keeps its nonce spent; a freed slot holds nothing.
+            if ((op.retiredEffects ?? []).some((row) => row.kind === kind && row.attempt.nonce === nonce))
+                return "committed";
             if (attempt === null)
                 return null;
             if (op.account !== account || attempt.nonce !== nonce)
@@ -237,7 +240,11 @@ export function envelopeOf(op, kind, nonce) {
     return { chainId: 1, from: op.account, to: call.to, data: call.data, value: "0", nonce,
         gasLimit: gas.gasLimit, maxFeePerGas: gas.maxFeePerGas, maxPriorityFeePerGas: gas.maxPriorityFeePerGas };
 }
-function effectKey(op, kind) { return domainHash("apn.uniswap-token-wallet-effect.v1", canonicalJson({ operationId: op.operationId, kind })); }
+/** Round 0 keeps the original custody key; a re-armed cleanup signs under its own round. */
+function effectKey(op, kind) {
+    const round = tokenEffectRound(op, kind);
+    return domainHash("apn.uniswap-token-wallet-effect.v1", canonicalJson(round === 0 ? { operationId: op.operationId, kind } : { operationId: op.operationId, kind, round }));
+}
 function corrupt(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-custody.js.map

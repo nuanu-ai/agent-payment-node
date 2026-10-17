@@ -52,6 +52,7 @@ import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js"
 import type { OrcaStableLegacyFinisher } from "./legacy/orca-stable/finisher.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
+import type { FinalizedReader } from "./evm-finalized-proof.js";
 
 export interface RelayExecutionConfirmationSummary {
   readonly operationId: string;
@@ -134,6 +135,8 @@ export interface CoreDependencies {
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
   readonly operationAbandonApproval?: OperationAbandonApprovalPort;
+  /** Keyless public reads at a chain's finalized tag, for the R4 proofs of operations no family runtime observes. */
+  readonly finalizedRead?: FinalizedReader;
 }
 
 export class RuntimeContext {
@@ -198,6 +201,7 @@ export class RuntimeContext {
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
   readonly operationAbandonApproval?: OperationAbandonApprovalPort;
+  readonly finalizedRead?: FinalizedReader;
   private readonly coinbaseRpcFactory?: () => RpcPort;
   private coinbaseRpcInstance?: RpcPort;
   private initialized: Promise<void> | undefined;
@@ -264,6 +268,7 @@ export class RuntimeContext {
     if (dependencies.providerTransactionEvidence !== undefined) this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
     if (dependencies.providerAuthorizationStore !== undefined) this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
     if (dependencies.operationAbandonApproval !== undefined) this.operationAbandonApproval = dependencies.operationAbandonApproval;
+    if (dependencies.finalizedRead !== undefined) this.finalizedRead = dependencies.finalizedRead;
   }
 
   async ready(): Promise<void> {

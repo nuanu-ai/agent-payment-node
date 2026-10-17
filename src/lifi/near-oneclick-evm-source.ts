@@ -1,6 +1,7 @@
 import { encodeFunctionData, getAddress, keccak256, pad, parseAbi, type Hex } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
+import { checkNeverLands, publicFinalizedRead } from "../evm-finalized-proof.js";
 import { CircleBaseJsonRpc } from "./circle-v2-source-service.js";
 import type { BridgeHttps } from "./https.js";
 import type { OneClickLane } from "./near-oneclick-lanes.js";
@@ -141,6 +142,16 @@ export class OneClickEvmSource {
   async send(raw: Hex): Promise<Hex> { return await this.rpc.send(raw); }
   /** Whether the node knows this hash at all (pending or mined). Read only when an earlier operation still reserves the nonce. */
   async transactionKnown(hash: Hex): Promise<boolean> { await this.chain(); return await this.raw("eth_getTransactionByHash", [hash]) !== null; }
+  /**
+   * R4 exit 2 for a signed source without a receipt: the payer's nonce at the `finalized` tag past the source nonce, while
+   * the node knows neither the transaction nor a receipt (one batch). The finalized nonce, or null while not proven.
+   */
+  async unlanded(record: OneClickSourceRecord): Promise<string | null> {
+    if (record.transactionHash === null) return null;
+    const check = await checkNeverLands({ chainId: this.lane.origin.chainId, account: record.payer, nonce: BigInt(record.sourceCall.nonce),
+      transactionHash: record.transactionHash }, publicFinalizedRead(this.url, "1Click origin RPC", this.https).batch);
+    return check.neverLands ? check.finalizedNonce.toString() : null;
+  }
   /** Safe-block receipt observation. It never implies destination delivery. */
   async observe(record: OneClickSourceRecord): Promise<unknown> {
     await this.chain();

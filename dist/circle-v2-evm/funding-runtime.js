@@ -192,9 +192,9 @@ export class CircleFundingEvmService {
     preflightAttesters(destination, digest) { return readCircleAttesters(destination, digest); }
     remotes(chain) {
         const route = circleRoute(chain), sourceUrl = this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
-        return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean"), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean"),
+        return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET),
             // External-mint discovery runs on its own client under its derived budget (P4), apart from the command's read plan.
-            discovery: () => new CircleRpc(destinationUrl, chain, this.https, CIRCLE_DISCOVERY_REQUEST_BUDGET, "lean") };
+            discovery: () => new CircleRpc(destinationUrl, chain, this.https, CIRCLE_DISCOVERY_REQUEST_BUDGET) };
     }
     async api(path) {
         const response = await this.https.request(`https://iris-api.circle.com${path}`, "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");

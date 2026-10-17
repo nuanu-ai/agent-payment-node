@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isLegacyStargateRecord, loadLegacyStargateRecord, type LegacyStargateFamily, type LegacyStargateRecord } from "../../src/legacy/stargate-v2/reader.js";
+import type { FinalizedBatchRead } from "../../src/evm-finalized-proof.js";
 import type { LegacyChainRead } from "../../src/legacy/stargate-v2/status.js";
 import { installLegacyCase } from "./legacy-corpus-readers.js";
 
@@ -67,5 +68,7 @@ export function mockChain(chainId: number, finalizedNonce: bigint, transactions:
       return transactions[String(params[0]).toLowerCase()] ?? null;
     },
   };
-  return { rpc, calls };
+  /** The never-lands proof's one-node batch: each row answered as `call` answers it. */
+  const batch: FinalizedBatchRead = async rows => await Promise.all(rows.map(async row => await rpc.call(row.method, row.params)));
+  return { rpc, batch, calls };
 }

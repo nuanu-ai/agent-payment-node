@@ -3,7 +3,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canon
 import { ApnError } from "../../errors.js";
 import { SecureStateStore } from "../../secure-state-store.js";
 import type { TokenEffectKind } from "./token-execution.js";
-import type { UniswapTokenOperation } from "./token-operation.js";
+import { tokenEffectRound, type UniswapTokenOperation } from "./token-operation.js";
 
 interface Reservation { readonly operationId: string; readonly kind: TokenEffectKind; readonly nonce: string; readonly state: "reserved" | "committed" }
 interface LegacyReservation { readonly nonce: string; readonly state: "committed" }
@@ -31,7 +31,7 @@ export class UniswapTokenNonceStore extends SecureStateStore {
   }
   async allocate(op: UniswapTokenOperation, kind: TokenEffectKind, pending: bigint, occupied: readonly bigint[] = []): Promise<string> {
     await this.initialize(); await this.ensureDirectory("uniswap-token-nonces"); const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path),
-      current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op.operationId, kind), prior = current.reservations[slot];
+      current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op, kind), prior = current.reservations[slot];
     if (prior !== undefined) return prior.nonce;
     const reservations: Record<string, Reservation | LegacyReservation> = { ...current.reservations };
     const unavailable = new Set([...Object.values(reservations).map((reservation) => reservation.nonce), ...occupied.map(String)]); let nonce = pending;
@@ -42,14 +42,14 @@ export class UniswapTokenNonceStore extends SecureStateStore {
   }
   async release(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean> {
     const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path); if (raw === null) corrupt("Uniswap token nonce record is missing.");
-    const current = validate(raw, account), slot = nonceSlot(op.operationId, kind), reservation = current.reservations[slot];
+    const current = validate(raw, account), slot = nonceSlot(op, kind), reservation = current.reservations[slot];
     if (reservation === undefined) return false;
     exact(reservation, op, kind, nonce); if (reservation.state === "committed") return false;
     const reservations = { ...current.reservations }; delete reservations[slot]; await this.writeJson(path, { ...current, reservations }); return true;
   }
   async commit(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void> {
     const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path); if (raw === null) corrupt("Uniswap token nonce record is missing.");
-    const current = validate(raw, account), slot = nonceSlot(op.operationId, kind), reservation = current.reservations[slot];
+    const current = validate(raw, account), slot = nonceSlot(op, kind), reservation = current.reservations[slot];
     if (reservation === undefined) corrupt("Uniswap token nonce reservation is missing."); exact(reservation, op, kind, nonce);
     if (reservation.state === "committed") return;
     await this.writeJson(path, { ...current, reservations: { ...current.reservations, [slot]: { ...reservation, state: "committed" } } });
@@ -57,7 +57,9 @@ export class UniswapTokenNonceStore extends SecureStateStore {
   private path(account: string) { return `uniswap-token-nonces/${domainHash("apn.uniswap-token-nonce-account.v1", account)}.json`; }
 }
 function empty(account: string): NonceRecord { return { schemaVersion: "apn.uniswap-token-nonces.v2", account, reservations: {} }; }
-function nonceSlot(operationId: string, kind: TokenEffectKind) { return domainHash("apn.uniswap-token-nonce-slot.v1", canonicalJson({ operationId, kind })); }
+/** Round 0 keeps the original slot; a re-armed cleanup reserves its own nonce. */
+function nonceSlot(op: UniswapTokenOperation, kind: TokenEffectKind) { const round = tokenEffectRound(op, kind);
+  return domainHash("apn.uniswap-token-nonce-slot.v1", canonicalJson(round === 0 ? { operationId: op.operationId, kind } : { operationId: op.operationId, kind, round })); }
 function validate(value: unknown, account: string): NonceRecord {
   if (!isPlainRecord(value) || value.account !== account || !isPlainRecord(value.reservations)) corrupt("Uniswap token nonce record is invalid.");
   if (value.schemaVersion === "apn.uniswap-token-nonces.v1" && exactKeys(value, ["schemaVersion", "account", "nextNonce", "reservations"])) {

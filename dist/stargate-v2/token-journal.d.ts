@@ -17,7 +17,11 @@ export declare function transition(op: StargateTokenOperation | Omit<StargateTok
 export declare function seal(value: Omit<StargateTokenOperation, "integrityHash"> | StargateTokenOperation): StargateTokenOperation;
 /** Every released version (0.5.25..) wrote only token schema v5. */
 export declare function validateRecord(value: unknown): StargateTokenOperation;
-/** Where each phase of a token Stargate journal may go next; a phase with nowhere to go (observed, cleaned) is its outcome. */
+/**
+ * Where each phase of a token Stargate journal may go next; a phase with nowhere to go (observed, cleaned, abandoned_unknown)
+ * is its outcome. A cleanup that can no longer zero the allowance returns to cleanup_required for a fresh, consented one,
+ * and the owner may abandon any open phase past the prepare expiry (R4).
+ */
 export declare const STARGATE_TOKEN_TRANSITIONS: Readonly<Record<StargateTokenPhase, readonly StargateTokenPhase[]>>;
 export declare function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation): Readonly<{
     evidenceHash: string;

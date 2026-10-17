@@ -1,11 +1,11 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 const load = (path) => import(pathToFileURL(resolve(path)).href);
-const [{ GaslessOperationRepository }, { gaslessFixture, GaslessTestRpc }] = await Promise.all([
-  load("dist-test/src/gasless/operation-repository.js"), load("dist-test/tests/core/gasless-helpers.js"),
+const [{ GaslessOperationRepository }, { gaslessFixture, GaslessTestRpc }, { findStored }] = await Promise.all([
+  load("dist-test/src/gasless/operation-repository.js"), load("dist-test/tests/core/gasless-helpers.js"), load("dist-test/tests/core/stored-operations.js"),
 ]);
 const [root, id] = process.argv.slice(2);
-const op = await new GaslessOperationRepository(root).findOperation(id);
+const op = await findStored(new GaslessOperationRepository(root), id);
 const now = new Date(Date.parse(op.intent.expiresAt) + 360000);
 const rpc = new GaslessTestRpc(op.intent.request.chainId, op.intent.owner.address, op.intent.initialSnapshot.delegation, now);
 rpc.current = op.intent.initialSnapshot;

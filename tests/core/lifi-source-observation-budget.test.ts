@@ -20,6 +20,7 @@ import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.j
 import { temporaryState } from "./helpers.js";
 import { LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { INCLUDED_BLOCK, capturedBytecode, chainDouble, chainEnvironment, type ChainRoute, type ReceiptRoute } from "./lifi-source-observation-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 const code = await capturedBytecode();
 const BASE_USDC = BRIDGE_ASSET_REGISTRY[8453].tokens[0]!.address;
@@ -80,7 +81,7 @@ async function approvalSent(root: string) {
   const s = await lifiFixture(root, "base-arb");
   const { id } = await s.prepare("across"); s.source.failObserve = true;
   const approved = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(approved.ok, true, approved.error?.message);
-  const op = (await s.core.bridges.records.findOperation(id))!;
+  const op = (await findStored(s.core.bridges.records, id))!;
   assert.deepEqual(op.effects.map((e) => [e.role, e.phase, e.submissionAttempts]), [["approval", "submitted_pending", 1], ["bridge", "unsealed", 0]]);
   assert.equal(op.failure?.reason, "source_observation_unavailable"); assert.equal(s.source.submissions.length, 1);
   const m = op.intent.materialization, approval = { token: m.request.fromToken, spender: m.approvalAddress, amount: BigInt(m.request.amountAtomic) };
@@ -97,7 +98,7 @@ test("operation resume ends an expired Base USDC Across approval as failed_after
   const restart = await lifiFixture(temporary.root, "base-arb", { now: s.now, provider: s.provider, initializeWallet: false, clockNow: () => new Date(later),
     rpcFor: bridgeRpcFactory(chainEnvironment([8453, 42161], "scalar"), { transport: reads.transport }) });
   const resumed = await restart.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
-  const record = (await restart.core.bridges.records.findOperation(id))!;
+  const record = (await findStored(restart.core.bridges.records, id))!;
   assert.equal(record.state, "failed_after_approval"); assert.equal(record.terminal, true);
   assert.deepEqual(effects(record), [["approval", "safe_success", 1], ["bridge", "unsealed", 0]]);
   assert.equal(record.effects[0]!.safeProof!.actualTotalFeeWei, (paid.gasUsed * paid.price + paid.l1Fee).toString());

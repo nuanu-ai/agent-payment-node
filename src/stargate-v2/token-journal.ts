@@ -133,7 +133,11 @@ export function validateRecord(value: unknown): StargateTokenOperation { if (!is
     if (["post_approval_quote_bound", "submission_started", "submitted", "unknown_finality", "observed"].includes(raw.phase) && raw.allowanceRequired && raw.postApprovalQuote === undefined)
       fail("APN_STATE_CORRUPT", "post_approval_quote_required");
   }
-  const usageStates: readonly StargateTokenUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
+  const usageStates: readonly StargateTokenUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert",
+    "released_unsubmitted"];
+  if (record.retiredEffects !== undefined) validateRetired(record);
+  if ((record.usageState === "released_unsubmitted" || record.usageTarget === "released_unsubmitted") &&
+    !(record.retiredEffects ?? []).some(row => row.role === "bridge" && row.reason === "never_landed")) fail("APN_STATE_CORRUPT", "usage_release_without_retired_send");
   if ((record.usageState !== undefined && !usageStates.includes(record.usageState)) || (record.usageTarget !== undefined && !usageStates.includes(record.usageTarget))) fail("APN_STATE_CORRUPT", "usage_state");
   if (canonicalJson(record.policy.mechanism) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) fail("APN_STATE_CORRUPT", "mechanism_pin");
   if (["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(record.phase) &&
@@ -144,24 +148,42 @@ export function validateRecord(value: unknown): StargateTokenOperation { if (!is
   if (record.transitions[0]?.phase !== "prepared") fail("APN_STATE_CORRUPT", "transition");
   for (let i = 1; i < record.transitions.length; i++) if (!allowed[record.transitions[i - 1]!.phase]?.includes(record.transitions[i]!.phase)) fail("APN_STATE_CORRUPT", "transition");
   return record; }
-/** Where each phase of a token Stargate journal may go next; a phase with nowhere to go (observed, cleaned) is its outcome. */
+/**
+ * Where each phase of a token Stargate journal may go next; a phase with nowhere to go (observed, cleaned, abandoned_unknown)
+ * is its outcome. A cleanup that can no longer zero the allowance returns to cleanup_required for a fresh, consented one,
+ * and the owner may abandon any open phase past the prepare expiry (R4).
+ */
 export const STARGATE_TOKEN_TRANSITIONS: Readonly<Record<StargateTokenPhase, readonly StargateTokenPhase[]>> = {
-  prepared: ["approved"], approved: ["allowance_submission_started", "submission_started", "cleanup_required"],
-  allowance_submission_started: ["allowance_submitted", "allowance_unknown_finality", "cleanup_required"],
-  allowance_submitted: ["allowance_unknown_finality", "allowance_observed", "cleanup_required"], allowance_unknown_finality: ["allowance_observed", "cleanup_required"],
-  allowance_observed: ["post_approval_quote_bound", "submission_started", "cleanup_required"], post_approval_quote_bound: ["submission_started", "cleanup_required"], submission_started: ["submitted", "unknown_finality", "cleanup_required"],
-  submitted: ["unknown_finality", "observed", "cleanup_required"], unknown_finality: ["submitted", "observed", "cleanup_required"], observed: [],
-  cleanup_required: ["cleanup_submission_started", "cleaned", "observed"], cleanup_submission_started: ["cleanup_submitted", "cleanup_unknown_finality"],
-  cleanup_submitted: ["cleanup_unknown_finality", "cleaned", "observed"], cleanup_unknown_finality: ["cleaned", "observed"], cleaned: [],
+  prepared: ["approved", "abandoned_unknown"], approved: ["allowance_submission_started", "submission_started", "cleanup_required", "abandoned_unknown"],
+  allowance_submission_started: ["allowance_submitted", "allowance_unknown_finality", "cleanup_required", "abandoned_unknown"],
+  allowance_submitted: ["allowance_unknown_finality", "allowance_observed", "cleanup_required", "abandoned_unknown"],
+  allowance_unknown_finality: ["allowance_observed", "cleanup_required", "abandoned_unknown"],
+  allowance_observed: ["post_approval_quote_bound", "submission_started", "cleanup_required", "abandoned_unknown"],
+  post_approval_quote_bound: ["submission_started", "cleanup_required", "abandoned_unknown"],
+  submission_started: ["submitted", "unknown_finality", "cleanup_required", "abandoned_unknown"],
+  submitted: ["unknown_finality", "observed", "cleanup_required", "abandoned_unknown"],
+  unknown_finality: ["submitted", "observed", "cleanup_required", "abandoned_unknown"], observed: [],
+  cleanup_required: ["cleanup_submission_started", "cleaned", "observed", "abandoned_unknown"],
+  cleanup_submission_started: ["cleanup_submitted", "cleanup_unknown_finality", "abandoned_unknown"],
+  cleanup_submitted: ["cleanup_unknown_finality", "cleaned", "observed", "cleanup_required", "abandoned_unknown"],
+  cleanup_unknown_finality: ["cleaned", "observed", "cleanup_required", "abandoned_unknown"], cleaned: [], abandoned_unknown: [],
 };
 function validateAdvance(previous: StargateTokenOperation | null, next: StargateTokenOperation) { if (previous === null) { if (next.phase !== "prepared" || next.transitions.length !== 1) fail("APN_STATE_CORRUPT", "initial"); return; }
   const frozen = (x: StargateTokenOperation) => { const { phase: _p, transitions: _t, integrityHash: _i, approvalTransactionHash: _a, transactionHash: _h,
     residualAllowanceAtomic: _r, sourceReceipt: _s, destinationEvidence: _d, cleanupEnvelope: _ce, cleanupTransactionHash: _ch,
     cleanupReason: _cr, usageState: _us, usageTarget: _ut, approvalSubmissionStartedAt: _asa, approvalFinalityDeadline: _afd,
-    postApprovalQuote: _paq, ...rest } = x; return rest; };
+    postApprovalQuote: _paq, retiredEffects: _re, ...rest } = x; return rest; };
+  // A retired cleanup (appended now, naming exactly the previous cleanup) frees its envelope and hash for the next round.
+  const retiredNow = (next.retiredEffects ?? []).slice((previous.retiredEffects ?? []).length);
+  const freed = previous.cleanupTransactionHash !== undefined && next.cleanupEnvelope === undefined && next.cleanupTransactionHash === undefined &&
+    retiredNow.length === 1 && retiredNow[0]!.role === "cleanup" && retiredNow[0]!.transactionHash === previous.cleanupTransactionHash &&
+    retiredNow[0]!.nonceAtomic === previous.cleanupEnvelope?.nonceAtomic;
+  if (canonicalJson((next.retiredEffects ?? []).slice(0, (previous.retiredEffects ?? []).length)) !== canonicalJson(previous.retiredEffects ?? [])) {
+    fail("APN_STATE_CORRUPT", "journal_rewrite");
+  }
   if (canonicalJson(frozen(previous)) !== canonicalJson(frozen(next)) || next.transitions.length < previous.transitions.length || canonicalJson(next.transitions.slice(0, previous.transitions.length)) !== canonicalJson(previous.transitions) || (previous.approvalTransactionHash !== undefined && previous.approvalTransactionHash !== next.approvalTransactionHash) || (previous.transactionHash !== undefined && previous.transactionHash !== next.transactionHash) ||
-    (previous.cleanupEnvelope !== undefined && canonicalJson(previous.cleanupEnvelope) !== canonicalJson(next.cleanupEnvelope)) ||
-    (previous.cleanupTransactionHash !== undefined && previous.cleanupTransactionHash !== next.cleanupTransactionHash) ||
+    (!freed && previous.cleanupEnvelope !== undefined && canonicalJson(previous.cleanupEnvelope) !== canonicalJson(next.cleanupEnvelope)) ||
+    (!freed && previous.cleanupTransactionHash !== undefined && previous.cleanupTransactionHash !== next.cleanupTransactionHash) ||
     (previous.cleanupReason !== undefined && previous.cleanupReason !== next.cleanupReason) ||
     (previous.approvalSubmissionStartedAt !== undefined && previous.approvalSubmissionStartedAt !== next.approvalSubmissionStartedAt) ||
     (previous.approvalFinalityDeadline !== undefined && previous.approvalFinalityDeadline !== next.approvalFinalityDeadline) ||
@@ -171,10 +193,25 @@ function validateAdvance(previous: StargateTokenOperation | null, next: Stargate
     !(next.usageTarget === undefined && next.usageState !== undefined)) fail("APN_STATE_CORRUPT", "usage_target_rewrite");
   const allowedUsage: Readonly<Partial<Record<StargateTokenUsageState, readonly StargateTokenUsageState[]>>> = {
     reserved: ["submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"],
-    submitted: ["unknown_finality", "finalized", "failed_confirmed_revert"], unknown_finality: ["finalized", "failed_confirmed_revert"],
-    finalized: [], failed_before_effect: [], failed_confirmed_revert: [],
+    submitted: ["unknown_finality", "finalized", "failed_confirmed_revert"], unknown_finality: ["finalized", "failed_confirmed_revert", "released_unsubmitted"],
+    finalized: [], failed_before_effect: [], failed_confirmed_revert: [], released_unsubmitted: [],
   };
   if (previous.usageState !== undefined && next.usageState !== previous.usageState && !allowedUsage[previous.usageState]?.includes(next.usageState!)) fail("APN_STATE_CORRUPT", "usage_state_rewrite"); }
+/** Retired effects: canonical shape, own nonces, a never-landed one proven by a finalized nonce past it; a release needs a retired send. */
+function validateRetired(op: StargateTokenOperation): void {
+  const rows = op.retiredEffects as unknown;
+  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 8) fail("APN_STATE_CORRUPT", "retired_effects");
+  for (const row of rows as readonly unknown[]) {
+    if (!isPlainRecord(row) || canonicalJson(Object.keys(row).sort()) !== canonicalJson(["at", "finalizedNonceAtomic", "nonceAtomic", "reason", "role", "transactionHash"])) fail("APN_STATE_CORRUPT", "retired_effects");
+    const r = row as unknown as NonNullable<StargateTokenOperation["retiredEffects"]>[number];
+    const validIso = typeof r.at === "string" && Number.isFinite(Date.parse(r.at)) && new Date(Date.parse(r.at)).toISOString() === r.at;
+    if (!["bridge", "cleanup"].includes(r.role) || !/^0x[0-9a-f]{64}$/u.test(r.transactionHash) || typeof r.nonceAtomic !== "string" || !UINT.test(r.nonceAtomic) || !validIso ||
+      !["never_landed", "reverted", "landed_allowance_nonzero"].includes(r.reason) || (r.reason === "never_landed"
+        ? typeof r.finalizedNonceAtomic !== "string" || !UINT.test(r.finalizedNonceAtomic) || BigInt(r.finalizedNonceAtomic) <= BigInt(r.nonceAtomic)
+        : r.role !== "cleanup" || r.finalizedNonceAtomic !== null) ||
+      r.role === "bridge" && (r.transactionHash !== op.transactionHash || r.nonceAtomic !== (op.postApprovalQuote?.sendEnvelope ?? op.sendEnvelope).nonceAtomic)) fail("APN_STATE_CORRUPT", "retired_effects");
+  }
+}
 export function stargateV2TokenCanonicalReceipt(input: StargateTokenOperation) { const op = validateRecord(input); if (op.phase !== "observed" || op.sourceReceipt === undefined || op.destinationEvidence === undefined || op.residualAllowanceAtomic !== "0" || op.usageState !== "finalized" || op.usageTarget !== undefined) fail("APN_OPERATION_BLOCKED", "receipt_not_observed");
   const effectiveQuote = op.postApprovalQuote?.quote ?? op.quote;
   const body = { schemaVersion: "apn.stargate-v2-token-receipt.v2" as const, operationId: op.operationId, profile: op.profile,

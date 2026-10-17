@@ -10,7 +10,7 @@ import type { WrappingSecretPort } from "../../macos-keychain.js";
 import type { StateStore } from "../../state.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
 import type { TokenEffectKind, TokenSealedEffect } from "./token-execution.js";
-import { UniswapTokenJournal, type TokenGasEnvelope, type UniswapTokenOperation } from "./token-operation.js";
+import { tokenEffectRound, UniswapTokenJournal, type TokenGasEnvelope, type UniswapTokenOperation } from "./token-operation.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
 import { UniswapTokenNonceStore, type TokenNonceEvidence } from "./token-nonce.js";
 import { tokenBatch, tokenBlock, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
@@ -59,6 +59,8 @@ export class UniswapTokenCustody {
     await this.nonces.reconcile(account, async (operationId, kind, nonce): Promise<TokenNonceEvidence> => {
       const op = await this.operations.load(operationId); if (op === null) return null;
       const attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
+      // A slot whose attempt was retired (it can no longer land) keeps its nonce spent; a freed slot holds nothing.
+      if ((op.retiredEffects ?? []).some((row) => row.kind === kind && row.attempt.nonce === nonce)) return "committed";
       if (attempt === null) return null;
       if (op.account !== account || attempt.nonce !== nonce) corrupt("Uniswap token nonce reservation conflicts with its operation marker.");
       if (attempt.transactionHash !== null || await this.effects.load(op, kind) !== null) return "committed";
@@ -184,6 +186,8 @@ export function envelopeOf(op: UniswapTokenOperation, kind: TokenEffectKind, non
   return { chainId: 1, from: op.account, to: call.to, data: call.data, value: "0", nonce,
     gasLimit: gas.gasLimit, maxFeePerGas: gas.maxFeePerGas, maxPriorityFeePerGas: gas.maxPriorityFeePerGas };
 }
-function effectKey(op: UniswapTokenOperation, kind: TokenEffectKind) { return domainHash("apn.uniswap-token-wallet-effect.v1", canonicalJson({ operationId: op.operationId, kind })); }
+/** Round 0 keeps the original custody key; a re-armed cleanup signs under its own round. */
+function effectKey(op: UniswapTokenOperation, kind: TokenEffectKind) { const round = tokenEffectRound(op, kind);
+  return domainHash("apn.uniswap-token-wallet-effect.v1", canonicalJson(round === 0 ? { operationId: op.operationId, kind } : { operationId: op.operationId, kind, round })); }
 function corrupt(message: string): never { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

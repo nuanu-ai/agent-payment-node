@@ -4,7 +4,7 @@ import { MerchantRetirement } from "./retirement.js";
 import { MerchantClaims } from "./claims.js";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
-import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
+import { assertExclusiveEvmRawSigner } from "../evm-address-ownership.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
 import { evmConflictDomain } from "../operation-conflict-domain.js";
@@ -12,7 +12,8 @@ import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import type { HttpPort } from "../x402-model.js";
-import { merchantFingerprint, merchantMove, merchantSnapshot, sealMerchant, type MerchantOperation, type MerchantReceipt } from "./model.js";
+import { MERCHANT_DELIVERY_ATTEMPT_LIMIT, merchantFingerprint, merchantMove, merchantSnapshot, sealMerchant, type MerchantOperation, type MerchantReceipt } from "./model.js";
+import { MerchantExits, merchantLocks } from "./exits.js";
 import { MerchantRepository } from "./repository.js";
 import { MerchantOwner } from "./owner.js";
 import { checkMerchantEnvelope, merchantCurrent, merchantReceipt, hexHash, type MerchantRpcPort } from "./rpc.js";
@@ -34,7 +35,8 @@ export class MerchantService {
     readonly records: MerchantRepository;
     private readonly operations: OperationService;
     private readonly owner: MerchantOwner;
-    constructor(private readonly state: StateStore, private readonly ports: MerchantPorts) { this.records = new MerchantRepository(state.root); this.operations = new OperationService(state); this.owner = new MerchantOwner(state, ports.now); }
+    private readonly exits: MerchantExits;
+    constructor(private readonly state: StateStore, private readonly ports: MerchantPorts) { this.records = new MerchantRepository(state.root); this.operations = new OperationService(state); this.owner = new MerchantOwner(state, ports.now); this.exits = new MerchantExits(state, ports.rpc, ports.now); }
     async prepare(input: {
         profile: string;
         url: string;
@@ -164,19 +166,36 @@ export class MerchantService {
     }
     async observe(id: string, deliver = false): Promise<MerchantOperation> {
         const found = await this.required(id);
-        return this.state.withLocks(this.locks(found.profileHash, found.operationId, found.idempotencyHash, found.custody.walletAddress), async () => this.observeLocked(await this.required(id), deliver));
+        return this.state.withLocks(this.locks(found.profileHash, found.operationId, found.idempotencyHash, found.custody.walletAddress), async () => {
+            const o = await this.required(id);
+            // A payment that never reached the wire has no transaction to observe: its only outcomes are the proven exits.
+            if (o.submissionAttempts !== 1 || o.txHash === null) {
+                const settled = await this.exits.settle(o);
+                if (settled !== null) return settled;
+                // A signed attempt nothing proves yet stays open with its holds; anything else has nothing to observe.
+                if (!o.terminal && o.signingAttempts === 1) return o;
+                refuse("merchant_observer_has_no_transaction_claim");
+            }
+            return await this.observeLocked(o, deliver);
+        });
     }
     async retireUnsent(id:string) { return new MerchantRetirement(this.state,this.ports.rpc,this.ports.now).retire(id); }
     async status(id: string) { return await this.required(id); }
     private async observeLocked(o: MerchantOperation, deliver: boolean): Promise<MerchantOperation> {
         if (o.submissionAttempts !== 1 || o.txHash === null) refuse("merchant_observer_has_no_transaction_claim");
+        // The owner ended it, or another transaction took its nonce at finality: a later receipt changes nothing recorded.
+        if (o.state === "abandoned_unknown" || o.state === "failed_proven_superseded") return o;
         let receipt: MerchantReceipt | null;
         try { receipt = await merchantReceipt(this.ports.rpc, o); }
         catch (error) {
             const reason = error instanceof ApnError && typeof error.details?.reason === "string" ? error.details.reason : "merchant_canonical_unavailable";
             return await this.canonicalAudit(o, reason.startsWith("merchant_receipt_") ? "mismatch" : "unavailable", reason, null);
         }
-        if (receipt === null) return await this.canonicalAudit(o, "unavailable", "merchant_canonical_not_finalized", null);
+        if (receipt === null) {
+            // No finalized receipt: the transaction may still land, unless the finalized nonce proves it never can.
+            const settled = o.receipt === null ? await this.exits.settle(o) : null;
+            return settled ?? await this.canonicalAudit(o, "unavailable", "merchant_canonical_not_finalized", null);
+        }
         if (o.receipt !== null && !sameReceiptEffect(o.receipt, receipt)) return await this.canonicalAudit(o, "mismatch", "merchant_saved_receipt_changed", receipt);
         if (o.receipt === null) {
             o = merchantMove(o, receipt.status === "success" ? "payment_finalized" : "reverted", this.at(), { receipt });
@@ -184,16 +203,17 @@ export class MerchantService {
         }
         o = await this.canonicalAudit(o, "verified", "merchant_canonical_verified", receipt);
         // Never infer new finalization from an old saved receipt. The original receipt and verdict remain immutable.
-        await this.owner.follow(o, receipt.status === "success" ? "finalized" : "failed_confirmed_revert",receipt);
+        // A delivery_failed payment was settled by this same call before it could become delivery_failed (below).
+        if (o.state !== "delivery_failed") await this.owner.follow(o, receipt.status === "success" ? "finalized" : "failed_confirmed_revert",receipt);
+        if (!o.terminal && deliveryExhausted(o)) return await this.deliveryFailed(o);
         if (o.terminal || receipt.status !== "success" || !deliver) return o;
         if (o.deliveryAttempts.length % 2 === 1) {
             const dangling = o.deliveryAttempts.at(-1)!;
             o = merchantMove(o, "delivery_unknown", this.at(), { deliveryAttempts: [...o.deliveryAttempts, { at:this.at(), proofHash:dangling.proofHash, outcome:"unknown" }] });
             await this.records.persist(o);
+            if (deliveryExhausted(o)) return await this.deliveryFailed(o);
         }
         // Only this explicit observer flag retries delivery. It always uses the original transaction, never pays again.
-        if (o.deliveryAttempts.length >= 16)
-            refuse("merchant_delivery_retry_limit");
         // Reobserve after accounting awaits and immediately before disclosing the original proof.
         const beforeDelivery = await this.refreshCanonical(o);
         o = beforeDelivery.operation;
@@ -211,8 +231,20 @@ export class MerchantService {
             o = merchantMove(o, "delivery_unknown", this.at(), { deliveryAttempts: [...o.deliveryAttempts, { at: this.at(), proofHash, outcome: "unknown", ...(response === undefined ? {} : { httpStatus: response.status, bodyHash: hashObject(Buffer.from(response.bodyBytes).toString("base64")), headers: response.rawHeaderPairs }) }] });
         }
         await this.records.persist(o);
+        // The last allowed GET left no delivery: the payment stays proven and charged, and its proof is not offered again.
+        if (deliveryExhausted(o)) o = await this.deliveryFailed(o);
         // Keep a successful HTTP200 fact even if a subsequent chain proof changes.
         return (await this.refreshCanonical(o)).operation;
+    }
+    /**
+     * A finalized payment whose proof the merchant never answered with a delivery in the allowed GETs ends here on its own,
+     * as `delivered` and `reverted` do: the payment is final and charged, no command could change the record any more,
+     * and an owner consent would decide nothing. The receipt and every proof hash stay in the record.
+     */
+    private async deliveryFailed(o: MerchantOperation): Promise<MerchantOperation> {
+        const next = merchantMove(o, "delivery_failed", this.at(), { exit: { reason: "delivery_attempts_exhausted" } });
+        await this.records.persist(next);
+        return next;
     }
     private async refreshCanonical(o: MerchantOperation): Promise<{ operation: MerchantOperation; verified: boolean }> {
         try {
@@ -261,7 +293,7 @@ export class MerchantService {
     private fresh(o: MerchantOperation) { if (this.at() >= o.expiresAt || this.at().slice(0, 10) !== o.createdAt.slice(0, 10))
         refuse("merchant_local_deadline_expired"); }
     private at() { return this.ports.now().toISOString(); }
-    private locks(profileHash: string, id: string, idempotencyHash: string, payer: string) { return [`profile:${profileHash}`, `operation:${id}`, `operation:idempotency:${idempotencyHash}`, evmAddressLock(payer)]; }
+    private locks(profileHash: string, id: string, idempotencyHash: string, payer: string) { return merchantLocks(profileHash, id, idempotencyHash, payer); }
     private async required(id: string) { const o = await this.records.findOperation(canonicalOperationId(id)); if (o === null)
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Merchant operation was not found."); return o; }
 }
@@ -271,3 +303,5 @@ export function sameReceiptEffect(saved: MerchantReceipt, fresh: MerchantReceipt
     if(saved.fullFee!==undefined&&canonicalJson(saved.fullFee)!==canonicalJson(fresh.fullFee))return false;
     return saved.canonical === undefined || saved.canonical.transactionIndex === fresh.canonical?.transactionIndex && saved.canonical.blockHeaderHash === fresh.canonical?.blockHeaderHash;
 }
+/** Every allowed GET was made and none delivered (a delivered GET moves the payment to `delivered`). */
+function deliveryExhausted(o: MerchantOperation): boolean { return o.state === "delivery_unknown" && o.deliveryAttempts.length >= MERCHANT_DELIVERY_ATTEMPT_LIMIT; }

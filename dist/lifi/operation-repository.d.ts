@@ -7,8 +7,6 @@ export declare class BridgeOperationRepository extends SecureStateStore {
     private ready;
     loadOperation(profileHash: string, operationId: string): Promise<BridgeOperationRecord | null>;
     loadStoredOperation(profileHash: string, operationId: string): Promise<StoredBridgeOperationRecord | null>;
-    findStoredOperation(operationId: string): Promise<StoredBridgeOperationRecord | null>;
-    findOperation(operationId: string): Promise<BridgeOperationRecord | null>;
     writeOperation(op: BridgeOperationRecord): Promise<void>;
     /** Caller holds the same profile/operation locks as every other money service. Its receipt is derived on read. */
     persist(op: BridgeOperationRecord): Promise<void>;

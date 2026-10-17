@@ -7,6 +7,7 @@ import { bridgeRpcCall, RpcProviderScheduler, RpcReadSession, type RpcReadTeleme
 import { submitDirect } from "../../lifi/rpc-support.js";
 import type { StateStore } from "../../state.js";
 import { tokenPrimaryCandidates, type TokenPrimaryFailureReason, type TokenPrimaryPoolTelemetry } from "./token-rpc-pool.js";
+import type { FinalizedBatchRead, FinalizedReadCall } from "../../evm-finalized-proof.js";
 
 export type TokenRpcRoute = "primary" | "archive" | "receipt";
 export interface TokenRpcItem { readonly method: string; readonly params: readonly unknown[];
@@ -239,3 +240,20 @@ function capabilityResponse(body: string): boolean { if (body.length < 2 || body
     return typeof message === "string" && ["batch requests are not supported", "batch requests not supported", "batch unsupported"]
       .includes(message.trim().toLowerCase()); });
   } catch { return false; } }
+
+/**
+ * The never-lands batch through the token lane's own pool and budget: everything but the receipt in one primary batch
+ * (one node answers the finalized nonce and the transaction lookup together), the receipt on its route, as the observer
+ * reads it (the receipt route's shape is exactly chain id + receipt).
+ */
+export function tokenFinalizedBatch(call: TokenRpcCall): FinalizedBatchRead {
+  const item = (read: FinalizedReadCall): TokenRpcItem => ({ method: read.method, params: read.params,
+    cachePolicy: read.method === "eth_chainId" ? "immutable" : "none", decoder: (row) => row });
+  return async (calls) => {
+    const receipt = calls.find((read) => read.method === "eth_getTransactionReceipt"), primary = calls.filter((read) => read !== receipt);
+    const [rows, receiptRows] = await Promise.all([tokenBatch(call, "primary", primary.map(item)), receipt === undefined ? [] :
+      tokenBatch(call, "receipt", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain }, item(receipt)])]);
+    let next = 0;
+    return calls.map((read) => read === receipt ? receiptRows[1] : rows[next++]);
+  };
+}
