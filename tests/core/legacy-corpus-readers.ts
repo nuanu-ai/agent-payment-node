@@ -38,13 +38,13 @@ export async function installLegacyCase(source: string, root: string): Promise<v
   await ownerOnly(root);
 }
 
-/** Hash of every file outside `locks/`; readers may take locks but must not rewrite a stored record. */
+/** Hash of every file outside `locks/` and the derived `operation-index/`; readers may take locks and index records but must not rewrite one. */
 export async function legacyCaseDigest(root: string): Promise<ReadonlyMap<string, string>> {
   const result = new Map<string, string>();
   const walk = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name), name = relative(root, path);
-      if (name === "locks") continue;
+      if (name === "locks" || name === "operation-index") continue;
       if (entry.isDirectory()) await walk(path);
       else result.set(name, createHash("sha256").update(await readFile(path)).digest("hex"));
     }
