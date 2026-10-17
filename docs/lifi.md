@@ -888,6 +888,29 @@ Base lane keeps its original status output, operation IDs and nonce reservation
 path; v1 and v2 records remain readable as that lane, and v3 records carry the
 lane. Ethereum nonce reservations are scoped under `eip155-1`.
 
+A signed source with no receipt (sealed, submitting, submitted or
+`unknown_finality`) ends `failed_proven_superseded` through status once the
+payer's nonce at the `finalized` tag is past the source nonce while the node
+knows neither the transaction nor a receipt (one JSON-RPC batch; the record keeps
+`finalizedNonceAtomic`). A nonce that is not past keeps it open. A deposit that
+lands late, even after the quote deadline, is still observed as
+`source_observed`: the deposit address is 1Click's, the quote is dead, and 1Click
+refunds such a deposit to the payer (the refund address); its status is reported
+as provider data and no destination proof is claimed. The payer's account is
+released by the operation index at the deposit deadline plus 10 minutes even
+before an outcome: a signed source has one fixed nonce, so it and any later
+transaction at that nonce cannot both land, and that release is what lets a later
+transaction take the nonce the never-lands proof needs. Like the other nonce-moved
+exits, the proof trusts the node's transaction lookup (a node that pruned its
+transaction index could report a long-landed deposit as absent).
+
+`apn circle approval status --operation <id>` ends an approval without a safe
+receipt the same way (`failed_proven_superseded`, read on `APN_BASE_RPC_URL`).
+Its `allowance` field says what the approval leaves: a completed approval leaves
+the Base USDC allowance it set for the Circle V2 TokenMessengerWithFees wrapper,
+which `apn circle source submit` spends; APN has no command that revokes it.
+Every other outcome changed no allowance.
+
 ## Stargate fee refusal and funding checkpoint, 2026-10-08
 
 A correctly reconciled Stargate LayerZero fee above `maxNativeDebitWei` is now
