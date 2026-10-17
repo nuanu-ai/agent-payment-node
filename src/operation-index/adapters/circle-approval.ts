@@ -1,4 +1,4 @@
-import { CIRCLE_APPROVAL_RESOLVED_PHASES, loadCircleApproval, type CircleApprovalRecord } from "../../lifi/circle-v2-approval-executor.js";
+import { abandonCircleApproval, CIRCLE_APPROVAL_RESOLVED_PHASES, loadCircleApproval, publicCircleApproval, type CircleApprovalRecord } from "../../lifi/circle-v2-approval-executor.js";
 import { field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
 import { evmClaim, pastUnstartedDeadline } from "./family-claims.js";
 import { OPERATION_STATUS } from "./family-commands.js";
@@ -9,7 +9,8 @@ const STORE: OperationStore = { directory: "circle-approvals", perProfile: false
  * Circle Base USDC allowance effects. Execute refuses a `prepared` approval past its preparation expiry before signing;
  * a started one resolves through status: an unsent marker ends failed_before_effect, a sent one is observed, and one
  * without a receipt ends failed_proven_superseded once the payer's finalized nonce is past its nonce while the node
- * knows neither its transaction nor a receipt.
+ * knows neither its transaction nor a receipt. The payer's account stays held until then, so no other APN operation
+ * consumes that nonce: an approval no proof decides takes the owner exit (`apn operation abandon`, TTY consent).
  */
 export const circleApprovalAdapter: OperationFamilyAdapter<CircleApprovalRecord> = {
   family: "circle_approval",
@@ -25,6 +26,8 @@ export const circleApprovalAdapter: OperationFamilyAdapter<CircleApprovalRecord>
   // Status observes a sent approval and closes an unsent marker as failed_before_effect; it never signs or resends.
   status: async (context, record) => await (await import("../../circle-command-service.js")).executeCircleCommand(
     { command: "circle.approval.status", operationId: record.id }, context),
+  abandon: async (context, record) => publicCircleApproval(await abandonCircleApproval(context.state, record.id,
+    context.requireOperationAbandonApproval(), () => context.clock.now().getTime())),
   commands: { status: OPERATION_STATUS, resume: OPERATION_STATUS },
   runtimeCommand: async () => "circle.approval.status",
 };

@@ -906,6 +906,10 @@ transaction index could report a long-landed deposit as absent).
 
 `apn circle approval status --operation <id>` ends an approval without a safe
 receipt the same way (`failed_proven_superseded`, read on `APN_BASE_RPC_URL`).
+The approval holds the payer's account until then, so no other APN operation
+takes that nonce; once the preparation expired, `apn operation abandon
+--operation <id>` ends a possibly sent approval `abandoned_unknown` behind TTY
+consent (it may still land and set the allowance).
 Its `allowance` field says what the approval leaves: a completed approval leaves
 the Base USDC allowance it set for the Circle V2 TokenMessengerWithFees wrapper,
 which `apn circle source submit` spends; APN has no command that revokes it.

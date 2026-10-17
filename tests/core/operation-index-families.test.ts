@@ -148,9 +148,9 @@ test("the registry covers every money family, each in its own store, and names e
     assert.ok(commands !== undefined && [commands.status, commands.resume ?? "", commands.exit ?? ""].filter(Boolean)
       .every(command => command.startsWith("apn ") && command.includes("<operation-id>")), family);
   }
-  // The two families that already had an owner exit keep it behind the generic abandon.
+  // The families with an owner exit keep it behind the generic abandon (Circle approval's is phase 4c's exit 3).
   assert.deepEqual(OPERATION_FAMILIES.filter(family => registry.get(family)?.abandon !== undefined && OPERATION_FAMILIES.indexOf(family) >= OPERATION_FAMILIES.indexOf("swap")),
-    ["swap", "metamask_native"]);
+    ["swap", "circle_approval", "metamask_native"]);
 });
 
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();

@@ -122,9 +122,10 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
     abandon: TERMINAL, receipt: NO_RECEIPT }),
   circle_source: async t => ({ ...await WP2_FAMILY_RECORDS.circle_source(t), cli: true, status: "ok", resume: RESUME_BY_FAMILY,
     abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
-  // The family's own status binds the saved RPC origin to the configured Base RPC, which this run does not name.
+  // The family's own status binds the saved RPC origin to the configured Base RPC, which this run does not name; its owner
+  // exit refuses an approval APN never sent (status closes it).
   circle_approval: async t => ({ ...await WP2_FAMILY_RECORDS.circle_approval(t), cli: true, status: { code: "APN_RPC_CONFIG" }, resume: RESUME_BY_FAMILY,
-    abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
+    abandon: { code: "APN_OPERATION_BLOCKED", reason: "circle_approval_abandon_not_unknown", family: true }, receipt: NO_RECEIPT }),
   // Closed before any effect: its owner exit refuses (only an unknown outcome past its quote can be abandoned).
   metamask_native: async t => ({ ...await WP2_FAMILY_RECORDS.metamask_native(t), cli: true, status: "ok", resume: "ok",
     abandon: { code: "APN_OPERATION_BLOCKED", message: /unknown outcome/u }, receipt: NO_RECEIPT }),

@@ -7,7 +7,7 @@ const option = (name, type) => ({
 const profile = option("--profile", "profile"), operation = option("--operation", "operation_id");
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
     success: "Saved exact Circle V2 Base approval state.", failures: ["Classified APN failure; no automatic resend."] };
-const states = { terminal: ["completed", "confirmed_revert", "failed_before_effect", "failed_proven_superseded"],
+const states = { terminal: ["completed", "confirmed_revert", "failed_before_effect", "failed_proven_superseded", "abandoned_unknown"],
     non_terminal: ["prepared", "signing_started", "sealed", "submitting", "unknown_finality"] };
 const limits = [option("--max-gas-limit-atomic", "string"), option("--max-fee-per-gas-wei", "wei"),
     option("--max-priority-fee-per-gas-wei", "wei"), option("--max-native-debit-wei", "wei")];
