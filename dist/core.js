@@ -14,7 +14,6 @@ import { inspectX402 } from "./x402-http.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
-import { assertLocalNetworkProfile } from "./x402-network.js";
 import { evmWalletBalance } from "./evm-wallet-balance.js";
 import { assertDirectEvmProfile } from "./evm-transfer-prepare.js";
 import { readProfilePortfolio } from "./portfolio/command.js";
@@ -441,7 +440,6 @@ export class ApnCore {
             case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
             case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, request.chainId, request.payer), "seller_challenge_static");
             case "x402.fetch.prepare": {
-                await assertLocalNetworkProfile(this.context, request.profile, request.chainId);
                 if ((request.chainId ?? 8453) === 8453)
                     await this.providerWallet.assertPaymentAvailable(request.profile, "x402", request.idempotencyKey);
                 return operationOutcome(await this.x402.prepare(request));

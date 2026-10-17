@@ -151,6 +151,10 @@ export class TestRpc implements RpcPort {
     if (this.chainId !== 8453) throw new Error("wrong chain");
     return { chainId: 8453, rpcOrigin: this.rpcOrigin };
   }
+  async assertX402Chain(chainId: 1 | 8453 | 42161): Promise<{ readonly chainId: 1 | 8453 | 42161; readonly rpcOrigin: string }> {
+    if (chainId !== 8453) throw new Error("wrong chain");
+    return await this.assertBaseChain();
+  }
   async getBalances(address: Address): Promise<BalanceSnapshot> {
     this.balanceCalls += 1;
     return { ...this.balances, address };

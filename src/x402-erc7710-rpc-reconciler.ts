@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import type { ClockPort, X402RpcBlock, X402RpcHead, X402RpcPort } from "./ports.js";
-import { matchingTransfer, sameRpcOrigin, validX402Head } from "./x402-rpc-scan.js";
+import { matchingTransfer } from "./x402-rpc-scan.js";
 import {
   appendX402Transition,
   sealX402Operation,
@@ -37,18 +37,16 @@ export class X402Erc7710RpcReconciler {
       operation.signatureHash === undefined || operation.paymentContextHash === undefined) return operation;
     // The safe head is read once; the transaction block read below is the canonical-membership check of the receipt.
     const safe = await this.rpc.getX402Head("safe");
-    if (!validX402Head(safe) || !sameRpcOrigin(safe.rpcOrigin, chain.rpcOrigin)) return operation;
     let receipt;
     try { receipt = await this.rpc.getX402Receipt(operation.transactionHint.transactionHash); }
     catch { return operation; }
     if (receipt === null || receipt.status !== "success" ||
       receipt.transactionHash !== operation.transactionHint.transactionHash ||
-      BigInt(receipt.blockNumber) > BigInt(safe.number) || !sameRpcOrigin(receipt.rpcOrigin, chain.rpcOrigin)) return operation;
+      BigInt(receipt.blockNumber) > BigInt(safe.number)) return operation;
     let transactionBlock;
     try { transactionBlock = await this.rpc.getX402Block(receipt.blockNumber); }
     catch { return operation; }
-    if (transactionBlock.number !== receipt.blockNumber || transactionBlock.hash !== receipt.blockHash ||
-      !sameRpcOrigin(transactionBlock.rpcOrigin, chain.rpcOrigin)) return operation;
+    if (transactionBlock.number !== receipt.blockNumber || transactionBlock.hash !== receipt.blockHash) return operation;
     const transfers = receipt.logs.filter((log) => matchingTransfer(log, operation));
     if (transfers.length !== 1 || transfers[0] === undefined) return operation;
     const transfer = transfers[0];
@@ -127,14 +125,12 @@ export class X402Erc7710RpcReconciler {
     let finalized;
     try { finalized = await this.rpc.getX402Head("finalized"); }
     catch { return operation; }
-    if (!validX402Head(finalized) || !sameRpcOrigin(finalized.rpcOrigin, rpcOrigin) ||
-      BigInt(finalized.timestamp) < BigInt(binding.effectiveExpiryUnix) ||
+    if (BigInt(finalized.timestamp) < BigInt(binding.effectiveExpiryUnix) ||
       BigInt(finalized.number) < BigInt(operation.preparedBlock.number)) return operation;
     let startBlock;
     try { startBlock = await this.rpc.getX402Block(operation.preparedBlock.number); }
     catch { return operation; }
     if (startBlock.number !== operation.preparedBlock.number || startBlock.hash !== operation.preparedBlock.hash ||
-      !sameRpcOrigin(startBlock.rpcOrigin, rpcOrigin) ||
       BigInt(startBlock.timestamp) >= BigInt(binding.effectiveExpiryUnix)) return operation;
 
     const expiryBlock = await this.expiryBound(startBlock, finalized, binding.effectiveExpiryUnix, rpcOrigin);
@@ -227,7 +223,7 @@ export class X402Erc7710RpcReconciler {
       let block;
       try { block = await this.rpc.getX402Block(guess.toString()); }
       catch { return null; }
-      if (block.number !== guess.toString() || !sameRpcOrigin(block.rpcOrigin, rpcOrigin)) return null;
+      if (block.number !== guess.toString()) return null;
       if (BigInt(block.timestamp) >= expiry) return block;
       low = { number: guess, timestamp: BigInt(block.timestamp) };
     }

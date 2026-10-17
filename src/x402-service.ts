@@ -276,9 +276,6 @@ export class X402Service extends X402PaidRequest {
       const remaining = remainingWaitMs(deadline as number, this.context.wait.nowMs());
       if (remaining < 1) return waitTimeout(waitSeconds, 0);
       const waitRpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Network(found.record.network).chainId);
-      if (waitRpc === null) {
-        throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
-      }
       try { await assertWaitRpcProvenance(waitRpc, found.record); }
       catch (error) {
         if (remainingWaitMs(deadline as number, this.context.wait.nowMs()) < 1) return waitTimeout(waitSeconds, 0);
@@ -341,29 +338,24 @@ export class X402Service extends X402PaidRequest {
       const x402Rpc = rpcRemaining === undefined
         ? x402ReadPort(rpc, x402Network(operation.network).chainId)
         : boundedX402ReadPort(rpc, Math.min(20_000, rpcRemaining), x402Network(operation.network).chainId);
-      if (deadline !== undefined && x402Rpc === null) {
-        throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the bounded read-only x402 RPC surface.");
-      }
       let verified: X402SealedPaymentMaterial | undefined;
       let unusedAtSafe = false;
-      if (x402Rpc !== null) {
-        try {
-          const reconciled = await reconcileX402Method(x402Rpc, this.context.clock, {
-            persist: async (next) => await this.context.state.writeX402Operation(next),
-          }, operation);
-          operation = reconciled.operation;
-          unusedAtSafe = reconciled.unusedAtSafe;
-        } catch (error) {
-          if (isRecoverableX402RpcObservationFailure(error)) {
-            const durable = await this.context.state.loadX402Operation(operation.profileHash, operation.operationId);
-            if (durable === null) throw new ApnError("APN_STATE_CORRUPT", "Durable x402 operation disappeared during RPC recovery.");
-            return publicX402Operation(durable);
-          }
-          throw error;
+      try {
+        const reconciled = await reconcileX402Method(x402Rpc, this.context.clock, {
+          persist: async (next) => await this.context.state.writeX402Operation(next),
+        }, operation);
+        operation = reconciled.operation;
+        unusedAtSafe = reconciled.unusedAtSafe;
+      } catch (error) {
+        if (isRecoverableX402RpcObservationFailure(error)) {
+          const durable = await this.context.state.loadX402Operation(operation.profileHash, operation.operationId);
+          if (durable === null) throw new ApnError("APN_STATE_CORRUPT", "Durable x402 operation disappeared during RPC recovery.");
+          return publicX402Operation(durable);
         }
-        operation = await this.finishReconciledEvidence(operation);
-        if (operation.terminal) return publicX402Operation(operation);
+        throw error;
       }
+      operation = await this.finishReconciledEvidence(operation);
+      if (operation.terminal) return publicX402Operation(operation);
 
       if (operation.state === "authorized_not_sent") {
         if (operation.selectedOffer.resolved.assetTransferMethod === "erc7710") {
@@ -372,15 +364,11 @@ export class X402Service extends X402PaidRequest {
           }
           verified = await this.recoverPaymentMaterial(operation);
           if (verified === undefined) return publicX402Operation(operation);
-        } else if (x402Rpc !== null) {
+        } else {
           // First send only after this resume read the nonce as unused at the safe head; the pending attempt marker keeps it at most once.
           if (!unusedAtSafe) return publicX402Operation(operation);
           verified = await this.recoverPaymentMaterial(operation);
           if (verified === undefined) return publicX402Operation(operation);
-        } else {
-          verified = await this.recoverPaymentMaterial(operation);
-          if (verified === undefined) return publicX402Operation(operation);
-          await this.assertLegacySafeRead(operation);
         }
         if (verified === undefined) return publicX402Operation(operation);
         return await this.sendPaidRequest(operation, "payment", verified, false, deadline);
@@ -403,9 +391,8 @@ export class X402Service extends X402PaidRequest {
         if (verified === undefined) {
           verified = await this.recoverPaymentMaterial(operation);
           if (verified === undefined) return publicX402Operation(operation);
-          if (x402Rpc === null) await this.assertLegacySafeRead(operation);
         }
-        return await this.sendPaidRequest(operation, "result_recovery", verified, x402Rpc !== null, deadline);
+        return await this.sendPaidRequest(operation, "result_recovery", verified, true, deadline);
       }
 
       // One resend of the byte-identical header after an ambiguous attempt, only while the nonce reads unused at safe.
@@ -415,7 +402,7 @@ export class X402Service extends X402PaidRequest {
         operation.transactionHint === undefined && operation.settlementResponseObservation === undefined &&
         operation.settlementEvidence === undefined && operation.unusedExpiryEvidence === undefined && operation.resultLink === undefined &&
         unusedAtSafe && paymentAttemptCount === 1 && operation.attempts.length === 1 &&
-        operation.state === "effect_unknown" && x402Rpc !== null
+        operation.state === "effect_unknown"
       ) {
         verified = await this.recoverPaymentMaterial(operation);
         if (verified === undefined) return publicX402Operation(operation);
@@ -464,7 +451,6 @@ export class X402Service extends X402PaidRequest {
       const remaining = remainingWaitMs(deadline, this.context.wait.nowMs());
       if (remaining < 1) return publicX402Operation(next);
       const x402Rpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Network(next.network).chainId);
-      if (x402Rpc === null) throw new ApnError("APN_OPERATION_BLOCKED", "Settlement wait requires the read-only x402 RPC surface.");
       try {
         next = (await reconcileX402Method(x402Rpc, this.context.clock, {
           persist: async (value) => await this.context.state.writeX402Operation(value),
