@@ -93,8 +93,9 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
     resume: { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "facilitator_gasless_capability" }, abandon: { code: "APN_OPERATION_BLOCKED" }, receipt: "ok" }),
   circle_route: async t => ({ ...await corpus(t, "22-v0543-circle-v2-evm-funding-public-receipt", "circle-v2-evm"), status: "ok",
     resume: TERMINAL, abandon: TERMINAL, receipt: "ok" }),
+  // A finalized payment awaiting delivery: its owner exit refuses (no outcome is unknown) and names the delivery retry.
   merchant_x402: async t => ({ ...await corpus(t, "41-v0543-merchant-x402", "merchant-x402"), status: "ok", resume: RESUME_BY_FAMILY,
-    abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT }),
+    abandon: { code: "APN_OPERATION_BLOCKED", reason: "merchant_abandon_not_unknown", family: true }, receipt: NO_RECEIPT }),
   permit2_production: async t => {
     const f = await journalFixture(t);
     return { id: f.record.operationId, root: f.root, status: "ok", resume: RESUME_BY_FAMILY, abandon: EXIT_BY_FAMILY, receipt: NO_RECEIPT };
