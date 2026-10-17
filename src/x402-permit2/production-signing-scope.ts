@@ -1,25 +1,39 @@
+import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { activeAssetPolicyFromState } from "../allowlist-active-policy.js";
-import { AssetUsageLedger, type AssetUsageReservation } from "../asset-usage-ledger.js";
+import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { walletCustodyLock } from "../encrypted-wallet-store.js";
 import { evmAddressLock, assertExclusiveEvmOwner } from "../evm-address-ownership.js";
 import { OperationService } from "../operation-service.js";
 import { decodePermit2WalletBinding } from "./owner-binding.js";
 import { assertPermit2OwnerIdentity, assertPermit2OwnerCaps } from "./production-owner-validation.js";
-import { assertSigningLifecycle, checkedSigningLease, type Permit2MetadataMode } from "./production-signing-owner.js";
+import { assertSigningLifecycle, checkedSigningLease, type Permit2MetadataMode, type Permit2SavedIdentity } from "./production-signing-owner.js";
 import { assertSigningTime } from "./production-signing-facts.js";
 import { productionUsageIdentity, type Permit2ProductionRecord, type Permit2ProductionRepository } from "./production-repository.js";
 
-export interface Permit2MetadataLockScope { readonly kind: "permit2-metadata-lock-scope" }
 type Context = { readonly record: Permit2ProductionRecord; readonly mode: Permit2MetadataMode;
   readonly keys: readonly string[]; readonly close: Set<() => void>;
   time?: { readonly policy: Awaited<ReturnType<AllowlistPolicyStore["readUnderProfileLock"]>>; readonly wallet: ReturnType<typeof decodePermit2WalletBinding>; readonly used: string } };
+/** Lives only inside Permit2MetadataLockOwner.within, while its metadata locks are held; it carries no key, approval,
+ * signature or transport authority, only the lexical fact that those locks are held. */
+export class Permit2MetadataLockScope {
+  readonly kind = "permit2-metadata-lock-scope" as const;
+  readonly #owner: Permit2MetadataLockOwner;
+  #context: Context | null;
+  constructor(owner: Permit2MetadataLockOwner, context: Context) { this.#owner = owner; this.#context = context; }
+  static held(scope: unknown, owner: Permit2MetadataLockOwner): Context {
+    if (!(scope instanceof Permit2MetadataLockScope) || scope.#owner !== owner || scope.#context === null) blocked();
+    return scope.#context;
+  }
+  static exit(scope: Permit2MetadataLockScope): void {
+    const context = scope.#context; scope.#context = null; for (const close of context?.close ?? []) close();
+  }
+}
 /** An actual metadata lock callback only. No key, approval, signature or transport authority. */
 export class Permit2MetadataLockOwner {
-  readonly #contexts = new WeakMap<Permit2MetadataLockScope, Context>();
   readonly #state: StateStore;
   readonly #records: Permit2ProductionRepository;
   readonly #policies: AllowlistPolicyStore;
@@ -39,32 +53,32 @@ export class Permit2MetadataLockOwner {
         const current = await this.#records.findOperation(id);
         if (current === null || current.integrityHash !== initial.integrityHash) blocked();
         assertSigningLifecycle(current, mode); freeze(current);
-        const scope = Object.freeze({ kind: "permit2-metadata-lock-scope" as const });
-        this.#contexts.set(scope, { record: current, mode, keys: Object.freeze([...outer, custody, policy]), close: new Set() });
+        const scope = new Permit2MetadataLockScope(this, { record: current, mode, keys: Object.freeze([...outer, custody, policy]), close: new Set() });
         try { await this.owner(scope, id, mode, clock); this.assert(scope, id, mode); return await action(scope); }
-        finally { const context = this.#contexts.get(scope); this.#contexts.delete(scope); for (const close of context?.close ?? []) close(); }
+        finally { Permit2MetadataLockScope.exit(scope); }
       })));
   }
   assert(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode): void {
-    const c = this.#contexts.get(scope);
-    if (c === undefined || c.record.operationId !== id || c.mode !== mode || c.record.material.wallet.profileHash !== c.record.profileHash) blocked();
+    const c = Permit2MetadataLockScope.held(scope, this);
+    if (c.record.operationId !== id || c.mode !== mode || c.record.material.wallet.profileHash !== c.record.profileHash) blocked();
     const keys = [`profile:${c.record.profileHash}`, `operation:${id}`, evmAddressLock(c.record.material.wallet.account),
       walletCustodyLock(this.#state, c.record.material.wallet.profile), `profile:${allowlistProfileHash(c.record.material.wallet.profile)}`];
     if (c.keys.length !== keys.length || c.keys.some((key, index) => key !== keys[index])) blocked();
   }
   assertTime(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, at: Date): void {
-    this.assert(scope, id, mode); const c = this.#contexts.get(scope)!, t = c.time; if (t === undefined) blocked();
+    this.assert(scope, id, mode); const c = Permit2MetadataLockScope.held(scope, this), t = c.time; if (t === undefined) blocked();
     const policy = activeAssetPolicyFromState(t.policy, at); assertPermit2OwnerIdentity(c.record, t.wallet, policy);
     assertPermit2OwnerCaps(c.record, at, t.used, policy); assertSigningTime(c.record, at);
   }
   onExit(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, close: () => void): () => void {
-    this.assert(scope, id, mode); const c = this.#contexts.get(scope)!; c.close.add(close); return () => { c.close.delete(close); };
+    this.assert(scope, id, mode); const c = Permit2MetadataLockScope.held(scope, this); c.close.add(close); return () => { c.close.delete(close); };
   }
   async owner(scope: Permit2MetadataLockScope, id: string, mode: Permit2MetadataMode, clock: () => Date,
-    expected?: { readonly record: Permit2ProductionRecord; readonly lease: AssetUsageReservation }) {
-    this.assert(scope, id, mode); const frozen = this.#contexts.get(scope)!.record;
+    expected?: Permit2SavedIdentity) {
+    this.assert(scope, id, mode); const frozen = Permit2MetadataLockScope.held(scope, this).record;
     const record = await this.#records.findOperation(id); this.assert(scope, id, mode);
-    if (record === null || record.integrityHash !== frozen.integrityHash) blocked();
+    if (record === null || record.integrityHash !== frozen.integrityHash ||
+      expected !== undefined && sha256(canonicalJson(record.material.wallet)) !== expected.walletHash) blocked();
     assertSigningLifecycle(record, mode); assertSigningTime(record, clock());
     // Ordinary bucket lock remains: no optimistic multi-file usage snapshot or aggregate bypass.
     const usage = await new AssetUsageLedger(this.#state.root).usageWithReservation(productionUsageIdentity(record), record.usageReservationId, clock());
@@ -81,7 +95,7 @@ export class Permit2MetadataLockOwner {
     const at = clock(), currentPolicy = activeAssetPolicyFromState(policy, at);
     assertPermit2OwnerIdentity(record, wallet, currentPolicy);
     assertPermit2OwnerCaps(record, at, used.toString(), currentPolicy); assertSigningTime(record, clock());
-    this.#contexts.get(scope)!.time = { policy, wallet, used: used.toString() };
+    Permit2MetadataLockScope.held(scope, this).time = { policy, wallet, used: used.toString() };
     return { record, lease };
   }
 }

@@ -5,7 +5,9 @@ import test from "node:test";
 import { OperationService } from "../../src/operation-service.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
 import { StateStore } from "../../src/state.js";
-import { makeCore, temporaryState, TestNative, TestRpc } from "./helpers.js";
+import { ApnCore } from "../../src/core.js";
+import { activateBaseUsdcDirectPolicy, makeCore, temporaryState, TestClock, TestNative, TestRpc, WALLET } from "./helpers.js";
+import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 
 const ACCOUNT = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const OTHER = "0xf41170df51aab52aaa04fbc3ff325cf051644aca";
@@ -58,19 +60,20 @@ test("Relay unsigned registry survives reopen, holds the Ethereum sender, and re
 });
 
 test("Relay unsigned insertion rejects same-key direct collision, same sender conflict, and changed replay", async (t) => {
+  // A real saved direct transfer bound to the same idempotency key (another root, so the rest starts clean).
+  const collided = await temporaryState(); t.after(collided.cleanup);
+  const collidedState = new StateStore(collided.root);
+  const core = new ApnCore({ state: collidedState, native: new CanonicalDirectTestNative(collided.root), rpc: new TestRpc(), clock: new TestClock() });
+  assert.equal((await core.execute({ command: "wallet.ensure", profile: "default" })).ok, true);
+  await activateBaseUsdcDirectPolicy(collided.root, WALLET, "default");
+  const direct = await core.execute({ command: "transfer.prepare", profile: "default", recipient: OTHER, amount: "1", idempotencyKey: "relay-unsigned-test-1" });
+  assert.equal(direct.ok, true, JSON.stringify(direct.error));
+  await assert.rejects(new OperationService(collidedState).persistRelayUnsigned(prepared(collidedState)), { code: "APN_IDEMPOTENCY_CONFLICT" });
+  assert.deepEqual(await new RelayUnsignedOperationRepository(collided.root).listAllOperations(), []);
+
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root);
   const operation = prepared(state);
-  const direct = { operationId: HASH("3"), idempotencyHash: operation.idempotencyHash, profileHash: operation.profileHash,
-    requestHash: HASH("4"), state: "awaiting_approval", terminal: false, chainId: 1, walletAddress: ACCOUNT };
-  const originalAll = state.listAllOperations.bind(state);
-  state.listAllOperations = async () => [direct] as never;
-  await assert.rejects(new OperationService(state).persistRelayUnsigned(operation), { code: "APN_IDEMPOTENCY_CONFLICT" });
-  state.listAllOperations = originalAll;
-  const originalProfile = state.listOperations.bind(state);
-  state.listOperations = async () => [direct] as never;
-  await assert.rejects(new OperationService(state).persistRelayUnsigned(operation), { code: "APN_OPERATION_BLOCKED" });
-  state.listOperations = originalProfile;
   const service = new OperationService(state);
   await service.persistRelayUnsigned(operation);
   const { integrityHash: _integrityHash, ...unsigned } = operation;

@@ -40,8 +40,6 @@ export declare class StateStore extends SecureStateStore {
     loadX402Operation(profileHash: string, operationId: string): Promise<X402OperationRecord | null>;
     findX402Operation(operationId: string): Promise<X402OperationRecord | null>;
     writeX402Operation(operation: X402OperationRecord): Promise<void>;
-    listX402Operations(profileHash: string): Promise<readonly X402OperationRecord[]>;
-    listAllX402Operations(): Promise<readonly X402OperationRecord[]>;
     loadX402Result(profileHash: string, operationId: string): Promise<X402ResultRecord | null>;
     /** Exact-path crash recovery only; ordinary result readers intentionally hide unlinked artifacts. */
     loadX402RecoveryResult(profileHash: string, operationId: string): Promise<X402ResultRecord | null>;

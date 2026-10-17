@@ -16,7 +16,7 @@ import { GaszipFundingJournal, publicGaszipFunding, sealGaszipFunding, validateG
 import { GaszipFundingRpc, assertGaszipFundingFresh, proveGaszipDelivery, proveGaszipSafeTransaction, readGaszipFundingPlan, type GaszipRpcPort } from "../../src/lifi/gaszip-direct-rpc.js";
 import { GaszipFundingService } from "../../src/lifi/gaszip-direct-service.js";
 const SEI_ROUTE=GASZIP_DIRECT_ROUTES.sei,MEGA_ROUTE=GASZIP_DIRECT_ROUTES.mega,seiCodec=gaszipCodec(SEI_ROUTE),megaCodec=gaszipCodec(MEGA_ROUTE);
-import { assertMetaMaskNativeConflictDomainAvailable, metaMaskNativeOperationExists } from "../../src/metamask-native-transfer-owner.js";
+import { metaMaskNativeOperationExists } from "../../src/metamask-native-transfer-owner.js";
 import { AssetUsageLedger, validateAssetUsageReservation } from "../../src/asset-usage-ledger.js";
 
 /** The directories of the owner-bound families and the ledger rows that reference them; nothing else is kept in a case. */
@@ -38,13 +38,13 @@ export async function installLegacyCase(source: string, root: string): Promise<v
   await ownerOnly(root);
 }
 
-/** Hash of every file outside `locks/`; readers may take locks but must not rewrite a stored record. */
+/** Hash of every file outside `locks/` and the derived `operation-index/`; readers may take locks and index records but must not rewrite one. */
 export async function legacyCaseDigest(root: string): Promise<ReadonlyMap<string, string>> {
   const result = new Map<string, string>();
   const walk = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name), name = relative(root, path);
-      if (name === "locks") continue;
+      if (name === "locks" || name === "operation-index") continue;
       if (entry.isDirectory()) await walk(path);
       else result.set(name, createHash("sha256").update(await readFile(path)).digest("hex"));
     }
@@ -83,9 +83,10 @@ export async function readEveryLegacyRecord(root: string, at: Date): Promise<Rea
   for (const name of await jsonNames(root, "metamask-native-operations")) {
     assert.equal(await metaMaskNativeOperationExists(root, name.slice(0, -5)), true);
     const op = JSON.parse(await readFile(join(root, "metamask-native-operations", name), "utf8")) as
-      { readonly state: string; readonly context: { readonly quote: { readonly chainId: number; readonly sender: string } } };
+      { readonly state: string; readonly context: { readonly profileHash: string; readonly quote: { readonly chainId: number; readonly sender: string } } };
     kinds.add(`metamask-native:${op.state}`);
-    await allowedOrBlocked(assertMetaMaskNativeConflictDomainAvailable(root, op.context.quote.chainId, op.context.quote.sender));
+    // The native transfer holds its account through the operation index like every other family.
+    await allowedOrBlocked(service.assertEvmAccountAvailable(op.context.profileHash, op.context.quote.chainId, op.context.quote.sender));
   }
   for (const profileHash of profiles) await allowedOrBlocked(service.assertProfileAvailable(profileHash));
   const ledger = new AssetUsageLedger(root);

@@ -1,59 +1,34 @@
-import { publicKnownCircle } from "./circle-v2-evm/funding-operation.js";
-import { assertMetaMaskNativeConflictDomainAvailable } from "./metamask-native-journal.js";
-import { circleNativeSourceIdentity, circleSourceSettled } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
-import { GaszipFundingJournal, publicGaszipFunding } from "./lifi/gaszip-direct-journal.js";
-import { GASZIP_DIRECT_ROUTES } from "./lifi/gaszip-direct-route.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
 import { MerchantRepository } from "./x402-merchant/repository.js";
-import { publicMerchant, validateMerchant } from "./x402-merchant/model.js";
-import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
+import { validateMerchant } from "./x402-merchant/model.js";
+import { Permit2ProductionRepository, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { ApnError } from "./errors.js";
-import { assertUsdtConflictDomainsAvailable, conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys, sharedEvmConflictDomain, storedOperationDomains } from "./operation-conflict-domain.js";
-import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
-import { publicX402Operation, } from "./x402-state-integrity.js";
-import { publicProviderX402Operation, } from "./provider-x402-model.js";
+import { conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys, sharedEvmConflictDomain } from "./operation-conflict-domain.js";
+import { canonicalOperationId } from "./transfer-policy.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
-import { localX402Outcome, providerX402Outcome, x402ReceiptOutcome } from "./operation-x402-outcome.js";
-import { RailOperationRepository } from "./rail-operation-repository.js";
-import { publicRailOperation } from "./rail-operation-model.js";
-import { BridgeOperationRepository } from "./lifi/operation-repository.js";
-import { publicStoredBridgeOperation } from "./lifi/receipt.js";
-import { GaslessOperationRepository } from "./gasless/operation-repository.js";
-import { publicGaslessOperation } from "./gasless/receipt.js";
-import { MetaMaskGaslessOperationRepository } from "./metamask-gasless/journal/repository.js";
-import { publicMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt.js";
-import { SmartAccountGaslessOperationRepository } from "./smart-account-gasless/operation-repository.js";
-import { publicSmartAccountGaslessOperation } from "./smart-account-gasless/receipt.js";
-import { FacilitatorGaslessOperationRepository } from "./facilitator-gasless/operation-repository.js";
-import { publicFacilitatorOperation } from "./facilitator-gasless/receipt.js";
-import { RelayUnsignedOperationRepository, RelayRetirementRepository, publicRelayUnsignedOperation, validateRelayUnsignedOperation } from "./relay-unsigned-operation.js";
+import { RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "./relay-unsigned-operation.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
-import { relaySourceTerminal } from "./relay/lifecycle.js";
+import { OperationIndex } from "./operation-index/index.js";
+import { relayStatus } from "./operation-index/adapters/relay.js";
+import { x402StoredOutcome, x402StoredReceiptOutcome } from "./operation-index/adapters/x402.js";
+import { profileClaim, providerClaims, UNREADABLE_PROVIDER_CLAIM, unreadableProfileClaim } from "./operation-index/types.js";
+const FACADE_KINDS = new Set(["sei_gaszip", "circle_route", "mega_gaszip", "merchant_x402",
+    "permit2_production", "relay_unsigned", "facilitator_gasless_transfer", "smart_account_gasless_transfer", "metamask_gasless_transfer",
+    "gasless_transfer", "bridge_route", "rail_transfer", "direct_transfer", "x402_fetch"]);
+/**
+ * The money-operation facade over the operation index (src/operation-index): idempotency, lookup and the
+ * one-operation-per-account guard read one index entry and at most the blocking records, never every store.
+ * Repository ports that older call sites still pass are not read: each family is read through its index adapter.
+ */
 export class OperationService {
     state;
     providerX402;
-    rails;
-    bridges;
-    gasless;
-    metaMaskGasless;
-    smartAccountGasless;
-    facilitatorGasless;
-    relayUnsigned;
-    seiFunding;
-    megaFunding;
-    constructor(state, providerX402 = new ProviderX402Repository(state.root), rails = new RailOperationRepository(state.root), bridges = new BridgeOperationRepository(state.root), gasless = new GaslessOperationRepository(state.root), metaMaskGasless = new MetaMaskGaslessOperationRepository(state.root), smartAccountGasless = new SmartAccountGaslessOperationRepository(state.root), facilitatorGasless = new FacilitatorGaslessOperationRepository(state.root), relayUnsigned = new RelayUnsignedOperationRepository(state.root), seiFunding = new GaszipFundingJournal(state.root, GASZIP_DIRECT_ROUTES.sei), megaFunding = new GaszipFundingJournal(state.root, GASZIP_DIRECT_ROUTES.mega)) {
+    index;
+    constructor(state, providerX402 = new ProviderX402Repository(state.root), ..._unreadPorts) {
         this.state = state;
         this.providerX402 = providerX402;
-        this.rails = rails;
-        this.bridges = bridges;
-        this.gasless = gasless;
-        this.metaMaskGasless = metaMaskGasless;
-        this.smartAccountGasless = smartAccountGasless;
-        this.facilitatorGasless = facilitatorGasless;
-        this.relayUnsigned = relayUnsigned;
-        this.seiFunding = seiFunding;
-        this.megaFunding = megaFunding;
+        this.index = new OperationIndex(state);
     }
     /** Create-only Relay insertion. Profile, operation, idempotency, then owner-address
      * locks are acquired together so owner validation and durable write are atomic. */
@@ -80,9 +55,11 @@ export class OperationService {
                 if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_NOT_FOUND")
                     throw error;
             }
-            await this.assertProfileAvailable(operation.profileHash);
+            // Its prepare admitted this operation's own claims; every other unresolved operation of the profile still blocks it.
+            await this.index.assertAvailable({ family: null, profileHash: operation.profileHash, claims: [profileClaim(operation.profileHash)],
+                except: operation.operationId });
             await assertExclusiveEvmOwner(this.state, operation.sourceAccount, operation.profileHash);
-            await this.relayUnsigned.persistLocked(operation);
+            await new RelayUnsignedOperationRepository(this.state.root).persistLocked(operation);
             return operation;
         });
     }
@@ -97,42 +74,34 @@ export class OperationService {
     }
     /** Pure lookup lets callers defer to the full prepare resolver before any lifecycle upgrade. */
     async findIdempotency(idempotencyHash) {
-        const matches = [
-            ...(await this.seiFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "sei_gaszip", record })),
-            ...(await this.circleOperations()).filter(operation => operation.idempotencyHash === idempotencyHash).map(record => ({ kind: "circle_route", record })),
-            ...(await this.megaFunding.listAllOperations()).filter(record => record.idempotencyHash === idempotencyHash).map(record => ({ kind: "mega_gaszip", record })),
-            ...(await this.merchantOperations()).filter(o => o.idempotencyHash === idempotencyHash).map(record => ({ kind: "merchant_x402", record })),
-            ...(await this.relayUnsigned.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "relay_unsigned", record })),
-            ...(await this.facilitatorGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "facilitator_gasless_transfer", record })),
-            ...(await this.smartAccountGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
-            ...(await this.metaMaskGasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "metamask_gasless_transfer", record })),
-            ...(await this.gasless.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "gasless_transfer", record })),
-            ...(await this.listAllBridgeOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "bridge_route", record })),
-            ...(await this.rails.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "rail_transfer", record })),
-            ...(await this.state.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "direct_transfer", record })),
-            ...(await this.state.listAllX402Operations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "x402_fetch", strategy: "local", record })),
-            ...(await this.providerX402.listAllOperations()).filter((operation) => operation.idempotencyHash === idempotencyHash).map((record) => ({ kind: "x402_fetch", strategy: "provider_atomic", record })),
-        ];
-        if (matches.length > 1)
-            throw new ApnError("APN_STATE_CORRUPT", "Idempotency identity is duplicated across operation stores.");
-        return matches[0] ?? null;
+        const entry = await this.index.findByIdempotency(idempotencyHash);
+        if (entry === null)
+            return null;
+        // An operation of a family this facade does not model still owns the key.
+        if (!FACADE_KINDS.has(entry.family))
+            throw new ApnError("APN_IDEMPOTENCY_CONFLICT", "Idempotency key is already bound to another operation family.");
+        return await this.stored(entry);
+    }
+    /**
+     * Admits a new operation: its claims are checked and written to the operation index as one step under the index lock,
+     * before `work` (the family's prepare body: RPC reads, signing material, the durable record) runs. When `work` fails
+     * or writes no record, the claims are removed. Any other prepare on the same account, of any family, is refused from
+     * that moment, and this one is refused while another holds the account. The caller holds its family locks and has
+     * already answered a replay of the same identity.
+     */
+    async admit(identity, admission, work) {
+        const claims = [...admission.profileWide === true ? [profileClaim(identity.profileHash)] : [],
+            ...this.domainClaims(identity.profileHash, admission.domains)];
+        if (admission.provider !== undefined) {
+            claims.push(...providerClaims(admission.provider.providerId, admission.provider.accountBindingHash, admission.provider.payer));
+        }
+        const others = admission.otherProfiles ?? [];
+        return await this.index.admit({ family: identity.kind, profileHash: identity.profileHash, operationId: identity.operationId,
+            idempotencyHash: identity.idempotencyHash, requestHash: identity.requestHash }, { family: null, profileHash: identity.profileHash, claims, holds: others.map(profileClaim), waits: others.map(unreadableProfileClaim),
+            ...(admission.tag === undefined ? {} : { tag: admission.tag }) }, work);
     }
     async assertProfileAvailable(profileHash) {
-        let blocking;
-        for (const operation of await this.profileOperations(profileHash)) {
-            if (operation.record.terminal)
-                continue;
-            if (operation.kind === "relay_unsigned" && await this.relayLifecycle(operation.record) !== "active")
-                continue;
-            blocking = operation;
-            break;
-        }
-        if (blocking !== undefined) {
-            throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this profile is not terminal.", {
-                blockingOperationId: blocking.record.operationId,
-                blockingState: blocking.record.state,
-            });
-        }
+        await this.index.assertAvailable({ family: null, profileHash, claims: [profileClaim(profileHash)] });
     }
     /** A new EVM money operation waits only for unresolved operations on the same chain and sending account. */
     async assertEvmAccountAvailable(profileHash, chainId, account) {
@@ -140,8 +109,7 @@ export class OperationService {
     }
     /** R8 (OWNR-16): a native Arbitrum move to a local custody wallet does not wait for this account's Circle routes whose source burn is final. */
     async assertEvmNativeAccountAvailableBesideSettledCircle(profileHash, account) {
-        const settled = (await this.circleOperations(profileHash)).filter(op => !op.terminal && circleSourceSettled(op, profileHash, account));
-        await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], undefined, false, new Map(settled.map(op => [op.operationId, circleNativeSourceIdentity(op)])));
+        await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], undefined, { kind: "native_beside_settled_circle", account });
     }
     /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
     async assertEvmAccountSharedAvailable(profileHash, chainId, account) {
@@ -163,73 +131,14 @@ export class OperationService {
     async assertRailAccountAvailable(profileHash, rail, account) {
         await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
     }
-    async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, allowIncludedCircleSource = false, finalizedNativeSources) {
+    async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, tag) {
+        await this.index.assertAvailable({ family: null, profileHash, claims: this.domainClaims(profileHash, domains),
+            ...(exceptOperationId === undefined ? {} : { except: exceptOperationId }), ...(tag === undefined ? {} : { tag }) });
+    }
+    /** An unreadable network or account on the caller's side waits for every unresolved operation of the profile. */
+    domainClaims(profileHash, domains) {
         const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
-        if (this.state.root !== undefined)
-            await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
-        if (this.state.root !== undefined) {
-            for (const wantedKey of wanted) {
-                const [family, network, account] = wantedKey.split(":");
-                if (family !== "evm" || network === undefined || account === undefined)
-                    continue;
-                await assertMetaMaskNativeConflictDomainAvailable(this.state.root, network, account, exceptOperationId);
-            }
-        }
-        for (const operation of await this.profileOperations(profileHash)) {
-            if (operation.record.terminal || operation.record.operationId === exceptOperationId)
-                continue;
-            if (operation.kind === "relay_unsigned" && await this.relayLifecycle(operation.record) !== "active")
-                continue;
-            let held = storedOperationDomains(operation);
-            if (allowIncludedCircleSource && operation.kind === "circle_route" && operation.record.source !== null &&
-                operation.record.residualAllowanceAtomic === "0" && operation.record.effects.find(e => e.role === "burn")?.phase === "confirmed") {
-                // Only another CCTP operation may queue a source nonce after canonical inclusion. Other rails remain conservative.
-                held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
-            }
-            if (operation.kind === "circle_route" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
-                held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
-            const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)) &&
-                !(domain.shared === true && coexisting.has(conflictDomainKey(domain))));
-            // An unreadable network or account on either side blocks the whole profile.
-            if (held !== null && wanted.size > 0 && shared === undefined)
-                continue;
-            throw new ApnError("APN_OPERATION_BLOCKED", shared === undefined
-                ? "Another money operation for this profile is not terminal."
-                : "Another money operation for this network and account is not terminal.", {
-                blockingOperationId: operation.record.operationId,
-                blockingState: operation.record.state,
-                ...(shared === undefined ? {} : { blockingNetwork: `${shared.family}:${shared.network}`, blockingAccount: shared.account }),
-            });
-        }
-    }
-    // Historical embedding ports supply only list methods; concrete StateStore always has a checked root.
-    async permit2ProductionOperations(profileHash) {
-        return this.state.root === undefined ? [] : new Permit2ProductionRepository(this.state.root).listOperations(profileHash);
-    }
-    async profileOperations(profileHash) {
-        return [
-            ...(await this.seiFunding.listOperations(profileHash)).map(record => ({ kind: "sei_gaszip", record })),
-            ...(await this.circleOperations(profileHash)).map(record => ({ kind: "circle_route", record })),
-            ...(await this.megaFunding.listOperations(profileHash)).map(record => ({ kind: "mega_gaszip", record })),
-            ...(await this.merchantOperations(profileHash)).map(record => ({ kind: "merchant_x402", record })),
-            ...(await this.permit2ProductionOperations(profileHash)).map(record => ({ kind: "permit2_production", record })),
-            ...(await this.relayUnsigned.listOperations(profileHash)).map((record) => ({ kind: "relay_unsigned", record })),
-            ...(await this.facilitatorGasless.listOperations(profileHash)).map((record) => ({ kind: "facilitator_gasless_transfer", record })),
-            ...(await this.smartAccountGasless.listOperations(profileHash)).map((record) => ({ kind: "smart_account_gasless_transfer", record })),
-            ...(await this.metaMaskGasless.listOperations(profileHash)).map((record) => ({ kind: "metamask_gasless_transfer", record })),
-            ...(await this.gasless.listOperations(profileHash)).map((record) => ({ kind: "gasless_transfer", record })),
-            ...(await this.listBridgeOperations(profileHash)).map((record) => ({ kind: "bridge_route", record })),
-            ...(await this.rails.listOperations(profileHash)).map((record) => ({ kind: "rail_transfer", record })),
-            ...(await this.state.listOperations(profileHash)).map((record) => ({ kind: "direct_transfer", record })),
-            ...(await this.state.listX402Operations(profileHash)).map((record) => ({ kind: "x402_fetch", strategy: "local", record })),
-            ...(await this.providerX402.listOperations(profileHash)).map((record) => ({ kind: "x402_fetch", strategy: "provider_atomic", record })),
-        ];
-    }
-    async circleOperations(profileHash) {
-        if (this.state.root === undefined)
-            return [];
-        const repo = new CircleRepository(this.state.root);
-        return profileHash === undefined ? repo.listAllAny() : repo.listAny(profileHash);
+        return wanted.size === 0 ? [profileClaim(profileHash)] : [...wanted].map(key => coexisting.has(key) ? { key, shared: true } : { key });
     }
     /** Both Circle signing accounts are held under their existing profile locks. */
     async assertCircleAccountsAvailable(record, exceptSaved = false, effectRole) {
@@ -246,31 +155,14 @@ export class OperationService {
         if (settledSourceMint)
             assertCircleAttestation(record.source, record.attestation, record.schemaVersion === "apn.circle-v2-evm-operation.v2" ? record.funding : undefined);
         else
-            await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], except, true);
+            await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], except, { kind: "circle_source_after_burn" });
         await this.assertConflictDomainsAvailable(record.destinationProfileHash, () => [evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)], except);
     }
+    /** The provider account and payer are held across profiles by provider direct and provider x402 operations. */
     async assertProviderAccountAvailable(providerId, accountBindingHash, payer, exceptOperationId) {
-        const direct = (await this.state.listAllOperations()).filter((record) => !record.terminal &&
-            record.operationId !== exceptOperationId &&
-            record.providerDirect?.providerId === providerId &&
-            (record.providerDirect.accountBindingHash === accountBindingHash || record.walletAddress.toLowerCase() === payer.toLowerCase()));
-        const providerPaid = (await this.providerX402.listAllOperations()).filter((record) => !record.terminal &&
-            record.operationId !== exceptOperationId &&
-            record.provider.providerId === providerId &&
-            (record.provider.accountBindingHash === accountBindingHash || record.provider.payer.toLowerCase() === payer.toLowerCase()));
-        const blocking = direct[0] ?? providerPaid[0];
-        if (blocking !== undefined) {
-            throw new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this provider account is not terminal.", {
-                blockingOperationId: blocking.operationId,
-                blockingState: blocking.state,
-            });
-        }
-    }
-    async merchantOperations(profileHash) {
-        if (this.state.root === undefined)
-            return [];
-        const records = new MerchantRepository(this.state.root);
-        return profileHash === undefined ? records.listAllOperations() : records.listOperations(profileHash);
+        await this.index.assertAvailable({ family: null, profileHash: null,
+            claims: [...providerClaims(providerId, accountBindingHash, payer), UNREADABLE_PROVIDER_CLAIM],
+            ...(exceptOperationId === undefined ? {} : { except: exceptOperationId }) });
     }
     async assertMerchantAccountAvailable(record) {
         validateMerchant(record);
@@ -280,169 +172,43 @@ export class OperationService {
         await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(4326, record.custody.walletAddress)], record.operationId);
     }
     async required(operationId) {
-        const canonicalId = canonicalOperationId(operationId);
-        const mega = await this.megaFunding.findOperation(canonicalId);
-        const sei = await this.seiFunding.findOperation(canonicalId);
-        const circle = (await this.circleOperations()).find(record => record.operationId === canonicalId) ?? null;
-        const merchant = await new MerchantRepository(this.state.root).findOperation(canonicalId);
-        const permit2 = await new Permit2ProductionRepository(this.state.root).findOperation(canonicalId);
-        const direct = await this.state.findOperation(canonicalId);
-        const x402 = await this.state.findX402Operation(canonicalId);
-        const providerX402 = await this.providerX402.findOperation(canonicalId);
-        const rail = await this.rails.findOperation(canonicalId);
-        const bridge = await this.findBridgeOperation(canonicalId);
-        const gasless = await this.gasless.findOperation(canonicalId);
-        const metaMaskGasless = await this.metaMaskGasless.findOperation(canonicalId);
-        const smartAccountGasless = await this.smartAccountGasless.findOperation(canonicalId);
-        const facilitatorGasless = await this.facilitatorGasless.findOperation(canonicalId);
-        const relayUnsigned = await this.relayUnsigned.findOperation(canonicalId);
-        if ([merchant, mega, sei, circle, permit2, direct, x402, providerX402, rail, bridge, gasless, metaMaskGasless, smartAccountGasless, facilitatorGasless, relayUnsigned]
-            .filter((value) => value !== null).length > 1) {
-            throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
-        }
-        if (mega !== null)
-            return { kind: "mega_gaszip", record: mega };
-        if (sei !== null)
-            return { kind: "sei_gaszip", record: sei };
-        if (circle !== null)
-            return { kind: "circle_route", record: circle };
-        if (merchant !== null)
-            return { kind: "merchant_x402", record: merchant };
-        if (permit2 !== null)
-            return { kind: "permit2_production", record: permit2 };
-        if (direct !== null)
-            return { kind: "direct_transfer", record: direct };
-        if (x402 !== null)
-            return { kind: "x402_fetch", strategy: "local", record: x402 };
-        if (providerX402 !== null)
-            return { kind: "x402_fetch", strategy: "provider_atomic", record: providerX402 };
-        if (rail !== null)
-            return { kind: "rail_transfer", record: rail };
-        if (bridge !== null)
-            return { kind: "bridge_route", record: bridge };
-        if (gasless !== null)
-            return { kind: "gasless_transfer", record: gasless };
-        if (metaMaskGasless !== null)
-            return { kind: "metamask_gasless_transfer", record: metaMaskGasless };
-        if (smartAccountGasless !== null)
-            return { kind: "smart_account_gasless_transfer", record: smartAccountGasless };
-        if (facilitatorGasless !== null)
-            return { kind: "facilitator_gasless_transfer", record: facilitatorGasless };
-        if (relayUnsigned !== null)
-            return { kind: "relay_unsigned", record: relayUnsigned };
-        throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
+        const entry = await this.index.find(canonicalOperationId(operationId));
+        if (entry === null || !FACADE_KINDS.has(entry.family))
+            throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
+        const found = await this.stored(entry);
+        if (found === null)
+            throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
+        return found;
     }
     async status(operationId) {
-        const operation = await this.required(operationId);
-        if (operation.kind === "sei_gaszip")
-            return publicGaszipFunding(GASZIP_DIRECT_ROUTES.sei, operation.record);
-        if (operation.kind === "circle_route")
-            return publicKnownCircle(operation.record);
-        if (operation.kind === "mega_gaszip")
-            return publicGaszipFunding(GASZIP_DIRECT_ROUTES.mega, operation.record);
-        if (operation.kind === "merchant_x402")
-            return publicMerchant(operation.record);
-        if (operation.kind === "permit2_production")
-            return publicPermit2Production(operation.record);
-        if (operation.kind === "relay_unsigned")
-            return this.relayStatus(operation.record);
-        if (operation.kind === "direct_transfer")
-            return publicOperation(operation.record);
-        if (operation.kind === "rail_transfer")
-            return publicRailOperation(operation.record);
-        if (operation.kind === "bridge_route")
-            return publicStoredBridgeOperation(operation.record);
-        if (operation.kind === "gasless_transfer")
-            return publicGaslessOperation(operation.record);
-        if (operation.kind === "metamask_gasless_transfer")
-            return publicMetaMaskGaslessOperation(operation.record);
-        if (operation.kind === "smart_account_gasless_transfer")
-            return publicSmartAccountGaslessOperation(operation.record);
-        if (operation.kind === "facilitator_gasless_transfer")
-            return publicFacilitatorOperation(operation.record);
-        return operation.strategy === "local"
-            ? publicX402Operation(operation.record)
-            : publicProviderX402Operation(operation.record);
+        const found = await this.required(operationId);
+        const adapter = this.index.adapter({ family: found.kind });
+        return await adapter.view(found.kind === "x402_fetch" ? found : found.record, this.state.root);
     }
     async relayStatus(operation) {
-        const retirement = await new RelayRetirementRepository(this.state.root).load(operation);
-        const completion = retirement === null ? await this.relaySourceCompletion(operation) : null;
-        return publicRelayUnsignedOperation(operation, retirement, completion);
-    }
-    /** Source finality or a finality-proven revert ends this spend attempt. Destination delivery is observed separately. */
-    async relaySourceCompletion(operation) {
-        return relaySourceTerminal(this.state.root, operation);
-    }
-    async relayLifecycle(operation) {
-        if (await new RelayRetirementRepository(this.state.root).load(operation) !== null)
-            return "retired";
-        return (await this.relaySourceCompletion(operation))?.state ?? "active";
-    }
-    // Test and embedding ports written before the compatibility reader expose the
-    // original current-record methods. Keep those ports working while the concrete
-    // repository supplies the version-aware methods.
-    async listAllBridgeOperations() {
-        const repository = this.bridges;
-        return typeof repository.listAllStoredOperations === "function"
-            ? await repository.listAllStoredOperations()
-            : await repository.listAllOperations();
-    }
-    async listBridgeOperations(profileHash) {
-        const repository = this.bridges;
-        return typeof repository.listStoredOperations === "function"
-            ? await repository.listStoredOperations(profileHash)
-            : await repository.listOperations(profileHash);
-    }
-    async findBridgeOperation(operationId) {
-        const repository = this.bridges;
-        return typeof repository.findStoredOperation === "function"
-            ? await repository.findStoredOperation(operationId)
-            : await repository.findOperation(operationId);
+        return await relayStatus(this.state.root, operation);
     }
     async x402Outcome(operationId, options) {
-        const found = await this.required(operationId);
-        if (found.kind !== "x402_fetch")
-            throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
-        if (found.strategy === "provider_atomic") {
-            const operation = found.record;
-            const receipt = operation.terminal && options.exposeTerminalReceipt
-                ? await this.providerX402.loadReceipt(operation.profileHash, operation.operationId)
-                : null;
-            if (operation.terminal && options.exposeTerminalReceipt && receipt === null) {
-                throw new ApnError("APN_STATE_CORRUPT", "Terminal provider x402 operation has no public receipt.");
-            }
-            return providerX402Outcome(operation, receipt, options);
-        }
-        const operation = found.record;
-        const result = operation.resultLink === undefined
-            ? null
-            : await this.state.loadX402Result(operation.profileHash, operation.operationId);
-        if (operation.resultLink !== undefined && result === null) {
-            throw new ApnError("APN_STATE_CORRUPT", "x402 operation has a dangling public result link.");
-        }
-        const receipt = operation.terminal && options.exposeTerminalReceipt
-            ? await this.state.loadX402Receipt(operation.profileHash, operation.operationId)
-            : null;
-        if (operation.terminal && options.exposeTerminalReceipt && receipt === null) {
-            throw new ApnError("APN_STATE_CORRUPT", "Terminal x402 operation has no public receipt.");
-        }
-        return localX402Outcome(operation, result, receipt, options);
+        return await x402StoredOutcome(this.state, this.providerX402, await this.requiredX402(operationId), options);
     }
     async x402ReceiptOutcome(operationId) {
+        return await x402StoredReceiptOutcome(this.state, this.providerX402, await this.requiredX402(operationId));
+    }
+    async requiredX402(operationId) {
         const found = await this.required(operationId);
         if (found.kind !== "x402_fetch")
             throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
-        if (found.strategy === "provider_atomic") {
-            const receipt = await this.providerX402.loadReceipt(found.record.profileHash, found.record.operationId);
-            if (receipt === null)
-                throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
-            return x402ReceiptOutcome({ variant: "normalized_provider_json", operation: found.record, receipt });
-        }
-        const operation = found.record;
-        const receipt = await this.state.loadX402Receipt(operation.profileHash, operation.operationId);
-        if (receipt === null)
-            throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
-        return x402ReceiptOutcome({ variant: "local", receipt });
+        return found;
+    }
+    /** The record behind an entry through its family's own reader (its errors propagate); null when absent. */
+    async stored(entry) {
+        if (entry.unreadableReason === "duplicate_operation_id")
+            throw new ApnError("APN_STATE_CORRUPT", "Operation ID is duplicated across operation stores.");
+        const record = await this.index.loadRecord(entry);
+        if (record === null)
+            return null;
+        return (entry.family === "x402_fetch" ? { kind: "x402_fetch", ...record }
+            : { kind: entry.family, record });
     }
 }
 //# sourceMappingURL=operation-service.js.map

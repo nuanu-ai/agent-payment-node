@@ -222,7 +222,8 @@ async function mcp(s) {
   close: async () => { await client.close(); s.safe(stderr); assert.equal(stderr, ""); } };
 }
 async function journalBytes(s, id) {
-  return Promise.all(["smart-account-gasless-operations", "smart-account-gasless-receipts"].map(folder =>
+  // Receipts are derived from the operation since phase 4b: the operation journal is the only file.
+  return Promise.all(["smart-account-gasless-operations"].map(folder =>
     readFile(join(s.state.root, folder, s.state.profileHash(s.profile), `${id}.json`)).then(digest)));
 }
 async function exposedMaterial(s, id) {

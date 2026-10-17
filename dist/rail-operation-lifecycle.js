@@ -180,7 +180,6 @@ export class RailOperationLifecycle {
         const keys = [`profile:${profileHash}`, `operation:${operationId}`];
         const snapshot = await this.context.state.withLocks(keys, async () => {
             let operation = await this.required(operationId);
-            await this.records.repairReceipt(operation);
             await this.followUsage(operation);
             if (operation.terminal || operation.state === "awaiting_approval")
                 return { operation, mode: "done" };
@@ -207,7 +206,6 @@ export class RailOperationLifecycle {
         const inspection = await this.inspectEvidence(frozen, this.adapter(frozen));
         return await this.context.state.withLocks(keys, async () => {
             const latest = await this.required(operationId);
-            await this.records.repairReceipt(latest);
             await this.followUsage(latest);
             // The journal hash covers the state, fingerprint, transaction ID, payload hash and send
             // binding. A competing resume/abandon wins; its latest record is returned unchanged.

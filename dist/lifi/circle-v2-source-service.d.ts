@@ -29,6 +29,8 @@ export interface CircleV2SourceResult {
 export interface CircleV2SourceApprovalPort {
     approve(preparation: CircleV2SourcePreparation): Promise<void>;
 }
+/** The submit command signs only before its preparation expires: at most this long after it was prepared. */
+export declare const CIRCLE_V2_SOURCE_TTL_MS = 60000;
 /** Production adapters use one pinned HTTPS Circle origin and one explicitly configured Base RPC origin. */
 export declare class CircleV2SourceService {
     private readonly state;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { SOLANA_USDC } from "../../chain-policy.js";
 import type { SolanaRpcPort } from "../../solana/rpc.js";
-import { SWAP_MECHANISM_PIN_SCHEMA, swapMechanismDigest, validateSwapMechanismPin, type SwapMechanismPin } from "../pin.js";
+import { SWAP_MECHANISM_PIN_SCHEMA, validateSwapMechanismPin, type SwapMechanismPin } from "../pin.js";
 import { compileSwapProtocolRegistry, type SwapProtocolRegistry } from "../protocol-registry.js";
 import { BPF_LOADER_2, NATIVE_LOADER, PROGRAM_HEADER_SLICE, PROGRAMDATA_HEADER_BYTES, programAuthorityReadKeys, UPGRADEABLE_LOADER,
   verifyProgramAuthorities, type SolanaProgramAuthority, type SolanaProgramObservation } from "../solana-program-authority.js";
@@ -78,10 +78,6 @@ export const ORCA_KEYLESS_MECHANISM_PIN: SwapMechanismPin = validateSwapMechanis
 export const ORCA_KEYLESS_PROTOCOL_REGISTRY: SwapProtocolRegistry = compileSwapProtocolRegistry({
   registryVersion: "orca-whirlpool-keyless.2026-10-17", pins: [ORCA_KEYLESS_MECHANISM_PIN],
 });
-const ORCA_KEYLESS_MECHANISM_DIGESTS: readonly string[] = Object.freeze([ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_MECHANISM_PIN_SLOT_457152296,
-  ORCA_KEYLESS_MECHANISM_PIN_SLOT_440170207].map((pin) => swapMechanismDigest(pin)));
-/** Any registered keyless generation: existing operations stay readable and observable after a program upgrade. */
-export function isOrcaKeylessMechanismDigest(digest: string): boolean { return ORCA_KEYLESS_MECHANISM_DIGESTS.includes(digest); }
 
 /** Verifies every program the transaction may invoke, at quote time and again before signing. A changed authority refuses. */
 export type OrcaProgramPinVerifier = (rpc: SolanaRpcPort) => Promise<readonly SolanaProgramObservation[]>;

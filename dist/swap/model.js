@@ -3,7 +3,7 @@ import { ApnError } from "../errors.js";
 import { validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { parseAtomic } from "../money.js";
 import { validateSwapQuote } from "./quote.js";
-import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 export const SWAP_OPERATION_SCHEMA = "apn.swap-operation.v1";
 /**
  * Every state with no further transition. expired_unlanded: the chain proved the marked effect can never land.

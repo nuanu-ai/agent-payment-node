@@ -7,13 +7,14 @@ import type { SolanaRpcPort } from "../../src/solana/rpc.js";
 import { swapMechanismDigest } from "../../src/swap/pin.js";
 import { requireSwapProtocol } from "../../src/swap/protocol-registry.js";
 import { swapRouteDigest } from "../../src/swap/route-admission.js";
-import { ATA_PROGRAM, isOrcaKeylessMechanismDigest, ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_MECHANISM_PIN_SLOT_440170207,
+import { isOrcaKeylessMechanismDigest } from "../../src/swap/orca-solana/pools.js";
+import { ATA_PROGRAM, ORCA_KEYLESS_MECHANISM_PIN, ORCA_KEYLESS_MECHANISM_PIN_SLOT_440170207,
   ORCA_KEYLESS_MECHANISM_PIN_SLOT_457152296, ORCA_KEYLESS_PROTOCOL_REGISTRY, ORCA_PROGRAM_AUTHORITIES, TOKEN_PROGRAMDATA, verifyOrcaProgramPins,
   WHIRLPOOL_PROGRAM, WHIRLPOOL_PROGRAMDATA } from "../../src/swap/orca-solana/pins.js";
 import { isOrcaStableGuardedMechanismDigest, orcaStableGuardedRegistryDigest, ORCA_PROTOCOL_REGISTRY, ORCA_PROTOCOL_REGISTRY_SLOT_440170207,
   ORCA_PROTOCOL_REGISTRY_SLOT_457152296, ORCA_STABLE_GUARDED_MECHANISM_DIGEST, ORCA_STABLE_GUARDED_MECHANISM_PIN, ORCA_STABLE_GUARDED_MECHANISM_PIN_SLOT_440170207,
   ORCA_STABLE_GUARDED_MECHANISM_PIN_SLOT_457152296, ORCA_STABLE_MECHANISM_DIGEST, ORCA_STABLE_MECHANISM_PIN_SLOT_440170207,
-  ORCA_STABLE_MECHANISM_PIN_SLOT_457152296 } from "../../src/swap/orca-solana/stable-mechanism.js";
+  ORCA_STABLE_MECHANISM_PIN_SLOT_457152296 } from "../../src/legacy/orca-stable/mechanism.js";
 import { fixture } from "../fixtures/jupiter-v1/material.js";
 import { whirlpoolC422b2ProgramData } from "../fixtures/whirlpool-runtime-c422b2/programdata.js";
 

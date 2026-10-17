@@ -134,7 +134,6 @@ export class MetaMaskGaslessService {
             const current = await this.operations.required(id);
             if (current.kind !== "metamask_gasless_transfer")
                 mmFail("mm_gasless_state_corrupt");
-            await this.records.repairReceipt(current.record);
             return await work(current.record);
         });
     }

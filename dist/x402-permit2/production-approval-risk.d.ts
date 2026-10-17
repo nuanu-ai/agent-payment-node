@@ -4,7 +4,10 @@ import { type Permit2SigningContinuation } from "./production-journal.js";
 import { Permit2ProductionPreparation } from "./production-prepare.js";
 import { publicPermit2Production } from "./production-repository.js";
 import { type Permit2ApprovalPurpose, type Permit2ForegroundApprovalPort } from "./production-approval.js";
-/** No-key production wiring. Returned continuation is private provenance, not signing/HTTP authority. */
+/**
+ * The paid Permit2 path in one process: foreground approval, the first exposure (ledger hold), one signature under the
+ * saved record, one request marker and one HTTPS attempt. Each step re-checks the saved record; nothing private escapes.
+ */
 export declare class Permit2ApprovalRiskCoordinator {
     #private;
     constructor(root: string, endpoint: string, native: NativePort, preparation: Permit2ProductionPreparation, clock?: () => Date, approval?: Permit2ForegroundApprovalPort);

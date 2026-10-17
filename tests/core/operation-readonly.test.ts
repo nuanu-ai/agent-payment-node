@@ -43,8 +43,6 @@ async function exerciseOperationQueries(root: string): Promise<void> {
   assert.deepEqual(await state.listAllOperations(), []);
   assert.equal(await state.loadX402Operation(PROFILE, OPERATION), null);
   assert.equal(await state.findX402Operation(OPERATION), null);
-  assert.deepEqual(await state.listX402Operations(PROFILE), []);
-  assert.deepEqual(await state.listAllX402Operations(), []);
   assert.equal(await state.loadX402Result(PROFILE, OPERATION), null);
   assert.equal(await state.loadX402RecoveryResult(PROFILE, OPERATION), null);
   assert.equal(await state.findX402Result(OPERATION), null);
@@ -58,9 +56,9 @@ async function exerciseOperationQueries(root: string): Promise<void> {
   for (const repository of [provider, rail, bridge, gasless, metaMask, relayUnsigned]) {
     assert.equal(await repository.loadOperation(PROFILE, OPERATION), null);
     assert.equal(await repository.findOperation(OPERATION), null);
-    assert.deepEqual(await repository.listOperations(PROFILE), []);
-    assert.deepEqual(await repository.listAllOperations(), []);
   }
+  for (const repository of [provider, rail, metaMask, relayUnsigned]) assert.deepEqual(await repository.listOperations(PROFILE), []);
+  for (const repository of [provider, metaMask, relayUnsigned]) assert.deepEqual(await repository.listAllOperations(), []);
   assert.equal(await provider.loadReceipt(PROFILE, OPERATION), null);
   for (const repository of [rail, bridge, gasless, metaMask]) {
     await assert.rejects(repository.loadReceipt(PROFILE, OPERATION), { code: "APN_OPERATION_NOT_FOUND" });

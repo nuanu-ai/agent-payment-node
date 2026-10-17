@@ -100,6 +100,8 @@ export class UniswapTokenJournal extends SecureStateStore {
         });
     }
     async load(id) { stateIdentifier(id, "Uniswap token operation"); await this.initialize(); const v = await this.readJson(this.path(id)); return v === null ? null : validateUniswapTokenOperation(v); }
+    /** Lock-free read without creating the state root (the operation index's reader). */
+    async read(id) { stateIdentifier(id, "Uniswap token operation"); const v = await this.readJson(this.path(id)); return v === null ? null : validateUniswapTokenOperation(v); }
     path(id) { return `uniswap-token-operations/${id}.json`; }
 }
 export function transitionUniswapToken(opValue, phase, patch, now) {

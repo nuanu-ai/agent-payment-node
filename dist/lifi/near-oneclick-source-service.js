@@ -14,6 +14,8 @@ import { assertOneClickNativePostApproval, assertOneClickPostApproval, OneClickE
 import { LEGACY_ONECLICK_LANE, oneClickLane, oneClickRecipient } from "./near-oneclick-lanes.js";
 import { OneClickSourceJournal, oneClickRecordLane, oneClickSourceCall } from "./near-oneclick-source-journal.js";
 import { bridgeAddress, bridgeFailure, bridgeRecord, bridgeUint } from "./validation.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim } from "../operation-index/adapters/family-claims.js";
 export { assertOneClickPostApproval } from "./near-oneclick-evm-source.js";
 const ORIGIN = "https://1click.chaindefuser.com";
 /** The quote request deadline is set this far ahead; it also bounds how old an attributable destination credit may be. */
@@ -147,88 +149,91 @@ export class OneClickSourceService {
         const source = new OneClickEvmSource(lane, this.rpcUrl(lane.origin.rpcEnvironment, lane.origin.network), https);
         const walletStore = new EncryptedWalletStore(this.state, this.wrapping);
         await this.state.initialize();
-        const loaded = await walletStore.describe(profile);
-        if (loaded === null)
-            fail("wallet_missing");
-        try {
-            if (loaded.identity.profile !== profile || loaded.identity.address !== payer ||
-                privateKeyToAccount(loaded.secret.privateKey).address !== payer)
-                fail("wallet_binding");
-            const quoteRequest = { dry: true, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: lane.origin.oneClickAsset,
-                depositType: "ORIGIN_CHAIN", destinationAsset: lane.destination.oneClickAsset, amount: amount.toString(), refundTo: payer,
-                refundType: "ORIGIN_CHAIN", recipient, recipientType: "DESTINATION_CHAIN",
-                deadline: new Date(now() + QUOTE_WINDOW_MS).toISOString() };
-            const getQuote = async (body) => {
-                const response = await https.request(`${ORIGIN}/v0/quote`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
-                if (response.status !== 201)
-                    fail("quote_http");
+        // The payer's claim is written before the quote, any RPC read or signature; it is held until the source receipt is final.
+        return await admitOperation(this.state, { family: "oneclick_source", profileHash, operationId, idempotencyHash: null, requestHash: null }, [evmClaim(lane.origin.chainId, payer)], async () => {
+            const loaded = await walletStore.describe(profile);
+            if (loaded === null)
+                fail("wallet_missing");
+            try {
+                if (loaded.identity.profile !== profile || loaded.identity.address !== payer ||
+                    privateKeyToAccount(loaded.secret.privateKey).address !== payer)
+                    fail("wallet_binding");
+                const quoteRequest = { dry: true, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: lane.origin.oneClickAsset,
+                    depositType: "ORIGIN_CHAIN", destinationAsset: lane.destination.oneClickAsset, amount: amount.toString(), refundTo: payer,
+                    refundType: "ORIGIN_CHAIN", recipient, recipientType: "DESTINATION_CHAIN",
+                    deadline: new Date(now() + QUOTE_WINDOW_MS).toISOString() };
+                const getQuote = async (body) => {
+                    const response = await https.request(`${ORIGIN}/v0/quote`, "POST", canonicalJson(body), 1024 * 1024, "APN_HTTP_CONFIG");
+                    if (response.status !== 201)
+                        fail("quote_http");
+                    try {
+                        return JSON.parse(response.body);
+                    }
+                    catch {
+                        return fail("quote_json");
+                    }
+                };
+                const dry = bridgeRecord(await getQuote(quoteRequest));
+                const dryQuote = bridgeRecord(dry.quote);
+                if (bridgeUint(dryQuote.minAmountOut) < minOutput || bridgeUint(dryQuote.amountIn) !== amount ||
+                    dryQuote.depositAddress !== undefined)
+                    fail("dry_quote");
+                const actualRequest = { ...quoteRequest, dry: false };
+                const q = inspectOneClickSourceQuote(await getQuote(actualRequest), actualRequest, minOutput, maxLoss, now(), lane);
+                const call = oneClickSourceCall(lane, q.deposit, q.amountIn.toString()), deadlineMs = Date.parse(q.effectiveDeadline);
+                const caps = { maxGas, maxFee, maxPriority, maxNative };
+                const read = async (signed) => {
+                    if (lane.origin.kind === "erc20")
+                        return await source.readToken(payer, call.data, amount, caps, deadlineMs, now, signed);
+                    const plan = planOneClickNative(await source.observeNative(payer, q.deposit, amount), amount, caps);
+                    if (now() > deadlineMs - 45_000)
+                        fail("block_or_quote_expired");
+                    return plan;
+                };
+                const initial = await read();
+                // A nonce an earlier operation sealed blocks this one before consent, unless that operation can no longer land.
+                const releasedReservation = await this.releasableNonce(journal, lane, profileHash, payer, initial.nonce, source, now());
+                let record = await journal.stage({ lane: lane.id, operationId, profileHash, payer, recipient, refundTo: payer,
+                    depositAddress: q.deposit, ...(initial.depositCode === null ? {} : { depositCode: initial.depositCode }),
+                    quoteHash: q.quoteHash, quoteRequestDeadline: actualRequest.deadline,
+                    quoteDeadline: q.quoteDeadline, effectiveDeadline: q.effectiveDeadline,
+                    amountInAtomic: q.amountIn.toString(), minAmountOutAtomic: q.minimum.toString(),
+                    quotedAmountOutAtomic: q.amountOut.toString(), sourceBlockHash: initial.blockHash,
+                    sourceCall: { ...call, nonce: initial.nonce.toString(), gas: initial.gas.toString(),
+                        maxFeePerGas: initial.fee.toString(), maxPriorityFeePerGas: initial.tip.toString(), maxNativeDebitWei: maxNative.toString() } });
+                await new TtyOneClickSourceApproval().approve(record, initial);
+                if (lane.origin.kind === "erc20")
+                    assertOneClickPostApproval(initial, await read(initial), maxNative, deadlineMs, now());
+                else
+                    assertOneClickNativePostApproval(initial, await source.observeNative(payer, q.deposit, amount), amount, deadlineMs, now());
+                if (now() > deadlineMs - 15_000)
+                    fail("quote_expired_before_sign");
+                record = await journal.advance(operationId, record.integrityHash, "signing_started");
+                const fees = { nonce: Number(initial.nonce), gas: initial.gas, maxFeePerGas: initial.fee, maxPriorityFeePerGas: initial.tip, accessList: [] };
+                const account = privateKeyToAccount(loaded.secret.privateKey);
+                const raw = lane.origin.kind === "erc20"
+                    ? await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, data: call.data, value: 0n, ...fees })
+                    : await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, value: amount, ...fees });
+                // Every pre-send check ran before signing; the sealed bytes go to the single send without a check that could strand them.
+                record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, releasedReservation);
+                record = await journal.advance(operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
                 try {
-                    return JSON.parse(response.body);
+                    const returned = await source.send(raw);
+                    if (returned !== record.transactionHash)
+                        fail("send_hash");
+                    record = await journal.advance(operationId, record.integrityHash, "submitted_pending");
                 }
                 catch {
-                    return fail("quote_json");
+                    record = await journal.advance(operationId, record.integrityHash, "unknown_finality");
                 }
-            };
-            const dry = bridgeRecord(await getQuote(quoteRequest));
-            const dryQuote = bridgeRecord(dry.quote);
-            if (bridgeUint(dryQuote.minAmountOut) < minOutput || bridgeUint(dryQuote.amountIn) !== amount ||
-                dryQuote.depositAddress !== undefined)
-                fail("dry_quote");
-            const actualRequest = { ...quoteRequest, dry: false };
-            const q = inspectOneClickSourceQuote(await getQuote(actualRequest), actualRequest, minOutput, maxLoss, now(), lane);
-            const call = oneClickSourceCall(lane, q.deposit, q.amountIn.toString()), deadlineMs = Date.parse(q.effectiveDeadline);
-            const caps = { maxGas, maxFee, maxPriority, maxNative };
-            const read = async (signed) => {
-                if (lane.origin.kind === "erc20")
-                    return await source.readToken(payer, call.data, amount, caps, deadlineMs, now, signed);
-                const plan = planOneClickNative(await source.observeNative(payer, q.deposit, amount), amount, caps);
-                if (now() > deadlineMs - 45_000)
-                    fail("block_or_quote_expired");
-                return plan;
-            };
-            const initial = await read();
-            // A nonce an earlier operation sealed blocks this one before consent, unless that operation can no longer land.
-            const releasedReservation = await this.releasableNonce(journal, lane, profileHash, payer, initial.nonce, source, now());
-            let record = await journal.stage({ lane: lane.id, operationId, profileHash, payer, recipient, refundTo: payer,
-                depositAddress: q.deposit, ...(initial.depositCode === null ? {} : { depositCode: initial.depositCode }),
-                quoteHash: q.quoteHash, quoteRequestDeadline: actualRequest.deadline,
-                quoteDeadline: q.quoteDeadline, effectiveDeadline: q.effectiveDeadline,
-                amountInAtomic: q.amountIn.toString(), minAmountOutAtomic: q.minimum.toString(),
-                quotedAmountOutAtomic: q.amountOut.toString(), sourceBlockHash: initial.blockHash,
-                sourceCall: { ...call, nonce: initial.nonce.toString(), gas: initial.gas.toString(),
-                    maxFeePerGas: initial.fee.toString(), maxPriorityFeePerGas: initial.tip.toString(), maxNativeDebitWei: maxNative.toString() } });
-            await new TtyOneClickSourceApproval().approve(record, initial);
-            if (lane.origin.kind === "erc20")
-                assertOneClickPostApproval(initial, await read(initial), maxNative, deadlineMs, now());
-            else
-                assertOneClickNativePostApproval(initial, await source.observeNative(payer, q.deposit, amount), amount, deadlineMs, now());
-            if (now() > deadlineMs - 15_000)
-                fail("quote_expired_before_sign");
-            record = await journal.advance(operationId, record.integrityHash, "signing_started");
-            const fees = { nonce: Number(initial.nonce), gas: initial.gas, maxFeePerGas: initial.fee, maxPriorityFeePerGas: initial.tip, accessList: [] };
-            const account = privateKeyToAccount(loaded.secret.privateKey);
-            const raw = lane.origin.kind === "erc20"
-                ? await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, data: call.data, value: 0n, ...fees })
-                : await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, value: amount, ...fees });
-            // Every pre-send check ran before signing; the sealed bytes go to the single send without a check that could strand them.
-            record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, releasedReservation);
-            record = await journal.advance(operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
-            try {
-                const returned = await source.send(raw);
-                if (returned !== record.transactionHash)
-                    fail("send_hash");
-                record = await journal.advance(operationId, record.integrityHash, "submitted_pending");
+                const common = { operationId, lane: lane.id, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
+                    submissionAttempts: 1, oneClickDepositAddress: record.depositAddress, sourceReceiptObserved: false };
+                return lane.id === LEGACY_ONECLICK_LANE ? { ...common, tronDestinationDelivered: false } : { ...common, destinationDelivered: false };
             }
-            catch {
-                record = await journal.advance(operationId, record.integrityHash, "unknown_finality");
+            finally {
+                walletStore.clear(loaded.secret);
             }
-            const common = { operationId, lane: lane.id, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
-                submissionAttempts: 1, oneClickDepositAddress: record.depositAddress, sourceReceiptObserved: false };
-            return lane.id === LEGACY_ONECLICK_LANE ? { ...common, tronDestinationDelivered: false } : { ...common, destinationDelivered: false };
-        }
-        finally {
-            walletStore.clear(loaded.secret);
-        }
+        });
     }
     /**
      * An earlier operation's nonce reservation is released only when it can no longer land: its quote deadline passed and the

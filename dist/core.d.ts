@@ -11,7 +11,7 @@ import { RailOperationService } from "./rail-operation-service.js";
 import { BridgeService } from "./lifi/service.js";
 import { GaslessService } from "./gasless/service.js";
 import { MetaMaskGaslessService } from "./metamask-gasless/service.js";
-import { OperationAbandonService } from "./operation-abandon-service.js";
+import { OperationCommands } from "./operation-commands.js";
 import { SmartAccountGaslessService } from "./smart-account-gasless/service.js";
 import { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 export * from "./core-exports.js";
@@ -30,7 +30,7 @@ export declare class ApnCore {
     readonly metaMaskGasless: MetaMaskGaslessService;
     readonly smartAccountGasless: SmartAccountGaslessService;
     readonly facilitatorGasless: FacilitatorGaslessService;
-    readonly operationAbandon: OperationAbandonService;
+    readonly operationCommands: OperationCommands;
     constructor(dependencies: CoreDependencies);
     execute(request: CommandRequest): Promise<OutputEnvelope>;
     private dispatch;

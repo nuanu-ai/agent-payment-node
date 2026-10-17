@@ -587,7 +587,7 @@ for (const asset of ["sol", "usdc"] as const) test(`local ${asset} integrates en
   const publicText = JSON.stringify([approved, receipt]);
   assert.equal(publicText.includes(setup.rpc.submissions[0]!), false);
   assert.equal(publicText.includes("unsignedPayload"), false);
-  for (const root of ["chain-wallets/solana", `rail-operations/${setup.account.profileHash}`, `rail-receipts/${setup.account.profileHash}`]) {
+  for (const root of ["chain-wallets/solana", `rail-operations/${setup.account.profileHash}`]) {
     for (const file of await readdir(join(temporary.root, root))) {
       const contents = await readFile(join(temporary.root, root, file), "utf8");
       assert.equal(contents.includes(setup.rpc.submissions[0]!), false);

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import test from "node:test";
-import { sha256 } from "../../src/canonical.js";
+import { canonicalJson, sha256 } from "../../src/canonical.js";
 import { ApnCore } from "../../src/core.js";
 import type { GaslessTransport } from "../../src/gasless/https.js";
 import { MetaMaskGaslessRpc, metaMaskGaslessObservationRpcFactory, mmObservationRpcEnv } from "../../src/metamask-gasless/chain/rpc.js";
@@ -132,7 +134,11 @@ test("an unresolved MetaMask operation observed through a named RPC keeps that o
   assert.deepEqual(validateMetaMaskGaslessReceipt(legacy, after), legacy);
   assert.throws(() => validateMetaMaskGaslessReceipt({ ...legacy, next_actions: ["apn operation resume --operation other"] }, after),
     { code: "APN_STATE_CORRUPT" });
+  // Written by that release for this transition, it is returned as written; without a file, the receipt is derived.
   const repository = new MetaMaskGaslessOperationRepository(temporary.root);
-  await repository.repairReceipt(after);
   assert.deepEqual(await repository.loadReceipt(after.profileHash, after.operationId), metaMaskGaslessReceipt(after));
+  const receiptPath = join(temporary.root, "metamask-gasless-receipts", after.profileHash, `${after.operationId}.json`);
+  await mkdir(dirname(receiptPath), { recursive: true, mode: 0o700 });
+  await writeFile(receiptPath, `${canonicalJson(legacy)}\n`, { mode: 0o600 });
+  assert.deepEqual(await repository.loadReceipt(after.profileHash, after.operationId), legacy);
 });

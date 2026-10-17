@@ -10,8 +10,5 @@ export declare function assertExclusiveEvmOwner(state: StateStore, address: stri
 export declare function assertExclusiveEvmRawSigner(state: StateStore, address: string, ownProfileHash: string): Promise<void>;
 /** Check a prepared token operation before and after foreground consent. */
 export declare function assertExclusiveUniswapTokenSigner(state: StateStore, address: string, ownProfileHash: string): Promise<void>;
-/** Execution-only Relay owner check. Call immediately before signing and again
- * before first submission. No network operation belongs in this critical section. */
-export declare function assertExclusiveRelayExecutionOwner(state: StateStore, permissions: Pick<EncryptedSmartAccountPermissionStore, "listAll">, address: string, ownProfileHash: string): Promise<void>;
 /** Caller holds evmAddressLock(address), including through the effect boundary. */
 export declare function assertExclusiveEvmOwnerIncludingGrants(state: StateStore, permissions: Pick<EncryptedSmartAccountPermissionStore, "listAll">, address: string, ownProfileHash: string): Promise<void>;

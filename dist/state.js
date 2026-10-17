@@ -1,18 +1,15 @@
 import { parsePortfolioCache } from "./portfolio/cache-record.js";
-import { randomBytes } from "node:crypto";
-import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, rename, stat, unlink, } from "node:fs/promises";
-import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
-import { canonicalJson, isPlainRecord, sha256 } from "./canonical.js";
+import {} from "node:fs";
+import { lstat, realpath } from "node:fs/promises";
+import { join } from "node:path";
+import { isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { MacosAdvisoryLock } from "./macos-advisory-lock.js";
 import { validateProviderProfile } from "./provider-profile.js";
-import { assertDirectTerminalReceiptAuthority } from "./direct-terminal-receipt.js";
 import { validateEvmOperationWrite } from "./evm-operation-write.js";
 import { validateOperation, validateReceipt, validateWallet } from "./state-integrity.js";
 import { isCode, SecureStateStore, stateCorrupt, stateIdentifier, stateSecurity, validateDirectory, } from "./secure-state-store.js";
 import { validateX402AppendOnly, validateX402ScanContinuity } from "./x402-state-continuity.js";
-import { x402TransactionHintSourceBindingHash, validateX402Operation, validateX402Receipt, validateX402Result, } from "./x402-state-integrity.js";
+import { validateX402Operation, validateX402Receipt, validateX402Result, } from "./x402-state-integrity.js";
 import { validateX402RecoveryReceiptAuthority, validateX402TerminalGraph } from "./state-x402-graph.js";
 export { appendTransition, sealOperation, sealReceipt, sealWallet } from "./state-integrity.js";
 const PROVIDER_X402_OPERATION_SCHEMAS = new Set(["apn.provider-x402.state.v1", "apn.provider-x402.state.v2"]);
@@ -155,11 +152,9 @@ export class StateStore extends SecureStateStore {
         const value = await this.readJson(join("operations", profileHash, `${operationId}.json`));
         if (value === null)
             return null;
-        const operation = validateOperation(value);
-        if ((operation.providerDirect !== undefined || operation.evm !== undefined) && operation.terminal) {
-            assertDirectTerminalReceiptAuthority(operation, await this.loadReceipt(profileHash, operationId));
-        }
-        return operation;
+        // A terminal direct operation's receipt is checked by `receipt get` of that operation (direct-terminal-receipt.ts),
+        // never here: a damaged receipt must not make the operation itself, or any lookup that meets it, unreadable.
+        return validateOperation(value);
     }
     async findOperation(operationId) {
         const entries = await this.readDirectory("operations");
@@ -254,37 +249,6 @@ export class StateStore extends SecureStateStore {
         await validateX402TerminalGraph((path) => this.readJson(path), operation);
         await this.ensureDirectory(join("x402-operations", operation.profileHash));
         await this.writeJson(path, operation);
-    }
-    async listX402Operations(profileHash) {
-        stateIdentifier(profileHash, "x402 profile hash");
-        const directory = join("x402-operations", profileHash);
-        const entries = await this.readDirectory(directory);
-        const operations = [];
-        for (const entry of entries) {
-            if (!entry.isFile() || entry.isSymbolicLink() || !/^[a-f0-9]{64}\.json$/.test(entry.name)) {
-                stateSecurity("x402 operations directory contains an unsafe entry.");
-            }
-            const value = await this.readJson(join(directory, entry.name));
-            if (value === null)
-                stateCorrupt("x402 operation disappeared during validation.");
-            if (PROVIDER_X402_OPERATION_SCHEMAS.has(storedSchema(value)))
-                continue;
-            const operation = validateX402Operation(value);
-            const operationId = entry.name.slice(0, -".json".length);
-            if (operation.profileHash !== profileHash || operation.operationId !== operationId) {
-                stateCorrupt("x402 operation path binding is invalid.");
-            }
-            await validateX402TerminalGraph((path) => this.readJson(path), operation);
-            operations.push(operation);
-        }
-        return operations;
-    }
-    async listAllX402Operations() {
-        const profiles = await this.operationProfiles("x402-operations");
-        const operations = [];
-        for (const profileHash of profiles)
-            operations.push(...await this.listX402Operations(profileHash));
-        return operations;
     }
     async loadX402Result(profileHash, operationId) {
         stateIdentifier(profileHash, "x402 profile hash");

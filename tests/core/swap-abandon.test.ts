@@ -8,13 +8,14 @@ import type { TtyTransferApprovalOptions } from "../../src/tty-approval.js";
 import { abandonSwapOperation } from "../../src/swap/abandon.js";
 import { ORCA_SOLANA_CHAIN } from "../../src/swap/orca-solana/pins.js";
 import { createOrcaKeylessRuntime } from "../../src/swap/orca-solana/runtime-factory.js";
+import { ORCA_POOLS } from "../../src/swap/orca-solana/pools.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { AMOUNT_IN, FakeOrcaRpc, orcaOwner, orcaPolicy, PROFILE } from "./orca-solana-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 const reason = (error: unknown) => error instanceof ApnError ? String(error.details?.reason ?? error.code) : String(error);
 
-async function marked(root: string, options: { readonly send: boolean }) {
+async function marked(root: string, options: { readonly send: boolean; readonly mark?: false }) {
   let clockMs = Date.now(); const clock = { now: () => new Date(clockMs) };
   const owner = await orcaOwner(root), rpc = new FakeOrcaRpc(owner.address, owner.wsol, owner.usdc, owner.oracle);
   const policy = orcaPolicy(owner.address, clock.now());
@@ -22,12 +23,14 @@ async function marked(root: string, options: { readonly send: boolean }) {
   const terminal: NonNullable<TtyTransferApprovalOptions["openTerminal"]> = async () => ({ fd: 11, write: async (text: string) => { printed += text; },
     read: async function* () { yield Buffer.from(`${/Type ([0-9a-f]{6}) and press Enter/u.exec(printed)?.[1] ?? ""}\n`); }, close: async () => undefined });
   const runtime = createOrcaKeylessRuntime({ state: owner.state, clock, rpc, accounts: owner.accounts, verifyPins: async () => [], foreground: "tty",
+    pool: ORCA_POOLS["sol-usdc"],
     policy: async () => policy, tty: { isTerminal: () => true, openTerminal: terminal } });
   const quoted = await runtime.quote({ profile: PROFILE, account: owner.address, amountAtomic: AMOUNT_IN.toString(), slippageBps: 50,
     ownerSlippageCapBps: 50, computeUnitLimit: 200_000, computeUnitPriceMicroLamports: "1000" }, clock.now()) as { quoteHash: string };
   const prepared = await runtime.prepare({ profile: PROFILE, quoteHash: quoted.quoteHash, idempotencyKey: `orca-abandon-${options.send}` }, clock.now());
   let operation;
-  if (options.send) operation = await runtime.approveAndExecute(prepared.operationId, clock.now());
+  if (options.mark === false) operation = prepared;
+  else if (options.send) operation = await runtime.approveAndExecute(prepared.operationId, clock.now());
   else {
     // The process died after the durable marker and before the execution binding: no lifetime was ever recorded.
     const reserved = await runtime.approve(prepared.operationId, clock.now());
@@ -66,15 +69,17 @@ test("operation abandon refuses a swap whose outcome the chain can still prove, 
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await marked(temporary.root, { send: true });
   assert.equal(f.operation.state, "submitted");
+  // Phase 4b: the submitted swap holds its account, so another swap on it is refused at prepare.
+  await assert.rejects(f.runtime.prepare({ profile: PROFILE, quoteHash: f.prepared.quote.quoteHash, idempotencyKey: "orca-abandon-second" },
+    f.clock.now()), { code: "APN_OPERATION_BLOCKED" });
   f.advance(Date.parse(f.operation.quote.expiresAt) - f.clock.now().getTime() + 1);
   await assert.rejects(abandonSwapOperation(f.context, f.operation.operationId), (error) => error instanceof ApnError &&
     error.details?.reason === "swap_chain_proof_available" &&
     JSON.stringify(error.details?.nextActions) === JSON.stringify([`apn swap solana orca status --operation ${f.operation.operationId}`]));
   assert.equal(f.approvals.length, 0);
   const other = await temporaryState(); t.after(other.cleanup);
-  const g = await marked(other.root, { send: false });
-  const unmarked = await g.runtime.prepare({ profile: PROFILE, quoteHash: g.prepared.quote.quoteHash, idempotencyKey: "orca-abandon-unmarked" }, g.clock.now());
-  await assert.rejects(abandonSwapOperation(g.context, unmarked.operationId), (error) => reason(error) === "swap_abandon_unmarked");
+  const g = await marked(other.root, { send: false, mark: false });
+  await assert.rejects(abandonSwapOperation(g.context, g.operation.operationId), (error) => reason(error) === "swap_abandon_unmarked");
 });
 
 test("apn operation abandon routes a swap through the exact owner consent and refuses without it", async (t) => {

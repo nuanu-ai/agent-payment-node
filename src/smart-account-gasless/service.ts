@@ -92,7 +92,7 @@ export class SmartAccountGaslessService {
     return await this.context.state.withLocks([`profile:${first.record.profileHash}`, `operation:${id}`], async () => {
       const current = await this.operations.required(id);
       if (current.kind !== "smart_account_gasless_transfer") saFail("sa_gasless_state_corrupt");
-      await this.records.repairReceipt(current.record); return await work(current.record);
+      return await work(current.record);
     });
   }
 }

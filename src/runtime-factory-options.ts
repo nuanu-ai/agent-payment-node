@@ -41,10 +41,9 @@ import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapPolicyResolver, GuardedSwapRuntime } from "./swap/runtime.js";
 import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
-import type { OrcaProgramPinVerifier } from "./swap/orca-solana/pins.js";
-import type { OrcaStableConsentPort } from "./swap/orca-solana/stable-approval.js";
+import type { OrcaStableConsentPort } from "./legacy/orca-stable/recovery-consent.js";
 import type { Permit2PreflightPorts } from "./x402-permit2/preflight.js";
-import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
+import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 
@@ -83,7 +82,7 @@ export interface RuntimeFactoryOptions {
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
-  readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
+  readonly orcaRuntime?: OrcaRuntimeSelector;
   /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
   readonly swapPolicy?: GuardedSwapPolicyResolver;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
@@ -111,12 +110,6 @@ export interface RuntimeFactoryOptions {
   readonly solanaRpcFetch?: typeof fetch;
   readonly solanaRpcNow?: () => number;
   readonly solanaRpcWait?: (milliseconds: number) => Promise<void>;
-  /** Offline acceptance only; the CLI exposes no option to replace pinned program proof. */
-  readonly orcaStablePinVerifier?: OrcaProgramPinVerifier;
-  /** Offline acceptance only; production reads exact consent from the owner TTY. */
-  readonly orcaStableExecuteConsent?: OrcaStableConsentPort;
-  /** Offline acceptance only; production reads the single approve-and-execute consent from the owner TTY. */
-  readonly orcaStableApproveConsent?: OrcaStableConsentPort;
   /** Offline acceptance only; production reads separate recovery consent from the owner TTY. */
   readonly orcaStableRecoveryConsent?: OrcaStableConsentPort;
   readonly tronRpcUrl?: string;

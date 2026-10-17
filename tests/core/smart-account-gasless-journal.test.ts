@@ -217,22 +217,27 @@ test("bounded cursors preserve anchors, earlier candidates and both scan-complet
   assert.throws(() => advance(progress, { observation: { ...progress.observation!, observedAt: at(8) } }, at(10)),
     { code: "APN_STATE_CORRUPT" });
 });
-test("operation-first writes recover exact stale receipts in a fresh repository without rewriting corrupt receipts", async t => {
+test("the receipt is derived in a fresh repository; a released receipt file is used only for its own transition", async t => {
   const state = await root(t), repo = new SmartAccountGaslessOperationRepository(state), all = stages();
   for (const op of all.slice(0, 4)) await repo.persist(op);
   const exposed = all[4]!, historical = await repo.loadReceipt(exposed.profileHash, exposed.operationId);
-  await repo.writeOperation(exposed); // Simulate a crash before its derived receipt write.
+  await repo.writeOperation(exposed);
   const fresh = new SmartAccountGaslessOperationRepository(state);
   assert.deepEqual(await fresh.loadOperation(exposed.profileHash, exposed.operationId), exposed);
-  await assert.rejects(() => fresh.loadReceipt(exposed.profileHash, exposed.operationId), { code: "APN_OPERATION_BLOCKED" });
-  assert.deepEqual(validateSmartAccountGaslessReceipt(historical, exposed), historical);
-  await fresh.repairReceipt(exposed);
-  assert.deepEqual(await fresh.loadReceipt(exposed.profileHash, exposed.operationId), smartAccountGaslessReceipt(exposed));
+  // Phase 4b (CORE-13): no receipt file is written; the receipt of the current transition is derived.
   const path = join(state, RECEIPTS, exposed.profileHash, `${exposed.operationId}.json`);
+  await assert.rejects(readFile(path), { code: "ENOENT" });
+  assert.deepEqual(await fresh.loadReceipt(exposed.profileHash, exposed.operationId), smartAccountGaslessReceipt(exposed));
+  // A released file of an earlier transition is history; one of the current transition is returned as written.
+  await writeCanonical(path, historical);
+  assert.deepEqual(validateSmartAccountGaslessReceipt(historical, exposed), historical);
+  assert.deepEqual(await fresh.loadReceipt(exposed.profileHash, exposed.operationId), smartAccountGaslessReceipt(exposed));
+  await writeCanonical(path, smartAccountGaslessReceipt(exposed));
+  assert.deepEqual(await fresh.loadReceipt(exposed.profileHash, exposed.operationId), smartAccountGaslessReceipt(exposed));
   const altered = { ...historical, profile: "foreign" }, { receipt_hash: _hash, ...body } = altered;
   await writeCanonical(path, { ...body, receipt_hash: hashObject(body) });
   const bytes = await readFile(path, "utf8");
-  await assert.rejects(() => fresh.repairReceipt(exposed), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(() => fresh.loadReceipt(exposed.profileHash, exposed.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(await readFile(path, "utf8"), bytes);
 });
 test("terminal bytes and receipts remain fixed, and stale writers cannot fork a saved prefix", async t => {
@@ -240,7 +245,8 @@ test("terminal bytes and receipts remain fixed, and stale writers cannot fork a 
   for (const op of all.slice(0, 5)) await repo.persist(op);
   const exposed = all[4]!, done = complete(exposed); await repo.persist(done);
   const path = join(state, OPS, done.profileHash, `${done.operationId}.json`), original = await readFile(path, "utf8");
-  await repo.persist(done); await repo.repairReceipt(done);
+  await repo.persist(done);
+  assert.deepEqual(await repo.loadReceipt(done.profileHash, done.operationId), smartAccountGaslessReceipt(done));
   assert.equal(await readFile(path, "utf8"), original);
   assert.throws(() => advance(done, { observation: { ...done.observation!, observedAt: at(601) } }, at(601)), { code: "APN_STATE_CORRUPT" });
   await assert.rejects(() => repo.persist(uncertain(exposed)), { code: "APN_STATE_CORRUPT" });

@@ -16,7 +16,7 @@ export class SmartAccountGaslessOperationRepository extends SecureStateStore imp
   private initialized: Promise<void> | undefined;
   private async ready(): Promise<void> {
     this.initialized ??= (async () => {
-      await super.initialize(); await this.ensureDirectory(OPERATIONS); await this.ensureDirectory(RECEIPTS);
+      await super.initialize(); await this.ensureDirectory(OPERATIONS);
     })();
     await this.initialized;
   }
@@ -77,33 +77,17 @@ export class SmartAccountGaslessOperationRepository extends SecureStateStore imp
     await this.ensureDirectory(`${OPERATIONS}/${op.profileHash}`);
     await this.writeJson(this.path(OPERATIONS, op.profileHash, op.operationId), op);
   }
+  /** The operation is the only record written; its receipt is derived from it on read. */
   async persist(op: SmartAccountGaslessOperationRecord): Promise<void> {
     await this.writeOperation(op);
-    await this.repairReceipt(op);
   }
-  async repairReceipt(input: SmartAccountGaslessOperationRecord): Promise<void> {
-    const op = validateSmartAccountGaslessOperation(input);
-    await this.ready();
-    const stored = await this.loadOperation(op.profileHash, op.operationId);
-    if (stored === null || !saSame(stored, op)) corrupt();
-    const path = this.path(RECEIPTS, op.profileHash, op.operationId), previous = await this.readJson(path);
-    if (previous !== null) validateSmartAccountGaslessReceipt(previous, op);
-    const receipt = smartAccountGaslessReceipt(op);
-    if (saSame(previous, receipt)) return;
-    if (Buffer.byteLength(canonicalJson(receipt), "utf8") + 1 > SA_FILE_LIMIT) saFail("sa_gasless_capacity");
-    await this.ensureDirectory(`${RECEIPTS}/${op.profileHash}`);
-    await this.writeJson(path, receipt);
-  }
+  /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
   async loadReceipt(profileHash: string, operationId: string): Promise<SmartAccountGaslessReceipt> {
     const op = await this.loadOperation(profileHash, operationId);
     if (op === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "The Smart Account gasless operation was not found.");
     const value = await this.readJson(this.path(RECEIPTS, profileHash, operationId));
-    if (value !== null) validateSmartAccountGaslessReceipt(value, op);
-    if (value === null || !saSame(value, smartAccountGaslessReceipt(op))) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "The saved Smart Account gasless receipt needs recovery.",
-        { reason: "sa_gasless_unknown", operationId, nextActions: [`apn operation resume --operation ${operationId}`] });
-    }
-    return value as SmartAccountGaslessReceipt;
+    const stored = value === null ? null : validateSmartAccountGaslessReceipt(value, op);
+    return stored !== null && stored.transition_hash === op.transitions.at(-1)!.transitionHash ? stored : smartAccountGaslessReceipt(op);
   }
   private path(root: typeof OPERATIONS | typeof RECEIPTS, profileHash: string, operationId: string): string {
     stateIdentifier(profileHash, "Smart Account gasless profile hash");

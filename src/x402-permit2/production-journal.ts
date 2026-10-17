@@ -1,13 +1,3 @@
-import { LocalWalletNative } from "../local-wallet-native.js";
-import { Permit2ProductionSigningFence } from "./production-signing-fence.js";
-import type { Permit2NativeRequestExecution, Permit2NativeSigningExecution } from "./production-native-capability.js";
-import { claimPermit2ForegroundApproval, assertClaimedPermit2ForegroundApproval, revokePermit2ForegroundApproval,
-  type Permit2ForegroundApprovalProof, type Permit2ApprovalBinding } from "./production-approval-provenance.js";
-import { assertSigningLifecycle, checkedSigningLease } from "./production-signing-owner.js";
-import { assertSigningTime } from "./production-signing-facts.js";
-export interface Permit2SigningContinuation { readonly kind: "permit2-private-signing-continuation" }
-interface FirstRequestProof { readonly kind: "permit2-private-first-request-proof" }
-type RiskCandidate = { readonly kind: "permit2-private-risk-candidate" };
 import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { AssetUsageLedger, type AssetUsageReservation } from "../asset-usage-ledger.js";
@@ -23,103 +13,50 @@ import { validatePermit2ProductionSigned, type Permit2ProductionSigned } from ".
 import { consumePermit2ObservationProof, type Permit2ObservationProof, type Permit2ObservationMode } from "./production-observer.js";
 import { JOURNAL_SCHEMA, productionApprovalFingerprint, productionRiskBinding, productionTerminalDigest,
   type Permit2ExposureJournal, type Permit2TerminalIntent } from "./production-journal-codec.js";
+import { assertPermit2ApprovalCurrent, permit2Now, type Permit2ForegroundApproval } from "./production-approval-provenance.js";
+import { assertSigningLifecycle, checkedSigningLease, permit2SavedIdentity, type Permit2SavedIdentity } from "./production-signing-owner.js";
+
+/**
+ * What an approved first exposure hands to the one signer: the owner's approval and the identity of the saved record
+ * and lease it was written under. Plain values with no private material: the signer re-reads both and signs only while
+ * they are unchanged.
+ */
+export interface Permit2SigningContinuation {
+  readonly approval: Permit2ForegroundApproval;
+  readonly saved: Permit2SavedIdentity;
+}
+/** A saved signed bundle under the owner's approval: the signed hash one request may send, and its lease. */
+export interface Permit2SignedOrigin {
+  readonly approval: Permit2ForegroundApproval;
+  readonly signedHash: string;
+  readonly leaseDigest: string;
+  readonly walletHash: string;
+}
 
 /** Storage/accounting only. No key, signing, transport or execution permission is returned. */
 export class Permit2ProductionJournal extends Permit2ProductionRepository {
-  readonly #firstRequests = new WeakMap<FirstRequestProof, { readonly execution: Permit2NativeRequestExecution; readonly record: Permit2ProductionRecord }>();
-  static markNativeRequestPending(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeRequestExecution) {
-    return journal.#markNativeRequestPending(id, execution);
-  }
-  static consumeNativeFirstRequestProof(journal: Permit2ProductionJournal, id: string,
-    execution: Permit2NativeRequestExecution, proof: FirstRequestProof): Permit2ProductionRecord {
-    LocalWalletNative.assertPermit2RequestExecution(execution, journal, id);
-    const saved = journal.#firstRequests.get(proof);
-    if (saved === undefined || saved.execution !== execution || saved.record.operationId !== id) blocked();
-    journal.#firstRequests.delete(proof); return saved.record;
-  }
-  #assertNativeRequestRecord(id: string, execution: Permit2NativeRequestExecution, r: Permit2ProductionRecord, lease: AssetUsageReservation): void {
-    const origin = LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
-    assertSigningLifecycle(r, "dispatch"); checkedSigningLease(r, lease, "dispatch");
-    if (r.material.materialHash !== origin.materialHash || r.material.checked.requestHash !== origin.requestHash ||
-        r.material.checked.challengeHash !== origin.challengeHash || r.exposureJournal?.signed?.signedHash !== origin.signedHash ||
-        lease.reservationDigest !== origin.grant.lease.reservationDigest ||
-        canonicalJson(r.material.wallet) !== canonicalJson(origin.grant.record.material.wallet)) blocked();
-  }
-  async #markNativeRequestPending(id: string, execution: Permit2NativeRequestExecution): Promise<{ readonly record: Permit2ProductionRecord; readonly proof: FirstRequestProof | null }> {
-    LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
-    const r = await this.#required(id); this.#assertNativeRequestRecord(id, execution, r, await this.#lease(r));
+  /**
+   * Writes attempt 1, the single durable request marker, for the saved signed bundle the origin names, while its paid
+   * approval is current. `first` is true only for the call that wrote it: only that call may send.
+   */
+  async markFirstRequest(origin: Permit2SignedOrigin, clock: () => Date): Promise<{ readonly record: Permit2ProductionRecord; readonly first: boolean }> {
+    const id = origin.approval.operationId;
+    if (origin.approval.purpose !== "sign-and-submit-once") blocked();
+    const check = async (r: Permit2ProductionRecord) => {
+      assertSigningLifecycle(r, "dispatch"); assertSignedOrigin(origin, r, checkedSigningLease(r, await this.#lease(r), "dispatch"));
+      assertPermit2ApprovalCurrent(origin.approval, r, permit2Now(clock));
+    };
+    const r = await this.#required(id); await check(r);
     return this.state.withLocks(this.#locks(r), async () => {
-      const current = await this.#required(id); this.#assertNativeRequestRecord(id, execution, current, await this.#lease(current));
+      const current = await this.#required(id); await check(current);
       const j = current.exposureJournal!;
-      if (j.request !== null) return Object.freeze({ record: current, proof: null });
+      if (j.request !== null) return Object.freeze({ record: current, first: false });
       const next = await this.#save(current, { ...j, request: { attempt: 1, requestHash: current.material.checked.requestHash,
         headerHash: j.signed!.headerHash } }, "request_pending");
-      LocalWalletNative.assertPermit2RequestExecution(execution, this, id);
-      freezeApprovedSnapshot(next); const proof = Object.freeze({ kind: "permit2-private-first-request-proof" as const });
-      this.#firstRequests.set(proof, { execution, record: next }); return Object.freeze({ record: next, proof });
+      assertPermit2ApprovalCurrent(origin.approval, next, permit2Now(clock));
+      freezeApprovedSnapshot(next); return Object.freeze({ record: next, first: true });
     });
   }
-  readonly #riskCandidates = new WeakMap<RiskCandidate, { readonly proof: Permit2ForegroundApprovalProof; readonly binding: Permit2ApprovalBinding; readonly riskRecord: Permit2ProductionRecord }>();
-  // Only the actual native execution can consume this private continuation.
-  readonly #continuations = new WeakMap<Permit2SigningContinuation, { readonly binding: Permit2ApprovalBinding;
-    readonly record: Permit2ProductionRecord; readonly lease: AssetUsageReservation }>();
-  readonly #nativeClaims = new WeakMap<Permit2NativeSigningExecution, {
-    readonly binding: Permit2ApprovalBinding; readonly record: Permit2ProductionRecord; readonly lease: AssetUsageReservation }>();
-  static claimNativeSigningContinuation(journal: Permit2ProductionJournal, id: string,
-    continuation: Permit2SigningContinuation, execution: Permit2NativeSigningExecution) {
-    return journal.#claimNativeSigningContinuation(id, continuation, execution);
-  }
-  static assertNativeSigningContinuation(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution) {
-    return journal.#assertNativeSigningContinuation(id, execution);
-  }
-  static nativeSigningSecond(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution, capturedAt?: number): number {
-    return journal.#nativeSigningSecond(id, execution, capturedAt);
-  }
-  static nativeOriginBinding(journal: Permit2ProductionJournal, id: string, execution: Permit2NativeSigningExecution) {
-    LocalWalletNative.assertPermit2SigningExecution(execution, journal, id);
-    const grant = journal.#nativeClaims.get(execution); if (grant === undefined) blocked();
-    journal.#nativeApprovalTime(grant.binding, grant.record); return Object.freeze({ ...grant });
-  }
-  static releaseNativeSigningContinuation(journal: Permit2ProductionJournal, execution: Permit2NativeSigningExecution): void {
-    journal.#releaseNativeSigningContinuation(execution);
-  }
-  static storeNativeSigned(journal: Permit2ProductionJournal, id: string, value: Permit2ProductionSigned) {
-    return journal.#storeSigned(id, value);
-  }
-  async #claimNativeSigningContinuation(id: string, continuation: Permit2SigningContinuation, execution: Permit2NativeSigningExecution) {
-    const native = LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
-    const grant = this.#continuations.get(continuation);
-    if (grant === undefined || this.#nativeClaims.has(execution) || grant.binding.native !== native.native ||
-      grant.binding.capability !== native.capability || grant.binding.nativeState !== native.state ||
-      grant.binding.root !== native.root || grant.binding.operationId !== id) blocked();
-    this.#continuations.delete(continuation); this.#nativeClaims.set(execution, grant);
-    return this.#assertNativeSigningContinuation(id, execution);
-  }
-  async #assertNativeSigningContinuation(id: string, execution: Permit2NativeSigningExecution): Promise<Permit2ProductionRecord> {
-    const native = LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
-    const grant = this.#nativeClaims.get(execution); if (grant === undefined) blocked();
-    this.#nativeApprovalTime(grant.binding, grant.record);
-    const current = await Permit2ProductionSigningFence.nativeScopeOwner(native.fence, native.scope, native.root, id);
-    LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
-    if (this.#nativeClaims.get(execution) !== grant || current.record.integrityHash !== grant.record.integrityHash ||
-      canonicalJson(current.record.material.wallet) !== canonicalJson(grant.record.material.wallet)) blocked();
-    checkedSigningLease(current.record, current.lease, "exposed", grant); this.#nativeApprovalTime(grant.binding, current.record);
-    return current.record;
-  }
-  #nativeSigningSecond(id: string, execution: Permit2NativeSigningExecution, capturedAt?: number): number {
-    LocalWalletNative.assertPermit2SigningExecution(execution, this, id);
-    const grant = this.#nativeClaims.get(execution); if (grant === undefined) blocked();
-    const at = this.#nativeApprovalTime(grant.binding, grant.record).getTime();
-    if (capturedAt !== undefined && (!Number.isSafeInteger(capturedAt) || at < capturedAt || at - capturedAt > 5_000)) blocked();
-    return Math.floor(at / 1000);
-  }
-  #nativeApprovalTime(binding: Permit2ApprovalBinding, record: Permit2ProductionRecord): Date {
-    const at = binding.clock();
-    if (!(at instanceof Date) || !Number.isSafeInteger(at.getTime()) || at.getTime() < binding.completedAt ||
-      at.getTime() - binding.completedAt > 60_000) blocked();
-    const now = new Date(at.getTime()); assertSigningTime(record, now); return now;
-  }
-  #releaseNativeSigningContinuation(execution: Permit2NativeSigningExecution): void { this.#nativeClaims.delete(execution); }
   private readonly state: StateStore;
   private readonly usage: AssetUsageLedger;
   constructor(root: string, private readonly preparation: Permit2ProductionPreparation,
@@ -154,36 +91,30 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
   async #persistExposureLocked(r: Permit2ProductionRecord): Promise<void> { await Permit2ProductionRepository.persistOwnedExposure(this, r); }
   /** Initial admission checks current owner. Replays can only reconcile the existing durable hold. */
   async markSignatureRisk(id: string): Promise<Permit2ProductionRecord> { return (await this.#markRisk(id)).record; }
-  /** Genuine UI + atomic first insertion only. No key/sign/HTTP permission is conveyed. */
-  async markApprovedSignatureRisk(id: string, proof: Permit2ForegroundApprovalProof): Promise<{
+  /**
+   * The first exposure under the owner's current foreground approval. Only the call that writes it receives a signing
+   * continuation; every replay, and any exposure written without an approval, gets status only.
+   */
+  async markApprovedSignatureRisk(id: string, approval: Permit2ForegroundApproval): Promise<{
     readonly record: Permit2ProductionRecord; readonly continuation: Permit2SigningContinuation | null }> {
-    let candidate: RiskCandidate | null = null;
-    try {
-      const result = await this.#markRisk(id, proof); candidate = result.candidate;
-      if (candidate === null) { freezeApprovedSnapshot(result.record); return Object.freeze({ record: result.record, continuation: null }); }
-      const owned = this.#riskCandidates.get(candidate); if (owned === undefined) blocked();
-      return await this.state.withLocks(this.#locks(result.record), async () => {
-        const current = await this.#required(id); assertSigningLifecycle(current, "exposed");
-        if (current.material.materialHash !== owned.riskRecord.material.materialHash ||
-          current.exposureAt !== owned.riskRecord.exposureAt || current.exposureJournal?.bindingHash !== owned.riskRecord.exposureJournal?.bindingHash) blocked();
-        const lease = checkedSigningLease(current, await this.#lease(current), "exposed");
-        assertClaimedPermit2ForegroundApproval(proof, this, current); this.#approvalTime(owned.binding, current);
-        freezeApprovedSnapshot(current); freezeApprovedSnapshot(lease);
-        const continuation = Object.freeze({ kind: "permit2-private-signing-continuation" as const });
-        this.#continuations.set(continuation, { binding: owned.binding, record: current, lease });
-        return Object.freeze({ record: current, continuation });
-      });
-    } finally { revokePermit2ForegroundApproval(proof); if (candidate !== null) this.#riskCandidates.delete(candidate); }
+    const result = await this.#markRisk(id, approval);
+    if (result.risk === null) { freezeApprovedSnapshot(result.record); return Object.freeze({ record: result.record, continuation: null }); }
+    const risk = result.risk;
+    return await this.state.withLocks(this.#locks(result.record), async () => {
+      const current = await this.#required(id); assertSigningLifecycle(current, "exposed");
+      if (current.material.materialHash !== risk.material.materialHash || current.exposureAt !== risk.exposureAt ||
+        current.exposureJournal?.bindingHash !== risk.exposureJournal?.bindingHash) blocked();
+      const lease = checkedSigningLease(current, await this.#lease(current), "exposed");
+      assertPermit2ApprovalCurrent(approval, current, this.#now());
+      freezeApprovedSnapshot(current);
+      return Object.freeze({ record: current, continuation: Object.freeze({ approval, saved: permit2SavedIdentity(current, lease) }) });
+    });
   }
-  #approvalTime(binding: Permit2ApprovalBinding, record: Permit2ProductionRecord): void {
-    const now = this.#now(); if (now.getTime() < binding.completedAt || now.getTime() - binding.completedAt > 60_000) blocked();
-    assertSigningTime(record, now);
-  }
-  async #markRisk(id: string, proof?: Permit2ForegroundApprovalProof): Promise<{ readonly record: Permit2ProductionRecord; readonly candidate: RiskCandidate | null }> {
-    await this.ready(); const first = await this.#required(id); let candidate: RiskCandidate | null = null;
-    if (first.exposureJournal !== undefined) return { record: await this.#confirmHold(id), candidate: null };
+  async #markRisk(id: string, approval?: Permit2ForegroundApproval): Promise<{ readonly record: Permit2ProductionRecord; readonly risk: Permit2ProductionRecord | null }> {
+    await this.ready(); const first = await this.#required(id); let risk: Permit2ProductionRecord | null = null;
+    if (first.exposureJournal !== undefined) return { record: await this.#confirmHold(id), risk: null };
     const admitted = await this.#admitFirstRisk(id);
-    if (admitted === null) return { record: await this.#confirmHold(id), candidate: null };
+    if (admitted === null) return { record: await this.#confirmHold(id), risk: null };
     const { r, usage, lease } = admitted;
     await this.state.withLocks(this.#locks(r), async () => {
       const current = await this.#required(id);
@@ -201,17 +132,11 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
         holdConfirmed: false, signed: null, request: null, terminalIntent: null };
       const next = sealPermit2ProductionRecord({ ...productionRecordBody(current), state: "exposure_unknown",
         exposureAt: at.toISOString(), updatedAt: at.toISOString(), exposureJournal: journal });
-      const binding = proof === undefined ? null : claimPermit2ForegroundApproval(proof, this, current);
-      if (binding !== null) this.#approvalTime(binding, current);
+      if (approval !== undefined) assertPermit2ApprovalCurrent(approval, current, this.#now());
       await this.#persistExposureLocked(next);
-      if (binding !== null && proof !== undefined) {
-        freezeApprovedSnapshot(next);
-        candidate = Object.freeze({ kind: "permit2-private-risk-candidate" as const });
-        this.#riskCandidates.set(candidate, { proof, binding, riskRecord: next });
-      }
+      if (approval !== undefined) risk = next;
     });
-    try { return { record: await this.#confirmHold(id), candidate }; }
-    catch (error) { if (candidate !== null) this.#riskCandidates.delete(candidate); throw error; }
+    return { record: await this.#confirmHold(id), risk };
   }
   /** Owner admission of the first exposure, read outside the locks. A caller whose first read predates a concurrent first
    * exposure sees that exposure (or its confirmed hold) here; it is then a replay of the durable hold, exactly as if it had
@@ -308,6 +233,12 @@ export class Permit2ProductionJournal extends Permit2ProductionRepository {
   }
 }
 function blocked(): never { throw new ApnError("APN_OPERATION_BLOCKED", "Permit2 exposure lifecycle remains held or its binding changed."); }
+
+/** The saved record still carries the origin's signed bundle under the same lease and wallet binding. */
+export function assertSignedOrigin(origin: Permit2SignedOrigin, record: Permit2ProductionRecord, lease: AssetUsageReservation): void {
+  if (record.operationId !== origin.approval.operationId || record.exposureJournal?.signed?.signedHash !== origin.signedHash ||
+      lease.reservationDigest !== origin.leaseDigest || sha256(canonicalJson(record.material.wallet)) !== origin.walletHash) blocked();
+}
 
 /** These repository-owned JSON snapshots are retained only by the approved path. */
 function freezeApprovedSnapshot(value: unknown): void {

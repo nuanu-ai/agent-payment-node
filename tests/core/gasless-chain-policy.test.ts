@@ -5,7 +5,7 @@ import { gaslessPolicyChain, localGaslessMechanism } from "../../src/gasless/ass
 import { gaslessDeployment } from "../../src/gasless/registry.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { gaslessFixture } from "./gasless-helpers.js";
-import { temporaryState } from "./helpers.js";
+import { temporaryState, savedGaslessOperations } from "./helpers.js";
 
 for (const chainId of [10, 130, 137, 42161] as const) {
   const row = gaslessDeployment(chainId), chain = `eip155:${chainId}`;
@@ -29,7 +29,7 @@ for (const chainId of [10, 130, 137, 42161] as const) {
       request: capped.request, idempotencyKey: "chain-policy-cap" });
     // The shared asset-policy evaluation refuses an amount above the per-transfer cap before any chain read.
     assert.equal(over.ok, false); assert.equal(over.error?.code, "APN_OPERATION_BLOCKED");
-    assert.deepEqual(capped.rpc.calls, []); assert.equal((await capped.core.gasless.records.listAllOperations()).length, 0);
+    assert.deepEqual(capped.rpc.calls, []); assert.equal((await savedGaslessOperations(capped.core.gasless.records)).length, 0);
 
     const admitted = await temporaryState(); t.after(admitted.cleanup);
     const s = await gaslessFixture(admitted.root, chainId), { id, operation } = await s.prepare();

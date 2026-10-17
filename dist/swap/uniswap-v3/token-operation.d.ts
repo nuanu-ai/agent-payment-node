@@ -92,6 +92,8 @@ export declare function validateUniswapTokenOperation(value: unknown): UniswapTo
 export declare class UniswapTokenJournal extends SecureStateStore {
     save(value: UniswapTokenOperation): Promise<UniswapTokenOperation>;
     load(id: string): Promise<UniswapTokenOperation | null>;
+    /** Lock-free read without creating the state root (the operation index's reader). */
+    read(id: string): Promise<UniswapTokenOperation | null>;
     private path;
 }
 export declare function transitionUniswapToken(opValue: UniswapTokenOperation, phase: UniswapTokenPhase, patch: Partial<UniswapTokenOperation>, now: Date): UniswapTokenOperation;

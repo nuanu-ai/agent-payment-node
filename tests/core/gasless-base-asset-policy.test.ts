@@ -13,7 +13,7 @@ import { newGaslessOperation, transitionGasless } from "../../src/gasless/transi
 import { gaslessDeployment } from "../../src/gasless/registry.js";
 import { gaslessEnvelopeBinding } from "../../src/gasless/wire.js";
 import { gaslessFixture, GASLESS_TEST_RECIPIENT, testWord } from "./gasless-helpers.js";
-import { temporaryState } from "./helpers.js";
+import { temporaryState, savedGaslessOperations } from "./helpers.js";
 
 const now = new Date("2026-09-18T02:00:00.000Z");
 const token = gaslessDeployment(8453).token;
@@ -48,7 +48,7 @@ test("Base local gasless prepare requires the exact active account, token rail a
       request: s.request, idempotencyKey: `denied-${bad}` });
     assert.equal(result.ok, false, bad);
     assert.equal(s.rpc.calls.length, 0, bad);
-    assert.equal((await s.core.gasless.records.listAllOperations()).length, 0, bad);
+    assert.equal((await savedGaslessOperations(s.core.gasless.records)).length, 0, bad);
   }
   assert.deepEqual(baseLocalGaslessMechanism(), {
     provider: "local", reference: `eip155:8453:${gaslessDeployment(8453).paymaster}` });

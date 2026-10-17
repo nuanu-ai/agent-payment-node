@@ -88,74 +88,76 @@ export class TransferService {
             const wallet = await state.loadWallet(profileHash);
             if (wallet === null)
                 throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-            await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, wallet.address);
-            // Owner caps come from the active allowlist policy and the shared usage ledger, as for every direct transfer, before any RPC.
-            const allowlist = await this.allowlist.admit(evmAllowlistSubject({ profile, operationId, walletAddress: wallet.address,
-                chainId: CHAIN_ID, token: BASE_USDC, amountAtomic: amount.atomic, recipient }));
-            const rpc = this.context.requireRpc();
-            rpc.armEvmDirectRpcGuard?.();
-            await rpc.assertBaseChain();
-            const data = transferData(recipient, amount.atomic);
-            const [balances, nonceAtomic, fees] = await Promise.all([
-                rpc.getBalances(wallet.address),
-                rpc.getPendingNonce(wallet.address),
-                rpc.estimateDirectTransfer({ from: wallet.address, to: BASE_USDC, data }),
-            ]);
-            validateBalance(balances, wallet.address);
-            const economics = validateEconomics(nonceAtomic, fees);
-            requireFunding(balances, amount.atomic, economics.maximumGasCostAtomic);
-            const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
-            const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
-            const fingerprint = hashObject({
-                method: materialRequest.method,
-                operationId,
-                profile,
-                chainId: CHAIN_ID,
-                token: BASE_USDC,
-                walletAddress: wallet.address,
-                recipient,
-                amountAtomic: amount.atomic,
-                transactionData: data,
-                economics,
-                preparedAt: preparedAt.toISOString(),
-                expiresAt: expiresAt.toISOString(),
+            // The account claim is written before any RPC read and dropped if this prepare writes no operation.
+            return await this.operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(CHAIN_ID, wallet.address)] }, async () => {
+                // Owner caps come from the active allowlist policy and the shared usage ledger, as for every direct transfer, before any RPC.
+                const allowlist = await this.allowlist.admit(evmAllowlistSubject({ profile, operationId, walletAddress: wallet.address,
+                    chainId: CHAIN_ID, token: BASE_USDC, amountAtomic: amount.atomic, recipient }));
+                const rpc = this.context.requireRpc();
+                rpc.armEvmDirectRpcGuard?.();
+                await rpc.assertBaseChain();
+                const data = transferData(recipient, amount.atomic);
+                const [balances, nonceAtomic, fees] = await Promise.all([
+                    rpc.getBalances(wallet.address),
+                    rpc.getPendingNonce(wallet.address),
+                    rpc.estimateDirectTransfer({ from: wallet.address, to: BASE_USDC, data }),
+                ]);
+                validateBalance(balances, wallet.address);
+                const economics = validateEconomics(nonceAtomic, fees);
+                requireFunding(balances, amount.atomic, economics.maximumGasCostAtomic);
+                const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
+                const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
+                const fingerprint = hashObject({
+                    method: materialRequest.method,
+                    operationId,
+                    profile,
+                    chainId: CHAIN_ID,
+                    token: BASE_USDC,
+                    walletAddress: wallet.address,
+                    recipient,
+                    amountAtomic: amount.atomic,
+                    transactionData: data,
+                    economics,
+                    preparedAt: preparedAt.toISOString(),
+                    expiresAt: expiresAt.toISOString(),
+                });
+                const initial = {
+                    at: preparedAt.toISOString(),
+                    state: "awaiting_approval",
+                    terminal: false,
+                    reason: "prepared_and_frozen",
+                    proofClass: "durable_pre_effect",
+                };
+                const operation = sealOperation({
+                    schemaVersion: STATE_VERSION,
+                    operationId,
+                    idempotencyHash,
+                    profile,
+                    profileHash,
+                    requestHash,
+                    fingerprint,
+                    walletAddress: wallet.address,
+                    recipient,
+                    amountAtomic: amount.atomic,
+                    amountDecimal: amount.decimal,
+                    chainId: CHAIN_ID,
+                    token: BASE_USDC,
+                    transactionData: data,
+                    economics,
+                    preparedAt: preparedAt.toISOString(),
+                    preparedBlockNumberAtomic: balances.blockNumberAtomic,
+                    expiresAt: expiresAt.toISOString(),
+                    state: initial.state,
+                    terminal: initial.terminal,
+                    reason: initial.reason,
+                    proofClass: initial.proofClass,
+                    transitions: appendTransition([], initial),
+                    allowlist,
+                });
+                await this.persist(operation);
+                await new DirectPublicEffectJournal(state).prepare(operation);
+                return publicOperation(operation);
             });
-            const initial = {
-                at: preparedAt.toISOString(),
-                state: "awaiting_approval",
-                terminal: false,
-                reason: "prepared_and_frozen",
-                proofClass: "durable_pre_effect",
-            };
-            const operation = sealOperation({
-                schemaVersion: STATE_VERSION,
-                operationId,
-                idempotencyHash,
-                profile,
-                profileHash,
-                requestHash,
-                fingerprint,
-                walletAddress: wallet.address,
-                recipient,
-                amountAtomic: amount.atomic,
-                amountDecimal: amount.decimal,
-                chainId: CHAIN_ID,
-                token: BASE_USDC,
-                transactionData: data,
-                economics,
-                preparedAt: preparedAt.toISOString(),
-                preparedBlockNumberAtomic: balances.blockNumberAtomic,
-                expiresAt: expiresAt.toISOString(),
-                state: initial.state,
-                terminal: initial.terminal,
-                reason: initial.reason,
-                proofClass: initial.proofClass,
-                transitions: appendTransition([], initial),
-                allowlist,
-            });
-            await this.persist(operation);
-            await new DirectPublicEffectJournal(state).prepare(operation);
-            return publicOperation(operation);
         });
     }
     async prepareCoinbaseGasless(request) {

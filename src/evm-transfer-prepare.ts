@@ -18,7 +18,7 @@ import { canonicalIdempotencyKey, publicOperation, validateEconomics } from "./t
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { assertLocalNetworkProfile } from "./x402-network.js";
 import { walletCustodyLock } from "./encrypted-wallet-store.js";
-import { occupiedUniswapTokenNonces } from "./swap/uniswap-v3/token-nonce-ownership.js";
+import { evmConflictDomain } from "./operation-conflict-domain.js";
 import { listLocalWallets } from "./wallet-import-collision.js";
 import type { StateStore } from "./state.js";
 
@@ -71,11 +71,13 @@ export async function prepareEvmTransfer(
     const wallet = await state.loadWallet(profileHash);
     if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
     await retireExpired(profileHash, selection.chainId, wallet.address);
-    // Every direct EVM transfer waits for unresolved operations on its own chain and account only; no other profile is locked.
+    // Every direct EVM transfer claims its own chain and account only, before any RPC read; no other profile is locked.
     // R8 (OWNR-16): native Arbitrum ETH to the wallet of any local custody profile need not wait for a Circle route of this
     // account whose source burn is final; that route never signs on Arbitrum again. Any other recipient waits for it.
-    if (selection.chainId === 42161 && selection.token === "native" && await localCustodyRecipient(state, recipient)) await operations.assertEvmNativeAccountAvailableBesideSettledCircle(profileHash, wallet.address);
-    else await operations.assertEvmAccountAvailable(profileHash, selection.chainId, wallet.address);
+    const besideSettledCircle = selection.chainId === 42161 && selection.token === "native" && await localCustodyRecipient(state, recipient);
+    return await operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash },
+      { domains: () => [evmConflictDomain(selection.chainId, wallet.address)],
+        ...(besideSettledCircle ? { tag: { kind: "native_beside_settled_circle" as const, account: wallet.address } } : {}) }, async () => {
     const amount = evmAmount(request.amount, listed.decimals);
     // Owner caps come only from the active allowlist policy and the shared usage ledger; no policy means no transfer.
     const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
@@ -93,8 +95,8 @@ export async function prepareEvmTransfer(
     if (evmUint(balance.assetAtomic) < BigInt(amount.atomic)) throw new ApnError("APN_INSUFFICIENT_ASSET", "Selected asset balance is insufficient for the exact amount.");
     const transaction = evmTransaction(balance.asset, wallet.address, recipient, amount.atomic);
     const { nonce: rpcNonce, estimated } = await reads.nonceEstimate(wallet.address, transaction);
-    let nonce = BigInt(rpcNonce); if (selection.chainId === 1) { const owned = new Set((await occupiedUniswapTokenNonces(state.root, wallet.address)).map(String));
-      while (owned.has(nonce.toString())) nonce += 1n; }
+    // A Uniswap token swap of this account holds the same claim, so the pending nonce is never one it may still use.
+    const nonce = BigInt(rpcNonce);
     const economics = validateEconomics(nonce.toString(), priorityFeeWei === undefined ? estimated : withOwnerPriorityFee(estimated, priorityFeeWei));
     const quote = await reads.feeQuote(economics);
     requireEvmFunding(balance, amount.atomic, quote, maximumFeeWei);
@@ -117,6 +119,7 @@ export async function prepareEvmTransfer(
     await persist(operation);
     await new DirectPublicEffectJournal(context.state).prepare(operation);
     return publicOperation(operation);
+    });
     });
   });
 }

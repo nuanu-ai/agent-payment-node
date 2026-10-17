@@ -153,7 +153,7 @@ test("Relay releases its owner lock during quote so rebind can finish, then refu
   await assert.rejects(pending, { code: "APN_OPERATION_BLOCKED" });
 });
 
-test("Relay releases its owner lock during quote so wallet ensure can finish", async t => {
+test("Relay holds no owner lock during quote: a wallet change is refused at once by its admitted claim, not left waiting", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root); await state.initialize();
   let release!: () => void, entered!: () => void;
@@ -167,8 +167,10 @@ test("Relay releases its owner lock during quote so wallet ensure can finish", a
   const native = new TestNative(); native.walletAddress = payer;
   const core = new ApnCore({ state, native });
   try {
-    const ensured = await core.wallet.ensure("default") as { readonly address: string };
-    assert.equal(ensured.address, payer);
+    // Phase 4b: the prepare claims its profile and source account before the quote, so the profile-wide wallet lifecycle
+    // guard refuses at once instead of waiting on a lock (before, only the window until the record was written let it pass).
+    await assert.rejects(core.wallet.ensure("default"), (error: { code?: string; details?: Record<string, unknown> }) =>
+      error.code === "APN_OPERATION_BLOCKED" && error.details?.blockingState === "admitted");
   } finally { release(); }
   assert.equal((await pending).state, "prepared");
 });
@@ -324,7 +326,9 @@ test("Relay retirement refuses existing effects and corrupted marker; parallel r
     { code: "APN_OPERATION_BLOCKED" });
   const marker = join(temporary.root, "relay-retirements", first.profileHash, `${first.operationId}.json`);
   await writeFile(marker, JSON.stringify({ ...JSON.parse(await readFile(marker, "utf8")), retiredAt: "2026-09-30T00:00:00.000Z" }));
-  await assert.rejects(new OperationService(state).assertProfileAvailable(first.profileHash), { code: "APN_STATE_CORRUPT" });
+  // A lifecycle that can no longer be decided keeps the operation's claims and names it as unreadable.
+  await assert.rejects(new OperationService(state).assertProfileAvailable(first.profileHash), {
+    code: "APN_OPERATION_BLOCKED", details: { blockingOperationId: first.operationId, blockingReason: "blocking_record_unreadable" } });
   await assert.rejects(retire.retire({ profile: "default", operationId: first.operationId }), { code: "APN_STATE_CORRUPT" });
 });
 

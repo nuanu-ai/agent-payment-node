@@ -14,7 +14,6 @@ export class FacilitatorGaslessOperationRepository extends SecureStateStore {
         this.initialized ??= (async () => {
             await super.initialize();
             await this.ensureDirectory(OPERATIONS);
-            await this.ensureDirectory(RECEIPTS);
         })();
         await this.initialized;
     }
@@ -81,36 +80,19 @@ export class FacilitatorGaslessOperationRepository extends SecureStateStore {
         await this.ensureDirectory(`${OPERATIONS}/${op.profileHash}`);
         await this.writeJson(this.path(OPERATIONS, op.profileHash, op.operationId), op);
     }
+    /** The operation is the only record written; its receipt is derived from it on read. */
     async persist(op) {
         await this.writeOperation(op);
-        await this.repairReceipt(op);
     }
-    async repairReceipt(input) {
-        const op = validateFacilitatorOperation(input);
-        await this.ready();
-        const stored = await this.loadOperation(op.profileHash, op.operationId);
-        if (stored === null || !facilitatorSame(stored, op))
-            corrupt();
-        const path = this.path(RECEIPTS, op.profileHash, op.operationId), previous = await this.readJson(path);
-        if (previous !== null)
-            validateReceipt(previous, op);
-        const receipt = facilitatorReceipt(op);
-        if (facilitatorSame(previous, receipt))
-            return;
-        await this.ensureDirectory(`${RECEIPTS}/${op.profileHash}`);
-        await this.writeJson(path, receipt);
-    }
+    /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
     async loadReceipt(profileHash, operationId) {
         const op = await this.loadOperation(profileHash, operationId);
         if (op === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "The Avalanche facilitator operation was not found.");
         const value = await this.readJson(this.path(RECEIPTS, profileHash, operationId));
-        if (value !== null)
-            validateReceipt(value, op);
-        if (value === null || !facilitatorSame(value, facilitatorReceipt(op))) {
-            throw new ApnError("APN_OPERATION_BLOCKED", "The Avalanche facilitator receipt needs recovery from its saved operation.", { reason: "facilitator_gasless_receipt", operationId, nextActions: [`apn operation resume --operation ${operationId}`] });
-        }
-        return value;
+        if (value !== null && receiptTransition(value, op) === op.transitions.length - 1)
+            return value;
+        return facilitatorReceipt(op);
     }
     path(root, profileHash, operationId) {
         stateIdentifier(profileHash, "facilitator gasless profile hash");
@@ -118,8 +100,8 @@ export class FacilitatorGaslessOperationRepository extends SecureStateStore {
         return `${root}/${profileHash}/${operationId}.json`;
     }
 }
-/** A stale receipt must equal the exact historical projection of one earlier transition. */
-function validateReceipt(value, op) {
+/** The transition a stored receipt belongs to: it must equal that transition's exact historical projection. */
+function receiptTransition(value, op) {
     if (!isPlainRecord(value) || value.operation_id !== op.operationId || value.fingerprint !== op.fingerprint)
         corrupt();
     const { receipt_hash, ...body } = value;
@@ -128,5 +110,6 @@ function validateReceipt(value, op) {
     const index = op.transitions.findIndex((_, i) => facilitatorAtTransition(op, i).integrityHash === value.operation_binding_hash);
     if (index < 0 || !facilitatorSame(value, facilitatorReceipt(facilitatorAtTransition(op, index))))
         corrupt();
+    return index;
 }
 //# sourceMappingURL=operation-repository.js.map

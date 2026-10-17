@@ -1,3 +1,4 @@
+import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
@@ -12,9 +13,27 @@ import { assertPermit2OwnerIdentity, assertPermit2OwnerCaps } from "./production
 import { assertSigningLifecycle, checkedSigningLease } from "./production-signing-owner.js";
 import { assertSigningTime } from "./production-signing-facts.js";
 import { productionUsageIdentity } from "./production-repository.js";
+/** Lives only inside Permit2MetadataLockOwner.within, while its metadata locks are held; it carries no key, approval,
+ * signature or transport authority, only the lexical fact that those locks are held. */
+export class Permit2MetadataLockScope {
+    kind = "permit2-metadata-lock-scope";
+    #owner;
+    #context;
+    constructor(owner, context) { this.#owner = owner; this.#context = context; }
+    static held(scope, owner) {
+        if (!(scope instanceof Permit2MetadataLockScope) || scope.#owner !== owner || scope.#context === null)
+            blocked();
+        return scope.#context;
+    }
+    static exit(scope) {
+        const context = scope.#context;
+        scope.#context = null;
+        for (const close of context?.close ?? [])
+            close();
+    }
+}
 /** An actual metadata lock callback only. No key, approval, signature or transport authority. */
 export class Permit2MetadataLockOwner {
-    #contexts = new WeakMap();
     #state;
     #records;
     #policies;
@@ -39,24 +58,20 @@ export class Permit2MetadataLockOwner {
                 blocked();
             assertSigningLifecycle(current, mode);
             freeze(current);
-            const scope = Object.freeze({ kind: "permit2-metadata-lock-scope" });
-            this.#contexts.set(scope, { record: current, mode, keys: Object.freeze([...outer, custody, policy]), close: new Set() });
+            const scope = new Permit2MetadataLockScope(this, { record: current, mode, keys: Object.freeze([...outer, custody, policy]), close: new Set() });
             try {
                 await this.owner(scope, id, mode, clock);
                 this.assert(scope, id, mode);
                 return await action(scope);
             }
             finally {
-                const context = this.#contexts.get(scope);
-                this.#contexts.delete(scope);
-                for (const close of context?.close ?? [])
-                    close();
+                Permit2MetadataLockScope.exit(scope);
             }
         })));
     }
     assert(scope, id, mode) {
-        const c = this.#contexts.get(scope);
-        if (c === undefined || c.record.operationId !== id || c.mode !== mode || c.record.material.wallet.profileHash !== c.record.profileHash)
+        const c = Permit2MetadataLockScope.held(scope, this);
+        if (c.record.operationId !== id || c.mode !== mode || c.record.material.wallet.profileHash !== c.record.profileHash)
             blocked();
         const keys = [`profile:${c.record.profileHash}`, `operation:${id}`, evmAddressLock(c.record.material.wallet.account),
             walletCustodyLock(this.#state, c.record.material.wallet.profile), `profile:${allowlistProfileHash(c.record.material.wallet.profile)}`];
@@ -65,7 +80,7 @@ export class Permit2MetadataLockOwner {
     }
     assertTime(scope, id, mode, at) {
         this.assert(scope, id, mode);
-        const c = this.#contexts.get(scope), t = c.time;
+        const c = Permit2MetadataLockScope.held(scope, this), t = c.time;
         if (t === undefined)
             blocked();
         const policy = activeAssetPolicyFromState(t.policy, at);
@@ -75,16 +90,17 @@ export class Permit2MetadataLockOwner {
     }
     onExit(scope, id, mode, close) {
         this.assert(scope, id, mode);
-        const c = this.#contexts.get(scope);
+        const c = Permit2MetadataLockScope.held(scope, this);
         c.close.add(close);
         return () => { c.close.delete(close); };
     }
     async owner(scope, id, mode, clock, expected) {
         this.assert(scope, id, mode);
-        const frozen = this.#contexts.get(scope).record;
+        const frozen = Permit2MetadataLockScope.held(scope, this).record;
         const record = await this.#records.findOperation(id);
         this.assert(scope, id, mode);
-        if (record === null || record.integrityHash !== frozen.integrityHash)
+        if (record === null || record.integrityHash !== frozen.integrityHash ||
+            expected !== undefined && sha256(canonicalJson(record.material.wallet)) !== expected.walletHash)
             blocked();
         assertSigningLifecycle(record, mode);
         assertSigningTime(record, clock());
@@ -113,7 +129,7 @@ export class Permit2MetadataLockOwner {
         assertPermit2OwnerIdentity(record, wallet, currentPolicy);
         assertPermit2OwnerCaps(record, at, used.toString(), currentPolicy);
         assertSigningTime(record, clock());
-        this.#contexts.get(scope).time = { policy, wallet, used: used.toString() };
+        Permit2MetadataLockScope.held(scope, this).time = { policy, wallet, used: used.toString() };
         return { record, lease };
     }
 }

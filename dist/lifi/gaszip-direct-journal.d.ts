@@ -55,7 +55,6 @@ export declare class GaszipFundingJournal extends SecureStateStore {
     private path;
     findOperation(id: string): Promise<GaszipFundingRecord | null>;
     listAllOperations(): Promise<readonly GaszipFundingRecord[]>;
-    listOperations(profileHash: string): Promise<readonly GaszipFundingRecord[]>;
     saveLocked(r: GaszipFundingRecord, create?: boolean): Promise<void>;
     sealTransaction(r: GaszipFundingRecord, raw: Hex): Promise<GaszipFundingRecord>;
     /** The create-only first-send marker precedes every broadcast; without it APN never sent these bytes. */

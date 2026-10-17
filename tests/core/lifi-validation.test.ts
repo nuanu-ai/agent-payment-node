@@ -12,7 +12,7 @@ import { materializeBridgeRoute, parseBridgeRoutes, validateRouteEconomics } fro
 import { TtyBridgeApproval } from "../../src/lifi/tty.js";
 import { bridgeDecimal } from "../../src/lifi/asset-registry.js";
 import { bridgeUint } from "../../src/lifi/validation.js";
-import { temporaryState } from "./helpers.js";
+import { temporaryState, savedBridgeOperations } from "./helpers.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_KEY, LIFI_SYNTHETIC_SENDER, lifiFixture, lifiRoute } from "./lifi-helpers.js";
 
 test("LI.FI integer parsing preserves exact USDC and wei boundaries without coercion or rounding", () => {
@@ -108,7 +108,7 @@ test("LI.FI stable materialization identities and every alternate execution exte
   s.provider.mutateMaterialization = (r) => { r.action.fromAmount = "1"; };
   const failed = await s.core.execute({ command: "bridge.prepare", profile: s.profile, quote: (quote.data as any).quote_hash,
     route: "route-across", idempotencyKey: "invalid-step-0001" });
-  assert.equal(failed.error?.code, "APN_PROVIDER_PROTOCOL"); assert.equal((await s.core.bridges.records.listAllOperations()).length, 0);
+  assert.equal(failed.error?.code, "APN_PROVIDER_PROTOCOL"); assert.equal((await savedBridgeOperations(s.core.bridges.records)).length, 0);
   assert.equal(s.wrapping.loads, 0); assert.equal(s.source.submissions.length, 0);
 });
 
@@ -155,7 +155,7 @@ test("LI.FI route fee, minimum output and native messaging accounting enforce ex
 for (const allowance of ["1", "10000001"]) test(`LI.FI nonzero inexact allowance ${allowance} fails without reset, signing or sending`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.source.allowance = allowance;
   await assert.rejects(s.prepare()); assert.equal(s.wrapping.loads, 0); assert.equal(s.source.submissions.length, 0);
-  assert.equal((await s.core.bridges.records.listAllOperations()).length, 0);
+  assert.equal((await savedBridgeOperations(s.core.bridges.records)).length, 0);
 });
 
 test("LI.FI independent post-approval gas over the frozen ceiling stops the bridge and preserves paid approval", async (t) => {
@@ -204,7 +204,7 @@ test("LI.FI concurrent preparation has one materialization and blocks every othe
   const input = { command: "bridge.prepare", profile: s.profile, quote: (quote.data as any).quote_hash, route: "route-across", idempotencyKey: "race-bridge-0001" } as const;
   const results = await Promise.all([s.core.execute(input), s.core.execute(input)]); assert.ok(results.every((r) => r.ok));
   assert.deepEqual(results[0]!.operation, results[1]!.operation); assert.equal(s.provider.materializeCalls, 1);
-  const [op] = await s.core.bridges.records.listAllOperations(); assert.ok(op);
+  const [op] = await savedBridgeOperations(s.core.bridges.records); assert.ok(op);
   const service = new OperationService(s.state);
   for (const kind of ["direct_transfer", "rail_transfer", "x402_fetch"] as const) await assert.rejects(service.resolvePrepare({ kind, profileHash: op.profileHash,
     operationId: op.operationId, idempotencyHash: op.idempotencyHash, requestHash: op.requestHash }), { code: "APN_IDEMPOTENCY_CONFLICT" });

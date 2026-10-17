@@ -1,8 +1,9 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SWAP_OPERATION_SCHEMA, validateSwapOperation } from "./model.js";
-import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
-import { validateOrcaStableNoSendProof } from "./orca-solana/stable-no-send-proof.js";
+// Readers of stable USDC to USDT records a released version wrote (SWAP-10): only the frozen no-send recovery reaches them.
+import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
+import { validateOrcaStableNoSendProof } from "../legacy/orca-stable/no-send-proof.js";
 const ALLOWED = {
     quoted: ["prepared", "failed_before_effect"],
     prepared: ["awaiting_approval", "failed_before_effect"],

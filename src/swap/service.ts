@@ -8,7 +8,7 @@ import { createSwapQuote, type SwapQuoteInput } from "./quote.js";
 import { newSwapOperation, SWAP_TERMINAL_STATES, validateSwapOperation, validateSwapReceiptProof, type SwapOperationRecord,
   type SwapReceiptProof } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
-import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 import { swapUnlandedProofHash, validateSwapUnlandedProof, type SwapUnlandedProof } from "./unlanded.js";
 
 export class GuardedSwapService {

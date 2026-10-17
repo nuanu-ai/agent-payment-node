@@ -29,6 +29,7 @@ import {
 import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { stagedProviderX402Operation } from "./provider-x402-stage.js";
 import { resolveProviderPrepare } from "./provider-prepare-identity.js";
+import { evmConflictDomain } from "./operation-conflict-domain.js";
 import { isCode } from "./secure-state-store.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
@@ -131,8 +132,11 @@ export class ProviderX402Service {
       if (bound.account_binding_hash !== initialBound.account_binding_hash ||
         bound.public_address.toLowerCase() !== initialBound.public_address.toLowerCase())
         throw new ApnError("APN_PROFILE_DRIFT", "Provider account identity changed while acquiring its operation lock.");
-      await this.operations.assertEvmAccountAvailable(profileHash, 8453, bound.public_address);
-      await this.operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
+      // The account and provider claims are written before the seller challenge and any provider or RPC read, and dropped
+      // if no operation is written.
+      return await this.operations.admit({ kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [evmConflictDomain(8453, bound.public_address)],
+          provider: { providerId: bound.provider_id, accountBindingHash: bound.account_binding_hash, payer: bound.public_address } }, async () => {
       assertProviderHttpRequest(requireProviderX402Adapter(this.context, bound).x402, httpRequest);
       const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(bound)));
       const capAtomic = effectiveX402Cap(policy, callerCap);
@@ -157,6 +161,7 @@ export class ProviderX402Service {
         if (durable !== null) return publicProviderX402Operation(durable);
         throw new ApnError("APN_STATE_CORRUPT", "Staged provider x402 operation disappeared during preparation.");
       }
+      });
     });
   }
   private async completePreparation(operation: ProviderX402OperationRecord): Promise<ProviderX402OperationRecord> {

@@ -166,28 +166,33 @@ test("exact nested schemas, hashes, and transition reconstruction fail closed; r
     { code: "APN_STATE_CORRUPT" });
 });
 
-test("operation-first persistence survives a fresh repository and repairs only valid historical receipts", async t => {
+test("the receipt is derived from the saved operation; a released receipt file is used only for its own transition", async t => {
   const root = await temporaryRoot(t), repository = new MetaMaskGaslessOperationRepository(root);
   const initial = makeOperation(), approved = approve(initial), marked = mark(approved);
   await repository.persist(initial);
   await repository.persist(approved);
   const historical = await repository.loadReceipt(initial.profileHash, initial.operationId);
   assert.equal(historical.operation_binding_hash, approved.integrityHash);
-  await repository.writeOperation(marked); // injected crash boundary: authoritative operation only
+  await repository.writeOperation(marked);
 
+  // Phase 4b (CORE-13): no receipt file is written; a fresh reader derives the receipt of the current transition.
   const fresh = new MetaMaskGaslessOperationRepository(root);
-  assert.equal((await fresh.loadOperation(marked.profileHash, marked.operationId))?.submissionAttempts, 1);
-  await assert.rejects(() => fresh.loadReceipt(marked.profileHash, marked.operationId), { code: "APN_OPERATION_BLOCKED" });
+  const receiptPath = join(root, RECEIPTS, marked.profileHash, `${marked.operationId}.json`);
+  await assert.rejects(readFile(receiptPath), { code: "ENOENT" });
+  assert.deepEqual(await fresh.loadReceipt(marked.profileHash, marked.operationId), metaMaskGaslessReceipt(marked));
+  // A file a released version wrote for an earlier transition is history; the current receipt is still derived.
+  await writeCanonical(receiptPath, historical);
   assert.deepEqual(validateMetaMaskGaslessReceipt(historical, marked), historical);
-  await fresh.repairReceipt(marked);
+  assert.deepEqual(await fresh.loadReceipt(marked.profileHash, marked.operationId), metaMaskGaslessReceipt(marked));
+  // One written for the current transition is returned as written.
+  await writeCanonical(receiptPath, metaMaskGaslessReceipt(marked));
   assert.deepEqual(await fresh.loadReceipt(marked.profileHash, marked.operationId), metaMaskGaslessReceipt(marked));
 
-  const receiptPath = join(root, RECEIPTS, marked.profileHash, `${marked.operationId}.json`);
   const corrupt = { ...metaMaskGaslessReceipt(marked), profile: "other" };
   const { receipt_hash: _old, ...body } = corrupt;
   await writeCanonical(receiptPath, { ...body, receipt_hash: hashObject(body) });
   const bytes = await readFile(receiptPath, "utf8");
-  await assert.rejects(() => fresh.repairReceipt(marked), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(() => fresh.loadReceipt(marked.profileHash, marked.operationId), { code: "APN_STATE_CORRUPT" });
   assert.equal(await readFile(receiptPath, "utf8"), bytes);
 });
 
@@ -249,7 +254,7 @@ test("history keeps its last slot for the terminal transition and a legacy full 
   assert.equal(legacy.transitions.length, 96); assert.equal(legacy.terminal, false);
   await repository.listAllOperations();
   await writeCanonical(join(root, OPS, legacy.profileHash, `${legacy.operationId}.json`), legacy);
-  await repository.repairReceipt(legacy);
+  assert.deepEqual(await repository.loadReceipt(legacy.profileHash, legacy.operationId), metaMaskGaslessReceipt(legacy));
   const loaded = await new MetaMaskGaslessOperationRepository(root).loadOperation(legacy.profileHash, legacy.operationId);
   assert.deepEqual(loaded, legacy);
   assert.throws(() => unknown(legacy, iso(Date.parse(legacy.updatedAt) + 1_000)), capacity);

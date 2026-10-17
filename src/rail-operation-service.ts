@@ -4,6 +4,7 @@ import { ChainPolicyService } from "./chain-policy-service.js";
 import type { ChainAssetAlias, DirectRailName, RailSendBinding } from "./direct-rail-ports.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
+import { railConflictDomain } from "./operation-conflict-domain.js";
 import { newRailOperation, publicRailOperation, validateRailPrepared, type RailOperationRecord } from "./rail-operation-model.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { railSendReason } from "./rail-send-binding.js";
@@ -58,7 +59,9 @@ export class RailOperationService {
         if (existing.kind !== "rail_transfer") corrupt();
         return publicRailOperation(existing.record);
       }
-      await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
+      // The account claim is written before any RPC read and dropped if no operation is written.
+      return await this.operations.admit({ kind: "rail_transfer", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [railConflictDomain(account.rail, account.address)] }, async () => {
       const policy = await this.policies.authorize(account, input.asset, maximumFeeAtomic);
       // Owner amount caps: the active allowlist policy and the shared usage ledger, then the chain policy, before any RPC call.
       const allowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account, prepared: { asset, amountAtomic, recipient } }));
@@ -70,6 +73,7 @@ export class RailOperationService {
         profile, profileHash, idempotencyHash, requestHash, account, prepared, policyHash: policy.policyHash, allowlist });
       await this.records.persist(operation);
       return publicRailOperation(operation);
+      });
     });
   }
   /** A durable, key-scoped claim survives a crash; only its short commit phases hold money-operation locks. */
@@ -140,6 +144,9 @@ export class RailOperationService {
       });
       if ("existing" in staged) return staged.existing;
       const { account, adapter, recipient, requestHash, policy, allowlist, claim } = staged;
+      // The account claim is written before the RPC reads and held through the commit; it is dropped if no operation is written.
+      return await this.operations.admit({ kind: "rail_transfer", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [railConflictDomain(account.rail, account.address)] }, async () => {
       try {
         const prepared = await adapter.prepare({ account, asset, recipient, amountAtomic, maximumFeeAtomic, now: this.context.clock.now() });
         validateRailPrepared(prepared, account);
@@ -156,7 +163,6 @@ export class RailOperationService {
           if (currentClaim?.integrityHash !== claim.integrityHash) corrupt();
           const currentAccount = await this.policies.account(profile, "solana");
           if (canonicalJson(currentAccount) !== canonicalJson(account)) throw new ApnError("APN_PROFILE_DRIFT", "The Solana account changed during preparation.");
-          await this.operations.assertRailAccountAvailable(profileHash, account.rail, account.address);
           const currentPolicy = await this.policies.authorize(currentAccount, input.asset, maximumFeeAtomic);
           if (currentPolicy.policyHash !== policy.policyHash) throw new ApnError("APN_PROFILE_DRIFT", "The Solana chain policy changed during preparation.");
           const currentAllowlist = await this.allowlist.admit(railAllowlistSubject({ profile, operationId, account: currentAccount, prepared: { asset, amountAtomic, recipient } }));
@@ -174,6 +180,7 @@ export class RailOperationService {
         await state.withLocks(locks, async () => { await claims.removeIfMatches(claim); });
         throw error;
       }
+      });
     }, { waitMs: 300_000 });
   }
   async approve(operationId: string): Promise<unknown> { return await reportingRateLimits(() => this.approveOperation(operationId)); }
@@ -221,7 +228,6 @@ export class RailOperationService {
     return await state.withLocks([`rail:approval-claim:${operationId}`], async () => {
       const staged = await state.withLocks(keys, async () => {
         const operation = await this.lifecycle.required(operationId);
-        await this.records.repairReceipt(operation);
         await this.lifecycle.followUsage(operation);
         const saved = await claims.load(operationId);
         if (operation.terminal) {
@@ -271,7 +277,6 @@ export class RailOperationService {
       try {
         const committed = await state.withLocks(keys, async () => {
           const latest = await this.lifecycle.required(operationId);
-          await this.records.repairReceipt(latest);
           await this.lifecycle.followUsage(latest);
           const saved = await claims.load(operationId);
           if (latest.integrityHash !== operation.integrityHash || saved?.integrityHash !== claim.integrityHash) {
@@ -343,7 +348,6 @@ export class RailOperationService {
     const found = await this.lifecycle.required(operationId);
     return await this.context.state.withLocks([`profile:${found.profileHash}`, `operation:${operationId}`], async () => {
       const operation = await this.lifecycle.required(operationId);
-      await this.records.repairReceipt(operation);
       await this.lifecycle.followUsage(operation);
       return publicRailOperation(await action(operation));
     });

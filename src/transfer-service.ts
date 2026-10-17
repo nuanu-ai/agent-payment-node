@@ -107,7 +107,9 @@ export class TransferService {
       if (existing !== null) return publicOperation(existing.record as OperationRecord);
       const wallet = await state.loadWallet(profileHash);
       if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-      await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, wallet.address);
+      // The account claim is written before any RPC read and dropped if this prepare writes no operation.
+      return await this.operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [evmConflictDomain(CHAIN_ID, wallet.address)] }, async () => {
       // Owner caps come from the active allowlist policy and the shared usage ledger, as for every direct transfer, before any RPC.
       const allowlist = await this.allowlist.admit(evmAllowlistSubject({ profile, operationId, walletAddress: wallet.address,
         chainId: CHAIN_ID, token: BASE_USDC, amountAtomic: amount.atomic, recipient }));
@@ -175,6 +177,7 @@ export class TransferService {
       await this.persist(operation);
       await new DirectPublicEffectJournal(state).prepare(operation);
       return publicOperation(operation);
+      });
     });
   }
 
