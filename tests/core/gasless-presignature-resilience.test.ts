@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
+import { gaslessReceipt } from "../../src/gasless/receipt.js";
 import { OperationService } from "../../src/operation-service.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -91,22 +92,25 @@ test("a definite refusal is never retried", async (t) => {
   assert.deepEqual(s.wait.waits, []); assert.equal(s.wrapping.loads, 0);
 });
 
-test("a receipt written with an earlier proof class is accepted and repaired", async (t) => {
+test("a receipt a released version wrote with an earlier proof class for the current transition is returned as written", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
   const stored = await approve(s, id);
   assert.equal(stored.state, "completed");
   const path = join(temporary.root, "gasless-receipts", stored.profileHash, `${id}.json`);
-  const raw = await readFile(path, "utf8"), current = JSON.parse(raw) as Record<string, unknown>;
+  const current = gaslessReceipt(stored) as unknown as Record<string, unknown>;
   assert.notEqual(current.proof_class, "effect_observation_pending");
   const { receipt_hash: _hash, ...body } = current;
   const historical = { ...body, proof_class: "effect_observation_pending" };
-  const ending = raw.endsWith("\n") ? "\n" : "";
-  await writeFile(path, `${canonicalJson({ ...historical, receipt_hash: hashObject(historical) })}${ending}`);
+  const written = { ...historical, receipt_hash: hashObject(historical) };
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await writeFile(path, `${canonicalJson(written)}\n`, { mode: 0o600 });
 
   const status = await s.core.execute({ command: "operation.status", operationId: id });
   assert.equal(status.ok, true, status.error?.message);
-  const repaired = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
-  assert.equal(repaired.proof_class, current.proof_class);
-  assert.equal(repaired.receipt_hash, current.receipt_hash);
+  assert.deepEqual((await s.core.execute({ command: "receipt.get", operationId: id })).receipt, written);
+  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), written);
+  // Without that file, the receipt is derived from the operation (phase 4b, CORE-13).
+  await rm(path);
+  assert.deepEqual((await s.core.execute({ command: "receipt.get", operationId: id })).receipt, current);
 });

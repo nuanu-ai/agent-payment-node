@@ -50,7 +50,6 @@ async function fixture(root: string, create = true) {
   class Records extends SmartAccountGaslessOperationRepository {
     override async persist(op: SmartAccountGaslessOperationRecord): Promise<void> {
       await this.writeOperation(op); await hook(`operation:${op.state}`);
-      await this.repairReceipt(op); await hook(`receipt:${op.state}`);
     }
   }
   const records = new Records(root), clock = { now: () => now };

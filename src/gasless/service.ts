@@ -185,7 +185,6 @@ export class GaslessService {
       async () => await this.context.state.withLocks([`profile:${allowlistProfileHash(first.record.intent.profile)}`], async () => {
       const current = await this.operations.required(operationId);
       if (current.kind !== "gasless_transfer") gaslessFailure("APN_STATE_CORRUPT", "gasless_operation_kind_changed");
-      await this.records.repairReceipt(current.record);
       await this.policy.reconcile(current.record);
       return await work(current.record);
     }));

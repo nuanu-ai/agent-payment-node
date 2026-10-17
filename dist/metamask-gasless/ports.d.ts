@@ -57,6 +57,5 @@ export interface MetaMaskGaslessRepositoryPort {
     listAllOperations(): Promise<readonly MetaMaskGaslessOperationRecord[]>;
     writeOperation(operation: MetaMaskGaslessOperationRecord): Promise<void>;
     persist(operation: MetaMaskGaslessOperationRecord): Promise<void>;
-    repairReceipt(operation: MetaMaskGaslessOperationRecord): Promise<void>;
     loadReceipt(profileHash: string, operationId: string): Promise<MetaMaskGaslessReceipt>;
 }

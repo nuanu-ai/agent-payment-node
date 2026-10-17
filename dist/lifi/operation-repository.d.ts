@@ -14,9 +14,9 @@ export declare class BridgeOperationRepository extends SecureStateStore {
     listOperations(profileHash: string): Promise<readonly BridgeOperationRecord[]>;
     listAllOperations(): Promise<readonly BridgeOperationRecord[]>;
     writeOperation(op: BridgeOperationRecord): Promise<void>;
-    /** Caller holds the same profile/operation locks as every other money service. */
+    /** Caller holds the same profile/operation locks as every other money service. Its receipt is derived on read. */
     persist(op: BridgeOperationRecord): Promise<void>;
-    repairReceipt(op: BridgeOperationRecord): Promise<void>;
+    /** A receipt file a released version wrote for the current transition is returned as written; otherwise it is derived. */
     loadReceipt(profileHash: string, operationId: string): Promise<BridgeReceipt>;
     loadLegacyReceipt(op: LegacyBridgeOperationRecord): Promise<Record<string, unknown>>;
     private path;

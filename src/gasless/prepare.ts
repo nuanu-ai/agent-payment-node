@@ -40,7 +40,7 @@ export class GaslessPreparation {
         operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== "gasless_transfer") gaslessFailure("APN_STATE_CORRUPT", "gasless_operation_kind");
-        await this.o.records.repairReceipt(existing.record); return existing.record;
+        return existing.record;
       }
       assertGaslessExecutionChain(request.chainId);
       const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);

@@ -18,7 +18,6 @@ import { bridgePreparePostBudget } from "./send-budget.js";
 import { bridgeExecutionDestination, bridgeExecutionSource, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
-import { isLegacyBridgeOperation } from "./legacy-operation.js";
 import { BNB_COMPOSITE, verifyFlyHeaderSignature } from "./bnb-composite.js";
 import { approvalData } from "./transaction.js";
 export class BridgePreparation {
@@ -53,8 +52,6 @@ export class BridgePreparation {
             if (existing !== null) {
                 if (existing.kind !== "bridge_route")
                     bridgeFailure("APN_STATE_CORRUPT", "bridge_global_operation_kind");
-                if (!isLegacyBridgeOperation(existing.record))
-                    await this.o.records.repairReceipt(existing.record);
                 return existing.record;
             }
             const quote = await this.o.quotes.load(profileHash, quoteHash);

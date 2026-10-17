@@ -22,7 +22,6 @@ import { bridgeExecutionDestination, bridgeExecutionSource, bridgeNativePrincipa
 import { bridgeFailure, bridgeHash, bridgeOpaque } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import type { StoredBridgeOperationRecord } from "./legacy-operation.js";
-import { isLegacyBridgeOperation } from "./legacy-operation.js";
 import { BNB_COMPOSITE, verifyFlyHeaderSignature } from "./bnb-composite.js";
 import { approvalData } from "./transaction.js";
 
@@ -59,7 +58,6 @@ export class BridgePreparation {
       const existing = await this.o.operations.resolvePrepare({ kind: "bridge_route", profileHash, operationId, idempotencyHash, requestHash });
       if (existing !== null) {
         if (existing.kind !== "bridge_route") bridgeFailure("APN_STATE_CORRUPT", "bridge_global_operation_kind");
-        if (!isLegacyBridgeOperation(existing.record)) await this.o.records.repairReceipt(existing.record);
         return existing.record;
       }
       const quote = await this.o.quotes.load(profileHash, quoteHash);
