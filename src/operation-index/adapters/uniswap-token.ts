@@ -27,4 +27,5 @@ export const uniswapTokenAdapter: OperationFamilyAdapter<UniswapTokenOperation> 
     { command: "swap.uniswap-token.status", operationId: record.operationId }, context),
   commands: { status: OPERATION_STATUS, resume: "apn swap ethereum uniswap-token execute --operation <operation-id>",
     exit: "apn swap ethereum uniswap-token cleanup --operation <operation-id>" },
+  runtimeCommand: async () => "swap.uniswap-token.status",
 };

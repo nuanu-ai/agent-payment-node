@@ -25,4 +25,5 @@ export const circleApprovalAdapter: OperationFamilyAdapter<CircleApprovalRecord>
   status: async (context, record) => await (await import("../../circle-command-service.js")).executeCircleCommand(
     { command: "circle.approval.status", operationId: record.id }, context),
   commands: { status: OPERATION_STATUS, resume: OPERATION_STATUS },
+  runtimeCommand: async () => "circle.approval.status",
 };

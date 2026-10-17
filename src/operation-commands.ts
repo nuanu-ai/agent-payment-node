@@ -3,10 +3,11 @@ import { operationOutcome } from "./core-outcome.js";
 import { ApnError } from "./errors.js";
 import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
 import type { OperationFamilyAdapter, OperationResumeOptions } from "./operation-index/adapter.js";
+import { unexecutedUsdtPreparation } from "./operation-index/adapters/gasless-usdt.js";
 import { OperationIndex } from "./operation-index/index.js";
 import type { OperationIndexEntry } from "./operation-index/types.js";
-import { pendingFamilyAbandon, pendingFamilyAnswer } from "./operation-pending-families.js";
 import type { RuntimeContext } from "./runtime.js";
+import { StateStore } from "./state.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 
 type ResumeRequest = Extract<CommandRequest, { readonly command: "operation.resume" }>;
@@ -49,7 +50,7 @@ export class OperationCommands {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
     let entry = await this.index.find(operationId);
-    if (entry === null) return operationOutcome(await pendingFamilyAbandon(this.context, this.index.registry, operationId));
+    if (entry === null) throw await this.notIndexed(operationId);
     let record: unknown;
     try { record = entry.unreadableReason === "duplicate_operation_id" ? undefined : await this.index.loadRecord(entry); }
     catch (error) {
@@ -71,12 +72,12 @@ export class OperationCommands {
     return operationOutcome(await adapter.abandon(this.context, record));
   }
 
-  /** The family's saved record behind an ID; an ID the index does not hold may belong to a family without an adapter yet. */
+  /** The family's saved record behind an ID; the index holds every family's operations. */
   private async found(operationIdInput: string): Promise<Found> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
     const entry = await this.index.find(operationId);
-    if (entry === null) return await pendingFamilyAnswer(this.context.state.root, this.index.registry, operationId);
+    if (entry === null) throw await this.notIndexed(operationId);
     const adapter = this.index.adapter(entry);
     if (adapter === undefined) throw notFound();
     if (entry.unreadableReason === "duplicate_operation_id") {
@@ -94,6 +95,11 @@ export class OperationCommands {
     return { entry, adapter, record };
   }
 
+  /** Every family's operations are indexed except a gasless USDT preparation that never executed, which has its own status. */
+  private async notIndexed(operationId: string): Promise<ApnError> {
+    return await unexecutedUsdtPreparation(this.context.state.root, operationId) ?? notFound();
+  }
+
   /** The option combinations no family accepts, checked before any state is read (as before the index). */
   private assertResumeOptions(options: OperationResumeOptions): void {
     if (options.observeOnly !== undefined && options.observeOnly !== true) throw new ApnError("APN_INVALID_INPUT", "observeOnly must be true.");
@@ -105,6 +111,29 @@ export class OperationCommands {
       if (options.waitSeconds !== undefined || this.context.rpcUrl !== undefined) throw new ApnError("APN_INVALID_INPUT",
         "Observation RPC recovery cannot be combined with --rpc-url or --wait-seconds.", { reason: "gasless_observation_rpc_options" });
     }
+  }
+}
+
+const GENERIC_COMMANDS: ReadonlySet<CommandRequest["command"]> = new Set(["operation.status", "operation.resume", "operation.abandon", "receipt.get"]);
+
+/**
+ * The family command whose runtime a generic operation command delegates to, read before that runtime is built: the
+ * runtime factory builds a family runtime only for the commands that name it. Null for any other command, for a family
+ * that needs no runtime of its own, and when the lookup refuses (an unknown ID, an unreadable record): the command repeats
+ * the same lookup and answers that refusal itself, and an unreadable record's only exit (the index release) needs no runtime.
+ */
+export async function operationRuntimeCommand(root: string, request: CommandRequest): Promise<CommandRequest["command"] | null> {
+  if (!GENERIC_COMMANDS.has(request.command)) return null;
+  try {
+    const state = new StateStore(root); await state.initialize();
+    const index = new OperationIndex(state), entry = await index.find(canonicalOperationId((request as { readonly operationId: string }).operationId));
+    const adapter = entry === null ? undefined : index.adapter(entry);
+    if (entry === null || adapter?.runtimeCommand === undefined) return null;
+    const record = await index.loadRecord(entry);
+    return record === null ? null : await adapter.runtimeCommand(record);
+  } catch (error) {
+    if (error instanceof ApnError) return null;
+    throw error;
   }
 }
 
