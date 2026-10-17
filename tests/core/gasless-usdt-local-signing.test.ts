@@ -17,7 +17,7 @@ import { runCli } from "../../src/cli.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
 import type { UsdtChainReceipt } from "../../src/gasless-usdt/receipt.js";
-import { preparePolicyBoundUsdt } from "../../src/gasless-usdt/policy-prepare.js";
+import { preparePolicyBoundUsdt } from "./gasless-usdt-v1-prepare-fixture.js";
 import { usdtUserOperationHash, usdtUserOperationTypedData } from "../../src/gasless-usdt/userop.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import { StateStore } from "../../src/state.js";

@@ -6,7 +6,7 @@ import { allowlistProfileHash } from "../../src/allowlist-policy-overlay.js";
 import { StateStore } from "../../src/state.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../../src/encrypted-wallet-store.js";
 import { preparePolicyBoundUsdtV2 } from "../../src/gasless-usdt/policy-prepare-v2.js";
-import { preparePolicyBoundUsdt } from "../../src/gasless-usdt/policy-prepare.js";
+import { preparePolicyBoundUsdt } from "./gasless-usdt-v1-prepare-fixture.js";
 import { UsdtBoundOperationRepository, validateUsdtAnyBoundOperation } from "../../src/gasless-usdt/bound-operation.js";
 import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
 import { GaslessUsdtCommandPrepare, UsdtCommandReadBudget } from "../../src/gasless-usdt/command-prepare.js";
