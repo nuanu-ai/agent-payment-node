@@ -1,8 +1,8 @@
 /** Pure finite preflight admission. Runtime must obtain all inputs from bounded canonical RPC/API reads under account locks. */
 import { encodePacked, keccak256 } from "viem";
 import { hashObject } from "../canonical.js";
-import { CIRCLE_AMOUNT, CIRCLE_DEPLOYMENT_PINS, CIRCLE_MAX_FEE, CIRCLE_MIN_MINT, CIRCLE_MINTER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
-import { assertCircleAttestation, assertCircleSource, circleFail, circleHex, circleRecord, circleUint, circleWord } from "./protocol.js";
+import { CIRCLE_DEPLOYMENT_PINS, CIRCLE_MINTER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { assertCircleAttestation, assertCircleSource, circleFail, circleHex, circleUint, circleWord } from "./protocol.js";
 /** TokenController.sol hashes abi.encodePacked(uint32 remoteDomain,bytes32 remoteToken), never abi.encode. */
 export function circleTokenPairKey(remoteDomain, remoteToken) {
     return keccak256(encodePacked(["uint32", "bytes32"], [remoteDomain, circleWord(remoteToken)]));
@@ -34,35 +34,6 @@ export function verifyCircleDeployments(source, destination) {
         }
     }
     return hashObject({ source, destination });
-}
-/** Ceil exact rational basis points. JSON floating values are accepted only as finite ordinary decimal numbers. */
-export function quoteCircleFastFee(chain, value, fetchedAtMs, nowMs) {
-    const route = circleRoute(chain);
-    if (!Array.isArray(value) || value.length > 4 || !Number.isSafeInteger(fetchedAtMs) || fetchedAtMs > nowMs || nowMs - fetchedAtMs > 30_000)
-        circleFail("fee_quote_shape_age");
-    const rows = value.map(circleRecord).filter(x => x.finalityThreshold === 1000);
-    if (rows.length !== 1)
-        circleFail("fast_fee_unavailable");
-    const rate = rows[0].minimumFee;
-    if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0 || !/^\d+(?:\.\d{1,6})?$/u.test(String(rate)))
-        circleFail("fee_rate");
-    const [whole, fraction = ""] = String(rate).split("."), denominator = 10n ** BigInt(fraction.length) * 10000n;
-    const numerator = BigInt(`${whole}${fraction}`), fee = (CIRCLE_AMOUNT * numerator + denominator - 1n) / denominator;
-    if (fee > CIRCLE_MAX_FEE || CIRCLE_AMOUNT - fee < CIRCLE_MIN_MINT)
-        circleFail("fee_cap_or_mint_floor");
-    const body = { schemaVersion: "apn.circle-fast-fee.v1", sourceDomain: 3,
-        destinationDomain: route.domain, minimumFeeBps: String(rate), quotedFeeAtomic: fee.toString(),
-        amountAtomic: "40100", maxFeeAtomic: "100", minMintAtomic: "40000",
-        fetchedAtMs, expiresAtMs: fetchedAtMs + 30_000, responseHash: hashObject(value) };
-    return { ...body, integrityHash: hashObject(body) };
-}
-export function assertCircleFeeQuote(quote, chain, nowMs) {
-    const { integrityHash, ...body } = quote;
-    if (integrityHash !== hashObject(body) || quote.schemaVersion !== "apn.circle-fast-fee.v1" || quote.sourceDomain !== 3 ||
-        quote.destinationDomain !== circleRoute(chain).domain || quote.amountAtomic !== "40100" || quote.maxFeeAtomic !== "100" || quote.minMintAtomic !== "40000" ||
-        quote.expiresAtMs !== quote.fetchedAtMs + 30_000 || nowMs < quote.fetchedAtMs || nowMs >= quote.expiresAtMs ||
-        circleUint(quote.quotedFeeAtomic) > CIRCLE_MAX_FEE)
-        circleFail("fee_quote_expired_or_integrity");
 }
 /** `gasPayer` is the operation's own destination custody wallet, which signs and pays the mint. */
 export function verifyCircleDestinationAccount(account, chain, gasPayer) {

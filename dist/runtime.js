@@ -18,7 +18,6 @@ export class RuntimeContext {
     relayNativeExecute;
     relayExecuteConfirmation;
     stargateNative;
-    circleEvm;
     circleFundingEvm;
     stargateToken;
     portfolio;
@@ -108,8 +107,6 @@ export class RuntimeContext {
             this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
         if (dependencies.stargateNative !== undefined)
             this.stargateNative = dependencies.stargateNative;
-        if (dependencies.circleEvm !== undefined)
-            this.circleEvm = dependencies.circleEvm;
         if (dependencies.circleFundingEvm !== undefined)
             this.circleFundingEvm = dependencies.circleFundingEvm;
         if (dependencies.stargateToken !== undefined)

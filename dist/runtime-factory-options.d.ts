@@ -1,6 +1,5 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
-import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { RelayUnsignedPrepareService, RelayPreparePorts } from "./relay/prepare.js";
 import type { RelayReadOnlyPreflightService, RelayPreflightPorts } from "./relay/preflight.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
@@ -83,7 +82,6 @@ export interface RuntimeFactoryOptions {
     readonly relayObserveSourceRpc?: HttpsBaseRpc;
     readonly relayObserveBnbRpc?: HttpsBaseRpc;
     readonly stargateNative?: StargateNativeService;
-    readonly circleEvm?: CircleEvmService;
     readonly circleFundingEvm?: CircleFundingEvmService;
     readonly stargateToken?: StargateTokenService;
     readonly portfolio?: PortfolioDependencies;

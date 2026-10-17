@@ -1,6 +1,6 @@
 import { type CircleExternalFulfillment } from "./external-proof.js";
 import { type CircleNonceRetirementProof } from "./nonce-retirement-proof.js";
-import { type Address, type Hex } from "viem";
+import type { Address, Hex } from "viem";
 import { type EvmNativeCustody } from "../evm-native-custody.js";
 import { type AssetUsageReservation } from "../asset-usage-ledger.js";
 import { type CircleDestinationChain } from "./catalog.js";
@@ -74,8 +74,6 @@ export interface CircleOperationV1 {
 }
 export declare function circleBlocked(reason: string): never;
 export declare function circleCorrupt(reason: string): never;
-export declare function sealCircle(input: Omit<CircleOperationV1, "integrityHash"> | CircleOperationV1): CircleOperationV1;
-export declare function advanceCircle(op: CircleOperationV1, patch: Partial<CircleOperationV1>, reason: string, now: number): CircleOperationV1;
 export declare function circleEnvelope(input: Omit<CircleEnvelope, "envelopeHash">): CircleEnvelope;
 export declare function validateCircleEnvelope(e: CircleEnvelope, role: CircleRole, chain: CircleDestinationChain, attestation: CircleAttestation | null, destinationProfile?: string): void;
 export declare function validateCircle(value: unknown): CircleOperationV1;

@@ -210,7 +210,6 @@ export class ApnCore {
             case "circle.evm.adopt-external-mint":
             case "circle.evm.refresh-attestation":
             case "circle.evm.cleanup":
-            case "circle.evm.cleanup-nonce":
             case "circle.evm.status":
             case "circle.approval.prepare":
             case "circle.approval.execute":
