@@ -40,6 +40,12 @@ export declare function runMetaMaskNativeTransfer(stateRoot: string, input: Meta
     effect_attempts: 0 | 1;
     proof_class: string;
 }>;
+/**
+ * Before a new transfer is admitted, every transfer of this account and chain that can never start is closed under its
+ * own operation lock. Best effort: one that cannot be closed now no longer blocks (the family's own rule reads it as
+ * resolved), and its next status closes it.
+ */
+export declare function closeExpiredNativeTransfersOf(stateRoot: string, chainId: number, payer: string): Promise<void>;
 export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean): Promise<{
     read_observation?: MetaMaskNativeReadObservation;
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;

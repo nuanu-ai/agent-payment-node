@@ -12,6 +12,7 @@ import { accountBindingHash as nativeAccountBindingHash, validateProviderProfile
 import { canonicalProfile } from "./wallet-policy.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { formatAtomic } from "./money.js";
+import { pastUnstartedDeadline } from "./unstarted-deadline.js";
 import { validateMetaMaskNativeDiagnostic, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { METAMASK_NATIVE_FEE_QUOTE_SCHEMA, METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote,
   validateMetaMaskNativeFeeReceipt, type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeReceiptEvidence } from "./metamask-native-fee-evidence.js";
@@ -21,7 +22,9 @@ const DIRECTORY = "metamask-native-operations";
 /** Outcomes after which a native transfer can no longer sign, hand off or land. */
 export const METAMASK_NATIVE_RESOLVED_STATES: readonly string[] = ["confirmed", "failed_before_effect", "abandoned_unknown"];
 const RESOLVED = METAMASK_NATIVE_RESOLVED_STATES;
-const STATES = ["prepared", "failed_before_effect", "effect_started", "acknowledged", "unknown", "confirmed", "abandoned_unknown"] as const;
+/** Every state a native transfer journal may hold. */
+export const METAMASK_NATIVE_STATES = ["prepared", "failed_before_effect", "effect_started", "acknowledged", "unknown", "confirmed", "abandoned_unknown"] as const;
+const STATES = METAMASK_NATIVE_STATES;
 const CONTEXT_KEYS = ["profile", "profileHash", "accountBindingHash", "capabilityHash", "profileRevision", "policyDigest", "policyRevision",
   "activationDigest", "vendorPolicyHash", "vendorProjectHash", "quote", "operationId", "consentExpiresAt", "issuedDay"] as const;
 
@@ -107,6 +110,18 @@ function validateOperation(value: unknown): MetaMaskNativeOperation {
   return o;
 }
 
+/**
+ * A transfer whose foreground command ended before its effect marker (still `prepared`: nothing was handed off or signed)
+ * and whose consent deadline has passed (plus the unstarted margin) can never start: the hand-off needs that consent.
+ */
+export function metaMaskNativeExpiredBeforeEffect(op: Pick<MetaMaskNativeOperation, "state" | "effectAttempts" | "context">, now = Date.now()): boolean {
+  return op.state === "prepared" && op.effectAttempts === 0 && pastUnstartedDeadline(op.context.consentExpiresAt, now);
+}
+/** The family's own terminal rule: a resolved outcome, or a transfer that can never start (closed at its next read). */
+export function metaMaskNativeResolved(op: Pick<MetaMaskNativeOperation, "state" | "effectAttempts" | "context">, now = Date.now()): boolean {
+  return RESOLVED.includes(op.state) || metaMaskNativeExpiredBeforeEffect(op, now);
+}
+
 export class MetaMaskNativeJournal extends SecureStateStore {
   async read(id: string): Promise<MetaMaskNativeOperation | null> {
     canonicalOperationId(id);
@@ -127,10 +142,13 @@ export class MetaMaskNativeJournal extends SecureStateStore {
   }
   /** Any other unresolved native transfer of this account and chain, signed or not, holds a new one back. */
   async assertAccountAvailable(chainId: number, account: string, exceptId: string): Promise<void> {
-    for (const op of await this.all()) {
-      if (op.operationId !== exceptId && op.context.quote.chainId === chainId && op.context.quote.sender.toLowerCase() === account.toLowerCase() &&
-        !RESOLVED.includes(op.state)) blocked("Another native transfer for this account and chain is unresolved.");
+    for (const op of await this.forAccount(chainId, account)) {
+      if (op.operationId !== exceptId && !metaMaskNativeResolved(op)) blocked("Another native transfer for this account and chain is unresolved.");
     }
+  }
+  /** Every native transfer of this account and chain. */
+  async forAccount(chainId: number, account: string): Promise<readonly MetaMaskNativeOperation[]> {
+    return (await this.all()).filter(op => op.context.quote.chainId === chainId && op.context.quote.sender.toLowerCase() === account.toLowerCase());
   }
   async matchingHold(reservation: AssetUsageReservation): Promise<MetaMaskNativeOperation | null> {
     for (const op of await this.all()) {

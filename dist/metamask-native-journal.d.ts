@@ -8,6 +8,8 @@ import { type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeReceiptEvidence } fr
 declare const V1 = "apn.metamask-native-operation.v1", V2 = "apn.metamask-native-operation.v2";
 /** Outcomes after which a native transfer can no longer sign, hand off or land. */
 export declare const METAMASK_NATIVE_RESOLVED_STATES: readonly string[];
+/** Every state a native transfer journal may hold. */
+export declare const METAMASK_NATIVE_STATES: readonly ["prepared", "failed_before_effect", "effect_started", "acknowledged", "unknown", "confirmed", "abandoned_unknown"];
 declare const STATES: readonly ["prepared", "failed_before_effect", "effect_started", "acknowledged", "unknown", "confirmed", "abandoned_unknown"];
 /**
  * The immutable owner context of one native transfer. Version 2 names no APN home path, so moving or renaming the home
@@ -51,11 +53,20 @@ export interface MetaMaskNativeOperation {
     readonly recordHash: string;
 }
 export declare const METAMASK_NATIVE_OPERATION_SCHEMA = "apn.metamask-native-operation.v2";
+/**
+ * A transfer whose foreground command ended before its effect marker (still `prepared`: nothing was handed off or signed)
+ * and whose consent deadline has passed (plus the unstarted margin) can never start: the hand-off needs that consent.
+ */
+export declare function metaMaskNativeExpiredBeforeEffect(op: Pick<MetaMaskNativeOperation, "state" | "effectAttempts" | "context">, now?: number): boolean;
+/** The family's own terminal rule: a resolved outcome, or a transfer that can never start (closed at its next read). */
+export declare function metaMaskNativeResolved(op: Pick<MetaMaskNativeOperation, "state" | "effectAttempts" | "context">, now?: number): boolean;
 export declare class MetaMaskNativeJournal extends SecureStateStore {
     read(id: string): Promise<MetaMaskNativeOperation | null>;
     private all;
     /** Any other unresolved native transfer of this account and chain, signed or not, holds a new one back. */
     assertAccountAvailable(chainId: number, account: string, exceptId: string): Promise<void>;
+    /** Every native transfer of this account and chain. */
+    forAccount(chainId: number, account: string): Promise<readonly MetaMaskNativeOperation[]>;
     matchingHold(reservation: AssetUsageReservation): Promise<MetaMaskNativeOperation | null>;
     persist(body: Omit<MetaMaskNativeOperation, "recordHash">): Promise<MetaMaskNativeOperation>;
 }
