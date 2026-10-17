@@ -12,7 +12,7 @@ import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { canonicalJson, domainHash, hashObject } from "../../src/canonical.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
 import { EncryptedSmartAccountPermissionStore } from "../../src/encrypted-smart-account-permission-store.js";
-import { assertExclusiveRelayExecutionOwner, assertExclusiveUniswapTokenSigner } from "../../src/evm-address-ownership.js";
+import { assertExclusiveEvmOwnerIncludingGrants, assertExclusiveUniswapTokenSigner, evmAddressLock } from "../../src/evm-address-ownership.js";
 import { METAMASK_SMART_ACCOUNT_PROVIDER_ID, SMART_ACCOUNT_PERMISSION_RECORD_VERSION, type GrantedSmartAccountPermissionRecord } from "../../src/metamask-smart-account-record.js";
 import { smartAccountEnvironment, validateSmartAccountObservation } from "../../src/metamask-smart-account-grant.js";
 import { BASE_USDC } from "../../src/constants.js";
@@ -39,6 +39,12 @@ import { sealWallet, StateStore } from "../../src/state.js";
 import { activateDirectPolicy, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
+/** The Relay execution owner check as production runs it: under the EVM owner lock (the test-only wrapper is gone). */
+async function assertExclusiveRelayExecutionOwner(state: StateStore, permissions: Pick<EncryptedSmartAccountPermissionStore, "listAll">,
+  address: string, ownProfileHash: string): Promise<void> {
+  await state.withLocks([evmAddressLock(address)], async () => await assertExclusiveEvmOwnerIncludingGrants(state, permissions, address, ownProfileHash));
+}
+
 
 const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1";
 const NOW = new Date("2026-09-22T00:00:00.000Z");

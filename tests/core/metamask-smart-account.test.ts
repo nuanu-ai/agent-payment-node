@@ -34,7 +34,7 @@ import { ApnCore } from "../../src/core.js";
 import { runCli } from "../../src/cli.js";
 import { BASE_USDC } from "../../src/constants.js";
 import { EncryptedSmartAccountPermissionStore } from "../../src/encrypted-smart-account-permission-store.js";
-import { assertExclusiveRelayExecutionOwner } from "../../src/evm-address-ownership.js";
+import { assertExclusiveEvmOwnerIncludingGrants, evmAddressLock } from "../../src/evm-address-ownership.js";
 import { EncryptedSmartAccountDirectEffectStore } from "../../src/encrypted-smart-account-direct-effect-store.js";
 import { EncryptedSmartAccountX402MaterialStore } from "../../src/encrypted-smart-account-x402-material-store.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -105,6 +105,12 @@ import {
   canonicalPaymentRequiredHeader,
   canonicalPaymentResponseHeader,
 } from "./x402-vectors.js";
+/** The Relay execution owner check as production runs it: under the EVM owner lock (the test-only wrapper is gone). */
+async function assertExclusiveRelayExecutionOwner(state: StateStore, permissions: Pick<EncryptedSmartAccountPermissionStore, "listAll">,
+  address: string, ownProfileHash: string): Promise<void> {
+  await state.withLocks([evmAddressLock(address)], async () => await assertExclusiveEvmOwnerIncludingGrants(state, permissions, address, ownProfileHash));
+}
+
 
 // All Smart Account fixtures in this file are deterministic, no-browser and no-money.
 
