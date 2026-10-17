@@ -5,7 +5,6 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import {
   ALLOWLIST_DATASET_SHA256,
   ALLOWLIST_DATASET_VERSION,
-  assertAllowlistExecutionConfigured,
   compileAllowlistInventory,
   loadAllowlistInventory,
   resolveAllowlistAsset,
@@ -78,16 +77,6 @@ test("unknown chains, symbols, noncanonical addresses and native-token confusion
       const value = error as { code?: string; details?: { reason?: string } };
       return value.code === code && value.details?.reason === reason;
     });
-  }
-});
-
-test("execution evaluation remains fail closed for every frozen rail", () => {
-  for (const rail of ["direct", "gasless", "x402", "bridge", "swap"] as const) {
-    assert.throws(() => assertAllowlistExecutionConfigured({ chain: "eip155:1", kind: "token", identifier: ETHEREUM_USDC, rail }),
-      (error: unknown) => {
-        const value = error as { code?: string; details?: { reason?: string } };
-        return value.code === "APN_ALLOWLIST_NOT_ADMITTED" && value.details?.reason === "rail_not_admitted";
-      });
   }
 });
 

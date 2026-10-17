@@ -7,8 +7,6 @@ import type { Hex } from "./model.js";
  * else is a transaction identity, so a provider cannot smuggle an arbitrary string through a hint.
  */
 export type RailStatusIdentifier = string;
-export type RailStatusFamily = "evm" | "solana";
-
 const EVM_TRANSACTION_HASH = /^0x[0-9a-fA-F]{64}$/u;
 const SOLANA_SIGNATURE_TEXT = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/u;
 
@@ -30,10 +28,6 @@ export function isSolanaTransactionSignature(value: unknown): value is string {
 }
 
 /** Null marks a value that is neither rail's transaction identity. */
-export function railStatusFamily(value: unknown): RailStatusFamily | null {
-  if (isEvmTransactionHash(value)) return "evm";
-  return isSolanaTransactionSignature(value) ? "solana" : null;
-}
 
 /**
  * Returns the identifier in its own rail's canonical form: an EVM hash lowercased exactly as the

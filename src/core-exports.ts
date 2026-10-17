@@ -13,7 +13,6 @@ export {
   ALLOWLIST_DATASET_SHA256,
   ALLOWLIST_DATASET_VERSION,
   ALLOWLIST_INVENTORY_SCHEMA,
-  assertAllowlistExecutionConfigured,
   compileAllowlistInventory,
   loadAllowlistInventory,
   resolveAllowlistAsset,

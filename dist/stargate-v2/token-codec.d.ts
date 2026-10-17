@@ -3,8 +3,6 @@ import type { Address } from "../model.js";
 import type { StargateTokenPacketBinding } from "./token-model.js";
 export declare const STARGATE_TOKEN_SOURCE_CHAIN: 10;
 export declare const STARGATE_TOKEN_DESTINATION_CHAIN: 137;
-export declare const STARGATE_TOKEN_SOURCE_EID: 30111;
-export declare const STARGATE_TOKEN_DESTINATION_EID: 30109;
 export declare const STARGATE_TOKEN_SOURCE_TOKEN: `0x${string}`;
 export declare const STARGATE_TOKEN_DESTINATION_TOKEN: `0x${string}`;
 export declare const STARGATE_TOKEN_SOURCE_POOL: `0x${string}`;

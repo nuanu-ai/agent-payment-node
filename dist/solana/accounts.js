@@ -34,7 +34,6 @@ export function requireNativeAccount(account) {
         protocolFailure();
     return account.lamports;
 }
-export function requireUsdcMint(account) { requireTokenMint(account, 6); }
 /** A pinned mint must be an initialized classic SPL mint with exactly the pinned decimals. */
 export function requireTokenMint(account, decimals) {
     if (account === null || account.owner !== TOKEN_PROGRAM_ADDRESS || account.executable || account.data.length !== 82)
@@ -47,9 +46,6 @@ export function requireTokenMint(account, decimals) {
     catch {
         protocolFailure();
     }
-}
-export function usdcAmount(account, owner) {
-    return tokenAccountAmount(account, owner, SOLANA_USDC);
 }
 /** An absent associated token account holds zero; a present one must be an initialized classic SPL account of this owner and mint. */
 export function tokenAccountAmount(account, owner, mint) {

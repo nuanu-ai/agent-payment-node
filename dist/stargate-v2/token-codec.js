@@ -2,8 +2,6 @@ import { getAddress, zeroAddress } from "viem";
 import { ApnError } from "../errors.js";
 export const STARGATE_TOKEN_SOURCE_CHAIN = 10;
 export const STARGATE_TOKEN_DESTINATION_CHAIN = 137;
-export const STARGATE_TOKEN_SOURCE_EID = 30111;
-export const STARGATE_TOKEN_DESTINATION_EID = 30109;
 export const STARGATE_TOKEN_SOURCE_TOKEN = getAddress("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85");
 export const STARGATE_TOKEN_DESTINATION_TOKEN = getAddress("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359");
 export const STARGATE_TOKEN_SOURCE_POOL = getAddress("0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0");
