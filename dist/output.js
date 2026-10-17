@@ -70,11 +70,14 @@ function nextActions(error) {
         case "APN_REPREPARE_REQUIRED": return ["Prepare a new operation with a new idempotency key; this one can no longer proceed."];
         case "APN_STATE_BUSY": return ["The kernel lock stayed busy through the bounded wait; retry after the active APN process exits. APN keeps stable lock files in place."];
         case "APN_OPERATION_BLOCKED": {
-            // A blocker whose record cannot be read has one exit: the owner releases its claims with TTY consent (the record
-            // and any ledger hold stay as they are). The operation index raises it for every family.
+            // The operation index names the blocker for every family; its status shows what it waits for (and, for a record
+            // of an unreleased Stargate schema, runs the chain-proven closure). A blocker whose record cannot be read has one
+            // more exit: the owner releases its claims with TTY consent (the record and any ledger hold stay as they are).
             const blocker = error.details?.blockingOperationId;
-            return error.details?.blockingReason === "blocking_record_unreadable" && typeof blocker === "string"
-                ? [`apn operation status --operation ${blocker}`, `apn operation abandon --operation ${blocker}`] : [];
+            if (typeof blocker !== "string")
+                return [];
+            return error.details?.blockingReason === "blocking_record_unreadable"
+                ? [`apn operation status --operation ${blocker}`, `apn operation abandon --operation ${blocker}`] : [`apn operation status --operation ${blocker}`];
         }
         default: return [];
     }

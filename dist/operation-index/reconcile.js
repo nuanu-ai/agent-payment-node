@@ -82,16 +82,19 @@ export class OperationIndexReconciler {
             undecided = true;
         }
         const held = adapter.claims(record);
-        const claims = terminal ? [] : normalizeClaims([profileClaim(identity.profileHash),
-            ...(held ?? [unreadableProfileClaim(identity.profileHash), ...adapter.unknownClaims ?? []])]);
+        const profile = held === null || adapter.holdsProfile?.(record) !== false ? [profileClaim(identity.profileHash)] : [];
+        const claims = terminal ? [] : normalizeClaims([...profile, ...(held ?? [unreadableProfileClaim(identity.profileHash), ...adapter.unknownClaims ?? []])]);
         return entryOf({ operationId: name.operationId, family: adapter.family, profileHash: identity.profileHash,
             idempotencyHash: identity.idempotencyHash, requestHash: identity.requestHash, recordPath: name.recordPath, claims,
             state: terminal ? "terminal" : undecided ? "unreadable" : "active", admittedAt: null,
             ...(undecided ? { unreadableReason: "record_invalid" } : {}) });
     }
     /**
-     * An unreadable record keeps the accounts its raw JSON still names canonically. Unknown accounts quarantine every
-     * profile the path or the bytes name, or the whole family when nothing names a profile.
+     * An unreadable record holds exactly the claims its raw JSON still names canonically: its accounts (and a profile only
+     * where the family's own claims name one, as Circle names its destination profile). It can never be advanced, so the
+     * account claims are what keeps another signer off its nonces; it does not take its profile from profile-wide work.
+     * Unknown accounts quarantine every profile the path or the bytes name (holding those profiles), or the whole family
+     * when nothing names a profile.
      */
     async quarantine(adapter, name, reason) {
         const raw = await this.store.rawRecord(name.recordPath);
@@ -99,11 +102,11 @@ export class OperationIndexReconciler {
             return null;
         const salvaged = "value" in raw ? adapter.salvage(raw.value) : null;
         const profiles = name.profileHash !== null ? [name.profileHash] : salvaged?.profileHashes ?? [];
-        const accounts = salvaged?.claims ?? [...profiles.length > 0 ? profiles.map(unreadableProfileClaim) : [unreadableFamilyClaim(adapter.family)],
-            ...adapter.unknownClaims ?? []];
+        const claims = salvaged?.claims ?? [...profiles.map(profileClaim),
+            ...profiles.length > 0 ? profiles.map(unreadableProfileClaim) : [unreadableFamilyClaim(adapter.family)], ...adapter.unknownClaims ?? []];
         return entryOf({ operationId: name.operationId, family: adapter.family, profileHash: profiles[0] ?? null,
             idempotencyHash: salvaged?.idempotencyHash ?? null, requestHash: null, recordPath: name.recordPath,
-            claims: normalizeClaims([...profiles.map(profileClaim), ...accounts]), state: "unreadable", admittedAt: null,
+            claims: normalizeClaims(claims), state: "unreadable", admittedAt: null,
             unreadableReason: "value" in raw ? reason : raw.unreadable });
     }
     /** Pointer first, then the open copy, then the entry: presence in `entries/` means fully indexed. */

@@ -12,6 +12,7 @@ import { StargateJsonRpc, confirmedStargateSourceReceipt } from "./native-runtim
 import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJournal, observeStargateV2Token, prepareStargateV2Token, reconcileStargateV2TokenUsage, stargateV2TokenCanonicalReceipt, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MECHANISM, LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_TOKEN } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
 import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW } from "./destination-scan.js";
+import { legacyStargateStatusAfter } from "../legacy/stargate-v2/status.js";
 function stargateUsageState(state) {
     if (state === "released_unsubmitted")
         throw new ApnError("APN_STATE_CORRUPT", "Stargate usage has an incompatible release state.");
@@ -67,15 +68,17 @@ export class StargateTokenService {
     state;
     env;
     now;
+    legacyRpc;
     source;
     destination;
     journal;
     local;
     usage;
-    constructor(state, wrapping, env, now = Date.now) {
+    constructor(state, wrapping, env, now = Date.now, legacyRpc) {
         this.state = state;
         this.env = env;
         this.now = now;
+        this.legacyRpc = legacyRpc;
         this.journal = new FileStargateTokenJournal(state.root, state);
         this.local = new LocalStargateTokenSigner(state, wrapping);
         this.usage = new AssetUsageLedger(state.root);
@@ -92,19 +95,29 @@ export class StargateTokenService {
         const op = await this.required(id);
         assertServiceUsageTarget(op);
         if (["observed", "cleanup_required", "cleaned"].includes(op.phase))
-            return op.usageTarget === undefined ? op : await this.status(id);
+            return op.usageTarget === undefined ? op : await this.reconciled(id);
         if (op.usageTarget === undefined && !["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "allowance_observed", "post_approval_quote_bound", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality", "cleaned"].includes(op.phase))
             throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted or recoverable Stargate token operation can be observed.");
         return await observeStargateV2Token(id, await this.ports(op.profile, op.owner, id), this.journal);
     }
+    /** A record of an unreleased token schema (v1..v4) is read by its frozen reader; its status may close it by a chain proof. */
     async status(id) {
+        try {
+            return await this.reconciled(id);
+        }
+        catch (error) {
+            return await legacyStargateStatusAfter(error, { root: this.state.root, family: "stargate_token", operationId: id, environment: this.env,
+                now: this.now, ...(this.legacyRpc === undefined ? {} : { rpc: this.legacyRpc }) });
+        }
+    }
+    async receipt(id) { return stargateV2TokenCanonicalReceipt(await this.reconciled(id)); }
+    async reconciled(id) {
         const op = await this.required(id);
         assertServiceUsageTarget(op);
         if (op.usageTarget === undefined)
             return op;
         return await reconcileStargateV2TokenUsage(id, { reserveUsage: value => this.reserveUsage(value), followUsage: (value, target) => this.followUsage(value, target) }, this.journal);
     }
-    async receipt(id) { return stargateV2TokenCanonicalReceipt(await this.status(id)); }
     async required(id) { const op = await this.journal.load(id); if (op === null)
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Stargate token operation was not found."); return op; }
     async ports(profile, owner, operationId) {
