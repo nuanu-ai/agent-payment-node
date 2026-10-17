@@ -17,7 +17,9 @@ const golden = await readGolden(), secret = Buffer.from(golden.secret, "base64")
 const encoding = (name: string): BufferEncoding => name === "merchantMaterial" ? "ascii" : "utf8";
 
 /** Deliberate differences from 0.5.45. Each still fails closed with the same error code where 0.5.45 failed. */
-const DIVERGENCES: Readonly<Record<string, Readonly<Record<string, string>>>> = {};
+const DIVERGENCES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  profilePolicy: { "ciphertext-empty": "an empty ciphertext is refused as a field length before decryption, as in every other store" },
+};
 
 test("every custody store has a 0.5.45 golden envelope", () => {
   assert.deepEqual(Object.keys(golden.cases).sort(), Object.keys(CUSTODY_CASES).sort());
@@ -35,6 +37,7 @@ for (const [name, c] of Object.entries(CUSTODY_CASES)) {
     for (const [kind, expected] of Object.entries(g.outcomes)) {
       const actual = outcomes[kind] as Outcome, divergence = DIVERGENCES[name]?.[kind];
       if (divergence === undefined) { assert.deepEqual(actual, expected, `${name} ${kind}`); continue; }
+      assert.notDeepEqual(actual, expected, `${name} ${kind}: a declared divergence that no longer diverges`);
       assert.equal(actual.ok, false, `${name} ${kind}: ${divergence}`);
       if (!actual.ok) assert.equal(actual.code, "APN_STATE_CORRUPT", `${name} ${kind}: ${divergence}`);
     }

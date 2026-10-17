@@ -1,6 +1,5 @@
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
-import { TextDecoder } from "node:util";
-import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../../../canonical.js";
+import { exactKeys, hashObject, isPlainRecord } from "../../../canonical.js";
+import { openNested, sealNested, type EnvelopeSpec } from "../../../custody-envelope.js";
 import { ApnError } from "../../../errors.js";
 import type { WrappingSecretPort } from "../../../macos-keychain.js";
 import type { StateStore } from "../../../state.js";
@@ -16,6 +15,13 @@ interface Header { readonly schemaVersion: typeof ENVELOPE_VERSION; readonly ope
   readonly kdf: { readonly name: "HKDF-SHA-256"; readonly salt: string };
   readonly cipher: { readonly name: "AES-256-GCM"; readonly nonce: string } }
 interface Envelope extends Omit<Header, "cipher"> { readonly cipher: Header["cipher"] & { readonly ciphertext: string; readonly tag: string } }
+const ENVELOPE: EnvelopeSpec<Header> = {
+  info: h => `${ENVELOPE_VERSION}\0${h.profileHash}\0${h.operationId}\0${h.bindingHash}\0${h.submissionMarkerHash}`,
+  aad: h => h,
+  maxFieldBytes: 64 * 1024,
+  fail: failure => corrupt(failure === "authentication" ? "Uniswap execution effect authentication failed."
+    : failure === "canonical_plaintext" ? "Uniswap execution effect plaintext is not canonical." : "Uniswap execution effect encoding is invalid."),
+};
 
 /** Raw signed bytes exist only inside this authenticated encrypted store. */
 export class EncryptedUniswapExecutionEffectStore extends SecureStateStore implements UniswapEffectStorePort {
@@ -69,37 +75,25 @@ export class EncryptedUniswapExecutionEffectStore extends SecureStateStore imple
     const raw = await this.readJson(this.path(operation)); if (raw === null) return null;
     const envelope = parseEnvelope(raw, operation, binding), wrapping = await this.wrappingSecret.load();
     if (wrapping === null) corrupt("Uniswap execution wrapping secret is missing.");
-    const salt = base64(envelope.kdf.salt, 32), nonce = base64(envelope.cipher.nonce, 12),
-      tag = base64(envelope.cipher.tag, 16), ciphertext = base64(envelope.cipher.ciphertext), key = deriveKey(wrapping, salt, envelope);
-    let plaintext = Buffer.alloc(0);
     try {
-      const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      decipher.setAAD(Buffer.from(canonicalJson(headerOf(envelope)), "utf8")); decipher.setAuthTag(tag);
-      plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext), value: unknown = JSON.parse(text);
-      if (canonicalJson(value) !== text) corrupt("Uniswap execution effect plaintext is not canonical.");
-      const effect = await validateEffect(value, operation, binding);
-      if (effect.transactionHash !== envelope.transactionHash) corrupt("Uniswap execution effect transaction binding changed.");
-      return effect;
-    } catch (error) { if (error instanceof ApnError) throw error; return corrupt("Uniswap execution effect authentication failed."); }
-    finally { wrapping.fill(0); salt.fill(0); nonce.fill(0); tag.fill(0); ciphertext.fill(0); key.fill(0); plaintext.fill(0); }
+      return await openNested(wrapping, ENVELOPE, envelope, async value => {
+        const effect = await validateEffect(value, operation, binding);
+        if (effect.transactionHash !== envelope.transactionHash) corrupt("Uniswap execution effect transaction binding changed.");
+        return effect;
+      });
+    } finally { wrapping.fill(0); }
   }
 
   private async writeUnlocked(operation: SwapOperationRecord, binding: UniswapExecutionBinding,
     effect: UniswapExecutionEffect, createOnly: boolean): Promise<void> {
-    const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create(), salt = randomBytes(32), nonce = randomBytes(12);
-    const header: Header = { schemaVersion: ENVELOPE_VERSION, operationId: operation.operationId, profileHash: operation.ownerProfileHash,
-      bindingHash: binding.bindingHash, envelopeHash: binding.envelopeHash, submissionMarkerHash: binding.submissionMarkerHash,
-      transactionHash: effect.transactionHash, kdf: { name: "HKDF-SHA-256", salt: salt.toString("base64") },
-      cipher: { name: "AES-256-GCM", nonce: nonce.toString("base64") } };
-    const key = deriveKey(wrapping, salt, header), plaintext = Buffer.from(canonicalJson(effect), "utf8"); let ciphertext = Buffer.alloc(0);
+    const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
     try {
-      const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
-      cipher.setAAD(Buffer.from(canonicalJson(header), "utf8")); ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const envelope = sealNested(wrapping, ENVELOPE, { schemaVersion: ENVELOPE_VERSION, operationId: operation.operationId,
+        profileHash: operation.ownerProfileHash, bindingHash: binding.bindingHash, envelopeHash: binding.envelopeHash,
+        submissionMarkerHash: binding.submissionMarkerHash, transactionHash: effect.transactionHash }, effect);
       await this.initialize(); await this.ensureDirectory(`uniswap-execution-effects/${operation.ownerProfileHash}`);
-      await this.writeJson(this.path(operation), { ...header, cipher: { ...header.cipher,
-        ciphertext: ciphertext.toString("base64"), tag: cipher.getAuthTag().toString("base64") } }, createOnly);
-    } finally { wrapping.fill(0); salt.fill(0); nonce.fill(0); key.fill(0); plaintext.fill(0); ciphertext.fill(0); }
+      await this.writeJson(this.path(operation), envelope, createOnly);
+    } finally { wrapping.fill(0); }
   }
 
   private path(operation: SwapOperationRecord): string {
@@ -142,12 +136,6 @@ function parseEnvelope(value: unknown, operation: SwapOperationRecord, binding: 
       value.cipher.name !== "AES-256-GCM") corrupt("Uniswap execution effect envelope is invalid.");
   return value as unknown as Envelope;
 }
-function headerOf(e: Envelope): Header { return { ...e, cipher: { name: e.cipher.name, nonce: e.cipher.nonce } }; }
-function deriveKey(wrapping: Buffer, salt: Buffer, h: Header): Buffer { return Buffer.from(hkdfSync("sha256", wrapping, salt,
-  Buffer.from(`${ENVELOPE_VERSION}\0${h.profileHash}\0${h.operationId}\0${h.bindingHash}\0${h.submissionMarkerHash}`), 32)); }
-function base64(value: unknown, length?: number): Buffer { if (typeof value !== "string") corrupt("Uniswap execution effect encoding is invalid.");
-  const bytes = Buffer.from(value, "base64"); if (bytes.length === 0 || bytes.length > 64 * 1024 || bytes.toString("base64") !== value ||
-    (length !== undefined && bytes.length !== length)) { bytes.fill(0); corrupt("Uniswap execution effect encoding is invalid."); } return bytes; }
 function instant(value: Date): string { if (!(value instanceof Date) || !Number.isFinite(value.getTime())) throw new ApnError("APN_INVALID_INPUT", "Uniswap execution time is invalid."); return value.toISOString(); }
 function canonicalInstant(value: unknown): value is string { return typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value; }
 function corrupt(message: string): never { throw new ApnError("APN_STATE_CORRUPT", message); }

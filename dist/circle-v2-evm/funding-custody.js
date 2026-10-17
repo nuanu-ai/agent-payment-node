@@ -4,15 +4,21 @@ import { lstat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { validateCircleFundingOperation as validateCircle } from "./funding-operation.js";
 import { assertCircleFundingEffectGuard, snapshotCircleFundingOperation, snapshotCircleFundingEffect } from "./funding-lifecycle.js";
-import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from "node:crypto";
 import { getAddress, keccak256, parseTransaction, recoverTransactionAddress, serializeTransaction } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
+import { exactKeys, hashObject, isPlainRecord } from "../canonical.js";
+import { openCanonicalJson, sealCanonicalJson } from "../custody-envelope.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { circleBlocked, circleCorrupt, circleSame } from "./operation-model.js";
 const VERSION = "apn.circle-v2-evm-effect-envelope.v2";
+/** The whole header is the AAD. A decryption error propagates unchanged, as it always has. */
+const SEAL = {
+    info: h => `${VERSION}\0${h.operationId}\0${h.role}\0${h.fingerprint}\0${h.envelopeHash}`, aad: h => h, maxFieldBytes: 65536,
+    fail: (failure, _field, cause) => { if (failure === "authentication")
+        throw cause; return circleCorrupt(failure === "canonical_plaintext" ? "material_plaintext" : "material_encoding"); },
+};
 export class CircleFundingEffectStore extends SecureStateStore {
     wrapping;
     constructor(root, wrapping) {
@@ -50,35 +56,19 @@ export class CircleFundingEffectStore extends SecureStateStore {
         const wrapping = await this.wrapping.load();
         if (wrapping === null)
             circleBlocked("wrapping_secret_missing");
-        let salt = Buffer.alloc(0), nonce = Buffer.alloc(0), ciphertext = Buffer.alloc(0), tag = Buffer.alloc(0), key = Buffer.alloc(0), plaintext = Buffer.alloc(0);
         try {
             guard?.();
             await this.sameSnapshot(op, effect, snapshot, value);
-            salt = base64(e.salt, 32);
-            nonce = base64(e.nonce, 12);
-            ciphertext = base64(e.ciphertext);
-            tag = base64(e.tag, 16);
-            key = derive(wrapping, salt, e);
-            const { ciphertext: _cipher, tag: _tag, ...header } = e, decipher = createDecipheriv("aes-256-gcm", key, nonce);
-            decipher.setAAD(Buffer.from(canonicalJson(header)));
-            decipher.setAuthTag(tag);
-            plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-            const text = new TextDecoder("utf-8", { fatal: true }).decode(plaintext), material = JSON.parse(text);
-            if (canonicalJson(material) !== text)
-                circleCorrupt("material_plaintext");
-            await this.sameSnapshot(op, effect, snapshot, value);
-            const verified = await verifyCircleFundingMaterial(op, effect, material);
-            await this.sameSnapshot(op, effect, snapshot, value);
-            return verified;
+            const { ciphertext: _cipher, tag: _tag, ...header } = e;
+            return await openCanonicalJson(wrapping, SEAL, header, e, async (material) => {
+                await this.sameSnapshot(op, effect, snapshot, value);
+                const verified = await verifyCircleFundingMaterial(op, effect, material);
+                await this.sameSnapshot(op, effect, snapshot, value);
+                return verified;
+            });
         }
         finally {
             wrapping.fill(0);
-            salt.fill(0);
-            nonce.fill(0);
-            ciphertext.fill(0);
-            tag.fill(0);
-            key.fill(0);
-            plaintext.fill(0);
         }
     }
     async claim(op, effect, kind, guard) {
@@ -125,27 +115,18 @@ export class CircleFundingEffectStore extends SecureStateStore {
         const wrapping = await this.wrapping.load();
         if (wrapping === null)
             circleBlocked("wrapping_secret_missing");
-        const salt = randomBytes(32), nonce = randomBytes(12), header = { schemaVersion: VERSION, operationId: op.operationId, role: effect.role,
-            fingerprint: op.fingerprint, envelopeHash: effect.envelope.envelopeHash, salt: salt.toString("base64"), nonce: nonce.toString("base64") }, key = derive(wrapping, salt, header), plaintext = Buffer.from(canonicalJson(material));
-        let ciphertext = Buffer.alloc(0);
         try {
             guard?.();
-            const cipher = createCipheriv("aes-256-gcm", key, nonce);
-            cipher.setAAD(Buffer.from(canonicalJson(header)));
-            ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+            const sealed = sealCanonicalJson(wrapping, SEAL, (salt, nonce) => ({ schemaVersion: VERSION, operationId: op.operationId,
+                role: effect.role, fingerprint: op.fingerprint, envelopeHash: effect.envelope.envelopeHash, salt, nonce }), material);
             await this.initialize();
             await this.ensureDirectory("circle-v2-evm-funding-effects");
             guard?.();
-            await this.writeJson(this.path(op, effect.role), { ...header, ciphertext: ciphertext.toString("base64"), tag: cipher.getAuthTag().toString("base64") }, true);
+            await this.writeJson(this.path(op, effect.role), { ...sealed.header, ciphertext: sealed.ciphertext, tag: sealed.tag }, true);
             return material;
         }
         finally {
             wrapping.fill(0);
-            salt.fill(0);
-            nonce.fill(0);
-            key.fill(0);
-            plaintext.fill(0);
-            ciphertext.fill(0);
         }
     }
 }
@@ -228,8 +209,4 @@ export async function verifyCircleFundingMaterial(op, effect, input) {
         circleCorrupt("signed_transaction");
     return material;
 }
-function derive(wrapping, salt, h) { return Buffer.from(hkdfSync("sha256", wrapping, salt, Buffer.from(`${VERSION}\0${h.operationId}\0${h.role}\0${h.fingerprint}\0${h.envelopeHash}`), 32)); }
-function base64(input, length) { if (typeof input !== "string")
-    circleCorrupt("material_encoding"); const b = Buffer.from(input, "base64"); if (b.length === 0 || b.length > 65536 || b.toString("base64") !== input || length !== undefined && b.length !== length)
-    circleCorrupt("material_encoding"); return b; }
 //# sourceMappingURL=funding-custody.js.map
