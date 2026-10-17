@@ -1,6 +1,16 @@
 import { SOLANA_GENESIS } from "./chain-policy.js";
 import type { StoredMoneyOperation } from "./operation-service.js";
 import { TRON_GENESIS } from "./tron/constants.js";
+import { bridgeDomains } from "./operation-index/adapters/bridge.js";
+import { circleDomains } from "./operation-index/adapters/circle.js";
+import { directDomains } from "./operation-index/adapters/direct.js";
+import { facilitatorGaslessDomains, gaslessDomains, metaMaskGaslessDomains, smartAccountGaslessDomains } from "./operation-index/adapters/gasless.js";
+import { megaGaszipDomains, seiGaszipDomains } from "./operation-index/adapters/gaszip.js";
+import { merchantDomains } from "./operation-index/adapters/merchant.js";
+import { permit2Domains } from "./operation-index/adapters/permit2.js";
+import { railDomains } from "./operation-index/adapters/rail.js";
+import { relayDomains } from "./operation-index/adapters/relay.js";
+import { x402Domains } from "./operation-index/adapters/x402.js";
 
 /** Two money operations conflict only when they can race for one account on one network. */
 export interface MoneyConflictDomain {
@@ -60,41 +70,28 @@ export function sharedConflictDomainKeys(domains: () => readonly MoneyConflictDo
 }
 export { assertUsdtConflictDomainsAvailable } from "./gasless-usdt/account-conflict.js";
 
-/** Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. */
+/**
+ * Null marks a record whose network or account cannot be read; the caller then blocks the whole profile. Each family's
+ * domains live in its operation-index adapter (src/operation-index/adapters), which the guard reads through.
+ */
 export function storedOperationDomains(operation: StoredMoneyOperation): readonly MoneyConflictDomain[] | null {
   try {
-    if (operation.kind === "sei_gaszip") return [evmConflictDomain(8453, operation.record.owner.address),
-      evmConflictDomain(1329, operation.record.owner.address)];
-    if (operation.kind === "circle_route") return [evmConflictDomain(42161, operation.record.sourceCustody.walletAddress),
-      evmConflictDomain(operation.record.destinationChain, operation.record.destinationCustody.walletAddress)];
-    if (operation.kind === "mega_gaszip") return [evmConflictDomain(8453, operation.record.owner.address)];
-    if (operation.kind === "permit2_production") return [evmConflictDomain(43114, operation.record.material.wallet.account)];
-    if (operation.kind === "merchant_x402") return [evmConflictDomain(4326, operation.record.custody.walletAddress)];
-    if (operation.kind === "relay_unsigned") return [evmConflictDomain(operation.record.sourceChainId, operation.record.sourceAccount)];
-    if (operation.kind === "direct_transfer") return [evmConflictDomain(operation.record.chainId, operation.record.walletAddress)];
-    if (operation.kind === "x402_fetch") {
-      // A local EIP-3009 authorization spends by its own random nonce: it shares the account with other purchases only.
-      if (operation.strategy === "local" && operation.record.selectedOffer.resolved.assetTransferMethod === "eip3009") {
-        return [sharedEvmConflictDomain(operation.record.chainId, operation.record.wallet)];
-      }
-      // Provider-atomic x402 is Base-only; its record carries the network as CAIP-2 instead of a chain id.
-      return [operation.strategy === "local" ? evmConflictDomain(operation.record.chainId, operation.record.wallet)
-        : evmConflictDomain(8453, operation.record.provider.payer)];
+    switch (operation.kind) {
+      case "sei_gaszip": return seiGaszipDomains(operation.record);
+      case "mega_gaszip": return megaGaszipDomains(operation.record);
+      case "circle_route": return circleDomains(operation.record);
+      case "permit2_production": return permit2Domains(operation.record);
+      case "merchant_x402": return merchantDomains(operation.record);
+      case "relay_unsigned": return relayDomains(operation.record);
+      case "direct_transfer": return directDomains(operation.record);
+      case "x402_fetch": return x402Domains(operation);
+      case "rail_transfer": return railDomains(operation.record);
+      case "bridge_route": return bridgeDomains(operation.record);
+      case "gasless_transfer": return gaslessDomains(operation.record);
+      case "metamask_gasless_transfer": return metaMaskGaslessDomains(operation.record);
+      case "facilitator_gasless_transfer": return facilitatorGaslessDomains(operation.record);
+      case "smart_account_gasless_transfer": return smartAccountGaslessDomains(operation.record);
     }
-    if (operation.kind === "rail_transfer") return [railConflictDomain(operation.record.account.rail, operation.record.account.address)];
-    if (operation.kind === "bridge_route") {
-      return [bridgeConflictDomain(operation.record.intent.sourceDeployment.chainId, operation.record.intent.owner.address)];
-    }
-    if (operation.kind === "gasless_transfer") {
-      return [evmConflictDomain(operation.record.intent.request.chainId, operation.record.intent.owner.address)];
-    }
-    if (operation.kind === "metamask_gasless_transfer") {
-      return [evmConflictDomain(operation.record.intent.request.chainId, operation.record.intent.binding.address)];
-    }
-    if (operation.kind === "facilitator_gasless_transfer") {
-      return [evmConflictDomain(operation.record.intent.request.chainId, operation.record.intent.owner.address)];
-    }
-    return [evmConflictDomain(operation.record.intent.request.chainId, operation.record.intent.binding.ownerAddress)];
   } catch {
     return null;
   }

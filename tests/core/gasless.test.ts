@@ -1,10 +1,11 @@
 import { approvalCode } from "../../src/approval-code.js";
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { hashObject } from "../../src/canonical.js";
 import { OperationService } from "../../src/operation-service.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 import { gaslessCapabilities } from "../../src/gasless/catalog.js";
 import { GASLESS_CHAINS } from "../../src/gasless/validation.js";
 import { gaslessFixture } from "./gasless-helpers.js";
@@ -111,8 +112,12 @@ test("gasless joins global identity, profile, duplicate lookup and different-inp
   await assert.rejects(service.assertProfileAvailable(operation.profileHash), { code: "APN_OPERATION_BLOCKED" });
   const changed = await s.core.execute({ ...input, request: { ...input.request, grossAtomic: "10000001" } });
   assert.equal(changed.error?.code, "APN_IDEMPOTENCY_CONFLICT");
-  s.state.findOperation = async () => operation as never;
-  await assert.rejects(service.required(id), { code: "APN_STATE_CORRUPT" });
+  // The same operation ID saved in a second store is corrupt state; the next reconcile marks it and lookups refuse.
+  await mkdir(join(temporary.root, "operations", operation.profileHash), { recursive: true, mode: 0o700 });
+  await copyFile(join(temporary.root, "gasless-operations", operation.profileHash, `${id}.json`),
+    join(temporary.root, "operations", operation.profileHash, `${id}.json`));
+  await new OperationIndex(s.state).reconcile();
+  await assert.rejects(service.required(id), { code: "APN_STATE_CORRUPT", message: "Operation ID is duplicated across operation stores." });
 });
 
 test("gasless strict history binding rejects a rehashed amount mutation and repairs only an authentic stale receipt", async (t) => {

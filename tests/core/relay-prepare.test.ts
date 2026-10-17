@@ -324,7 +324,9 @@ test("Relay retirement refuses existing effects and corrupted marker; parallel r
     { code: "APN_OPERATION_BLOCKED" });
   const marker = join(temporary.root, "relay-retirements", first.profileHash, `${first.operationId}.json`);
   await writeFile(marker, JSON.stringify({ ...JSON.parse(await readFile(marker, "utf8")), retiredAt: "2026-09-30T00:00:00.000Z" }));
-  await assert.rejects(new OperationService(state).assertProfileAvailable(first.profileHash), { code: "APN_STATE_CORRUPT" });
+  // A lifecycle that can no longer be decided keeps the operation's claims and names it as unreadable.
+  await assert.rejects(new OperationService(state).assertProfileAvailable(first.profileHash), {
+    code: "APN_OPERATION_BLOCKED", details: { blockingOperationId: first.operationId, blockingReason: "blocking_record_unreadable" } });
   await assert.rejects(retire.retire({ profile: "default", operationId: first.operationId }), { code: "APN_STATE_CORRUPT" });
 });
 
