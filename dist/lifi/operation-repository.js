@@ -42,18 +42,6 @@ export class BridgeOperationRepository extends SecureStateStore {
             bridgeCorrupt();
         return op;
     }
-    async findStoredOperation(operationId) {
-        stateIdentifier(operationId, "bridge operation ID");
-        return await this.findInProfiles("bridge-operations", async (profileHash) => await this.loadStoredOperation(profileHash, operationId), bridgeCorrupt);
-    }
-    async findOperation(operationId) {
-        const stored = await this.findStoredOperation(operationId);
-        if (stored === null)
-            return null;
-        if (isLegacyBridgeOperation(stored))
-            bridgeCorrupt();
-        return stored;
-    }
     async writeOperation(op) {
         validateBridgeOperation(op);
         await this.ready();

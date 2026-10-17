@@ -46,6 +46,7 @@ import type { Permit2PreflightPorts } from "./x402-permit2/preflight.js";
 import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
+import type { FinalizedReader } from "./evm-finalized-proof.js";
 
 export interface RuntimeFactoryOptions {
   readonly merchantTtyOptions?: TtyTransferApprovalOptions;
@@ -134,4 +135,6 @@ export interface RuntimeFactoryOptions {
   readonly smartAccountSessionKeys?: SessionKeyFactoryPort;
   readonly smartAccountX402Material?: X402PaymentMaterialPort;
   readonly operationAbandonApproval?: OperationAbandonApprovalPort;
+  /** Test seam for the finalized-tag reads of R4 proofs; production reads each chain's APN_*_RPC_URL. */
+  readonly finalizedRead?: FinalizedReader;
 }

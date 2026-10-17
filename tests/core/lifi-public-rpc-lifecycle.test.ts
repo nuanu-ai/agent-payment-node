@@ -14,6 +14,7 @@ import { addressWord, makeDestinationReceipt, makeSourceReceipt } from "./lifi-e
 import { LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpers.js";
 import { lifecycleDouble } from "./lifi-lifecycle-double.js";
 import { capturedBytecode } from "./lifi-source-observation-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 const code = await capturedBytecode();
 const APPROVAL_TOPIC = keccak256(Buffer.from("Approval(address,address,uint256)"));
@@ -47,7 +48,7 @@ test("one Base USDC to Arbitrum USDC Across bridge runs its whole lifecycle on k
   decoded = operation.intent.decoded; amount = BigInt(operation.intent.materialization.request.amountAtomic);
   const resume = async () => {
     const result = await f.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, JSON.stringify(result.error));
-    return (await f.core.bridges.records.findOperation(id))!;
+    return (await findStored(f.core.bridges.records, id))!;
   };
   const approved = await f.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(approved.ok, true, JSON.stringify(approved.error));
   step("approve: guards, approval send");
@@ -93,7 +94,7 @@ test("an approval inclusion proved with the legacy Base oracle evidence finishes
   chain.mine(8453);
   // Rewrite the approval's inclusion as 0.5.42 recorded it: same inclusion, with the oracle-proven fee evidence that release
   // wrote for a zero Jovian operator fee (GasPriceOracle getOperatorFee(gasUsed) returned 0 at the inclusion block).
-  let op = (await f.core.bridges.records.findOperation(id))!;
+  let op = (await findStored(f.core.bridges.records, id))!;
   const approval = op.effects[0]!;
   const observed = await rpcFor(8453).observe(approval.transactionHash!, approval.envelope);
   assert.ok(observed); assert.equal(observed.transaction.operatorFeeWei, "0");
@@ -107,7 +108,7 @@ test("an approval inclusion proved with the legacy Base oracle evidence finishes
   const before = op.transitions.length;
   chain.finalize(8453);
   const resumed = await f.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, JSON.stringify(resumed.error));
-  op = (await f.core.bridges.records.findOperation(id))!;
+  op = (await findStored(f.core.bridges.records, id))!;
   assert.equal(op.effects[0]!.phase, "safe_success"); assert.equal(op.effects[0]!.safeProof!.feeEvidence.baseOracle, null);
   assert.equal(op.effects[0]!.safeProof!.actualTotalFeeWei, legacy.transaction.actualTotalFeeWei);
   assert.ok(op.transitions.slice(before).every((entry) => entry.state !== "unknown_finality" || entry.effects[1]!.submissionAttempts === 1),

@@ -20,11 +20,13 @@ export class UniswapTokenObserver {
         if (evmRpcQuantity(primary[0]) !== 1n || evmRpcQuantity(receiptRows[0]) !== 1n)
             throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token observer requires Ethereum chain 1.");
         const rawTx = primary[1], rawReceipt = receiptRows[1];
+        // Null means the node knows neither the transaction nor a receipt (the only case an R4 never-lands check reads on);
+        // a known transaction that is not yet in a safe block is pending.
         if (rawTx === null && rawReceipt === null)
             return null;
         if (rawTx === null || rawReceipt === null) {
             if (rawReceipt === null)
-                return null;
+                return pending(transactionHash);
             blocked("Receipt exists without its transaction.", "uniswap_token_receipt_conflict");
         }
         const tx = evmRpcRecord(rawTx), receipt = evmRpcRecord(rawReceipt), hash = evmRpcHex(transactionHash, 32), attempt = kind === "approval" ? op.approvalAttempt : kind === "swap" ? op.swapAttempt : op.cleanupAttempt;
@@ -45,7 +47,7 @@ export class UniswapTokenObserver {
         if (block.hash !== blockHash)
             blocked("Receipt block is no longer canonical.", "uniswap_token_reorg_conflict");
         if (BigInt(safe.number) < blockNumber)
-            return null;
+            return pending(hash);
         await recheck(rpc, block, safe);
         const status = evmRpcQuantity(receipt.status), gasUsed = evmRpcQuantity(receipt.gasUsed), effectivePrice = evmRpcQuantity(receipt.effectiveGasPrice), cap = kind === "approval" ? op.approvalGas : kind === "swap" ? op.swapGas : op.cleanupGas;
         if (gasUsed > BigInt(cap.gasLimit) || effectivePrice > BigInt(cap.maxFeePerGas))
@@ -73,6 +75,9 @@ export class UniswapTokenObserver {
         return { status: "success", transactionHash: hash, gasDebitWei, allowanceAtomic: allowance.toString(),
             inputDebitAtomic: (inputBefore - inputAfter).toString(), outputCreditAtomic: (outputAfter - outputBefore).toString() };
     }
+}
+function pending(transactionHash) {
+    return { status: "pending", transactionHash: evmRpcHex(transactionHash, 32), gasDebitWei: "0", allowanceAtomic: "0" };
 }
 function allowanceRequest(op, tag) {
     const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account, op.route.router] });

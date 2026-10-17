@@ -20,6 +20,7 @@ import { SOLANA_CHAIN, TRON_CHAIN, activateDirectPolicy, directAdmission, direct
 import { temporaryState } from "./helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 import { TRON_RECIPIENT, tronFixture } from "./tron-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 const refusal = (result: OutputEnvelope, reason: string) => {
   assert.equal(result.error?.code, "APN_ALLOWLIST_REFUSED", JSON.stringify(result.error)); assert.equal(result.error?.details?.reason, reason);
@@ -31,7 +32,7 @@ function observeSigning(root: string, s: Fixture): () => { state: string; lease:
   let observed: { state: string; lease: DirectAssetUsageLease | undefined; ledger: string | undefined } | undefined;
   const adapter = s.adapter as unknown as DirectRailPort, sign = adapter.sign.bind(adapter);
   const observe = async (binding: Parameters<DirectRailPort["sign"]>[0]) => {
-    const journal = (await s.core.rails.records.findOperation(binding.operationId))!, lease = journal.allowlistLease;
+    const journal = (await findStored(s.core.rails.records, binding.operationId))!, lease = journal.allowlistLease;
     observed = { state: journal.state, lease, ledger: lease === undefined ? undefined
       : (await new AssetUsageLedger(root).load(lease.reservation, lease.reservation.reservationId))?.state };
   };
@@ -98,12 +99,12 @@ test("TRX owner caps refuse per operation and per day against the shared ledger;
   await seedUsage(temporary.root, s, TRON_CHAIN, "2000000", s.now);
   refusal(await prepare("1.5", "tron-cap-daily-0001"), "allowlist_daily_cap_exceeded");
   const prepared = await prepare("1", "tron-cap-daily-0002"); assert.equal(prepared.ok, true, prepared.error?.message);
-  const id = (prepared.operation as { operation_id: string }).operation_id; s.rpc.prepared = (await s.core.rails.records.findOperation(id))!.prepared;
+  const id = (prepared.operation as { operation_id: string }).operation_id; s.rpc.prepared = (await findStored(s.core.rails.records, id))!.prepared;
   const approved = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(approved.ok, true, approved.error?.message);
   assert.equal((approved.operation as { state: string }).state, "completed");
   const atSigning = observed()!; assert.equal(atSigning.state, "signing_started"); assert.equal(atSigning.ledger, "reserved");
   assert.equal(atSigning.lease?.reservation.amountAtomic, "1000000");
-  const record = (await s.core.rails.records.findOperation(id))!;
+  const record = (await findStored(s.core.rails.records, id))!;
   assert.deepEqual(s.approval.allowlistBindings, [record.allowlist]);
   const lease = record.allowlistLease!;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
@@ -123,7 +124,7 @@ test("the TRX chain policy's admitted principal caps are enforced beside the all
   assert.equal(over.error?.code, "APN_OPERATION_BLOCKED"); assert.equal(over.error?.details?.reason, "chain_policy_per_transfer_cap_exceeded");
   assert.equal(s.rpc.calls.length, calls, "refused before any RPC read");
   const first = await prepare("1", "tron-chain-cap-0002"); assert.equal(first.ok, true, first.error?.message);
-  const id = (first.operation as { operation_id: string }).operation_id; s.rpc.prepared = (await s.core.rails.records.findOperation(id))!.prepared;
+  const id = (first.operation as { operation_id: string }).operation_id; s.rpc.prepared = (await findStored(s.core.rails.records, id))!.prepared;
   const approved = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(approved.ok, true, approved.error?.message);
   assert.equal((approved.operation as { state: string }).state, "completed");
   const daily = await prepare("1", "tron-chain-cap-0003");
@@ -137,7 +138,7 @@ test("a TRON effect refused after signing but before its first send releases the
   adapter.sign = async (binding) => { const effect = await sign(binding); await revokeDirectPolicy(temporary.root, s.account.profile, new Date(s.now)); return effect; };
   const id = await s.prepare("trx", "tron-release-0001");
   const approved = await s.core.execute({ command: "transfer.approve", operationId: id });
-  const ended = (await s.core.rails.records.findOperation(id))!;
+  const ended = (await findStored(s.core.rails.records, id))!;
   assert.equal((approved.operation as { state: string }).state, "failed_before_effect"); assert.equal(ended.reason, "never_submitted_frozen_effect_no_longer_valid");
   assert.equal(s.rpc.submissions.length, 0);
   assert.equal((await new AssetUsageLedger(temporary.root).load(ended.allowlistLease!.reservation, ended.allowlistLease!.reservation.reservationId))?.state, "failed_before_effect");
@@ -145,10 +146,10 @@ test("a TRON effect refused after signing but before its first send releases the
 
   const other = await temporaryState(); t.after(other.cleanup);
   const replay = await tronFixture(other.root); const replayId = await replay.prepare("trx", "tron-replay-0001");
-  const record = (await replay.core.rails.records.findOperation(replayId))!;
+  const record = (await findStored(replay.core.rails.records, replayId))!;
   const orphan = await reserveRailLease(other.root, replay.now, record);
   const result = await replay.core.execute({ command: "transfer.approve", operationId: replayId }); assert.equal(result.ok, true, result.error?.message);
-  assert.equal((await replay.core.rails.records.findOperation(replayId))!.allowlistLease?.reservation.reservationId, orphan.reservation.reservationId);
+  assert.equal((await findStored(replay.core.rails.records, replayId))!.allowlistLease?.reservation.reservationId, orphan.reservation.reservationId);
   const buckets = await readdir(join(other.root, "asset-usage"));
   assert.equal(buckets.length, 1); assert.equal((await readdir(join(other.root, "asset-usage", buckets[0]!))).length, 1);
   await replay.core.execute({ command: "operation.resume", operationId: replayId });
@@ -159,7 +160,7 @@ test("a TRON effect refused after signing but before its first send releases the
 test("a TRON record written before the gate still validates and reads; approving it is refused before the owner screen or any signature", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await tronFixture(temporary.root); const id = await s.prepare("trx", "tron-legacy-0001");
-  const gated: RailOperationRecord = (await s.core.rails.records.findOperation(id))!;
+  const gated: RailOperationRecord = (await findStored(s.core.rails.records, id))!;
   const legacy = newRailOperation({ schemaVersion: gated.schemaVersion, kind: gated.kind, operationId: gated.operationId, profile: gated.profile,
     profileHash: gated.profileHash, idempotencyHash: gated.idempotencyHash, requestHash: gated.requestHash, account: gated.account,
     prepared: gated.prepared, policyHash: gated.policyHash });
@@ -168,7 +169,7 @@ test("a TRON record written before the gate still validates and reads; approving
   const status = await s.core.execute({ command: "operation.status", operationId: id });
   assert.equal(status.ok, true, status.error?.message); assert.equal("allowlist" in (status.operation as object), false);
   refusal(await s.core.execute({ command: "transfer.approve", operationId: id }), "allowlist_binding_missing");
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "failed_before_effect");
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "failed_before_effect");
   assert.equal(s.approval.calls.length, 0); assert.equal(s.rpc.submissions.length, 0);
 });
 
@@ -184,7 +185,7 @@ test("SOL owner caps refuse per operation and per day; the Solana lease is durab
   const approved = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(approved.ok, true, approved.error?.message);
   assert.equal((approved.operation as { state: string }).state, "completed");
   assert.equal(observed()?.state, "signing_started"); assert.equal(observed()?.ledger, "reserved");
-  const record = (await s.core.rails.records.findOperation(id))!;
+  const record = (await findStored(s.core.rails.records, id))!;
   assert.deepEqual(s.approval.allowlistBindings, [record.allowlist]);
   const lease = record.allowlistLease!;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
@@ -210,11 +211,11 @@ test("Solana USDT uses its pinned mint beside USDC: CLI and MCP bind it, owner c
   refusal(await prepare("3.5", "solana-usdt-0002"), "allowlist_per_transfer_cap_exceeded");
   const prepared = await prepare("1.25", "solana-usdt-0003"); assert.equal(prepared.ok, true, prepared.error?.message);
   const id = (prepared.operation as { operation_id: string }).operation_id;
-  const record = (await s.core.rails.records.findOperation(id))!; s.rpc.prepared = record.prepared;
+  const record = (await findStored(s.core.rails.records, id))!; s.rpc.prepared = record.prepared;
   assert.equal(record.prepared.asset.identifier, SOLANA_USDT); assert.equal(record.prepared.sourceTokenAccount, s.rpc.sourceAta);
   const approved = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(approved.ok, true, approved.error?.message);
   assert.equal((approved.operation as { state: string }).state, "completed");
-  const lease = (await s.core.rails.records.findOperation(id))!.allowlistLease!;
+  const lease = (await findStored(s.core.rails.records, id))!.allowlistLease!;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
   assert.equal(await directUsage(temporary.root, s.account.address, SOLANA_CHAIN, SOLANA_USDT, s.now), "1250000");
 });

@@ -19,6 +19,7 @@ import { canonicalJson, hashObject, sha256 } from "../../src/canonical.js";
 import { BridgeQuoteRepository } from "../../src/lifi/quote-repository.js";
 import { BridgeRpc } from "../../src/lifi/rpc.js";
 import type { EvmRpcCall } from "../../src/evm-ports.js";
+import { findStored } from "./stored-operations.js";
 
 function capturedRpc(capture: any, mutate?: (method: string, params: readonly unknown[], result: unknown) => unknown): EvmRpcCall {
   const values = new Map(capture.requests.map((row: any) => [canonicalJson([row.request.method, row.request.params]), row.response.result]));
@@ -82,7 +83,7 @@ test("Linea native Across executes one exact EIP-1559 source effect and complete
 
   const completed = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(completed.ok, true, completed.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!;
+  const record = (await findStored(s.core.bridges.records, id))!;
   assert.equal(record.state, "completed", JSON.stringify({ failure: record.failure, provider: record.providerObservation }));
   assert.equal(record.destinationProof?.chainId, 59144);
   assert.equal(record.destinationProof?.token, BRIDGE_ZERO_ADDRESS);
@@ -233,7 +234,7 @@ test("Linea shared usage reservation is atomic, survives unknown outcome, and bl
   u.source.sendTimeout = true; u.source.failObserve = true;
   const prepared = await u.prepare("across", "linea-unknown-001");
   const sent = await u.core.execute({ command: "bridge.approve", operationId: prepared.id });
-  assert.equal(sent.ok, true); const record = (await u.core.bridges.records.findOperation(prepared.id))!;
+  assert.equal(sent.ok, true); const record = (await findStored(u.core.bridges.records, prepared.id))!;
   assert.equal(record.state, "unknown_finality");
   const lease = await new AssetUsageLedger(unknownRoot.root).load({ account: record.intent.owner.address,
     chain: record.intent.allowlist!.chain, asset: record.intent.allowlist!.asset }, record.usageLease!.reservationId);
@@ -262,7 +263,7 @@ test("Linea reconciles an exact reservation after a crash before the operation s
     const reserved = await new BridgeAllowlistGate({ state: s.state, clock: { now: () => new Date(s.now) } })
       .reserve(prepared.operation);
     assert.equal(reserved.reservationId, reservationId);
-    const unchanged = (await s.core.bridges.records.findOperation(prepared.id))!;
+    const unchanged = (await findStored(s.core.bridges.records, prepared.id))!;
     assert.equal(unchanged.state, "awaiting_approval"); assert.equal(unchanged.usageLease, null);
     const ledger = new AssetUsageLedger(temporary.root), orphan = await ledger.load(identity, reservationId);
     assert.equal(orphan?.state, "reserved");
@@ -281,7 +282,7 @@ test("Linea reconciles an exact reservation after a crash before the operation s
     });
     const retried = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
     assert.equal(retried.ok, true, retried.error?.message);
-    const record = (await s.core.bridges.records.findOperation(prepared.id))!;
+    const record = (await findStored(s.core.bridges.records, prepared.id))!;
     const recovered = await ledger.load(identity, reservationId);
     if (outcome === "completed") {
       assert.equal(record.state, "completed"); assert.equal(record.usageLease?.reservationId, reservationId);
@@ -320,7 +321,7 @@ test("Linea caught reservation-save failure releases the exact hold before any p
   const refused = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
   assert.equal(refused.ok, true); assert.equal(injected, true);
   repository.persist = persist;
-  const record = (await repository.findOperation(prepared.id))!;
+  const record = (await findStored(repository, prepared.id))!;
   assert.equal(record.state, "failed_before_effect"); assert.equal(record.terminal, true);
   assert.equal(record.failure?.reason, "unsent_guard_unavailable"); assert.equal(record.usageLease, null);
   const ledger = new AssetUsageLedger(temporary.root), held = await ledger.load(identity, reservationId);
@@ -331,7 +332,7 @@ test("Linea caught reservation-save failure releases the exact hold before any p
   assert.equal(record.effects.every(effect => effect.phase === "unsealed" && effect.submissionAttempts === 0 && effect.transactionHash === null), true);
   const retried = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
   assert.equal(retried.ok, true);
-  assert.deepEqual(await repository.findOperation(prepared.id), record);
+  assert.deepEqual(await findStored(repository, prepared.id), record);
   assert.deepEqual(await ledger.load(identity, reservationId), held);
   const fresh = await s.prepare("across", "linea-caught-save-fresh-001");
   assert.notEqual(fresh.id, prepared.id); assert.equal(fresh.operation.state, "awaiting_approval");
@@ -348,7 +349,7 @@ test("Linea execution refuses active policy drift before signing or sending", as
     dailyLimitAtomic: "400000000000000", mechanism: LIFI_ACROSS_BRIDGE_MECHANISM,
   }] });
   const result = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
-  assert.equal(result.ok, true); const record = (await s.core.bridges.records.findOperation(prepared.id))!;
+  assert.equal(result.ok, true); const record = (await findStored(s.core.bridges.records, prepared.id))!;
   assert.equal(record.state, "failed_before_effect"); assert.equal(record.failure?.reason, "unsent_apn_allowlist_refused");
   assert.equal(s.source.submissions.length, 0); assert.equal(record.usageLease, null);
 });
@@ -378,7 +379,7 @@ test("Linea native completion refuses missing or misbound trace delivery and cor
     const { id } = await s.prepare("across", `lifi-linea-proof-${mutation}`);
     const result = await s.core.execute({ command: "bridge.approve", operationId: id });
     assert.equal(result.ok, true, result.error?.message);
-    const record = (await s.core.bridges.records.findOperation(id))!;
+    const record = (await findStored(s.core.bridges.records, id))!;
     assert.equal(record.state, "unknown_finality", mutation);
     assert.equal(record.destinationProof, null); assert.equal(s.source.submissions.length, 1);
     await s.core.execute({ command: "operation.resume", operationId: id });

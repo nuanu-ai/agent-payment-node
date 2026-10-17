@@ -12,6 +12,7 @@ import { temporaryState } from "./helpers.js";
 import { ETH_WBTC, ARB_WBTC, wbtcBudgetSpy } from "./lifi-wbtc-budget-helpers.js";
 
 import { preparedWbtc } from "./lifi-wbtc-authority-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 for (const reverse of [false, true]) for (const exhausted of [false, true]) test(`WBTC Across ${reverse ? "Arbitrum to Ethereum" : "Ethereum to Arbitrum"} ${exhausted ? "exhausted cap refuses before transport" : "continuation reads only primary batches"} inside its derived budget`, async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup);
@@ -68,7 +69,7 @@ test("WBTC continuation keeps the original approval and submits the bridge once 
   const { op, f } = await preparedWbtc(temp.root, new Date("2026-10-09T03:44:00.000Z"));
   f.source.failObserve = true;
   const first = await f.core.execute({ command: "bridge.approve", operationId: op.operationId }); assert(first.ok);
-  const pending = (await f.core.bridges.records.findOperation(op.operationId))!;
+  const pending = (await findStored(f.core.bridges.records, op.operationId))!;
   assert.equal(pending.effects[0]!.submissionAttempts, 1); assert.equal(pending.effects[1]!.phase, "unsealed");
   f.source.failObserve = false; f.source.safeApproval = false;
   const observedOnly = await f.core.execute({ command: "operation.resume", operationId: op.operationId }); assert(observedOnly.ok);
@@ -84,12 +85,12 @@ test("WBTC continuation keeps the original approval and submits the bridge once 
   };
   f.rpcSessions.length = 0;
   const depleted = await f.core.execute({ command: "operation.resume", operationId: op.operationId }); assert(depleted.ok);
-  assert.equal((await f.core.bridges.records.findOperation(op.operationId))!.effects[1]!.phase, "unsealed");
+  assert.equal((await findStored(f.core.bridges.records, op.operationId))!.effects[1]!.phase, "unsealed");
   assert.equal(f.source.submissions.length, 1);
   f.rpcSessions.length = 0;
   const resumed = await f.core.execute({ command: "operation.resume", operationId: op.operationId }); assert(resumed.ok);
   assert.equal(f.source.submissions.length, 2); assert.equal(f.approval.calls.length, 3);
-  const sent = (await f.core.bridges.records.findOperation(op.operationId))!;
+  const sent = (await findStored(f.core.bridges.records, op.operationId))!;
   assert.equal(sent.effects[0]!.transactionHash, pending.effects[0]!.transactionHash);
   assert.equal(sent.effects[1]!.submissionAttempts, 1); assert.equal(bridgeSendStepPostBudget(sent), 0);
   f.source.safeApproval = true;

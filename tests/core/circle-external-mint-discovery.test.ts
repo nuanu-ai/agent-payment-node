@@ -33,7 +33,7 @@ function chain(chainId: CircleDestinationChain, head: bigint, time: (n: bigint) 
     return { jsonrpc: "2.0", id: r.id, result };
   };
   const transport = { request: async (_url: string, _method: string, body: string | null) => { const x = JSON.parse(body!); return { status: 200, body: JSON.stringify(Array.isArray(x) ? x.map(answer) : answer(x)) }; } };
-  return { rpc: new CircleRpc("https://destination.example", chainId, transport as never, CIRCLE_DISCOVERY_REQUEST_BUDGET, "lean"), methods, windows };
+  return { rpc: new CircleRpc("https://destination.example", chainId, transport as never, CIRCLE_DISCOVERY_REQUEST_BUDGET), methods, windows };
 }
 
 test("the discovery budget is derived from its read plan with one retry per read", () => {
@@ -97,7 +97,7 @@ for (const name of ["linea-op-a", "monad-op-b"] as const) test(`recorded public 
     assert.equal(canonicalJson({ method: r.method, params: r.params }), canonicalJson({ method: e.method, params: e.params })); return { jsonrpc: "2.0", id: r.id, result: e.result };
   };
   const transport = { request: async (_url: string, _method: string, body: string | null) => { const x = JSON.parse(body!); return { status: 200, body: JSON.stringify(Array.isArray(x) ? x.map(answer) : answer(x)) }; } };
-  const rpc = new CircleRpc(circleRoute(t.chainId).rpcDefault, t.chainId, transport as never, CIRCLE_DISCOVERY_REQUEST_BUDGET, "lean");
+  const rpc = new CircleRpc(circleRoute(t.chainId).rpcDefault, t.chainId, transport as never, CIRCLE_DISCOVERY_REQUEST_BUDGET);
   const scan = await discoverCircleExternalMint(rpc, t.nonce, BigInt(t.burnTimestamp));
   assert.equal(scan.transactionHash, t.transactionHash); assert.equal(index, t.exchanges.length); assert.equal(rpc.requestCount, t.exchanges.length);
   assert.ok(t.exchanges.every(e => ["eth_chainId", "eth_getBlockByNumber", "eth_getLogs"].includes(e.method)));

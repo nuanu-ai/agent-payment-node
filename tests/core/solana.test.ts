@@ -22,6 +22,7 @@ import { freezeRelayUnsignedOperation } from "../../src/relay-unsigned-operation
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 import { ApnError } from "../../src/errors.js";
+import { findStored } from "./stored-operations.js";
 
 async function writeDurableSolanaClaim(root: string, s: Awaited<ReturnType<typeof solanaFixture>>,
   input: { readonly profile: string; readonly amount: string; readonly maximumFee: string; readonly idempotencyKey: string },
@@ -92,15 +93,15 @@ test("local Solana public identity and unsigned prepare recover across restart w
   assert.deepEqual(resumed.operation, prepared.operation);
   assert.equal(restarted.approval.calls.length, 0);
   assert.equal(first.rpc.submissions.length, 0);
-  assert.equal(await restarted.storage.effect(restarted.account, id, (await restarted.core.rails.records.findOperation(id))!.fingerprint), null);
+  assert.equal(await restarted.storage.effect(restarted.account, id, (await findStored(restarted.core.rails.records, id))!.fingerprint), null);
 
   restarted.approval.refuse = true;
   const refused = await restarted.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(refused.ok, false);
-  assert.equal((await restarted.core.rails.records.findOperation(id))!.state, "failed_before_effect");
+  assert.equal((await findStored(restarted.core.rails.records, id))!.state, "failed_before_effect");
   assert.equal(first.rpc.submissions.length, 0);
   assert.equal(first.rpc.simulateCalls, 0);
-  assert.equal(await restarted.storage.effect(restarted.account, id, (await restarted.core.rails.records.findOperation(id))!.fingerprint), null);
+  assert.equal(await restarted.storage.effect(restarted.account, id, (await findStored(restarted.core.rails.records, id))!.fingerprint), null);
 });
 
 test("parallel local SOL approve uses one prompt, binding, and signing transition", async (t) => {
@@ -122,7 +123,7 @@ test("parallel local SOL approve uses one prompt, binding, and signing transitio
   assert.equal(s.approval.calls.length, 1);
   assert.equal(binds, 1);
   assert.equal(s.rpc.submissions.length, 1);
-  const operation = (await s.core.rails.records.findOperation(id))!;
+  const operation = (await findStored(s.core.rails.records, id))!;
   assert.equal(operation.transitions.filter((entry) => entry.state === "signing_started").length, 1);
   const lease = operation.allowlistLease!;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease.reservation, lease.reservation.reservationId))?.state, "finalized");
@@ -148,7 +149,7 @@ test("resume that read awaiting approval cannot recover a new signing marker wit
   const batch = s.rpc.batch.bind(s.rpc);
   let heldSigner = false;
   Object.assign(s.rpc, { batch: async (...args: Parameters<typeof batch>) => {
-    if (!heldSigner && (await s.core.rails.records.findOperation(id))?.state === "signing_started") {
+    if (!heldSigner && (await findStored(s.core.rails.records, id))?.state === "signing_started") {
       heldSigner = true; signerEntered(); await signerBlocked;
     }
     return await batch(...args);
@@ -167,7 +168,7 @@ test("resume that read awaiting approval cannot recover a new signing marker wit
     const raced = await Promise.race([resuming.then(() => "returned"),
       new Promise<"claim_wait">((resolve) => setTimeout(() => resolve("claim_wait"), 200))]);
     assert.equal(raced, "claim_wait");
-    assert.equal((await s.core.rails.records.findOperation(id))?.state, "signing_started");
+    assert.equal((await findStored(s.core.rails.records, id))?.state, "signing_started");
     assert.equal(s.rpc.submissions.length, 0);
   } finally { releasePrompt(); releaseResume(); releaseSigner(); }
   const [approved, resumed] = await Promise.all([approving, resuming]) as [{ state: string }, { state: string }];
@@ -212,8 +213,8 @@ test("local SOL approval discards policy drift during the owner prompt before si
   release();
   await assert.rejects(approving, { code: "APN_PROFILE_DRIFT" });
   assert.equal(s.rpc.submissions.length, 0);
-  assert.equal((await s.core.rails.records.findOperation(id))?.state, "failed_before_effect");
-  assert.equal(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint), null);
+  assert.equal((await findStored(s.core.rails.records, id))?.state, "failed_before_effect");
+  assert.equal(await s.storage.effect(s.account, id, (await findStored(s.core.rails.records, id))!.fingerprint), null);
 });
 
 test("local SOL approval rejects a send binding after policy changes during RPC", async (t) => {
@@ -235,8 +236,8 @@ test("local SOL approval rejects a send binding after policy changes during RPC"
   release();
   await assert.rejects(approving, { code: "APN_PROFILE_DRIFT" });
   assert.equal(s.rpc.submissions.length, 0);
-  assert.equal((await s.core.rails.records.findOperation(id))?.state, "awaiting_approval");
-  assert.equal(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint), null);
+  assert.equal((await findStored(s.core.rails.records, id))?.state, "awaiting_approval");
+  assert.equal(await s.storage.effect(s.account, id, (await findStored(s.core.rails.records, id))!.fingerprint), null);
   assert.deepEqual(await readdir(join(temporary.root, "rail-approval-claims")), []);
 });
 
@@ -258,17 +259,17 @@ test("local SOL approval discards account drift during the owner prompt before s
   release();
   await assert.rejects(approving, { code: "APN_STATE_CORRUPT" });
   assert.equal(s.rpc.submissions.length, 0);
-  assert.equal((await s.core.rails.records.findOperation(id))?.state, "failed_before_effect");
+  assert.equal((await findStored(s.core.rails.records, id))?.state, "failed_before_effect");
   await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
     await writeFile(accountPath, `${canonicalJson(s.account)}\n`, { mode: 0o600 });
   });
-  assert.equal(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint), null);
+  assert.equal(await s.storage.effect(s.account, id, (await findStored(s.core.rails.records, id))!.fingerprint), null);
 });
 
 test("local SOL approval retry reuses a matching durable claim after restart", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare("sol", "solana-approval-crash-0001");
-  const operation = (await s.core.rails.records.findOperation(id))!;
+  const operation = (await findStored(s.core.rails.records, id))!;
   const directory = await writeDurableApprovalClaim(temporary.root, operation);
   const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
   const approved = await restarted.core.rails.approve(id) as { state: string };
@@ -286,7 +287,7 @@ test("local SOL signer RPC read releases money locks and policy drift prevents s
   let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
   const batch = s.rpc.batch.bind(s.rpc);
   Object.assign(s.rpc, { batch: async (...args: Parameters<typeof batch>) => {
-    if ((await s.core.rails.records.findOperation(id))?.state === "signing_started") { entered(); await blocked; }
+    if ((await findStored(s.core.rails.records, id))?.state === "signing_started") { entered(); await blocked; }
     return await batch(...args);
   } });
   const approving = s.core.rails.approve(id);
@@ -301,7 +302,7 @@ test("local SOL signer RPC read releases money locks and policy drift prevents s
     ]);
   } finally { release(); }
   await assert.rejects(approving);
-  const current = (await s.core.rails.records.findOperation(id))!;
+  const current = (await findStored(s.core.rails.records, id))!;
   assert.equal(current.state, "failed_before_effect");
   assert.equal(await s.storage.effect(s.account, id, current.fingerprint), null);
   assert.equal(s.rpc.submissions.length, 0);
@@ -319,7 +320,7 @@ test("local SOL first submit releases money locks and a concurrent resume does n
   const approving = s.core.rails.approve(id);
   await started;
   try {
-    assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting");
+    assert.equal((await findStored(s.core.rails.records, id))!.state, "submitting");
     await Promise.race([
       s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => true),
       new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("submit held money-operation locks")), 2000)),
@@ -330,7 +331,7 @@ test("local SOL first submit releases money locks and a concurrent resume does n
     assert.equal(a.state, "completed"); assert.equal(b.state, "completed");
   } finally { release(); }
   assert.equal(s.rpc.submissions.length, 1);
-  const stored = (await s.core.rails.records.findOperation(id))!;
+  const stored = (await findStored(s.core.rails.records, id))!;
   assert.equal(stored.transitions.filter((entry) => entry.state === "submitting").length, 1);
   const lease = stored.allowlistLease!.reservation;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease, lease.reservationId))?.state, "finalized");
@@ -351,7 +352,7 @@ test("local SOL policy drift after sealing is refused before the one send, from 
   } });
   assert.equal((await s.core.rails.approve(id) as { state: string }).state, "failed_before_effect");
   assert.equal(s.rpc.calls.length, readsAtSeal, "a signature sealed seconds ago is not re-read from the chain before its send");
-  assert.ok(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint));
+  assert.ok(await s.storage.effect(s.account, id, (await findStored(s.core.rails.records, id))!.fingerprint));
   assert.equal(s.rpc.submissions.length, 0);
 });
 
@@ -374,7 +375,7 @@ test("local SOL recovered signature stays sealed and resumable when its one reva
     return await batch(...args);
   } });
   await assert.rejects(restarted.core.rails.resume(id), { code: "APN_RPC_RATE_LIMITED" });
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "signed_not_submitted", "a failed read proves nothing about the sealed bytes");
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "signed_not_submitted", "a failed read proves nothing about the sealed bytes");
   assert.equal(s.rpc.submissions.length, 0);
   assert.equal((await restarted.core.rails.resume(id) as { state: string }).state, "completed");
   assert.equal(s.rpc.submissions.length, 1);
@@ -394,8 +395,8 @@ test("local SOL resumes a sealed effect after crash before the signed journal wi
   } });
   await assert.rejects(s.core.rails.approve(id), /synthetic crash/);
   Object.assign(s.core.rails.records, { persist });
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "signing_started");
-  assert.ok(await s.storage.effect(s.account, id, (await s.core.rails.records.findOperation(id))!.fingerprint));
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "signing_started");
+  assert.ok(await s.storage.effect(s.account, id, (await findStored(s.core.rails.records, id))!.fingerprint));
   const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
   assert.equal((await restarted.core.rails.resume(id) as { state: string }).state, "completed");
   assert.equal(seals, 1);
@@ -412,7 +413,7 @@ test("local SOL crash after submitting marker but before transport never retries
     return await persist(record);
   } });
   await assert.rejects(s.core.rails.approve(id), /synthetic crash before outcome journal/);
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting");
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "submitting");
   assert.equal(s.rpc.submissions.length, 0);
   const restarted = await solanaFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
   restarted.rpc.absentHistory = true;
@@ -448,7 +449,7 @@ test("duplicate local SOL prepare shares one claim and leaves money-operation lo
   const [a, b] = await Promise.all([first, second]);
   assert.deepEqual(a, b);
   assert.equal(calls, 1);
-  assert.equal((await s.core.rails.records.findOperation(operationId))?.state, "awaiting_approval");
+  assert.equal((await findStored(s.core.rails.records, operationId))?.state, "awaiting_approval");
   assert.deepEqual(await readdir(join(temporary.root, "rail-prepare-claims")), []);
   assert.equal(s.rpc.submissions.length, 0);
 });
@@ -474,7 +475,7 @@ test("local SOL prepare discards an RPC result after policy drift and cleans the
   });
   release();
   await assert.rejects(first, { code: "APN_PROFILE_DRIFT" });
-  assert.equal(await s.core.rails.records.findOperation(s.core.context.state.operationId(input.profile, input.idempotencyKey)), null);
+  assert.equal(await findStored(s.core.rails.records, s.core.context.state.operationId(input.profile, input.idempotencyKey)), null);
   assert.deepEqual(await readdir(join(temporary.root, "rail-prepare-claims")), []);
   await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => { await s.core.rails.policies.policies.write(policy); });
   assert.equal((await s.core.rails.prepare(input) as { state: string }).state, "awaiting_approval");
@@ -502,7 +503,7 @@ test("local SOL prepare refuses a changed account during RPC without committing 
   });
   release();
   await assert.rejects(first);
-  assert.equal(await s.core.rails.records.findOperation(s.core.context.state.operationId(input.profile, input.idempotencyKey)), null);
+  assert.equal(await findStored(s.core.rails.records, s.core.context.state.operationId(input.profile, input.idempotencyKey)), null);
   assert.deepEqual(await readdir(join(temporary.root, "rail-prepare-claims")), []);
   await s.core.context.state.withLocks([`profile:${s.account.profileHash}`], async () => {
     await writeFile(accountPath, `${canonicalJson(s.account)}\n`, { mode: 0o600 });
@@ -535,7 +536,7 @@ test("same-key replay preserves a different profile's durable Solana claim", asy
     const signer = await createKeyPairSignerFromPrivateKeyBytes(seed);
     return { seed, address: signer.address };
   } });
-  const stored = (await s.core.rails.records.findOperation(s.core.context.state.operationId(input.profile, input.idempotencyKey)))!;
+  const stored = (await findStored(s.core.rails.records, s.core.context.state.operationId(input.profile, input.idempotencyKey)))!;
   const claim = await writeDurableSolanaClaim(temporary.root, s, { ...input, profile: other.profile },
     { account: other, policyHash: stored.policyHash, allowlist: stored.allowlist! });
   assert.deepEqual(await s.core.rails.prepare(input), prepared);
@@ -633,10 +634,10 @@ test("finalized SOL observation reads transaction encodings separately and rejec
   Object.assign(s.rpc, { call: async (...args: Parameters<typeof originalCall>) =>
     args[0] === "getTransaction" && (args[1][1] as { encoding: string }).encoding === "base64" ? null : await originalCall(...args) });
   assert.equal((await s.core.rails.resume(id) as { state: string }).state, "submitted_pending");
-  assert.equal((await s.core.rails.records.findOperation(id))!.evidence, null);
+  assert.equal((await findStored(s.core.rails.records, id))!.evidence, null);
   Object.assign(s.rpc, { call: originalCall });
   assert.equal((await s.core.rails.resume(id) as { state: string }).state, "completed");
-  const record = (await s.core.rails.records.findOperation(id))!;
+  const record = (await findStored(s.core.rails.records, id))!;
   assert.equal(record.evidence?.transactionId, record.transactionId);
   assert.equal(record.evidence?.amountAtomic, "1000");
   assert.equal(record.evidence?.recipient, SOL_RECIPIENT);
@@ -649,7 +650,7 @@ test("local SOL resume releases locks during saved-effect observation and discar
   const id = await s.prepare(); s.rpc.finalized = false;
   const pending = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal((pending.operation as { state: string }).state, "submitted_pending");
-  const frozen = (await s.core.rails.records.findOperation(id))!;
+  const frozen = (await findStored(s.core.rails.records, id))!;
   s.rpc.finalized = true;
   let releaseInspect!: () => void;
   const inspectionBlocked = new Promise<void>((resolve) => { releaseInspect = resolve; });
@@ -670,7 +671,7 @@ test("local SOL resume releases locks during saved-effect observation and discar
   // This writer needs the same profile and operation locks. It can advance while RPC waits.
   await Promise.race([
     s.core.context.state.withLocks([`profile:${frozen.profileHash}`, `operation:${id}`], async () => {
-      const current = (await s.core.rails.records.findOperation(id))!;
+      const current = (await findStored(s.core.rails.records, id))!;
       await s.core.rails.records.persist(transitionRail(current, { state: "unknown_finality", at: s.now.toISOString(),
         reason: "concurrent_observation_update", proofClass: "effect_outcome_unknown" }));
     }),
@@ -680,10 +681,10 @@ test("local SOL resume releases locks during saved-effect observation and discar
   const stale = await resumed as { state: string; reason: string };
   assert.equal(stale.state, "unknown_finality");
   assert.equal(stale.reason, "concurrent_observation_update");
-  assert.equal((await s.core.rails.records.findOperation(id))!.evidence, null);
+  assert.equal((await findStored(s.core.rails.records, id))!.evidence, null);
   const completed = await s.core.rails.resume(id) as { state: string };
   assert.equal(completed.state, "completed");
-  const stored = (await s.core.rails.records.findOperation(id))!;
+  const stored = (await findStored(s.core.rails.records, id))!;
   assert.equal(stored.transitions.filter((entry) => entry.state === "completed").length, 1);
   const lease = stored.allowlistLease!.reservation;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease, lease.reservationId))?.state, "finalized");
@@ -701,11 +702,11 @@ test("local SOL submitting timeout resumes observation without a second send", a
   } });
   await assert.rejects(s.core.rails.approve(id), /synthetic crash/);
   Object.assign(s.core.rails.records, { persist });
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting");
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "submitting");
   assert.equal(s.rpc.submissions.length, 1);
   const resumed = await s.core.rails.resume(id) as { state: string; reason: string };
   assert.equal(resumed.state, "completed");
-  const stored = (await s.core.rails.records.findOperation(id))!;
+  const stored = (await findStored(s.core.rails.records, id))!;
   assert.ok(stored.transitions.some((entry) => entry.state === "unknown_finality" && entry.reason === "interrupted_submission_observation_only"));
   assert.equal(s.rpc.submissions.length, 1);
   const lease = stored.allowlistLease!.reservation;
@@ -733,7 +734,7 @@ test("simultaneous local SOL observations finalize one journal transition and on
   await started; release();
   const results = await Promise.all([first, second]) as { state: string }[];
   assert.deepEqual(results.map((result) => result.state), ["completed", "completed"]);
-  const stored = (await s.core.rails.records.findOperation(id))!;
+  const stored = (await findStored(s.core.rails.records, id))!;
   assert.equal(stored.transitions.filter((entry) => entry.state === "completed").length, 1);
   const lease = stored.allowlistLease!.reservation;
   assert.equal((await new AssetUsageLedger(temporary.root).load(lease, lease.reservationId))?.state, "finalized");
@@ -745,7 +746,7 @@ test("finalized rollback records actual fee and no delivered principal or rent",
   const id = await s.prepare(); s.rpc.failed = true;
   const result = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal(result.ok, true); assert.equal((result.operation as { state: string }).state, "failed_confirmed_revert");
-  const record = (await s.core.rails.records.findOperation(id))!;
+  const record = (await findStored(s.core.rails.records, id))!;
   assert.equal(record.evidence?.senderEffectVerified, false); assert.equal(record.evidence?.actualNetworkFeeAtomic, "5000");
 });
 
@@ -765,7 +766,7 @@ test("provider finality binds signed instruction bytes to the exact prepared amo
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
   const id = await s.prepare();
   await s.core.execute({ command: "transfer.approve", operationId: id });
-  const local = (await s.core.rails.records.findOperation(id))!;
+  const local = (await findStored(s.core.rails.records, id))!;
   const { identityHash: _hash, ...accountBody } = s.account;
   const account = sealChainAccount({ ...accountBody, provider: "coinbase-awal", custody: "provider_managed" });
   const prepared = { ...local.prepared, unsignedPayload: null, economics: { ...local.prepared.economics, feeControl: "provider_guarantee" as const } };
@@ -833,6 +834,6 @@ test("Solana abandon leaves money locks available during RPC and rejects policy 
   release();
   const result = await abandon;
   assert.equal(result.error?.code, "APN_PROFILE_DRIFT");
-  assert.equal((await s.core.rails.records.findOperation(id))?.state, "unknown_finality");
+  assert.equal((await findStored(s.core.rails.records, id))?.state, "unknown_finality");
   assert.equal(s.rpc.submissions.length, 1);
 });

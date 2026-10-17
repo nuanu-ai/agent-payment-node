@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { TronMethod } from "../../src/tron/rpc.js";
 import type { TronTransaction } from "../../src/tron/transaction.js";
 import { tronFixture } from "./tron-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 const [mode, root, operationId] = process.argv.slice(2);
 assert.ok(root);
@@ -39,7 +40,7 @@ async function resumedProcess(): Promise<void> {
     });
   });
   const fixture = await tronFixture(root!, { admit: false });
-  const record = await fixture.core.rails.records.findOperation(operationId!);
+  const record = await findStored(fixture.core.rails.records, operationId!);
   assert.ok(record);
   fixture.rpc.prepared = record.prepared;
   fixture.rpc.submissions.push(transaction);

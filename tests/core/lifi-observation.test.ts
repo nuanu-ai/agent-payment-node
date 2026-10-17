@@ -6,6 +6,7 @@ import { LIFI_DESTINATION_HASH, lifiFixture } from "./lifi-helpers.js";
 import { ApnError } from "../../src/errors.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { observationRpcFailure } from "../../src/lifi/observation-diagnostics.js";
+import { findStored } from "./stored-operations.js";
 
 test("LI.FI observation diagnostics retain only the sanitized endpoint role", () => {
   const error = new ApnError("APN_RPC_PROTOCOL", "Bridge validation failed: bridge_RPC_HTTP_status.", {
@@ -49,7 +50,7 @@ test("LI.FI Across slow-fill delivery persists an empty repayment credit and res
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   s.destination.destinationFillType = 2; const { id } = await s.prepare("across");
   const completed = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(completed.ok, true, completed.error?.message);
-  const op = (await s.core.bridges.records.findOperation(id))!; assert.equal(op.state, "completed");
+  const op = (await findStored(s.core.bridges.records, id))!; assert.equal(op.state, "completed");
   assert.equal(op.destinationProof!.fillType, 2); assert.equal(op.destinationProof!.relayerCredit, `0x${"00".repeat(32)}`);
   assert.equal(op.destinationProof!.repaymentChainIdAtomic, "0"); assert.equal(s.source.submissions.length, 2);
   const receipt = await s.core.execute({ command: "receipt.get", operationId: id }); assert.equal(receipt.ok, true, receipt.error?.message);
@@ -61,7 +62,7 @@ for (const status of ["not_found", "pending", "completed_observed", "partial_obs
     const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
     s.provider.statusValue = status; s.destination.destinationAvailable = false;
     const { id } = await s.prepare(); const result = await s.core.execute({ command: "bridge.approve", operationId: id });
-    assert.equal(result.ok, true, result.error?.message); const record = (await s.core.bridges.records.findOperation(id))!;
+    assert.equal(result.ok, true, result.error?.message); const record = (await findStored(s.core.bridges.records, id))!;
     assert.equal(record.terminal, false); assert.equal(record.destinationProof, null);
     assert.equal(record.state, ["not_found", "pending", "completed_observed"].includes(status) ? "destination_pending" : "unknown_finality");
     assert.ok(record.effects.every((e) => e.phase === "safe_success")); assert.equal(s.source.submissions.length, 2);
@@ -75,12 +76,12 @@ for (const status of ["not_found", "pending", "completed_observed", "partial_obs
 test("LI.FI destination inclusion without safe finality remains pending and completes by observing the same hash", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.destination.destinationSafe = false;
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  assert.equal((await s.core.bridges.records.findOperation(id))!.destinationProof, null);
-  assert.equal((await s.core.bridges.records.findOperation(id))!.state, "destination_pending");
+  assert.equal((await findStored(s.core.bridges.records, id))!.destinationProof, null);
+  assert.equal((await findStored(s.core.bridges.records, id))!.state, "destination_pending");
   assert.equal(s.destination.calls.includes("logs"), false);
   s.destination.destinationSafe = true;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
-  const record = (await s.core.bridges.records.findOperation(id))!; assert.equal(record.state, "completed");
+  const record = (await findStored(s.core.bridges.records, id))!; assert.equal(record.state, "completed");
   assert.equal(record.destinationProof!.transactionHash, LIFI_DESTINATION_HASH); assert.equal(s.source.submissions.length, 2);
 });
 
@@ -89,7 +90,7 @@ test("LI.FI safe reverted provider destination remains nonterminal and accepts a
   s.destination.destinationStatus = "reverted";
   const { id } = await s.prepare();
   const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, true, first.error?.message);
-  const reverted = (await s.core.bridges.records.findOperation(id))!;
+  const reverted = (await findStored(s.core.bridges.records, id))!;
   assert.equal(reverted.state, "unknown_finality"); assert.equal(reverted.terminal, false); assert.equal(reverted.destinationProof, null);
   assert.ok(reverted.usageLease); assert.equal(reverted.failure?.reason, "destination_observation_unavailable");
   assert.deepEqual(reverted.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
@@ -97,7 +98,7 @@ test("LI.FI safe reverted provider destination remains nonterminal and accepts a
     reason: "destination_transaction_reverted", rpcMethod: "eth_getTransactionReceipt" });
   const statusCalls = s.provider.statusCalls;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
-  const conflicted = (await s.core.bridges.records.findOperation(id))!;
+  const conflicted = (await findStored(s.core.bridges.records, id))!;
   assert.equal(s.provider.statusCalls, statusCalls + 1); assert.equal(conflicted.state, "unknown_finality");
   assert.equal(conflicted.failure?.observationRpc?.reason, "destination_transaction_reverted");
   assert.equal(conflicted.destinationProof, null); assert.equal(conflicted.usageLease?.reservationId, reverted.usageLease?.reservationId);
@@ -105,7 +106,7 @@ test("LI.FI safe reverted provider destination remains nonterminal and accepts a
   const replacement = `0x${"78".repeat(32)}` as const;
   s.provider.hint = replacement; s.destination.destinationHash = replacement; s.destination.destinationStatus = "success";
   const recovered = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(recovered.ok, true, recovered.error?.message);
-  const completed = (await s.core.bridges.records.findOperation(id))!;
+  const completed = (await findStored(s.core.bridges.records, id))!;
   assert.equal(completed.state, "completed"); assert.equal(completed.destinationProof?.transactionHash, replacement);
   assert.equal(s.destination.calls.includes("logs"), false);
 });
@@ -114,7 +115,7 @@ test("LI.FI waits without a provider-named destination transaction and preserves
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.provider.hint = null;
   const { id, operation } = await s.prepare("stargateV2");
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "destination_pending");
+  const current = (await findStored(s.core.bridges.records, id))!; assert.equal(current.state, "destination_pending");
   assert.deepEqual(current.destinationScan, operation.destinationScan);
   assert.equal(s.destination.calls.includes("logs"), false);
 });
@@ -123,10 +124,10 @@ for (const role of ["approval", "bridge"] as const) test(`LI.FI included ${role}
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   s.source.safeApproval = false; s.source.safeBridge = false;
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  const before = (await s.core.bridges.records.findOperation(id))!, hash = before.effects.find((e) => e.role === role)!.transactionHash!;
+  const before = (await findStored(s.core.bridges.records, id))!, hash = before.effects.find((e) => e.role === role)!.transactionHash!;
   s.source.missingHashes.add(hash);
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!;
+  const current = (await findStored(s.core.bridges.records, id))!;
   assert.equal(current.state, "unknown_finality"); assert.equal(current.effects.find((e) => e.role === role)!.includedProof, null);
   assert.equal(current.failure?.reason, "source_observation_unavailable");
   assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
@@ -144,7 +145,7 @@ test("LI.FI source observation errors replace stale projection with a bounded sa
   const { id } = await s.prepare();
   s.source.observe = async () => { throw new ApnError("APN_RPC_AMBIGUOUS", "synthetic unavailable", { transportReason: "timeout" }); };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!;
+  const current = (await findStored(s.core.bridges.records, id))!;
   assert.equal(current.state, "unknown_finality"); assert.equal(current.failure?.reason, "source_observation_unavailable");
   assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
     stage: "source_observation", effectRole: "approval", code: "APN_RPC_AMBIGUOUS" });
@@ -165,7 +166,7 @@ test("LI.FI source receipt protocol failures persist only allowlisted diagnostic
     responseBody: `raw provider body ${secret}`,
   } as any); };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!;
+  const current = (await findStored(s.core.bridges.records, id))!;
   assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
     stage: "source_receipt", effectRole: "approval", code: "APN_RPC_PROTOCOL", reason: "receipt_status",
     rpcMethod: "eth_getTransactionReceipt", httpStatus: 502, attempts: 2, endpointRole: "receipt" });
@@ -188,7 +189,7 @@ test("LI.FI exact destination receipt log failures persist bounded diagnostics w
     responseBody: "authorization: bearer secret",
   } as any); };
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!;
+  const current = (await findStored(s.core.bridges.records, id))!;
   assert.equal(current.failure?.reason, "destination_observation_unavailable");
   assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
     stage: "destination_receipt", effectRole: "bridge", code: "APN_RPC_PROTOCOL", reason: "receipt_log_membership",
@@ -203,10 +204,10 @@ test("LI.FI validated safe source evidence resumes without source RPC", async (t
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.destination.destinationAvailable = false;
   s.provider.statusValue = "completed_observed";
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  const previous = (await s.core.bridges.records.findOperation(id))!; s.source.missingHashes.add(previous.effects[0]!.transactionHash!);
+  const previous = (await findStored(s.core.bridges.records, id))!; s.source.missingHashes.add(previous.effects[0]!.transactionHash!);
   const sourceCalls = s.source.calls.length, providerCalls = s.provider.statusCalls;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true);
-  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "destination_pending");
+  const current = (await findStored(s.core.bridges.records, id))!; assert.equal(current.state, "destination_pending");
   assert.deepEqual(current.effects.map((e) => e.safeProof), previous.effects.map((e) => e.safeProof));
   assert.equal(s.source.calls.length, sourceCalls); assert.equal(s.provider.statusCalls, providerCalls);
   s.source.missingHashes.clear(); s.destination.destinationAvailable = true;
@@ -217,9 +218,9 @@ test("LI.FI validated safe source evidence resumes without source RPC", async (t
 test("LI.FI unchanged polling does not grow history, including changed provider timestamps and response hashes", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); s.destination.destinationAvailable = false;
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  const previous = (await s.core.bridges.records.findOperation(id))!;
+  const previous = (await findStored(s.core.bridges.records, id))!;
   for (let i = 0; i < 3; i++) { s.now.setTime(s.now.getTime() + 60_000); assert.equal((await s.core.execute({ command: "operation.resume", operationId: id })).ok, true); }
-  assert.deepEqual(await s.core.bridges.records.findOperation(id), previous);
+  assert.deepEqual(await findStored(s.core.bridges.records, id), previous);
 });
 
 test("LI.FI interruption after durable destination evidence derives its receipt and rechecks the same delivery", async (t) => {
@@ -227,10 +228,10 @@ test("LI.FI interruption after durable destination evidence derives its receipt 
   const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
   s.core.bridges.records.persist = async (op) => { await persist(op); if (op.destinationProof !== null) throw new Error("synthetic interruption after the durable write"); };
   const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, false);
-  const previous = (await s.core.bridges.records.findOperation(id))!; assert.ok(previous.destinationProof); assert.equal(previous.terminal, false);
+  const previous = (await findStored(s.core.bridges.records, id))!; assert.ok(previous.destinationProof); assert.equal(previous.terminal, false);
   const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
   const result = await restart.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await restart.core.bridges.records.findOperation(id))!; assert.equal(current.state, "completed");
+  const current = (await findStored(restart.core.bridges.records, id))!; assert.equal(current.state, "completed");
   assert.deepEqual(current.destinationProof, previous.destinationProof); assert.equal(s.source.submissions.length, 2);
   assert.deepEqual(await restart.core.bridges.records.loadReceipt(current.profileHash, id), bridgeReceipt(current));
 });
@@ -240,11 +241,11 @@ test("LI.FI validated safe destination proof resumes locally without destination
   const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
   s.core.bridges.records.persist = async (op) => { await persist(op); if (op.destinationProof !== null) throw new Error("synthetic durable boundary"); };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false);
-  s.core.bridges.records.persist = persist; const previous = (await s.core.bridges.records.findOperation(id))!;
+  s.core.bridges.records.persist = persist; const previous = (await findStored(s.core.bridges.records, id))!;
   const destinationCalls = s.destination.calls.length, providerCalls = s.provider.statusCalls;
   s.destination.changedBlock = true;
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "completed");
+  const current = (await findStored(s.core.bridges.records, id))!; assert.equal(current.state, "completed");
   assert.deepEqual(current.destinationProof, previous.destinationProof); assert.equal(current.terminal, true);
   assert.equal(s.destination.calls.length, destinationCalls); assert.equal(s.provider.statusCalls, providerCalls);
   assert.equal(s.source.submissions.length, 2);
@@ -257,7 +258,7 @@ test("LI.FI proven delivery completes without a residual allowance read, so an u
   s.destination.observe = async (...args) => { const result = await observe(...args); if (result !== null) s.source.failAccount = true; return result; };
   s.source.account = async (...args) => { if (s.source.failAccount) accountsAfterDelivery++; return await account(...args); };
   const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, true, first.error?.message);
-  const completed = (await s.core.bridges.records.findOperation(id))!;
+  const completed = (await findStored(s.core.bridges.records, id))!;
   assert.equal(completed.state, "completed"); assert.ok(completed.destinationProof); assert.equal(accountsAfterDelivery, 0);
   // The exact-amount allowance was consumed by the proven exact source Transfer: the residual is zero at the safe bridge block.
   assert.deepEqual(completed.failure?.residualAllowance, { amountAtomic: "0", block: completed.effects[1]!.safeProof!.block,
@@ -275,7 +276,7 @@ for (const reason of ["distinct_archive_RPC_required", "explicit_archive_RPC_req
       reason, endpointUrl: "https://user:secret@rpc.example/key", responseBody: "secret provider body",
     }); };
     await s.core.execute({ command: "bridge.approve", operationId: id });
-    const current = (await s.core.bridges.records.findOperation(id))!;
+    const current = (await findStored(s.core.bridges.records, id))!;
     assert.deepEqual(current.failure?.observationRpc, { schemaVersion: "apn.bridge-observation-rpc-failure.v1",
       stage: "source_observation", effectRole: "approval", code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason });
     validateBridgeOperation(current);

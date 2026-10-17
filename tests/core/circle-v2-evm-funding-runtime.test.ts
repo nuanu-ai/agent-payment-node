@@ -187,7 +187,9 @@ test(`production estimate pending ${kind} HTTP result ${result} fails closed bef
   const effect = op.effects.find(e => e.role === kind)!;
   let keys = 0; const requests: { method: string; params: unknown[] }[] = [];
   const remote = new CircleRpc("https://estimate-test.example", 42161, { request: async (_url, method, body) => {
-    assert.equal(method, "POST"); const q = JSON.parse(body!); requests.push(q); let value: unknown;
+    // Reads issued together leave as one JSON-RPC batch POST; each item is answered in kind.
+    assert.equal(method, "POST"); const parsed = JSON.parse(body!), batch = Array.isArray(parsed);
+    const rows = (batch ? parsed : [parsed]).map((q: { id: number; method: string; params: any[] }) => { requests.push(q); let value: unknown;
     if (q.method === "eth_chainId") value = "0xa4b1";
     else if (q.method === "eth_getTransactionCount") value = `0x${BigInt(effect.envelope.nonceAtomic).toString(16)}`;
     else if (q.method === "eth_getBalance") value = "0x100000000000000";
@@ -197,7 +199,8 @@ test(`production estimate pending ${kind} HTTP result ${result} fails closed bef
       if (data === effect.envelope.data) { assert.equal(q.params[1], "pending"); value = "0x"; }
       else { const decoded = decodeFunctionData({ abi: CIRCLE_RPC_ABI, data }); value = encodeFunctionResult({ abi: CIRCLE_RPC_ABI, functionName: decoded.functionName as never, result: (decoded.functionName === "balanceOf" ? 1000000n : kind === "burn" ? 1000000n : 0n) as never }); }
     } else throw Error(q.method);
-    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: q.id, ...(q.method === "eth_estimateGas" && result === "missing" ? {} : { result: value }) }) };
+    return { jsonrpc: "2.0", id: q.id, ...(q.method === "eth_estimateGas" && result === "missing" ? {} : { result: value }) }; });
+    return { status: 200, body: JSON.stringify(batch ? rows : rows[0]) };
   } });
   const wrapping = { create: async () => { keys++; throw Error("NO_KEY"); }, load: async () => { keys++; throw Error("NO_KEY"); } };
   const service = new CircleFundingEvmService(new StateStore(root), wrapping, {}, () => at, {}, { request: async () => ({ status: 200, body: JSON.stringify([{ finalityThreshold: 1000, minimumFee: 1 }]) }) });

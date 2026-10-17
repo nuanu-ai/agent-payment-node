@@ -7,6 +7,7 @@ import { bridgeRpcCall, RpcProviderScheduler, RpcReadSession, type RpcReadTeleme
 import { submitDirect } from "../../lifi/rpc-support.js";
 import type { StateStore } from "../../state.js";
 import { tokenPrimaryCandidates, type TokenPrimaryFailureReason, type TokenPrimaryPoolTelemetry } from "./token-rpc-pool.js";
+import type { FinalizedChainRead } from "../../evm-finalized-proof.js";
 
 export type TokenRpcRoute = "primary" | "archive" | "receipt";
 export interface TokenRpcItem { readonly method: string; readonly params: readonly unknown[];
@@ -239,3 +240,12 @@ function capabilityResponse(body: string): boolean { if (body.length < 2 || body
     return typeof message === "string" && ["batch requests are not supported", "batch requests not supported", "batch unsupported"]
       .includes(message.trim().toLowerCase()); });
   } catch { return false; } }
+
+/** The finalized-tag reads of an R4 proof through the token lane's own pool and budget: one read per batch, receipts on their route. */
+export function tokenFinalizedRead(call: TokenRpcCall): FinalizedChainRead {
+  return { async call(method, params) {
+    const [value] = await tokenBatch(call, method === "eth_getTransactionReceipt" ? "receipt" : "primary",
+      [{ method, params, cachePolicy: method === "eth_chainId" ? "immutable" : "none", decoder: (row) => row }]);
+    return value;
+  } };
+}

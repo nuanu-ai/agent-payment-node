@@ -1,17 +1,17 @@
-import { decodeFunctionData, decodeFunctionResult, encodeFunctionData, keccak256, pad, type Hex } from "viem";
+import { decodeFunctionResult, encodeFunctionData, keccak256, pad, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import type { Address } from "../model.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
-import { assertStargateV2RouteFinalityPolicy, stargateV2RouteFinalityPolicy } from "./finality-policy.js";
+import { stargateV2RouteFinalityPolicy } from "./finality-policy.js";
+import { createPostApprovalQuote, freshPreflight, sendFeeAdmitted } from "./token-preflight.js";
 import { quoteStargateV2Direct } from "./quote.js";
 import {
   MAX_TTL_MS, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_POOL,
-  STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS,
+  STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS,
   STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN,
-  address, encodeStargateNativeDrop, fail, quantity, uint,
+  address, encodeStargateNativeDrop, fail, uint,
 } from "./token-codec.js";
 import { seal, transition } from "./token-journal.js";
 import type {
@@ -147,13 +147,14 @@ export async function observeStargateV2Token(id: string, ports: StargateTokenExe
     }
     if (["submission_started", "unknown_finality", "submitted"].includes(op.phase)) return await observeBridge(op, ports, journal);
     if (["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase)) return await observeCleanup(op, ports, journal);
-    if (op.phase === "allowance_observed" || op.phase === "post_approval_quote_bound" || op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required") return op;
+    if (op.phase === "allowance_observed" || op.phase === "post_approval_quote_bound" || op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required" ||
+      op.phase === "abandoned_unknown") return op;
     fail("APN_OPERATION_BLOCKED", "operation_not_attempted");
   });
 }
 async function executeLocked(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation> {
   let op = await journal.load(id); if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing"); const now = ports.now ?? Date.now;
-  op = await reconcileUsageOrCleanup(op, ports, journal); if (op.phase === "observed" || op.phase === "cleaned" || op.phase === "cleanup_required") return op;
+  op = await reconcileUsageOrCleanup(op, ports, journal); if (["observed", "cleaned", "cleanup_required", "abandoned_unknown"].includes(op.phase)) return op;
   if (["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase)) {
     fail("APN_OPERATION_BLOCKED", "cleanup_command_required");
   }
@@ -224,7 +225,7 @@ async function executeLocked(id: string, ports: StargateTokenExecutionPorts, jou
   catch { op = transition(op, "unknown_finality", "bridge_broadcast_ambiguous_no_resend", now()); await journal.save(op); op = await markUsageTarget(op, "unknown_finality", journal);
     try { op = await reconcileUsage(op, ports, journal); } catch { /* durable target retries */ } return op; }
   op = transition(op, "submitted", "bridge_broadcast_returned_exact_hash", now()); await journal.save(op); op = await markUsageTarget(op, "submitted", journal); op = await reconcileUsage(op, ports, journal);
-  return await observeBridge(op, ports, journal);
+  return await observeBridge(op, ports, journal, true);
 }
 async function observeAllowance(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
   if (op.approvalTransactionHash === undefined) fail("APN_STATE_CORRUPT", "approval_hash_missing"); const receipt = await ports.waitSourceReceipt(op.approvalTransactionHash, op.finalityPolicy.source.blockTag);
@@ -242,14 +243,16 @@ async function observeAllowance(op: StargateTokenOperation, ports: StargateToken
   const allowance = await readAllowance(ports.sourceCall, op.owner, op.finalityPolicy.source.blockTag); if (allowance !== BigInt(op.amountAtomic)) fail("APN_RPC_PROTOCOL", "approval_allowance_not_exact");
   op = transition(op, "allowance_observed", "exact_allowance_safe", now); await journal.save(op); return op;
 }
-async function observeBridge(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
+/** `sentNow`: the send left in this invocation, so its nonce cannot be finalized past yet and no never-lands read is spent. */
+async function observeBridge(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal, sentNow = false) {
   if (op.transactionHash === undefined) fail("APN_STATE_CORRUPT", "bridge_hash_missing");
   // P2: a source receipt already proven at safe finality, and the residual allowance read with it, are not re-read per poll.
   if (op.phase === "submitted" && op.sourceReceipt !== undefined && op.residualAllowanceAtomic !== undefined)
     return await observeDelivery(op, ports, journal, op.sourceReceipt, BigInt(op.residualAllowanceAtomic));
   const receipt = await ports.waitSourceReceipt(op.transactionHash, op.finalityPolicy.source.blockTag);
   if (receipt === null) { if (op.phase !== "unknown_finality") { op = transition(op, "unknown_finality", "source_receipt_not_safe", (ports.now ?? Date.now)()); await journal.save(op); }
-    op = await markUsageTarget(op, "unknown_finality", journal); return await reconcileUsage(op, ports, journal); }
+    op = await markUsageTarget(op, "unknown_finality", journal); op = await reconcileUsage(op, ports, journal);
+    return sentNow ? op : await retireSendIfNeverLanded(op, ports, journal); }
   if (receipt.status === "reverted") { if (receipt.transactionHash !== op.transactionHash || receipt.finality !== op.finalityPolicy.source.blockTag) fail("APN_RPC_PROTOCOL", "source_revert_receipt");
     op = await requireCleanup(op, ports, journal, "bridge_confirmed_revert"); op = await markUsageTarget(op, "failed_confirmed_revert", journal); return await reconcileUsage(op, ports, journal); }
   return await observeDelivery(op, ports, journal, sourceReceipt(op, receipt), await readAllowance(ports.sourceCall, op.owner, op.finalityPolicy.source.blockTag));
@@ -293,7 +296,7 @@ export async function cleanupStargateV2Token(id: string, ports: StargateTokenExe
   return await journal.withOwnerLock(initial.owner, async () => await journal.withLock(id, async () => {
     let op = await journal.load(id); if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing"); op = await reconcileUsageOrCleanup(op, ports, journal);
     if (["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase)) return await observeCleanup(op, ports, journal);
-    if (op.phase === "cleaned" || op.phase === "observed") return op;
+    if (op.phase === "cleaned" || op.phase === "observed" || op.phase === "abandoned_unknown") return op;
     if (op.phase !== "cleanup_required") fail("APN_OPERATION_BLOCKED", "cleanup_not_required");
     const allowance = await readAllowance(ports.sourceCall, op.owner, "pending");
     const forceApprovalZero = op.cleanupReason === "approval_finality_deadline_passed" || op.cleanupReason === "approval_safe_after_finality_deadline" || op.cleanupReason === "approval_receipt_mismatched";
@@ -315,16 +318,45 @@ export async function cleanupStargateV2Token(id: string, ports: StargateTokenExe
     try { if ((await ports.sendRawTransaction(raw)).toLowerCase() !== hash.toLowerCase()) fail("APN_RPC_AMBIGUOUS", "cleanup_hash");
       op = transition(op, "cleanup_submitted", "cleanup_broadcast_returned_exact_hash", (ports.now ?? Date.now)()); await journal.save(op);
     } catch { op = transition(op, "cleanup_unknown_finality", "cleanup_broadcast_ambiguous_no_resend", (ports.now ?? Date.now)()); await journal.save(op); return op; }
-    return await observeCleanup(op, ports, journal);
+    return await observeCleanup(op, ports, journal, true);
   }));
 }
-async function observeCleanup(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
+async function observeCleanup(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal, sentNow = false) {
   if (op.cleanupTransactionHash === undefined) fail("APN_STATE_CORRUPT", "cleanup_hash_missing");
   const receipt = await ports.waitSourceReceipt(op.cleanupTransactionHash, op.finalityPolicy.source.blockTag);
-  if (receipt === null) { if (op.phase !== "cleanup_unknown_finality") { op = transition(op, "cleanup_unknown_finality", "cleanup_receipt_not_safe", (ports.now ?? Date.now)()); await journal.save(op); } return op; }
-  if (receipt.status !== "success" || receipt.finality !== op.finalityPolicy.source.blockTag || receipt.transactionHash !== op.cleanupTransactionHash) fail("APN_OPERATION_BLOCKED", "cleanup_failed_or_mismatched");
-  if (await readAllowance(ports.sourceCall, op.owner, op.finalityPolicy.source.blockTag) !== 0n) fail("APN_OPERATION_BLOCKED", "cleanup_allowance_not_zero");
+  if (receipt === null) { if (op.phase !== "cleanup_unknown_finality") { op = transition(op, "cleanup_unknown_finality", "cleanup_receipt_not_safe", (ports.now ?? Date.now)()); await journal.save(op); }
+    return sentNow ? op : await rearmCleanupIfNeverLanded(op, ports, journal); }
+  if (receipt.finality !== op.finalityPolicy.source.blockTag || receipt.transactionHash !== op.cleanupTransactionHash) fail("APN_OPERATION_BLOCKED", "cleanup_failed_or_mismatched");
+  // A cleanup that landed without zeroing the allowance is retired; the next one needs fresh owner consent (R4).
+  if (receipt.status !== "success") return await rearmCleanup(op, journal, "reverted", null, (ports.now ?? Date.now)());
+  if (await readAllowance(ports.sourceCall, op.owner, op.finalityPolicy.source.blockTag) !== 0n) return await rearmCleanup(op, journal, "landed_allowance_nonzero", null, (ports.now ?? Date.now)());
   return await finishCleanup({ ...op, residualAllowanceAtomic: "0" } as StargateTokenOperation, ports, journal, "cleanup_safe_zero_allowance");
+}
+/**
+ * R4 exit 2 for the bridge send: the finalized nonce passed it and the node knows neither its transaction nor a receipt.
+ * Its hold is released as unsubmitted, and the allowance it would have spent goes to cleanup (closed at once when zero).
+ */
+async function retireSendIfNeverLanded(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
+  if (ports.neverLands === undefined || op.transactionHash === undefined || op.usageState !== "unknown_finality" || op.usageTarget !== undefined) return op;
+  const nonceAtomic = (op.postApprovalQuote?.sendEnvelope ?? op.sendEnvelope).nonceAtomic;
+  const check = await ports.neverLands({ transactionHash: op.transactionHash, nonceAtomic }); if (!check.neverLands) return op;
+  op = seal({ ...op, retiredEffects: [...op.retiredEffects ?? [], { role: "bridge", transactionHash: op.transactionHash, nonceAtomic, reason: "never_landed",
+    finalizedNonceAtomic: check.finalizedNonce.toString(), at: new Date((ports.now ?? Date.now)()).toISOString() }] }); await journal.save(op);
+  op = await markUsageTarget(op, "released_unsubmitted", journal); op = await reconcileUsage(op, ports, journal);
+  return await requireCleanup(op, ports, journal, "bridge_never_landed");
+}
+async function rearmCleanupIfNeverLanded(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
+  if (ports.neverLands === undefined || op.cleanupTransactionHash === undefined || op.cleanupEnvelope === undefined) return op;
+  const check = await ports.neverLands({ transactionHash: op.cleanupTransactionHash, nonceAtomic: op.cleanupEnvelope.nonceAtomic });
+  return check.neverLands ? await rearmCleanup(op, journal, "never_landed", check.finalizedNonce.toString(), (ports.now ?? Date.now)()) : op;
+}
+/** The cleanup slot is freed: the retired cleanup is kept, and `stargate token cleanup` freezes and consents a new one. */
+async function rearmCleanup(op: StargateTokenOperation, journal: StargateTokenJournal, reason: "never_landed" | "reverted" | "landed_allowance_nonzero",
+  finalizedNonceAtomic: string | null, at: number) {
+  const { cleanupEnvelope, cleanupTransactionHash, ...rest } = op;
+  op = transition({ ...rest, retiredEffects: [...op.retiredEffects ?? [], { role: "cleanup" as const, transactionHash: cleanupTransactionHash!,
+    nonceAtomic: cleanupEnvelope!.nonceAtomic, reason, finalizedNonceAtomic, at: new Date(at).toISOString() }] }, "cleanup_required", `cleanup_${reason}_rearmed`, at);
+  await journal.save(op); return op;
 }
 async function finishCleanup(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal, reason: string) {
   const delivered = op.sourceReceipt !== undefined && op.destinationEvidence !== undefined;
@@ -352,134 +384,3 @@ async function reconcileUsageOrCleanup(op: StargateTokenOperation, ports: Starga
 export async function reconcileStargateV2TokenUsage(id: string, ports: Pick<StargateTokenExecutionPorts, "reserveUsage" | "followUsage">,
   journal: StargateTokenJournal) { return await journal.withLock(id, async () => { const op = await journal.load(id);
     if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing"); return await reconcileUsage(op, ports, journal); }); }
-async function createPostApprovalQuote(op: StargateTokenOperation, ports: StargateTokenExecutionPorts): Promise<StargateTokenPostApprovalQuote> {
-  const now = ports.now ?? Date.now;
-  if (op.phase !== "allowance_observed" ||
-    op.postApprovalQuote !== undefined || op.approvalFinalityDeadline === undefined) fail("APN_STATE_CORRUPT", "post_approval_quote_state");
-  if (now() >= Date.parse(op.approvalFinalityDeadline)) fail("APN_REPREPARE_REQUIRED", "approval_finality_deadline_passed");
-  await ports.confirmPolicy(op);
-  assertStargateV2RouteFinalityPolicy(op.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN);
-  const quote = await quoteStargateV2Direct({ sourceChainId: 10, destinationChainId: 137, sourceToken: STARGATE_TOKEN_SOURCE_TOKEN,
-    destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, recipient: op.recipient, amountAtomic: op.amountAtomic, extraOptions: op.options }, ports.sourceCall);
-  assertLane(quote);
-  if (quote.quote.amountSentAtomic !== op.amountAtomic) fail("APN_REPREPARE_REQUIRED", "post_approval_amount_changed");
-  if (BigInt(quote.quote.minimumOutputAtomic) < BigInt(op.minOutputAtomic)) fail("APN_REPREPARE_REQUIRED", "post_approval_minimum_output");
-  // P2/P5: the pinned pools' functional configuration is re-read; their runtime code was recorded once at prepare.
-  const [cap, , , allowance, tokenBalance, destinationBalance] = await Promise.all([
-    readExecutorCap(ports.sourceCall, "latest"),
-    readPoolFunctional(ports.sourceCall, 10, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, 30111, "latest"),
-    readPoolFunctional(ports.destinationCall, 137, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, 30109, "latest"),
-    readAllowance(ports.sourceCall, op.owner, "pending"),
-    readTokenBalance(ports.sourceCall, STARGATE_TOKEN_SOURCE_TOKEN, op.owner, "pending"),
-    ports.destinationBalances(op.recipient, op.finalityPolicy.destination.blockTag),
-  ]);
-  if (BigInt(op.nativeDropAtomic) > cap) fail("APN_REPREPARE_REQUIRED", "post_approval_native_drop_cap");
-  if (allowance !== BigInt(op.amountAtomic)) fail("APN_REPREPARE_REQUIRED", "post_approval_allowance");
-  if (tokenBalance < BigInt(op.amountAtomic)) fail("APN_REPREPARE_REQUIRED", "post_approval_token_balance");
-  const sendParam = { dstEid: 30109, to: pad(op.recipient, { size: 32 }), amountLD: BigInt(op.amountAtomic),
-    minAmountLD: BigInt(quote.quote.minimumOutputAtomic), extraOptions: op.options, composeMsg: "0x" as Hex, oftCmd: "0x" as Hex };
-  const exactFee = await requoteSend(ports.sourceCall, sendParam, `0x${BigInt(quote.block.numberAtomic).toString(16)}`);
-  if (exactFee !== BigInt(quote.quote.nativeMessageFeeAtomic)) fail("APN_REPREPARE_REQUIRED", "post_approval_exact_send_fee_changed");
-  const sendData = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken", args: [sendParam,
-    { nativeFee: exactFee, lzTokenFee: 0n }, op.owner] });
-  const prepared = await ports.prepareEnvelope({ chainId: 10, from: op.owner, to: STARGATE_TOKEN_SOURCE_POOL,
-    data: sendData, valueAtomic: exactFee.toString() });
-  const expectedNonce = BigInt(op.approvalEnvelope!.nonceAtomic) + 1n;
-  if (BigInt(prepared.nonceAtomic) !== expectedNonce) fail("APN_REPREPARE_REQUIRED", "post_approval_nonce_changed");
-  const quotedMaxFee = uint(prepared.maxFeePerGasAtomic, true), quotedPriority = uint(prepared.maxPriorityFeePerGasAtomic);
-  const feeCeiling = op.feeApproval!;
-  // The bridge is signed with the owner-approved fee fields; a fresh 2 × base + tip estimate is recorded, not compared.
-  // freshPreflight("before_send") admits the frozen envelope only while it can be included now.
-  if (quotedPriority > quotedMaxFee) fail("APN_RPC_PROTOCOL", "post_approval_priority_fee");
-  const gasCeiling = BigInt(op.bridgeSimulation!.gasCeilingAtomic);
-  const sendEnvelope: StargateTokenEnvelope = { chainId: 10, from: op.owner, to: STARGATE_TOKEN_SOURCE_POOL, data: sendData,
-    valueAtomic: exactFee.toString(), nonceAtomic: expectedNonce.toString(), gasLimitAtomic: gasCeiling.toString(),
-    maxFeePerGasAtomic: feeCeiling.approvedMaxFeePerGasWei, maxPriorityFeePerGasAtomic: feeCeiling.approvedMaxPriorityFeePerGasWei };
-  const tx = rpcEnvelope(sendEnvelope);
-  const [simulation, estimateRaw] = await Promise.all([
-    ports.sourceCall("eth_call", [tx, "pending"]).catch(() => fail("APN_REPREPARE_REQUIRED", "post_approval_send_simulation")),
-    ports.sourceCall("eth_estimateGas", [tx, "pending"]).catch(() => fail("APN_REPREPARE_REQUIRED", "post_approval_send_estimate")),
-  ]);
-  const estimate = quantity(estimateRaw); if (estimate > gasCeiling) fail("APN_REPREPARE_REQUIRED", "post_approval_gas_limit");
-  try { const decoded = decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", data: simulation as Hex });
-    if (decoded[1].amountSentLD.toString() !== op.amountAtomic || decoded[1].amountReceivedLD.toString() !== quote.quote.minimumOutputAtomic) throw 0;
-  } catch { fail("APN_REPREPARE_REQUIRED", "post_approval_send_simulation"); }
-  const approvalDebit = BigInt(op.approvalEnvelope!.gasLimitAtomic) * BigInt(op.approvalEnvelope!.maxFeePerGasAtomic);
-  const maximumDebit = approvalDebit + exactFee + gasCeiling * BigInt(sendEnvelope.maxFeePerGasAtomic);
-  if (maximumDebit > BigInt(op.maxNativeDebitAtomic)) fail("APN_REPREPARE_REQUIRED", "post_approval_max_native_debit");
-  if (BigInt(prepared.nativeBalanceAtomic) < exactFee + gasCeiling * BigInt(sendEnvelope.maxFeePerGasAtomic))
-    fail("APN_REPREPARE_REQUIRED", "post_approval_native_balance");
-  const quotedAtMs = now(), expiresAtMs = Math.min(quotedAtMs + STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS,
-    Date.parse(op.approvalFinalityDeadline));
-  if (expiresAtMs <= quotedAtMs) fail("APN_REPREPARE_REQUIRED", "post_approval_quote_expired");
-  const body = { schemaVersion: "apn.stargate-v2-token-post-approval-quote.v1" as const,
-    quotedAt: new Date(quotedAtMs).toISOString(), expiresAt: new Date(expiresAtMs).toISOString(), quote, quoteBlock: quote.block,
-    ownerApprovedMinimumOutputAtomic: op.minOutputAtomic,
-    ownerApprovedMaximumQuoteLossAtomic: (BigInt(op.amountAtomic) - BigInt(op.minOutputAtomic)).toString(),
-    finalityPolicy: op.finalityPolicy, executorNativeCapAtomic: cap.toString(), sourceCodeHash: op.sourceCodeHash,
-    destinationCodeHash: op.destinationCodeHash, sourceTokenCodeHash: op.sourceTokenCodeHash,
-    destinationTokenCodeHash: op.destinationTokenCodeHash, policy: op.policy,
-    sourceSnapshot: { tokenBalanceAtomic: tokenBalance.toString(), nativeBalanceAtomic: prepared.nativeBalanceAtomic,
-      allowanceAtomic: allowance.toString(), nonceAtomic: prepared.nonceAtomic, quotedMaxFeePerGasWei: quotedMaxFee.toString(),
-      quotedMaxPriorityFeePerGasWei: quotedPriority.toString() },
-    destinationSnapshot: { tokenBalanceAtomic: destinationBalance.tokenAtomic, nativeBalanceAtomic: destinationBalance.nativeAtomic,
-      blockNumberAtomic: destinationBalance.blockNumberAtomic, blockHash: destinationBalance.blockHash },
-    bridgeEstimateGasAtomic: estimate.toString(), sendEnvelope, maximumDebitAtomic: maximumDebit.toString() };
-  return Object.freeze({ ...body, snapshotHash: hashObject(body) });
-}
-/** The one fee rule for a send whose quote was bound in this invocation: the frozen envelope must be includable now. */
-async function sendFeeAdmitted(op: StargateTokenOperation, ports: StargateTokenExecutionPorts) {
-  const e = op.postApprovalQuote?.sendEnvelope ?? op.sendEnvelope, latest = await ports.sourceCall("eth_getBlockByNumber", ["latest", false]);
-  if (!evmFrozenFeeAdmitted(quantity((latest as Record<string, unknown>).baseFeePerGas), { maxFeePerGasWei: BigInt(e.maxFeePerGasAtomic),
-    maxPriorityFeePerGasWei: BigInt(e.maxPriorityFeePerGasAtomic) })) fail("APN_REPREPARE_REQUIRED", "fee_spike");
-}
-async function freshPreflight(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, stage: "before_approval" | "before_send") {
-  const post = stage === "before_send" ? op.postApprovalQuote : undefined;
-  if (Date.parse(post?.expiresAt ?? op.expiresAt) <= (ports.now ?? Date.now)()) fail("APN_REPREPARE_REQUIRED", post === undefined ? "expired" : "post_approval_quote_expired");
-  const expectedQuote = post?.quote ?? op.quote, expectedCap = BigInt(post?.executorNativeCapAtomic ?? op.executorNativeCapAtomic);
-  const cap = await readExecutorCap(ports.sourceCall, "latest"); if (cap !== expectedCap || BigInt(op.nativeDropAtomic) > cap) fail("APN_REPREPARE_REQUIRED", "native_drop_cap_changed");
-  if (post === undefined) {
-    const fresh = await quoteStargateV2Direct({ sourceChainId: 10, destinationChainId: 137, sourceToken: STARGATE_TOKEN_SOURCE_TOKEN,
-      destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, recipient: op.recipient, amountAtomic: op.amountAtomic, extraOptions: op.options }, ports.sourceCall);
-    if (fresh.quote.amountSentAtomic !== expectedQuote.quote.amountSentAtomic || fresh.quote.minimumOutputAtomic !== expectedQuote.quote.minimumOutputAtomic ||
-      fresh.quote.nativeMessageFeeAtomic !== expectedQuote.quote.nativeMessageFeeAtomic) fail("APN_REPREPARE_REQUIRED", "quote_changed");
-  }
-  const effectiveSendEnvelope = post?.sendEnvelope ?? op.sendEnvelope;
-  const decodedSend = decodeFunctionData({ abi: STARGATE_SEND_ABI, data: effectiveSendEnvelope.data });
-  if (decodedSend.functionName !== "sendToken") fail("APN_STATE_CORRUPT", "send_calldata");
-  if (await requoteSend(ports.sourceCall, decodedSend.args[0], "latest") !== BigInt(expectedQuote.quote.nativeMessageFeeAtomic)) fail("APN_REPREPARE_REQUIRED", "exact_send_fee_changed");
-  const [, , balance, nativeBalance, allowance, nonce, latest] = await Promise.all([
-    readPoolFunctional(ports.sourceCall, 10, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, 30111, "latest"),
-    readPoolFunctional(ports.destinationCall, 137, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, 30109, "latest"),
-    readTokenBalance(ports.sourceCall, STARGATE_TOKEN_SOURCE_TOKEN, op.owner, "pending"), ports.sourceCall("eth_getBalance", [op.owner, "pending"]),
-    readAllowance(ports.sourceCall, op.owner, "pending"),
-    ports.sourceCall("eth_getTransactionCount", [op.owner, "pending"]),
-    ports.sourceCall("eth_getBlockByNumber", ["latest", false]),
-  ]);
-  if (balance < BigInt(op.amountAtomic)) fail("APN_REPREPARE_REQUIRED", "token_balance");
-  const expectedAllowance = stage === "before_approval" ? BigInt(op.initialAllowanceAtomic) : BigInt(op.amountAtomic);
-  if (allowance !== expectedAllowance) fail("APN_REPREPARE_REQUIRED", "allowance_changed");
-  const envelope = stage === "before_approval" ? op.approvalEnvelope! : effectiveSendEnvelope;
-  if (quantity(nonce).toString() !== envelope.nonceAtomic) fail("APN_REPREPARE_REQUIRED", "nonce_changed");
-  const remainingDebit = stage === "before_approval" ? BigInt(op.maximumDebitAtomic)
-    : BigInt(envelope.valueAtomic) + BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic);
-  if (quantity(nativeBalance) < remainingDebit) fail("APN_REPREPARE_REQUIRED", "native_balance");
-  // One fee rule: each frozen envelope must be includable now; its signed gas × maxFeePerGas is the owner-approved spend bound.
-  // Before the approval, the bridge envelope that follows is admitted too, so an already inadmissible fee never buys an approval.
-  const baseFee = quantity((latest as Record<string, unknown>).baseFeePerGas);
-  const admitted = (e: StargateTokenEnvelope) => evmFrozenFeeAdmitted(baseFee, { maxFeePerGasWei: BigInt(e.maxFeePerGasAtomic), maxPriorityFeePerGasWei: BigInt(e.maxPriorityFeePerGasAtomic) });
-  if (!admitted(envelope) || (stage === "before_approval" && !admitted(effectiveSendEnvelope))) fail("APN_REPREPARE_REQUIRED", "fee_spike");
-  const tx = rpcEnvelope(envelope);
-  const [simulation, estimate] = await Promise.all([
-    ports.sourceCall("eth_call", [tx, "pending"]).catch(() => fail("APN_REPREPARE_REQUIRED", stage === "before_approval" ? "approval_simulation" : "send_simulation")),
-    ports.sourceCall("eth_estimateGas", [tx, "pending"]).catch(() => fail("APN_REPREPARE_REQUIRED", stage === "before_approval" ? "approval_estimate" : "send_estimate")),
-  ]);
-  if (quantity(estimate) > BigInt(envelope.gasLimitAtomic)) fail("APN_REPREPARE_REQUIRED", "gas_limit");
-  if (stage === "before_send") {
-    const approvalGasDebit = op.approvalEnvelope === undefined ? 0n : BigInt(op.approvalEnvelope.gasLimitAtomic) * BigInt(op.approvalEnvelope.maxFeePerGasAtomic);
-    const recomputed = approvalGasDebit + BigInt(envelope.valueAtomic) + quantity(estimate) * BigInt(envelope.maxFeePerGasAtomic);
-    if (recomputed > BigInt(op.maxNativeDebitAtomic)) fail("APN_REPREPARE_REQUIRED", "recomputed_native_debit");
-  }
-  if (stage === "before_approval") { try { if (decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "approve", data: simulation as Hex }) !== true) throw 0; } catch { fail("APN_REPREPARE_REQUIRED", "approval_simulation"); } }
-  else { try { const decoded = decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", data: simulation as Hex }); if (decoded[1].amountSentLD.toString() !== op.amountAtomic || decoded[1].amountReceivedLD.toString() !== expectedQuote.quote.minimumOutputAtomic) throw 0; } catch { fail("APN_REPREPARE_REQUIRED", "send_simulation"); } }
-}

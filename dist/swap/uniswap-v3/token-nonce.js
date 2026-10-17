@@ -2,6 +2,7 @@ import { getAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { SecureStateStore } from "../../secure-state-store.js";
+import { tokenEffectRound } from "./token-operation.js";
 /** Called while the shared account custody lock is held. Only reservations without a durable signed-effect marker may be reclaimed. */
 export class UniswapTokenNonceStore extends SecureStateStore {
     async occupied(accountValue) {
@@ -40,7 +41,7 @@ export class UniswapTokenNonceStore extends SecureStateStore {
     async allocate(op, kind, pending, occupied = []) {
         await this.initialize();
         await this.ensureDirectory("uniswap-token-nonces");
-        const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path), current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op.operationId, kind), prior = current.reservations[slot];
+        const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path), current = raw === null ? empty(account) : validate(raw, account), slot = nonceSlot(op, kind), prior = current.reservations[slot];
         if (prior !== undefined)
             return prior.nonce;
         const reservations = { ...current.reservations };
@@ -56,7 +57,7 @@ export class UniswapTokenNonceStore extends SecureStateStore {
         const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path);
         if (raw === null)
             corrupt("Uniswap token nonce record is missing.");
-        const current = validate(raw, account), slot = nonceSlot(op.operationId, kind), reservation = current.reservations[slot];
+        const current = validate(raw, account), slot = nonceSlot(op, kind), reservation = current.reservations[slot];
         if (reservation === undefined)
             return false;
         exact(reservation, op, kind, nonce);
@@ -71,7 +72,7 @@ export class UniswapTokenNonceStore extends SecureStateStore {
         const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path);
         if (raw === null)
             corrupt("Uniswap token nonce record is missing.");
-        const current = validate(raw, account), slot = nonceSlot(op.operationId, kind), reservation = current.reservations[slot];
+        const current = validate(raw, account), slot = nonceSlot(op, kind), reservation = current.reservations[slot];
         if (reservation === undefined)
             corrupt("Uniswap token nonce reservation is missing.");
         exact(reservation, op, kind, nonce);
@@ -82,7 +83,11 @@ export class UniswapTokenNonceStore extends SecureStateStore {
     path(account) { return `uniswap-token-nonces/${domainHash("apn.uniswap-token-nonce-account.v1", account)}.json`; }
 }
 function empty(account) { return { schemaVersion: "apn.uniswap-token-nonces.v2", account, reservations: {} }; }
-function nonceSlot(operationId, kind) { return domainHash("apn.uniswap-token-nonce-slot.v1", canonicalJson({ operationId, kind })); }
+/** Round 0 keeps the original slot; a re-armed cleanup reserves its own nonce. */
+function nonceSlot(op, kind) {
+    const round = tokenEffectRound(op, kind);
+    return domainHash("apn.uniswap-token-nonce-slot.v1", canonicalJson(round === 0 ? { operationId: op.operationId, kind } : { operationId: op.operationId, kind, round }));
+}
 function validate(value, account) {
     if (!isPlainRecord(value) || value.account !== account || !isPlainRecord(value.reservations))
         corrupt("Uniswap token nonce record is invalid.");

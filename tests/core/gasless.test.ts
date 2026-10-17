@@ -11,6 +11,7 @@ import { gaslessReceipt } from "../../src/gasless/receipt.js";
 import { GASLESS_CHAINS } from "../../src/gasless/validation.js";
 import { gaslessFixture } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 for (const chain of GASLESS_CHAINS.filter(chain => chain !== 43114)) for (const delegation of ["empty", "expected"] as const) {
   test(`gasless ${chain} ${delegation} funds principal and gas from USDC with zero native balance`, async (t) => {
@@ -74,7 +75,7 @@ for (const delegation of ["empty", "expected"] as const) {
       request: s.request, idempotencyKey: key });
     assert.equal(response.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
     assert.match(response.error?.message ?? "", /Avalanche facilitator/u);
-    assert.equal(await s.core.gasless.records.findOperation(s.state.operationId(s.profile, key)), null);
+    assert.equal(await findStored(s.core.gasless.records, s.state.operationId(s.profile, key)), null);
     assert.deepEqual(s.rpc.calls, []); assert.equal(s.rpc.sends.length, 0);
     assert.equal(s.wrapping.loads, 0); assert.equal(s.approval.calls.length, 0);
     await new OperationService(s.state).assertProfileAvailable(s.state.profileHash(s.profile));
@@ -162,6 +163,6 @@ test("gasless refuses a prepare whose current quote exceeds the owner's fee limi
   const response = await s.core.execute({ command: "gasless.transfer.prepare", profile: s.profile,
     request: { ...s.request, maxFeeAtomic: "5000", minReceivedAtomic: "9900000" }, idempotencyKey: key });
   assert.equal(response.error?.code, "APN_FEE_BUDGET_EXCEEDED");
-  assert.equal(await s.core.gasless.records.findOperation(s.state.operationId(s.profile, key)), null);
+  assert.equal(await findStored(s.core.gasless.records, s.state.operationId(s.profile, key)), null);
   assert.equal(s.rpc.sends.length, 0); assert.equal(s.approval.calls.length, 0);
 });

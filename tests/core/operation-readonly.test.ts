@@ -12,6 +12,7 @@ import { RelayUnsignedOperationRepository } from "../../src/relay-unsigned-opera
 import { SecureStateStore } from "../../src/secure-state-store.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 const PROFILE = "a".repeat(64);
 const OPERATION = "b".repeat(64);
@@ -53,10 +54,9 @@ async function exerciseOperationQueries(root: string): Promise<void> {
   assert.deepEqual(await state.listX402Receipts(PROFILE), []);
   assert.equal(await state.loadReceipt(PROFILE, OPERATION), null);
 
-  for (const repository of [provider, rail, bridge, gasless, metaMask, relayUnsigned]) {
-    assert.equal(await repository.loadOperation(PROFILE, OPERATION), null);
-    assert.equal(await repository.findOperation(OPERATION), null);
-  }
+  for (const repository of [provider, rail, bridge, gasless, metaMask, relayUnsigned]) assert.equal(await repository.loadOperation(PROFILE, OPERATION), null);
+  for (const repository of [provider, metaMask, relayUnsigned]) assert.equal(await repository.findOperation(OPERATION), null);
+  for (const repository of [rail, gasless, bridge] as const) assert.equal(await findStored(repository as never, OPERATION), null);
   for (const repository of [provider, rail, metaMask, relayUnsigned]) assert.deepEqual(await repository.listOperations(PROFILE), []);
   for (const repository of [provider, metaMask, relayUnsigned]) assert.deepEqual(await repository.listAllOperations(), []);
   assert.equal(await provider.loadReceipt(PROFILE, OPERATION), null);

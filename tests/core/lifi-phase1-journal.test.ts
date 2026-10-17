@@ -11,6 +11,7 @@ import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 /** Every file under a state directory, so a test can restore that directory exactly as a backup restore would. */
 async function files(root: string): Promise<Map<string, Buffer>> {
@@ -38,7 +39,7 @@ test("LIFI-07: telemetry-only polls never grow the hashed journal, and a long 0.
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   s.source.safeApproval = false; s.source.safeBridge = false;
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  let op = (await s.core.bridges.records.findOperation(id))!; const size = canonicalJson(op).length, transitions = op.transitions.length;
+  let op = (await findStored(s.core.bridges.records, id))!; const size = canonicalJson(op).length, transitions = op.transitions.length;
   // Two hundred polls that only add read telemetry: the record, its size and its history stay exactly the same.
   for (let poll = 0; poll < 200; poll++) op = transitionBridge(op, { observationTelemetry: [...op.observationTelemetry ?? [], row(poll + 1)] }, op.updatedAt);
   assert.equal(op.transitions.length, transitions); assert.equal(canonicalJson(op).length, size);
@@ -54,13 +55,13 @@ test("LIFI-06: a user can swap both RPC endpoints mid-bridge; proofs bind the ch
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root, "base-arb");
   s.source.safeApproval = false;
   const { id } = await s.prepare(); assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  const pending = (await s.core.bridges.records.findOperation(id))!;
+  const pending = (await findStored(s.core.bridges.records, id))!;
   assert.equal(pending.effects[0]!.phase, "included_success"); assert.equal(pending.effects[0]!.includedProof!.rpcOrigin, "https://rpc-8453.example");
   (s.source as { origin: string }).origin = "https://base-replacement.example";
   (s.destination as { origin: string }).origin = "https://arbitrum-replacement.example";
   s.source.safeApproval = true;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
-  const completed = (await s.core.bridges.records.findOperation(id))!;
+  const completed = (await findStored(s.core.bridges.records, id))!;
   assert.equal(completed.state, "completed"); assert.equal(completed.intent.sourceRpcOrigin, "https://rpc-8453.example");
   assert.equal(completed.effects[0]!.safeProof!.rpcOrigin, "https://base-replacement.example");
   assert.equal(completed.destinationProof!.rpcOrigin, "https://arbitrum-replacement.example"); assert.equal(s.source.submissions.length, 2);
@@ -78,7 +79,7 @@ test("LIFI-11: every route claims SIGN and SEND; a journal restored to a sealed 
       usage: await files(join(temporary.root, "asset-usage")) };
   };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  const completed = (await s.core.bridges.records.findOperation(id))!, claims = new BridgeEffectClaims(temporary.root);
+  const completed = (await findStored(s.core.bridges.records, id))!, claims = new BridgeEffectClaims(temporary.root);
   assert.equal(completed.state, "completed"); assert.equal(s.source.submissions.length, 2);
   for (const role of ["approval", "bridge"] as const) assert.equal((await claims.sendClaim(completed, role))?.transactionHash,
     completed.effects.find((effect) => effect.role === role)!.transactionHash);
@@ -86,7 +87,7 @@ test("LIFI-11: every route claims SIGN and SEND; a journal restored to a sealed 
   // records each attempt and observes it instead of sending again, for both effects in turn.
   await writeFile(opPath, snapshot!.op); await restore(join(temporary.root, "asset-usage"), snapshot!.usage);
   for (let resume = 0; resume < 3; resume++) await s.core.execute({ command: "operation.resume", operationId: id });
-  const caughtUp = (await s.core.bridges.records.findOperation(id))!;
+  const caughtUp = (await findStored(s.core.bridges.records, id))!;
   assert.equal(caughtUp.state, "completed"); assert.equal(s.source.submissions.length, 2);
   assert.deepEqual(caughtUp.effects.map((effect) => effect.transactionHash), completed.effects.map((effect) => effect.transactionHash));
 });
@@ -97,7 +98,7 @@ async function interruptedSeal(root: string) {
   let interrupt = true;
   s.custody.seal = async (...args) => { if (interrupt) { interrupt = false; throw new Error("synthetic crash before sealing"); } return await seal(...args); };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false);
-  const op = (await s.core.bridges.records.findOperation(id))!;
+  const op = (await findStored(s.core.bridges.records, id))!;
   assert.deepEqual(op.effects.map((effect) => [effect.role, effect.phase, effect.submissionAttempts]), [["approval", "signing_started", 0], ["bridge", "unsealed", 0]]);
   assert.equal(await s.custody.load(op, "approval"), null); assert.equal(s.source.submissions.length, 0);
   return { s, id, op };
@@ -107,7 +108,7 @@ test("sign-step wedge: signing_started without material or SEND claim re-seals t
   const temporary = await temporaryState(); t.after(temporary.cleanup); const { s, id, op } = await interruptedSeal(temporary.root);
   // Before the fix every resume threw bridge_committed_signing_material_missing and the wallet stayed blocked.
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
-  const completed = (await s.core.bridges.records.findOperation(id))!;
+  const completed = (await findStored(s.core.bridges.records, id))!;
   assert.equal(completed.state, "completed"); assert.equal(s.source.submissions.length, 2);
   // RFC 6979 signing of the unchanged envelope gives the same bytes the interrupted seal would have produced.
   const e = op.effects[0]!.envelope, c = e.economics;
@@ -121,7 +122,7 @@ test("sign-step wedge: an interrupted seal past the deadline ends failed_before_
   const temporary = await temporaryState(); t.after(temporary.cleanup); const { s, id, op } = await interruptedSeal(temporary.root);
   s.now.setTime(Date.parse(op.intent.expiresAt) + 1); const loads = s.wrapping.loads;
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
-  const ended = (await s.core.bridges.records.findOperation(id))!;
+  const ended = (await findStored(s.core.bridges.records, id))!;
   assert.equal(ended.state, "failed_before_effect"); assert.equal(ended.terminal, true);
   assert.equal(ended.effects[0]!.phase, "unsealed"); assert.equal(s.source.submissions.length, 0); assert.equal(s.wrapping.loads, loads);
 });
@@ -137,7 +138,7 @@ test("sign-step wedge: a SEND claim keeps its observe-only path and is never re-
   await new BridgeEffectClaims(temporary.root).claim(op, "approval", "send", { ...body, materialHash: hashObject(body) });
   const resumed = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(resumed.ok, false); assert.equal(resumed.error?.details?.reason, "bridge_effect_send_claim_unresolved");
-  const held = (await s.core.bridges.records.findOperation(id))!;
+  const held = (await findStored(s.core.bridges.records, id))!;
   assert.equal(held.effects[0]!.phase, "signing_started"); assert.equal(held.terminal, false); assert.equal(s.source.submissions.length, 0);
   assert.equal(await s.custody.load(held, "approval"), null);
 });
