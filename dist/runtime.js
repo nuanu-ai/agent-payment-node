@@ -5,7 +5,6 @@ import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
     relayPrepare;
-    relayPreflight;
     relayRetire;
     relayStatus;
     relayObserve;
@@ -82,8 +81,6 @@ export class RuntimeContext {
     constructor(dependencies) {
         if (dependencies.relayPrepare !== undefined)
             this.relayPrepare = dependencies.relayPrepare;
-        if (dependencies.relayPreflight !== undefined)
-            this.relayPreflight = dependencies.relayPreflight;
         if (dependencies.relayRetire !== undefined)
             this.relayRetire = dependencies.relayRetire;
         if (dependencies.relayStatus !== undefined)

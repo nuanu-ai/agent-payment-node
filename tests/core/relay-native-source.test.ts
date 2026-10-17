@@ -7,6 +7,7 @@ import { canonicalJson, domainHash, hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { bindArgv } from "../../src/command-binder.js";
+import { resolveRelayRoute } from "../../src/relay/command-route.js";
 import { runCli } from "../../src/cli.js";
 import { OperationService } from "../../src/operation-service.js";
 import { freezeRelayUnsignedOperation, RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
@@ -323,14 +324,16 @@ test("default Monad profile is released only by a valid confirmed source journal
   await assert.rejects(operations.assertProfileAvailable(op.profileHash), { code: "APN_STATE_CORRUPT" });
 });
 
-test("native execute command remains distinct and keyless RPC URL is mandatory", async t => {
+test("relay execute routes a saved native quote to native execution and a keyless RPC URL is mandatory", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root);
   const op = await prepared(state);
-  assert.deepEqual(bindArgv(["relay", "native", "execute", "--profile", "evm-live-buyer", "--operation", op.operationId,
-    "--rpc-url", "https://bsc-rpc.publicnode.com"]),
+  await new RelayUnsignedOperationRepository(temp.root).persistLocked(op);
+  const bound = bindArgv(["relay", "execute", "--profile", "evm-live-buyer", "--operation", op.operationId,
+    "--rpc-url", "https://bsc-rpc.publicnode.com"]);
+  assert.deepEqual((await resolveRelayRoute(bound, temp.root)).resolved,
     { request: { command: "relay.native.execute", profile: "evm-live-buyer", operationId: op.operationId }, rpcUrl: "https://bsc-rpc.publicnode.com" });
-  assert.throws(() => bindArgv(["relay", "native", "execute", "--operation", op.operationId, "--rpc-url", "https://bsc-rpc.publicnode.com"]),
+  assert.throws(() => bindArgv(["relay", "execute", "--operation", op.operationId, "--rpc-url", "https://bsc-rpc.publicnode.com"]),
     { code: "APN_INVALID_INPUT" });
   const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
   for (const url of ["http://rpc.example", "https://user:secret@rpc.example", "https://rpc.example/signed?key=x"])
@@ -345,7 +348,7 @@ test("installed native execute CLI refuses absent buyer custody before any RPC o
   await repository.persistLocked(op);
   let posts = 0;
   const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
-  const result = await runCli(["relay", "native", "execute", "--profile", "evm-live-buyer", "--operation", op.operationId,
+  const result = await runCli(["relay", "execute", "--profile", "evm-live-buyer", "--operation", op.operationId,
     "--rpc-url", "https://bsc-rpc.publicnode.com"], {}, { stateRoot: temp.root, wrappingSecret: wrapping,
     clock: { now: () => now }, relayExecuteTransport: {
       batchCall: async () => { posts++; return []; },

@@ -145,8 +145,11 @@ export type CommandRequest = {
     readonly minOutputAtomic: string;
     readonly maxDepositNetworkFeeWei: string;
     readonly idempotencyKey: string;
-} | {
-    readonly command: "relay.preflight";
+}
+/** `relay execute` and `relay observe` before the saved operation names their route (relay/command-route.ts). */
+ | {
+    readonly command: "relay.route";
+    readonly action: "execute" | "observe";
     readonly profile: string;
     readonly operationId: string;
 } | {

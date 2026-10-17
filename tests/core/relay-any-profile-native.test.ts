@@ -1,6 +1,6 @@
 /** QA RELAY-002, 003, 004, 006, 007 end to end through the installed command path, for profiles and addresses that
- * belong to nobody: `wallet import` → owner policy → `relay native prepare` → `relay native execute` (foreground code,
- * real signing, one send) → `relay native execute` (source receipt) → `relay observe` (destination credit to the
+ * belong to nobody: `wallet import` → owner policy → `relay prepare` → `relay execute` (foreground code,
+ * real signing, one send) → `relay execute` (source receipt) → `relay observe` (destination credit to the
  * caller's recipient) → `relay status`. Chains are simulated; quotes are provider-signed for the generated keys. */
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
@@ -41,7 +41,7 @@ const LANES: readonly NativeLane[] = [
 ];
 
 function prepareArgs(lane: NativeLane, key: string): string[] {
-  return ["relay", "native", "prepare", "--profile", lane.profile, "--source-chain", `eip155:${lane.source}`,
+  return ["relay", "prepare", "--profile", lane.profile, "--source-chain", `eip155:${lane.source}`, "--asset", "native",
     "--destination-chain", `eip155:${lane.destination}`, "--recipient", QA_RECIPIENT, "--amount-atomic", lane.amount,
     "--min-output-atomic", lane.minOut, "--max-deposit-network-fee-wei", lane.fee, "--idempotency-key", key];
 }
@@ -73,7 +73,7 @@ async function runLane(t: TestContext, lane: NativeLane) {
 
   const source = new SimChain(lane.source).fund(QA_PAYER, 10n ** 18n);
   const screens: string[] = [];
-  const execute = ["relay", "native", "execute", "--profile", lane.profile, "--operation", op.operationId, "--rpc-url", RPC[lane.source]!];
+  const execute = ["relay", "execute", "--profile", lane.profile, "--operation", op.operationId, "--rpc-url", RPC[lane.source]!];
   const sent = await world.cli(execute, { relayExecuteTransport: source, ...consent(op.operationId, op.quoteDigest, screens) });
   assert.equal(sent.ok, true, JSON.stringify(sent.error));
   assert.equal((sent.data as any).phase, "submitting");
@@ -102,7 +102,7 @@ async function runLane(t: TestContext, lane: NativeLane) {
   const payout = lane.payout(destination, BigInt(op.minOutputAtomic));
   provider = { status: "success", originChainId: lane.source, destinationChainId: lane.destination, inTxHashes: [sourceHash], txHashes: [payout] };
   const observed = await world.cli(["relay", "observe", "--profile", lane.profile, "--operation", op.operationId,
-    "--rpc-url", RPC[lane.source]!, "--bnb-rpc-url", RPC[lane.destination]!], { relayObserveSourceRpc: source, relayObserveBnbRpc: destination });
+    "--rpc-url", RPC[lane.source]!, "--destination-rpc-url", RPC[lane.destination]!], { relayObserveSourceRpc: source, relayObserveBnbRpc: destination });
   assert.equal(observed.ok, true, JSON.stringify(observed.error));
   const result = observed.data as any;
   assert.equal(result.state, "operational_acceptance", JSON.stringify(result));

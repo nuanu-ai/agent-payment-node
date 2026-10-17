@@ -11,6 +11,17 @@ export const REMOVED_V1_COMMANDS: readonly RemovedV1Command[] = [
   { path: ["x402", "inspect-network"], replacement: "apn x402 inspect --chain <caip2> --url <https-url>" },
   { path: ["x402", "fetch", "prepare-network"], replacement: "apn x402 fetch prepare --profile <profile> --chain <caip2> --url <https-url> --idempotency-key <key> --rpc-url <https-url>" },
   { path: ["wallet", "balance-asset"], replacement: "apn wallet balance --profile <profile> --chain <caip2> --asset <native-or-contract> --rpc-url <https-url>" },
+  // Relay (owner decision OD-5): one prepare/execute/observe surface; the route comes from the chains or the saved operation.
+  { path: ["relay", "base", "prepare"], replacement: "apn relay prepare --profile <profile> --source-chain eip155:1 --asset usdc --destination-chain eip155:8453 --recipient <address> --amount-atomic <usdc> --min-output-atomic <wei> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --idempotency-key <key>" },
+  { path: ["relay", "native", "prepare"], replacement: "apn relay prepare --profile <profile> --source-chain <eip155:56|eip155:8453> --asset native --destination-chain <caip2> --recipient <address> --amount-atomic <wei> --min-output-atomic <destination-atomic> --max-deposit-network-fee-wei <wei> --idempotency-key <key>" },
+  { path: ["relay", "arbitrum", "prepare"], replacement: "apn relay prepare --profile <profile> --source-chain eip155:42161 --asset usdc --destination-chain eip155:1 --recipient <address> --payer <address> --amount-atomic <usdc> --min-output-atomic <usdc> --max-provider-fee-atomic <usdc> --max-approval-network-fee-wei <wei> --max-deposit-network-fee-wei <wei> --quote-file <absolute-json-path> --idempotency-key <key>" },
+  { path: ["relay", "preflight"], replacement: "apn relay execute --profile <profile> --operation <operation-id> --rpc-url <ethereum-rpc>" },
+  { path: ["relay", "native", "execute"], replacement: "apn relay execute --profile <profile> --operation <operation-id> --rpc-url <source-rpc>" },
+  { path: ["relay", "arbitrum", "approval-check"], replacement: "apn relay execute --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>" },
+  { path: ["relay", "arbitrum", "approval-execute"], replacement: "apn relay execute --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>" },
+  { path: ["relay", "arbitrum", "deposit-dispatch"], replacement: "apn relay execute --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>" },
+  { path: ["relay", "base", "observe"], replacement: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <ethereum-rpc> --destination-rpc-url <base-rpc>" },
+  { path: ["relay", "arbitrum", "observe"], replacement: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc> [--destination-rpc-url <ethereum-rpc>]" },
 ];
 
 /** The removed v1 command an argv names, if any. */

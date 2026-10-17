@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { bindArgv } from "../../src/command-binder.js";
+import { resolveRelayRoute } from "../../src/relay/command-route.js";
 import { EvmDirectRpcGuard } from "../../src/evm-direct-rpc-guard.js";
 import { ApnError } from "../../src/errors.js";
 import { RelayUnsignedOperationRepository } from "../../src/relay-unsigned-operation.js";
@@ -85,9 +86,10 @@ function service(state: StateStore, allowances: readonly bigint[], options: {
 test("saved operation command persists only a fresh canonical skip, with six guarded POSTs", async t => {
   const { temporary, state, operation } = await prepared(); t.after(temporary.cleanup);
   const { decision, calls, starts, guard } = service(state, [500_000n, 500_000n]);
-  const bound = bindArgv(["relay", "arbitrum", "approval-check", "--profile", "default",
+  // `relay execute` on a saved Arbitrum route with no journal yet runs this allowance check first.
+  const bound = bindArgv(["relay", "execute", "--profile", "default",
     "--operation", operation.operationId, "--rpc-url", "https://arb-rpc.example"]);
-  assert.deepEqual(bound.request, { command: "relay.arbitrum.approval-check", profile: "default",
+  assert.deepEqual((await resolveRelayRoute(bound, temporary.root)).resolved.request, { command: "relay.arbitrum.approval-check", profile: "default",
     operationId: operation.operationId });
   const result = await decision.decide("default", operation.operationId);
   assert.equal(result.state, "approval_skipped");
@@ -159,8 +161,8 @@ test("reorg, stale policy, 429, forged saved operation and cross-profile access 
 
 test("installed command leaves signing and sending unavailable", async t => {
   const { temporary, operation } = await prepared(); t.after(temporary.cleanup);
-  const bound = bindArgv(["relay", "arbitrum", "approval-check", "--profile", "default",
-    "--operation", operation.operationId, "--rpc-url", "https://arb-rpc.example"]);
+  const bound = (await resolveRelayRoute(bindArgv(["relay", "execute", "--profile", "default",
+    "--operation", operation.operationId, "--rpc-url", "https://arb-rpc.example"]), temporary.root)).resolved;
   const core = createApnCore(bound, { stateRoot: temporary.root,
     relayArbitrumApprovalDecision: service(new StateStore(temporary.root), [0n]).decision });
   const result = await core.execute(bound.request);

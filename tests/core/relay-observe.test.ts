@@ -251,12 +251,12 @@ test("a reused BNB adapter is refused before a second observation spends its bud
 test("Relay observe CLI binds two explicit public RPCs and rejects extra capabilities", () => {
   const argv = ["relay", "observe", "--profile", "default", "--operation", "2".repeat(64),
     "--rpc-url", "https://ethereum-rpc.publicnode.com",
-    "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"];
-  assert.deepEqual(bindArgv(argv), { request: { command: "relay.observe", profile: "default", operationId: "2".repeat(64) },
-    rpcUrl: "https://ethereum-rpc.publicnode.com", bnbRpcUrl: "https://bsc-rpc.publicnode.com" });
-  // `--profile` is required: no profile is assumed (OWNR 4.1).
-  for (const invalid of [argv.slice(0, -2), [...argv, "--profile", "default"], argv.filter((_, index) => index !== 2 && index !== 3),
-    [...argv, "--dry-run", "false"], [...argv, "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"],
+    "--destination-rpc-url", "https://bsc-rpc.publicnode.com"];
+  assert.deepEqual(bindArgv(argv), { request: { command: "relay.route", action: "observe", profile: "default", operationId: "2".repeat(64) },
+    rpcUrl: "https://ethereum-rpc.publicnode.com", destinationRpcUrl: "https://bsc-rpc.publicnode.com" });
+  // `--profile` is required: no profile is assumed (OWNR 4.1). The saved route decides whether the destination RPC is required.
+  for (const invalid of [argv.slice(0, -4), [...argv, "--profile", "default"], argv.filter((_, index) => index !== 2 && index !== 3),
+    [...argv, "--dry-run", "false"], [...argv, "--destination-rpc-url", "https://bsc-rpc.publicnode.com"],
     [...argv.slice(0, -1), "https://user:pass@bsc-rpc.publicnode.com"]])
     assert.throws(() => bindArgv(invalid), { code: "APN_INVALID_INPUT" });
 });
@@ -283,7 +283,7 @@ test("Relay observe CLI emits operational evidence with a bounded keyless adapte
     return calls.map(call => bnbAnswer(f, call));
   } } as unknown as HttpsBaseRpc;
   const result = await runCli(["relay", "observe", "--profile", "default", "--operation", f.op.operationId,
-    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"], {},
+    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--destination-rpc-url", "https://bsc-rpc.publicnode.com"], {},
   { stateRoot: f.temp.root, relayObserveSourceRpc: sourceRpc, relayObserveBnbRpc: bnbRpc,
     relayStatusFetch: async () => { providerReads++; return new Response(JSON.stringify(f.payload)); } });
   assert.equal(result.ok, true);
@@ -348,7 +348,7 @@ test("contended cross-client provider lock refuses observe RPC before physical P
 test("Relay observe CLI keeps provider failure and source mismatch below operational acceptance", async t => {
   const f = await fixture(); t.after(f.temp.cleanup); await f.journal();
   const args = ["relay", "observe", "--profile", "default", "--operation", f.op.operationId,
-    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"];
+    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--destination-rpc-url", "https://bsc-rpc.publicnode.com"];
   for (const payload of [{ ...f.payload, status: "failure" },
     { ...f.payload, inTxHashes: [hash("9")] }]) {
     const service = new RelayObserveService(f.state, f.source, () => ({ ...f.bnb }),
@@ -385,7 +385,7 @@ test("Relay observe CLI finds a native operation only under its own profile and 
   let reads = 0;
   const fake = { batchCall: async () => { reads++; return []; } } as unknown as HttpsBaseRpc;
   const observe = (profile: string) => runCli(["relay", "observe", "--profile", profile, "--operation", op.operationId,
-    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--bnb-rpc-url", "https://bsc-rpc.publicnode.com"], {},
+    "--rpc-url", "https://ethereum-rpc.publicnode.com", "--destination-rpc-url", "https://bsc-rpc.publicnode.com"], {},
   { stateRoot: temp.root, relayObserveSourceRpc: fake, relayObserveBnbRpc: fake,
     relayStatusFetch: async () => { reads++; throw new Error("unexpected provider read"); } });
   const foreign = await observe("default");
