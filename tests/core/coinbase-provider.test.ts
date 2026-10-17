@@ -229,11 +229,9 @@ test("exact awal identity, declared bin and Node-plus-script closed argv are imm
   const adapter = new AwalProcessAdapter(fixture);
   await adapter.probeStatus();
   await adapter.crossCheckAddress(ADDRESS_A);
-  await adapter.logout();
   assert.deepEqual(fixture.calls, [
     { argv: ["status", "--json"], sensitive: true },
     { argv: ["address", "--chain", "base"], sensitive: false },
-    { argv: ["auth", "logout", "--json"], sensitive: true },
   ]);
 });
 
@@ -651,8 +649,8 @@ test("MCP connect returns the exact foreground handoff before provider compositi
   await client.connect(clientTransport);
   t.after(async () => { await client.close(); await server.close(); });
   const result = await client.callTool({
-    name: "apn_wallet_connect",
-    arguments: { profile: "provider-one", provider: AWAL_PROVIDER_ID, expected_revision: "4" },
+    name: "apn_foreground_handoff",
+    arguments: { command: "wallet connect", arguments: { profile: "provider-one", provider: AWAL_PROVIDER_ID, expected_revision: "4" } },
   });
   const envelope = result.structuredContent as unknown as OutputEnvelope;
   const handoff = `apn wallet connect --profile provider-one --provider ${AWAL_PROVIDER_ID} --expected-revision 4`;
@@ -661,8 +659,8 @@ test("MCP connect returns the exact foreground handoff before provider compositi
   assert.deepEqual(envelope.error?.details?.cli_handoff_argv, handoff.split(" "));
   assert.deepEqual(envelope.next_actions, [handoff]);
   const browserResult = await client.callTool({
-    name: "apn_wallet_connect",
-    arguments: { profile: "metamask", provider: "metamask-agent-wallet", auth_method: "browser" },
+    name: "apn_foreground_handoff",
+    arguments: { command: "wallet connect", arguments: { profile: "metamask", provider: "metamask-agent-wallet", auth_method: "browser" } },
   });
   const browserEnvelope = browserResult.structuredContent as unknown as OutputEnvelope;
   const browserHandoff = "apn wallet connect --profile metamask --provider metamask-agent-wallet --auth-method browser";
@@ -1105,8 +1103,8 @@ test("provider direct prepare is complete and atomic, MCP stops at exact handoff
   await client.connect(clientTransport);
   t.after(async () => { await client.close(); await server.close(); });
   const mcpApproval = (await client.callTool({
-    name: "apn_pay_transfer_approve",
-    arguments: { operation: operationId, rpc_url: rpcUrl },
+    name: "apn_foreground_handoff",
+    arguments: { command: "pay transfer approve", arguments: { operation: operationId, rpc_url: rpcUrl } },
   })).structuredContent as unknown as OutputEnvelope;
   const handoff = `apn pay transfer approve --operation ${operationId} --rpc-url ${rpcUrl}`;
   assert.equal(mcpApproval.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");

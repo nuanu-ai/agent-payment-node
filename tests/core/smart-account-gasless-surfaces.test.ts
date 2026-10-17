@@ -33,7 +33,7 @@ async function connection(options: McpRuntimeOptions) {
   const server = createMcpServer(options), client = new Client({ name: "sa-surfaces", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport); await client.connect(clientTransport);
-  return { client, call: async (name: string, args: Record<string, string>) => {
+  return { client, call: async (name: string, args: Record<string, unknown>) => {
     const result = await client.callTool({ name, arguments: args }), first = result.content[0];
     assert.ok(first && first.type === "text"); const envelope = JSON.parse(first.text) as OutputEnvelope;
     assert.deepEqual(envelope, result.structuredContent); return envelope;
@@ -97,9 +97,9 @@ test("Smart Account static CLI/MCP discovery and approval handoff access no stat
   assert.deepEqual(data.provider_networks["metamask-smart-account"].map((row: any) => [row.chain_id, row.executable_adapter, row.mainnet_acceptance]), [[8453, true, "open"]]);
   assert.equal(semantics.fee_atomic, "0"); assert.equal(semantics.onchain_permission_expiry, true);
   assert.equal(semantics.recovery_after_exposure, "independent_chain_observation_only");
-  const listed = await c.client.listTools(); assert.equal(listed.tools.length, projectMcpTools().length);
-  assert.deepEqual(listed.tools.map(tool => tool.name), projectMcpTools().map(tool => tool.name));
-  const handoff = await c.call("apn_gasless_transfer_approve", { operation: ID });
+  const listed = await c.client.listTools(); assert.equal(listed.tools.length, projectMcpTools().length + 1);
+  assert.deepEqual(listed.tools.map(tool => tool.name), [...projectMcpTools().map(tool => tool.name), "apn_foreground_handoff"]);
+  const handoff = await c.call("apn_foreground_handoff", { command: "gasless transfer approve", arguments: { operation: ID } });
   assert.equal(handoff.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.deepEqual(handoff.error?.details?.cli_handoff_argv, ["apn", "gasless", "transfer", "approve", "--operation", ID]);
   await assert.rejects(stat(temporary.root), { code: "ENOENT" });
@@ -130,7 +130,7 @@ test("same-key routing survives a missing profile and all approval surfaces pres
   const f = await fixture(temporary.root), prepared = await runCli(argv, {}, f.options); assert.equal(prepared.ok, true);
   const op = prepared.operation as any, c = await connection(f.options); t.after(c.close);
   const calls = { ...f.calls };
-  const generic = await c.call("apn_pay_transfer_approve", { operation: op.operation_id, rpc_url: "https://rpc.example" });
+  const generic = await runCli(["pay", "transfer", "approve", "--operation", op.operation_id, "--rpc-url", "https://rpc.example"], {}, f.options);
   assert.equal(generic.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.deepEqual(generic.next_actions, [`apn gasless transfer approve --operation ${op.operation_id}`]);
   assert.equal(generic.error?.details?.reason, "sa_gasless_approval"); assert.deepEqual(f.calls, calls);

@@ -204,11 +204,5 @@ export function rpcReceiptFallbackValue(expected) {
         return value;
     };
 }
-export function assertMatchingHeader(raw, expected) {
-    if (evmRpcQuantity(raw.number).toString() !== expected.numberAtomic || evmRpcHex(raw.hash, 32) !== expected.hash) {
-        bridgeFailure("APN_RPC_PROTOCOL", "bridge_archive_block_mismatch");
-    }
-}
 export function quantity(n) { return `0x${n.toString(16)}`; }
-export function eip7702Delegation(code) { return /^0xef0100[0-9a-f]{40}$/iu.test(code); }
 //# sourceMappingURL=rpc-support.js.map

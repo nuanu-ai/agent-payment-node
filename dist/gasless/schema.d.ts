@@ -515,12 +515,12 @@ export declare const consentSchema: z.ZodObject<{
     expiresAt: z.ZodString;
 }, z.core.$strict>;
 export declare const stateSchema: z.ZodEnum<{
+    completed: "completed";
     unknown_finality: "unknown_finality";
     failed_before_effect: "failed_before_effect";
     failed_confirmed_revert: "failed_confirmed_revert";
     awaiting_approval: "awaiting_approval";
     execution_pending: "execution_pending";
-    completed: "completed";
     submitted_pending: "submitted_pending";
     included_success: "included_success";
     included_revert: "included_revert";
@@ -607,12 +607,12 @@ export declare const transitionSchema: z.ZodObject<{
         approvalDigest: z.ZodString;
     }, z.core.$strict>>>;
     state: z.ZodEnum<{
+        completed: "completed";
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
         execution_pending: "execution_pending";
-        completed: "completed";
         submitted_pending: "submitted_pending";
         included_success: "included_success";
         included_revert: "included_revert";
@@ -1068,12 +1068,12 @@ export declare const operationSchema: z.ZodObject<{
             approvalDigest: z.ZodString;
         }, z.core.$strict>>>;
         state: z.ZodEnum<{
+            completed: "completed";
             unknown_finality: "unknown_finality";
             failed_before_effect: "failed_before_effect";
             failed_confirmed_revert: "failed_confirmed_revert";
             awaiting_approval: "awaiting_approval";
             execution_pending: "execution_pending";
-            completed: "completed";
             submitted_pending: "submitted_pending";
             included_success: "included_success";
             included_revert: "included_revert";
@@ -1414,12 +1414,12 @@ export declare const operationSchema: z.ZodObject<{
         approvalDigest: z.ZodString;
     }, z.core.$strict>>>;
     state: z.ZodEnum<{
+        completed: "completed";
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
         execution_pending: "execution_pending";
-        completed: "completed";
         submitted_pending: "submitted_pending";
         included_success: "included_success";
         included_revert: "included_revert";

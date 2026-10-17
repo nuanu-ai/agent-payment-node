@@ -1,9 +1,6 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
 import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
-import type { Cleanup85RecoveryDependencies } from "./circle-v2-evm/cleanup85-recovery-runtime.js";
-import type { CircleEvmService } from "./circle-v2-evm/runtime.js";
 import type { RelayUnsignedPrepareService, RelayPreparePorts } from "./relay/prepare.js";
-import type { RelayReadOnlyPreflightService, RelayPreflightPorts } from "./relay/preflight.js";
 import type { RelayKeylessStatusService } from "./relay/status.js";
 import type { RelayApprovalInclusionWait } from "./relay/source-runtime.js";
 import type { RelayObserveService } from "./relay/observe.js";
@@ -39,9 +36,6 @@ import type { MetaMaskGaslessDependencies } from "./metamask-gasless/service.js"
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { SmartAccountGaslessDependencies } from "./smart-account-gasless/service.js";
 import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/service.js";
-import type { UniswapGuardedSwapBuilder } from "./swap/uniswap-service.js";
-import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
-import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
@@ -65,8 +59,6 @@ export interface RuntimeFactoryOptions {
   readonly relayExecuteTtyOptions?: TtyTransferApprovalOptions;
   readonly relayPrepare?: RelayUnsignedPrepareService;
   readonly relayPreparePorts?: RelayPreparePorts;
-  readonly relayPreflight?: RelayReadOnlyPreflightService;
-  readonly relayPreflightPorts?: RelayPreflightPorts;
   readonly relayStatus?: RelayKeylessStatusService;
   readonly relayStatusFetch?: typeof fetch;
   readonly relayObserve?: RelayObserveService;
@@ -85,20 +77,15 @@ export interface RuntimeFactoryOptions {
   readonly relayObserveSourceRpc?: HttpsBaseRpc;
   readonly relayObserveBnbRpc?: HttpsBaseRpc;
   readonly stargateNative?: StargateNativeService;
-  readonly circleEvm?: CircleEvmService;
   readonly circleFundingEvm?: CircleFundingEvmService;
-  readonly cleanup85Recovery?: Cleanup85RecoveryDependencies;
   readonly stargateToken?: StargateTokenService;
   readonly portfolio?: PortfolioDependencies;
   readonly uniswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.uniswap.quote" }>>;
   readonly uniswapTokenRuntime?: UniswapTokenCommandRuntime;
   readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.sunswap.quote" }>>;
   readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
-  readonly uniswap?: UniswapGuardedSwapBuilder;
   /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
   readonly swapPolicy?: GuardedSwapPolicyResolver;
-  readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-  readonly jupiter?: JupiterReadOnlyQuoteBuilder;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
   readonly metaMaskGasless?: MetaMaskGaslessDependencies;

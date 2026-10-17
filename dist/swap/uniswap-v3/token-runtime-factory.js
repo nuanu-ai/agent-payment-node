@@ -50,5 +50,4 @@ async function foreground(enabled, op, cleanup, now, tty = {}) {
             "Approval, swap, and any explicit cleanup are independently signed and broadcast at most once."];
     await exactChainConsent(lines, approvalCode("swap", op.integrityHash, cleanup ? "cleanup" : "execute"), cleanup ? new Date(now.getTime() + 300_000).toISOString() : new Date(op.route.deadline * 1000).toISOString(), tty);
 }
-function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-runtime-factory.js.map

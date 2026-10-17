@@ -3,7 +3,7 @@ import { canonicalJson, sha256 } from "../canonical.js";
 import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
-import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeSame, bridgeUint } from "./validation.js";
+import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeUint } from "./validation.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
 export function bridgeSourceProof(materialization, decoded, receipt) {
     // `decoded` is the stored decode of this materialization, re-derived and compared when the record was loaded.
@@ -86,16 +86,6 @@ function validateStoredSource(source, decoded) {
         return;
     }
     fail("stored_correlation_kind");
-}
-/** The destination token selects the Stargate pool emitter; the Across spoke pool is asset independent. */
-export function destinationEventFilter(source, destinationToken) {
-    if (source.correlation.kind === "across") {
-        const c = source.correlation;
-        return { address: bridgeProtocolEmitter(c.destinationChainId, "across", destinationToken), topics: [EVENT_TOPICS.filledRelay, uintWord(c.originChainId), uintWord(c.depositId)] };
-    }
-    const c = source.correlation;
-    const destination = chainForEid(c.destinationEid);
-    return { address: bridgeProtocolEmitter(destination, "stargateV2", destinationToken), topics: [EVENT_TOPICS.oftReceived, bridgeHex(c.guid, 32, 32), addressWord(c.recipient)] };
 }
 function validateCommonSourceEvents(decoded, receipt) {
     const lifi = oneEvent(receipt, BRIDGE_DIAMOND, EVENT_TOPICS.lifiTransferStarted, "LiFiTransferStarted");
@@ -386,11 +376,6 @@ function events(receipt, address, topic, eventName) {
     return output;
 }
 function logsHash(logs) { return sha256(canonicalJson(logs)); }
-function uintWord(value) { return `0x${BigInt(value).toString(16).padStart(64, "0")}`; }
 function addressWord(address) { return `0x${"0".repeat(24)}${address.slice(2).toLowerCase()}`; }
-function chainForEid(eid) { if (eid === 30101)
-    return 1; if (eid === 30184)
-    return 8453; if (eid === 30110)
-    return 42161; return fail("endpoint_identity"); }
 function fail(reason) { return bridgeFailure("APN_RPC_PROTOCOL", reason); }
 //# sourceMappingURL=protocol-evidence.js.map

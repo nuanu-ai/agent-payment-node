@@ -37,7 +37,6 @@ export function jsonRpcRateLimit(error: unknown): boolean {
   return typeof error === "object" && error !== null && !Array.isArray(error) &&
     JSON_RPC_RATE_LIMIT_CODES.has((error as { readonly code?: unknown }).code as number);
 }
-export const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
 export const RPC_DEFAULT_LOGICAL_ITEMS = 96;
 export const RPC_DEFAULT_HTTP_REQUESTS = 8;
 export const RPC_DEFAULT_HTTP_ATTEMPTS = 10;

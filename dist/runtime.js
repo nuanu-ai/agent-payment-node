@@ -5,7 +5,6 @@ import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
 export class RuntimeContext {
     relayPrepare;
-    relayPreflight;
     relayRetire;
     relayStatus;
     relayObserve;
@@ -18,7 +17,6 @@ export class RuntimeContext {
     relayNativeExecute;
     relayExecuteConfirmation;
     stargateNative;
-    circleEvm;
     circleFundingEvm;
     stargateToken;
     portfolio;
@@ -34,9 +32,6 @@ export class RuntimeContext {
     orcaStableRecoverNoSend;
     orcaStableRelease;
     orcaStableObserve;
-    uniswap;
-    sunswap;
-    jupiter;
     jupiterV1Runtime;
     facilitatorGasless;
     smartAccountGasless;
@@ -82,8 +77,6 @@ export class RuntimeContext {
     constructor(dependencies) {
         if (dependencies.relayPrepare !== undefined)
             this.relayPrepare = dependencies.relayPrepare;
-        if (dependencies.relayPreflight !== undefined)
-            this.relayPreflight = dependencies.relayPreflight;
         if (dependencies.relayRetire !== undefined)
             this.relayRetire = dependencies.relayRetire;
         if (dependencies.relayStatus !== undefined)
@@ -108,8 +101,6 @@ export class RuntimeContext {
             this.relayExecuteConfirmation = dependencies.relayExecuteConfirmation;
         if (dependencies.stargateNative !== undefined)
             this.stargateNative = dependencies.stargateNative;
-        if (dependencies.circleEvm !== undefined)
-            this.circleEvm = dependencies.circleEvm;
         if (dependencies.circleFundingEvm !== undefined)
             this.circleFundingEvm = dependencies.circleFundingEvm;
         if (dependencies.stargateToken !== undefined)
@@ -140,12 +131,6 @@ export class RuntimeContext {
             this.orcaStableRelease = dependencies.orcaStableRelease;
         if (dependencies.orcaStableObserve !== undefined)
             this.orcaStableObserve = dependencies.orcaStableObserve;
-        if (dependencies.uniswap !== undefined)
-            this.uniswap = dependencies.uniswap;
-        if (dependencies.sunswap !== undefined)
-            this.sunswap = dependencies.sunswap;
-        if (dependencies.jupiter !== undefined)
-            this.jupiter = dependencies.jupiter;
         if (dependencies.jupiterV1Runtime !== undefined)
             this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
         if (dependencies.facilitatorGasless !== undefined)

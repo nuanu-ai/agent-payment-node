@@ -106,13 +106,6 @@ export function resolveAllowlistAsset(input, inventory = loadAllowlistInventory(
         refuse("APN_ALLOWLIST_ASSET_NOT_FOUND", "The exact token deployment is absent from the frozen allowlist inventory.", "unknown_token_deployment");
     return asset;
 }
-export function assertAllowlistExecutionConfigured(input, inventory = loadAllowlistInventory()) {
-    const asset = resolveAllowlistAsset(input, inventory);
-    if (!RAILS.includes(input.rail))
-        refuse("APN_ALLOWLIST_IDENTITY_INVALID", "The requested rail is invalid.", "invalid_rail");
-    const reason = asset.rails[input.rail] ? "owner_caps_missing" : "rail_not_admitted";
-    refuse("APN_ALLOWLIST_NOT_ADMITTED", "The candidate identity is not configured for execution.", reason);
-}
 function candidateAsset(raw, chain, family, networkName, kind) {
     const value = record(raw, "An allowlist asset row is invalid.");
     const keys = kind === "native"

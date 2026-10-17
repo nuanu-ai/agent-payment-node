@@ -1,6 +1,5 @@
 import { validateExternalFulfillment } from "./external-proof.js";
 import { validateCircleNonceRetirementProof } from "./nonce-retirement-proof.js";
-import { getAddress } from "viem";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { validateEvmNativeCustody } from "../evm-native-custody.js";
@@ -9,15 +8,6 @@ import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRAN
 import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, encodeCircleBurn, encodeCircleMint } from "./protocol.js";
 export function circleBlocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", `Circle EVM operation blocked: ${reason}.`, { reason }); }
 export function circleCorrupt(reason) { throw new ApnError("APN_STATE_CORRUPT", `Circle EVM journal is invalid: ${reason}.`, { reason }); }
-export function sealCircle(input) {
-    const { integrityHash: _old, ...body } = input;
-    return { ...body, integrityHash: hashObject(body) };
-}
-export function advanceCircle(op, patch, reason, now) {
-    const { transitions, integrityHash: _old, ...body } = { ...op, ...patch };
-    const entry = { sequence: transitions.length, at: new Date(now).toISOString(), reason, previousHash: op.transitions.at(-1)?.snapshotHash ?? null, snapshotHash: hashObject(body) };
-    return sealCircle({ ...body, transitions: [...transitions, entry] });
-}
 export function circleEnvelope(input) { return { ...input, envelopeHash: hashObject(input) }; }
 export function validateCircleEnvelope(e, role, chain, attestation, destinationProfile) {
     if (!isPlainRecord(e) || !exactKeys(e, ["chainId", "from", "to", "data", "valueAtomic", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "envelopeHash"]))

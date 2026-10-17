@@ -7,7 +7,7 @@ import { parseAtomic } from "../../money.js";
 import { swapMechanismDigest } from "../pin.js";
 import { createSwapQuote } from "../quote.js";
 import type { GuardedSwapReadOnlyBuilder } from "../runtime.js";
-import type { UniswapTransactionEnvelope } from "../uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "./envelope.js";
 import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../uniswap-pin.js";
 import { encodeUniswapV3ExactInput } from "./encoder.js";
 import { readUniswapV3Quote } from "./onchain.js";

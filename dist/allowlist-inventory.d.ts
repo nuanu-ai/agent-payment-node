@@ -91,10 +91,4 @@ export declare function resolveAllowlistAsset(input: {
     readonly kind: CandidateKind;
     readonly identifier?: string;
 }, inventory?: AllowlistInventory): CandidateAsset;
-export declare function assertAllowlistExecutionConfigured(input: {
-    readonly chain: string;
-    readonly kind: CandidateKind;
-    readonly identifier?: string;
-    readonly rail: CandidateRail;
-}, inventory?: AllowlistInventory): never;
 export {};

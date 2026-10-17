@@ -33,6 +33,21 @@ test("risk and attempt races preserve one immutable exposure and private request
   await assert.rejects(new OperationService(f.state).assertEvmAccountAvailable(f.record.profileHash, 43114, f.prepared.payer));
 });
 
+test("a risk caller whose first read predates a concurrent first exposure replays that hold instead of refusing", async t => {
+  const f = await journalFixture(t), id = f.record.operationId;
+  const admit = f.preparation.assertCurrentOwner.bind(f.preparation);
+  const race: { raced: boolean; first?: Awaited<ReturnType<typeof f.journal.markSignatureRisk>> } = { raced: false };
+  // The late caller has already read the unexposed record; the first caller exposes and confirms the hold before the late
+  // caller's owner admission runs. Before the fix that admission saw the exposure and refused with APN_OPERATION_BLOCKED.
+  t.mock.method(f.preparation, "assertCurrentOwner", async (operationId: string) => {
+    if (!race.raced) { race.raced = true; race.first = await f.journal.markSignatureRisk(operationId); }
+    return admit(operationId);
+  });
+  const late = await f.journal.markSignatureRisk(id);
+  assert.ok(race.first !== undefined); assert.deepEqual(late, race.first);
+  assert.equal(late.exposureJournal!.holdConfirmed, true); assert.equal((await f.lease()).state, "unknown_finality");
+});
+
 for (const sponsor of [false, true]) test(`checked ${sponsor ? "sponsored" : "allowance"} settlement alone finalizes common consumption`, async t => {
   const f = await journalFixture(t, sponsor), id = f.record.operationId;
   await f.journal.markSignatureRisk(id); await f.journal.storeSigned(id, f.signed); await f.journal.markRequestPending(id);
@@ -126,7 +141,7 @@ test("unsigned persistence cannot fabricate terminal intent or mutate first sign
 
 test("revoked current owner refuses initial risk without exposure", async t => {
   const f = await journalFixture(t), id = f.record.operationId;
-  await f.revoke(); await assert.rejects(f.journal.markSignatureRisk(id));
+  await f.revoke(); await assert.rejects(f.journal.markSignatureRisk(id), { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await f.journal.findOperation(id))!.exposureAt, null);
   assert.equal((await f.lease()).state, "reserved");
 });

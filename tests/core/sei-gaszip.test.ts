@@ -217,7 +217,7 @@ for(const change of ["decrease","increase"] as const)test(`unsigned dynamic L1 f
 for(const drift of ["nonce","gas","minimum-price","L1-over-cap","full-reserve"] as const)test(`fresh ${drift} refuses before any signing or send claim`,async t=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as GaszipFundingRecord;
  if(drift==="nonce")f.source.nonce=1n;if(drift==="gas")f.source.estimate=BigInt(r.plan.gas)+1n;if(drift==="minimum-price")f.source.baseFee=BigInt(r.plan.maxFee);if(drift==="L1-over-cap")f.source.l1=BigInt(r.maximumFeeAtomic);if(drift==="full-reserve")f.source.balance=BigInt(r.amountAtomic)+BigInt(r.maximumFeeAtomic)-1n;
- await assert.rejects(f.service.approve(r.operationId));assert.equal(f.source.sends,0);const repo=new GaszipFundingJournal(f.state.root,SEI_ROUTE);const saved=(await repo.findOperation(r.operationId))!;assert.equal(saved.state,"prepared");assert.equal(saved.rawTransaction,null);await repo.assertNoEffectClaimsLocked(saved);
+ await assert.rejects(f.service.approve(r.operationId));assert.equal(f.source.sends,0);const repo=new GaszipFundingJournal(f.state.root,SEI_ROUTE);const saved=(await repo.findOperation(r.operationId))!;assert.equal(saved.state,"prepared");assert.equal(saved.rawTransaction,null);assert.equal(await repo.sendClaimedLocked(saved),false);
 });
 
 test("normal direct Base prepare cannot interleave the held caller fee reserve",async t=>{

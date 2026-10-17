@@ -30,8 +30,6 @@ export interface BridgeRpcPort {
   readTelemetry?(): RpcReadTelemetry | null;
   assertChain(): Promise<void>;
   block(tag: "latest" | "safe" | string): Promise<BridgeBlock>;
-  /** The legacy full historical deployment proof at one block. Only the frozen migration proofs call it. */
-  deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock, exactHashPin?: boolean): Promise<BridgeDeploymentIdentity>;
   /** The light deployment check of one role (deployment-check.ts) at the moving head. */
   deploymentCheck(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, role: "source" | "destination"): Promise<BridgeDeploymentIdentity>;
   /** The source role's deployment check and the account snapshot, read together at one head. */
@@ -58,8 +56,6 @@ export interface BridgeRpcPort {
 export interface BridgeObservationOptions {
   /** The inclusion block an earlier observation recorded: its header joins the first batch, so a re-poll costs one POST. */
   readonly includedBlock?: BridgeBlock;
-  /** Only the frozen historical migration proofs: re-prove Base fees through the legacy pinned oracle on the archive role. */
-  readonly legacyBaseFees?: boolean;
 }
 export type BridgeRpcFactory = (chainId: BridgeChainId, session?: RpcReadSession) => BridgeRpcPort;
 export interface BridgeSealedMaterial {

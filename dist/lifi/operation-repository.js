@@ -2,13 +2,12 @@ import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import {} from "./operation-model.js";
-import { assertBridgeAppend, bridgeCorrupt, validateBridgeOperation, validateLegacyBridgeOperation } from "./operation-validation.js";
+import { assertBridgeAppend, bridgeCorrupt, validateBridgeOperation } from "./operation-validation.js";
 import { bridgeReceipt, currentBridgeReceiptCandidates } from "./receipt.js";
 import { legacyBridgeReceiptCandidates } from "./receipt.js";
 import { bridgeAtTransition } from "./transitions.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 import { adaptLegacyBridgeOperation, isLegacyBridgeOperation } from "./legacy-operation.js";
-import { assertBaseDeploymentMigrationCandidate, assertBaseDeploymentMigrationSourceProof, BASE_DEPLOYMENT_MIGRATION_CANDIDATE } from "./base-deployment-migration.js";
 export class BridgeOperationRepository extends SecureStateStore {
     initialized;
     async ready() {
@@ -16,7 +15,6 @@ export class BridgeOperationRepository extends SecureStateStore {
             await super.initialize();
             await this.ensureDirectory("bridge-operations");
             await this.ensureDirectory("bridge-receipts");
-            await this.ensureDirectory("bridge-migrations");
         })();
         await this.initialized;
     }
@@ -125,136 +123,6 @@ export class BridgeOperationRepository extends SecureStateStore {
             return;
         await this.ensureDirectory(`bridge-receipts/${op.profileHash}`);
         await this.writeJson(path, receipt);
-    }
-    /** Caller holds the profile and operation locks. The audit-first order makes an interrupted repair resumable. */
-    async migrateDeployment(previous, next, audit) {
-        validateBridgeOperation(previous);
-        validateBridgeOperation(next);
-        await this.ready();
-        const current = await this.loadOperation(previous.profileHash, previous.operationId);
-        if (current === null || (current.integrityHash !== previous.integrityHash && current.integrityHash !== next.integrityHash))
-            bridgeCorrupt();
-        const auditPath = `bridge-migrations/${previous.profileHash}/${previous.operationId}.json`;
-        const savedAudit = await this.readJson(auditPath);
-        if (savedAudit !== null && !bridgeSame(savedAudit, audit))
-            bridgeCorrupt();
-        const receiptPath = this.path("bridge-receipts", previous.profileHash, previous.operationId);
-        if (current.integrityHash === previous.integrityHash) {
-            const oldReceipt = await this.readJson(receiptPath);
-            if (oldReceipt !== null)
-                validateReceipt(oldReceipt, previous);
-            await this.ensureDirectory(`bridge-migrations/${previous.profileHash}`);
-            if (savedAudit === null)
-                await this.writeJson(auditPath, audit);
-            await this.writeJson(this.path("bridge-operations", previous.profileHash, previous.operationId), next);
-        }
-        else if (savedAudit === null)
-            bridgeCorrupt();
-        await this.ensureDirectory(`bridge-receipts/${previous.profileHash}`);
-        await this.writeJson(receiptPath, bridgeReceipt(next));
-    }
-    /** Complete or verify the derived receipt after an audit-first migration was interrupted. */
-    async repairMigratedDeployment(previous, op, audit) {
-        validateBridgeOperation(previous);
-        validateBridgeOperation(op);
-        await this.ready();
-        if (op.fingerprint !== audit.newFingerprint || op.integrityHash !== audit.newIntegrityHash ||
-            op.transitions.at(-1)?.transitionHash !== audit.newTransitionRoot || previous.fingerprint !== audit.oldFingerprint ||
-            previous.integrityHash !== audit.oldIntegrityHash || previous.transitions.at(-1)?.transitionHash !== audit.oldTransitionRoot)
-            bridgeCorrupt();
-        const savedAudit = await this.readJson(`bridge-migrations/${op.profileHash}/${op.operationId}.json`);
-        if (!bridgeSame(savedAudit, audit))
-            bridgeCorrupt();
-        const receiptPath = this.path("bridge-receipts", op.profileHash, op.operationId), savedReceipt = await this.readJson(receiptPath);
-        if (savedReceipt !== null && !currentBridgeReceiptCandidates(previous).some((candidate) => bridgeSame(savedReceipt, candidate)) &&
-            !bridgeSame(savedReceipt, bridgeReceipt(op)))
-            bridgeCorrupt();
-        await this.ensureDirectory(`bridge-receipts/${op.profileHash}`);
-        if (!bridgeSame(savedReceipt, bridgeReceipt(op)))
-            await this.writeJson(receiptPath, bridgeReceipt(op));
-    }
-    /** One exact pre-allowlist Base journal can be promoted without relaxing normal legacy loading. */
-    async migrateLegacyDeployment(previous, next, audit) {
-        validateLegacyBridgeOperation(previous);
-        validateBridgeOperation(next);
-        await this.ready();
-        const legacy = adaptLegacyBridgeOperation(previous), current = await this.loadStoredOperation(previous.profileHash, previous.operationId);
-        if (current === null || (isLegacyBridgeOperation(current) ? current.raw.integrityHash !== previous.integrityHash
-            : current.integrityHash !== next.integrityHash))
-            bridgeCorrupt();
-        const auditPath = `bridge-migrations/${previous.profileHash}/${previous.operationId}.json`, savedAudit = await this.readJson(auditPath);
-        if (savedAudit !== null && !bridgeSame(savedAudit, audit))
-            bridgeCorrupt();
-        const receiptPath = this.path("bridge-receipts", previous.profileHash, previous.operationId);
-        if (isLegacyBridgeOperation(current)) {
-            const oldReceipt = await this.readJson(receiptPath);
-            if (oldReceipt !== null && !legacyBridgeReceiptCandidates(legacy).some((candidate) => bridgeSame(oldReceipt, candidate)))
-                bridgeCorrupt();
-            await this.ensureDirectory(`bridge-migrations/${previous.profileHash}`);
-            if (savedAudit === null)
-                await this.writeJson(auditPath, audit);
-            await this.writeJson(this.path("bridge-operations", previous.profileHash, previous.operationId), next);
-        }
-        else if (savedAudit === null)
-            bridgeCorrupt();
-        await this.ensureDirectory(`bridge-receipts/${previous.profileHash}`);
-        await this.writeJson(receiptPath, bridgeReceipt(next));
-    }
-    /** Finish or verify the receipt replacement after the legacy operation was atomically replaced. */
-    async repairMigratedLegacyDeployment(previous, op, audit) {
-        validateLegacyBridgeOperation(previous);
-        validateBridgeOperation(op);
-        await this.ready();
-        if (op.fingerprint !== audit.newFingerprint || op.integrityHash !== audit.newIntegrityHash ||
-            op.transitions.at(-1)?.transitionHash !== audit.newTransitionRoot || previous.fingerprint !== audit.oldFingerprint ||
-            previous.integrityHash !== audit.oldIntegrityHash || previous.transitions.at(-1)?.transitionHash !== audit.oldTransitionRoot)
-            bridgeCorrupt();
-        const savedAudit = await this.readJson(`bridge-migrations/${op.profileHash}/${op.operationId}.json`);
-        if (!bridgeSame(savedAudit, audit))
-            bridgeCorrupt();
-        const receiptPath = this.path("bridge-receipts", op.profileHash, op.operationId), savedReceipt = await this.readJson(receiptPath);
-        const legacy = adaptLegacyBridgeOperation(previous);
-        if (savedReceipt !== null && !legacyBridgeReceiptCandidates(legacy).some((candidate) => bridgeSame(savedReceipt, candidate)) &&
-            !bridgeSame(savedReceipt, bridgeReceipt(op)))
-            bridgeCorrupt();
-        await this.ensureDirectory(`bridge-receipts/${op.profileHash}`);
-        if (!bridgeSame(savedReceipt, bridgeReceipt(op)))
-            await this.writeJson(receiptPath, bridgeReceipt(op));
-    }
-    /** Immutable source phase for the one recognized Base migration. Caller holds profile and operation locks. */
-    async baseMigrationSourceCheckpoint(op) {
-        assertBaseDeploymentMigrationCandidate(op);
-        const value = await this.readJson(`bridge-migrations/${op.profileHash}/${op.operationId}.source.json`);
-        if (value === null)
-            return null;
-        if (!isPlainRecord(value))
-            bridgeCorrupt();
-        const { digest, ...body } = value;
-        if (body.schemaVersion !== "apn.bridge-base-source-checkpoint.v1" ||
-            body.operationId !== op.operationId || body.oldIntegrityHash !== op.integrityHash ||
-            body.candidateHash !== hashObject(BASE_DEPLOYMENT_MIGRATION_CANDIDATE) || hashObject(body) !== digest)
-            bridgeCorrupt();
-        try {
-            assertBaseDeploymentMigrationSourceProof(op, body.observation, body.deployment);
-        }
-        catch {
-            return bridgeCorrupt();
-        }
-        return { observation: body.observation, deployment: body.deployment };
-    }
-    async saveBaseMigrationSourceCheckpoint(op, observation, deployment) {
-        assertBaseDeploymentMigrationCandidate(op);
-        assertBaseDeploymentMigrationSourceProof(op, observation, deployment);
-        const previous = await this.baseMigrationSourceCheckpoint(op);
-        if (previous !== null) {
-            if (!bridgeSame(previous, { observation, deployment }))
-                bridgeCorrupt();
-            return;
-        }
-        const body = { schemaVersion: "apn.bridge-base-source-checkpoint.v1", operationId: op.operationId,
-            oldIntegrityHash: op.integrityHash, candidateHash: hashObject(BASE_DEPLOYMENT_MIGRATION_CANDIDATE), observation, deployment };
-        await this.ensureDirectory(`bridge-migrations/${op.profileHash}`);
-        await this.writeJson(`bridge-migrations/${op.profileHash}/${op.operationId}.source.json`, { ...body, digest: hashObject(body) }, true);
     }
     async loadReceipt(profileHash, operationId) {
         const op = await this.loadOperation(profileHash, operationId);

@@ -14,7 +14,6 @@ export function rpcWordValue(value) { return evmRpcWord(value); }
 export function rpcHexValue(maximumBytes) {
     return (value) => bridgeHex(value, maximumBytes, undefined, "APN_RPC_PROTOCOL");
 }
-export function rpcRecordValue(value) { return evmRpcRecord(value); }
 export function rpcBlockValue(value) {
     const block = evmRpcRecord(value);
     evmRpcQuantity(block.number);

@@ -1,7 +1,7 @@
 export { UniswapEthereumExecutionDriver, type UniswapExecutionDriverDependencies, type UniswapOutcomeObserverPort } from "./driver.js";
 export { UniswapExecutionBindingStore } from "./binding-store.js";
 export { UniswapExecutionGuard } from "./guard.js";
-export { assertInjectedProtocol, createUniswapApprovalRequest, createUniswapExecutionBinding, validateFreshness, validateUniswapExecutionBinding, verifySignedUniswapTransaction } from "./binding.js";
+export { createUniswapApprovalRequest, createUniswapExecutionBinding, validateFreshness, validateUniswapExecutionBinding, verifySignedUniswapTransaction } from "./binding.js";
 export { EncryptedUniswapExecutionEffectStore, newUniswapExecutionEffect, validateEffect } from "./effect-store.js";
 export { UniswapEthereumReceiptObserver, type UniswapObservedOutcome } from "./observer.js";
 export { UniswapBalanceEvidenceStore, sealUniswapBalanceEvidence, validateUniswapBalanceEvidence, type UniswapBalanceEvidence, type UniswapBalanceEvidencePort } from "./evidence-store.js";

@@ -6,7 +6,7 @@ import { bindMcpInput } from "../../src/command-binder.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { runCli } from "../../src/cli.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
-import { projectMcpTools } from "../../src/mcp-projection.js";
+import { projectMcpForegroundHandoff, projectMcpTools } from "../../src/mcp-projection.js";
 import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js";
 import type { ProfilePolicyApprovalPort } from "../../src/policy-approval.js";
 import type { NativePort, NativeRequest, RpcPort } from "../../src/ports.js";
@@ -77,8 +77,9 @@ test("payment MCP schemas project the existing catalog scalar contracts", () => 
   );
 });
 
-test("all ten payment tools bind through the shared catalog binder", () => {
-  const tools = new Map(projectMcpTools().map((tool) => [tool.name, tool.command]));
+test("payment tools and foreground handoff commands bind through the shared catalog binder", () => {
+  const tools = new Map([...projectMcpTools().map((tool) => [tool.name, tool.command] as const),
+    ...projectMcpForegroundHandoff().commands.map((command) => [`apn_${command.path.join("_").replaceAll("-", "_")}`, command] as const)]);
   const operation = "a".repeat(64);
   const bind = (name: string, input: Record<string, unknown>) => {
     const command = tools.get(name);

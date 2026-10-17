@@ -2,8 +2,7 @@ import { getAddress, zeroAddress, type Hex } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import type { Address } from "../model.js";
-import { assertStargateV2LegacyRouteFinalityPolicy, assertStargateV2RouteFinalityPolicy, stargateV2LegacyRouteFinalityPolicy,
-  type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
+import { assertStargateV2RouteFinalityPolicy, type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import type { StargateNativeOperation, StargateNativePhase, StargateSourceReceipt, StargateDestinationEvidence } from "./native-execution.js";
 
 export const SOURCE_CHAIN = 1 as const;
@@ -19,8 +18,8 @@ export const MAX_TTL_MS = 120_000;
 /** Owner admission pin for this exact native lane, in the same provider/reference form as the token lane. */
 export const STARGATE_NATIVE_MECHANISM = Object.freeze({ provider: "stargate-v2",
   reference: `eip155:${SOURCE_CHAIN}:${SOURCE_POOL}/eip155:${DESTINATION_CHAIN}:${DESTINATION_POOL}` });
-export const STARGATE_NATIVE_SCHEMAS = ["apn.stargate-v2-native-operation.v1", "apn.stargate-v2-native-operation.v2",
-  "apn.stargate-v2-native-operation.v3"] as const;
+/** v2 (0.5.25..) and v3 (admission-bound) are the only native schemas any release wrote. */
+export const STARGATE_NATIVE_SCHEMAS = ["apn.stargate-v2-native-operation.v2", "apn.stargate-v2-native-operation.v3"] as const;
 
 export function fail(code: "APN_INVALID_INPUT" | "APN_OPERATION_BLOCKED" | "APN_RPC_PROTOCOL" | "APN_RPC_AMBIGUOUS" |
   "APN_CHAIN_MISMATCH" | "APN_REPREPARE_REQUIRED" | "APN_STATE_CORRUPT", reason: string): never {
@@ -52,18 +51,10 @@ export function validateRecord(value: unknown): StargateNativeOperation {
   if (!isPlainRecord(value) || !(STARGATE_NATIVE_SCHEMAS as readonly string[]).includes(String(value.schemaVersion))) fail("APN_STATE_CORRUPT", "schema");
   const raw = value as unknown as StargateNativeOperation, { integrityHash, ...body } = raw;
   if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
-  let record = raw;
-  if (raw.schemaVersion === "apn.stargate-v2-native-operation.v1") {
-    assertLegacyNativeLane(raw);
-    if (raw.finalityPolicy === undefined && raw.finalityPolicyProvenance === undefined) record = seal({ ...body,
-      finalityPolicy: stargateV2LegacyRouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN), finalityPolicyProvenance: "derived_legacy_v1" } as StargateNativeOperation);
-    else { assertStargateV2LegacyRouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
-      if (raw.finalityPolicyProvenance !== "derived_legacy_v1") fail("APN_STATE_CORRUPT", "finality_policy_provenance"); }
-  } else {
-    assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
-    if (raw.finalityPolicyProvenance !== "pinned_v2") fail("APN_STATE_CORRUPT", "finality_policy_provenance");
-  }
-  // v3 binds owner admission at prepare; older schemas were written before the native lane reserved usage.
+  const record = raw;
+  assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, SOURCE_CHAIN, DESTINATION_CHAIN);
+  if (raw.finalityPolicyProvenance !== "pinned_v2") fail("APN_STATE_CORRUPT", "finality_policy_provenance");
+  // v3 binds owner admission at prepare; v2 was written before the native lane reserved usage.
   if (raw.schemaVersion === "apn.stargate-v2-native-operation.v3") assertPolicyBinding(raw.policy);
   else if (raw.policy !== undefined) fail("APN_STATE_CORRUPT", "legacy_policy_field");
   const order: StargateNativePhase[] = ["prepared", "approved", "submission_started", "submitted", "observed"];
@@ -83,13 +74,6 @@ function assertPolicyBinding(policy: unknown): void {
     !/^[a-f0-9]{64}$/u.test(binding.policyDigest) || !Number.isSafeInteger(binding.policyRevision) || binding.policyRevision < 1 ||
     !isPlainRecord(binding.mechanism) || Object.keys(binding.mechanism).sort().join() !== "provider,reference" ||
     typeof binding.mechanism.provider !== "string" || typeof binding.mechanism.reference !== "string") fail("APN_STATE_CORRUPT", "policy_binding");
-}
-function assertLegacyNativeLane(record: StargateNativeOperation): void {
-  const route = record.quote?.route;
-  if (record.recipient !== record.owner || record.sourcePool !== SOURCE_POOL || record.destinationPool !== DESTINATION_POOL || record.sourceEid !== SOURCE_EID ||
-    record.destinationEid !== DESTINATION_EID || record.envelope?.chainId !== SOURCE_CHAIN || record.envelope.from !== record.owner || record.envelope.to !== SOURCE_POOL || route?.sourceChainId !== SOURCE_CHAIN ||
-    route.destinationChainId !== DESTINATION_CHAIN || route.sourceEid !== SOURCE_EID || route.destinationEid !== DESTINATION_EID || record.quote.recipient !== record.owner ||
-    route.sourcePool !== SOURCE_POOL || route.destinationPool !== DESTINATION_POOL || route.sourceToken !== zeroAddress || route.destinationToken !== zeroAddress || route.asset !== "ETH") fail("APN_STATE_CORRUPT", "legacy_lane");
 }
 export function validateAdvance(previous: StargateNativeOperation | null, next: StargateNativeOperation): void {
   if (previous === null) { if (next.phase !== "prepared" || next.transitions.length !== 1) fail("APN_STATE_CORRUPT", "initial_state"); return; }

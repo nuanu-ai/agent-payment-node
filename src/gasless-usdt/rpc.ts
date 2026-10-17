@@ -5,7 +5,7 @@ import type { GaslessTransport } from "../gasless/https.js";
 import { RpcHttpFailure } from "../lifi/rpc-scheduler.js";
 import { rpcAddress, rpcHex, rpcJson, rpcQuantity, rpcRecord, rpcWord } from "../gasless/rpc-codec.js";
 import type { Address, Hex } from "../model.js";
-import type { UsdtAccountState, UsdtChainPort, UsdtSponsorPort } from "./engine.js";
+import type { UsdtAccountState, UsdtSponsorPort } from "./engine.js";
 import { USDT_GASLESS, usdtFailure } from "./model.js";
 import type { UsdtChainReceipt } from "./receipt.js";
 import type { UsdtRecoveryPort } from "./recovery.js";
@@ -13,8 +13,7 @@ import { scanUsdtUserOperation } from "./rpc-scan.js";
 import type { UsdtUserOperation } from "./userop.js";
 
 const MAX_RESPONSE = 1024 * 1024;
-const SPONSOR_METHODS = new Set(["pimlico_getTokenQuotes", "pimlico_getUserOperationGasPrice", "pm_getPaymasterData",
-  "eth_getUserOperationReceipt"]);
+const SPONSOR_METHODS = new Set(["pimlico_getTokenQuotes", "pimlico_getUserOperationGasPrice", "pm_getPaymasterData"]);
 const SEND_METHODS = new Set(["eth_sendUserOperation"]);
 const CHAIN_METHODS = new Set(["eth_chainId", "eth_getCode", "eth_call", "eth_getTransactionCount", "eth_getTransactionReceipt",
   "eth_getBlockByNumber"]);
@@ -192,12 +191,6 @@ export function usdtSponsorPort(transport: GaslessTransport): UsdtSponsorPort {
     gasPrice: async () => await rpc.call("pimlico_getUserOperationGasPrice", []),
     paymasterData: async (op: UsdtUserOperation) => await rpc.call("pm_getPaymasterData",
       [op, USDT_GASLESS.entryPoint, "0x1", { token: USDT_GASLESS.token }]),
-    receiptLocator: async (userOpHash: Hex) => {
-      const value = await rpc.call("eth_getUserOperationReceipt", [userOpHash]);
-      if (value === null) return null;
-      if (!isPlainRecord(value) || !isPlainRecord(value.receipt)) usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_locator_shape");
-      return rpcHex(value.receipt.transactionHash, 32, 32);
-    },
   };
 }
 
@@ -211,7 +204,7 @@ export function usdtSendPort(transport: GaslessTransport): (op: UsdtUserOperatio
 export function usdtRecoveryPort(transport: GaslessTransport, rpcUrl: string): UsdtRecoveryPort {
   const sponsor = new UsdtJsonRpc(transport, USDT_GASLESS.bundlerUrl, new Set(["eth_getUserOperationReceipt"]));
   const chainRpc = new UsdtJsonRpc(transport, rpcUrl, new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getLogs"]));
-  const chain = usdtChainPort(transport, rpcUrl);
+  const receiptAt = usdtReceiptAt(transport, rpcUrl);
   // One pass talks to one endpoint; its chain identity is proved once, by the scan batch or the first receipt read.
   let chainProven = false;
   return {
@@ -228,7 +221,7 @@ export function usdtRecoveryPort(transport: GaslessTransport, rpcUrl: string): U
     async canonicalFinalizedReceipt(transactionHash) {
       if (!chainProven && rpcQuantity(await chainRpc.call("eth_chainId", [])) !== 1n) usdtFailure("APN_CHAIN_MISMATCH", "gasless_usdt_chain");
       chainProven = true;
-      return await chain.receiptAt(transactionHash, "finalized");
+      return await receiptAt(transactionHash, "finalized");
     },
     async scanUserOperation(input) {
       const scan = await scanUsdtUserOperation(chainRpc, input);
@@ -238,58 +231,29 @@ export function usdtRecoveryPort(transport: GaslessTransport, rpcUrl: string): U
   };
 }
 
-/** Canonical Ethereum reads through the owner's explicit `APN_ETHEREUM_RPC_URL`; no default endpoint exists. */
-export function usdtChainPort(transport: GaslessTransport, rpcUrl: string): UsdtChainPort {
+/** Canonical finalized-or-safe receipt read through the owner's explicit `APN_ETHEREUM_RPC_URL`; no default endpoint exists. */
+function usdtReceiptAt(transport: GaslessTransport, rpcUrl: string): (transactionHash: Hex, finality?: "safe" | "finalized") => Promise<UsdtChainReceipt | null> {
   const rpc = new UsdtJsonRpc(transport, rpcUrl, CHAIN_METHODS);
-  const read = async (to: Address, data: Hex): Promise<Hex> => rpcHex(await rpc.call("eth_call", [{ to, data }, "latest"]));
-  const codeHash = async (address: Address): Promise<Hex> => keccak256(rpcHex(await rpc.call("eth_getCode", [address, "latest"])));
-  return {
-    async verifyPins() {
-      if (rpcQuantity(await rpc.call("eth_chainId", [])) !== 1n) usdtFailure("APN_CHAIN_MISMATCH", "gasless_usdt_chain");
-      for (const [address, expected] of [[USDT_GASLESS.token, USDT_GASLESS.tokenCodeHash], [USDT_GASLESS.entryPoint, USDT_GASLESS.entryPointCodeHash],
-        [USDT_GASLESS.delegate, USDT_GASLESS.delegateCodeHash], [USDT_GASLESS.paymaster, USDT_GASLESS.paymasterCodeHash]] as const) {
-        if (await codeHash(address) !== expected) usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_code_drift");
-      }
-      const call = (functionName: "basisPointsRate" | "maximumFee" | "paused" | "entryPoint") =>
-        encodeFunctionData({ abi: READS, functionName });
-      if (rpcWord(await read(USDT_GASLESS.token, call("basisPointsRate"))) !== 0n ||
-        rpcWord(await read(USDT_GASLESS.token, call("maximumFee"))) !== 0n) {
-        usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_token_transfer_fee");
-      }
-      if (rpcWord(await read(USDT_GASLESS.token, call("paused"))) !== 0n) usdtFailure("APN_OPERATION_BLOCKED", "gasless_usdt_token_paused");
-      const entryPoint = rpcAddress(`0x${(await read(USDT_GASLESS.paymaster, call("entryPoint"))).slice(26)}`);
-      if (entryPoint !== USDT_GASLESS.entryPoint) usdtFailure("APN_PROVIDER_PROTOCOL", "gasless_usdt_paymaster_entry_point");
-    },
-    async account(sender): Promise<UsdtAccountState> {
-      const code = rpcHex(await rpc.call("eth_getCode", [sender, "latest"]));
-      if (code !== "0x" && code !== DELEGATION) usdtFailure("APN_OPERATION_BLOCKED", "gasless_usdt_foreign_delegation");
-      const balance = rpcWord(await read(USDT_GASLESS.token, encodeFunctionData({ abi: READS, functionName: "balanceOf", args: [sender] })));
-      const entryPointNonce = rpcWord(await read(USDT_GASLESS.entryPoint,
-        encodeFunctionData({ abi: READS, functionName: "getNonce", args: [sender, 0n] })));
-      const eoaNonce = rpcQuantity(await rpc.call("eth_getTransactionCount", [sender, "latest"]));
-      return { usdtBalanceAtomic: balance, entryPointNonce, eoaNonce, delegation: code === "0x" ? "empty" : "expected" };
-    },
-    async receiptAt(transactionHash, finality = "safe") {
-      const raw = await rpc.call("eth_getTransactionReceipt", [transactionHash]);
-      if (raw === null) return null;
-      const receipt = rpcRecord(raw), height = rpcQuantity(receipt.blockNumber);
-      const head = rpcRecord(await rpc.call("eth_getBlockByNumber", [finality, false]));
-      if (height > rpcQuantity(head.number)) return null;
-      const block = rpcRecord(await rpc.call("eth_getBlockByNumber", [`0x${height.toString(16)}`, false]));
-      if (rpcHex(block.hash, 32, 32) !== rpcHex(receipt.blockHash, 32, 32) || rpcHex(receipt.transactionHash, 32, 32) !== transactionHash.toLowerCase()) {
-        usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_not_canonical");
-      }
-      if (!Array.isArray(receipt.logs)) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_receipt_logs");
-      const logs = receipt.logs.map((entry: unknown) => {
-        const log = rpcRecord(entry);
-        if (!Array.isArray(log.topics)) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_receipt_logs");
-        return { address: rpcAddress(log.address), topics: log.topics.map((topic: unknown) => rpcHex(topic, 32, 32)), data: rpcHex(log.data) };
-      });
-      const status = rpcQuantity(receipt.status);
-      if (status !== 0n && status !== 1n) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_receipt_status");
-      return { transactionHash: transactionHash.toLowerCase() as Hex, blockNumber: height,
-        status: status === 1n ? "success" : "reverted", logs } satisfies UsdtChainReceipt;
-    },
+  return async (transactionHash, finality = "safe") => {
+    const raw = await rpc.call("eth_getTransactionReceipt", [transactionHash]);
+    if (raw === null) return null;
+    const receipt = rpcRecord(raw), height = rpcQuantity(receipt.blockNumber);
+    const head = rpcRecord(await rpc.call("eth_getBlockByNumber", [finality, false]));
+    if (height > rpcQuantity(head.number)) return null;
+    const block = rpcRecord(await rpc.call("eth_getBlockByNumber", [`0x${height.toString(16)}`, false]));
+    if (rpcHex(block.hash, 32, 32) !== rpcHex(receipt.blockHash, 32, 32) || rpcHex(receipt.transactionHash, 32, 32) !== transactionHash.toLowerCase()) {
+      usdtFailure("APN_RPC_AMBIGUOUS", "gasless_usdt_receipt_not_canonical");
+    }
+    if (!Array.isArray(receipt.logs)) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_receipt_logs");
+    const logs = receipt.logs.map((entry: unknown) => {
+      const log = rpcRecord(entry);
+      if (!Array.isArray(log.topics)) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_receipt_logs");
+      return { address: rpcAddress(log.address), topics: log.topics.map((topic: unknown) => rpcHex(topic, 32, 32)), data: rpcHex(log.data) };
+    });
+    const status = rpcQuantity(receipt.status);
+    if (status !== 0n && status !== 1n) usdtFailure("APN_RPC_PROTOCOL", "gasless_usdt_receipt_status");
+    return { transactionHash: transactionHash.toLowerCase() as Hex, blockNumber: height,
+      status: status === 1n ? "success" : "reverted", logs } satisfies UsdtChainReceipt;
   };
 }
 

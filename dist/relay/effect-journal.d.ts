@@ -2,7 +2,7 @@ import { type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import type { RelayQuoteTransaction } from "./quote.js";
 export type RelayEffectRole = "approval" | "deposit";
-export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "submission_marked" | "tx_known" | "confirmed" | "failed" | "abandoned_unsent";
+export type RelayEffectPhase = "pending" | "signing_started" | "sealed" | "submitting" | "confirmed" | "failed" | "abandoned_unsent";
 export interface RelayEffect {
     readonly role: RelayEffectRole;
     readonly phase: RelayEffectPhase;
@@ -43,15 +43,6 @@ export type RelayEffectEvent = Readonly<{
     role: RelayEffectRole;
     at: string;
 }> | Readonly<{
-    kind: "mark_submission";
-    role: RelayEffectRole;
-    marker: string;
-    at: string;
-}> | Readonly<{
-    kind: "record_transaction";
-    role: RelayEffectRole;
-    transactionHash: string;
-}> | Readonly<{
     kind: "observe";
     role: RelayEffectRole;
     outcome: "confirmed" | "failed";
@@ -67,7 +58,6 @@ export declare function validateRelayEffectJournal(value: unknown, op: RelayUnsi
 export declare function createRelayEffectJournal(op: RelayUnsignedOperation, createdAt: string): RelayEffectJournal;
 /** Pure transition. Once a submission is marked, no transition can mark it again. */
 export declare function advanceRelayEffectJournal(journal: RelayEffectJournal, op: RelayUnsignedOperation, event: RelayEffectEvent): RelayEffectJournal;
-export declare function relayRecoveryClass(journal: RelayEffectJournal, op: RelayUnsignedOperation): "not_started" | "observation_only" | "approval_confirmed" | "completed" | "failed";
 export declare class RelayEffectJournalRepository extends SecureStateStore {
     private readonly preparedOperations;
     private path;

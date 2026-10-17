@@ -15,7 +15,6 @@ import {
   projectPermissionBinding,
   SMART_ACCOUNT_PERMISSION_RECORD_VERSION,
   type GrantedSmartAccountPermissionRecord,
-  type PendingSmartAccountPermissionRecord,
   type SmartAccountPermissionRecord,
 } from "./metamask-smart-account-record.js";
 import type { SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
@@ -72,7 +71,6 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
         authenticationMethods: ["browser"],
         connect: async () => unsupportedInternalPath(),
         probeStatus: async () => undefined,
-        logout: async () => { throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Use wallet permission forget for this local Smart Account profile."); },
       },
       reads: {
         observeBalance: async () => unsupportedInternalPath(),

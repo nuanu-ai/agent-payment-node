@@ -19,20 +19,6 @@ export declare const MM_TRANSFER_TOPIC: `0x${string}`;
 export declare const MM_APPROVAL_TOPIC: `0x${string}`;
 export declare const MM_INCREASED_COUNT_TOPIC: `0x${string}`;
 export declare const MM_REDEEM_SELECTOR: `0x${string}`;
-export declare const MM_DECIMALS_CALL: `0x${string}`;
-export declare const MM_EXECUTION_PARAMETER: {
-    readonly type: "tuple[]";
-    readonly components: readonly [{
-        readonly name: "target";
-        readonly type: "address";
-    }, {
-        readonly name: "value";
-        readonly type: "uint256";
-    }, {
-        readonly name: "callData";
-        readonly type: "bytes";
-    }];
-};
 export declare const MM_DELEGATION_PARAMETER: {
     readonly type: "tuple[]";
     readonly components: readonly [{

@@ -21,4 +21,3 @@ export declare const AVALANCHE_FACILITATOR: {
     readonly authorizationUsedTopic: `0x${string}`;
     readonly authorizationStateSelector: Hex;
 };
-export type FacilitatorRegistry = typeof AVALANCHE_FACILITATOR;

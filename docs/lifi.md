@@ -349,8 +349,7 @@ call traces use the archive reader when the owner names one, otherwise the
 primary, which serves recent blocks; `requireCanonical: true` still makes the
 node refuse a non-canonical hash. APN never infers an archive URL. Missing
 historical data on a pruned primary surfaces as an RPC failure of that read.
-Only the frozen historical migration proofs of `operation repair-deployment`
-still require the archive reader (three-item chunks). Observation diagnostics
+Observation diagnostics
 keep `explicit_archive_RPC_required`, `distinct_archive_RPC_required` and
 `historical_receipt_unavailable` for old journals without exposing provider bodies or URLs.
 
@@ -532,7 +531,7 @@ At the verified `StargatePoolNative` implementation, `OFTReceived` follows a
 successful native outflow. A supplied native call trace or balance snapshot is
 validated, but neither is required: the recipient may spend in the same block.
 A cached failure without a successful event cannot prove delivery. The
-[paired safe-block pin record](lifi-stargate-native-pins-2026-09-25.md) covers both
+[paired safe-block pin record](../reports/lifi-stargate-native-pins-2026-09-25.md) covers both
 native pools, both LI.FI facets, code hashes, asset ID 13 mappings, address
 configuration, TokenMessaging links and the executable selector. Preparation
 and historical observation must verify fresh code/configuration at exact block
@@ -740,10 +739,10 @@ not a trustless light-client proof. The operation is authoritative: interrupted
 derived-receipt writes are repaired under the same locks. Raw calldata, signed
 bytes, wallet secrets and raw provider errors are omitted from public output.
 
-The five MCP tools are `apn_bridge_capabilities`, `apn_bridge_inventory`,
-`apn_bridge_routes`, `apn_bridge_prepare` and `apn_bridge_approve`. They use the
-same catalog and binder as the CLI. Approval through MCP returns only the exact
-foreground CLI command without reading state or entering custody. Generic
+The four MCP tools are `apn_bridge_capabilities`, `apn_bridge_inventory`,
+`apn_bridge_routes` and `apn_bridge_prepare`. They use the same catalog and
+binder as the CLI. Approval is not an MCP tool: `apn_foreground_handoff` returns
+only the exact foreground CLI command without reading state or entering custody. Generic
 status, resume and receipt tools handle the durable bridge operation.
 
 ## Evidence and remaining acceptance
@@ -820,150 +819,18 @@ Ethereum PublicNode safe-block code reads did work, while official Arbitrum
 historical capability remained unverified. Arbitrum→Ethereum canonical USDC,
 WBTC and named-recipient acceptance remain open.
 
-## Base to Solana USDC observation kernel (source only)
+## Removed offline inspectors
 
-`src/lifi/solana-destination-candidate.ts` parses a finalized successful Solana
-`getSignatureStatuses` and `getTransaction` pair into a **candidate** for a
-Base-USDC to Solana-USDC delivery. It requires the exact recipient's existing
-canonical USDC associated token account, the canonical mint and Token Program,
-one unambiguous pre/post balance row, and a positive token increase meeting a
-frozen minimum. Only the exact `completed` LI.FI outcome is accepted as a
-candidate; every other outcome and malformed value is refused.
-
-The candidate always has `sourceMessageCorrelation: "unverified"` and
-`bridgeCompletion: false`. There is no admitted route, prepare, approval,
-submission, completed operation or receipt for this lane. A later protocol
-packet for the selected direct Circle CCTP V2 lane must bind its signed fee
-quote, Base burn and CCTP message to the specific Solana USDC mint and receive
-transaction before a bridge receipt can be supported. Public Circle/LI.FI
-bridge/provider observation APIs supply the destination observations and their
-normal provenance; APN does not require or implement its own Iris attester key,
-signed-domain verifier or custom attestation cryptography. Until owner/provider
-acceptance, the offline destination path remains `executionAdmitted: false` and
-`bridgeCompletion: false`. This LI.FI-shaped candidate does not establish that
-correlation. A recipient with no USDC associated token account is outside this
-kernel's proof contract; its creation and rent payer need separate admission.
-
-## Offline Base to Solana Mayan quote inspection
-
-`src/lifi/mayan-offline.ts` inspects **one captured synthetic LI.FI quote shape**
-for Base canonical USDC to Solana canonical USDC through `mayanMCTP`. Its
-Mayan redemption fee value is pinned to that capture; other valid Mayan quotes
-may be rejected. This is not general Mayan route acceptance. It is a pure
-decoder and is not connected to route admission, preparation, approval,
-execution, status or completion. Its result always says `bridgeCompletion:
-false`. The fixture in
-`tests/core/lifi-fixtures/base-solana-mayan-mctp-quote-synthetic-20260916.json`
-uses public synthetic source and destination addresses and was captured with
-the read-only `/v1/quote` endpoint for 100 USDC. It must never be submitted.
-
-The decoder uses [LI.FI contracts commit
-`4b4b8138`](https://github.com/lifinance/contracts/tree/4b4b8138a6f12e8c32ad72040fae5f1a763e3fc6):
-`MayanFacet.sol`, `ILiFi.sol`, `LibSwap.sol`, `FeeForwarder.sol` and the Base
-deployment record. It checks the Base Diamond and approval spender, current
-nine-field Mayan ABI, one same-token FeeForwarder step, the included fee and
-caller-supplied fee cap, source principal, source and destination identities,
-non-EVM receiver bytes, refund recipient, zero native value, and the nested
-MayanCircle `bridgeWithFee` selector and amount. It also binds the top-level
-transaction ID and integrator, source amount, token chain IDs and decimals, and
-both included steps' tools, amounts, assets, recipient and fee rows to the
-decoded calldata. Its pinned MayanCircle address
-and destination domain are observed from the synthetic quote, not an
-independent deployment proof. Changes to either must be reviewed explicitly.
-
-The captured 100 USDC source amount includes a **250,000 atomic USDC LI.FI
-FeeForwarder fee**, leaving 99,750,000 atomic USDC for Mayan. The nested
-`bridgeWithFee` carries a separate **1,647,869 atomic USDC `redeemFee`** and
-zero `gasDrop`; the fee names and argument order follow [Mayan SDK commit
-`c4c98031`](https://github.com/mayan-finance/swap-sdk/blob/c4c98031aaad9264d17630d7b4de0cb18688cf78/src/evm/evmMctp.ts#L36-L113).
-The decoder reports `lifiFeeAmountAtomic` and `mayanRedeemFeeAtomic` separately.
-Neither fee is an onchain destination output floor, and this synthetic fixture
-does not establish current fee pricing.
-
-The API's `estimate.toAmountMin` is an offchain estimate. The decoded source
-call does not expose an onchain destination minimum or a quote expiry. The
-captured `redeemFee` is a fixture guard, not a general fee cap. Mayan MCTP
-remains a discovery and offline observation candidate and is not selected for
-the first executable Base-to-Solana lane. Any later Mayan execution proposal
-needs current deployment and bytecode proof, complete protocol semantics,
-destination and refund proof, an enforceable output/timing contract, and a
-separate admission review.
-
-`src/lifi/mayan-source-receipt.ts` adds a pure, offline source receipt parser for
-that same frozen quote shape. It checks the original Base transaction's chain,
-hash, sender, Diamond target, zero value and exact quoted input, a successful
-receipt with the same transaction hash, one Diamond `LiFiTransferStarted`, one
-`BridgeToNonEVMChainBytes32` matching the quoted transaction ID and receiver,
-and exactly one `MessageSent` from Circle's canonical Base CCTP V1
-MessageTransmitter. It decodes the [CCTP V1 message
-layout](https://developers.circle.com/cctp/v1/message-format), checks domains
-6 to 5, V1 versions, canonical Base TokenMessenger sender, Circle's Solana V1
-TokenMessengerMinter recipient, canonical Base USDC
-burn token, MayanCircle message sender, and a positive burn amount no greater
-than the bridge principal. The [Circle V1 deployment
-table](https://developers.circle.com/cctp/v1/evm-smart-contracts) pins the Base
-MessageTransmitter and TokenMessenger addresses. The [pinned LI.FI
-facet](https://github.com/lifinance/contracts/blob/4b4b8138a6f12e8c32ad72040fae5f1a763e3fc6/src/Facets/MayanFacet.sol)
-forwards the Mayan call and emits the two source events. [Mayan's MCTP
-description](https://docs.mayan.finance/) identifies Circle CCTP as the value
-transfer layer.
-
-The parser returns a source message hash, nonce, burn amount/token and CCTP
-mint recipient with `bridgeCompletion: false`. The CCTP mint recipient can be a
-Mayan program; it is not claimed to be the user's final Solana recipient.
-This is correlation within one source receipt, not destination delivery or
-finality proof. The caller must supply an authenticated transaction and receipt;
-the parser performs no RPC call, signature reconstruction, attestation lookup,
-or execution.
-
-`src/lifi/mayan-provider-status-offline.ts` accepts the frozen quote, an
-independently observed Base source transaction hash and CCTP V1 message
-hash/nonce, and caller-supplied responses from Circle
-`GET /v1/messages/6/{transactionHash}` and LI.FI `GET /status`. It checks the
-single Circle message's bytes, Keccak hash, V1 header and nonce; it also
-requires one LI.FI `DONE`/`COMPLETED` response with the quote transaction ID,
-source hash, Mayan tool, Base and Solana chain IDs, sender and recipient,
-canonical USDC token identities, the source amount, a receiving amount at
-least as large as the quoted minimum, and a canonical Solana receiving
-signature. Missing fields or contradictions are rejected. The result
-is a provider hint with `bridgeCompletion: false`. The caller obtains the
-responses through the public Circle/LI.FI bridge/provider observation APIs and
-passes their normal provenance; this offline parser does not fetch or replace
-that external transport and attestation acceptance. It does not prove onchain
-Solana delivery or admit execution. The source hash and message correlation
-must first come from a separately verified source receipt. The parser uses only
-fields shown in [Circle's V1 message response](https://developers.circle.com/cctp/migration-from-v1-to-v2)
-and [LI.FI status schema](https://docs.li.fi/agents/reference/endpoint-specs).
-
-## Offline direct Circle CCTP V2 source receipt candidate
-
-`src/lifi/circle-v2-source-receipt.ts` parses one caller-authenticated successful,
-safe Base transaction and receipt for the direct Circle `TokenMessengerWithFees`
-address. It requires exactly one `DepositForBurn` emitted by the underlying Base `TokenMessengerV2`
-with `TokenMessengerWithFees` as depositor and burn-body message sender, and one
-`MessageSent(bytes)` emitted by Base `MessageTransmitterV2` with
-`TokenMessengerV2` as the message-header sender. It compares the V2
-message header and burn body to every expected burn field: Base USDC, amount,
-sender, Solana USDC ATA bytes32, domain 5, Solana V2 TokenMessengerMinter,
-zero destination caller, maximum fee, finality threshold, and hook data. The
-`maxFee` in that burn event is the CCTP burn field, separate from the USDC
-`FORWARD` fee collected by the wrapper. A `FORWARD`-only signed quote selects
-Standard finality (2000) and a zero CCTP `maxFee`; live source submission
-currently admits this exact quote shape and rejects additional fee items.
-The V2 source message contains a zero nonce placeholder; the parser does not expose
-or infer an attested nonce. Duplicate or ambiguous events fail closed. Its
-result is source evidence only (`executionAdmitted: false`,
-`bridgeCompletion: false`). The public bridge/provider observation API and its
-normal provenance, followed by owner/provider acceptance, carry the RPC and
-attestation trust boundary. This source evidence does not prove a destination
-mint or admit execution; APN does not implement a separate attestation
-verifier.
-The event ABI and packed message format follow Circle's
-[TokenMessengerV2](https://github.com/circlefin/evm-cctp-contracts/blob/master/src/v2/TokenMessengerV2.sol),
-[MessageTransmitterV2](https://github.com/circlefin/evm-cctp-contracts/blob/master/src/v2/MessageTransmitterV2.sol),
-[technical guide](https://developers.circle.com/cctp/references/technical-guide),
-[contract addresses](https://developers.circle.com/cctp/references/contract-addresses),
-and [Solana programs](https://developers.circle.com/cctp/references/solana-programs).
+Earlier versions carried offline parsers that no CLI command or MCP tool ever
+reached: the LI.FI-shaped Base to Solana destination candidate, the Mayan MCTP
+quote, source-receipt and provider-status inspectors, the NEAR-via-LI.FI Base to
+TRON kernel, the dormant non-EVM bridge operation, and the Circle CCTP V2
+source-receipt, Iris and Solana destination inspectors. They were deleted
+because nothing reachable from `apn` or `apn mcp serve` used them (checked with
+an import and call graph built from the TypeScript compiler API). The live
+Circle V2 Base to Solana source submission and the direct NEAR 1Click lanes are
+unchanged, and the source journal still reads every record a released version
+wrote (`apn.non-evm-source-journal.v3`).
 
 ## Direct NEAR 1Click lanes
 
@@ -1000,9 +867,9 @@ foreground terminal, and the reads repeat: the nonce and deposit code class must
 be unchanged, gas may not grow, the approved max fee must still cover the fresh
 base fee plus the approved tip, and the balance must still cover the approved
 debit. The signed raw transaction is saved before the single send; an unknown
-send result is recorded as `unknown_finality` and never resent. MCP exposes
-`apn_oneclick_source_submit` only as an `APN_FOREGROUND_APPROVAL_REQUIRED`
-handoff carrying the exact CLI command, plus the read-only status tool.
+send result is recorded as `unknown_finality` and never resent. Over MCP, submit
+is reachable only through `apn_foreground_handoff`, which returns
+`APN_FOREGROUND_APPROVAL_REQUIRED` with the exact CLI command; status is a read-only tool.
 
 `apn oneclick source status --operation <id>` keeps three observations apart:
 the safe source receipt, the provider's HTTPS status claim (bound to the saved
@@ -1298,9 +1165,6 @@ Other routes: Ethereum USDC → Arbitrum continuation after a paid approval 35 �
 WBTC Ethereum ↔ Arbitrum continuation 32/33 → 6; Base USDC → Arbitrum send step
 24 → 3; captured mainnet Base native Across observation 13 → 4; Linea native fill
 destination observation 11 → 7; a Circle approval state read about 25 → 1.
-
-`operation repair-deployment` keeps its frozen archive proofs unchanged for the
-two recognized historical migrations.
 
 GasZip (Sei, Mega): a payout is proved from the chain alone (exact signed payout,
 successful receipt with empty input and no logs at or below the safe head, block

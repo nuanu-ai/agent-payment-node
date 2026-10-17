@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmod, readFile, unlink, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { chainAsset, chainUsage, assertChainPolicy, sealChainPolicy } from "../../src/chain-policy.js";
+import { chainAsset, chainUsage, assertChainFeePolicy, assertChainPrincipal, sealChainPolicy } from "../../src/chain-policy.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
 import { SOLANA_APPROVAL_WINDOW_MS } from "../../src/rail-send-binding.js";
 import { temporaryState } from "./helpers.js";
@@ -27,9 +27,9 @@ test("principal and native fee caps stay separate and unknown reservations survi
   assert.deepEqual(usage, { principalAtomic: "1000000", nativeFeeAtomic: "2044280" });
   const { policyHash: _hash, ...body } = policy;
   const constrained = sealChainPolicy({ ...body, maximumPerTransferAtomic: "1500000", dailyLimitAtomic: "1500000" });
-  assert.throws(() => assertChainPolicy(constrained, s.account, chainAsset("solana", "usdc"), "600000", "3000000", [record], s.now), { code: "APN_OPERATION_BLOCKED" });
-  assert.throws(() => assertChainPolicy(policy, s.account, chainAsset("solana", "usdc"), "1", "3000001", [], s.now), { code: "APN_OPERATION_BLOCKED" });
-  assert.throws(() => assertChainPolicy(policy, s.account, chainAsset("solana", "sol"), "1", "5000", [], s.now), { code: "APN_OPERATION_BLOCKED" });
+  assert.throws(() => assertChainPrincipal(constrained, "600000", [record], s.now), { code: "APN_OPERATION_BLOCKED" });
+  assert.throws(() => assertChainFeePolicy(policy, s.account, chainAsset("solana", "usdc"), "3000001"), { code: "APN_OPERATION_BLOCKED" });
+  assert.throws(() => assertChainFeePolicy(policy, s.account, chainAsset("solana", "sol"), "5000"), { code: "APN_OPERATION_BLOCKED" });
 });
 
 test("confirmed principal and fee costs are charged on terminal UTC day, and confirmed revert charges only fee", async (t) => {

@@ -1,4 +1,3 @@
-import type { TronRpcPort } from "../../tron/rpc.js";
 export interface SunSwapReceiptExpectation {
     readonly transactionHash: string;
     readonly recipient: string;
@@ -21,7 +20,6 @@ export interface SunSwapReceiptValidation {
     readonly finalized: true;
     readonly receiptHash: string;
 }
-export declare function observeSunSwapReceipt(rpc: TronRpcPort, expected: SunSwapReceiptExpectation): Promise<SunSwapReceiptValidation>;
 /**
  * Proves one solidified successful V2 swap: exact txid and bytes, owner debit = call_value (input) + fee where
  * fee = energy_fee (<= fee_limit) + net_fee (<= bandwidth budget), one WTRX deposit of the input by the router, one pair

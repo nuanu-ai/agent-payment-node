@@ -1,6 +1,6 @@
-import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
+import type { EvmChainId } from "./evm-asset.js";
 import type { Address, Hex } from "./model.js";
-import type { EvmBalanceSnapshot, EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
+import type { EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
 
 export type { HttpGetRequest, HttpObservation, HttpPort } from "./x402-model.js";
 
@@ -183,7 +183,6 @@ export interface RpcPort {
   /** Arms this command's physical POST cap; a direct EVM step passes the cap derived from its read plan. */
   armEvmDirectRpcGuard?(maxPhysicalRequests?: number): void;
   /** Command-scoped, bounded public read for native Sei balance. */
-  seiNativeBalance?(address: Address, selection: EvmAssetSelection, deadlineAtMs: number): Promise<EvmBalanceSnapshot>;
   forX402Network?(chainId: EvmChainId): RpcPort & X402RpcPort;
   readonly evm?: EvmRpcPort;
   assertBaseChain(): Promise<{ readonly chainId: 8453; readonly rpcOrigin: string }>;
@@ -202,12 +201,6 @@ export interface RpcPort {
   }): Promise<FeeEstimate>;
   submitRawTransaction(rawTransaction: Hex): Promise<Hex>;
   getReceipt(transactionHash: Hex): Promise<RpcReceipt | null>;
-  getLatestConfirmedNonce(address: Address): Promise<string>;
-  getConfirmedTransactionAtNonce(
-    address: Address,
-    nonceAtomic: string,
-    startBlockNumberAtomic: string,
-  ): Promise<Hex | null>;
   /** Bounded read-only Base RPC used by the Coinbase gasless observer. */
   coinbaseGaslessCall?(method: "eth_chainId" | "eth_getTransactionCount" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getCode" |
     "eth_getStorageAt" | "eth_call" | "eth_getTransactionByHash" | "eth_getTransactionReceipt",

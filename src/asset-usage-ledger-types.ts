@@ -1,8 +1,7 @@
 import type { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW } from "./asset-usage-ledger-record.js";
 import type { AssetPolicyRail } from "./asset-policy-registry.js";
 import type { MerchantNativeActualFee } from "./x402-merchant/fee-settlement.js";
-import type { Cleanup85NativeReservationMarker } from "./asset-usage-ledger-cleanup85-native.js";
-import type { Cleanup85NativeActualSettlement } from "./circle-cleanup85-native-ledger-authority.js";
+import type { Cleanup85NativeActualSettlement, Cleanup85NativeReservationMarker } from "./legacy/cleanup85-native-records.js";
 
 export type AssetUsageState =
   | "reserved"

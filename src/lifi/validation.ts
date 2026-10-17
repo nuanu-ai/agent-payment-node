@@ -4,7 +4,6 @@ import { ApnError, type ErrorCode, type ErrorDetails } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 
 export const BRIDGE_MAX_CALLDATA_BYTES = 12 * 1024;
-export const BRIDGE_MAX_SIGNED_BYTES = 16 * 1024;
 export const BRIDGE_MAX_GAS = 5_000_000n;
 export const BRIDGE_TTL_MS = 300_000;
 export const BRIDGE_MIN_REMAINING_MS = 15_000;

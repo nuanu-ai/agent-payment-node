@@ -1,13 +1,10 @@
 import { publicKnownCircle } from "./circle-v2-evm/funding-operation.js";
 import { assertMetaMaskNativeConflictDomainAvailable } from "./metamask-native-journal.js";
-import { cleanup85UnsignedResumeExclusion } from "./circle-cleanup85-unsigned-resume.js";
-import { cleanup85ConflictExclusion } from "./circle-cleanup85-native-conflict.js";
-import { circleNativeSourceIdentity, circleSourceSettled, verifiedCircleNativeSources } from "./circle-native-admission.js";
+import { circleNativeSourceIdentity, circleSourceSettled } from "./circle-native-admission.js";
 import { assertCircleAttestation } from "./circle-v2-evm/protocol.js";
 import { GaszipFundingJournal, publicGaszipFunding } from "./lifi/gaszip-direct-journal.js";
 import { GASZIP_DIRECT_ROUTES } from "./lifi/gaszip-direct-route.js";
 import { CircleRepository } from "./circle-v2-evm/repository.js";
-import { publicCircle } from "./circle-v2-evm/operation-model.js";
 import { MerchantRepository } from "./x402-merchant/repository.js";
 import { publicMerchant, validateMerchant } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, publicPermit2Production, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
@@ -154,16 +151,6 @@ export class OperationService {
     async assertEvmAccountAvailableExcept(profileHash, chainId, account, exceptOperationId) {
         await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)], canonicalOperationId(exceptOperationId));
     }
-    async assertFinalizedCircleNativeAccountAvailable(profileHash, account, proof, exceptOperation) {
-        const sources = verifiedCircleNativeSources(proof, profileHash, account);
-        if (exceptOperation !== undefined && (exceptOperation.profileHash !== profileHash || exceptOperation.walletAddress !== account || exceptOperation.chainId !== 42161 || exceptOperation.evm?.asset.kind !== "native" || exceptOperation.evm.circleNativeAdmission === undefined || (await this.state.findOperation(exceptOperation.operationId))?.integrityHash !== exceptOperation.integrityHash))
-            throw new ApnError("APN_OPERATION_BLOCKED", "Native exclusion requires its exact saved operation.");
-        await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], exceptOperation?.operationId, false, sources);
-    }
-    async assertCleanup85NativeAccountAvailable(proof, request, exceptOperation) {
-        const v = await cleanup85ConflictExclusion(this.state, proof, request, exceptOperation);
-        await this.assertConflictDomainsAvailable(v.profileHash, () => [evmConflictDomain(42161, v.account)], exceptOperation?.operationId, false, undefined, v.parent);
-    }
     /** Only a checked saved Permit2 operation can exclude its own existing conflict claim. */
     async assertPermit2AccountAvailable(record) {
         validatePermit2ProductionRecord(record);
@@ -176,7 +163,7 @@ export class OperationService {
     async assertRailAccountAvailable(profileHash, rail, account) {
         await this.assertConflictDomainsAvailable(profileHash, () => [railConflictDomain(rail, account)]);
     }
-    async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, allowIncludedCircleSource = false, finalizedNativeSources, cleanup85Parent) {
+    async assertConflictDomainsAvailable(profileHash, domains, exceptOperationId, allowIncludedCircleSource = false, finalizedNativeSources) {
         const wanted = conflictDomainKeys(domains), coexisting = sharedConflictDomainKeys(domains);
         if (this.state.root !== undefined)
             await assertUsdtConflictDomainsAvailable(this.state.root, wanted, exceptOperationId);
@@ -200,8 +187,6 @@ export class OperationService {
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
             }
             if (operation.kind === "circle_route" && finalizedNativeSources?.get(operation.record.operationId) === circleNativeSourceIdentity(operation.record))
-                held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
-            if (operation.kind === "circle_route" && cleanup85Parent?.operationId === operation.record.operationId && cleanup85Parent.integrityHash === operation.record.integrityHash)
                 held = held?.filter(domain => !(domain.family === "evm" && domain.network === "42161" && domain.account === operation.record.sourceCustody.walletAddress.toLowerCase())) ?? null;
             const shared = held?.find((domain) => wanted.has(conflictDomainKey(domain)) &&
                 !(domain.shared === true && coexisting.has(conflictDomainKey(domain))));
@@ -245,14 +230,6 @@ export class OperationService {
             return [];
         const repo = new CircleRepository(this.state.root);
         return profileHash === undefined ? repo.listAllAny() : repo.listAny(profileHash);
-    }
-    /** Finite unsigned retry only; IDs are derived and independently checked, never caller exclusions. */
-    async assertCleanup85PreparationAccountsAvailable(record, now) {
-        const native = await cleanup85UnsignedResumeExclusion(this.state, record, now);
-        if (native === null)
-            return this.assertCircleAccountsAvailable(record, true, "cleanup");
-        await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(42161, record.sourceCustody.walletAddress)], native, true, undefined, { operationId: record.operationId, integrityHash: record.integrityHash });
-        await this.assertConflictDomainsAvailable(record.destinationProfileHash, () => [evmConflictDomain(record.destinationChain, record.destinationCustody.walletAddress)], record.operationId);
     }
     /** Both Circle signing accounts are held under their existing profile locks. */
     async assertCircleAccountsAvailable(record, exceptSaved = false, effectRole) {

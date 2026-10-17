@@ -292,14 +292,11 @@ test("ambiguous submission with unavailable receipt stays unknown without nonce 
     const approved = await makeCore({ root: temporary.root, rpc, native: new TestNative(temporary.root) }).execute({ command: "transfer.approve", operationId });
     assert.equal(operationRecord(approved).state, "unknown_finality");
     rpc.submitError = null;
-    rpc.latestNonceAtomic = "8";
-    rpc.confirmedAtNonce = `0x${"c".repeat(64)}` as Hex;
     if (outcome === "error") rpc.getReceipt = async () => { throw new Error("receipt provider unavailable"); };
     const resumed = await makeCore({ root: temporary.root, rpc, native: new TestNative(temporary.root) }).execute({ command: "operation.resume", operationId });
     assert.equal(operationRecord(resumed).state, "unknown_finality", outcome);
     assert.equal(operationRecord(resumed).terminal, false, outcome);
     assert.deepEqual(rpc.submissions, [RAW_TRANSACTION], outcome);
-    assert.equal(rpc.confirmedNonceStartBlockAtomic, null, outcome);
   }
 });
 
@@ -338,15 +335,12 @@ test("invalid log stays unknown, revert is terminal, and nonce advance without t
     command: "transfer.approve",
     operationId: supersededId,
   });
-  supersededRpc.latestNonceAtomic = "8";
-  supersededRpc.confirmedAtNonce = `0x${"c".repeat(64)}` as Hex;
   const superseded = await makeCore({ root: supersededState.root, rpc: supersededRpc, native: new TestNative(supersededState.root) }).execute({
     command: "operation.resume",
     operationId: supersededId,
   });
   assert.equal(operationRecord(superseded).state, "submitted_pending");
   assert.equal(operationRecord(superseded).terminal, false);
-  assert.equal(supersededRpc.confirmedNonceStartBlockAtomic, null, "exact-hash observation does not classify from a different transaction");
   const stillPending = await makeCore({ root: supersededState.root, rpc: supersededRpc,
     native: new TestNative(supersededState.root) }).execute({ command: "operation.resume", operationId: supersededId });
   assert.equal(operationRecord(stillPending).state, "submitted_pending");

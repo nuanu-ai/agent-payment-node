@@ -1,9 +1,5 @@
 var _a;
-import { recheckCircleNativeAdmission } from "./circle-native-admission.js";
-import { OperationService } from "./operation-service.js";
 import { assertFreshDirectEffect, publishDirectPublicEffect } from "./direct-public-attestation.js";
-import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
-import { evmAllowlistSubject } from "./evm-direct-allowlist.js";
 import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
 import { assertSigningTime } from "./x402-permit2/production-signing-facts.js";
 import { Permit2ProductionSigningFence } from "./x402-permit2/production-signing-fence.js";
@@ -14,7 +10,7 @@ import { publicPermit2Production } from "./x402-permit2/production-repository.js
 import { parseDirectIntent, parseDirectRecovery } from "./local-wallet-direct-payload.js";
 import { signedDirectTransaction } from "./local-wallet-direct-signed.js";
 import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization } from "./local-wallet-native-x402-fields.js";
-import { assertWallet, ensureX402Live, effectSlot, requestProfile, exactRecord, addressEqual, x402Address, protocol, rejected } from "./local-wallet-native-fields.js";
+import { assertWallet, ensureX402Live, effectSlot, requestProfile, protocol, rejected } from "./local-wallet-native-fields.js";
 import { performance } from "node:perf_hooks";
 import { Permit2ProductionHttps } from "./x402-permit2/production-http.js";
 import { constants } from "node:fs";
@@ -387,8 +383,9 @@ export class LocalWalletNative {
     }
     async approveAndSign(payload) {
         const intent = payload.evm === undefined ? Object.freeze(parseDirectIntent(payload)) : parseEvmNativeIntent(payload);
-        if (intent.evm?.cleanup85Cancellation !== undefined)
-            throw protocol("Finite cleanup85 signing requires its private scoped controller.");
+        // Read-only historical shapes: the cleanup85 cancellation and the 0.5.41 Circle native rider never sign again.
+        if (intent.evm?.cleanup85Cancellation !== undefined || intent.evm?.circleNativeAdmission !== undefined)
+            throw protocol("A retired historical direct transfer cannot be signed.");
         const frozen = await this.state.findOperation(intent.operationId), journal = new DirectPublicEffectJournal(this.state);
         if (frozen === null || frozen.profile !== intent.profile || frozen.state !== "started" ||
             hashObject(directCustodyPayload(frozen)) !== hashObject(payload))
@@ -427,9 +424,6 @@ export class LocalWalletNative {
                 throw protocol("Fresh direct operation changed before signing.");
             const binding = await journal.prepared(latest);
             await assertEvmNativeCustody(this.state, intent.profile, binding.custody, identity);
-            const admission = await recheckCircleNativeAdmission(this.state, latest);
-            if (admission !== null)
-                await new OperationService(this.state).assertFinalizedCircleNativeAccountAvailable(latest.profileHash, latest.walletAddress, admission, latest);
             const account = privateKeyToAccount(secret.privateKey);
             const rawTransaction = await account.signTransaction({
                 type: "eip1559",

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getBase58Decoder } from "@solana/kit";
 import { normalizeLifiStatus } from "../../src/lifi/provider.js";
-import { isEvmTransactionHash, isSolanaTransactionSignature, railStatusFamily } from "../../src/rail-status-binding.js";
+import { isEvmTransactionHash, isSolanaTransactionSignature } from "../../src/rail-status-binding.js";
+
+const railStatusFamily = (value: unknown): "evm" | "solana" | null =>
+  isEvmTransactionHash(value) ? "evm" : isSolanaTransactionSignature(value) ? "solana" : null;
 
 const AT = "2026-09-16T10:00:00.000Z";
 const EVM_HASH = `0x${"ab".repeat(32)}`;

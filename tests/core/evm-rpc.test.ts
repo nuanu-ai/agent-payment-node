@@ -322,11 +322,9 @@ test("Arbitrum receipt and supersession evidence refuse latest-only or reorged s
     throw new Error(`unexpected ${method}`);
   }, "https://rpc.example");
   await assert.rejects(rpc.evidence(operation, receipt), { code: "APN_RPC_PROTOCOL", details: { reason: "evm_safe_head_lag" } });
-  assert.equal(await rpc.confirmedAtNonce(42161, operation.walletAddress, operation.economics!.nonceAtomic, "12346"), null);
   safeNumber = "0x303a"; safeReads = 0;
   const evidence = await rpc.evidence(operation, receipt);
   assert.equal(evidence.safeBlockNumberAtomic, "12346"); assert.equal(evidence.safeBlockHash, EVM_BLOCK_HASH);
-  assert.equal(await rpc.confirmedAtNonce(42161, operation.walletAddress, operation.economics!.nonceAtomic, "12346"), operation.transactionHash);
   assert.equal(tags.includes("latest"), false);
   reorg = true; safeReads = 0;
   await assert.rejects(rpc.evidence(operation, receipt), { code: "APN_RPC_PROTOCOL", details: { reason: "evm_block_identity_changed" } });

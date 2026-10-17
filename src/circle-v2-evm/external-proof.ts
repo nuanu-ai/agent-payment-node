@@ -1,9 +1,7 @@
-import { decodeCircleMintEvents } from "./mint-events.js";
 import { getAddress, keccak256, recoverTransactionAddress, serializeTransaction, toRlp, type Address, type Hex } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "../canonical.js";
-import { CIRCLE_AMOUNT, CIRCLE_MESSENGER, CIRCLE_MIN_MINT, CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleLegacyRoute } from "./catalog.js";
-import { assertCircleAttestation, assertCircleSource, circleFail, circleHex, circleRecord, circleUint, circleWord, encodeCircleMint, oneEvent,
-  type CircleObservation, type CircleReceiptProof, type CircleSourceProof } from "./protocol.js";
+import { CIRCLE_RECIPIENT, CIRCLE_TRANSMITTER, circleLegacyRoute } from "./catalog.js";
+import { assertCircleSource, circleFail, circleHex, circleRecord, circleUint, type CircleReceiptProof, type CircleSourceProof } from "./protocol.js";
 import type { CircleOperationV1 } from "./operation-model.js";
 
 export interface CircleExternalFulfillment {
@@ -48,33 +46,6 @@ export async function circleExternalTransaction(value: unknown): Promise<{ hash:
   const hash = keccak256(raw), caller = await recoverTransactionAddress({ serializedTransaction: raw as Parameters<typeof recoverTransactionAddress>[0]["serializedTransaction"] });
   if (hash !== circleHex(t.hash, 32) || caller !== getAddress(String(t.from))) circleFail("external_transaction_hash_or_signer");
   return { hash, caller, feePrice };
-}
-export async function decodeCircleExternalDestination(op: CircleOperationV1, input: CircleObservation, usedNonce: unknown, feeRecipient?: Address): Promise<CircleReceiptProof & { caller: Address }> {
-  if (op.source === null || op.attestation === null) circleFail("external_source_attestation_required");
-  assertCircleAttestation(op.source, op.attestation); const route = circleLegacyRoute(op.destinationChain, op.destinationProfile), a = op.attestation;
-  const t = circleRecord(input.transaction), r = circleRecord(input.receipt), b = circleRecord(input.canonicalBlock), h = circleRecord(input.finalityHead);
-  const signed = await circleExternalTransaction(t), blockHash = circleExternalHeader(b); circleExternalHeader(input.recheckedBlock); circleExternalHeader(h);
-  const number = circleUint(b.number), index = circleUint(t.transactionIndex), gas = circleUint(t.gas), used = circleUint(r.gasUsed), price = circleUint(r.effectiveGasPrice);
-  if (input.chainId !== route.chainId || input.finalityTag !== "safe" || circleUint(t.chainId) !== BigInt(route.chainId) || signed.caller === route.gasPayer ||
-    getAddress(String(t.to)) !== CIRCLE_TRANSMITTER || circleHex(t.input) !== encodeCircleMint(a) || circleUint(t.value) !== 0n ||
-    circleHex(t.blockHash,32) !== blockHash || circleUint(t.blockNumber) !== number || circleHex(r.transactionHash,32) !== signed.hash ||
-    circleUint(r.transactionIndex) !== index || circleHex(r.blockHash,32) !== blockHash || circleUint(r.blockNumber) !== number || circleUint(r.status) !== 1n ||
-    getAddress(String(r.from)) !== signed.caller || getAddress(String(r.to)) !== CIRCLE_TRANSMITTER || circleHex(circleRecord(input.recheckedBlock).hash,32) !== blockHash ||
-    circleUint(h.number) < number || !Array.isArray(b.transactions) || b.transactions[Number(index)] !== signed.hash ||
-    b.transactions.filter(v => v === signed.hash).length !== 1 || gas === 0n || gas > circleUint(b.gasLimit) || used > gas || price > signed.feePrice) circleFail("external_receipt_binding");
-  for (const k of ["l1Fee", "operatorFee", "blobGasUsed", "blobGasPrice"]) if (r[k] !== undefined && circleUint(r[k]) !== 0n) circleFail("external_unmodeled_fee");
-  if (!Array.isArray(r.logs) || r.logs.length > 64) circleFail("external_logs_shape"); const seen = new Set<string>();
-  for (const value of r.logs) { const l = circleRecord(value), key = circleUint(l.logIndex).toString();
-    if (seen.has(key) || l.removed !== false || circleHex(l.transactionHash,32) !== signed.hash || circleHex(l.blockHash,32) !== blockHash ||
-      circleUint(l.blockNumber) !== number || circleUint(l.transactionIndex) !== index) circleFail("external_log_membership"); seen.add(key); }
-  decodeCircleMintEvents(a,input,feeRecipient);
-  const received = oneEvent(input,"MessageReceived",CIRCLE_TRANSMITTER).args;
-  if (circleUint(String(usedNonce)) !== 1n || getAddress(String(received.caller)) !== signed.caller || received.sourceDomain !== 3 ||
-    circleHex(received.nonce,32) !== a.nonce || circleHex(received.sender,32) !== circleWord(CIRCLE_MESSENGER) ||
-    received.finalityThresholdExecuted !== a.finalityExecuted || circleHex(received.messageBody) !== a.body ||
-    BigInt(a.expirationBlock) !== 0n && BigInt(a.expirationBlock) <= number || CIRCLE_AMOUNT - BigInt(a.feeExecutedAtomic) !== BigInt(a.receivedAtomic) || BigInt(a.receivedAtomic) < CIRCLE_MIN_MINT) circleFail("external_message_binding");
-  return { caller:signed.caller,transactionHash:signed.hash,blockHash,blockNumberAtomic:number.toString(),finalityBlockHash:circleHex(h.hash,32),finalityBlockNumberAtomic:circleUint(h.number).toString(),
-    transactionHashBinding:hashObject(t),finalityTag:"safe",receiptHash:hashObject(r),logsHash:hashObject(r.logs),actualFeeAtomic:((route.gasBilling === "limit" ? gas : used)*price).toString() };
 }
 export function externalClaimKey(op: CircleOperationV1): string {
   if (op.attestation === null || op.source === null) circleFail("external_claim_source");

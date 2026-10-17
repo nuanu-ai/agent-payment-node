@@ -1,6 +1,6 @@
 import type { GaslessTransport } from "../gasless/https.js";
 import type { Address, Hex } from "../model.js";
-import type { UsdtAccountState, UsdtChainPort, UsdtSponsorPort } from "./engine.js";
+import type { UsdtAccountState, UsdtSponsorPort } from "./engine.js";
 import type { UsdtRecoveryPort } from "./recovery.js";
 import type { UsdtUserOperation } from "./userop.js";
 /** One JSON-RPC exchange over the pinned public HTTPS transport; exact envelope, no retry, bounded provider text. */
@@ -45,6 +45,4 @@ export declare function usdtSponsorPort(transport: GaslessTransport): UsdtSponso
 export declare function usdtSendPort(transport: GaslessTransport): (op: UsdtUserOperation) => Promise<Hex>;
 /** One keyless locator read and bounded public chain reads; the caller supplies its paced transport. */
 export declare function usdtRecoveryPort(transport: GaslessTransport, rpcUrl: string): UsdtRecoveryPort;
-/** Canonical Ethereum reads through the owner's explicit `APN_ETHEREUM_RPC_URL`; no default endpoint exists. */
-export declare function usdtChainPort(transport: GaslessTransport, rpcUrl: string): UsdtChainPort;
 export {};

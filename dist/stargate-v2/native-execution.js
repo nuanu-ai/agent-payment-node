@@ -6,7 +6,6 @@ import { privateKeyToAccount } from "viem/accounts";
 import { hashObject } from "../canonical.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
-import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "./abi.js";
@@ -151,8 +150,6 @@ async function executeLocked(operationId, ports, journal) {
         return await observeOnly(operation, ports, journal);
     if (operation.phase === "observed" || operation.phase === "failed_confirmed_revert")
         return await followPhaseUsage(operation, ports);
-    if (operation.finalityPolicyProvenance === "derived_legacy_v1")
-        fail("APN_OPERATION_BLOCKED", "legacy_operation_nonresumable");
     if (operation.policy === undefined)
         fail("APN_REPREPARE_REQUIRED", "owner_policy_binding_required");
     const now = ports.now ?? Date.now;

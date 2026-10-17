@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
-import { validateAssetPolicyRegistry } from "../../asset-policy-registry.js";
 import { ApnError } from "../../errors.js";
+import { assertActiveSwapPolicyUnchanged } from "../family-guards.js";
 import { validateSwapOperation } from "../model.js";
 /**
  * Owner admission for the local non-custodial Solana wallet: the profile's active sealed policy must still be the one
@@ -15,13 +15,7 @@ export class OrcaLocalOwnerAdmission {
     }
     async assert(operationValue) {
         const operation = validateSwapOperation(operationValue);
-        const active = await this.policy(operation.quote.profile);
-        if (active === null)
-            blocked("No active owner swap admission is installed for this profile.", "swap_owner_admission_required");
-        const registry = validateAssetPolicyRegistry(active);
-        if (registry.policyDigest !== operation.policyDigest || registry.registryVersion !== operation.policyVersion) {
-            blocked("The active owner policy changed after preparation.", "swap_policy_drift");
-        }
+        await assertActiveSwapPolicyUnchanged(this.policy, operation);
         const account = await this.localAccount(operation);
         return { account, accountBindingHash: orcaAccountBindingHash(account), admissionHash: domainHash("apn.orca-owner-admission.v1", canonicalJson({ account, operationId: operation.operationId, policyDigest: operation.policyDigest, mechanismDigest: operation.mechanismDigest })) };
     }

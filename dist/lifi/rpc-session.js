@@ -1,10 +1,10 @@
-import { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_DEFAULT_LOGICAL_ITEMS, RPC_DEFAULT_HTTP_REQUESTS, RPC_DEFAULT_HTTP_ATTEMPTS, RPC_DEFAULT_DEADLINE_MS, rpcEndpointIdentity, invalidRpcReadMethod, assertRpcReadMethod, approvedTransportReason, parseRetryAfter, telemetryDetails, rpcMethodClass, positiveBound, identity, decodeRpcValue, cloneRpcValue, isSessionCacheable, jsonRpcRateLimit, } from "./rpc-session-helpers.js";
-export { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
+import { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_BATCH_MAX_ITEMS, RPC_DEFAULT_LOGICAL_ITEMS, RPC_DEFAULT_HTTP_REQUESTS, RPC_DEFAULT_HTTP_ATTEMPTS, RPC_DEFAULT_DEADLINE_MS, rpcEndpointIdentity, invalidRpcReadMethod, assertRpcReadMethod, approvedTransportReason, parseRetryAfter, telemetryDetails, rpcMethodClass, positiveBound, identity, decodeRpcValue, cloneRpcValue, isSessionCacheable, jsonRpcRateLimit, } from "./rpc-session-helpers.js";
+export { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
 import { canonicalJson, hashObject } from "../canonical.js";
 import { isDeepStrictEqual } from "node:util";
 import { ApnError } from "../errors.js";
-import { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity } from "./rpc-scheduler.js";
-export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity, rpcProviderFamily } from "./rpc-scheduler.js";
+import { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS } from "./rpc-scheduler.js";
+export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcProviderFamily } from "./rpc-scheduler.js";
 /** Command-scoped read coordination with no persistence hook across approval or signing boundaries. */
 export class RpcReadSession {
     physicalBudget;
@@ -12,7 +12,6 @@ export class RpcReadSession {
     maxHttpRequests;
     maxHttpAttempts;
     maxReadAttempts;
-    archiveDeploymentBatchMaxItems;
     now;
     wait;
     deadline;
@@ -43,10 +42,6 @@ export class RpcReadSession {
         this.maxHttpRequests = positiveBound(options.maxHttpRequests ?? RPC_DEFAULT_HTTP_REQUESTS, "maxHttpRequests");
         this.maxHttpAttempts = positiveBound(options.maxHttpAttempts ?? RPC_DEFAULT_HTTP_ATTEMPTS, "maxHttpAttempts");
         this.maxReadAttempts = options.maxReadAttempts ?? MAX_READ_ATTEMPTS;
-        this.archiveDeploymentBatchMaxItems = positiveBound(options.archiveDeploymentBatchMaxItems ?? RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, "archiveDeploymentBatchMaxItems");
-        if (this.archiveDeploymentBatchMaxItems > RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS) {
-            throw new ApnError("APN_RPC_CONFIG", "RPC archiveDeploymentBatchMaxItems bound is invalid.");
-        }
         const deadlineMs = positiveBound(options.deadlineMs ?? RPC_DEFAULT_DEADLINE_MS, "deadlineMs");
         this.now = options.now ?? (() => Date.now());
         this.wait = options.wait ?? (async (milliseconds) => await new Promise((resolve) => setTimeout(resolve, milliseconds)));
@@ -122,7 +117,7 @@ export class RpcReadSession {
         }
         this.reserveLogical(method);
         this.reserveRequest(method);
-        const operation = this.retry(origin, method, () => oneAttempt(method, params), true, [method])
+        const operation = this.retry(origin, method, () => oneAttempt(method, params), [method])
             .then((raw) => { if (isSessionCacheable(method, params, raw))
             this.cache.set(key, cloneRpcValue(raw)); return raw; })
             .finally(() => this.inflight.delete(key));
@@ -134,17 +129,13 @@ export class RpcReadSession {
      * known smaller batch capability receives the same logical batch in sequential chunks, committed to the cache atomically.
      */
     async readBatch(origin, chainId, items, maxItemsPerRequest = RPC_BATCH_MAX_ITEMS) {
-        return await this.readBatchBounded(origin, chainId, items, maxItemsPerRequest, false, true, true);
-    }
-    /** One logical archive deployment read, transported sequentially in provider-sized chunks with one atomic cache commit. */
-    async readArchiveDeploymentBatch(origin, chainId, items) {
-        return await this.readBatchBounded(origin, chainId, items, this.archiveDeploymentBatchMaxItems, false, false);
+        return await this.readBatchBounded(origin, chainId, items, maxItemsPerRequest, false, true);
     }
     /** One atomic receipt identity read. Partial cache hits never remove chainId or receipt from the logical read. */
     async readReceiptBatch(origin, chainId, items, maxItemsPerRequest) {
         return await this.readBatchBounded(origin, chainId, items, maxItemsPerRequest, true);
     }
-    async readBatchBounded(origin, chainId, items, maxItemsPerRequest, atomicCache, retryHttp500 = true, oneRequest = false) {
+    async readBatchBounded(origin, chainId, items, maxItemsPerRequest, atomicCache, oneRequest = false) {
         if (!Array.isArray(items) || items.length === 0)
             return [];
         for (const item of items) {
@@ -154,7 +145,7 @@ export class RpcReadSession {
         }
         const batchKey = hashObject({ endpoint: rpcEndpointIdentity(origin), chainId, items: items.map((item) => ({
                 key: hashObject({ method: item.method, params: item.params }), cachePolicy: item.cachePolicy ?? "auto",
-            })), maxItemsPerRequest, atomicCache, retryHttp500, oneRequest });
+            })), maxItemsPerRequest, atomicCache, oneRequest });
         const current = this.batchInflight.get(batchKey);
         if (current !== undefined) {
             this.assertBeforeQueue("batch");
@@ -162,12 +153,12 @@ export class RpcReadSession {
             const execution = await current;
             return this.decodeBatch(items, execution.raw);
         }
-        const operation = this.executeBatch(origin, chainId, items, maxItemsPerRequest, atomicCache, retryHttp500, oneRequest)
+        const operation = this.executeBatch(origin, chainId, items, maxItemsPerRequest, atomicCache, oneRequest)
             .finally(() => this.batchInflight.delete(batchKey));
         this.batchInflight.set(batchKey, operation);
         return cloneRpcValue((await operation).decoded);
     }
-    async executeBatch(origin, chainId, items, maxItemsPerRequest, atomicCache, retryHttp500, oneRequest) {
+    async executeBatch(origin, chainId, items, maxItemsPerRequest, atomicCache, oneRequest) {
         const rawResults = new Array(items.length), decodedResults = new Array(items.length);
         const unique = new Map();
         const atomicCacheHit = atomicCache && items.every((item) => item.cachePolicy !== "none" &&
@@ -219,7 +210,7 @@ export class RpcReadSession {
             if (!continuation)
                 this.reserveRequest(chunkMethod);
             const body = canonicalJson(chunk.length === 1 ? chunk[0] : chunk);
-            const response = await this.retry(origin, chunkMethod, async () => await attempt(body), retryHttp500, chunk.map((row) => row.method), continuation);
+            const response = await this.retry(origin, chunkMethod, async () => await attempt(body), chunk.map((row) => row.method), continuation);
             const responses = chunk.length === 1 ? [response] : response;
             if (!Array.isArray(responses))
                 throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Bridge RPC endpoint does not support JSON-RPC batching.", { rpcMethod: chunkMethod });
@@ -317,7 +308,7 @@ export class RpcReadSession {
             this.budgetError(method, "maxHttpRequests");
         this.httpRequests += 1;
     }
-    async retry(origin, method, oneAttempt, retryHttp500 = true, methodsForAttempt = [method], continuation = false) {
+    async retry(origin, method, oneAttempt, methodsForAttempt = [method], continuation = false) {
         for (let attempt = 0;; attempt += 1) {
             const counted = !continuation || attempt > 0;
             try {
@@ -332,10 +323,7 @@ export class RpcReadSession {
             }
             catch (error) {
                 const http = error instanceof RpcHttpFailure ? error : undefined, transport = approvedTransportReason(error);
-                // Archive deployment HTTP 500 commonly represents deterministic provider rejection (including an oversized batch).
-                // Replaying the identical chunk cannot change that shape; other bounded reads retain their existing retry contract.
-                const retryable = http !== undefined ? http.status === 408 || http.status >= 500 && http.status <= 599 &&
-                    (http.status !== 500 || retryHttp500) : transport !== undefined;
+                const retryable = http !== undefined ? http.status === 408 || http.status >= 500 && http.status <= 599 : transport !== undefined;
                 if (!retryable || attempt + 1 >= this.maxReadAttempts) {
                     if (http !== undefined) {
                         if (http.status === 429)

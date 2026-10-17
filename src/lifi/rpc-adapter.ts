@@ -11,7 +11,6 @@ import type { BridgeBlock, BridgeDestinationTransactionProof, BridgeEnvelope, Br
 import type { BridgeObservationOptions, BridgeRpcPort } from "./ports.js";
 import { bridgeFeeQuote, rpcBlockValue, rpcExpectedChainValue, rpcFeeBlockValue, rpcQuantityValue, rpcTransactionInput, rpcWordValue } from "./rpc-batch-codec.js";
 import { ERC20_READ, GAS_ORACLE, GAS_ORACLE_ABI, L1_BLOCK } from "./rpc-deployment.js";
-import { legacyBaseFees, legacyDeploymentProof } from "./rpc-legacy-proof.js";
 import { type BridgeBatchCall, type BridgeObservationContext, observeCanonical } from "./rpc-observation.js";
 import type { RpcBatchReadItem, RpcReadSession } from "./rpc-session.js";
 import { quantity, submitDirect } from "./rpc-support.js";
@@ -60,11 +59,6 @@ export class BridgeRpc implements BridgeRpcPort {
     if (tag !== "latest" && tag !== "safe" && block.numberAtomic !== bridgeUint(tag).toString()) bridgeFailure("APN_RPC_PROTOCOL", "bridge_block_number");
     if (tag === "latest") this.commandLatestBlock = block;
     return block;
-  }
-  /** The legacy full historical proof at one block, only for the frozen migration proofs. */
-  async deployment(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, block?: BridgeBlock, exactHashPin = false) {
-    return await legacyDeploymentProof(this.chainId, this.origin, this.batchCall, tool, peerChainId, token,
-      block ?? await this.block("safe"), exactHashPin);
   }
   /** The light deployment check of one role at the moving head, with that head: one POST. */
   async deploymentCheck(tool: BridgeTool, peerChainId: BridgeChainId, token: Address, role: "source" | "destination") {
@@ -182,7 +176,6 @@ export class BridgeRpc implements BridgeRpcPort {
       { transaction: BridgeDestinationTransactionProof; receipt: BridgeProtocolReceipt } | null;
   }
   private observation(options?: BridgeObservationOptions): BridgeObservationContext {
-    return { chainId: this.chainId, origin: this.origin, call: this.call, batchCall: this.batchCall, receipts: this.receipts,
-      ...(options?.legacyBaseFees === true ? { legacyFees: legacyBaseFees(this.chainId, this.call, this.batchCall) } : {}) };
+    return { chainId: this.chainId, origin: this.origin, call: this.call, batchCall: this.batchCall, receipts: this.receipts };
   }
 }

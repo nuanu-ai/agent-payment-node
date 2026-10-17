@@ -2,9 +2,9 @@ import type { CircleFundingBindingV2 } from "./funding-binding.js";
 /** Pure finite preflight admission. Runtime must obtain all inputs from bounded canonical RPC/API reads under account locks. */
 import { encodePacked, keccak256, type Address, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
-import { CIRCLE_AMOUNT, CIRCLE_DEPLOYMENT_PINS, CIRCLE_MAX_FEE, CIRCLE_MIN_MINT, CIRCLE_MINTER,
-  CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, type CircleDestinationChain } from "./catalog.js";
-import { assertCircleAttestation, assertCircleSource, circleFail, circleHex, circleRecord, circleUint, circleWord,
+import { CIRCLE_DEPLOYMENT_PINS, CIRCLE_MINTER,
+  CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, type CircleDestinationChain } from "./catalog.js";
+import { assertCircleAttestation, assertCircleSource, circleFail, circleHex, circleUint, circleWord,
   type CircleAttestation, type CircleSourceProof } from "./protocol.js";
 export interface CircleContractSnapshot { readonly address: string; readonly proxyCodeHash: string;
   readonly implementation: string; readonly implementationCodeHash: string | null; }
@@ -51,39 +51,9 @@ export interface CircleFeeQuote { readonly schemaVersion: "apn.circle-fast-fee.v
   readonly amountAtomic: "40100"; readonly maxFeeAtomic: "100"; readonly minMintAtomic: "40000";
   readonly fetchedAtMs: number; readonly expiresAtMs: number; readonly responseHash: string; readonly integrityHash: string; }
 /** Ceil exact rational basis points. JSON floating values are accepted only as finite ordinary decimal numbers. */
-export function quoteCircleFastFee(chain: CircleDestinationChain, value: unknown, fetchedAtMs: number, nowMs: number): CircleFeeQuote {
-  const route = circleRoute(chain);
-  if (!Array.isArray(value) || value.length > 4 || !Number.isSafeInteger(fetchedAtMs) || fetchedAtMs > nowMs || nowMs - fetchedAtMs > 30_000) circleFail("fee_quote_shape_age");
-  const rows = value.map(circleRecord).filter(x => x.finalityThreshold === 1000);
-  if (rows.length !== 1) circleFail("fast_fee_unavailable");
-  const rate = rows[0]!.minimumFee;
-  if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0 || !/^\d+(?:\.\d{1,6})?$/u.test(String(rate))) circleFail("fee_rate");
-  const [whole, fraction = ""] = String(rate).split("."), denominator = 10n ** BigInt(fraction.length) * 10_000n;
-  const numerator = BigInt(`${whole}${fraction}`), fee = (CIRCLE_AMOUNT * numerator + denominator - 1n) / denominator;
-  if (fee > CIRCLE_MAX_FEE || CIRCLE_AMOUNT - fee < CIRCLE_MIN_MINT) circleFail("fee_cap_or_mint_floor");
-  const body = { schemaVersion: "apn.circle-fast-fee.v1" as const, sourceDomain: 3 as const,
-    destinationDomain: route.domain, minimumFeeBps: String(rate), quotedFeeAtomic: fee.toString(),
-    amountAtomic: "40100" as const, maxFeeAtomic: "100" as const, minMintAtomic: "40000" as const,
-    fetchedAtMs, expiresAtMs: fetchedAtMs + 30_000, responseHash: hashObject(value) };
-  return { ...body, integrityHash: hashObject(body) };
-}
-export function assertCircleFeeQuote(quote: CircleFeeQuote, chain: CircleDestinationChain, nowMs: number): void {
-  const { integrityHash, ...body } = quote;
-  if (integrityHash !== hashObject(body) || quote.schemaVersion !== "apn.circle-fast-fee.v1" || quote.sourceDomain !== 3 ||
-    quote.destinationDomain !== circleRoute(chain).domain || quote.amountAtomic !== "40100" || quote.maxFeeAtomic !== "100" || quote.minMintAtomic !== "40000" ||
-    quote.expiresAtMs !== quote.fetchedAtMs + 30_000 || nowMs < quote.fetchedAtMs || nowMs >= quote.expiresAtMs ||
-    circleUint(quote.quotedFeeAtomic) > CIRCLE_MAX_FEE) circleFail("fee_quote_expired_or_integrity");
-}
 export interface CircleAccountPreflight { readonly chainId: number; readonly address: Address;
   readonly nativeBalanceAtomic: string; readonly usdcBalanceAtomic: string; readonly allowanceAtomic: string;
   readonly latestNonceAtomic: string; readonly pendingNonceAtomic: string; }
-export function verifyCircleSourceAccount(account: CircleAccountPreflight): { readonly approvalRequired: boolean; readonly nonceAtomic: string } {
-  const allowance = circleUint(account.allowanceAtomic);
-  if (account.chainId !== 42161 || account.address !== CIRCLE_SOURCE_OWNER || circleUint(account.usdcBalanceAtomic) < CIRCLE_AMOUNT ||
-    circleUint(account.nativeBalanceAtomic) < 30_000_000_000_000n || account.latestNonceAtomic !== account.pendingNonceAtomic ||
-    ![0n, CIRCLE_AMOUNT].includes(allowance)) circleFail("source_account");
-  circleUint(account.latestNonceAtomic); return { approvalRequired: allowance === 0n, nonceAtomic: account.latestNonceAtomic };
-}
 /** `gasPayer` is the operation's own destination custody wallet, which signs and pays the mint. */
 export function verifyCircleDestinationAccount(account: CircleAccountPreflight, chain: CircleDestinationChain, gasPayer: Address): string {
   const route = circleRoute(chain);

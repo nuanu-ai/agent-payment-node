@@ -4,7 +4,7 @@ import { encodeFunctionData, parseAbi, type Address } from "viem";
 import {
   SUNSWAP_PIN_CATALOG, SUNSWAP_PIN_CATALOG_SHA256, SUNSWAP_USDT, SUNSWAP_V2_ROUTER, SUNSWAP_V2_WTRX_USDT_PAIR, SUNSWAP_WTRX,
   buildSunSwapUnsignedTransaction, createSunSwapQuoteSnapshot, decodeSunSwapCalldata, encodeSunSwapCalldata, loadSunSwapPinCatalog,
-  observeSunSwapReceipt, parseSunSwapV2SwapCall, simulateSunSwapTransaction, validateSunSwapReceipt, validateSunSwapUnsignedTransaction,
+  parseSunSwapV2SwapCall, simulateSunSwapTransaction, validateSunSwapReceipt, validateSunSwapUnsignedTransaction,
   type SunSwapCalldataIntent, type SunSwapUnsignedIntent,
 } from "../../src/core.js";
 import { tronHex } from "../../src/tron/codec.js";
@@ -132,9 +132,6 @@ test("V2 receipt proves solidified success, exact debit, WTRX deposit, pair swap
   const bigints: any = structuredClone(fixture); bigints.info.blockNumber = 123n; bigints.info.fee = 12345n;
   bigints.transaction.raw_data.contract[0].parameter.value.call_value = 1_000_000n;
   assert.equal(validateSunSwapReceipt(bigints.transaction, bigints.info, "124", expected).trxDebitSun, "1012345");
-  const calls = new FakeSunSwapRpc(); calls.call = async (method) => method.endsWith("gettransactionbyid") ? fixture.transaction :
-    method.endsWith("gettransactioninfobyid") ? fixture.info : { block_header: { raw_data: { number: 124n } } };
-  assert.equal((await observeSunSwapReceipt(calls, expected)).transactionHash, tx.txID);
   for (const mutate of [
     (v: any) => { v.info.log[2].data = (299_999n).toString(16).padStart(64, "0"); }, (v: any) => { v.info.log[2].topics[2] = word(SUNSWAP_USDT); },
     (v: any) => { v.info.log[2].topics[1] = word(OWNER); }, (v: any) => { v.info.log[4].topics[2] = word(SUNSWAP_USDT); },

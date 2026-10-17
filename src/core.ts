@@ -11,7 +11,6 @@ import { inspectX402 } from "./x402-http.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
-import { assertLocalNetworkProfile } from "./x402-network.js";
 import { evmWalletBalance } from "./evm-wallet-balance.js";
 import { assertDirectEvmProfile } from "./evm-transfer-prepare.js";
 import { readProfilePortfolio } from "./portfolio/command.js";
@@ -113,11 +112,8 @@ export class ApnCore {
         if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay native prepare runtime is unavailable.");
         return operationOutcome(await service.prepareNative(request));
       }
-      case "relay.preflight": {
-        const service = this.context.relayPreflight;
-        if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Relay preflight runtime is unavailable.");
-        return dataOutcome(await service.preflight(request), "read_only_rpc_observation");
-      }
+      case "relay.route":
+        throw new ApnError("APN_INTERNAL", "A Relay route request must be resolved before the core runs.");
       case "relay.execute": {
         canonicalOperationId(request.operationId);
         const service = this.context.relayExecute;
@@ -178,7 +174,7 @@ export class ApnCore {
         return operationOutcome(await service.prepare(request));
       }
       case "circle.evm.prepare": case "circle.evm.approve-source": case "circle.evm.approve-mint": case "circle.evm.observe":
-      case "circle.evm.adopt-external-mint": case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.cleanup-nonce": case "circle.evm.cleanup85-prepare": case "circle.evm.cleanup85-cancel": case "circle.evm.cleanup86-approve": case "circle.evm.status": case "circle.approval.prepare":
+      case "circle.evm.adopt-external-mint": case "circle.evm.refresh-attestation": case "circle.evm.cleanup": case "circle.evm.status": case "circle.approval.prepare":
       case "circle.approval.execute": case "circle.approval.status": case "circle.source.submit": return await executeCircleCommand(request, this.context);
       case "stargate.native.execute": case "stargate.native.observe": case "stargate.native.status": case "stargate.native.receipt": {
         const service = this.context.stargateNative;
@@ -258,18 +254,12 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
       case "gasless.usdt.status": case "gasless.usdt.resume":
         if (this.context.gaslessUsdt === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
           "Gasless USDT operation command runtime is unavailable.", { reason: "gasless_usdt_command_runtime_unavailable" });
-        if (request.command === "gasless.usdt.status") {
-          try { return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash).statusBound(request.operationId)); }
-          catch (error) {
-            if (!(error instanceof ApnError) || error.code !== "APN_OPERATION_NOT_FOUND") throw error;
-          }
-        }
         if (request.command === "gasless.usdt.resume") {
           if (this.context.gaslessUsdtExecute === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
             "Gasless USDT execution runtime is unavailable.", { reason: "gasless_usdt_command_runtime_unavailable" });
           return operationOutcome(await this.context.gaslessUsdtExecute.resume(request.profileHash, request.operationId));
         }
-        return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash).status(request.operationId));
+        return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash).statusBound(request.operationId));
       case "gasless.transfer.approve-sealed": return operationOutcome(await this.gasless.approveSealed(request.operationId));
       case "gasless.transfer.approve": {
         const stored = await this.operations.required(request.operationId), { kind } = stored;
@@ -334,7 +324,6 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
       case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
       case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, request.chainId, request.payer), "seller_challenge_static");
       case "x402.fetch.prepare": {
-        await assertLocalNetworkProfile(this.context, request.profile, request.chainId);
         if ((request.chainId ?? 8453) === 8453) await this.providerWallet.assertPaymentAvailable(request.profile, "x402", request.idempotencyKey);
         return operationOutcome(await this.x402.prepare(request));
       }
@@ -420,7 +409,6 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
         }
         return operationOutcome(await this.transfer.resume(request.operationId, request.waitSeconds, request.observeOnly, request.coinbaseObservationRpc));
       }
-      case "operation.repair-deployment": return dataOutcome(await this.bridges.repairDeployment(request.operationId), "local_journal_migration");
       case "operation.abandon": return operationOutcome(await this.operationAbandon.abandon(request.operationId));
       case "operation.recover-provider-request": return operationOutcome(
         await this.transfer.recoverProviderRequest(request.operationId, request.providerRequestId),

@@ -1,5 +1,5 @@
 import { type Address, type Hex } from "viem";
-import { type CircleObservation, type CircleReceiptProof, type CircleSourceProof } from "./protocol.js";
+import { type CircleReceiptProof, type CircleSourceProof } from "./protocol.js";
 import type { CircleOperationV1 } from "./operation-model.js";
 export interface CircleExternalFulfillment {
     readonly schemaVersion: "apn.circle-external-fulfillment.v1";
@@ -39,9 +39,6 @@ export declare function circleExternalTransaction(value: unknown): Promise<{
     hash: Hex;
     caller: Address;
     feePrice: bigint;
-}>;
-export declare function decodeCircleExternalDestination(op: CircleOperationV1, input: CircleObservation, usedNonce: unknown, feeRecipient?: Address): Promise<CircleReceiptProof & {
-    caller: Address;
 }>;
 export declare function externalClaimKey(op: CircleOperationV1): string;
 export declare function validateExternalFulfillment(p: CircleExternalFulfillment, op: CircleOperationV1): void;

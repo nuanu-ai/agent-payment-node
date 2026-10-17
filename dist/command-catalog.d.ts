@@ -1,16 +1,14 @@
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
-import { assertCompatibleManifestEvolution, validateCommandManifest } from "./command-manifest-validation.js";
 import type { CommandDefinition, CommandGroup } from "./command-catalog-types.js";
 export { renderHelp, renderReadmeCommandReference };
-export { assertCompatibleManifestEvolution, validateCommandManifest };
 export * from "./command-catalog-parser.js";
 export type { ApprovalClass, CommandDefinition, CommandGroup, CommandOption, EffectClass, ScalarType } from "./command-catalog-types.js";
 export declare const COMMAND_GROUPS: readonly CommandGroup[];
 export declare const COMMANDS: readonly CommandDefinition[];
 export declare const COMMAND_MANIFEST: {
-    readonly schema_version: "apn.command-manifest.v1";
+    readonly schema_version: "apn.command-manifest.v2";
     readonly product: "agent-payment-node";
-    readonly product_version: "0.5.44";
+    readonly product_version: "0.5.45";
     readonly cli_envelope_version: "apn.cli.v1";
     readonly compatibility: {
         readonly additive_optional_within_version: true;
@@ -32,4 +30,5 @@ export declare const COMMAND_MANIFEST: {
     };
     readonly groups: readonly CommandGroup[];
     readonly commands: readonly CommandDefinition[];
+    readonly removed_v1_commands: readonly import("./command-manifest-migration.js").RemovedV1Command[];
 };

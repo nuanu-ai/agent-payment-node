@@ -20,8 +20,8 @@ import {
   type SettlementEvidence,
   type X402OperationRecord,
 } from "../../src/x402-state-integrity.js";
-import { TestClock, TestRpc, makeCore, temporaryState } from "./helpers.js";
-import { QueuedHttp, challengeObservation, paidObservation } from "./x402-helpers.js";
+import { TestClock, makeCore, temporaryState } from "./helpers.js";
+import { QueuedHttp, RecoveryRpc, challengeObservation, paidObservation } from "./x402-helpers.js";
 import {
   X402_TRANSACTION,
   X402_URL,
@@ -128,7 +128,7 @@ async function authorizedFixture(t: TestContext): Promise<{
   readonly operationId: string;
   readonly native: ExactPaymentNative;
   readonly http: QueuedHttp;
-  readonly rpc: TestRpc;
+  readonly rpc: RecoveryRpc;
   readonly root: string;
   readonly clock: TestClock;
 }>;
@@ -144,7 +144,7 @@ async function authorizedFixture(t: TestContext, input: {
   readonly operationId: string;
   readonly native: ExactPaymentNative;
   readonly http: QueuedHttp;
-  readonly rpc: TestRpc;
+  readonly rpc: RecoveryRpc;
   readonly root: string;
   readonly clock: TestClock;
 }>;
@@ -160,7 +160,7 @@ async function authorizedFixture(t: TestContext, input: {
   readonly operationId: string;
   readonly native: ExactPaymentNative;
   readonly http: QueuedHttp;
-  readonly rpc: TestRpc;
+  readonly rpc: RecoveryRpc;
   readonly root: string;
   readonly clock: TestClock;
 }> {
@@ -178,7 +178,7 @@ async function authorizedFixture(t: TestContext, input: {
     input.paidOutcome ?? paidObservation({ paymentResponseHeader: canonicalPaymentResponseHeader(settlement) }),
   ], input.onHttpCall);
   const native = new ExactPaymentNative();
-  const rpc = new TestRpc();
+  const rpc = new RecoveryRpc();
   rpc.x402Evidence = { ...rpc.x402Evidence, address: ACCOUNT.address };
   const clock = input.clock ?? new TestClock();
   const core = makeCore({ root: temporary.root, native, rpc, http, clock });
@@ -244,12 +244,12 @@ test("a fresh Node process resumes the frozen POST with the original authorizati
   const fixture = await authorizedFixture(t, { httpRequest });
   const before = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
   const child = await promisify(execFile)(process.execPath, ["--input-type=module", "-e", `
-    import { makeCore, TestRpc, TestClock } from './dist-test/tests/core/helpers.js';
-    import { ExactX402Native, QueuedHttp, paidObservation } from './dist-test/tests/core/x402-helpers.js';
+    import { makeCore, TestClock } from './dist-test/tests/core/helpers.js';
+    import { ExactX402Native, QueuedHttp, RecoveryRpc, paidObservation } from './dist-test/tests/core/x402-helpers.js';
     import { canonicalPaymentResponseHeader, X402_TRANSACTION } from './dist-test/tests/core/x402-vectors.js';
     const input = JSON.parse(process.argv[1]);
     const native = new ExactX402Native(); native.material = input.material;
-    const rpc = new TestRpc(); rpc.x402Evidence = { ...rpc.x402Evidence, address: input.wallet };
+    const rpc = new RecoveryRpc(); rpc.x402Evidence = { ...rpc.x402Evidence, address: input.wallet };
     const clock = new TestClock(); clock.value = new Date(input.now);
     const response = { ...paidObservation(), status: 201, bodyBytes: Buffer.from([0, 255, 1]),
       rawHeaderPairs: [['content-type', 'application/octet-stream'], ['payment-response', canonicalPaymentResponseHeader({
@@ -511,6 +511,8 @@ test("post-exposure transport ambiguity is durable and never retries implicitly"
   assert.equal(JSON.stringify(resumed).includes("raw seller canary"), false);
   const callCount = fixture.http.calls.length;
   const nativeCount = fixture.native.calls.length;
+  // Once the nonce reads consumed at the safe head, no resend is allowed.
+  fixture.rpc.authorizationStateValue = true;
   const second = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(second.ok, true);
   assert.equal(fixture.http.calls.length, callCount);
@@ -528,6 +530,7 @@ test("missing settlement response persists an observed unknown outcome without e
   assert.equal(operation.settlementResponseObservation, undefined);
   assert.equal(operation.resultLink, undefined);
   assert.equal(JSON.stringify(resumed).includes("forecast"), false);
+  fixture.rpc.authorizationStateValue = true;
   await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(fixture.http.calls.length, 2);
 });
@@ -700,6 +703,7 @@ test("an unreadable result body keeps its payment response; duplicate control he
         assert.equal(operation.attempts[0]?.phase, "ambiguous");
         assert.equal(operation.resultLink, undefined);
       }
+      fixture.rpc.authorizationStateValue = true;
       await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
       assert.equal(fixture.http.calls.length, 2);
       assert.equal(fixture.rpc.submissions.length, 0);
@@ -861,7 +865,8 @@ test("one advertised-ID result recovery reuses identical material and cannot sen
   const recovered = await restarted.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(recovered.ok, true, JSON.stringify(recovered));
   operation = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
-  assert.equal(operation.state, "seller_result_recovery_pending");
+  // The recovered result joins the already proven settlement, so the operation completes.
+  assert.equal(operation.state, "completed");
   assert.deepEqual(operation.attempts.map((attempt) => [attempt.purpose, attempt.phase]), [
     ["payment", "observed"],
     ["result_recovery", "observed"],
@@ -911,7 +916,8 @@ test("non-success cached recovery is observed without replacing proven settlemen
   const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
   const after = await fixture.core.context.state.findX402Operation(fixture.operationId) as X402OperationRecord;
-  assert.equal(after.state, "seller_result_recovery_pending");
+  // The single advertised-ID recovery attempt came back without a result: settled, result unavailable.
+  assert.equal(after.state, "failed_settled_without_result");
   assert.equal(after.attempts.at(-1)?.purpose, "result_recovery");
   assert.equal(after.attempts.at(-1)?.phase, "observed");
   assert.equal(

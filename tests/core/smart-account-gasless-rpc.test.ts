@@ -5,7 +5,7 @@ import type { GaslessTransport } from "../../src/gasless/https.js";
 import { sha256 } from "../../src/canonical.js";
 import type { Hex } from "../../src/model.js";
 import { readCurrentAllowance, readCurrentNonce } from "../../src/smart-account-gasless/chain/allowance.js";
-import { initialSmartAccountGaslessCursor } from "../../src/smart-account-gasless/chain/scan.js";
+import { initialSmartAccountGaslessCursor } from "./smart-account-gasless-fixtures.js";
 import { captureSmartAccountGaslessSnapshot, recheckSmartAccountPreparation } from
   "../../src/smart-account-gasless/chain/snapshot.js";
 import { SmartAccountGaslessRpc, smartAccountGaslessRpcFactory,

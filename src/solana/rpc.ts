@@ -80,7 +80,6 @@ const READ_METHODS: ReadonlySet<string> = new Set<SolanaReadMethod>([
 ]);
 export interface SolanaRpcPort {
   readonly originHash: string;
-  readonly maximumAccountsPerRead?: 8 | 16;
   call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown>;
   batch?(reads: readonly SolanaBatchRead[]): Promise<readonly unknown[]>;
 }
@@ -107,9 +106,6 @@ export class SolanaRpc implements SolanaRpcPort {
     this.budget = budget;
   }
   get hasPersistentPacer(): boolean { return this.pacer !== undefined; }
-  get maximumAccountsPerRead(): 8 | 16 {
-    return this.endpoint === "https://solana-rpc.publicnode.com" || this.endpoint === "https://solana-rpc.publicnode.com/" ? 8 : 16;
-  }
   async call(method: SolanaMethod, params: readonly unknown[]): Promise<unknown> {
     if (method === "getGenesisHash" && this.genesis !== undefined) return this.genesis;
     const id = randomUUID();

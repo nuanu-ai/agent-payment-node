@@ -8,7 +8,6 @@ import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import type { BridgeLog, BridgeTool } from "../../src/lifi/model.js";
 import { MULTICALL3_ABI } from "../../src/portfolio/evm-reader.js";
 import { MULTICALL3_ADDRESS } from "../../src/portfolio/registry.js";
-import { BASE_FEE_CONTRACT } from "../../src/lifi/rpc-fees.js";
 
 type Rpc = { readonly id: string; readonly method: string; readonly params: readonly any[] };
 export type LifecycleRoute = readonly [chainId: BridgeChainId, peerChainId: BridgeChainId, tool: BridgeTool, token: Address];
@@ -29,7 +28,7 @@ export function lifecycleDouble(routes: readonly LifecycleRoute[], code: Readonl
   const expected = new Map<string, Hex>(), key = (chainId: number, kind: string, address: string, data: string) =>
     canonicalJson([chainId, kind, address.toLowerCase(), data.toLowerCase()]);
   for (const [chainId, peer, tool, token] of routes) {
-    for (const row of [...bridgeDeployment(chainId, peer, tool, token).reads, ...(chainId === 8453 ? BASE_FEE_CONTRACT.reads : [])]) {
+    for (const row of bridgeDeployment(chainId, peer, tool, token).reads) {
       expected.set(key(chainId, row.kind, row.address, row.data), row.expected);
     }
   }

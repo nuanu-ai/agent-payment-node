@@ -13,8 +13,6 @@ import { run } from "./metamask-gasless-fixtures/harness.mjs";
 
 const source = resolve(dirname(fileURLToPath(import.meta.url)), "../.."), digest = b => createHash("sha256").update(b).digest("hex");
 const moduleAt = (root, path) => import(pathToFileURL(join(root, "dist", path)).href);
-const LEGACY_SHA = "1883f117a84552e720319d2770ea9439fad30d8eb6f1bd3212f344854b0ce267";
-const LEGACY_COMMIT = "cf415148c905f8f993a0c53217fc92e40f9fc4f9";
 let installed;
 before(async () => { installed = await install(); }, { timeout: 960000 });
 
@@ -242,11 +240,6 @@ async function exposedMaterial(s, id) {
   assert.deepEqual(await readFile(join(s.state.root, "smart-account-gasless-materials", `${id}.json`)), bytes);
   return bytes;
 }
-async function gate(s, manifest = installed.manifest, manifestPath = installed.manifestPath, manifestSha256 = installed.manifestSha256) {
-  return run(process.execPath, [join(installed.packageRoot, "dist/smart-account-gasless/recovery-gate.js"),
-    "--state-root", s.state.root, "--archive", manifest.archive, "--manifest", manifestPath,
-    "--manifest-sha256", manifestSha256, "--package-root", manifest.packageRoot]);
-}
 
 test("installed CLI and 122-tool MCP discover Base Smart Account gasless without state or external effects", async () => {
   const s = await scenario(); await chmod(s.state.root, 0o777);
@@ -269,7 +262,7 @@ test("installed ordinary prepare, real TTY, SDK, encrypted material and RPC-only
       to: "0x4444444444444444444444444444444444444444", amount: "0.01", max_fee: "0", min_received: "0.01", idempotency_key: "installed-one" });
     assert.equal(prepared.ok, true, JSON.stringify(prepared)); id = prepared.operation.operation_id;
     const trace = await s.trace(); assert.deepEqual((await s.cli(s.prepareArgs("installed-one"))).operation, prepared.operation);
-    const handoff = await connection.call("apn_gasless_transfer_approve", { operation: id });
+    const handoff = await connection.call("apn_foreground_handoff", { command: "gasless transfer approve", arguments: { operation: id } });
     assert.equal(handoff.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.deepEqual(await s.trace(), trace);
     assert.equal((await s.cli(["gasless", "transfer", "approve", "--operation", id])).error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.equal((await approval(s, id)).code, 0);
@@ -277,7 +270,6 @@ test("installed ordinary prepare, real TTY, SDK, encrypted material and RPC-only
     assert.equal(op.exposureAttempts, 1); assert.equal(op.submissionAttempts, 1); assert.equal(op.settlement, null);
     const materialPath = join(s.state.root, "smart-account-gasless-materials", `${id}.json`), sealed = await exposedMaterial(s, id);
     assert.equal((await stat(materialPath)).mode & 0o777, 0o600); safe(sealed.toString());
-    const selected = await gate(s); assert.equal(selected.code, 0, selected.stdout); assert.equal(JSON.parse(selected.stdout).guards_held, 1);
     await s.update({ denyKeychain: true, denyEffects: true });
     const status = await connection.call("apn_operation_status", { operation: id }); assert.equal(status.operation.terminal, false);
     await s.cli(["operation", "resume", "--operation", id]); assert.deepEqual(await readFile(materialPath), sealed);
@@ -310,39 +302,6 @@ test("installed process deaths at verification and settlement never repeat SDK s
     assert.deepEqual(await readFile(join(s.state.root, "smart-account-gasless-materials", `${id}.json`)), sealed);
     await effectCounts(s, { sign: 1, verify: 1, settle: crash === "settle" ? 1 : 0, supported: 1 });
   });
-});
-
-test("actual I745 cannot discover the new family and the verified selection gate refuses it before target execution", { timeout: 120000 }, async () => {
-  const originalPath = process.env.APN_SA_LEGACY_MANIFEST;
-  assert.ok(originalPath, "APN_SA_LEGACY_MANIFEST must identify actual retained I745 evidence; never substitute a fixture archive");
-  const original = JSON.parse(await readFile(originalPath)), legacy = { ...original,
-    archive: await realpath(original.archive), packageRoot: await realpath(original.packageRoot) };
-  assert.equal(digest(await readFile(legacy.archive)), LEGACY_SHA); assert.equal(legacy.archiveSha256, LEGACY_SHA);
-  assert.equal(legacy.sourceCommit, LEGACY_COMMIT); assert.equal(legacy.fileCount, 883);
-  const historical = await unpackArchive(legacy.archive, await mkdtemp(join(installed.root, "i745-extraction-")), LEGACY_SHA);
-  const files = await verifyFiles(historical.packageRoot, legacy.packageRoot, historical.members, LEGACY_COMMIT);
-  assert.equal(digest(await readFile(legacy.archive)), LEGACY_SHA);
-  assert.equal(files.length, 883);
-  const sortFiles = rows => [...rows].sort((a, b) => a.path.localeCompare(b.path));
-  assert.deepEqual(sortFiles(legacy.files), sortFiles(files));
-  assert.equal(legacy.allArchiveFilesMatchGitSourceAndInstalledBytes, true);
-  const manifestPath = join(installed.root, "i745-canonical-identity.json"), verifiedManifestBytes = Buffer.from(JSON.stringify(legacy));
-  const verifiedManifestSha256 = digest(verifiedManifestBytes); await writeFile(manifestPath, verifiedManifestBytes);
-  const s = await scenario("verify"), prepared = await s.cli(s.prepareArgs("archive-barrier")); assert.equal(prepared.ok, true);
-  const id = prepared.operation.operation_id; assert.equal((await approval(s, id)).code, 73);
-  await exposedMaterial(s, id);
-  const before = await journalBytes(s, id), trace = await s.trace(), op = await s.operation(id);
-  const { OperationService } = await moduleAt(legacy.packageRoot, "operation-service.js");
-  const { StateStore } = await moduleAt(legacy.packageRoot, "state.js");
-  // Explicit effect-free historical lookup probe, never a selected executable or approval.
-  const old = new OperationService(new StateStore(s.state.root));
-  await assert.rejects(old.required(id), { code: "APN_OPERATION_NOT_FOUND" }); await old.assertProfileAvailable(op.profileHash);
-  const result = await gate(s, legacy, manifestPath, verifiedManifestSha256); assert.equal(result.code, 1, result.stdout);
-  assert.equal(JSON.parse(result.stdout).error.reason, "sa_gasless_archive_incompatible");
-  assert.deepEqual(await journalBytes(s, id), before); assert.deepEqual(await s.trace(), trace);
-  const current = await gate(s); assert.equal(current.code, 0, current.stdout);
-  assert.equal(JSON.parse(current.stdout).supports_smart_account_gasless, true);
-  assert.deepEqual(await journalBytes(s, id), before);
 });
 
 async function effectCounts(s, expected) {

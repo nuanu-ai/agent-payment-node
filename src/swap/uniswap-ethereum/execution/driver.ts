@@ -2,13 +2,14 @@ import type { Hex } from "viem";
 import { canonicalJson, domainHash } from "../../../canonical.js";
 import { ApnError } from "../../../errors.js";
 import type { ClockPort } from "../../../ports.js";
+import { assertOperationProtocolRegistry } from "../../family-guards.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../../model.js";
 import type { SwapProtocolRegistry } from "../../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../../runtime.js";
 import type { GuardedSwapService } from "../../service.js";
 import type { SwapUnlandedProof } from "../../unlanded.js";
 import { validateUniswapKeylessMaterial } from "../../uniswap-v3/material.js";
-import { assertInjectedProtocol, createUniswapApprovalRequest, createUniswapExecutionBinding, validateFreshness } from "./binding.js";
+import { createUniswapApprovalRequest, createUniswapExecutionBinding, validateFreshness } from "./binding.js";
 import type { UniswapExecutionBindingStore } from "./binding-store.js";
 import type { UniswapObservedOutcome } from "./observer.js";
 import type { UniswapEffectStorePort, UniswapExecutionBinding, UniswapExecutionGuardPort, UniswapExecutionSignerPort,
@@ -45,7 +46,7 @@ export class UniswapEthereumExecutionDriver implements GuardedSwapExecutionDrive
     const envelope = validateUniswapKeylessMaterial(input.material).execution.envelope;
     let admission, freshness, approvalHash: string;
     try {
-      assertInjectedProtocol(operation, this.d.protocolRegistry);
+      assertOperationProtocolRegistry(operation, this.d.protocolRegistry, "uniswap");
       admission = await this.d.admission.assert(operation);
       freshness = await this.d.guard.inspect(operation, envelope);
       const checked = this.d.clock.now();

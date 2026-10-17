@@ -16,7 +16,6 @@ export declare class MetaMaskProcessAdapter implements ProviderLifecyclePort, Pr
     bundle(): ProviderAdapterBundle;
     connect(_foreground: ForegroundAuthenticationPort, options?: ProviderConnectOptions): Promise<void>;
     probeStatus(): Promise<void>;
-    logout(): Promise<void>;
     observeBalance(): Promise<ProviderBalanceObservation>;
     crossCheckAddress(expected: Address): Promise<void>;
     private doctor;

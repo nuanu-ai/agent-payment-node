@@ -1,6 +1,6 @@
 import type { Address, Hex } from "../model.js";
 import { type UsdtTransferPlan } from "./model.js";
-export declare const USDT_7702_FACTORY_MARKER: "0x7702";
+declare const USDT_7702_FACTORY_MARKER: "0x7702";
 /** The signed EIP-7702 tuple for a first use; a delegated account sends none. */
 export interface UsdtAuthorization {
     readonly chainId: Hex;
@@ -84,3 +84,4 @@ export declare function usdtUserOperationTypedData(op: UsdtUserOperation): {
     };
 };
 export declare function usdtUserOperationHash(op: UsdtUserOperation): Hex;
+export {};

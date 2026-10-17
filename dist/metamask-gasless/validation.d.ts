@@ -3,7 +3,6 @@ import { type MetaMaskGaslessChainId, type MetaMaskGaslessRequest } from "./mode
 import { type MetaMaskGaslessFailureReason } from "./reasons.js";
 export declare function mmExact(value: unknown, keys: readonly string[], reason?: MetaMaskGaslessFailureReason): Record<string, unknown>;
 export declare function mmUint(value: unknown, positive?: boolean, reason?: MetaMaskGaslessFailureReason): bigint;
-export declare function mmDecimal(value: unknown, positive?: boolean): string;
 export declare function mmFormat(value: string): string;
 export declare function mmAddress(value: unknown, reason?: MetaMaskGaslessFailureReason): Address;
 export declare function mmCanonicalAddress(value: unknown, reason?: MetaMaskGaslessFailureReason): Address;

@@ -11,7 +11,6 @@ import { GaslessUsdtCommandExecute } from "../../src/gasless-usdt/command-execut
 import { GaslessUsdtCommandPrepare } from "../../src/gasless-usdt/command-prepare.js";
 import { UsdtExecutionJournal, usdtExecutionIntent } from "../../src/gasless-usdt/execution-journal.js";
 import { USDT_GASLESS } from "../../src/gasless-usdt/model.js";
-import { UsdtOperationRepository } from "../../src/gasless-usdt/operation.js";
 import { preparePolicyBoundUsdtV2 } from "../../src/gasless-usdt/policy-prepare-v2.js";
 import { GaslessUsdtOperationService } from "../../src/gasless-usdt/service.js";
 import { OperationService } from "../../src/operation-service.js";
@@ -31,7 +30,7 @@ async function usdt(t: test.TestContext) {
   const f = v2Fixture("expected"), repository = new UsdtBoundOperationRepository(state.root), journal = new UsdtExecutionJournal(state.root);
   const bound = async (key: string) => await repository.create(allowlistProfileHash("owner"),
     await preparePolicyBoundUsdtV2({ prepare: f.prepare, sponsor: f.sponsor }, f.request), key, f.now());
-  const prepare = new GaslessUsdtCommandPrepare(state, { now: f.now }, new GaslessUsdtOperationService(new UsdtOperationRepository(state.root)),
+  const prepare = new GaslessUsdtCommandPrepare(state, { now: f.now }, new GaslessUsdtOperationService(state.root),
     { preparePort: f.prepare, sponsorPort: f.sponsor });
   return { temporary, state, f, bound, journal, prepare, operations: new OperationService(state) };
 }

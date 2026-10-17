@@ -1,11 +1,11 @@
 import type { RpcDecoder } from "./rpc-session-helpers.js";
 import { BridgeRpcPhysicalBudget } from "./rpc-session-helpers.js";
-export { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
+export { BridgeRpcPhysicalBudget, MAX_READ_ATTEMPTS, RPC_BATCH_MAX_ITEMS, RPC_READ_METHODS, rpcEndpointIdentity, approvedTransportReason, parseRetryAfter, telemetryDetails } from "./rpc-session-helpers.js";
 export type { RpcReadMethod } from "./rpc-session-helpers.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { BridgeChainId } from "./chains.js";
 import { RpcProviderScheduler } from "./rpc-scheduler.js";
-export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcOriginIdentity, rpcProviderFamily } from "./rpc-scheduler.js";
+export { RpcHttpFailure, RpcProviderScheduler, RPC_RETRY_DELAY_MS, rpcProviderFamily } from "./rpc-scheduler.js";
 export type { RpcProviderPacingCoordinator } from "./rpc-scheduler.js";
 export type RpcBatchAttempt = (canonicalBody: string) => Promise<unknown>;
 export interface RpcBatchReadItem<T = unknown> {
@@ -24,8 +24,6 @@ export interface RpcReadSessionOptions {
     /** Attempts permitted for one logical read. Defaults to the established two-attempt LI.FI contract. */
     readonly maxReadAttempts?: 1 | 2;
     readonly deadlineMs?: number;
-    /** HTTP chunk bound for one atomic historical deployment read. General batches retain RPC_BATCH_MAX_ITEMS. */
-    readonly archiveDeploymentBatchMaxItems?: number;
     /** Backward-compatible alias. */
     readonly maxUniqueCalls?: number;
     readonly now?: () => number;
@@ -66,7 +64,6 @@ export declare class RpcReadSession {
     private readonly maxHttpRequests;
     private readonly maxHttpAttempts;
     private readonly maxReadAttempts;
-    private readonly archiveDeploymentBatchMaxItems;
     private readonly now;
     private readonly wait;
     private readonly deadline;
@@ -107,10 +104,6 @@ export declare class RpcReadSession {
      * known smaller batch capability receives the same logical batch in sequential chunks, committed to the cache atomically.
      */
     readBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T, maxItemsPerRequest?: number): Promise<{
-        readonly [K in keyof T]: unknown;
-    }>;
-    /** One logical archive deployment read, transported sequentially in provider-sized chunks with one atomic cache commit. */
-    readArchiveDeploymentBatch<T extends readonly RpcBatchReadItem[]>(origin: string, chainId: BridgeChainId, items: T): Promise<{
         readonly [K in keyof T]: unknown;
     }>;
     /** One atomic receipt identity read. Partial cache hits never remove chainId or receipt from the logical read. */

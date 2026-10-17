@@ -21,11 +21,6 @@ export function isSolanaTransactionSignature(value) {
     }
 }
 /** Null marks a value that is neither rail's transaction identity. */
-export function railStatusFamily(value) {
-    if (isEvmTransactionHash(value))
-        return "evm";
-    return isSolanaTransactionSignature(value) ? "solana" : null;
-}
 /**
  * Returns the identifier in its own rail's canonical form: an EVM hash lowercased exactly as the
  * hex reader always returned it, a Solana signature as itself. Null marks an unusable value; the

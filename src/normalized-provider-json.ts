@@ -1,11 +1,3 @@
-export type NormalizedProviderJson =
-  | null
-  | boolean
-  | number
-  | string
-  | readonly NormalizedProviderJson[]
-  | { readonly [key: string]: NormalizedProviderJson };
-
 export const NORMALIZED_PROVIDER_JSON_LIMITS = Object.freeze({
   maxDepth: 16,
   maxNodes: 4096,
@@ -50,14 +42,6 @@ export function canonicalizeSellerResultJson(value: unknown): string {
   return state.output.join("");
 }
 
-export function isSafeNormalizedProviderJson(value: unknown): value is NormalizedProviderJson {
-  try {
-    canonicalizeNormalizedProviderJson(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 interface CanonicalState {
   nodes: number;

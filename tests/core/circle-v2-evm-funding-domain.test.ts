@@ -1,3 +1,5 @@
+import { advanceCircle, circleMechanism, saveCircleV1 } from "./circle-v1-journal.js";
+import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 /** Synthetic CPU-only public observations and owner policies; no current-chain or financial proof. */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -10,11 +12,11 @@ import { hashObject, canonicalJson } from "../../src/canonical.js";
 import { StateStore } from "../../src/state.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { OperationService } from "../../src/operation-service.js";
-import { CircleUsage, circleMechanism } from "../../src/circle-v2-evm/usage.js";
+import { CircleUsage } from "../../src/circle-v2-evm/usage.js";
 import { CircleRepository, validateCircleFundingAdvance } from "../../src/circle-v2-evm/repository.js";
 import { circleFundingBinding, quoteCircleFundingFee } from "../../src/circle-v2-evm/funding-binding.js";
 import { circleFundingFingerprint, sealCircleFundingOperation, advanceCircleFundingOperation, validateCircleFundingOperation, validateKnownCircle, type CircleFundingOperationV2 } from "../../src/circle-v2-evm/funding-operation.js";
-import { advanceCircle, circleEnvelope, validateCircle } from "../../src/circle-v2-evm/operation-model.js";
+import { circleEnvelope, validateCircle } from "../../src/circle-v2-evm/operation-model.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleLegacyRoute as circleRoute } from "../../src/circle-v2-evm/catalog.js";
 import { bindCircleAttestation, circleWord, decodeCircleMessage, decodeCircleSource, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, verifyCircleApproval, CIRCLE_ZERO } from "../../src/circle-v2-evm/protocol.js";
 import { verifyCircleMintPreflight, verifyCircleClosureFinality } from "../../src/circle-v2-evm/preflight.js";
@@ -93,22 +95,23 @@ for (const first of ["v1", "v2"] as const) for (const [chain, profile] of [[143,
   const repo = new CircleRepository(root), state = new StateStore(root), service = new OperationService(state);
   const old = initial(root, chain, profile), fresh = funding(root, chain, profile);
   const held = first === "v1" ? old : fresh;
-  if (held.schemaVersion === "apn.circle-v2-evm-operation.v1") await repo.save(held); else await repo.saveFunding(held);
+  if (held.schemaVersion === "apn.circle-v2-evm-operation.v1") await saveCircleV1(root, held); else await repo.saveFunding(held);
   const attempted = { ...held.effects[0]!, phase: "signing_started" as const };
   const unknown = held.schemaVersion === "apn.circle-v2-evm-operation.v1" ? advanceCircle(held, { effects: [attempted, held.effects[1]!], state: "source_unknown" }, "fence", at) : advanceCircleFundingOperation(held, { effects: [attempted, held.effects[1]!], state: "source_unknown" }, "fence", at);
-  if (unknown.schemaVersion === "apn.circle-v2-evm-operation.v1") await repo.save(unknown); else await repo.saveFunding(unknown);
+  if (unknown.schemaVersion === "apn.circle-v2-evm-operation.v1") await saveCircleV1(root, unknown); else await repo.saveFunding(unknown);
   for (const candidate of [old, fresh]) await assert.rejects(service.assertCircleAccountsAvailable({ ...candidate, operationId: "e".repeat(64) }), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(service.assertEvmAccountAvailable(held.profileHash, 42161, CIRCLE_SOURCE_OWNER), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(service.assertEvmAccountAvailable(held.destinationProfileHash, held.destinationChain, held.destinationCustody.walletAddress), { code: "APN_OPERATION_BLOCKED" });
   await service.assertEvmAccountAvailable(held.profileHash, 1, CIRCLE_SOURCE_OWNER);
   const found = (await service.findIdempotency(held.idempotencyHash))!; assert.equal(found.kind, "circle_route"); if (found.kind !== "circle_route") throw new Error("wrong kind"); assert.equal(found.record.integrityHash, unknown.integrityHash);
   assert.equal((await repo.listAllAny()).length, 1);
-  if (first === "v2") { assert.equal((await repo.listAllOperations()).length, 0); await assert.rejects(repo.load(fresh.operationId), /legacy_operation_schema_required/); }
-  const before = await repo.loadAny(held.operationId); await assert.rejects(first === "v1" ? repo.saveFunding(fresh) : repo.save(old)); assert.equal(canonicalJson(await repo.loadAny(held.operationId)), canonicalJson(before));
+  if (first === "v2") assert.equal((await repo.listAllAny()).filter(op => op.schemaVersion === "apn.circle-v2-evm-operation.v1").length, 0);
+  // A v2 save never replaces a stored v1 journal (nothing writes v1 any more).
+  const before = await repo.loadAny(held.operationId); if (first === "v1") await assert.rejects(repo.saveFunding(fresh)); assert.equal(canonicalJson(await repo.loadAny(held.operationId)), canonicalJson(before));
   await writeFile(join(root,"circle-v2-evm",`${"a".repeat(64)}.json`), `${canonicalJson({ ...fresh, schemaVersion: "unknown" })}\n`, { mode: 0o600 });
   await assert.rejects(repo.listAllAny(), /unsupported_operation_schema/); await assert.rejects(service.assertEvmAccountAvailable(held.profileHash, 1, CIRCLE_SOURCE_OWNER));
 });
-for (const first of ["v1", "v2"] as const) test(`shared ledger charges ${first} holds against the other schema and retains five leases`, async t => {
+test("held v1 ledger reservations still count against a new v2 operation's caps", async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "circle-v2-ledger-"))); t.after(() => rm(root, { recursive: true, force: true }));
   const state = new StateStore(root), store = new AllowlistPolicyStore(root); await state.initialize();
   const newer = funding(root,1329), older = initial(root,1329), b = newer.funding;
@@ -118,13 +121,10 @@ for (const first of ["v1", "v2"] as const) test(`shared ledger charges ${first} 
     { chain:"eip155:42161", kind:"native", rail:"bridge", mechanisms:alternatives("75000000000000"), dailyLimitAtomic:"150000000000000" },
     { chain:"eip155:1329", kind:"native", rail:"bridge", mechanisms:alternatives(b.destinationChain === 1329 ? "50000000000000000":"0"), dailyLimitAtomic:"100000000000000000" } ] } });
   await store.appendDecision("evm-live-buyer",null,{ status:"active",revision:record.revision,stagedRecordDigest:record.recordDigest,policyDigest:record.registry.policyDigest,registry:record.registry,approvalFingerprint:hashObject("fixture"),decidedAt:new Date(at).toISOString() });
+  // The USDC hold the deleted v1 writer reserved for `older`: its namespace, mechanism and amount.
+  await new AssetUsageLedger(root).reserve({ account: CIRCLE_SOURCE_OWNER, chain: "eip155:42161", asset: { kind: "token", identifier: CIRCLE_SOURCE_TOKEN }, registry: record.registry, rail: "bridge",
+    mechanism: circleMechanism(1329), amountAtomic: "40100", idempotencyKey: `circle-v2-evm.v1:${older.operationId}:usdc`, now: new Date(at) });
   const u = new CircleUsage(state,()=>at);
-  await u.withPolicyLocks(["evm-live-buyer"],async()=> {
-    const op = first === "v1" ? older : newer, next = first === "v1" ? newer : older;
-    const policies = await u.policies(op), rows = await u.reserve({ ...op, policies });
-    assert.equal(rows.length,5); assert.equal(rows[0]!.amountAtomic,first === "v1" ? "40100":"1000000");
-    assert.deepEqual(rows.slice(1).map(r=>r.amountAtomic),["30000000000000","30000000000000","15000000000000","50000000000000000"]);
-    await u.confirm({ ...op, policies, usage:rows });
-    await assert.rejects(u.policies(next),{ code:"APN_OPERATION_BLOCKED" });
-  });
+  await u.withPolicyLocks(["evm-live-buyer"], async () => { await assert.rejects(u.policies(newer), { code: "APN_OPERATION_BLOCKED" }); });
 });
+

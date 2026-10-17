@@ -1,7 +1,6 @@
 import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, getAddress, parseAbi } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { UNISWAP_USDC } from "./uniswap-pin.js";
 
 const ROUTER_ABI = parseAbi(["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"]);
 const WRAP_ETH = 0x0b, V3_SWAP_EXACT_IN = 0x00, V2_SWAP_EXACT_IN = 0x08;
@@ -10,13 +9,7 @@ const WETH = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
 export interface UniswapDecodedRoute { readonly command: "V2_SWAP_EXACT_IN" | "V3_SWAP_EXACT_IN"; readonly recipient: string;
   readonly inputAmountAtomic: string; readonly minimumOutputAtomic: string; readonly deadline: number; readonly routeHash: string }
 
-/** The official Trading API catalog pair: native ETH to USDC only. */
-export function decodeUniswapRouterCalldata(data: `0x${string}`, expected: { readonly recipient: string;
-  readonly inputAmountAtomic: string; readonly minimumOutputAtomic: string; readonly deadline: number }): UniswapDecodedRoute {
-  return decodeUniswapRouterCalldataFor(data, { ...expected, outputToken: UNISWAP_USDC });
-}
-
-/** Same strict proof for an explicit pinned output token; the path must end at exactly that token. */
+/** Strict Universal Router proof for an explicit pinned output token; the path must end at exactly that token. */
 export function decodeUniswapRouterCalldataFor(data: `0x${string}`, expected: { readonly recipient: string;
   readonly inputAmountAtomic: string; readonly minimumOutputAtomic: string; readonly deadline: number;
   readonly outputToken: string }): UniswapDecodedRoute {

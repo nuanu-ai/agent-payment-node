@@ -75,7 +75,7 @@ test("installed CLI and stdio MCP share replay, foreground handoff, status and r
     const replay = await connection.call("apn_gasless_transfer_prepare", { profile: s.profile, chain: "8453",
       to: s.fixture().recipient, amount: "1", max_fee: "0.002", min_received: "0.998", idempotency_key: "mm-installed-1" });
     assert.deepEqual(replay.operation, result.operation);
-    const handoff = await connection.call("apn_gasless_transfer_approve", { operation: id });
+    const handoff = await connection.call("apn_foreground_handoff", { command: "gasless transfer approve", arguments: { operation: id } });
     assert.equal(handoff.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
     assert.deepEqual(handoff.error.details.cli_handoff_argv, ["apn", "gasless", "transfer", "approve", "--operation", id]);
     assert.deepEqual(await s.trace(), before);
@@ -106,7 +106,7 @@ test("installed CLI and MCP discovery enumerate the same finite gasless surface 
     const discovery = await connection.client.listTools();
     assert.deepEqual(discovery.tools.filter(tool => tool.name.startsWith("apn_gasless_")).map(tool => tool.name),
       ["apn_gasless_usdt_prepare", "apn_gasless_usdt_status", "apn_gasless_usdt_resume", "apn_gasless_capabilities", "apn_gasless_balance",
-        "apn_gasless_transfer_quote", "apn_gasless_transfer_prepare", "apn_gasless_transfer_approve", "apn_gasless_transfer_approve_sealed"]);
+        "apn_gasless_transfer_quote", "apn_gasless_transfer_prepare"]);
     const capabilities = await connection.call("apn_gasless_capabilities", { profile: s.profile });
     assert.deepEqual(capabilities.data, cli.data);
   } finally { await connection.close(); }

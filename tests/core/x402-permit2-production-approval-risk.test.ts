@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { LocalWalletNative } from "../../src/local-wallet-native.js";
-import { InheritedNativeIpc } from "../../src/native-ipc.js";
 import { StateStore } from "../../src/state.js";
 import { SecureStateStore } from "../../src/secure-state-store.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
@@ -38,9 +37,9 @@ for (const sponsor of [false, true]) test(`owned ${sponsor ? "sponsored" : "allo
     assert.equal(JSON.stringify({ result, displays }).includes(secret), false);
   assert.equal(Object.isFrozen(displays[0]), true);
 });
-test("selected IPC, prototype fake, raw or clone native capability cannot begin approval or risk", async t => {
+test("prototype fake, raw or clone native capability cannot begin approval or risk", async t => {
   const f = await setup(t); let ui = 0; const approval = { approve: async () => { ui++; } };
-  for (const native of [new InheritedNativeIpc(3, 4), Object.create(LocalWalletNative.prototype), { request: async () => ({}) }])
+  for (const native of [Object.create(LocalWalletNative.prototype), { request: async () => ({}) }])
     assert.throws(() => new Permit2ApprovalRiskCoordinator(f.root, f.input.rpcUrl, native, f.preparation, f.now, approval));
   assert.throws(() => new Permit2ForegroundApprovalAuthority(f.journal, {}, f.native, { ...f.capability }, approval, f.now));
   assert.throws(() => LocalWalletNative.resolvePermit2LocalCapability(f.native, `${f.root}/other`));

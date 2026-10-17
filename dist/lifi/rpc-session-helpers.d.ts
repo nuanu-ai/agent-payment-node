@@ -20,7 +20,6 @@ export declare class BridgeRpcPhysicalBudget {
  */
 export declare function bridgeRpcBudgetDeferred(error: unknown): boolean;
 export declare function jsonRpcRateLimit(error: unknown): boolean;
-export declare const RPC_ARCHIVE_DEPLOYMENT_BATCH_MAX_ITEMS = 3;
 export declare const RPC_DEFAULT_LOGICAL_ITEMS = 96;
 export declare const RPC_DEFAULT_HTTP_REQUESTS = 8;
 export declare const RPC_DEFAULT_HTTP_ATTEMPTS = 10;
