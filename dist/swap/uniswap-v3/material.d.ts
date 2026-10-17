@@ -2,7 +2,7 @@ import { type Hex } from "viem";
 import { SecureStateStore } from "../../secure-state-store.js";
 import { type SwapQuoteSnapshot } from "../quote.js";
 import type { GuardedSwapPreparedMaterial } from "../runtime.js";
-import type { UniswapTransactionEnvelope } from "../uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "./envelope.js";
 import type { UniswapV3PoolQuote } from "./onchain.js";
 import { type UniswapV3CodePin } from "./pins.js";
 export declare const UNISWAP_KEYLESS_EXECUTION_SCHEMA: "apn.uniswap-v3-keyless-execution.v1";
