@@ -35,16 +35,6 @@ export class BridgeOperationRepository extends SecureStateStore {
     if (op.profileHash !== profileHash || op.operationId !== operationId) bridgeCorrupt();
     return op;
   }
-  async findStoredOperation(operationId: string): Promise<StoredBridgeOperationRecord | null> {
-    stateIdentifier(operationId, "bridge operation ID");
-    return await this.findInProfiles("bridge-operations", async (profileHash) => await this.loadStoredOperation(profileHash, operationId), bridgeCorrupt);
-  }
-  async findOperation(operationId: string): Promise<BridgeOperationRecord | null> {
-    const stored = await this.findStoredOperation(operationId);
-    if (stored === null) return null;
-    if (isLegacyBridgeOperation(stored)) bridgeCorrupt();
-    return stored;
-  }
   async writeOperation(op: BridgeOperationRecord): Promise<void> {
     validateBridgeOperation(op); await this.ready();
     if (Buffer.byteLength(canonicalJson(op), "utf8") + 1 > 1024 * 1024) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_record_capacity");

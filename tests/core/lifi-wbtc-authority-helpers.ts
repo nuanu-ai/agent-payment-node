@@ -14,6 +14,7 @@ import { LifiTestProvider, lifiFixture, lifiSteps } from "./lifi-helpers.js";
 import { addressWord } from "./lifi-event-fixtures.js";
 import { temporaryState } from "./helpers.js";
 import { ETH_WBTC, ARB_WBTC, wbtcBudgetSpy } from "./lifi-wbtc-budget-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 export async function preparedWbtc(root: string, now: Date, policyExpiresAt?: string, allowance?: string) {
   const step = (await lifiSteps("eth-base", now))[0]!;
@@ -53,7 +54,7 @@ export async function preparedWbtc(root: string, now: Date, policyExpiresAt?: st
   const prepared = await f.core.execute({ command: "bridge.prepare", profile: f.profile,
     quote: (quote.data as { quote_hash: string }).quote_hash, route: "route-across", idempotencyKey: "wbtc-budget-model" });
   assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
-  const op = (await f.core.bridges.records.findOperation((prepared.operation as { operation_id: string }).operation_id))!;
+  const op = (await findStored(f.core.bridges.records, (prepared.operation as { operation_id: string }).operation_id))!;
   f.source.op = op; f.destination.op = op;
   return { op, f };
 }

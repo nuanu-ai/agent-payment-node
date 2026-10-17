@@ -25,6 +25,7 @@ import { addressWord, eventLog, makeDestinationReceipt, makeSourceReceipt } from
 import { BNB_COMPOSITE } from "../../src/lifi/bnb-composite.js";
 import { activateDirectPolicy, WIDE_CAPS } from "./direct-allowlist-helpers.js";
 import { bridgeMechanism } from "../../src/lifi/allowlist.js";
+import { findStored } from "./stored-operations.js";
 
 export type LifiJson = Record<string, any>;
 export const LIFI_SYNTHETIC_KEY = `0x${"01".repeat(32)}` as Hex;
@@ -300,7 +301,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
     const input = { command: "bridge.prepare", profile, quote, route: routeId, idempotencyKey: key } as const;
     const prepared = await core.execute(input); assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
     const id = (prepared.operation as { operation_id: string }).operation_id;
-    source.op = (await core.bridges.records.findOperation(id))!; destination.op = source.op;
+    source.op = (await findStored(core.bridges.records, id))!; destination.op = source.op;
     return { id, input, quote, operation: source.op };
   };
   return { core, state, now, wrapping, wallets, provider, source, destination, approval, custody, dependencies, rpcSessions, profile, request, prepare };

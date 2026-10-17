@@ -5,6 +5,7 @@ import { publicBridgeOperation } from "../../src/lifi/receipt.js";
 import { RpcReadSession, bridgeRpcFactory } from "../../src/lifi/rpc.js";
 import { temporaryState } from "./helpers.js";
 import { approvalSafe, effects, invocation } from "./lifi-send-step-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 /** Rate-limits the guard's first POST (the source check with the account batch) once. */
 const firstGuard = (shape: "http_429" | "json_rpc") => {
@@ -22,7 +23,7 @@ for (const shape of ["http_429", "json_rpc"] as const) test(`a ${shape} rate lim
   const view = publicBridgeOperation(deferred);
   assert.equal(view.reason, "pre_sign_rpc_rate_limited");
   assert.deepEqual(view.next_actions, [`apn operation resume --operation ${op.operationId}`, `apn operation status --operation ${op.operationId}`]);
-  assert.deepEqual((await s.core.bridges.records.findOperation(op.operationId))!.failure, deferred.failure);
+  assert.deepEqual((await findStored(s.core.bridges.records, op.operationId))!.failure, deferred.failure);
   // The next resume repeats the full guard, clears the deferral when it signs and sends the one bridge. A rate limit in the
   // bridge's own source observation then stays recoverable as well.
   const later = invocation(s, deferred, "scalar", 0, { at: Date.parse(deferred.updatedAt) + 1_000, limit: (post) => post.index >= 3 ? shape : null });

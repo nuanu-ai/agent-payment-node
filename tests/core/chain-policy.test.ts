@@ -7,6 +7,7 @@ import { ChainAccountStore } from "../../src/chain-account-store.js";
 import { SOLANA_APPROVAL_WINDOW_MS } from "../../src/rail-send-binding.js";
 import { temporaryState } from "./helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 test("new mainnet assets are denied before RPC preparation until the exact asset receives human policy admission", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root, { admit: false });
@@ -20,7 +21,7 @@ test("new mainnet assets are denied before RPC preparation until the exact asset
 
 test("principal and native fee caps stay separate and unknown reservations survive the next UTC day", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root);
-  const id = await s.prepare("usdc"); const record = (await s.core.rails.records.findOperation(id))!;
+  const id = await s.prepare("usdc"); const record = (await findStored(s.core.rails.records, id))!;
   const policy = (await s.core.rails.policies.requiredPolicy(s.account, "usdc"));
   s.now.setUTCDate(s.now.getUTCDate() + 1);
   const usage = chainUsage(policy, [record], s.now);
@@ -38,12 +39,12 @@ test("confirmed principal and fee costs are charged on terminal UTC day, and con
   await s.core.execute({ command: "transfer.approve", operationId: id });
   s.now.setUTCDate(s.now.getUTCDate() + 1); s.rpc.finalized = true;
   await s.core.execute({ command: "operation.resume", operationId: id });
-  const record = (await s.core.rails.records.findOperation(id))!; const policy = await s.core.rails.policies.requiredPolicy(s.account, "usdc");
+  const record = (await findStored(s.core.rails.records, id))!; const policy = await s.core.rails.policies.requiredPolicy(s.account, "usdc");
   assert.equal(record.state, "completed"); assert.deepEqual(chainUsage(policy, [record], s.now), { principalAtomic: "1000000", nativeFeeAtomic: "2044280" });
   assert.deepEqual(chainUsage(policy, [record], new Date("2026-09-08T11:00:00.000Z")), { principalAtomic: "0", nativeFeeAtomic: "0" });
   const next = await s.prepare("sol", "solana-revert-fee-0001"); s.rpc.failed = true;
   await s.core.execute({ command: "transfer.approve", operationId: next });
-  const failed = (await s.core.rails.records.findOperation(next))!;
+  const failed = (await findStored(s.core.rails.records, next))!;
   const native = await s.core.rails.policies.requiredPolicy(s.account, "sol");
   assert.equal(failed.state, "failed_confirmed_revert"); assert.deepEqual(chainUsage(native, [failed], s.now), { principalAtomic: "0", nativeFeeAtomic: "5000" });
 });
@@ -56,7 +57,7 @@ test("an unresolved operation prevents policy replacement and expiry before sign
   // Tied to the window constant so this can never silently stop testing expiry again.
   s.now.setTime(s.now.getTime() + SOLANA_APPROVAL_WINDOW_MS + 1_000);
   await s.core.execute({ command: "transfer.approve", operationId: id });
-  const record = (await s.core.rails.records.findOperation(id))!; assert.equal(record.state, "failed_before_effect");
+  const record = (await findStored(s.core.rails.records, id))!; assert.equal(record.state, "failed_before_effect");
   const policy = await s.core.rails.policies.requiredPolicy(s.account, "sol");
   assert.deepEqual(chainUsage(policy, [record], s.now), { principalAtomic: "0", nativeFeeAtomic: "0" });
   assert.equal(s.approval.calls.length, 0); assert.equal(s.rpc.submissions.length, 0);

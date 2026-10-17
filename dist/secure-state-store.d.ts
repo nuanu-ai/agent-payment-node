@@ -25,11 +25,6 @@ export declare class SecureStateStore {
     protected ensureDirectory(relativePath: string): Promise<void>;
     /** Records only: atomic-write stages are never records, and an abandoned stage cannot wedge a listing. */
     protected readDirectory(relativePath: string): Promise<readonly Dirent[]>;
-    /**
-     * The one record named for this ID across the per-profile directories of `store`, through the family's own `load`.
-     * Only that name is read under each profile, so another saved record can never break the lookup.
-     */
-    protected findInProfiles<T>(store: string, load: (profileHash: string) => Promise<T | null>, corrupt: () => never): Promise<T | null>;
     /** Raw listing that still shows atomic-write stages; only for code that inspects its own in-flight stage. */
     protected readDirectoryWithStagedWrites(relativePath: string): Promise<readonly Dirent[]>;
     /**

@@ -30,7 +30,7 @@ function transport(chainId: number, peer = 143) {
     return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? rows : rows[0]) };
   } } };
 }
-const lean = (chainId: number, https: ReturnType<typeof transport>["https"]) => new CircleRpc(`https://lean-${chainId}.example`, chainId, https, CIRCLE_COMMAND_REQUEST_BUDGET, "lean");
+const lean = (chainId: number, https: ReturnType<typeof transport>["https"]) => new CircleRpc(`https://lean-${chainId}.example`, chainId, https, CIRCLE_COMMAND_REQUEST_BUDGET);
 
 test("lean client checks the chain once and batches concurrent reads into one POST", async () => {
   const t = transport(42161), rpc = lean(42161, t.https);

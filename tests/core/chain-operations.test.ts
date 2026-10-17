@@ -13,13 +13,14 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { makeCore, temporaryState, TestNative, TestRpc } from "./helpers.js";
 import { solanaFixture, SOL_RECIPIENT } from "./solana-helpers.js";
 import { SOLANA_CHAIN, activateDirectPolicy, directAdmission, reserveRailLease } from "./direct-allowlist-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 test("restart after custody saved an effect recovers the same signature without another approval or signing", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root); const id = await s.prepare();
   const original = s.adapter.sealRevalidated.bind(s.adapter); let signs = 0;
   s.adapter.sealRevalidated = async (binding) => { signs++; await original(binding); throw new Error("synthetic process interruption"); };
   const first = await s.core.execute({ command: "transfer.approve", operationId: id });
-  assert.equal(first.ok, false); assert.equal((await s.core.rails.records.findOperation(id))!.state, "signing_started");
+  assert.equal(first.ok, false); assert.equal((await findStored(s.core.rails.records, id))!.state, "signing_started");
   assert.equal(s.rpc.submissions.length, 0); assert.equal(signs, 1);
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: id, waitSeconds: 1 })).error?.code, "APN_INVALID_INPUT");
   assert.equal(s.rpc.submissions.length, 0);
@@ -55,7 +56,7 @@ test("a crash after the durable submitting write preserves the submission bounda
     if (operation.state === "submitting") throw new Error("synthetic interruption after the durable write");
   };
   const failed = await s.core.execute({ command: "transfer.approve", operationId: id });
-  assert.equal(failed.ok, false); assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting");
+  assert.equal(failed.ok, false); assert.equal((await findStored(s.core.rails.records, id))!.state, "submitting");
   assert.equal(s.rpc.submissions.length, 0);
   // Phase 4b (CORE-13): the receipt is derived from the saved operation, so it never needs a repair.
   const receipt = await s.core.execute({ command: "receipt.get", operationId: id });
@@ -68,13 +69,13 @@ test("a crash after the durable submitting write preserves the submission bounda
 
 test("trusted missing effect can end interrupted local signing, while missing committed effect is corruption", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root); const id = await s.prepare();
-  const initial = (await s.core.rails.records.findOperation(id))!;
+  const initial = (await findStored(s.core.rails.records, id))!;
   await s.core.rails.records.persist(transitionRail(initial, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect",
     allowlistLease: await reserveRailLease(temporary.root, s.now, initial) }));
   const result = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal((result.operation as { state: string }).state, "failed_before_effect"); assert.equal(s.rpc.submissions.length, 0);
   const nextId = await s.prepare("sol", "solana-missing-effect-0002");
-  let next = (await s.core.rails.records.findOperation(nextId))!;
+  let next = (await findStored(s.core.rails.records, nextId))!;
   const send = await s.adapter.bindSend(next.account, next.prepared);
   next = transitionRail(next, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect", send,
     allowlistLease: await reserveRailLease(temporary.root, s.now, next) });
@@ -84,7 +85,7 @@ test("trusted missing effect can end interrupted local signing, while missing co
   await s.core.rails.records.persist(next);
   s.adapter.recoverEffect = async () => null;
   assert.equal((await s.core.execute({ command: "operation.resume", operationId: nextId })).error?.code, "APN_STATE_CORRUPT");
-  assert.equal((await s.core.rails.records.findOperation(nextId))!.state, "signed_not_submitted");
+  assert.equal((await findStored(s.core.rails.records, nextId))!.state, "signed_not_submitted");
   assert.equal(s.rpc.submissions.length, 0);
 });
 
@@ -95,7 +96,7 @@ test("same-key replay is stable; cross-kind idempotency and EVM/new-rail profile
   const changed = await s.core.execute({ command: "transfer.prepare-solana", profile: s.account.profile, asset: "sol", recipient: SOL_RECIPIENT,
     amount: "0.000002", maximumFee: "0.003", idempotencyKey: "solana-fixture-0001" });
   assert.equal(changed.error?.code, "APN_IDEMPOTENCY_CONFLICT");
-  const operation = (await s.core.rails.records.findOperation(id))!;
+  const operation = (await findStored(s.core.rails.records, id))!;
   await assert.rejects(new OperationService(s.core.context.state).resolvePrepare({ kind: "direct_transfer", profileHash: operation.profileHash,
     operationId: id, idempotencyHash: operation.idempotencyHash, requestHash: operation.requestHash }), { code: "APN_IDEMPOTENCY_CONFLICT" });
   const evm = makeCore({ root: temporary.root, native: new TestNative(), rpc: new TestRpc() });
@@ -107,10 +108,10 @@ test("same-key replay is stable; cross-kind idempotency and EVM/new-rail profile
 
 test("strict operation and historic-receipt integrity reject added fields and forbidden terminal mutation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await solanaFixture(temporary.root); const id = await s.prepare();
-  const initial = (await s.core.rails.records.findOperation(id))!;
+  const initial = (await findStored(s.core.rails.records, id))!;
   assert.throws(() => validateRailOperation({ ...initial, injected: "field" }), { code: "APN_STATE_CORRUPT" });
   await s.core.execute({ command: "transfer.approve", operationId: id });
-  const final = (await s.core.rails.records.findOperation(id))!;
+  const final = (await findStored(s.core.rails.records, id))!;
   assert.throws(() => transitionRail(final, { state: "unknown_finality", at: s.now.toISOString(), reason: "invalid_reopen", proofClass: "effect_outcome_unknown" }), { code: "APN_STATE_CORRUPT" });
   // A receipt file (as released versions wrote them) that claims the current transition but differs from it is corrupt,
   // and fails only its own receipt read: the operation itself still resumes (phase 4b, CORE-13).
@@ -154,7 +155,7 @@ test("provider invocation is durable before launch and an ambiguous result witho
       economics: { networkFeeMaximumAtomic: "5000", recipientRentAtomic: "0", maximumNativeDebitAtomic: "5000", networkFeePayer: account.address, rentPayer: null, feeControl: "provider_guarantee" } }),
     revalidate: async () => {}, sign: async () => { throw new Error("provider cannot use local signing"); }, recoverEffect: async () => null,
     submit: async (binding) => {
-      assert.equal((await core.rails.records.findOperation(binding.operationId))!.state, "submitting");
+      assert.equal((await findStored(core.rails.records, binding.operationId))!.state, "submitting");
       launches++; throw new Error("synthetic protected provider response lost");
     },
     inspect: async () => { inspections++; return { status: "unproven", reason: "synthetic_unproven" }; },
@@ -170,5 +171,5 @@ test("provider invocation is durable before launch and an ambiguous result witho
   assert.equal(JSON.stringify(result).includes("synthetic protected provider response lost"), false);
   for (let i = 0; i < 2; i++) await core.execute({ command: "operation.resume", operationId: id });
   assert.equal(launches, 1); assert.equal(inspections, 0);
-  const record = (await core.rails.records.findOperation(id))!; assert.equal(record.transactionId, null); assert.equal(record.terminal, false);
+  const record = (await findStored(core.rails.records, id))!; assert.equal(record.transactionId, null); assert.equal(record.terminal, false);
 });

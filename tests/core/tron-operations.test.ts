@@ -13,6 +13,7 @@ import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../..
 import { SOL_RECIPIENT } from "./solana-helpers.js";
 import { TRON_RECIPIENT, tronFixture } from "./tron-helpers.js";
 import { reserveRailLease } from "./direct-allowlist-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 test("TRX preparation reads its window once and keeps every other safety read", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
@@ -53,7 +54,7 @@ test("TRON sealing interruption recovers exactly one signed protobuf without ano
   const original = s.adapter.sign.bind(s.adapter); let signs = 0;
   s.adapter.sign = async (binding) => { signs++; await original(binding); throw new Error("synthetic interruption after sealed effect"); };
   assert.equal((await s.core.execute({ command: "transfer.approve", operationId: id })).ok, false);
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "signing_started"); assert.equal(s.rpc.submissions.length, 0);
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "signing_started"); assert.equal(s.rpc.submissions.length, 0);
   const restart = await tronFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
   const result = await restart.core.execute({ command: "operation.resume", operationId: id });
   assert.equal((result.operation as { state: string }).state, "completed"); assert.equal(signs, 1); assert.equal(restart.approval.calls.length, 0); assert.equal(s.rpc.submissions.length, 1);
@@ -64,7 +65,7 @@ test("TRON interrupted submission, expired TAPOS and absent history preserve the
   s.rpc.submissionTimeout = true; const first = await s.core.execute({ command: "transfer.approve", operationId: id });
   assert.equal((first.operation as { state: string }).state, "unknown_finality"); const transaction = s.rpc.submissions[0]; assert.ok(transaction);
   s.rpc.absentHistory = true; s.now.setUTCDate(s.now.getUTCDate() + 1); s.rpc.energyPrice = 900n;
-  const policy = await s.core.rails.policies.requiredPolicy(s.account, "usdt"); const record = (await s.core.rails.records.findOperation(id))!;
+  const policy = await s.core.rails.policies.requiredPolicy(s.account, "usdt"); const record = (await findStored(s.core.rails.records, id))!;
   assert.deepEqual(chainUsage(policy, [record], s.now), { principalAtomic: "1000000", nativeFeeAtomic: record.prepared.resources!.totalFeeMaximumAtomic });
   for (let i = 0; i < 2; i++) {
     const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal((result.operation as { state: string }).state, "unknown_finality"); assert.deepEqual(s.rpc.submissions, [transaction]);
@@ -86,7 +87,7 @@ for (const mutation of ["reference", "expiry", "last-slot", "permission", "fundi
     if (mutation === "funding") s.rpc.native = 0n;
   };
   const result = await s.core.execute({ command: "transfer.approve", operationId: id }); assert.equal(result.ok, false);
-  const record = (await s.core.rails.records.findOperation(id))!; assert.equal(record.state, "failed_before_effect"); assert.equal(s.approval.calls.length, 1); assert.equal(s.rpc.submissions.length, 0);
+  const record = (await findStored(s.core.rails.records, id))!; assert.equal(record.state, "failed_before_effect"); assert.equal(s.approval.calls.length, 1); assert.equal(s.rpc.submissions.length, 0);
   assert.equal(await s.storage.effect(s.account, id, record.fingerprint), null);
 });
 
@@ -95,7 +96,7 @@ test("TRON durable submission boundary survives an interruption after its write 
   const persist = s.core.rails.records.persist.bind(s.core.rails.records);
   s.core.rails.records.persist = async (operation) => { await persist(operation); if (operation.state === "submitting") throw new Error("synthetic interruption after the durable write"); };
   assert.equal((await s.core.execute({ command: "transfer.approve", operationId: id })).ok, false);
-  assert.equal((await s.core.rails.records.findOperation(id))!.state, "submitting"); assert.equal(s.rpc.submissions.length, 0);
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "submitting"); assert.equal(s.rpc.submissions.length, 0);
   s.rpc.absentHistory = true; const restart = await tronFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
   const result = await restart.core.execute({ command: "operation.resume", operationId: id }); assert.equal((result.operation as { state: string }).state, "unknown_finality"); assert.equal(s.rpc.submissions.length, 0);
   assert.equal((await restart.core.execute({ command: "receipt.get", operationId: id })).ok, true);
@@ -103,11 +104,11 @@ test("TRON durable submission boundary survives an interruption after its write 
 
 test("TRON missing uncommitted effect ends safely, while a sealed expired transaction is retained without first submission", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare();
-  let record = (await s.core.rails.records.findOperation(id))!;
+  let record = (await findStored(s.core.rails.records, id))!;
   record = transitionRail(record, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect",
     allowlistLease: await reserveRailLease(temporary.root, s.now, record) }); await s.core.rails.records.persist(record);
   assert.equal(((await s.core.execute({ command: "operation.resume", operationId: id })).operation as { state: string }).state, "failed_before_effect");
-  const next = await s.prepare("trx", "tron-sealed-expiry-0002"); const nextRecord = (await s.core.rails.records.findOperation(next))!;
+  const next = await s.prepare("trx", "tron-sealed-expiry-0002"); const nextRecord = (await findStored(s.core.rails.records, next))!;
   const signing = transitionRail(nextRecord, { state: "signing_started", at: s.now.toISOString(), reason: "foreground_signing_started", proofClass: "durable_pre_effect",
     allowlistLease: await reserveRailLease(temporary.root, s.now, nextRecord) }); await s.core.rails.records.persist(signing);
   const effect = await s.adapter.sign({ account: signing.account, operationId: next, fingerprint: signing.fingerprint, prepared: signing.prepared, send: null });
@@ -122,7 +123,7 @@ test("TRON MCP preparation and status share CLI state, while approval and policy
   const client = new Client({ name: "synthetic-tron-acceptance", version: "1" }); const [a, b] = InMemoryTransport.createLinkedPair(); await server.connect(b); await client.connect(a); t.after(async () => { await client.close(); await server.close(); });
   const prepared = await client.callTool({ name: "apn_pay_transfer_prepare_tron", arguments: { profile: s.account.profile, asset: "usdt", to: TRON_RECIPIENT, amount: "1", max_fee_trx: "30", idempotency_key: "tron-mcp-0001" } });
   const first = prepared.structuredContent as { ok: boolean; operation: { operation_id: string } }; assert.equal(first.ok, true); const id = first.operation.operation_id;
-  s.rpc.prepared = (await s.core.rails.records.findOperation(id))!.prepared;
+  s.rpc.prepared = (await findStored(s.core.rails.records, id))!.prepared;
   const calls = s.rpc.calls.length;
   const approve = (await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "pay transfer approve", arguments: { operation: id } } })).structuredContent as { error: { code: string }; next_actions: string[] };
   assert.equal(approve.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.deepEqual(approve.next_actions, [`apn pay transfer approve --operation ${id}`]);

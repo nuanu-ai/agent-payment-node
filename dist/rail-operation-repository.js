@@ -20,10 +20,6 @@ export class RailOperationRepository extends SecureStateStore {
             corrupt();
         return operation;
     }
-    async findOperation(operationId) {
-        stateIdentifier(operationId, "rail operation ID");
-        return await this.findInProfiles("rail-operations", async (profileHash) => await this.loadOperation(profileHash, operationId), corrupt);
-    }
     async listOperations(profileHash) {
         stateIdentifier(profileHash, "rail profile hash");
         const directory = `rail-operations/${profileHash}`;

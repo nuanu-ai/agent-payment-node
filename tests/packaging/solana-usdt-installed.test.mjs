@@ -53,6 +53,7 @@ test("packed APN CLI prepares pinned Solana USDT, refuses policy violations, and
   const { SOLANA_USDT, SOLANA_GENESIS } = await moduleAt("chain-policy.js");
   const { AllowlistPolicyStore, allowlistDecisionFingerprint, allowlistProfileHash } = await moduleAt("allowlist-policy.js");
   const { RailOperationRepository } = await moduleAt("rail-operation-repository.js");
+  const { StateStore } = await moduleAt("state.js");
   assert.equal(SOLANA_USDT, "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB");
 
   const stateRoot = join(sandbox, "state");
@@ -133,7 +134,7 @@ test("packed APN CLI prepares pinned Solana USDT, refuses policy violations, and
   const prepared = await prepare("1.25", "installed-solana-usdt-prepared");
   assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
   const id = prepared.operation.operation_id;
-  const record = await new RailOperationRepository(stateRoot).findOperation(id);
+  const record = await new RailOperationRepository(stateRoot).loadOperation(new StateStore(stateRoot).profileHash(PROFILE), id);
   assert.equal(record.state, "awaiting_approval");
   assert.equal(record.prepared.asset.identifier, SOLANA_USDT);
   assert.equal(record.prepared.sourceTokenAccount, sourceAta);
