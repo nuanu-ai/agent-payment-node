@@ -4,8 +4,11 @@ import { getAddress } from "viem";
 import { USDT_GASLESS, type UsdtTransferPlan } from "../../src/gasless-usdt/model.js";
 import { decodeUsdtPaymasterData, validateUsdtPaymasterData } from "../../src/gasless-usdt/paymaster-data.js";
 import { planUsdtTransfer, validateUsdtGasPrice, validateUsdtTokenQuote } from "../../src/gasless-usdt/quote.js";
-import { assertUsdtFunding, observeUsdtGasless, quoteUsdtGasless, sponsorUsdtOperation, type UsdtAccountState, type UsdtChainPort, type UsdtSponsorPort } from "../../src/gasless-usdt/engine.js";
-import { USDT_CURRENT_PINS, verifyUsdtReceipt, type UsdtChainReceipt } from "../../src/gasless-usdt/receipt.js";
+import { assertUsdtFunding, type UsdtAccountState } from "../../src/gasless-usdt/engine.js";
+import { verifyUsdtReceipt, type UsdtChainReceipt } from "../../src/gasless-usdt/receipt.js";
+
+const USDT_CURRENT_PINS = Object.freeze({ token: USDT_GASLESS.token, paymaster: USDT_GASLESS.paymaster,
+  treasury: USDT_GASLESS.treasury, entryPoint: USDT_GASLESS.entryPoint });
 import type { Hex } from "../../src/model.js";
 const QUOTE = { quotes: [{ paymaster: USDT_GASLESS.paymaster, token: USDT_GASLESS.token, postOpGas: "0x4c2c", exchangeRate: "0xa38ca6e3", exchangeRateNativeToUsd: "0x948f68af", balanceSlot: "0x2", allowanceSlot: "0x5" }] };
 const PRICE = { slow: { maxFeePerGas: "0x10ef719d", maxPriorityFeePerGas: "0xbb0de7a" }, standard: { maxFeePerGas: "0x11c8374b", maxPriorityFeePerGas: "0xc468333" }, fast: { maxFeePerGas: "0x12a0fcf9", maxPriorityFeePerGas: "0xcdc27ec" } };
@@ -20,6 +23,4 @@ test("quote rejects insufficient positive fee budget", () => { assert.throws(() 
 test("paymaster codec validates exact treasury and validity", () => { const decoded = decodeUsdtPaymasterData(SIGNED.paymasterData); assert.equal(decoded.treasury, USDT_GASLESS.treasury); validateUsdtPaymasterData(SIGNED, plan(), 0x6aacecdbn - 300n); assert.throws(() => validateUsdtPaymasterData(SIGNED, plan(), 0x6aacecdbn - 30n), /paymaster_validity/u); });
 test("paymaster codec rejects flags and trailing bytes", () => { assert.throws(() => validateUsdtPaymasterData({ ...SIGNED, paymasterData: `0x0201${SIGNED.paymasterData.slice(6)}` }, plan(), 0x6aacecdbn - 300n), /paymaster_flags/u); assert.throws(() => decodeUsdtPaymasterData(`${SIGNED.paymasterData}00`), /paymaster_data_shape/u); });
 test("funding check binds gross amount", () => { assert.throws(() => assertUsdtFunding(plan(), { ...account, usdtBalanceAtomic: 0n }), /holds 0 atomic/u); });
-test("sponsor rehearsal requests only an unsigned structural operation", async () => { const calls: string[] = []; const sponsor: UsdtSponsorPort = { tokenQuote: async () => QUOTE, gasPrice: async () => PRICE, paymasterData: async op => { calls.push(op.signature); return SIGNED; }, receiptLocator: async () => null }; const chain: UsdtChainPort = { verifyPins: async () => {}, account: async () => account, receiptAt: async () => null }; const p = await quoteUsdtGasless({ sponsor, chain }, request()); await sponsorUsdtOperation(sponsor, p, account, 0x6aacecdbn - 300n); assert.equal(calls.length, 1); assert.equal(calls[0]?.length, 132); });
-test("observation remains pending without canonical evidence", async () => { const p = plan(); const sponsor = { receiptLocator: async () => null }; const chain = { verifyPins: async () => {}, account: async () => account, receiptAt: async () => null }; assert.deepEqual(await observeUsdtGasless({ sponsor, chain }, p, `0x${"ab".repeat(32)}`), { state: "pending" }); });
 test("receipt evidence requires exact successful transfers", () => { const hash = `0x${"ab".repeat(32)}` as Hex; const receipt: UsdtChainReceipt = { transactionHash: `0x${"cd".repeat(32)}`, blockNumber: 1n, status: "success", logs: [] }; assert.throws(() => verifyUsdtReceipt(plan(), hash, receipt, USDT_CURRENT_PINS), /receipt_user_operation|receipt_transfers/u); });

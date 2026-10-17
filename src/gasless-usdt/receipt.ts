@@ -1,6 +1,6 @@
 import { decodeAbiParameters, getAddress, toEventSelector } from "viem";
 import type { Address, Hex } from "../model.js";
-import { USDT_GASLESS, usdtFailure, type UsdtTransferPlan } from "./model.js";
+import { usdtFailure, type UsdtTransferPlan } from "./model.js";
 
 const USER_OPERATION_EVENT = toEventSelector(
   "UserOperationEvent(bytes32 indexed userOpHash, address indexed sender, address indexed paymaster, uint256 nonce, bool success, uint256 actualGasCost, uint256 actualGasUsed)");
@@ -14,9 +14,6 @@ export interface UsdtReceiptLog { readonly address: string; readonly topics: rea
  * singleton the operation's hash is bound to.
  */
 export interface UsdtReceiptPins { readonly token: Address; readonly paymaster: Address; readonly treasury: Address; readonly entryPoint: Address }
-/** Pins of a freshly prepared plan: the current constants it was just validated against. */
-export const USDT_CURRENT_PINS: UsdtReceiptPins = Object.freeze({ token: USDT_GASLESS.token, paymaster: USDT_GASLESS.paymaster,
-  treasury: USDT_GASLESS.treasury, entryPoint: USDT_GASLESS.entryPoint });
 export interface UsdtChainReceipt {
   readonly transactionHash: Hex; readonly blockNumber: bigint; readonly status: "success" | "reverted";
   readonly logs: readonly UsdtReceiptLog[];
