@@ -457,7 +457,12 @@ test("an unresolved Coinbase account blocks a gasless alias bound to the same pr
   await state.writeOperation(operation);
   const service = new OperationService(state);
   await assert.rejects(() => service.assertProviderAccountAvailable("coinbase-agentic-wallet",
-    operation.providerDirect!.accountBindingHash, operation.walletAddress), { code: "APN_OPERATION_BLOCKED" });
+    operation.providerDirect!.accountBindingHash, operation.walletAddress), { code: "APN_OPERATION_BLOCKED",
+    message: "Another money operation for this provider account is not terminal.",
+    details: { blockingOperationId: operation.operationId, blockingState: operation.state } });
+  // The payer alone (another binding hash) is the same provider account.
+  await assert.rejects(() => service.assertProviderAccountAvailable("coinbase-agentic-wallet", "6".repeat(64), operation.walletAddress),
+    { code: "APN_OPERATION_BLOCKED" });
   await service.assertProviderAccountAvailable("coinbase-agentic-wallet", "6".repeat(64), OUTER);
 });
 
