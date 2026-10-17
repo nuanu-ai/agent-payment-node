@@ -1,7 +1,7 @@
 /** Pure finite preflight admission. Runtime must obtain all inputs from bounded canonical RPC/API reads under account locks. */
 import { encodePacked, keccak256 } from "viem";
 import { hashObject } from "../canonical.js";
-import { CIRCLE_AMOUNT, CIRCLE_DEPLOYMENT_PINS, CIRCLE_MAX_FEE, CIRCLE_MIN_MINT, CIRCLE_MINTER, CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_AMOUNT, CIRCLE_DEPLOYMENT_PINS, CIRCLE_MAX_FEE, CIRCLE_MIN_MINT, CIRCLE_MINTER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
 import { assertCircleAttestation, assertCircleSource, circleFail, circleHex, circleRecord, circleUint, circleWord } from "./protocol.js";
 /** TokenController.sol hashes abi.encodePacked(uint32 remoteDomain,bytes32 remoteToken), never abi.encode. */
 export function circleTokenPairKey(remoteDomain, remoteToken) {
@@ -63,15 +63,6 @@ export function assertCircleFeeQuote(quote, chain, nowMs) {
         quote.expiresAtMs !== quote.fetchedAtMs + 30_000 || nowMs < quote.fetchedAtMs || nowMs >= quote.expiresAtMs ||
         circleUint(quote.quotedFeeAtomic) > CIRCLE_MAX_FEE)
         circleFail("fee_quote_expired_or_integrity");
-}
-export function verifyCircleSourceAccount(account) {
-    const allowance = circleUint(account.allowanceAtomic);
-    if (account.chainId !== 42161 || account.address !== CIRCLE_SOURCE_OWNER || circleUint(account.usdcBalanceAtomic) < CIRCLE_AMOUNT ||
-        circleUint(account.nativeBalanceAtomic) < 30000000000000n || account.latestNonceAtomic !== account.pendingNonceAtomic ||
-        ![0n, CIRCLE_AMOUNT].includes(allowance))
-        circleFail("source_account");
-    circleUint(account.latestNonceAtomic);
-    return { approvalRequired: allowance === 0n, nonceAtomic: account.latestNonceAtomic };
 }
 /** `gasPayer` is the operation's own destination custody wallet, which signs and pays the mint. */
 export function verifyCircleDestinationAccount(account, chain, gasPayer) {

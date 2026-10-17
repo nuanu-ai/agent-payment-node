@@ -48,7 +48,6 @@ export declare function observeCircleFunding(input: CircleFundingOperationV2, po
 export declare function refreshCircleFundingAttestation(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
 export declare function cleanupCircleFunding(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
 /** Explicit fresh cleanup authority, never source authorization or expiry renewal. */
-export declare function executeCircleFundingCleanupWithConsent(op: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2>;
 /** Production retirement custody accepts only the private controller's currently active exact guard. */
 export declare function assertCircleFundingEffectGuard(input: CircleFundingOperationV2, effectInput: CircleEffect, guard: () => void): void;
 export {};

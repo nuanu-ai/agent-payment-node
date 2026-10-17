@@ -3,7 +3,7 @@ import type { CircleFundingBindingV2 } from "./funding-binding.js";
 import { encodePacked, keccak256, type Address, type Hex } from "viem";
 import { hashObject } from "../canonical.js";
 import { CIRCLE_AMOUNT, CIRCLE_DEPLOYMENT_PINS, CIRCLE_MAX_FEE, CIRCLE_MIN_MINT, CIRCLE_MINTER,
-  CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, type CircleDestinationChain } from "./catalog.js";
+  CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, type CircleDestinationChain } from "./catalog.js";
 import { assertCircleAttestation, assertCircleSource, circleFail, circleHex, circleRecord, circleUint, circleWord,
   type CircleAttestation, type CircleSourceProof } from "./protocol.js";
 export interface CircleContractSnapshot { readonly address: string; readonly proxyCodeHash: string;
@@ -77,13 +77,6 @@ export function assertCircleFeeQuote(quote: CircleFeeQuote, chain: CircleDestina
 export interface CircleAccountPreflight { readonly chainId: number; readonly address: Address;
   readonly nativeBalanceAtomic: string; readonly usdcBalanceAtomic: string; readonly allowanceAtomic: string;
   readonly latestNonceAtomic: string; readonly pendingNonceAtomic: string; }
-export function verifyCircleSourceAccount(account: CircleAccountPreflight): { readonly approvalRequired: boolean; readonly nonceAtomic: string } {
-  const allowance = circleUint(account.allowanceAtomic);
-  if (account.chainId !== 42161 || account.address !== CIRCLE_SOURCE_OWNER || circleUint(account.usdcBalanceAtomic) < CIRCLE_AMOUNT ||
-    circleUint(account.nativeBalanceAtomic) < 30_000_000_000_000n || account.latestNonceAtomic !== account.pendingNonceAtomic ||
-    ![0n, CIRCLE_AMOUNT].includes(allowance)) circleFail("source_account");
-  circleUint(account.latestNonceAtomic); return { approvalRequired: allowance === 0n, nonceAtomic: account.latestNonceAtomic };
-}
 /** `gasPayer` is the operation's own destination custody wallet, which signs and pays the mint. */
 export function verifyCircleDestinationAccount(account: CircleAccountPreflight, chain: CircleDestinationChain, gasPayer: Address): string {
   const route = circleRoute(chain);

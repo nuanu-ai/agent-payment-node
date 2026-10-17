@@ -279,11 +279,6 @@ export async function cleanupCircleFunding(input: CircleFundingOperationV2, port
 }
 
 /** Explicit fresh cleanup authority, never source authorization or expiry renewal. */
-export async function executeCircleFundingCleanupWithConsent(op: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
-  await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "cleanup", ports);
-  try { return await executeCircleFundingEffect(op, "cleanup", ports, token); } finally { authorities.delete(token); }
-}
-
 /** Production retirement custody accepts only the private controller's currently active exact guard. */
 export function assertCircleFundingEffectGuard(input: CircleFundingOperationV2, effectInput: CircleEffect, guard: () => void): void {
   const op = snapshotCircleFundingOperation(input), effect = snapshotCircleFundingEffect(op, effectInput);

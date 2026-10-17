@@ -3,7 +3,6 @@ import type { EvmRpcCall } from "../evm-ports.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
 import type { Hex } from "../model.js";
 import type { BridgeChainId } from "./chains.js";
-import type { BridgeBlock } from "./model.js";
 import { isArchiveRead } from "./rpc-archive.js";
 import { approvedTransportReason, MAX_READ_ATTEMPTS, RpcHttpFailure, RPC_RETRY_DELAY_MS } from "./rpc-session.js";
 import { jsonRpcRateLimit } from "./rpc-session-helpers.js";
@@ -171,10 +170,4 @@ export function rpcReceiptFallbackValue(expected: unknown): (value: unknown) => 
     return value;
   };
 }
-export function assertMatchingHeader(raw: Record<string, unknown>, expected: BridgeBlock): void {
-  if (evmRpcQuantity(raw.number).toString() !== expected.numberAtomic || evmRpcHex(raw.hash, 32) !== expected.hash) {
-    bridgeFailure("APN_RPC_PROTOCOL", "bridge_archive_block_mismatch");
-  }
-}
 export function quantity(n: bigint): Hex { return `0x${n.toString(16)}`; }
-export function eip7702Delegation(code: Hex): boolean { return /^0xef0100[0-9a-f]{40}$/iu.test(code); }
