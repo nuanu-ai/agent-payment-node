@@ -160,9 +160,11 @@ export declare const CIRCLE_READ_PLAN: {
     readonly preflight: 8;
     readonly observation: 4;
     readonly single: 1;
+    readonly ambiguous: 4;
 };
 /** The longest live command: identity, configuration, attesters, two accounts, two envelopes, three effect preflights,
- * eight observations and four single reads (allowance, used nonce, cleanup nonce, mint head), each retried once. */
+ * eight observations, one ambiguous-send check (two nonces, transaction, receipt) and four single reads (allowance,
+ * used nonce, cleanup nonce, mint head), each retried once. */
 export declare const CIRCLE_COMMAND_REQUEST_BUDGET: number;
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
  * retry once; anchored observations restart wholly. Financial RPC is never retried.

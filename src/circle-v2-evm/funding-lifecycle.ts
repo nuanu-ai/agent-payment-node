@@ -1,7 +1,7 @@
 import { types } from "node:util";
 import { advanceCircleFundingOperation as advanceCircle, validateCircleFundingOperation as validateCircle, type CircleFundingOperationV2 } from "./funding-operation.js";
 import { hashObject } from "../canonical.js";
-import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
+import type { EvmAmbiguousSendOutcome, EvmUnsentOutcome } from "../evm-unsent-outcome.js";
 import type { Hex } from "viem";
 import type { CircleFundingMaterial } from "./funding-custody.js";
 import { circleBlocked, circleCorrupt, circleSame, type CircleEffect, type CircleEnvelope, type CircleRole } from "./operation-model.js";
@@ -49,9 +49,15 @@ export interface CircleFundingLifecyclePorts {
   cleanupEnvelope(op: CircleFundingOperationV2): Promise<CircleEnvelope>;
   usage(op: CircleFundingOperationV2, target: "unknown_finality" | "finalized" | "failed_confirmed_revert" | "failed_before_effect" | "released_unsubmitted"): Promise<CircleFundingOperationV2["usage"]>;
   /** Never-lands proof and discard for signed-but-unsent bytes (`outcome`) and for possibly-sent bytes (`sentOutcome`, which
-   * also requires no receipt). Production runtimes always provide it; injected test ports may omit it. */
+   * also requires no receipt). Production runtimes always provide it; injected test ports may omit it. `ambiguous` and
+   * `resend` serve a possibly-sent mint or cleanup: the same proofs plus "send the identical sealed bytes again". */
   unsent?: Readonly<{ outcome(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>; sentOutcome?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
+    ambiguous?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmAmbiguousSendOutcome>;
+    /** Sends exactly these sealed bytes once per command; false when nothing was sent (refused or not accepted). */
+    resend?(op: CircleFundingOperationV2, effect: CircleEffect, rawTransaction: Hex): Promise<boolean>;
     discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void> }>;
+  /** Whether the destination already consumed the issuer message nonce (MessageTransmitter `usedNonces`). */
+  messageNonceUsed?(op: CircleFundingOperationV2): Promise<boolean>;
 }
 type Consent = () => void;
 /** Phases whose signed bytes, if any, never crossed the submission fence: resumable with fresh consent (R3). */
@@ -166,11 +172,18 @@ export async function executeCircleFundingEffect(input: CircleFundingOperationV2
 }
 export async function approveCircleFundingMint(input: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
   let op = await observeCircleFunding(input, ports); if (op.terminal) return op;
-  const existing = op.effects.find(e => e.role === "mint"); if (existing !== undefined && existing.phase !== "prepared" && !UNSENT_SIGNING.includes(existing.phase)) return op;
+  const existing = op.effects.find(e => e.role === "mint"), rearm = existing?.phase === "abandoned_unsent";
+  if (existing !== undefined && !rearm && existing.phase !== "prepared" && !UNSENT_SIGNING.includes(existing.phase)) return op;
   if (op.source === null || op.attestation === null || op.residualAllowanceAtomic !== "0") circleBlocked("verified_source_attestation_and_zero_allowance_required");
   assertCircleAttestation(op.source, op.attestation, op.funding);
   await ports.assertOwnerPolicyAndConflicts(op, "mint");
-  if (existing === undefined) {
+  if (rearm) {
+    // R4: the previous mint can never land (another transaction took its nonce). A fresh envelope is signed only while
+    // the issuer message is still unused on the destination; a used message was minted by someone else: adopt it.
+    if (ports.messageNonceUsed === undefined) circleBlocked("mint_message_state_unavailable");
+    if (await ports.messageNonceUsed(op)) circleBlocked("mint_message_used_external_adoption_required");
+    op = await rearmEffect(op, "mint", await ports.mintEnvelope(op), ports);
+  } else if (existing === undefined) {
     const envelope = await ports.mintEnvelope(op);
     op = await persist(op, { effects: [...op.effects, { role: "mint", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "mint_envelope_frozen", ports);
   }
@@ -192,7 +205,7 @@ export async function observeCircleFunding(input: CircleFundingOperationV2, port
     }
     if (effect.transactionHash === null || ["prepared", "sealed", "abandoned_unsent", "confirmed", "reverted"].includes(effect.phase)) continue;
     const proof = await ports.observeEffect(op, effect);
-    if (proof === null) { if (effect.role === "approval" || effect.role === "burn") { op = await sentNeverLanded(op, effect.role, ports); if (op.terminal) return op; } continue; }
+    if (proof === null) { if (effect.role === "approval" || effect.role === "burn") { op = await sentNeverLanded(op, effect.role, ports); if (op.terminal) return op; } else op = await ambiguousOwnedSend(op, effect.role, ports); continue; }
     if (proof.outcome === "reverted") {
       op = await persist(op, { effects: updateEffect(op, effect.role, { phase: "reverted", proof }), state: "cleanup_required" }, `${effect.role}_finalized_revert_requires_explicit_cleanup`, ports);
       continue;
@@ -221,7 +234,7 @@ export async function observeCircleFunding(input: CircleFundingOperationV2, port
       }
     }
   }
-  if (op.source !== null && op.attestation !== null && op.effects.some(e => e.role === "mint" && e.transactionHash !== null)) {
+  if (op.source !== null && op.attestation !== null && op.effects.some(e => e.role === "mint" && e.transactionHash !== null && e.phase !== "abandoned_unsent")) {
     const destination = await ports.observeDestination(op);
     if (destination !== null) {
       if (op.destination !== null && (destination.blockHash !== op.destination.blockHash || destination.receiptHash !== op.destination.receiptHash || destination.transactionHash !== op.destination.transactionHash)) circleBlocked("destination_reorg_holds_required");
@@ -266,7 +279,7 @@ export async function cleanupCircleFunding(input: CircleFundingOperationV2, port
   if (cleanup === undefined) {
     const envelope = await ports.cleanupEnvelope(op);
     op = await persist(op, { state: "cleanup_required", effects: [...op.effects, { role: "cleanup", phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }] }, "cleanup_envelope_frozen", ports);
-  }
+  } else if (cleanup.phase === "abandoned_unsent") op = await rearmEffect(op, "cleanup", await ports.cleanupEnvelope(op), ports);
   cleanup = op.effects.find(e => e.role === "cleanup")!;
   if (["prepared", ...UNSENT_SIGNING].includes(cleanup.phase)) { await ports.assertOwnerPolicyAndConflicts(op); const token = await consent(op, "cleanup", ports); checkConsent(token, op, ports); op = await executeCircleFundingEffect(op, "cleanup", ports, token); }
   op = await observeCircleFunding(op, ports); cleanup = op.effects.find(e => e.role === "cleanup")!;
@@ -330,4 +343,31 @@ async function sentNeverLanded(input: CircleFundingOperationV2, role: "approval"
   // The submission fence exposed every hold (`unknown_finality`); released, not counted, is the ledger's terminal for them.
   const usage = await ports.usage(op, "released_unsubmitted");
   return persist(op, { usage, usageFinalized: true, residualAllowanceAtomic: "0", state: "cancelled_unsubmitted", terminal: true }, "approval_never_landed_holds_released", ports);
+}
+
+/** R4 for a possibly-broadcast mint or cleanup (submission fence crossed) that no receipt proves. If the node knows neither
+ * its transaction nor a receipt and the signer's latest nonce has not passed the effect's nonce, the identical sealed
+ * bytes are sent again, once per command, never re-signed (same hash and nonce: at most one inclusion). If the safe nonce
+ * is past it, another transaction took the nonce and the bytes can never land: the effect is abandoned, its bytes
+ * discarded, and approve-mint (or cleanup) may re-arm a fresh envelope under fresh foreground consent. Otherwise observe. */
+async function ambiguousOwnedSend(input: CircleFundingOperationV2, role: "mint" | "cleanup", ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
+  let op = input; const effect = op.effects.find(e => e.role === role)!;
+  if (op.terminal || ports.unsent?.ambiguous === undefined || effect.transactionHash === null || !["submission_started", "submitted", "unknown"].includes(effect.phase)) return op;
+  const outcome = await ports.unsent.ambiguous(op, effect);
+  if (outcome === "resend_identical") {
+    if (ports.unsent.resend === undefined) return op;
+    const material = await ports.loadMaterial(op, effect); if (material === null || material.transactionHash !== effect.transactionHash) circleCorrupt("sealed_material_missing");
+    return await ports.unsent.resend(op, effect, material.rawTransaction) ? persist(op, {}, `${role}_identical_sealed_bytes_rebroadcast`, ports) : op;
+  }
+  if (outcome !== "never_lands") return op;
+  op = await persist(op, { effects: updateEffect(op, role, { phase: "abandoned_unsent" }), ...(role === "mint" ? { state: "awaiting_mint" as const } : {}) }, `${role}_sent_bytes_never_land`, ports);
+  if (effect.materialHash !== null) await ports.unsent.discard(op, op.effects.find(e => e.role === role)!);
+  return op;
+}
+/** Replaces an abandoned mint or cleanup with a fresh prepared envelope; the transition names the abandoned hash. */
+async function rearmEffect(op: CircleFundingOperationV2, role: "mint" | "cleanup", envelope: CircleEnvelope, ports: CircleFundingLifecyclePorts): Promise<CircleFundingOperationV2> {
+  const old = op.effects.find(e => e.role === role)!;
+  // The abandoned bytes are gone before anything new is signed (idempotent, also after a crash between abandon and discard).
+  if (old.materialHash !== null) { if (ports.unsent === undefined) circleBlocked("never_landed_discard_unavailable"); await ports.unsent.discard(op, old); }
+  return persist(op, { effects: updateEffect(op, role, { phase: "prepared", envelope, transactionHash: null, materialHash: null, proof: null }) }, `${role}_fresh_envelope_after_never_landed:${old.transactionHash ?? "none"}`, ports);
 }
