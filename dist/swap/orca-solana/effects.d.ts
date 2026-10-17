@@ -5,7 +5,7 @@ import { type SwapOperationRecord } from "../model.js";
 import { type OrcaOwnerAdmission } from "./admission.js";
 import { type OrcaSwapLifetime } from "./instructions.js";
 import { type OrcaKeylessMaterial } from "./material.js";
-import type { OrcaSimulationEvidence } from "./simulation.js";
+import type { OrcaSimulationEvidence, OrcaTokenSimulationEvidence } from "./simulation.js";
 declare const BINDING_VERSION: "apn.orca-whirlpool-execution-binding.v1";
 /** Post-approval facts taken at the send boundary: a fresh lifetime and the exact-bytes simulation. */
 export interface OrcaExecutionFreshness {
@@ -13,7 +13,7 @@ export interface OrcaExecutionFreshness {
     readonly unsignedPayload: string;
     readonly messageHash: string;
     readonly networkFeeLamports: string;
-    readonly simulation: OrcaSimulationEvidence;
+    readonly simulation: OrcaSimulationEvidence | OrcaTokenSimulationEvidence;
     readonly blockHeight: string;
     readonly checkedAt: string;
 }

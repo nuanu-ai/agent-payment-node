@@ -9,8 +9,9 @@ export type OrcaObservedOutcome = {
 };
 /**
  * Observe-only receipt reader. A finalized success must carry the exact signature and message, a fee within the
- * approved fee, a SOL spend within the approved maximum, and a USDC delta on the owner's account of at least the
- * minimum. A finalized failure proves every instruction reverted and only the fee was spent.
+ * approved fee, a SOL spend within the approved maximum, and a delta of the pool's output token on the owner's
+ * destination account of at least the minimum; for a token-input pool the owner's source account must also have lost
+ * exactly the input. A finalized failure proves every instruction reverted and only the fee was spent.
  */
 export declare class OrcaReceiptObserver {
     private readonly rpc;

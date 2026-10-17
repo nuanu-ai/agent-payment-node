@@ -320,6 +320,7 @@ export type CommandRequest = {
     readonly operationId: string;
 } | {
     readonly command: "swap.orca.quote";
+    readonly pool: "sol-usdc" | "usdc-usdt";
     readonly profile: string;
     readonly account: string;
     readonly amountAtomic: string;

@@ -39,7 +39,7 @@ import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapRuntime } from "./swap/runtime.js";
-import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
+import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
 import type { OrcaStableQuoteRequest } from "./swap/orca-solana/stable-readonly.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
@@ -86,7 +86,7 @@ export interface CoreDependencies {
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.sunswap.quote";
     }>>;
-    readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
+    readonly orcaRuntime?: OrcaRuntimeSelector;
     readonly orcaStableQuote?: (request: OrcaStableQuoteRequest) => Promise<unknown>;
     readonly orcaStablePrepare?: (request: Extract<CommandRequest, {
         readonly command: "swap.orca.stable-prepare";
@@ -164,7 +164,7 @@ export declare class RuntimeContext {
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.sunswap.quote";
     }>>;
-    readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
+    readonly orcaRuntime?: OrcaRuntimeSelector;
     readonly orcaStableQuote?: (request: OrcaStableQuoteRequest) => Promise<unknown>;
     readonly orcaStablePrepare?: (request: Extract<CommandRequest, {
         readonly command: "swap.orca.stable-prepare";

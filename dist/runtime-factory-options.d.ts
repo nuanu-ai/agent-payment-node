@@ -44,7 +44,7 @@ import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-executi
 import type { OrcaProgramPinVerifier } from "./swap/orca-solana/pins.js";
 import type { OrcaStableConsentPort } from "./swap/orca-solana/stable-approval.js";
 import type { Permit2PreflightPorts } from "./x402-permit2/preflight.js";
-import type { OrcaKeylessQuoteRequest } from "./swap/orca-solana/builder.js";
+import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export interface RuntimeFactoryOptions {
@@ -86,7 +86,7 @@ export interface RuntimeFactoryOptions {
     readonly sunswapRuntime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.sunswap.quote";
     }>>;
-    readonly orcaRuntime?: GuardedSwapRuntime<OrcaKeylessQuoteRequest>;
+    readonly orcaRuntime?: OrcaRuntimeSelector;
     /** Test seam for the owner's active sealed swap policy. Production reads the activated allowlist revision. */
     readonly swapPolicy?: GuardedSwapPolicyResolver;
     readonly facilitatorGasless?: FacilitatorGaslessDependencies;

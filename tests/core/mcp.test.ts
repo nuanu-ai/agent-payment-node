@@ -166,7 +166,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_swap_solana_orca_stable_release", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_solana_orca_stable_observe", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_swap_solana_orca_inventory", properties: [], required: [], defaults: {} },
-      { name: "apn_swap_solana_orca_quote", properties: ["profile", "account", "amount", "slippage_bps", "owner_slippage_cap_bps", "compute_unit_limit", "compute_unit_price"], required: ["profile", "account", "amount", "slippage_bps", "owner_slippage_cap_bps", "compute_unit_limit", "compute_unit_price"], defaults: {} },
+      { name: "apn_swap_solana_orca_quote", properties: ["pool", "profile", "account", "amount", "slippage_bps", "owner_slippage_cap_bps", "compute_unit_limit", "compute_unit_price"], required: ["pool", "profile", "account", "amount", "slippage_bps", "owner_slippage_cap_bps", "compute_unit_limit", "compute_unit_price"], defaults: {} },
       { name: "apn_swap_solana_orca_prepare", properties: ["profile", "quote", "idempotency_key"], required: ["profile", "quote", "idempotency_key"], defaults: {} },
       { name: "apn_swap_solana_orca_status", properties: ["operation"], required: ["operation"], defaults: {} },
       { name: "apn_allowlist_inventory", properties: [], required: [], defaults: {} },
