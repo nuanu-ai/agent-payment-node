@@ -1,10 +1,24 @@
 import type { Hex } from "viem";
 import type { EvmRpcCall } from "../evm-ports.js";
+import type { NeverLandsCheck } from "../evm-finalized-proof.js";
 import type { Address } from "../model.js";
 import type { StargateV2FinalityPolicyProvenance, StargateV2FinalityTag, StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import type { StargateV2QuoteEvidence } from "./quote.js";
-export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" | "allowance_submitted" | "allowance_observed" | "post_approval_quote_bound" | "submission_started" | "unknown_finality" | "submitted" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
-export type StargateTokenUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
+export type StargateTokenPhase = "prepared" | "approved" | "allowance_submission_started" | "allowance_unknown_finality" | "allowance_submitted" | "allowance_observed" | "post_approval_quote_bound" | "submission_started" | "unknown_finality" | "submitted" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned" | "abandoned_unknown";
+export type StargateTokenUsageState = "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert" | "released_unsubmitted";
+/**
+ * A signed source effect that can no longer land (R4): the bridge send or a cleanup the finalized nonce passed while the
+ * node knew neither its transaction nor a receipt, or a cleanup that landed reverted or left the allowance non-zero.
+ * A retired cleanup frees the cleanup slot for a fresh, consented one; a retired send is never signed again.
+ */
+export interface StargateTokenRetiredEffect {
+    readonly role: "bridge" | "cleanup";
+    readonly transactionHash: Hex;
+    readonly nonceAtomic: string;
+    readonly reason: "never_landed" | "reverted" | "landed_allowance_nonzero";
+    readonly finalizedNonceAtomic: string | null;
+    readonly at: string;
+}
 export interface StargateTokenTransition {
     readonly phase: StargateTokenPhase;
     readonly at: string;
@@ -191,6 +205,8 @@ export interface StargateTokenOperation {
     readonly usageState?: StargateTokenUsageState;
     /** Durable desired ledger transition. Presence means the idempotent ledger call still needs reconciliation. */
     readonly usageTarget?: StargateTokenUsageState;
+    /** Present only once a signed effect was retired; records without it read as before. */
+    readonly retiredEffects?: readonly StargateTokenRetiredEffect[];
     readonly integrityHash: string;
 }
 export interface StargateTokenPreparationRequest {
@@ -281,6 +297,11 @@ export interface StargateTokenExecutionPorts {
         finalityTag: StargateV2FinalityTag;
     }>) => Promise<StargateTokenDestinationEvidence | null>;
     readonly now?: () => number;
+    /** R4 exit 2 on the source chain: the owner's finalized nonce passed the effect's nonce and the node knows neither its transaction nor a receipt. */
+    readonly neverLands?: (effect: Readonly<{
+        transactionHash: Hex;
+        nonceAtomic: string;
+    }>) => Promise<NeverLandsCheck>;
 }
 export interface StargateTokenJournal {
     load(id: string): Promise<StargateTokenOperation | null>;

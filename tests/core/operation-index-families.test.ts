@@ -148,9 +148,9 @@ test("the registry covers every money family, each in its own store, and names e
     assert.ok(commands !== undefined && [commands.status, commands.resume ?? "", commands.exit ?? ""].filter(Boolean)
       .every(command => command.startsWith("apn ") && command.includes("<operation-id>")), family);
   }
-  // The two families that already had an owner exit keep it behind the generic abandon.
+  // The families with an owner exit (R4, last resort) keep it behind the generic abandon.
   assert.deepEqual(OPERATION_FAMILIES.filter(family => registry.get(family)?.abandon !== undefined && OPERATION_FAMILIES.indexOf(family) >= OPERATION_FAMILIES.indexOf("swap")),
-    ["swap", "metamask_native"]);
+    ["swap", "uniswap_token", "stargate_token", "metamask_native"]);
 });
 
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
