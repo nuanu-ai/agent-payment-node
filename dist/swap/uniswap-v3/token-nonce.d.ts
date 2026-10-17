@@ -1,6 +1,6 @@
 import { SecureStateStore } from "../../secure-state-store.js";
 import type { TokenEffectKind } from "./token-execution.js";
-import type { UniswapTokenOperation } from "./token-operation.js";
+import { type UniswapTokenOperation } from "./token-operation.js";
 export type TokenNonceEvidence = "reserved" | "committed" | null;
 type Evidence = (operationId: string, kind: TokenEffectKind, nonce: string) => Promise<TokenNonceEvidence>;
 /** Called while the shared account custody lock is held. Only reservations without a durable signed-effect marker may be reclaimed. */

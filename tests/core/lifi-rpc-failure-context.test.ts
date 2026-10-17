@@ -9,6 +9,7 @@ import { validateBridgeOperation } from "../../src/lifi/operation-validation.js"
 import { bridgeRpcCall } from "../../src/lifi/rpc.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 const secret = "provider-secret-token";
 const endpoint = `https://user:${secret}@rpc.example/private?key=${secret}`;
@@ -56,7 +57,7 @@ for (const row of cases) test(`LI.FI ${row.name} defers the approval with only i
 
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!;
+  const record = (await findStored(s.core.bridges.records, id))!;
   const expected: BridgePreSignRpcFailure = {
     schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard", effectRole: row.pair === "eth-bnb" ? "bridge" : "approval",
     stage: row.stage, chainRole: row.chainRole, chainId: row.chainRole === "source"
@@ -113,7 +114,7 @@ test("LI.FI bridge simulation transport failure after safe approval defers with 
 
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!;
+  const record = (await findStored(s.core.bridges.records, id))!;
   const expected: BridgePreSignRpcFailure = { schemaVersion: "apn.bridge-presign-rpc-failure.v1", phase: "pre_sign_guard",
     effectRole: "bridge", stage: "source_execution_simulation", chainRole: "source",
     chainId: operation.intent.materialization.request.fromChainId, category: "simulation", method: "eth_estimateGas" };
@@ -156,13 +157,13 @@ test("LI.FI deferred bridge guard after safe approval ends on the expired path, 
   failBridgeSimulation(s, operation);
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
-  assert.equal((await s.core.bridges.records.findOperation(id))!.failure?.reason, "pre_sign_rpc_unavailable");
+  assert.equal((await findStored(s.core.bridges.records, id))!.failure?.reason, "pre_sign_rpc_unavailable");
 
   const loads = s.wrapping.loads; s.now.setTime(Date.parse(operation.intent.expiresAt) + 60_000); s.source.failAccount = true;
   const unresolved = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(unresolved.ok, true, unresolved.error?.message);
   // The residual allowance is reported, never required: the expired unsent bridge ends on the first resume.
-  const recovered = (await s.core.bridges.records.findOperation(id))!;
+  const recovered = (await findStored(s.core.bridges.records, id))!;
   assert.equal(recovered.state, "failed_after_approval"); assert.equal(recovered.failure?.reason, "unsent_apn_reprepare_required");
   assert.equal(recovered.failure?.residualAllowance, null); assert.equal(recovered.failure?.residualAllowanceStatus, "unavailable");
   assert.deepEqual(pendingEffects(recovered), [
@@ -179,7 +180,7 @@ test("LI.FI bridge guard transport failure with the approval only included stays
 
   const result = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(result.ok, true, result.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!;
+  const record = (await findStored(s.core.bridges.records, id))!;
   assert.equal(record.terminal, false); assert.equal(record.failure?.reason, "pre_sign_rpc_unavailable");
   assert.equal(record.failure?.preSignRpc?.method, "eth_estimateGas");
   assert.equal(record.effects[0]?.phase, "included_success");
@@ -189,7 +190,7 @@ test("LI.FI bridge guard transport failure with the approval only included stays
   s.source.safeApproval = true;
   const observed = await s.core.execute({ command: "operation.resume", operationId: id });
   assert.equal(observed.ok, true, observed.error?.message);
-  const safe = (await s.core.bridges.records.findOperation(id))!;
+  const safe = (await findStored(s.core.bridges.records, id))!;
   assert.equal(safe.effects[0]?.phase, "safe_success"); assert.equal(safe.terminal, false);
   assert.equal(safe.failure?.reason, "pre_sign_rpc_unavailable"); assert.equal(s.source.submissions.length, 1);
 

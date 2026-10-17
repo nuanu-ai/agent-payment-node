@@ -167,15 +167,13 @@ export declare const CIRCLE_READ_PLAN: {
  * used nonce, cleanup nonce, mint head), each retried once. */
 export declare const CIRCLE_COMMAND_REQUEST_BUDGET: number;
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
- * retry once; anchored observations restart wholly. Financial RPC is never retried.
- * `lean` (the live Circle rails) checks the chain id once per client, sends reads issued together as one JSON-RPC
- * batch POST (every default Circle endpoint accepts batches) and observes without a header sandwich. `anchored`
- * keeps the historical one-call-per-POST sequence for the frozen recovery paths. */
+ * retry once; an observation restarts wholly. Financial RPC is never retried. The chain id is checked once per client,
+ * reads issued together leave as one JSON-RPC batch POST (every default Circle endpoint accepts batches), and an
+ * observation needs no header sandwich. */
 export declare class CircleRpc {
     readonly chainId: number;
     private readonly https;
     private readonly maxRequests;
-    readonly mode: "lean" | "anchored";
     private sequence;
     private requests;
     private posts;
@@ -183,7 +181,7 @@ export declare class CircleRpc {
     private chainVerified;
     private queued;
     private readonly scopes;
-    constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number, mode?: "lean" | "anchored");
+    constructor(url: string, chainId: number, https?: Pick<BridgeHttps, "request">, maxRequests?: number);
     /** Read calls counted against the budget, and physical POSTs sent (a batch is one POST). */
     get requestCount(): number;
     get postCount(): number;
@@ -204,15 +202,13 @@ export declare class CircleRpc {
     /** Two POSTs: transaction and receipt, then the finality head with the canonical block at the receipt height. A head
      * at or above that height read with the canonical block makes a separate header recheck redundant (P2). */
     private leanObservation;
-    private anchoredObservation;
     account(address: Address, token: Address, spender: Address): Promise<CircleAccountPreflight>;
     envelope(from: Address, to: Address, data: Hex, nonceAtomic: string, gasLimit?: string): Promise<CircleEnvelope>;
 }
 /** The live rails read functional configuration only, at the latest head, as one batch: domains, remote messenger,
  * local minter/transmitter, token pair, versions, decimals and paused flags (P1/P5). Implementation addresses and
- * code hashes change on legitimate Circle upgrades and are not read. Frozen recovery paths pass `historicalBlock`
- * and keep their anchored implementation snapshot. */
-export declare function readCircleDeployment(rpc: CircleRpc, destinationChain: CircleDestinationChain, historicalBlock?: Record<string, unknown>): Promise<CircleDeploymentSnapshot>;
+ * code hashes change on legitimate Circle upgrades and are not read. */
+export declare function readCircleDeployment(rpc: CircleRpc, destinationChain: CircleDestinationChain): Promise<CircleDeploymentSnapshot>;
 export declare function currentCircleDeployments(source: CircleRpc, destination: CircleRpc, chain: CircleDestinationChain): Promise<{
     source: CircleDeploymentSnapshot;
     destination: CircleDeploymentSnapshot;
@@ -220,7 +216,7 @@ export declare function currentCircleDeployments(source: CircleRpc, destination:
 }>;
 /** The live rails read the attester set at the latest head: threshold and count in one batch, then every enabled
  * attester in a second. Signatures are recovered against this set; no block sandwich is needed for a current read. */
-export declare function readCircleAttesters(rpc: CircleRpc, deploymentDigest: string, historicalBlock?: Record<string, unknown>): Promise<CircleAttesterSnapshot>;
+export declare function readCircleAttesters(rpc: CircleRpc, deploymentDigest: string): Promise<CircleAttesterSnapshot>;
 export declare const circleRpcTransaction: (e: CircleEnvelope) => {
     from: `0x${string}`;
     to: `0x${string}`;
@@ -231,5 +227,3 @@ export declare const circleRpcTransaction: (e: CircleEnvelope) => {
     maxFeePerGas: string;
     maxPriorityFeePerGas: string;
 };
-/** EIP-170 runtime code is a distinct field domain from CCTP messages and sealed transactions. */
-export declare function circleRuntimeBytecode(value: unknown): Hex;

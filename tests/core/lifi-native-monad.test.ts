@@ -14,6 +14,7 @@ import { TtyBridgeApproval } from "../../src/lifi/tty.js";
 import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 async function renderApproval(summary: ReturnType<typeof publicBridgeOperation>, operationId: string, fingerprint: string): Promise<string> {
   let printed = "";
@@ -42,7 +43,7 @@ test("Ethereum to Monad admits only the exact direct native Across self route an
   assert.equal(operation.effects.length, 1);
   const completed = await s.core.execute({ command: "bridge.approve", operationId: id });
   assert.equal(completed.ok, true, completed.error?.message);
-  const record = (await s.core.bridges.records.findOperation(id))!;
+  const record = (await findStored(s.core.bridges.records, id))!;
   assert.equal(record.state, "completed");
   assert.equal(record.destinationProof?.chainId, 143);
   assert.equal(record.destinationProof?.nativeTransfer?.to, record.intent.owner.address);
@@ -109,7 +110,7 @@ test("Monad safe finality and exact native proof are required; ambiguous send st
   unsafe.provider.statusValue = "completed_observed"; unsafe.destination.destinationSafe = false;
   const first = await unsafe.prepare("across", "monad-unsafe-001");
   await unsafe.core.execute({ command: "bridge.approve", operationId: first.id });
-  assert.notEqual((await unsafe.core.bridges.records.findOperation(first.id))!.state, "completed");
+  assert.notEqual((await findStored(unsafe.core.bridges.records, first.id))!.state, "completed");
   assert.equal(unsafe.source.submissions.length, 1);
 
   const ambiguousRoot = await temporaryState(); t.after(ambiguousRoot.cleanup);
@@ -119,7 +120,7 @@ test("Monad safe finality and exact native proof are required; ambiguous send st
   ambiguous.source.sendTimeout = true; ambiguous.source.failObserve = true;
   const prepared = await ambiguous.prepare("across", "monad-ambiguous-001");
   await ambiguous.core.execute({ command: "bridge.approve", operationId: prepared.id });
-  assert.equal((await ambiguous.core.bridges.records.findOperation(prepared.id))!.state, "unknown_finality");
+  assert.equal((await findStored(ambiguous.core.bridges.records, prepared.id))!.state, "unknown_finality");
   for (let i = 0; i < 2; i++) await ambiguous.core.execute({ command: "operation.resume", operationId: prepared.id });
   assert.equal(ambiguous.source.submissions.length, 1);
   const routes = await ambiguous.core.execute({ command: "bridge.routes", profile: ambiguous.profile, request: ambiguous.request });

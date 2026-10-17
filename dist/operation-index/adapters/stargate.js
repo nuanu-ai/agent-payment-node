@@ -29,7 +29,7 @@ async function withLegacy(live, root, family, operationId) {
         return legacy;
     }
 }
-function stargateAdapter(family, directory, chainId, read, terminal, service, runtimeCommand, exit) {
+function stargateAdapter(family, directory, chainId, read, terminal, service, runtimeCommand, exit, abandon) {
     const store = { directory, perProfile: false };
     return {
         family,
@@ -53,6 +53,17 @@ function stargateAdapter(family, directory, chainId, read, terminal, service, ru
             return operationOutcome(await (isLegacyStargateRecord(record) ? service(context).status(record.operationId) : service(context).observe(record.operationId)));
         },
         receipt: async (context, record) => receiptOutcome(await service(context).receipt(record.operationId)),
+        ...(abandon === undefined ? {} : { async abandon(context, record) {
+                // An unreleased-schema record has its own exit: the chain-proven closure its status runs (once closed, it is terminal).
+                if (isLegacyStargateRecord(record)) {
+                    const id = record.operationId, status = `apn operation status --operation ${id}`;
+                    if (await legacyStargateTerminal(context.state.root, record))
+                        throw new ApnError("APN_OPERATION_BLOCKED", `The ${family} operation is already terminal; there is nothing to abandon.`, { operationId: id, family, state: record.phase,
+                            reason: "operation_already_terminal", nextActions: [status, `apn receipt get --operation ${id}`] });
+                    throw new ApnError("APN_OPERATION_BLOCKED", "An unreleased-schema Stargate record closes by its chain-proven closure.", { reason: "stargate_legacy_closure_is_the_exit", nextActions: [status] });
+                }
+                return await abandon(context, record);
+            } }),
         commands: { status: OPERATION_STATUS, resume: OPERATION_RESUME, ...(exit === undefined ? {} : { exit }) },
         runtimeCommand: async () => runtimeCommand,
     };
@@ -63,5 +74,7 @@ export const stargateNativeAdapter = stargateAdapter("stargate_native", "stargat
 /** Neither an approval nor a send is signed past the prepare expiry; any signed approval, send or cleanup ends observed or cleaned. */
 export const stargateTokenAdapter = stargateAdapter("stargate_token", "stargate-v2-token", STARGATE_TOKEN_SOURCE_CHAIN_ID, async (root, id) => await new FileStargateTokenJournal(root).load(id), record => STARGATE_TOKEN_TRANSITIONS[record.phase]?.length === 0 ||
     (record.phase === "prepared" || record.phase === "approved") && record.approvalTransactionHash === undefined &&
-        record.transactionHash === undefined && pastUnstartedDeadline(record.expiresAt), context => installed(context.stargateToken, "Stargate token runtime is unavailable."), "stargate.token.status", "apn stargate token cleanup --operation <operation-id>");
+        record.transactionHash === undefined && pastUnstartedDeadline(record.expiresAt), context => installed(context.stargateToken, "Stargate token runtime is unavailable."), "stargate.token.status", "apn stargate token cleanup --operation <operation-id>", 
+// The last-resort owner exit (R4): past the prepare expiry, with TTY consent; reads and writes only the journal.
+async (context, record) => await (await import("../../stargate-v2/token-abandon.js")).abandonStargateV2Token(record.operationId, new FileStargateTokenJournal(context.state.root, context.state), async (intent) => await context.requireOperationAbandonApproval().approve(intent), () => context.clock.now().getTime()));
 //# sourceMappingURL=stargate.js.map

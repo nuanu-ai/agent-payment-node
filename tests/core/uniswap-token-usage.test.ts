@@ -396,8 +396,10 @@ test("production token RPC phases stay within exact physical budgets through fin
 
   call = p.sessionCall(14); op = await runtime(call, "approve").approve(op.operationId); telemetry = call.telemetry!()!;
   assert.equal(op.phase, "approval_submitted"); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [14, 25]);
+  // A transaction the node does not know also reads the R4 never-lands batch once (not past here): chain id, finalized nonce
+  // and the transaction in one primary batch, the receipt on its route.
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
-  assert.equal(op.phase, "approval_submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [2, 4]);
+  assert.equal(op.phase, "approval_submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [4, 8]);
   p.setAllowance("1000000"); p.observe(op, "approval", 1);
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
   assert.equal(op.phase, "approval_observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [7, 10]);
@@ -405,11 +407,11 @@ test("production token RPC phases stay within exact physical budgets through fin
   p.clearObservation(); call = p.sessionCall(24); op = await runtime(call, "refuse").execute(op.operationId); telemetry = call.telemetry!()!;
   assert.equal(op.phase, "submitted", op.cleanupReason ?? undefined); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [19, 32]);
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
-  assert.equal(op.phase, "submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [2, 4]);
+  assert.equal(op.phase, "submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [4, 8]);
   p.setAllowance("0"); p.observe(op, "swap", 1);
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
   assert.equal(op.phase, "observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [8, 14]);
-  assert.equal(8 + 9 + 14 + 7 + 19 + 8, 65); assert.equal(65 + 2 + 2, 69); assert.equal(op.receipt?.inputDebitAtomic, "1000000");
+  assert.equal(8 + 9 + 14 + 7 + 19 + 8, 65); assert.equal(65 + 4 + 4, 73); assert.equal(op.receipt?.inputDebitAtomic, "1000000");
 
   const journal = new UniswapTokenJournal(temporary.root), cleanupBase = await journal.save(operation(s.policy.policyDigest, "a", account)),
     cleanupUsage = new UniswapTokenUsage(new StateStore(temporary.root), { now: () => at }, new AssetUsageLedger(temporary.root)),

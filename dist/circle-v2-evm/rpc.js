@@ -1,11 +1,11 @@
-import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256, parseAbi } from "viem";
-import { canonicalJson, hashObject } from "../canonical.js";
+import { decodeFunctionResult, encodeFunctionData, getAddress, parseAbi } from "viem";
+import { canonicalJson } from "../canonical.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ApnError } from "../errors.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { parsePublicHttpsUrl } from "../network-policy.js";
-import { CIRCLE_DEPLOYMENT_PINS, CIRCLE_IMPLEMENTATION_SLOT, CIRCLE_TOKEN_IMPLEMENTATION_SLOT, CIRCLE_MINTER, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_SOURCE_TOKEN, circleRoute } from "./catalog.js";
-import { circleFail, circleHex, circleRecord, circleUint } from "./protocol.js";
+import { CIRCLE_MINTER, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_SOURCE_TOKEN, circleRoute } from "./catalog.js";
+import { circleHex, circleRecord, circleUint } from "./protocol.js";
 import { circleTokenPairKey, verifyCircleDeployments } from "./preflight.js";
 import { circleBlocked, circleEnvelope } from "./operation-model.js";
 export const CIRCLE_RPC_ABI = parseAbi([
@@ -32,15 +32,13 @@ export const CIRCLE_COMMAND_REQUEST_BUDGET = 2 * (CIRCLE_READ_PLAN.identity + CI
     2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + CIRCLE_READ_PLAN.ambiguous + 4 * CIRCLE_READ_PLAN.single);
 const transient = (e) => e instanceof ApnError && typeof e.details?.status === "number" && [429, 500, 502, 503, 504].includes(e.details.status);
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
- * retry once; anchored observations restart wholly. Financial RPC is never retried.
- * `lean` (the live Circle rails) checks the chain id once per client, sends reads issued together as one JSON-RPC
- * batch POST (every default Circle endpoint accepts batches) and observes without a header sandwich. `anchored`
- * keeps the historical one-call-per-POST sequence for the frozen recovery paths. */
+ * retry once; an observation restarts wholly. Financial RPC is never retried. The chain id is checked once per client,
+ * reads issued together leave as one JSON-RPC batch POST (every default Circle endpoint accepts batches), and an
+ * observation needs no header sandwich. */
 export class CircleRpc {
     chainId;
     https;
     maxRequests;
-    mode;
     sequence = 0;
     requests = 0;
     posts = 0;
@@ -48,11 +46,10 @@ export class CircleRpc {
     chainVerified = false;
     queued = [];
     scopes = new AsyncLocalStorage();
-    constructor(url, chainId, https = new BridgeHttps(), maxRequests = 256, mode = "anchored") {
+    constructor(url, chainId, https = new BridgeHttps(), maxRequests = 256) {
         this.chainId = chainId;
         this.https = https;
         this.maxRequests = maxRequests;
-        this.mode = mode;
         const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Circle RPC", 2048);
         if (parsed.search !== "" || parsed.hash !== "")
             circleBlocked("rpc_url");
@@ -84,7 +81,7 @@ export class CircleRpc {
             circleBlocked("rpc_method_or_budget");
         if (method === "eth_sendRawTransaction" && !financialConsent)
             circleBlocked("financial_rpc_consent_required");
-        if (this.mode === "lean" && method !== "eth_sendRawTransaction")
+        if (method !== "eth_sendRawTransaction")
             return new Promise((resolve, reject) => {
                 this.queued.push({ method, params, gate, resolve, reject });
                 if (this.queued.length === 1)
@@ -172,7 +169,7 @@ export class CircleRpc {
         return value.result;
     }
     async identity() {
-        if (this.mode === "lean" && this.chainVerified)
+        if (this.chainVerified)
             return;
         if (circleUint(await this.call("eth_chainId", [])) !== BigInt(this.chainId))
             circleBlocked("rpc_chain_changed");
@@ -187,7 +184,7 @@ export class CircleRpc {
     async observation(transactionHash, finalityTag) {
         for (let attempt = 0;; attempt++) {
             try {
-                return await this.scopes.run({ retryRead: false }, () => this.mode === "lean" ? this.leanObservation(transactionHash, finalityTag) : this.anchoredObservation(transactionHash, finalityTag));
+                return await this.scopes.run({ retryRead: false }, () => this.leanObservation(transactionHash, finalityTag));
             }
             catch (error) {
                 if (attempt >= 1 || !transient(error))
@@ -211,20 +208,6 @@ export class CircleRpc {
             return null;
         return { transaction, receipt, canonicalBlock, recheckedBlock: canonicalBlock, finalityHead, chainId: this.chainId, finalityTag };
     }
-    async anchoredObservation(transactionHash, finalityTag) {
-        await this.identity();
-        const [transaction, receipt] = await Promise.all([this.call("eth_getTransactionByHash", [transactionHash]), this.call("eth_getTransactionReceipt", [transactionHash])]);
-        if (transaction === null || receipt === null)
-            return null;
-        const r = circleRecord(receipt);
-        if (r.blockNumber === null || r.blockHash === null)
-            return null;
-        const canonicalBlock = await this.block(String(r.blockNumber)), finalityHead = await this.block(finalityTag === "included" ? "latest" : finalityTag);
-        if (circleUint(finalityHead.number) < circleUint(r.blockNumber))
-            return null;
-        const recheckedBlock = await this.block(String(r.blockNumber));
-        return { transaction, receipt, canonicalBlock, recheckedBlock, finalityHead, chainId: this.chainId, finalityTag };
-    }
     async account(address, token, spender) {
         await this.identity();
         const values = await Promise.all([this.call("eth_getBalance", [address, "pending"]), this.read(token, "balanceOf", [address]), this.read(token, "allowance", [address, spender]),
@@ -242,36 +225,15 @@ export class CircleRpc {
 function hexQuantity(input) { return `0x${circleUint(input).toString(16)}`; }
 /** The live rails read functional configuration only, at the latest head, as one batch: domains, remote messenger,
  * local minter/transmitter, token pair, versions, decimals and paused flags (P1/P5). Implementation addresses and
- * code hashes change on legitimate Circle upgrades and are not read. Frozen recovery paths pass `historicalBlock`
- * and keep their anchored implementation snapshot. */
-export async function readCircleDeployment(rpc, destinationChain, historicalBlock) {
+ * code hashes change on legitimate Circle upgrades and are not read. */
+export async function readCircleDeployment(rpc, destinationChain) {
     await rpc.identity();
-    const route = circleRoute(destinationChain), source = rpc.chainId === 42161, token = source ? CIRCLE_SOURCE_TOKEN : route.token, remoteDomain = source ? route.domain : 3, remoteToken = source ? route.token : CIRCLE_SOURCE_TOKEN, lean = historicalBlock === undefined && rpc.mode === "lean";
-    const configuration = (tag) => Promise.all([rpc.read(CIRCLE_TRANSMITTER, "localDomain", [], tag), rpc.read(CIRCLE_MESSENGER, "remoteTokenMessengers", [remoteDomain], tag),
-        rpc.read(CIRCLE_MINTER, "remoteTokensToLocalTokens", [circleTokenPairKey(remoteDomain, remoteToken)], tag), rpc.read(CIRCLE_MESSENGER, "localMinter", [], tag),
-        rpc.read(CIRCLE_MESSENGER, "localMessageTransmitter", [], tag), rpc.read(CIRCLE_MINTER, "localTokenMessenger", [], tag), rpc.read(CIRCLE_TRANSMITTER, "version", [], tag),
-        rpc.read(CIRCLE_MESSENGER, "messageBodyVersion", [], tag), rpc.read(token, "decimals", [], tag), rpc.read(CIRCLE_TRANSMITTER, "paused", [], tag), rpc.read(CIRCLE_MINTER, "paused", [], tag), rpc.read(token, "paused", [], tag)]);
-    let block, values, contracts;
-    if (lean)
-        [block, values] = await Promise.all([rpc.block("latest"), configuration("latest")]);
-    else {
-        block = historicalBlock ?? await rpc.block("safe");
-        const tag = historicalBlock === undefined ? String(block.number) : { blockHash: circleHex(block.hash, 32), requireCanonical: true }, expected = CIRCLE_DEPLOYMENT_PINS[rpc.chainId];
-        const anchored = {};
-        for (const key of ["messenger", "transmitter", "minter", "token"]) {
-            const address = getAddress(expected[key].address), proxyCodeHash = keccak256(circleRuntimeBytecode(await rpc.call("eth_getCode", [address, tag])));
-            const slot = key === "token" ? CIRCLE_TOKEN_IMPLEMENTATION_SLOT : CIRCLE_IMPLEMENTATION_SLOT;
-            const storage = circleHex(await rpc.call("eth_getStorageAt", [address, slot, tag]), 32), implementation = getAddress(`0x${storage.slice(-40)}`), zero = `0x${"0".repeat(40)}`;
-            const implementationCodeHash = implementation.toLowerCase() === zero ? null : keccak256(circleRuntimeBytecode(await rpc.call("eth_getCode", [implementation, tag])));
-            anchored[key] = { address, proxyCodeHash, implementation, implementationCodeHash };
-        }
-        contracts = anchored;
-        values = await configuration(tag);
-        const rechecked = await rpc.block(String(block.number));
-        if (circleHex(rechecked.hash, 32) !== circleHex(block.hash, 32))
-            circleBlocked("deployment_snapshot_reorg");
-    }
-    return { chainId: rpc.chainId, domain: Number(values[0]), blockHash: circleHex(block.hash, 32), blockNumberAtomic: circleUint(block.number).toString(), ...(contracts === undefined ? {} : { contracts }),
+    const route = circleRoute(destinationChain), source = rpc.chainId === 42161, token = source ? CIRCLE_SOURCE_TOKEN : route.token, remoteDomain = source ? route.domain : 3, remoteToken = source ? route.token : CIRCLE_SOURCE_TOKEN, tag = "latest";
+    const [block, values] = await Promise.all([rpc.block("latest"), Promise.all([rpc.read(CIRCLE_TRANSMITTER, "localDomain", [], tag), rpc.read(CIRCLE_MESSENGER, "remoteTokenMessengers", [remoteDomain], tag),
+            rpc.read(CIRCLE_MINTER, "remoteTokensToLocalTokens", [circleTokenPairKey(remoteDomain, remoteToken)], tag), rpc.read(CIRCLE_MESSENGER, "localMinter", [], tag),
+            rpc.read(CIRCLE_MESSENGER, "localMessageTransmitter", [], tag), rpc.read(CIRCLE_MINTER, "localTokenMessenger", [], tag), rpc.read(CIRCLE_TRANSMITTER, "version", [], tag),
+            rpc.read(CIRCLE_MESSENGER, "messageBodyVersion", [], tag), rpc.read(token, "decimals", [], tag), rpc.read(CIRCLE_TRANSMITTER, "paused", [], tag), rpc.read(CIRCLE_MINTER, "paused", [], tag), rpc.read(token, "paused", [], tag)])]);
+    return { chainId: rpc.chainId, domain: Number(values[0]), blockHash: circleHex(block.hash, 32), blockNumberAtomic: circleUint(block.number).toString(),
         remoteDomain, remoteMessenger: circleHex(values[1], 32), pairedToken: getAddress(String(values[2])), localMinter: getAddress(String(values[3])), localMessageTransmitter: getAddress(String(values[4])),
         localTokenMessenger: getAddress(String(values[5])), messageVersion: Number(values[6]), messageBodyVersion: Number(values[7]), tokenDecimals: Number(values[8]), transmitterPaused: values[9] === true, minterPaused: values[10] === true, tokenPaused: values[11] === true };
 }
@@ -281,41 +243,15 @@ export async function currentCircleDeployments(source, destination, chain) {
 }
 /** The live rails read the attester set at the latest head: threshold and count in one batch, then every enabled
  * attester in a second. Signatures are recovered against this set; no block sandwich is needed for a current read. */
-export async function readCircleAttesters(rpc, deploymentDigest, historicalBlock) {
+export async function readCircleAttesters(rpc, deploymentDigest) {
     await rpc.identity();
-    const lean = historicalBlock === undefined && rpc.mode === "lean";
-    let block, tag, threshold, count;
-    if (lean) {
-        tag = "latest";
-        const [head, t, c] = await Promise.all([rpc.block("latest"), rpc.read(CIRCLE_TRANSMITTER, "signatureThreshold", [], tag), rpc.read(CIRCLE_TRANSMITTER, "getNumEnabledAttesters", [], tag)]);
-        block = head;
-        threshold = Number(t);
-        count = Number(c);
-    }
-    else {
-        block = historicalBlock ?? await rpc.block("safe");
-        tag = historicalBlock === undefined ? String(block.number) : { blockHash: circleHex(block.hash, 32), requireCanonical: true };
-        threshold = Number(await rpc.read(CIRCLE_TRANSMITTER, "signatureThreshold", [], tag));
-        count = Number(await rpc.read(CIRCLE_TRANSMITTER, "getNumEnabledAttesters", [], tag));
-    }
+    const tag = "latest";
+    const [block, rawThreshold, rawCount] = await Promise.all([rpc.block("latest"), rpc.read(CIRCLE_TRANSMITTER, "signatureThreshold", [], tag), rpc.read(CIRCLE_TRANSMITTER, "getNumEnabledAttesters", [], tag)]);
+    const threshold = Number(rawThreshold), count = Number(rawCount);
     if (!Number.isSafeInteger(count) || count < 1 || count > 20 || !Number.isSafeInteger(threshold) || threshold < 1 || threshold > count)
         circleBlocked("attester_count");
-    const enabledAttesters = [];
-    if (lean)
-        enabledAttesters.push(...(await Promise.all(Array.from({ length: count }, (_, i) => rpc.read(CIRCLE_TRANSMITTER, "getEnabledAttester", [BigInt(i)], tag)))).map(value => getAddress(String(value))));
-    else {
-        for (let i = 0; i < count; i++)
-            enabledAttesters.push(getAddress(String(await rpc.read(CIRCLE_TRANSMITTER, "getEnabledAttester", [BigInt(i)], tag))));
-        if (circleHex((await rpc.block(String(block.number))).hash, 32) !== circleHex(block.hash, 32))
-            circleBlocked("attester_snapshot_reorg");
-    }
+    const enabledAttesters = (await Promise.all(Array.from({ length: count }, (_, i) => rpc.read(CIRCLE_TRANSMITTER, "getEnabledAttester", [BigInt(i)], tag)))).map(value => getAddress(String(value)));
     return { threshold, enabledAttesters, chainId: rpc.chainId, transmitter: CIRCLE_TRANSMITTER, blockHash: circleHex(block.hash, 32), blockNumberAtomic: circleUint(block.number).toString(), deploymentDigest };
 }
 export const circleRpcTransaction = (e) => ({ from: e.from, to: e.to, data: e.data, value: "0x0", nonce: hexQuantity(e.nonceAtomic), gas: hexQuantity(e.gasLimitAtomic), maxFeePerGas: hexQuantity(e.maxFeePerGasAtomic), maxPriorityFeePerGas: hexQuantity(e.maxPriorityFeePerGasAtomic) });
-/** EIP-170 runtime code is a distinct field domain from CCTP messages and sealed transactions. */
-export function circleRuntimeBytecode(value) {
-    if (typeof value !== "string" || !/^0x(?:[a-fA-F0-9]{2})*$/u.test(value) || value.length > 2 + 24_576 * 2)
-        circleFail("runtime_bytecode");
-    return value.toLowerCase();
-}
 //# sourceMappingURL=rpc.js.map

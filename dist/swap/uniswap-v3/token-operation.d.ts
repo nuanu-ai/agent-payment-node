@@ -4,7 +4,7 @@ import { type UniswapTokenRoute } from "./token-route.js";
 export declare const UNISWAP_TOKEN_OPERATION_SCHEMA_V1: "apn.uniswap-token-operation.v1";
 export declare const UNISWAP_TOKEN_OPERATION_SCHEMA: "apn.uniswap-token-operation.v2";
 export declare const UNISWAP_TOKEN_RECEIPT_SCHEMA: "apn.uniswap-token-receipt.v1";
-export type UniswapTokenPhase = "prepared" | "approved" | "approval_submission_started" | "approval_submitted" | "approval_unknown_finality" | "approval_observed" | "submission_started" | "submitted" | "unknown_finality" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
+export type UniswapTokenPhase = "prepared" | "approved" | "approval_submission_started" | "approval_submitted" | "approval_unknown_finality" | "approval_observed" | "submission_started" | "submitted" | "unknown_finality" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned" | "abandoned_unknown";
 export interface TokenGasEnvelope {
     readonly gasLimit: string;
     readonly maxFeePerGas: string;
@@ -46,6 +46,27 @@ export interface UniswapTokenExpiredApprovalEvidence {
     readonly observedAt: string;
     readonly source?: never;
 }
+/** The residual allowance was observed zero after an effect of this swap landed (or was retired): nothing is left to clean. */
+export interface UniswapTokenZeroAllowanceEvidence {
+    readonly schemaVersion: "apn.uniswap-token-zero-allowance-evidence.v1";
+    readonly kind: "zero_allowance_after_effect";
+    readonly observedAllowanceAtomic: "0";
+    readonly observedAt: string;
+    readonly source?: never;
+}
+/**
+ * An attempt that can no longer land, kept when its slot is freed (R4): never landed (at the finalized tag the account's
+ * nonce passed the attempt's nonce and the node knows neither its transaction nor a receipt) or, for a cleanup, landed
+ * without zeroing the allowance (reverted, or another approval followed in its block). A freed cleanup slot is re-armed
+ * under a new round with fresh owner consent; approval and swap slots are never signed again.
+ */
+export interface UniswapTokenRetiredEffect {
+    readonly kind: "approval" | "swap" | "cleanup";
+    readonly attempt: UniswapTokenAttempt;
+    readonly reason: "never_landed" | "reverted" | "landed_allowance_nonzero";
+    readonly finalizedNonceAtomic: string | null;
+    readonly observedAt: string;
+}
 export interface UniswapTokenFailureDiagnostic {
     readonly code: string | null;
     readonly reason: string | null;
@@ -79,8 +100,10 @@ export interface UniswapTokenOperation {
     readonly swapAttempt: UniswapTokenAttempt | null;
     readonly cleanupAttempt: UniswapTokenAttempt | null;
     readonly cleanupReason: string | null;
-    readonly cleanupEvidence?: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | null;
+    readonly cleanupEvidence?: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | UniswapTokenZeroAllowanceEvidence | null;
     readonly preSignFailure?: UniswapTokenFailureDiagnostic | null;
+    /** Present only once an attempt was retired (v2 records without it read as before). */
+    readonly retiredEffects?: readonly UniswapTokenRetiredEffect[];
     readonly receipt: UniswapTokenReceipt | null;
     readonly previousIntegrityHash: string | null;
     readonly integrityHash: string;
@@ -92,6 +115,8 @@ export declare function validateUniswapTokenOperation(value: unknown): UniswapTo
 /** Every phase of a Uniswap token swap; `observed` and `cleaned` are its outcomes (nothing of it signs, sends or lands after them). */
 export declare const UNISWAP_TOKEN_TERMINAL_PHASES: readonly UniswapTokenPhase[];
 export declare const UNISWAP_TOKEN_PHASES: readonly UniswapTokenPhase[];
+/** The round of an effect slot: how many attempts of that kind were retired before it. Round 0 keeps the original keys. */
+export declare function tokenEffectRound(op: Pick<UniswapTokenOperation, "retiredEffects">, kind: "approval" | "swap" | "cleanup"): number;
 export declare class UniswapTokenJournal extends SecureStateStore {
     save(value: UniswapTokenOperation): Promise<UniswapTokenOperation>;
     load(id: string): Promise<UniswapTokenOperation | null>;

@@ -9,6 +9,7 @@ import { bridgeInvocationPostBudget, bridgeSendStepPostBudget } from "../../src/
 import { transitionBridge } from "../../src/lifi/transitions.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { capturedBytecode, chainDouble, chainEnvironment, type ReceiptRoute } from "./lifi-source-observation-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 const code = await capturedBytecode();
 export const effects = (op: BridgeOperationRecord) => op.effects.map((e) => [e.role, e.phase, e.submissionAttempts]);
@@ -29,7 +30,7 @@ export async function approvalSafe(root: string) {
   // observation (2 effects x 2 passes x 4 + 2), destination (4 + 2) and residual (1 + 1) sessions.
   assert.equal(s.rpcSessions[0]!.physicalBudget!.remaining(), bridgeInvocationPostBudget(prepared));
   assert.equal(bridgeInvocationPostBudget(prepared), 11 + 18 + 6 + 2);
-  const op = (await s.core.bridges.records.findOperation(id))!;
+  const op = (await findStored(s.core.bridges.records, id))!;
   assert.deepEqual(effects(op), [["approval", "safe_success", 1], ["bridge", "unsealed", 0]]);
   return { s, op };
 }

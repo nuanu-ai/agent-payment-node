@@ -23,10 +23,6 @@ export class GaslessOperationRepository extends SecureStateStore {
             gaslessCorrupt();
         return op;
     }
-    async findOperation(operationId) {
-        stateIdentifier(operationId, "gasless operation ID");
-        return await this.findInProfiles("gasless-operations", async (profileHash) => await this.loadOperation(profileHash, operationId), gaslessCorrupt);
-    }
     async writeOperation(op) {
         validateGaslessOperation(op);
         await this.ready();

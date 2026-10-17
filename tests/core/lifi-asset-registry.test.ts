@@ -16,6 +16,7 @@ function bridgeTokenRow(chainId: unknown, address: unknown): BridgeTokenAsset {
   return row;
 }
 import { LIFI_RECIPIENT, LifiTestProvider, lifiFixture, lifiSteps, type LifiJson } from "./lifi-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 /** Pinned independently of the registry so the test fails if a row's address is ever edited. */
 const USDC = { 1: getAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
@@ -146,7 +147,7 @@ for (const boundary of ["inside", "outside"] as const) {
     };
     const result = await s.core.execute({ command: "bridge.approve", operationId: id });
     assert.equal(result.ok, true, result.error?.message);
-    const record = (await s.core.bridges.records.findOperation(id))!;
+    const record = (await findStored(s.core.bridges.records, id))!;
     if (boundary === "inside") {
       assert.equal(record.state, "completed");
       assert.equal(s.source.submissions.length, 2);

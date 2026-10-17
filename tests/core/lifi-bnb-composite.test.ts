@@ -15,6 +15,7 @@ import { temporaryState } from "./helpers.js";
 import { ApnCore } from "../../src/core.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { LifiProvider } from "../../src/lifi/provider.js";
+import { findStored } from "./stored-operations.js";
 
 const fixture = JSON.parse(readFileSync(resolve("tests/core/lifi-fixtures/bnb-composite-fly-20260921.json"), "utf8")) as {
   routeResponse: { routes: Record<string, unknown>[] }; materializationRequest: Record<string, unknown>; materializationResponse: unknown;
@@ -188,7 +189,7 @@ test("BNB destination outcomes survive restart, finalize spent usage and never r
     const prepared = await s.prepare("across", `bnb-${outcome}-001`);
     const result = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
     assert.equal(result.ok, true, `${outcome}: ${result.error?.message}`);
-    const record = (await s.core.bridges.records.findOperation(prepared.id))!;
+    const record = (await findStored(s.core.bridges.records, prepared.id))!;
     assert.equal(record.state, "destination_failed"); assert.equal(record.failure?.reason, outcome);
     assert.equal(record.destinationProof?.compositeTrace?.outcome, outcome);
     const binding = record.intent.allowlist!, lease = await new AssetUsageLedger(temporary.root).load({
@@ -208,11 +209,11 @@ test("BNB destination RPC absence remains evidence_unavailable and observe-only 
   s.provider.statusValue = "completed_observed"; s.destination.failObserve = true;
   const prepared = await s.prepare("across", "bnb-evidence-unavailable-001");
   await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
-  let record = (await s.core.bridges.records.findOperation(prepared.id))!;
+  let record = (await findStored(s.core.bridges.records, prepared.id))!;
   assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "evidence_unavailable");
   const restarted = new ApnCore({ state: s.state, bridge: s.dependencies, clock: { now: () => new Date(s.now) } });
   await restarted.execute({ command: "operation.resume", operationId: prepared.id });
-  record = (await restarted.bridges.records.findOperation(prepared.id))!;
+  record = (await findStored(restarted.bridges.records, prepared.id))!;
   assert.equal(record.failure?.reason, "evidence_unavailable"); assert.equal(s.source.submissions.length, 1);
   const binding = record.intent.allowlist!, lease = await new AssetUsageLedger(temporary.root).load({
     account: binding.account, chain: binding.chain, asset: binding.asset }, record.usageLease!.reservationId);

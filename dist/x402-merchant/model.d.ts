@@ -13,9 +13,24 @@ export interface MerchantEnvelope {
     readonly nativeFeeReserveWei?: string;
 }
 /** Every phase a merchant payment may hold, and its outcomes (the record's `terminal` flag must equal membership). */
-export declare const MERCHANT_PHASES: readonly ["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent"];
+export declare const MERCHANT_PHASES: readonly ["prepared", "signing_started", "submission_started", "unknown_finality", "payment_finalized", "delivery_unknown", "delivered", "reverted", "retired_unsent", "failed_before_effect", "failed_proven_superseded", "abandoned_unknown", "delivery_failed"];
 export declare const MERCHANT_TERMINAL_PHASES: readonly MerchantPhase[];
 export type MerchantPhase = typeof MERCHANT_PHASES[number];
+/** The most merchant GETs that may carry one payment's proof (started and outcome rows, two per GET). */
+export declare const MERCHANT_DELIVERY_ATTEMPT_LIMIT = 16;
+/**
+ * Why a payment ended without a merchant delivery (phase 4c exits). `never_signed`: custody was never asked to sign;
+ * `signature_never_left_process`: a signature may have existed only inside a process that died before sealing it, and
+ * nothing is sent before the durable submission fence; `finalized_nonce_superseded`: another transaction took the
+ * payment's nonce at the finalized tag and the node knows neither this transaction nor a receipt; `owner_abandoned`:
+ * the owner's TTY consent ended an attempt no proof could decide; `delivery_attempts_exhausted`: the finalized payment's
+ * proof was offered to the merchant the maximum number of times without an HTTP 200 delivery.
+ */
+export interface MerchantExit {
+    readonly reason: "never_signed" | "signature_never_left_process" | "finalized_nonce_superseded" | "owner_abandoned" | "delivery_attempts_exhausted";
+    readonly finalizedNonce?: string;
+    readonly transactionHash?: Hex;
+}
 export interface MerchantReceipt {
     readonly transactionHash: Hex;
     readonly blockNumber: string;
@@ -119,13 +134,16 @@ export interface MerchantOperation {
     readonly events: readonly MerchantEvent[];
     readonly integrityHash: string;
     readonly canonicalObservations?: readonly MerchantCanonicalObservation[];
+    /** Present exactly in the phase 4c exit states. */
+    readonly exit?: MerchantExit;
 }
 export declare function merchantFingerprint(o: Omit<MerchantOperation, "fingerprint" | "integrityHash">): string;
 export declare function sealMerchant(o: Omit<MerchantOperation, "integrityHash">): MerchantOperation;
 export declare function merchantSnapshot(o: Pick<MerchantOperation, "state" | "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts">): string;
-export declare function merchantMove(o: MerchantOperation, state: MerchantPhase, at: string, changes?: Partial<Pick<MerchantOperation, "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts" | "retirementDigest">>): MerchantOperation;
+export declare function merchantMove(o: MerchantOperation, state: MerchantPhase, at: string, changes?: Partial<Pick<MerchantOperation, "signingAttempts" | "submissionAttempts" | "txHash" | "receipt" | "deliveryAttempts" | "retirementDigest" | "exit">>): MerchantOperation;
 export declare function validateMerchant(v: unknown): MerchantOperation;
 export declare function publicMerchant(o: MerchantOperation): {
+    exit: MerchantExit | null;
     currentCanonicalProof: MerchantCanonicalObservation | null;
     result: Record<string, unknown> | null | undefined;
     receipt: MerchantReceipt | null;
@@ -147,7 +165,7 @@ export declare function publicMerchant(o: MerchantOperation): {
     feeRule?: "apn.merchant-mega-fee.v1" | "apn.merchant-mega-fee.v2";
     kind: "merchant_x402";
     operationId: string;
-    state: "prepared" | "signing_started" | "submission_started" | "reverted" | "unknown_finality" | "payment_finalized" | "delivery_unknown" | "delivered" | "retired_unsent";
+    state: "prepared" | "signing_started" | "submission_started" | "reverted" | "unknown_finality" | "failed_before_effect" | "payment_finalized" | "delivery_unknown" | "delivered" | "retired_unsent" | "failed_proven_superseded" | "abandoned_unknown" | "delivery_failed";
     terminal: boolean;
     mechanism: string;
     provider: {

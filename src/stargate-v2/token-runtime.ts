@@ -22,9 +22,9 @@ import { TtyStargateTokenApproval } from "./token-tty.js";
 import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
 import type { StargateTokenUsageState } from "./token-model.js";
 import { legacyStargateStatusAfter, type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
+import { checkNeverLands } from "../evm-finalized-proof.js";
 
 function stargateUsageState(state: AssetUsageState): StargateTokenUsageState {
-  if (state === "released_unsubmitted") throw new ApnError("APN_STATE_CORRUPT", "Stargate usage has an incompatible release state.");
   return state;
 }
 
@@ -63,7 +63,7 @@ export class StargateTokenService {
   async execute(id: string) { const op = await this.required(id); return await executeStargateV2Token(id, await this.ports(op.profile, op.owner, id), this.journal); }
   async cleanup(id: string) { const op = await this.required(id); return await cleanupStargateV2Token(id, await this.ports(op.profile, op.owner, id), this.journal); }
   async observe(id: string) { const op = await this.required(id); assertServiceUsageTarget(op);
-    if (["observed", "cleanup_required", "cleaned"].includes(op.phase)) return op.usageTarget === undefined ? op : await this.reconciled(id);
+    if (["observed", "cleanup_required", "cleaned", "abandoned_unknown"].includes(op.phase)) return op.usageTarget === undefined ? op : await this.reconciled(id);
     if (op.usageTarget === undefined && !["allowance_submission_started", "allowance_unknown_finality", "allowance_submitted", "allowance_observed", "post_approval_quote_bound", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality", "cleaned"].includes(op.phase)) throw new ApnError("APN_OPERATION_BLOCKED", "Only an attempted or recoverable Stargate token operation can be observed.");
     return await observeStargateV2Token(id, await this.ports(op.profile, op.owner, id), this.journal); }
   /** A record of an unreleased token schema (v1..v4) is read by its frozen reader; its status may close it by a chain proof. */
@@ -101,23 +101,25 @@ export class StargateTokenService {
       reserveUsage: async op => await this.reserveUsage(op),
       followUsage: async (op, target) => await this.followUsage(op, target),
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateTokenSourceReceipt(source, txHash, finalityTag),
-      observeDestination: async input => await observeStargateTokenDestination(destination, input, tokenAt, cursor), now: this.now };
+      observeDestination: async input => await observeStargateTokenDestination(destination, input, tokenAt, cursor), now: this.now,
+      neverLands: async effect => await checkNeverLands({ chainId: 10, account: owner, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash },
+        async calls => await remotes.source.batchCall(calls)) };
   }
   private async reserveUsage(op: StargateTokenOperation): Promise<StargateTokenUsageState> { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);
     if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again.");
     const at = new Date(this.now()); return stargateUsageState((await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
       idempotencyKey: usageKey(op.operationId), now: at })).state); }
-  private async followUsage(op: StargateTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert"): Promise<StargateTokenUsageState> {
+  private async followUsage(op: StargateTokenOperation, target: Exclude<StargateTokenUsageState, "reserved">): Promise<StargateTokenUsageState> {
     const identity = usageIdentity(op.owner), reservationId = assetUsageReservationId(identity, usageKey(op.operationId));
     const current = await this.usage.load(identity, reservationId); if (current === null) { if (target === "failed_before_effect") return target; throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation is missing."); }
     const state = stargateUsageState(current.state);
     if (state === target) return state;
     if (target === "submitted" && state === "unknown_finality") return state;
-    if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(state)) {
+    if (["finalized", "failed_before_effect", "failed_confirmed_revert", "released_unsubmitted"].includes(state)) {
       if (target === "submitted" || target === "unknown_finality") return state;
       throw new ApnError("APN_STATE_CORRUPT", "Stargate usage reservation reached a conflicting terminal state.");
     }
-    const outcome = ["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(target)
+    const outcome = ["finalized", "failed_before_effect", "failed_confirmed_revert", "released_unsubmitted"].includes(target)
       ? { outcomeDigest: domainHash("apn.stargate-token-usage-outcome.v1", canonicalJson({ operationId: op.operationId, target, integrityHash: op.integrityHash })) } : {};
     return stargateUsageState((await this.usage.transition({ ...identity, reservationId, policyDigest: current.policyDigest, state: target, now: new Date(this.now()), ...outcome })).state);
   }
@@ -132,7 +134,7 @@ function assertServiceUsageTarget(op: StargateTokenOperation): void {
   const legal: Readonly<Record<NonNullable<StargateTokenOperation["usageTarget"]>, readonly StargateTokenOperation["phase"][]>> = {
     reserved: ["approved", "allowance_observed", "post_approval_quote_bound", "cleanup_required"], submitted: ["submitted", "unknown_finality"],
     unknown_finality: ["unknown_finality"], finalized: ["observed"], failed_before_effect: ["cleanup_required", "cleaned"],
-    failed_confirmed_revert: ["cleanup_required", "cleaned"],
+    failed_confirmed_revert: ["cleanup_required", "cleaned"], released_unsubmitted: ["unknown_finality", "cleanup_required", "cleaned"],
   };
   if (!legal[op.usageTarget].includes(op.phase)) throw new ApnError("APN_STATE_CORRUPT", "The Stargate token usage reconciliation target is incompatible with the journal phase.");
 }

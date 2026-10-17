@@ -11,6 +11,7 @@ import { LifiTestProvider, LIFI_SYNTHETIC_SENDER, lifiFixture, lifiSteps } from 
 import { addressWord } from "./lifi-event-fixtures.js";
 import { temporaryState } from "./helpers.js";
 import { ETH_USDC, ARB_USDC, usdcBudgetSpy } from "./lifi-usdc-budget-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 async function pendingUsdc(root: string, now: Date) {
   const step = (await lifiSteps("eth-base", now))[0]!;
@@ -30,10 +31,10 @@ async function pendingUsdc(root: string, now: Date) {
     quote: (quoted.data as { quote_hash: string }).quote_hash, route: "route-across", idempotencyKey: "usdc-budget-test-1" });
   assert(prepared.ok, JSON.stringify(prepared.error));
   const id = (prepared.operation as { operation_id: string }).operation_id;
-  f.source.op = (await f.core.bridges.records.findOperation(id))!; f.destination.op = f.source.op;
+  f.source.op = (await findStored(f.core.bridges.records, id))!; f.destination.op = f.source.op;
   f.source.failObserve = true;
   const approved = await f.core.execute({ command: "bridge.approve", operationId: id }); assert(approved.ok);
-  const op = (await f.core.bridges.records.findOperation(id))!;
+  const op = (await findStored(f.core.bridges.records, id))!;
   assert.equal(op.effects[0]!.submissionAttempts, 1); assert.equal(op.effects[1]!.submissionAttempts, 0);
   assert.equal(f.source.submissions.length, 1); assert.equal(f.approval.calls.length, 1);
   return { f, op, approvalRaw: f.source.submissions[0]! };

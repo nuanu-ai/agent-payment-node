@@ -8,7 +8,7 @@ import { validateUniswapTokenRoute, type UniswapTokenRoute } from "./token-route
 export const UNISWAP_TOKEN_OPERATION_SCHEMA_V1 = "apn.uniswap-token-operation.v1" as const;
 export const UNISWAP_TOKEN_OPERATION_SCHEMA = "apn.uniswap-token-operation.v2" as const;
 export const UNISWAP_TOKEN_RECEIPT_SCHEMA = "apn.uniswap-token-receipt.v1" as const;
-export type UniswapTokenPhase = "prepared" | "approved" | "approval_submission_started" | "approval_submitted" | "approval_unknown_finality" | "approval_observed" | "submission_started" | "submitted" | "unknown_finality" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned";
+export type UniswapTokenPhase = "prepared" | "approved" | "approval_submission_started" | "approval_submitted" | "approval_unknown_finality" | "approval_observed" | "submission_started" | "submitted" | "unknown_finality" | "observed" | "cleanup_required" | "cleanup_submission_started" | "cleanup_submitted" | "cleanup_unknown_finality" | "cleaned" | "abandoned_unknown";
 export interface TokenGasEnvelope {
     readonly gasLimit: string;
     readonly maxFeePerGas: string;
@@ -41,6 +41,17 @@ export interface UniswapTokenCleanupEvidence { readonly schemaVersion: "apn.unis
 export interface UniswapTokenExpiredApprovalEvidence { readonly schemaVersion: "apn.uniswap-token-expired-approval-evidence.v1";
     readonly kind: "expired_approval_no_swap"; readonly approvalTransactionHash: string;
     readonly observedAllowanceAtomic: string; readonly observedAt: string; readonly source?: never; }
+/** The residual allowance was observed zero after an effect of this swap landed (or was retired): nothing is left to clean. */
+export interface UniswapTokenZeroAllowanceEvidence { readonly schemaVersion: "apn.uniswap-token-zero-allowance-evidence.v1";
+    readonly kind: "zero_allowance_after_effect"; readonly observedAllowanceAtomic: "0"; readonly observedAt: string; readonly source?: never; }
+/**
+ * An attempt that can no longer land, kept when its slot is freed (R4): never landed (at the finalized tag the account's
+ * nonce passed the attempt's nonce and the node knows neither its transaction nor a receipt) or, for a cleanup, landed
+ * without zeroing the allowance (reverted, or another approval followed in its block). A freed cleanup slot is re-armed
+ * under a new round with fresh owner consent; approval and swap slots are never signed again.
+ */
+export interface UniswapTokenRetiredEffect { readonly kind: "approval" | "swap" | "cleanup"; readonly attempt: UniswapTokenAttempt;
+    readonly reason: "never_landed" | "reverted" | "landed_allowance_nonzero"; readonly finalizedNonceAtomic: string | null; readonly observedAt: string; }
 export interface UniswapTokenFailureDiagnostic { readonly code: string | null; readonly reason: string | null;
     readonly rpcMethod: string | null; readonly endpointRole: string | null; readonly phase: UniswapTokenPhase; }
 type FailureDiagnosticField = "code" | "reason" | "rpcMethod" | "endpointRole";
@@ -81,8 +92,10 @@ export interface UniswapTokenOperation {
     readonly swapAttempt: UniswapTokenAttempt | null;
     readonly cleanupAttempt: UniswapTokenAttempt | null;
     readonly cleanupReason: string | null;
-    readonly cleanupEvidence?: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | null;
+    readonly cleanupEvidence?: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | UniswapTokenZeroAllowanceEvidence | null;
     readonly preSignFailure?: UniswapTokenFailureDiagnostic | null;
+    /** Present only once an attempt was retired (v2 records without it read as before). */
+    readonly retiredEffects?: readonly UniswapTokenRetiredEffect[];
     readonly receipt: UniswapTokenReceipt | null;
     readonly previousIntegrityHash: string | null;
     readonly integrityHash: string;
@@ -103,7 +116,8 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
         "usageReservationId", "usageState", "createdAt", "updatedAt",
         "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"];
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
-        !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure"] : common))
+        !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
+          ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value as unknown as UniswapTokenOperation, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -113,7 +127,8 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
         corrupt("Uniswap token operation binding is invalid.");
     for (const gas of [op.approvalGas, op.swapGas, op.cleanupGas])
         validateGas(gas);
-    const usageStates: readonly AssetUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert"];
+    const usageStates: readonly AssetUsageState[] = ["reserved", "submitted", "unknown_finality", "finalized", "failed_before_effect", "failed_confirmed_revert",
+        "released_unsubmitted"];
     if ((op.usageReservationId === null) !== (op.usageState === null) || op.usageReservationId !== null && !/^[a-f0-9]{64}$/u.test(op.usageReservationId) ||
         op.usageState !== null && !usageStates.includes(op.usageState) || op.phase !== "prepared" && op.usageReservationId === null &&
         !(op.phase === "cleaned" && op.cleanupEvidence?.kind === "zero_allowance_no_effect" && op.usageState === null &&
@@ -122,7 +137,8 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
     attempt(op.approvalAttempt);
     attempt(op.swapAttempt);
     attempt(op.cleanupAttempt);
-    if (op.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA) { validateCleanupEvidence(op.cleanupEvidence); validateFailureDiagnostic(op.preSignFailure); }
+    if (op.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA) { validateCleanupEvidence(op.cleanupEvidence); validateFailureDiagnostic(op.preSignFailure);
+        if (op.retiredEffects !== undefined) validateRetired(op.retiredEffects, op.updatedAt); }
     const evidence = op.cleanupEvidence ?? null, failure = op.preSignFailure ?? null;
     const approvalStarted = ["approval_submission_started", "approval_submitted", "approval_unknown_finality"].includes(op.phase) || op.approvalAttempt !== null, swapStarted = ["submission_started", "submitted", "unknown_finality", "observed"].includes(op.phase), cleanupStarted = ["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase) || op.phase === "cleaned" && evidence === null;
     if (approvalStarted && op.allowanceAtPrepare === "0" && op.approvalAttempt === null || swapStarted && op.swapAttempt === null || cleanupStarted && op.cleanupAttempt === null)
@@ -138,7 +154,12 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
         evidence.observedAllowanceAtomic !== route.amountIn || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
         Date.parse(evidence.observedAt) < route.deadline * 1000 || evidence.observedAt > op.updatedAt))
         corrupt("Uniswap token expired approval evidence is invalid.");
-    if (failure !== null && op.phase !== "cleanup_required" && op.phase !== "cleaned") corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
+    if (evidence?.kind === "zero_allowance_after_effect" && (op.phase !== "cleaned" || op.cleanupReason !== "zero_allowance_after_effect" ||
+        !hashes && (op.retiredEffects ?? []).length === 0 || evidence.observedAt > op.updatedAt))
+        corrupt("Uniswap token zero allowance evidence is invalid.");
+    if (op.usageState === "released_unsubmitted" && !(op.retiredEffects ?? []).some((row) => row.kind === "swap" && row.reason === "never_landed"))
+        corrupt("Uniswap token usage release has no never-landed swap.");
+    if (failure !== null && op.phase !== "cleanup_required" && op.phase !== "cleaned" && op.phase !== "abandoned_unknown") corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
     if (op.receipt !== null)
@@ -146,10 +167,14 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
     return op;
 }
 /** Every phase of a Uniswap token swap; `observed` and `cleaned` are its outcomes (nothing of it signs, sends or lands after them). */
-export const UNISWAP_TOKEN_TERMINAL_PHASES: readonly UniswapTokenPhase[] = ["observed", "cleaned"];
+export const UNISWAP_TOKEN_TERMINAL_PHASES: readonly UniswapTokenPhase[] = ["observed", "cleaned", "abandoned_unknown"];
 export const UNISWAP_TOKEN_PHASES: readonly UniswapTokenPhase[] = ["prepared", "approved", "approval_submission_started", "approval_submitted", "approval_unknown_finality",
     "approval_observed", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started",
-    "cleanup_submitted", "cleanup_unknown_finality", "cleaned"];
+    "cleanup_submitted", "cleanup_unknown_finality", "cleaned", "abandoned_unknown"];
+/** The round of an effect slot: how many attempts of that kind were retired before it. Round 0 keeps the original keys. */
+export function tokenEffectRound(op: Pick<UniswapTokenOperation, "retiredEffects">, kind: "approval" | "swap" | "cleanup"): number {
+    return (op.retiredEffects ?? []).filter((row) => row.kind === kind).length;
+}
 export class UniswapTokenJournal extends SecureStateStore {
     async save(value: UniswapTokenOperation): Promise<UniswapTokenOperation> {
         const op = validateUniswapTokenOperation(value);
@@ -188,7 +213,26 @@ function maxGas(v: TokenGasEnvelope) { validateGas(v); return BigInt(v.gasLimit)
 function attempt(v: UniswapTokenAttempt | null) { if (v === null)
     return; if (!isPlainRecord(v) || !exactKeys(v, ["markerHash", "markedAt", "nonce", "transactionHash", "attempts"]) || v.attempts !== 1 || !/^[a-f0-9]{64}$/u.test(v.markerHash) || !canonicalInstant(v.markedAt) || (v.transactionHash !== null && !/^0x[a-f0-9]{64}$/u.test(v.transactionHash)))
     corrupt("Uniswap token attempt is invalid."); uint(v.nonce); }
-function validateCleanupEvidence(v: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | null | undefined) { if (v === null) return;
+function validateRetired(rows: readonly UniswapTokenRetiredEffect[], updatedAt: string) {
+    if (!Array.isArray(rows) || rows.length < 1 || rows.length > 8) corrupt("Uniswap token retired effects are invalid.");
+    for (const value of rows as readonly unknown[]) {
+        if (!isPlainRecord(value) || !exactKeys(value, ["kind", "attempt", "reason", "finalizedNonceAtomic", "observedAt"])) corrupt("Uniswap token retired effect is invalid.");
+        const row = value as unknown as UniswapTokenRetiredEffect;
+        if (
+            !["approval", "swap", "cleanup"].includes(row.kind) || !["never_landed", "reverted", "landed_allowance_nonzero"].includes(row.reason) ||
+            !canonicalInstant(row.observedAt) || row.observedAt > updatedAt) corrupt("Uniswap token retired effect is invalid.");
+        attempt(row.attempt);
+        if (row.attempt.transactionHash === null || (row.reason === "never_landed"
+            ? typeof row.finalizedNonceAtomic !== "string" || uint(row.finalizedNonceAtomic) <= uint(row.attempt.nonce)
+            : row.kind !== "cleanup" || row.finalizedNonceAtomic !== null)) corrupt("Uniswap token retired effect is invalid.");
+    }
+}
+function validateCleanupEvidence(v: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | UniswapTokenZeroAllowanceEvidence | null | undefined) { if (v === null) return;
+    if (isPlainRecord(v) && v.kind === "zero_allowance_after_effect") {
+      if (!exactKeys(v, ["schemaVersion", "kind", "observedAllowanceAtomic", "observedAt"]) || v.schemaVersion !== "apn.uniswap-token-zero-allowance-evidence.v1" ||
+          v.observedAllowanceAtomic !== "0" || !canonicalInstant(v.observedAt as string)) corrupt("Uniswap token zero allowance evidence is invalid.");
+      return;
+    }
     if (isPlainRecord(v) && v.kind === "expired_approval_no_swap") {
       if (!exactKeys(v, ["schemaVersion", "kind", "approvalTransactionHash", "observedAllowanceAtomic", "observedAt"]) ||
           v.schemaVersion !== "apn.uniswap-token-expired-approval-evidence.v1" || !/^0x[a-f0-9]{64}$/u.test(v.approvalTransactionHash as string) ||
