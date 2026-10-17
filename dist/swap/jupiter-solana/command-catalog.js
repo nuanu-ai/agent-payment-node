@@ -13,7 +13,7 @@ const account = option("--account", "string", ["canonical_32_byte_base58_solana_
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
 export const JUPITER_COMMAND_GROUPS = [
     { path: ["swap", "solana"], summary: "Solana guarded swaps.", kind: "group" },
-    { path: ["swap", "solana", "jupiter"], summary: "Jupiter V1 direct Whirlpool SOL to USDC; V2 Quantum remains blocked.", kind: "group" },
+    { path: ["swap", "solana", "jupiter"], summary: "Jupiter V1 direct Whirlpool SOL to USDC.", kind: "group" },
 ];
 export const JUPITER_COMMANDS = [
     command("inventory", [], "Read the immutable Jupiter identities without admitting them.", "none"),
