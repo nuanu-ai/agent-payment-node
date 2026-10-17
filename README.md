@@ -89,7 +89,8 @@ under an idempotency key and signs nothing. An `approve`/`execute` command re-ch
 shows the exact terms in a foreground terminal and asks for a typed code before signing. Every send is behind a durable
 marker; an ambiguous send is only observed afterwards, never repeated. `operation status`, `operation resume`,
 `operation abandon` and `receipt get` take a saved operation of any family and run that family's own code; a family
-whose recovery or exit is a separate command (Circle, x402 merchant, Permit2, Relay, GasZip funding) answers with it.
+whose recovery or exit is a separate command (Circle, x402 merchant, Permit2, Relay, GasZip funding, Uniswap token,
+Stargate token cleanup) answers with it.
 
 **MCP never approves.** `apn mcp config` prints the launch descriptor and `apn mcp serve` runs the stdio server. Its tools
 are projected from the same catalog and run the same code as the CLI. Commands that need a human (approve, execute,
