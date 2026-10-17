@@ -66,7 +66,7 @@ import { policyBinding, type ProfilePolicyPort } from "../../src/profile-policy.
 import { StateStore } from "../../src/state.js";
 import { appendTransition, sealOperation } from "../../src/state-integrity.js";
 import type { HttpGetRequest, HttpObservation } from "../../src/x402-model.js";
-import { TestClock, TestNative, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
+import { TestClock, TestNative, TestProfilePolicy, TestRpc, temporaryState, savedX402Operations } from "./helpers.js";
 import { challengeObservation, TestHttp } from "./x402-helpers.js";
 import {
   canonicalPaymentRequiredHeader,
@@ -1176,7 +1176,7 @@ test("provider x402 joins normalized seller result with the sole exact fixed-win
   assert.equal(localPrepared.ok, true, JSON.stringify(localPrepared));
   const localOperationId = (localPrepared.operation as { operationId?: unknown }).operationId;
   assert.equal(typeof localOperationId, "string");
-  assert.deepEqual((await fixture.state.listX402Operations(fixture.profile.profile_hash)).map((item) => item.operationId), [localOperationId]);
+  assert.deepEqual((await savedX402Operations(fixture.state, fixture.profile.profile_hash)).map((item) => item.operationId), [localOperationId]);
   assert.deepEqual((await new ProviderX402Repository(fixture.temporary.root).listOperations(fixture.profile.profile_hash)).map((item) => item.operationId), [operationId]);
   assert.deepEqual(await fixture.state.listX402Receipts(fixture.profile.profile_hash), [], "local receipt reader must skip provider receipt schema");
 });

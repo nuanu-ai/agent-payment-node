@@ -6,7 +6,7 @@ import { BRIDGE_EXECUTION_SOURCE_CHAIN_IDS } from "../../src/lifi/chains.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
-import { temporaryState } from "./helpers.js";
+import { temporaryState, savedBridgeOperations } from "./helpers.js";
 import { LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpers.js";
 
 for (const [pair, tool] of [["base-arb", "across"], ["arb-eth", "stargateV2"]] as const) {
@@ -70,7 +70,7 @@ test("common LI.FI allowlist admission cannot authorize a mutated materialized r
   const result = await s.core.execute({ command: "bridge.prepare", profile: s.profile,
     quote: (routes.data as any).quote_hash, route: "route-across", idempotencyKey: "allowlist-route-mutation-001" });
   assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_PROVIDER_PROTOCOL");
-  assert.equal((await s.core.bridges.records.listAllOperations()).length, 0);
+  assert.equal((await savedBridgeOperations(s.core.bridges.records)).length, 0);
 });
 
 test("common LI.FI finalized usage enforces the shared daily cap before another materialization", async (t) => {
