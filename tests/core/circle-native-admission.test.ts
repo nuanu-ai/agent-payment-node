@@ -10,7 +10,8 @@ import { encodeFunctionResult } from "viem";
 import { StateStore } from "../../src/state.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import { evmNativeCustody } from "../../src/evm-native-custody.js";
-import { verifyCircleNativeAdmission, recheckCircleNativeAdmission, verifiedCircleNativeSources, circleNativeSourceIdentity } from "../../src/circle-native-admission.js";
+import { circleNativeSourceIdentity } from "../../src/circle-native-admission.js";
+import type { CircleNativeAdmission } from "../../src/legacy/circle-native-admission-rider.js";
 import { OperationService } from "../../src/operation-service.js";
 import { sealCircle, advanceCircle } from "../../src/circle-v2-evm/operation-model.js";
 import { sourceReady } from "./circle-native-admission-fixture.js";
@@ -91,19 +92,6 @@ test("R8: an INCLUDED (not yet finalized) Circle source keeps the account held e
   } finally { await rm(s.root, { recursive: true, force: true }); }
 });
 
-test("INCLUDED source, reorg, missing approval proof, unknown approval and other recipient never obtain admission", async () => {
-  for (const variant of ["included", "reorg", "missing", "unknown", "recipient"] as const) {
-    const s = await setup(); try {
-      if (variant === "included") s.op = advanceCircle(s.op, { source: { ...s.op.source!, finalityTag: "included", integrityHash: hashObject((({ integrityHash: _, ...body }) => ({ ...body, finalityTag: "included" }))(s.op.source!)) } }, "included", Date.parse(s.op.preparedAt));
-      if (variant === "missing" || variant === "unknown") s.op = advanceCircle(s.op, { effects: s.op.effects.map(e => e.role === "approval" ? { ...e, ...(variant === "missing" ? { proof: null } : { phase: "unknown" as const }) } : e) }, "negative_fixture", Date.parse(s.op.preparedAt));
-      if (variant === "reorg") s.setReorg(); else await s.save();
-      const check = () => verifyCircleNativeAdmission(s.state, s.port, s.buyer, CIRCLE_SOURCE_OWNER, variant === "recipient" ? CIRCLE_SOURCE_OWNER : s.recipient);
-      if (variant === "reorg" || variant === "missing") await assert.rejects(check()); else assert.equal(await check(), null);
-      await assert.rejects(new OperationService(s.state).assertEvmAccountAvailable(s.op.profileHash, 42161, CIRCLE_SOURCE_OWNER));
-    } finally { await rm(s.root, { recursive: true, force: true }); }
-  }
-});
-
 test("a record prepared with the retired Circle rider is refused before the owner screen or any signature", async () => {
   const s = await setup(); try {
     const record = await riderRecord(s, "rider-refused"), before = await readFile(s.path);
@@ -115,37 +103,16 @@ test("a record prepared with the retired Circle rider is refused before the owne
   } finally { await rm(s.root, { recursive: true, force: true }); }
 });
 
-test("verified source exclusion refuses forged proof, foreign owner, old unknown and a second unsettled Circle", async () => {
-  const s = await setup(); try {
-    const service = new OperationService(s.state), result = (await verifyCircleNativeAdmission(s.state, s.port, s.buyer, CIRCLE_SOURCE_OWNER, s.recipient))!;
-    await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable(s.op.profileHash, CIRCLE_SOURCE_OWNER, { kind: "verified-circle-native-source" }));
-    await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable("e".repeat(64), CIRCLE_SOURCE_OWNER, result.token));
-    const other = advanceCircle(sealCircle({ ...s.op, operationId: "8".repeat(64), idempotencyHash: "8".repeat(64) }), { state: "source_unknown", source: null, attestation: null, effects: s.op.effects.map(e => ({ ...e, phase: "unknown" as const })) }, "other_unknown", Date.parse(s.op.preparedAt));
-    await writeFile(join(s.root, "circle-v2-evm", `${other.operationId}.json`), canonicalJson(other), { mode: 0o600 });
-    await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable(s.op.profileHash, CIRCLE_SOURCE_OWNER, result.token));
-    const second = advanceCircle(sealCircle({ ...s.op, operationId: other.operationId, idempotencyHash: "8".repeat(64) }), {}, "second_settled", Date.parse(s.op.preparedAt));
-    await writeFile(join(s.root, "circle-v2-evm", `${other.operationId}.json`), canonicalJson(second), { mode: 0o600 });
-    assert.equal(await verifyCircleNativeAdmission(s.state, s.port, s.buyer, CIRCLE_SOURCE_OWNER, s.recipient), null);
-  } finally { await rm(s.root, { recursive: true, force: true }); }
-});
-
-test("the retired rider's recheck still refuses a late pending nonce change", async () => {
-  const s = await setup(); try {
-    const record = await riderRecord(s, "rider-nonce");
-    assert.ok(await recheckCircleNativeAdmission(s.state, record, s.port));
-    s.rpc.nonceAtomic = (BigInt(record.economics!.nonceAtomic) + 1n).toString();
-    await assert.rejects(recheckCircleNativeAdmission(s.state, record, s.port)); assert.equal(s.rpc.broadcastCount, 0);
-  } finally { await rm(s.root, { recursive: true, force: true }); }
-});
-
 /** A record as 0.5.41 wrote it: a plain Arbitrum native prepare beside a settled-source Circle operation, plus the rider. */
 async function riderRecord(s: Awaited<ReturnType<typeof setup>>, key: string): Promise<OperationRecord> {
   await rm(s.path);
   const value = await s.core.execute({ command: "transfer.prepare", profile: s.buyer, asset: { chainId: 42161, token: "native" }, recipient: s.recipient, amount: "0.00015", maxFeeWei: "5000000000000", idempotencyKey: key });
   assert.equal(value.ok, true, JSON.stringify(value)); await s.save();
   const plain = (await s.state.listOperations(s.op.profileHash))[0]!;
-  const admission = (await verifyCircleNativeAdmission(s.state, s.port, s.buyer, CIRCLE_SOURCE_OWNER, s.recipient))!;
-  const { integrityHash: _old, ...body } = plain, evm = { ...plain.evm!, circleNativeAdmission: admission.binding };
+  // The 0.5.41 rider as that release stored it: the `default` recipient custody and the one finalized source it relied on.
+  const admission: CircleNativeAdmission = { schemaVersion: "apn.circle-finalized-native-admission.v1", recipientCustody: await evmNativeCustody(s.state, "default"),
+    sources: [{ operationId: s.op.operationId, sourceIdentityHash: circleNativeSourceIdentity(s.op) }] };
+  const { integrityHash: _old, ...body } = plain, evm = { ...plain.evm!, circleNativeAdmission: admission };
   const record = sealOperation({ ...body, evm, fingerprint: evmDirectFingerprint({ ...body, evm }) });
   // Written as the old version left it; the current write guard rightly refuses to rewrite a frozen fingerprint.
   await writeFile(join(s.root, "operations", record.profileHash, `${record.operationId}.json`), canonicalJson(record), { mode: 0o600 });
@@ -155,27 +122,3 @@ async function riderRecord(s: Awaited<ReturnType<typeof setup>>, key: string): P
 }
 
 
-test("caller-visible proof mutations cannot alter the detached one-source private authority", async () => {
-  for (const mutation of ["append", "index", "entry", "custody"] as const) {
-    const s = await setup(); try {
-      const service = new OperationService(s.state), result = (await verifyCircleNativeAdmission(s.state, s.port, s.buyer, CIRCLE_SOURCE_OWNER, s.recipient))!;
-      const other = advanceCircle(sealCircle({ ...s.op, operationId: "8".repeat(64), idempotencyHash: "8".repeat(64) }), {}, "second_settled", Date.parse(s.op.preparedAt));
-      await writeFile(join(s.root, "circle-v2-evm", `${other.operationId}.json`), canonicalJson(other), { mode: 0o600 });
-      await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable(s.op.profileHash, CIRCLE_SOURCE_OWNER, result.token));
-      const publicBinding = result.binding as unknown as { sources: { operationId: string; sourceIdentityHash: string }[]; recipientCustody: { profileHash: string; walletAddress: string; walletBindingHash: string } };
-      const second = { operationId: other.operationId, sourceIdentityHash: circleNativeSourceIdentity(other) };
-      if (mutation === "append") publicBinding.sources.push(second);
-      if (mutation === "index") publicBinding.sources[0] = second;
-      if (mutation === "entry") Object.assign(publicBinding.sources[0]!, second);
-      if (mutation === "custody") Object.assign(publicBinding.recipientCustody, { profileHash: "e".repeat(64), walletAddress: CIRCLE_SOURCE_OWNER, walletBindingHash: "f".repeat(64) });
-      assert.deepEqual([...verifiedCircleNativeSources(result.token, s.op.profileHash, CIRCLE_SOURCE_OWNER)], [[s.op.operationId, circleNativeSourceIdentity(s.op)]]);
-      await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable(s.op.profileHash, CIRCLE_SOURCE_OWNER, result.token));
-      await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable("e".repeat(64), CIRCLE_SOURCE_OWNER, result.token));
-      await assert.rejects(service.assertFinalizedCircleNativeAccountAvailable(s.op.profileHash, CIRCLE_SOURCE_OWNER, { ...result.token }));
-      // Mutating a returned map is also harmless: each getter returns a fresh detached map.
-      (verifiedCircleNativeSources(result.token, s.op.profileHash, CIRCLE_SOURCE_OWNER) as Map<string, string>).set(second.operationId, second.sourceIdentityHash);
-      assert.equal(verifiedCircleNativeSources(result.token, s.op.profileHash, CIRCLE_SOURCE_OWNER).size, 1);
-      assert.equal(s.rpc.broadcastCount, 0);
-    } finally { await rm(s.root, { recursive: true, force: true }); }
-  }
-});

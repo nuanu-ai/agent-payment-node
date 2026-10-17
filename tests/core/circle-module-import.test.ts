@@ -9,11 +9,12 @@ import { join } from "node:path";
 // would conceal the CircleRpc initialization cycle rather than test it.
 for (const [path, symbol] of [
   ["circle-v2-evm/rpc.js", "CircleRpc"],
-  ["circle-cleanup85-native-cancellation.js", "Cleanup85NativeCancellation"],
   ["cli.js", "runCli"],
-  ["circle-v2-evm/cleanup85-recovery-runtime.js", "Cleanup85RecoveryRuntime"],
-  ["circle-v2-evm/cleanup86-store.js", "Cleanup86Store"],
-  ["circle-v2-evm/cleanup86-snapshot.js", "Cleanup86SnapshotStore"],
+  // The frozen historical readers load on their own, without pulling a live write path in first.
+  ["legacy/circle-sealed-burn-retirement.js", "validateSealedBurnProof"],
+  ["legacy/circle-cleanup85-retirement-proof.js", "validateCleanup85RecoveryProof"],
+  ["legacy/cleanup85-native-records.js", "validateCleanup85NativeBinding"],
+  ["legacy/circle-native-admission-rider.js", "validateCircleNativeAdmission"],
 ] as const) test(`fresh normal Node imports ${path} without a core-first shim`, async t => {
   const root = await mkdtemp(join(tmpdir(), "apn-circle-import-"));
   t.after(() => rm(root, { recursive: true, force: true }));

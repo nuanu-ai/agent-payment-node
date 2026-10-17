@@ -25,18 +25,9 @@ export class CircleRepository extends SecureStateStore {
     }
     return result;
   }
-  /** Historical enumeration only. Generic identity and financial inventory must use all known schemas. */
-  async listAllOperations(): Promise<readonly CircleOperationV1[]> {
-    return (await this.listAllAny()).filter((op): op is CircleOperationV1 => op.schemaVersion === "apn.circle-v2-evm-operation.v1");
-  }
   async listAny(profileHash: string): Promise<readonly CircleKnownOperation[]> {
     stateIdentifier(profileHash, "Circle profile hash");
     return (await this.listAllAny()).filter(op => op.profileHash === profileHash || op.destinationProfileHash === profileHash);
-  }
-  async listOperations(profileHash: string): Promise<readonly CircleOperationV1[]> {
-    stateIdentifier(profileHash, "Circle profile hash");
-    // Both the principal owner and a distinct gas owner hold the operation while unresolved.
-    return (await this.listAllOperations()).filter(op => op.profileHash === profileHash || op.destinationProfileHash === profileHash);
   }
   async save(input: CircleOperationV1): Promise<void> {
     const next = validateCircle(input), previous = await this.load(next.operationId);

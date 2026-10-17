@@ -103,7 +103,7 @@ for (const first of ["v1", "v2"] as const) for (const [chain, profile] of [[143,
   await service.assertEvmAccountAvailable(held.profileHash, 1, CIRCLE_SOURCE_OWNER);
   const found = (await service.findIdempotency(held.idempotencyHash))!; assert.equal(found.kind, "circle_route"); if (found.kind !== "circle_route") throw new Error("wrong kind"); assert.equal(found.record.integrityHash, unknown.integrityHash);
   assert.equal((await repo.listAllAny()).length, 1);
-  if (first === "v2") { assert.equal((await repo.listAllOperations()).length, 0); await assert.rejects(repo.load(fresh.operationId), /legacy_operation_schema_required/); }
+  if (first === "v2") { assert.equal((await repo.listAllAny()).filter(op => op.schemaVersion === "apn.circle-v2-evm-operation.v1").length, 0); await assert.rejects(repo.load(fresh.operationId), /legacy_operation_schema_required/); }
   const before = await repo.loadAny(held.operationId); await assert.rejects(first === "v1" ? repo.saveFunding(fresh) : repo.save(old)); assert.equal(canonicalJson(await repo.loadAny(held.operationId)), canonicalJson(before));
   await writeFile(join(root,"circle-v2-evm",`${"a".repeat(64)}.json`), `${canonicalJson({ ...fresh, schemaVersion: "unknown" })}\n`, { mode: 0o600 });
   await assert.rejects(repo.listAllAny(), /unsupported_operation_schema/); await assert.rejects(service.assertEvmAccountAvailable(held.profileHash, 1, CIRCLE_SOURCE_OWNER));

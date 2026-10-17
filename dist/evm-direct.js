@@ -1,4 +1,4 @@
-import { validateCircleNativeAdmission } from "./circle-native-admission.js";
+import { validateCircleNativeAdmission } from "./legacy/circle-native-admission-rider.js";
 import { encodeFunctionData } from "viem";
 import { exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -8,7 +8,7 @@ import { directEvmStepBudget } from "./evm-direct-reads.js";
 import { canonicalAddress } from "./wallet-policy.js";
 import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 import { validateEvmNativeCustody } from "./evm-native-custody.js";
-import { cleanup85OperationEnvelope, validateCleanup85NativeBinding } from "./circle-cleanup85-native-binding.js";
+import { cleanup85OperationEnvelope, validateCleanup85NativeBinding } from "./legacy/cleanup85-native-records.js";
 export function requireEvmRpc(rpc) {
     if (rpc.evm === undefined)
         throw new ApnError("APN_RPC_CONFIG", "RPC adapter does not implement explicit EVM assets.");

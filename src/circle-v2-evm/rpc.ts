@@ -1,6 +1,5 @@
 import { decodeFunctionResult, encodeFunctionData, getAddress, keccak256, parseAbi, type Address, type Hex } from "viem";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { archiveReadInterval, circleArchiveReadPacer, type CircleArchiveReadPacer } from "../circle-archive-read-pacing.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ApnError } from "../errors.js";
 import { BridgeHttps } from "../lifi/https.js";
@@ -40,19 +39,17 @@ interface CircleQueuedRead { readonly method: string; readonly params: readonly 
  * keeps the historical one-call-per-POST sequence for the frozen recovery paths. */
 export class CircleRpc {
   private sequence = 0; private requests = 0; private posts = 0; private readonly endpoint: string;
-  private readonly archiveInterval: number; private chainVerified = false; private queued: CircleQueuedRead[] = [];
-  private readonly scopes = new AsyncLocalStorage<{ readonly guard: (() => void) | undefined; readonly retryRead: boolean }>();
-  constructor(url: string, readonly chainId: number, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps(), private readonly maxRequests = 256, archiveMinimumIntervalMs = process.env.APN_ARBITRUM_ARCHIVE_MIN_INTERVAL_MS, private readonly archivePacer: CircleArchiveReadPacer = circleArchiveReadPacer, readonly mode: "lean" | "anchored" = "anchored") {
-    this.archiveInterval = archiveReadInterval(archiveMinimumIntervalMs);
+  private chainVerified = false; private queued: CircleQueuedRead[] = [];
+  private readonly scopes = new AsyncLocalStorage<{ readonly retryRead: boolean }>();
+  constructor(url: string, readonly chainId: number, private readonly https: Pick<BridgeHttps, "request"> = new BridgeHttps(), private readonly maxRequests = 256, readonly mode: "lean" | "anchored" = "anchored") {
     const parsed = parsePublicHttpsUrl(url, "APN_RPC_CONFIG", "Circle RPC", 2048);
     if (parsed.search !== "" || parsed.hash !== "") circleBlocked("rpc_url"); this.endpoint = parsed.toString();
   }
   /** Read calls counted against the budget, and physical POSTs sent (a batch is one POST). */
   get requestCount(): number { return this.requests; }
   get postCount(): number { return this.posts; }
-  guarded<T>(guard: () => void, action: () => Promise<T>): Promise<T> { return this.scopes.run({ guard, retryRead: this.scopes.getStore()?.retryRead ?? true }, action); }
   async call(method: string, params: readonly unknown[], beforeSend?: () => void): Promise<unknown> {
-    const guard = this.scopes.getStore()?.guard, gate = () => { guard?.(); beforeSend?.(); }, retry = READ_METHODS.has(method) && this.scopes.getStore()?.retryRead !== false;
+    const gate = () => { beforeSend?.(); }, retry = READ_METHODS.has(method) && this.scopes.getStore()?.retryRead !== false;
     for (let attempt = 0; ; attempt++) {
       try { return await this.physicalCall(method, params, gate, beforeSend !== undefined); }
       catch (error) { if (!retry || attempt >= 1 || !transient(error)) throw error; gate(); await new Promise(resolve => setTimeout(resolve, 100)); gate(); }
@@ -86,7 +83,7 @@ export class CircleRpc {
     const origin = new URL(this.endpoint).origin;
     let response: Awaited<ReturnType<BridgeHttps["request"]>>;
     this.posts++;
-    try { response = await this.archivePacer.start(this.endpoint, method, this.archiveInterval, gate, () => this.https.request(this.endpoint, "POST", body, 1024 * 1024, "APN_RPC_CONFIG", gate)); }
+    try { response = await this.https.request(this.endpoint, "POST", body, 1024 * 1024, "APN_RPC_CONFIG", gate); }
     catch (error) { if (error instanceof ApnError) throw new ApnError(error.code, "Circle RPC transport failed.", { method, origin, stage: "transport" }); throw error; }
     gate();
     if (response.status !== 200) throw new ApnError("APN_RPC_CONFIG", "Circle RPC returned an unsuccessful HTTP response.", { method, origin, status: response.status, stage: "response" });
@@ -112,8 +109,8 @@ export class CircleRpc {
   async block(tag: string) { return circleRecord(await this.call("eth_getBlockByNumber", [tag, false])); }
   async observation(transactionHash: Hex, finalityTag: "included" | "safe" | "finalized"): Promise<CircleObservation | null> {
     for (let attempt = 0; ; attempt++) {
-      try { return await this.scopes.run({ guard: this.scopes.getStore()?.guard, retryRead: false }, () => this.mode === "lean" ? this.leanObservation(transactionHash, finalityTag) : this.anchoredObservation(transactionHash, finalityTag)); }
-      catch (error) { if (attempt >= 1 || !transient(error)) throw error; this.scopes.getStore()?.guard?.(); await new Promise(resolve => setTimeout(resolve, 100)); this.scopes.getStore()?.guard?.(); }
+      try { return await this.scopes.run({ retryRead: false }, () => this.mode === "lean" ? this.leanObservation(transactionHash, finalityTag) : this.anchoredObservation(transactionHash, finalityTag)); }
+      catch (error) { if (attempt >= 1 || !transient(error)) throw error; await new Promise(resolve => setTimeout(resolve, 100)); }
     }
   }
   /** Two POSTs: transaction and receipt, then the finality head with the canonical block at the receipt height. A head

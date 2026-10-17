@@ -16,14 +16,6 @@ export async function executeCircleCommand(request: Extract<CommandRequest, { co
   context: RuntimeContext): Promise<CommandOutcome> {
   switch (request.command) {
       case "circle.evm.adopt-external-mint": {if ((await checkedOperation(context, request.operationId)).schemaVersion === "apn.circle-v2-evm-operation.v2") { const service=context.circleFundingEvm;if(service===undefined)unavailable();const op=await service.adoptExternalMint(request.operationId,request.transactionHash);return {...operationOutcome(publicCircleFundingOperation(op)),proofClass:"circle_funding_external_mint_fulfillment",receipt:op.externalFulfillment??null}; }const service=context.circleEvm;if(service===undefined)throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE","Circle EVM runtime unavailable.");const op=await service.adoptExternalMint(request.operationId,request.transactionHash);return {...operationOutcome(publicCircle(op)),proofClass:"circle_external_mint_fulfillment",receipt:op.externalFulfillment??null};}
-
-      case "circle.evm.cleanup85-prepare": case "circle.evm.cleanup85-cancel": case "circle.evm.cleanup86-approve": {
-        if ((await checkedOperation(context, request.operationId)).schemaVersion !== "apn.circle-v2-evm-operation.v1") legacyOnly();
-        const service = context.circleEvm; if (service === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Circle EVM runtime unavailable.");
-        if (request.command === "circle.evm.cleanup85-prepare") return dataOutcome(await service.prepareCleanup85Recovery(request.operationId), "circle_cleanup85_recovery_prepared_unsigned");
-        if (request.command === "circle.evm.cleanup85-cancel") return dataOutcome(await service.cancelCleanup85(request.operationId), "circle_cleanup85_distinct_native_cancellation");
-        await service.approveCleanup86(request.operationId); return operationOutcome(await service.status(request.operationId));
-      }
       case "circle.evm.prepare": {
         // One route: every new operation is v2 with all four economic inputs; the fixed v1 shape is read-only.
         if (!isPlainRecord(request) || !exactKeys(request, ["command", "profile", "destinationProfile", "destinationChain", "idempotencyKey", "funding"])) throw new ApnError("APN_INVALID_INPUT", "Circle prepare requires --profile, --destination-profile, --destination-chain, --idempotency-key, --beneficiary, --gross-atomic, --max-issuer-fee-atomic and --min-mint-atomic.");

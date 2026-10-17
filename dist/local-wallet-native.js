@@ -1,6 +1,4 @@
 var _a;
-import { recheckCircleNativeAdmission } from "./circle-native-admission.js";
-import { OperationService } from "./operation-service.js";
 import { assertFreshDirectEffect, publishDirectPublicEffect } from "./direct-public-attestation.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { evmAllowlistSubject } from "./evm-direct-allowlist.js";
@@ -387,8 +385,9 @@ export class LocalWalletNative {
     }
     async approveAndSign(payload) {
         const intent = payload.evm === undefined ? Object.freeze(parseDirectIntent(payload)) : parseEvmNativeIntent(payload);
-        if (intent.evm?.cleanup85Cancellation !== undefined)
-            throw protocol("Finite cleanup85 signing requires its private scoped controller.");
+        // Read-only historical shapes: the cleanup85 cancellation and the 0.5.41 Circle native rider never sign again.
+        if (intent.evm?.cleanup85Cancellation !== undefined || intent.evm?.circleNativeAdmission !== undefined)
+            throw protocol("A retired historical direct transfer cannot be signed.");
         const frozen = await this.state.findOperation(intent.operationId), journal = new DirectPublicEffectJournal(this.state);
         if (frozen === null || frozen.profile !== intent.profile || frozen.state !== "started" ||
             hashObject(directCustodyPayload(frozen)) !== hashObject(payload))
@@ -427,9 +426,6 @@ export class LocalWalletNative {
                 throw protocol("Fresh direct operation changed before signing.");
             const binding = await journal.prepared(latest);
             await assertEvmNativeCustody(this.state, intent.profile, binding.custody, identity);
-            const admission = await recheckCircleNativeAdmission(this.state, latest);
-            if (admission !== null)
-                await new OperationService(this.state).assertFinalizedCircleNativeAccountAvailable(latest.profileHash, latest.walletAddress, admission, latest);
             const account = privateKeyToAccount(secret.privateKey);
             const rawTransaction = await account.signTransaction({
                 type: "eip1559",
