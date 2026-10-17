@@ -40,8 +40,6 @@ const GASLESS_TOOLS = [
   "apn_gasless_balance",
   "apn_gasless_transfer_quote",
   "apn_gasless_transfer_prepare",
-  "apn_gasless_transfer_approve",
-  "apn_gasless_transfer_approve_sealed",
 ] as const;
 const OPERATION_ID = "a".repeat(64);
 
@@ -135,14 +133,15 @@ test("MCP gasless approval returns the exact foreground handoff before state, Ke
   t.after(connection.close);
 
   const envelope = decode(await connection.client.callTool({
-    name: "apn_gasless_transfer_approve",
-    arguments: { operation: OPERATION_ID },
+    name: "apn_foreground_handoff",
+    arguments: { command: "gasless transfer approve", arguments: { operation: OPERATION_ID } },
   }));
   const handoff = `apn gasless transfer approve --operation ${OPERATION_ID}`;
   assert.equal(envelope.command, "gasless.transfer.approve");
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.deepEqual(envelope.error?.details, {
+    approval_boundary: "foreground_tty",
     cli_handoff: handoff,
     cli_handoff_argv: ["apn", "gasless", "transfer", "approve", "--operation", OPERATION_ID],
     foreground_auth: true,
@@ -154,20 +153,14 @@ test("MCP gasless approval returns the exact foreground handoff before state, Ke
   await assert.rejects(stat(temporary.root), { code: "ENOENT" });
 });
 
-test("generic MCP transfer approval redirects a stored MetaMask operation without provider, approval, or RPC effects", async (t) => {
+test("generic transfer approval redirects a stored MetaMask operation without provider, approval, or RPC effects", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   const fixture = await mmFixture(temporary.root, 143);
   const { id } = await fixture.prepare("mm-generic-handoff-0001");
   const calls = effectSnapshot(fixture);
-  const connection = await connectMcp({ stateRoot: temporary.root, metaMaskGasless: fixture.dependencies,
-    clock: fixture.clock });
-  t.after(connection.close);
-
-  const envelope = decode(await connection.client.callTool({
-    name: "apn_pay_transfer_approve",
-    arguments: { operation: id, rpc_url: "https://rpc.example" },
-  }));
+  const envelope = await runCli(["pay", "transfer", "approve", "--operation", id, "--rpc-url", "https://rpc.example"], {},
+    { stateRoot: temporary.root, metaMaskGasless: fixture.dependencies, clock: fixture.clock });
   assert.equal(envelope.command, "transfer.approve");
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");

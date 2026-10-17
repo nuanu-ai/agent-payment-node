@@ -1,6 +1,5 @@
 import type { CommandDefinition, CommandOption } from "../command-catalog.js";
 import type { CommandRequest } from "../commands.js";
-import { createCliHandoff, type CliHandoff } from "../cli-handoff.js";
 import { ONECLICK_LANE_IDS, oneClickLane, oneClickRecipient } from "./near-oneclick-lanes.js";
 import { bridgeAddress, bridgeHash, bridgeUint } from "./validation.js";
 const option = (name: CommandOption["name"], type: CommandOption["type"], ...extra: readonly string[]): CommandOption => ({
@@ -44,10 +43,3 @@ export function bindOneClickCommand(path: string, o: Record<string,string>): Com
     maxNativeDebitWei: u(o,"--max-native-debit-wei"), idempotencyKey: v(o,"--idempotency-key") };
 }
 /** MCP never approves money: it returns the exact foreground command for the owner to run. */
-export function oneClickSubmitHandoff(r: Extract<CommandRequest, { readonly command: "oneclick.source.submit" }>): CliHandoff {
-  return createCliHandoff(["apn", "oneclick", "source", "submit", "--lane", r.lane, "--profile", r.profile, "--expected-payer", r.expectedPayer,
-    "--recipient", r.recipient, "--amount-atomic", r.amountAtomic, "--min-output-atomic", r.minOutputAtomic,
-    "--max-quoted-loss-atomic", r.maxQuotedLossAtomic, "--max-gas-limit-atomic", r.maxGasLimitAtomic,
-    "--max-fee-per-gas-wei", r.maxFeePerGasWei, "--max-priority-fee-per-gas-wei", r.maxPriorityFeePerGasWei,
-    "--max-native-debit-wei", r.maxNativeDebitWei, "--idempotency-key", r.idempotencyKey]);
-}

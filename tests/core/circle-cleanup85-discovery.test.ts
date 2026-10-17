@@ -14,11 +14,12 @@ test("official MCP client discovers finite tools and financial calls return CLI 
   const { Client, InMemoryTransport } = await import("@modelcontextprotocol/client"), { createMcpServer } = await import("../../src/mcp-server.js"); let entries = 0;
   const server = createMcpServer({ circleEvm: { cancelCleanup85: async () => { entries++; }, approveCleanup86: async () => { entries++; } } as never });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair(); await server.connect(serverTransport); const client = new Client({ name: "cleanup85-finite-gate", version: "1" }); await client.connect(clientTransport); t.after(async () => { await client.close(); await server.close(); });
-  const listed = await client.listTools(); for (const action of ["cleanup85_prepare", "cleanup85_cancel", "cleanup86_approve"]) assert.ok(listed.tools.some(x => x.name === "apn_circle_evm_" + action));
-  for (const action of ["cleanup85_cancel", "cleanup86_approve"]) {
-    const result = await client.callTool({ name: "apn_circle_evm_" + action, arguments: { operation: id } }), content = result.content[0]; assert.equal(content?.type, "text"); if (content?.type !== "text") throw new Error("text required");
-    const outcome = JSON.parse(content.text); assert.equal(outcome.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.match(JSON.stringify(outcome.error.details), new RegExp(action.replaceAll("_", "-")));
-    const forged = await client.callTool({ name: "apn_circle_evm_" + action, arguments: { operation: id, approve: true } }), c = forged.content[0]; assert.equal(c?.type, "text"); if (c?.type === "text") assert.equal(JSON.parse(c.text).error.code, "APN_INVALID_INPUT");
+  const listed = await client.listTools(); assert.ok(listed.tools.some(x => x.name === "apn_circle_evm_cleanup85_prepare"));
+  for (const action of ["cleanup85-cancel", "cleanup86-approve"]) {
+    assert.equal(listed.tools.some(x => x.name === "apn_circle_evm_" + action.replaceAll("-", "_")), false);
+    const result = await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "circle evm " + action, arguments: { operation: id } } }), content = result.content[0]; assert.equal(content?.type, "text"); if (content?.type !== "text") throw new Error("text required");
+    const outcome = JSON.parse(content.text); assert.equal(outcome.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.match(JSON.stringify(outcome.error.details), new RegExp(action));
+    const forged = await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "circle evm " + action, arguments: { operation: id, approve: true } } }), c = forged.content[0]; assert.equal(c?.type, "text"); if (c?.type === "text") assert.equal(JSON.parse(c.text).error.code, "APN_INVALID_INPUT");
   }
   assert.equal(entries, 0);
 });

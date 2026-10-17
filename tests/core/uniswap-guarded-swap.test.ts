@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { encodeAbiParameters, encodeFunctionData, parseAbi } from "viem";
 import { bindArgv } from "../../src/command-binder.js";
-import { MCP_TOOLS } from "../../src/mcp-projection.js";
+import { MCP_FOREGROUND_HANDOFF, MCP_TOOLS } from "../../src/mcp-projection.js";
 import { ApnCore } from "../../src/core.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
@@ -161,8 +161,8 @@ test("final receipt accepts a real V3 swap's multi-word pool Swap log and credit
 });
 
 test("CLI and MCP expose identical dormant surface; inventory grants no admission and prepare/execute refuse stably", async (t) => {
-  const paths = ["inventory", "quote", "prepare", "status", "approve", "execute"];
-  for (const action of paths) assert.ok(MCP_TOOLS.some((row) => row.name === `apn_swap_ethereum_uniswap_${action}`));
+  for (const action of ["inventory", "quote", "prepare", "status"]) assert.ok(MCP_TOOLS.some((row) => row.name === `apn_swap_ethereum_uniswap_${action}`));
+  for (const action of ["approve", "execute"]) assert.ok(MCP_FOREGROUND_HANDOFF.commands.some((row) => row.path.join(" ") === `swap ethereum uniswap ${action}`));
   assert.equal(bindArgv(["swap", "ethereum", "uniswap", "inventory"]).request.command, "swap.uniswap.inventory");
   const temporary = await temporaryState(); t.after(temporary.cleanup); const core = new ApnCore({ state: new StateStore(temporary.root) });
   const inventory = await core.execute({ command: "swap.uniswap.inventory" }); assert.equal(inventory.ok, true);

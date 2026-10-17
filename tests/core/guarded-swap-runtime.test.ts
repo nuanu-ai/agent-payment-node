@@ -171,7 +171,7 @@ test("MCP transports a guarded quote, prepare, and status with no effect, and ha
   const status = await call("apn_swap_ethereum_uniswap_status", { operation: operationId });
   assert.equal(status.envelope.ok, true); assert.equal(status.isError, false);
   assert.equal(status.envelope.operation?.operationId, operationId);
-  const execution = await call("apn_swap_ethereum_uniswap_execute", { operation: operationId });
+  const execution = await call("apn_foreground_handoff", { command: "swap ethereum uniswap execute", arguments: { operation: operationId } });
   assert.equal(execution.envelope.ok, false); assert.equal(execution.isError, true);
   assert.equal(execution.envelope.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
   assert.equal(execution.envelope.error?.details?.cli_handoff, `apn swap ethereum uniswap execute --operation ${operationId}`);

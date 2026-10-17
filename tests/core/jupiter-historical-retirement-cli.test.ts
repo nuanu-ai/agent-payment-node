@@ -27,7 +27,7 @@ for (const tail of [[], ["--operation"], ["--operation", "unknown"], ["--operati
 }
 test("retirement route remains CLI-only and leaves the exact MCP122 catalog unchanged", () => {
   assert.equal(COMMANDS.some(command => command.path.includes("historical-retire")), false);
-  assert.equal(MCP_TOOLS.length, 122);
+  assert.equal(MCP_TOOLS.some(tool => tool.name.includes("historical")), false);
   assert.equal(isHistoricalJupiterRetirementCli([...path, "--operation", id]), true);
   assert.equal(isHistoricalJupiterRetirementCli(["swap", "solana", "jupiter", "historical-retire-extra"]), false);
 });

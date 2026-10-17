@@ -124,9 +124,9 @@ test("TRON MCP preparation and status share CLI state, while approval and policy
   const first = prepared.structuredContent as { ok: boolean; operation: { operation_id: string } }; assert.equal(first.ok, true); const id = first.operation.operation_id;
   s.rpc.prepared = (await s.core.rails.records.findOperation(id))!.prepared;
   const calls = s.rpc.calls.length;
-  const approve = (await client.callTool({ name: "apn_pay_transfer_approve", arguments: { operation: id } })).structuredContent as { error: { code: string }; next_actions: string[] };
+  const approve = (await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "pay transfer approve", arguments: { operation: id } } })).structuredContent as { error: { code: string }; next_actions: string[] };
   assert.equal(approve.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.deepEqual(approve.next_actions, [`apn pay transfer approve --operation ${id}`]);
-  const policy = (await client.callTool({ name: "apn_policy_admit_tron", arguments: { profile: s.account.profile, asset: "usdt", max_per_transfer: "2", daily_limit: "3", max_fee_trx: "30" } })).structuredContent as { error: { code: string }; next_actions: string[] };
+  const policy = (await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "policy admit-tron", arguments: { profile: s.account.profile, asset: "usdt", max_per_transfer: "2", daily_limit: "3", max_fee_trx: "30" } } })).structuredContent as { error: { code: string }; next_actions: string[] };
   assert.equal(policy.error.code, "APN_FOREGROUND_APPROVAL_REQUIRED"); assert.ok(policy.next_actions.some((line) => line.includes("policy admit-tron") && line.includes("--max-fee-trx 30")));
   assert.equal(s.rpc.calls.length, calls); assert.equal(s.approval.calls.length, 0); assert.equal(s.rpc.submissions.length, 0);
   assert.equal((await s.core.execute({ command: "transfer.approve", operationId: id })).ok, true);
