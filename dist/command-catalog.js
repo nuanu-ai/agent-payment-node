@@ -99,7 +99,7 @@ export const COMMAND_GROUPS = [
     { path: ["doctor"], summary: "Inspect local APN prerequisites.", kind: "group" },
     { path: ["wallet"], summary: "Create, inspect and configure the disposable wallet.", kind: "group" },
     { path: ["wallet", "permission"], summary: "Inspect and manage bounded provider permission state.", kind: "group" },
-    { path: ["wallet", "metamask"], summary: "Finite fixed MetaMask native-paid transfer.", kind: "group" },
+    { path: ["wallet", "metamask"], summary: "Guarded MetaMask Agent Wallet USDC transfer that pays its network fee in the native coin.", kind: "group" },
     { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
     { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
     { path: ["x402", "merchant"], summary: "x402 ERC-20 transfer-proof merchant payment and delivery.", kind: "group" },

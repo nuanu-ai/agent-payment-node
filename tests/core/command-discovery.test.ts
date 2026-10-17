@@ -185,7 +185,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "",
     "Subgroups:",
     "  apn wallet permission <command> [options] — Inspect and manage bounded provider permission state.",
-    "  apn wallet metamask <command> [options] — Finite fixed MetaMask native-paid transfer.",
+    "  apn wallet metamask <command> [options] — Guarded MetaMask Agent Wallet USDC transfer that pays its network fee in the native coin.",
     "  apn wallet policy <command> [options] — Inspect or change owner-approved wallet policy.",
     "",
     "Commands:",
