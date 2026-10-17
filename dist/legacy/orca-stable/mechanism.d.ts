@@ -1,5 +1,5 @@
 /**
- * Frozen, finish-only (SWAP-10, APN 0.5.46): the former stable USDC to USDT lane. New USDC to USDT swaps run through
+ * Frozen, finish-only (SWAP-10, APN 0.5.47): the former stable USDC to USDT lane. New USDC to USDT swaps run through
  * the keyless Orca route's usdc-usdt pool, whose route equals these pins'. These identities only recognise operations a
  * released version prepared, so status, release, no-send recovery and observation can finish them. Nothing here
  * quotes, prepares, approves, signs or sends.
