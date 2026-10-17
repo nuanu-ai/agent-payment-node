@@ -17,5 +17,9 @@ export const permit2Adapter = {
     state: record => record.state,
     salvage: raw => salvageRecord(raw, value => [salvageEvm(43114, field(value, "material", "wallet", "account"))]),
     view: async (record) => publicPermit2Production(record),
+    // Observation, including the proof that an expired authorization was never used, runs on Permit2's own CLI path.
+    commands: { status: "apn x402 permit2 status --profile <profile> --operation <operation-id>",
+        resume: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc>",
+        exit: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> --expired-unused" },
 };
 //# sourceMappingURL=permit2.js.map

@@ -1,109 +1,87 @@
 import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { publicRailOperation, transitionRail } from "./rail-operation-model.js";
+import { publicRailOperation, transitionRail, type RailOperationRecord } from "./rail-operation-model.js";
 import type { RailOperationService } from "./rail-operation-service.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import type { OperationRecord } from "./model.js";
 import { OperationService } from "./operation-service.js";
 import { ProviderDirectState } from "./provider-direct-state.js";
 import type { RuntimeContext } from "./runtime.js";
-import { canonicalOperationId, publicOperation } from "./transfer-policy.js";
+import { publicOperation } from "./transfer-policy.js";
 import { TransferService } from "./transfer-service.js";
-import type { GaslessService } from "./gasless/service.js";
-import type { MetaMaskGaslessService } from "./metamask-gasless/service.js";
-import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "./operation-abandon-gasless.js";
-import type { FacilitatorGaslessService } from "./facilitator-gasless/service.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject } from "./rail-direct-allowlist.js";
-import { ABANDON_OPERATION_KINDS } from "./operation-coverage.js";
-import { X402AbandonService } from "./x402-abandon.js";
-import { abandonProviderX402, abandonSmartAccountGasless } from "./operation-abandon-provider.js";
-import { abandonMetaMaskNativeTransfer, metaMaskNativeOperationExists } from "./metamask-native-transfer-owner.js";
-import { SwapOperationRepository } from "./swap/repository.js";
-import { abandonSwapOperation } from "./swap/abandon.js";
 
-export class OperationAbandonService {
-  private readonly operations: OperationService;
-  private readonly durable: ProviderDirectState;
-
-  constructor(private readonly context: RuntimeContext, private readonly rails: RailOperationService,
-    private readonly gasless: GaslessService, private readonly metaMaskGasless: MetaMaskGaslessService,
-    private readonly facilitatorGasless?: FacilitatorGaslessService) {
-    this.operations = new OperationService(context.state);
-    this.durable = new ProviderDirectState(context);
-  }
-
-  async abandon(operationIdInput: string): Promise<unknown> {
-    const operationId = canonicalOperationId(operationIdInput);
-    await this.context.ready();
-    if (await metaMaskNativeOperationExists(this.context.state.root, operationId)) {
-      return await abandonMetaMaskNativeTransfer(this.context.state.root, operationId,
-        async (intent) => await this.context.requireOperationAbandonApproval().approve(intent), () => this.context.clock.now());
+/**
+ * The owner exits of the direct EVM and direct rail families (phase 4b: `apn operation abandon` reaches them through
+ * their operation-index adapters). Each re-reads its operation under its own locks and asks for TTY consent.
+ */
+export async function abandonDirectTransfer(context: RuntimeContext, operationId: string): Promise<unknown> {
+  const operations = new OperationService(context.state), durable = new ProviderDirectState(context);
+  const found = await operations.required(operationId);
+  if (found.kind !== "direct_transfer") return ineligible();
+  if (found.record.providerDirect === undefined) return await new TransferService(context).abandonUndispatched(operationId);
+  const profileHash = found.record.profileHash;
+  return await context.state.withLocks([
+    `profile:${profileHash}`,
+    `operation:${operationId}`,
+  ], async () => {
+    const selected = await operations.required(operationId);
+    if (selected.kind !== "direct_transfer" || selected.record.profileHash !== profileHash) return ineligible();
+    assertProviderAbandonFamily(selected.record);
+    if (selected.record.state === "abandoned_unknown" && selected.record.terminal) {
+      return publicOperation(selected.record);
     }
-    // Swaps live in their own repository; a marked swap with no provable bound has an owner exit here (R4).
-    if (await new SwapOperationRepository(this.context.state.root).loadAny(operationId) !== null) return await abandonSwapOperation(this.context, operationId);
-    const found = await this.operations.required(operationId);
-    if (found.kind === "rail_transfer") return found.record.account.rail === "solana"
-      ? await this.abandonLocalSolana(found.record.profileHash, operationId)
-      : await this.abandonRail(found.record.profileHash, operationId);
-    const base = { context: this.context, operations: this.operations };
-    if (found.kind === "gasless_transfer") return await abandonLocalGasless({ ...base, gasless: this.gasless }, operationId);
-    if (found.kind === "metamask_gasless_transfer") return await abandonMetaMaskGasless({ ...base, metaMaskGasless: this.metaMaskGasless }, operationId);
-    if (found.kind === "facilitator_gasless_transfer" && this.facilitatorGasless !== undefined) {
-      return await abandonFacilitatorGasless({ ...base, facilitatorGasless: this.facilitatorGasless }, operationId);
-    }
-    if (found.kind === "x402_fetch" && found.strategy === "local") return await new X402AbandonService(this.context).abandon(operationId);
-    if (found.kind === "x402_fetch" && found.strategy === "provider_atomic") return await abandonProviderX402(this.context, this.operations, operationId);
-    if (found.kind === "smart_account_gasless_transfer") return await abandonSmartAccountGasless(this.context, this.operations, operationId);
-    if (found.kind !== "direct_transfer") return ineligible(found.kind);
-    if (found.record.providerDirect === undefined) return await new TransferService(this.context).abandonUndispatched(operationId);
-    const profileHash = found.record.profileHash;
-    return await this.context.state.withLocks([
-      `profile:${profileHash}`,
-      `operation:${operationId}`,
-    ], async () => {
-      const selected = await this.operations.required(operationId);
-      if (selected.kind !== "direct_transfer" || selected.record.profileHash !== profileHash) return ineligible();
-      assertProviderAbandonFamily(selected.record);
-      if (selected.record.state === "abandoned_unknown" && selected.record.terminal) {
-        return publicOperation(selected.record);
-      }
-      const now = this.context.clock.now().getTime();
-      assertEligible(selected.record, now);
-      let operation = await this.durable.recoverOrphanTerminal(selected.record);
-      if (operation.state === "abandoned_unknown" && operation.terminal) return publicOperation(operation);
-      // A known transaction is read once more: a receipt that landed closes the operation instead.
-      operation = await this.durable.inspectReceipt(operation);
-      if (operation.terminal) return publicOperation(operation);
-      assertEligible(operation, now);
-      const binding = operation.providerDirect!;
-      await this.context.requireOperationAbandonApproval().approve({
-        operationId: operation.operationId,
-        fingerprint: operation.fingerprint,
-        profile: operation.profile,
-        providerId: binding.providerId,
-        walletAddress: operation.walletAddress,
-        recipient: operation.recipient,
-        amountAtomic: operation.amountAtomic,
-        amountDecimal: operation.amountDecimal,
-        chainLabel: "Base (8453)",
-        assetLabel: "canonical Base USDC",
-        unit: "USDC",
-        outcomeNote: `Financial outcome: UNKNOWN. The provider may already have sent this transfer${operation.transactionHash === undefined
-          ? "." : `; its last known transaction ${operation.transactionHash} may still land.`}`,
-      });
-      operation = await this.durable.transition(
-        operation,
-        "abandoned_unknown",
-        true,
-        "owner_acknowledged_unresolved_effect",
-        "owner_acknowledgement_only",
-      );
-      return publicOperation(operation);
+    const now = context.clock.now().getTime();
+    assertEligible(selected.record, now);
+    let operation = await durable.recoverOrphanTerminal(selected.record);
+    if (operation.state === "abandoned_unknown" && operation.terminal) return publicOperation(operation);
+    // A known transaction is read once more: a receipt that landed closes the operation instead.
+    operation = await durable.inspectReceipt(operation);
+    if (operation.terminal) return publicOperation(operation);
+    assertEligible(operation, now);
+    const binding = operation.providerDirect!;
+    await context.requireOperationAbandonApproval().approve({
+      operationId: operation.operationId,
+      fingerprint: operation.fingerprint,
+      profile: operation.profile,
+      providerId: binding.providerId,
+      walletAddress: operation.walletAddress,
+      recipient: operation.recipient,
+      amountAtomic: operation.amountAtomic,
+      amountDecimal: operation.amountDecimal,
+      chainLabel: "Base (8453)",
+      assetLabel: "canonical Base USDC",
+      unit: "USDC",
+      outcomeNote: `Financial outcome: UNKNOWN. The provider may already have sent this transfer${operation.transactionHash === undefined
+        ? "." : `; its last known transaction ${operation.transactionHash} may still land.`}`,
     });
+    operation = await durable.transition(
+      operation,
+      "abandoned_unknown",
+      true,
+      "owner_acknowledged_unresolved_effect",
+      "owner_acknowledgement_only",
+    );
+    return publicOperation(operation);
+  });
+}
+
+/** A local Solana or TRON transfer whose validity window passed with no RPC history. */
+export async function abandonRailTransfer(context: RuntimeContext, rails: RailOperationService, operation: RailOperationRecord): Promise<unknown> {
+  const exits = new RailAbandon(context, rails);
+  return operation.account.rail === "solana"
+    ? await exits.abandonLocalSolana(operation.profileHash, operation.operationId)
+    : await exits.abandonRail(operation.profileHash, operation.operationId);
+}
+
+class RailAbandon {
+  private readonly operations: OperationService;
+  constructor(private readonly context: RuntimeContext, private readonly rails: RailOperationService) {
+    this.operations = new OperationService(context.state);
   }
 
-  private async abandonRail(profileHash: string, operationId: string): Promise<unknown> {
+  async abandonRail(profileHash: string, operationId: string): Promise<unknown> {
     return await this.context.state.withLocks([`profile:${profileHash}`, `operation:${operationId}`], async () => {
       const selected = await this.operations.required(operationId);
       if (selected.kind !== "rail_transfer" || selected.record.profileHash !== profileHash) return ineligibleRail();
@@ -129,7 +107,7 @@ export class OperationAbandonService {
   }
 
   /** A Solana RPC cooldown and the owner's acknowledgement hold only this narrow claim lock. */
-  private async abandonLocalSolana(profileHash: string, operationId: string): Promise<unknown> {
+  async abandonLocalSolana(profileHash: string, operationId: string): Promise<unknown> {
     const state = this.context.state, keys = [`profile:${profileHash}`, `operation:${operationId}`];
     return await state.withLocks([`rail:abandon-claim:${operationId}`], async () => {
       const snapshot = await state.withLocks(keys, async () => {
@@ -193,14 +171,9 @@ function assertEligible(operation: OperationRecord, now: number): void {
     (!identifierless && now < Date.parse(operation.expiresAt))) ineligible();
 }
 
-function ineligible(kind?: string): never {
-  throw new ApnError(
-    "APN_OPERATION_BLOCKED",
-    kind === undefined
-      ? "Only an unresolved provider direct or gasless operation can be abandoned, and one with a known transaction, request or delegated send only after its approval window."
-      : `Operation abandon does not cover ${kind} operations yet; use that family's own recovery command.`,
-    kind === undefined ? undefined : { reason: "operation_kind_not_abandonable", kind, abandon_kinds: ABANDON_OPERATION_KINDS },
-  );
+function ineligible(): never {
+  throw new ApnError("APN_OPERATION_BLOCKED",
+    "Only an unresolved provider direct or gasless operation can be abandoned, and one with a known transaction, request or delegated send only after its approval window.");
 }
 function ineligibleRail(): never {
   throw new ApnError("APN_OPERATION_BLOCKED", "Only a local Solana or TRON transfer with an unknown outcome and a bound transaction can be abandoned after its validity window.");

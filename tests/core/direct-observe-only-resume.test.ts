@@ -3,6 +3,7 @@ import test from "node:test";
 import { runCli } from "../../src/cli.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
+import { DirectAllowlistGate } from "../../src/direct-allowlist-gate.js";
 import { EVM_REQUEST, EvmTestRpc, evmCore, ensureDirectWallet } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
 
@@ -35,13 +36,14 @@ test("observation-only resume terminalizes a verified receipt without custody or
 test("observation-only retry reconciles usage after interrupted terminal transition", async (t) => {
   const s = await pending(t);
   s.rpc.receiptEnabled = true;
-  const allowlist = (s.core.transfer as unknown as { allowlist: { follow: (...args: unknown[]) => Promise<unknown> } }).allowlist;
-  const follow = allowlist.follow.bind(allowlist);
+  // The generic resume runs the direct family's own service, built for the command: the interruption is injected there.
+  const follow = DirectAllowlistGate.prototype.follow;
   let failOnce = true;
-  allowlist.follow = async (...args) => {
+  DirectAllowlistGate.prototype.follow = async function (this: DirectAllowlistGate, ...args: Parameters<typeof follow>) {
     if (failOnce) { failOnce = false; throw new Error("injected usage interruption"); }
-    return await follow(...args);
+    return await follow.apply(this, args);
   };
+  t.after(() => { DirectAllowlistGate.prototype.follow = follow; });
   const interrupted = await s.core.execute({ command: "operation.resume", operationId: s.operationId, observeOnly: true });
   assert.equal(interrupted.ok, false);
   assert.equal((await s.core.transfer.status(s.operationId) as { state: string }).state, "completed");

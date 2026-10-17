@@ -1,12 +1,17 @@
 import { ApnError } from "../../errors.js";
+import { abandonProviderX402 } from "../../operation-abandon-provider.js";
+import { assertResumeOptions } from "../../operation-command-options.js";
 import { evmConflictDomain, sharedEvmConflictDomain } from "../../operation-conflict-domain.js";
 import { localX402Outcome, providerX402Outcome, x402ReceiptOutcome } from "../../operation-x402-outcome.js";
 import { publicProviderX402Operation } from "../../provider-x402-model.js";
 import { ProviderX402Repository } from "../../provider-x402-repository.js";
 import { StateStore } from "../../state.js";
+import { X402AbandonService } from "../../x402-abandon.js";
+import { X402Service } from "../../x402-service.js";
 import { publicX402Operation } from "../../x402-state-integrity.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity } from "../adapter.js";
 import { providerClaims, UNREADABLE_PROVIDER_CLAIM } from "../types.js";
+import { OperationService } from "../../operation-service.js";
 import { salvageProvider } from "./direct.js";
 const STORE = { directory: "x402-operations", perProfile: true };
 const LOCAL_SCHEMA = "apn.x402.state.v1";
@@ -51,7 +56,35 @@ export const x402Adapter = {
     unknownClaims: [UNREADABLE_PROVIDER_CLAIM],
     view: async (operation) => operation.strategy === "local"
         ? publicX402Operation(operation.record) : publicProviderX402Operation(operation.record),
+    // A provider purchase first recovers an interrupted read; the outcome is then built from the record saved after it.
+    async status(context, { record }) {
+        await new X402Service(context).recoverRead(record.operationId);
+        return await savedOutcome(context, record.operationId, { exposeSellerResult: false, exposeTerminalReceipt: false });
+    },
+    async receipt(context, { record }) {
+        await new X402Service(context).recoverRead(record.operationId);
+        return await x402StoredReceiptOutcome(context.state, providerReceipts(context), await saved(context, record.operationId));
+    },
+    async resume(context, { record }, options) {
+        assertResumeOptions(options, {});
+        const settlementWait = await new X402Service(context).resume(record.operationId, options.waitSeconds);
+        return await savedOutcome(context, record.operationId, { exposeSellerResult: true, exposeTerminalReceipt: true,
+            ...(settlementWait === undefined ? {} : { settlementWait }) });
+    },
+    abandon: async (context, operation) => operation.strategy === "local"
+        ? await new X402AbandonService(context).abandon(operation.record.operationId)
+        : await abandonProviderX402(context, new OperationService(context.state), operation.record.operationId),
 };
+const providerReceipts = (context) => context.providerX402Repository ?? new ProviderX402Repository(context.state.root);
+async function saved(context, operationId) {
+    const found = await new OperationService(context.state).required(operationId);
+    if (found.kind !== "x402_fetch")
+        throw new ApnError("APN_OPERATION_BLOCKED", "Operation is not an x402 fetch.");
+    return found;
+}
+async function savedOutcome(context, operationId, options) {
+    return await x402StoredOutcome(context.state, providerReceipts(context), await saved(context, operationId), options);
+}
 /** The status/resume outcome of a saved purchase, with its linked seller result and terminal receipt. */
 export async function x402StoredOutcome(state, providerReceipts, found, options) {
     if (found.strategy === "provider_atomic") {

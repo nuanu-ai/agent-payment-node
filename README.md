@@ -87,8 +87,9 @@ the profile policy (`wallet policy set`). APN never fills in a missing cap, acco
 **Prepare, approve, recover.** A `prepare` command freezes one exact effect (chain, asset, amount, recipient, fee budget)
 under an idempotency key and signs nothing. An `approve`/`execute` command re-checks the frozen facts and the active policy,
 shows the exact terms in a foreground terminal and asks for a typed code before signing. Every send is behind a durable
-marker; an ambiguous send is only observed afterwards, never repeated. `operation status`, `operation resume` and
-`receipt get` read or advance a saved operation; families with their own lifecycle add `status`/`observe` commands.
+marker; an ambiguous send is only observed afterwards, never repeated. `operation status`, `operation resume`,
+`operation abandon` and `receipt get` take a saved operation of any family and run that family's own code; a family
+whose recovery or exit is a separate command (Circle, x402 merchant, Permit2, Relay, GasZip funding) answers with it.
 
 **MCP never approves.** `apn mcp config` prints the launch descriptor and `apn mcp serve` runs the stdio server. Its tools
 are projected from the same catalog and run the same code as the CLI. Commands that need a human (approve, execute,
@@ -148,6 +149,8 @@ Solana and TRON have their own `-solana`/`-tron` commands ([Solana](docs/solana.
 If a transfer stalls, `operation resume --operation <id> --rpc-url <url>` performs only the next legal transition
 (`--observe-only true` inspects an already submitted local transfer without custody access). `operation abandon` lets the
 owner close an eligible operation whose outcome cannot be proven, after accepting the unresolved risk in the terminal.
+A saved record APN can no longer read blocks only the accounts it names; `operation abandon` releases those claims after
+the same terminal consent and leaves the file and any usage-ledger reservation as they are, so the amount stays charged.
 
 ## x402 purchases
 

@@ -1,6 +1,8 @@
 import { circleSourceSettled } from "../../circle-native-admission.js";
-import { publicKnownCircle } from "../../circle-v2-evm/funding-operation.js";
+import { publicKnownCircle, validateKnownCircle } from "../../circle-v2-evm/funding-operation.js";
 import { CircleRepository } from "../../circle-v2-evm/repository.js";
+import { receiptOutcome } from "../../core-outcome.js";
+import { ApnError } from "../../errors.js";
 import { conflictDomainKey, evmConflictDomain } from "../../operation-conflict-domain.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity } from "../adapter.js";
 import { profileClaim } from "../types.js";
@@ -35,5 +37,13 @@ export const circleAdapter = {
     salvage: raw => salvageRecord(raw, value => [salvageEvm(42161, field(value, "sourceCustody", "walletAddress")),
         salvageEvm(field(value, "destinationChain"), field(value, "destinationCustody", "walletAddress"))], ["profileHash", "destinationProfileHash"]),
     view: async (record) => publicKnownCircle(record),
+    async receipt(_context, record) {
+        if (!record.terminal)
+            throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.", { operationId: record.operationId, nextActions: [`apn circle evm observe --operation ${record.operationId}`] });
+        return receiptOutcome(publicKnownCircle(validateKnownCircle(record)));
+    },
+    // Approval, mint, observation and cleanup are Circle's own foreground and network commands.
+    commands: { status: "apn circle evm status --operation <operation-id>", resume: "apn circle evm observe --operation <operation-id>",
+        exit: "apn circle evm cleanup --operation <operation-id>" },
 };
 //# sourceMappingURL=circle.js.map
