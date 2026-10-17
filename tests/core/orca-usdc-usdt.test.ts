@@ -11,7 +11,7 @@ import { swapRouteOf } from "../../src/swap/route-admission.js";
 import { solanaSwapCommandRequests, SOLANA_SWAP_PLAN_HEADROOM_REQUESTS } from "../../src/swap/solana-read-plan.js";
 import { createOrcaKeylessRuntime, orcaRuntimeSelector } from "../../src/swap/orca-solana/runtime-factory.js";
 import { ORCA_POOLS } from "../../src/swap/orca-solana/pools.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/swap/orca-solana/stable-mechanism.js";
+import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "../../src/legacy/orca-stable/mechanism.js";
 import { temporaryState } from "./helpers.js";
 import { FakeOrcaRpc, orcaOwner, orcaPolicy, PROFILE, signatureOf } from "./orca-solana-helpers.js";
 import { FakeOrcaTokenRpc, POOL, USDC_IN, usdcUsdtPolicy } from "./orca-usdc-usdt-helpers.js";

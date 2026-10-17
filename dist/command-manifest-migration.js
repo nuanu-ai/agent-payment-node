@@ -15,6 +15,13 @@ const REPLACED_V1_COMMANDS = [
     { path: ["relay", "arbitrum", "deposit-dispatch"], replacement: "apn relay execute --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc>" },
     { path: ["relay", "base", "observe"], replacement: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <ethereum-rpc> --destination-rpc-url <base-rpc>" },
     { path: ["relay", "arbitrum", "observe"], replacement: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <arbitrum-rpc> [--destination-rpc-url <ethereum-rpc>]" },
+    // Orca (SWAP-10): USDC to USDT is the usdc-usdt pool of the keyless Orca route; stable-status/release/recover-no-send/observe
+    // stay to finish operations a released version prepared.
+    { path: ["swap", "solana", "orca", "stable-inventory"], replacement: "apn swap solana orca inventory" },
+    { path: ["swap", "solana", "orca", "stable-quote"], replacement: "apn swap solana orca quote --pool usdc-usdt --profile <profile> --account <solana-address> --amount <usdc-atomic> --slippage-bps <bps> --owner-slippage-cap-bps <bps> --compute-unit-limit <units> --compute-unit-price <micro-lamports>" },
+    { path: ["swap", "solana", "orca", "stable-prepare"], replacement: "apn swap solana orca prepare --profile <profile> --quote <hash-of-a-usdc-usdt-quote> --idempotency-key <key>" },
+    { path: ["swap", "solana", "orca", "stable-approve"], replacement: "apn swap solana orca approve --operation <operation-id>" },
+    { path: ["swap", "solana", "orca", "stable-execute"], replacement: "apn swap solana orca execute --operation <operation-id>" },
 ];
 const HISTORICAL_CIRCLE = "Historical Circle CCTP recovery for operations that are now terminal.";
 /** v1 commands that the phase-4a pruning deletes without a successor. Each is listed once its command has left the

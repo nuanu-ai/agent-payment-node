@@ -1,10 +1,8 @@
 import { ApnError } from "../../errors.js";
-import { isPlainRecord } from "../../canonical.js";
+import { isOrcaStableGuardedMechanismDigest } from "../../legacy/orca-stable/mechanism.js";
 import { swapMechanismDigest } from "../pin.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "../route-admission.js";
-import { ORCA_STABLE_GUARDED_MECHANISM_PIN } from "./stable-mechanism.js";
 import { SwapOperationRepository } from "../repository.js";
-import { orcaStableInventory } from "./stable-readonly.js";
 import { isOrcaTokenPlan } from "./instructions.js";
 import { SavedOrcaQuoteStore } from "./material.js";
 import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, ORCA_PROGRAM_AUTHORITIES, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG } from "./pins.js";
@@ -25,51 +23,18 @@ export async function executeOrcaCommand(request, context) {
     const runtime = context.orcaRuntime;
     if (request.command === "swap.orca.inventory")
         return data(orcaInventory(runtime !== undefined), "official_catalog_not_owner_admission");
-    if (request.command === "swap.orca.stable-inventory")
-        return data({ ...orcaStableInventory(), route: swapRouteOf(ORCA_STABLE_GUARDED_MECHANISM_PIN),
-            routeDigest: swapRouteDigest(ORCA_STABLE_GUARDED_MECHANISM_PIN) }, "pinned_read_only_inventory");
-    if (request.command === "swap.orca.stable-quote") {
-        if (context.orcaStableQuote === undefined)
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca quote reader is unavailable.");
-        return data(await context.orcaStableQuote(request), "read_only_market_quote");
-    }
-    if (request.command === "swap.orca.stable-prepare") {
-        if (context.orcaStablePrepare === undefined)
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca preparation is unavailable.");
-        return data(await context.orcaStablePrepare(request), "unsigned_simulated_stable_preparation");
-    }
-    if (request.command === "swap.orca.stable-status") {
-        if (context.orcaStableStatus === undefined)
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca status is unavailable.");
-        return data(await context.orcaStableStatus(request.operationId), "stable_operation_status");
-    }
-    if (request.command === "swap.orca.stable-approve" || request.command === "swap.orca.stable-execute") {
-        // One foreground consent: approve reserves and executes; execute (its own consent) serves a reservation left unexecuted.
-        const run = request.command === "swap.orca.stable-approve" ? context.orcaStableApprove : context.orcaStableExecute;
-        if (run === undefined)
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca execution is unavailable.");
-        const result = await run(request.operationId);
-        if (isPlainRecord(result) && result.signature === null) {
-            throw new ApnError("APN_OPERATION_BLOCKED", "Stable execution stopped after its durable marker without a proved send. Principal remains held.", { reason: "orca_stable_marked_no_send_unproven", nextActions: [
-                    `apn swap solana orca stable-recover-no-send --operation ${request.operationId}`
-                ] });
-        }
-        return data(result, "stable_first_send_attempt");
-    }
-    if (request.command === "swap.orca.stable-recover-no-send") {
-        if (context.orcaStableRecoverNoSend === undefined)
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca no-send recovery is unavailable.");
-        return data(await context.orcaStableRecoverNoSend(request.operationId), "stable_no_send_proved_principal_released");
-    }
-    if (request.command === "swap.orca.stable-observe") {
-        if (context.orcaStableObserve === undefined)
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca observation is unavailable.");
-        return data(await context.orcaStableObserve(request.operationId), "stable_observation");
-    }
-    if (request.command === "swap.orca.stable-release") {
-        if (context.orcaStableRelease === undefined)
-            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Stable Orca release is unavailable.");
-        return data(await context.orcaStableRelease(request.operationId), "stable_unsigned_principal_released");
+    if (request.command === "swap.orca.stable-status" || request.command === "swap.orca.stable-release" ||
+        request.command === "swap.orca.stable-recover-no-send" || request.command === "swap.orca.stable-observe") {
+        const legacy = context.orcaStableLegacy;
+        if (legacy === undefined)
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "The stable Orca finishers are unavailable.");
+        if (request.command === "swap.orca.stable-status")
+            return data(await legacy.status(request.operationId), "stable_operation_status");
+        if (request.command === "swap.orca.stable-release")
+            return data(await legacy.release(request.operationId), "stable_unsigned_principal_released");
+        if (request.command === "swap.orca.stable-recover-no-send")
+            return data(await legacy.recoverNoSend(request.operationId), "stable_no_send_proved_principal_released");
+        return data(await legacy.observe(request.operationId), "stable_observation");
     }
     if (request.command === "swap.orca.quote") {
         const { command: _command, pool, ...quote } = request;
@@ -88,8 +53,13 @@ export async function executeOrcaCommand(request, context) {
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
     // Any registered generation stays readable; the pool's runtime admits only its current registry for approval or signing.
     const pool = orcaPoolOfMechanism(operation.mechanismDigest);
-    if (pool === null)
-        throw new ApnError("APN_OPERATION_BLOCKED", "This operation is outside the keyless Orca pools.", { reason: "orca_mechanism_mismatch" });
+    if (pool === null) {
+        // A stable USDC to USDT operation from APN 0.5.45 or earlier finishes only through its frozen exits.
+        const stable = isOrcaStableGuardedMechanismDigest(operation.mechanismDigest);
+        throw new ApnError("APN_OPERATION_BLOCKED", "This operation is outside the keyless Orca pools.", { reason: "orca_mechanism_mismatch",
+            ...(stable ? { nextActions: [`apn swap solana orca stable-status --operation ${operation.operationId}`,
+                    `apn swap solana orca ${operation.submissionMarker === null ? "stable-release" : "stable-observe"} --operation ${operation.operationId}`] } : {}) });
+    }
     if (request.command === "swap.orca.status" && runtime === undefined)
         return { proofClass: operation.state, data: null, operation, receipt: null, nextActions: [] };
     const pooled = installed(runtime)(pool);

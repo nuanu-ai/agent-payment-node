@@ -1,79 +1,94 @@
 # Solana Orca Whirlpool: keyless guarded swap
 
-## USDC to USDT market read (C2-05)
-
-`apn swap solana orca stable-inventory` lists the pinned mainnet USDC/USDT
-Whirlpool `4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4` (tick spacing 1,
-fee rate 100 = 0.01%). `apn swap solana orca stable-quote --amount 1000000
---slippage-bps 50 --maximum-price-impact-bps 50` reads it through
-`APN_SOLANA_RPC_URL`. `--amount` is `<atomic_usdc>`: six-decimal USDC atomic
-units (so `1000000` means one USDC). The quote is
-exact-input A to B and uses the Whirlpool's local integer swap math.
-
-The reader verifies mainnet genesis; exact pool owner, config, mints, vaults,
-spacing and fee; absent adaptive-fee oracle; and both classic SPL vault mint,
-authority and state. It derives three downward tick arrays from the first pool
-read, then verifies the pool, arrays, oracle and vaults in a single
-`getMultipleAccounts` result with one slot. It checks the output against the
-destination reserve, computes a ceiling-rounded slippage floor, and refuses
-when price impact exceeds the supplied cap. Current math supports a starting
-tick of zero or a negative tick. It refuses other positive ticks until the
-positive-tick math is separately implemented and verified.
-
-This surface returns `mode: read_only`, `signable: false`, `signed: false`,
-`broadcast: false`, and no transaction bytes. Inventory does not grant an
-asset admission. There is no prepare, approval, signer, sender or payment
-claim for this pool. Owner USDC funding, token-account existence, SOL fee
-balance and account rent are unverified. The SOL/USDC execution route below
-remains separate.
-
-The pin and vault balances were observed on mainnet on 2026-09-26 near slots
-450687682–450687913. A fresh quote re-reads the current state; those balances
-are historical evidence, not a live reserve guarantee.
-
-### Internal USDC to USDT snapshot preview (27 Sep source checkpoint)
-
-Merged [PR #422](https://github.com/nuanu-ai/agent-payment-node/pull/422) added an offline unsigned v0 message preview from caller-supplied account data. Merged [PR #424](https://github.com/nuanu-ai/agent-payment-node/pull/424) adds an internal read-only adapter that checks Solana mainnet genesis and pinned program bytes, derives three tick arrays and the owner's classic USDC/USDT associated accounts, then reads the pool, arrays, vaults and owner accounts in one `getMultipleAccounts` slot. It recomputes the exact-input quote, price impact and output floor from those bytes and obtains a fresh blockhash and height for the preview. The adapter requires a fresh budget of at most 24 physical POSTs with persistent pacing of at least 750 ms between requests to the provider family; HTTP 429/403 remain terminal.
-
-This adapter is absent from the public Orca CLI/MCP inventory and quote commands above. Its result is an untrusted, non-signable preview. The 22 focused tests used fake RPC responses; no live Solana RPC or paid USDC→USDT swap was proved. It does not fund the current profile with USDT, create an owner USDT policy admission, or close C2-05. The admitted SOL→USDC execution route below is separate.
-
-Merged [PR #426](https://github.com/nuanu-ai/agent-payment-node/pull/426) defines a separate USDC→USDT mechanism pin and exact digest selector. Its owner admission helper checks the active sealed policy revision, local Solana account, both canonical mint rows, identical stable pin, per-transfer and daily caps, and exact pool/program/amount quote binding. Merged [PR #428](https://github.com/nuanu-ai/agent-payment-node/pull/428) adds an internal guarded candidate entry after those checks. It rechecks active policy and usage, the one-slot market and owner account identities, current fee and blockhash lifetime, and a same-result simulation. It decodes exactly two classic Tokenkeg `Transfer` CPIs in the pinned Whirlpool swap instruction: exact USDC input from the owner's existing ATA and USDT output to the owner's existing ATA at or above the minimum. Missing or unfamiliar traces and missing USDT ATA setup fail closed. Only then may it persist a recoverable prepared operation and return unsigned transaction bytes. The 47 focused tests used synthetic RPC and simulation results; they establish source behavior, not a live Solana simulation.
-
-The guarded candidate has CLI/MCP stable preparation and status routes, with guarded one-shot foreground execution available through `stable-execute`. Owner execution requires separate foreground consent after principal reservation. This source still has no current-owner USDT funding and admission proof, on-chain receipt, or paid USDC→USDT swap acceptance. The snapshot preview remains untrusted and non-signable. C2-05 remains blocked.
-
-The `stable-approve --operation` foreground CLI command shows the exact prepared USDC→USDT intent and reserves its USDC principal after rechecking the active owner policy, activation and daily cap. Its MCP route returns a CLI handoff. The approval response and reserved `stable-status` remain `signable: false`, `signed: false` and `broadcast: false`; while reserved, they report `executable: true` and `executionRequiresForegroundConsent: true`. Since phase-1 cleanup (SWAP-20) the one approval screen also authorizes the execution that follows in the same `stable-approve` command: after the reservation it refreshes the preflight, signs once and makes at most one send attempt, with no second prompt. `stable-execute --operation` remains for a reservation left unexecuted (an interrupted or refused execution) and asks for its own fresh consent. The prepared quote expires after 60 seconds, and a policy replacement or expired quote requires a fresh preparation. `stable-release --operation` retires a still unsigned operation and releases its exact lease, including an orphan left by an interrupted reservation write. `stable-status` performs that same local reconciliation after quote expiry. Both paths retain a terminal no-effect record and cannot cross a submission marker.
-
-The phase 2C source includes a pure finalized-receipt verifier for a future already marked stable operation. It binds the returned signature to the saved v0 message and blockhash; matches finalized status, slot and transaction error; verifies exact owner USDC ATA debit, owner USDT ATA credit at or above the saved minimum, the two pinned Tokenkeg transfer CPIs, and the capped network fee and optional USDT ATA rent. A finalized revert yields a separate proof only when owner SOL lost the fee and token balances did not change. Missing or nonfinalized evidence remains pending; conflicting evidence is refused. The verifier makes no RPC call or state transition and is not wired to CLI/MCP.
-
-The internal journal from [PR #451](https://github.com/nuanu-ai/agent-payment-node/pull/451) can persist a stable submission marker, exact execution binding and signed effect. Merged [PR #461](https://github.com/nuanu-ai/agent-payment-node/pull/461) exposes the guarded `stable-execute --operation <id>` foreground CLI path: after separate reservation approval, it requires fresh owner consent, refreshes execution preflight, signs once and makes at most one send attempt. MCP returns the exact CLI handoff and cannot sign or submit. An interrupted binding or signing write is observe only until local no-send recovery reads encrypted custody by operation ID, including when the binding is absent. All encrypted signed-effect writes and this operation-ID read use the same wallet lock, so concurrent operations cannot erase a saved effect through stale whole-wallet writes. Recovery holds the same cross-process operation lock as marker creation and sender, requires the exact material, owner identity and lease, and refuses any signed effect, unreadable custody, receipt or progressed state. It persists a marker-bound proof before releasing the reserved USDC lease and then records a terminal `failed_before_effect` operation that retains the marker and proof hash. A crash after the lease write is reconciled with that same proof. The current sender requires the persisted, verified signed effect before its send claim; a no-send proof bars later signing or sending. This source does not establish a live swap or receipt acceptance.
-
-### Read-only guarded simulation (source surface)
-
-`simulateOrcaStableGuardedReadOnly(rpc, ports, request)` exposes the current-owner
-guarded proof as an exported TypeScript source API, not a CLI/MCP operator command. The caller supplies the
-active owner policy and usage readers, local account reader, exact policy
-revision, owner, amount, slippage, compute and fee caps, and a fresh Solana RPC
-transport. The transport must have at most 24 physical POSTs and persistent
-provider-family pacing of at least 750 ms. HTTP 429/403 are terminal. The
-existing `SolanaRpcPacer` writes only provider POST timestamp and cooldown
-metadata to maintain pacing across invocations; the simulation writes no
-operation, policy, usage reservation, wallet, or key state.
-
-It runs the same pinned program, one-slot market, policy, ATA, fee, blockhash,
-and same-simulation classic Tokenkeg CPI checks used by the guarded candidate.
-The result contains a quote and proof evidence, with `mode: read_only`,
-`signable: false`, and `executable: false`. No operation repository, signer,
-sender, or transaction bytes are reachable from this surface. A missing USDT
-ATA and any unsupported setup or CPI trace fail closed. This source proof is
-not a current-profile live simulation or a paid receipt; C2-05 remains blocked.
-
 APN exposes `inventory`, `quote`, `prepare`, `status`, `approve`, and `execute`
-under `apn swap solana orca`. The only admitted mechanism is native SOL to
-canonical USDC, exact input, against one pinned Orca Whirlpool on Solana
-mainnet. APN uses no API key, no route API and no off-chain quote: price,
-expected output, slippage floor and price impact come from the pool's on-chain
-state, APN builds every instruction locally, and the owner's local Solana key
-is the only signer. Inventory reports `admitted: false` and grants nothing.
+under `apn swap solana orca`, over two pinned Orca Whirlpools on Solana
+mainnet. Every swap is exact input from token A to token B:
+
+| `--pool` | Swap | Pool | Input |
+| --- | --- | --- | --- |
+| `sol-usdc` | native SOL to canonical USDC | `Czfq3xZZDmsdGdUyrNLtRhGc47cXcZtLG4crryfu44zE` (tick spacing 4) | native SOL, wrapped to wSOL and unwrapped inside the transaction |
+| `usdc-usdt` | USDC to USDT | `4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4` (tick spacing 1) | the owner's USDC token account |
+
+APN uses no API key, no route API and no off-chain quote: price, expected
+output, slippage floor and price impact come from the pool's on-chain state,
+APN builds every instruction locally, and the owner's local Solana key is the
+only signer. Inventory lists each pool with its route, mechanism pin and
+registry digest; it grants nothing.
+
+`quote` requires `--pool`; nothing defaults it. `prepare` takes the pool from
+the saved quote, and `status`, `approve` and `execute` take it from the
+operation's lane, so one pool never runs in another pool's runtime (a foreign
+saved quote refuses with `orca_pool_mismatch`).
+
+## USDC to USDT (`--pool usdc-usdt`)
+
+Since APN 0.5.46 (SWAP-10) USDC to USDT is a pool of the same keyless route,
+not a separate stack. It shares the program pins, the market read, the local
+swap math, the exact-message simulation, the single foreground consent, the
+submission marker, the single send, the finalized receipt check and the
+generic finality, expiry and abandon exits. What differs:
+
+- Pins: pool `4fuUiYxTQ6QCrdSq9ouBYcTM7bqSwYTSyLueGZLTy4T4` with config,
+  mints (USDC A, USDT B), vaults `4oY1eVHJrt7ywuFoQnAZwto4qcQip1QhYMAhD11PU4QL`
+  (USDC) and `4dSG9tKHZR4CAictyEnH9XuGZyKapodWXq5xyg7uFwE9` (USDT), tick
+  spacing and fee-tier seed 1, no adaptive-fee oracle. The fee rate is read at
+  quote (100 = 0.01% when reviewed).
+- `--amount` is six-decimal USDC atomic units (`1000000` is one USDC).
+- Instructions: SetComputeUnitLimit, SetComputeUnitPrice, create-idempotent
+  USDT associated account, Whirlpool `swap` from the owner's USDC account to
+  the owner's USDT account. No wrap and no close.
+- The owner's USDC account must exist, be a classic token account controlled
+  only by the owner, and hold the exact input (`orca_source_account_absent`,
+  `orca_insufficient_source`, both `APN_INSUFFICIENT_ASSET`). A missing USDT
+  account is created inside the swap; its rent is on the consent screen.
+- SOL leaving the wallet is bounded by the network fee and that rent.
+- The simulation and the finalized receipt require the USDC account to lose
+  exactly the input, the USDT account to gain at least the minimum, and the
+  SOL spent to stay within the approved maximum.
+- Owner admission: both the USDC and the USDT rows must admit the usdc-usdt
+  route. Its route (router and contracts) is exactly the route of the former
+  stable lane, so a policy that admitted that lane, by route or by any stable
+  mechanism pin, admits this one without re-admission. Mechanism digest
+  `c3eb94c36563119c3e1d47f43ea1a4e541dec4766e01b1d258559591d18efa0e`, registry
+  `orca-whirlpool-keyless-usdc-usdt.2026-10-17`
+  (`7352c69fc65fc16ffb5d5e2a36e97b5811c5d7ddee2919d22dfdb343a95ff1f6`).
+
+Solana POSTs: quote 9, prepare 0, approve 13 (including the single send and
+its first observation), status 4, the same read plan as SOL to USDC. The
+former stable lane spent 12 to 13 on stable-prepare, 13 to 14 on the execution
+(a second full preparation-grade proof plus the send) and 3 on each
+stable-observe.
+
+```sh
+QUOTE=$(apn swap solana orca quote --pool usdc-usdt --profile solana-local --account GtZc9wfM98Peee7dJrL1dYE54sWU8zA8gYeo9VUfR9ki --amount 1000000 --slippage-bps 50 --owner-slippage-cap-bps 50 --compute-unit-limit 250000 --compute-unit-price 1000 | jq -r .data.quoteHash)
+OP=$(apn swap solana orca prepare --profile solana-local --quote $QUOTE --idempotency-key orca-usdc-usdt-2026-10-17-1 | jq -r .operation.operationId)
+apn swap solana orca approve --operation $OP
+apn swap solana orca status --operation $OP
+```
+
+## Stable USDC to USDT operations from APN 0.5.45 and earlier (finish-only)
+
+`stable-inventory`, `stable-quote`, `stable-prepare`, `stable-approve` and
+`stable-execute` were removed in command manifest v2; an old invocation fails
+with its keyless replacement as the next action. Frozen readers in
+`src/legacy/orca-stable/` keep every record a released version wrote readable,
+and four exits finish them. None of them quotes, prepares, approves, signs or
+sends.
+
+- `stable-status` reads the operation. An unsigned preparation whose 60-second
+  quote window closed is released (`failed_before_effect`).
+- `stable-release` retires an unsigned preparation (quoted, prepared, awaiting
+  approval or reserved) and releases its exact USDC principal lease.
+- `stable-recover-no-send` (foreground consent; MCP returns the CLI handoff)
+  proves that a marked operation has neither a send claim nor a signed custody
+  effect, then releases its lease (`failed_before_effect`).
+- `stable-observe` observes a signed or claimed operation through the RPC
+  origin it was prepared with: it records the possible send, then the
+  finalized receipt (`finalized`) or revert (`failed_confirmed_revert`). Once
+  the finalized block height passes the bound blockhash lifetime and the
+  claimed signature has no status, the operation becomes `expired_unlanded`
+  and the lease is released. A signed effect that was never claimed was never
+  sent (the claim precedes transport), so it expires the same way.
 
 ## Why this pool
 
@@ -128,8 +143,8 @@ local math cannot reproduce, so such a pool refuses with `orca_adaptive_fee`.
 
 ## Quote
 
-`quote` takes the profile, the profile's Solana account (the owner is also the
-recipient), the lamport amount, `--slippage-bps` no greater than
+`quote` takes `--pool` (here `sol-usdc`), the profile, the profile's Solana
+account (the owner is also the recipient), the lamport amount, `--slippage-bps` no greater than
 `--owner-slippage-cap-bps`, and the owner's `--compute-unit-limit` and
 `--compute-unit-price` (micro-lamports). Nothing is defaulted. APN then:
 
@@ -168,15 +183,16 @@ recipient), the lamport amount, `--slippage-bps` no greater than
 8. saves the quote, plan, bytes, evidence and simulation under the state root
    keyed by `quoteHash`. `load` re-derives every binding.
 
-An existing owner wSOL account refuses with `orca_wsol_account_present`
-(closing it would move unrelated wrapped SOL).
+An existing owner wSOL account is reused and kept (SWAP-20): the swap neither
+creates nor closes it, and the simulation requires its own balance and
+lamports to survive unchanged.
 
 ## Keyless mechanism pin and owner admission
 
-`apn swap solana orca inventory` lists the pool, the program pins and, under
-`keyless`, the route, the mechanism pin with its digest
-`bf55422e985eaa33dc1ee952e3d71dde28af0fc2092fb47041a8b5ffff5d6081` and the
-protocol registry digest
+`apn swap solana orca inventory` lists the program pins and, for each pool
+under `pools`, the route, the mechanism pin with its digest and the protocol
+registry digest. For sol-usdc these are
+`bf55422e985eaa33dc1ee952e3d71dde28af0fc2092fb47041a8b5ffff5d6081` and
 `83c4b5acac83b0a93a191f2fa8f7cd764660e4475a57ebfb1e4ebe7647e92d39`
 (`orca-whirlpool-keyless.2026-10-17`, protocol version
 `whirlpool-upgrade-authority.1`, which names no deployment). The slot 440170207
@@ -255,7 +271,7 @@ minutes of the quote.
 ```sh
 export APN_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 apn swap solana orca inventory
-QUOTE=$(apn swap solana orca quote --profile solana-local --account GtZc9wfM98Peee7dJrL1dYE54sWU8zA8gYeo9VUfR9ki --amount 10000000 --slippage-bps 50 --owner-slippage-cap-bps 50 --compute-unit-limit 200000 --compute-unit-price 1000 | jq -r .data.quoteHash)
+QUOTE=$(apn swap solana orca quote --pool sol-usdc --profile solana-local --account GtZc9wfM98Peee7dJrL1dYE54sWU8zA8gYeo9VUfR9ki --amount 10000000 --slippage-bps 50 --owner-slippage-cap-bps 50 --compute-unit-limit 200000 --compute-unit-price 1000 | jq -r .data.quoteHash)
 OP=$(apn swap solana orca prepare --profile solana-local --quote $QUOTE --idempotency-key orca-001sol-2026-09-18-1 | jq -r .operation.operationId)
 apn swap solana orca approve --operation $OP
 apn swap solana orca status --operation $OP
@@ -353,7 +369,8 @@ owner's token accounts, at most 150 slots apart; they share one JSON-RPC
 batch where the endpoint batches account reads. Each Orca keyless command's
 physical request budget is derived from its read plan
 (`src/swap/solana-read-plan.ts`): quote 9, approve 13, status 4, plus 2 of
-headroom. The stable USDC→USDT route uses the
-same header verifier and no fee-rate pin; its mechanism is
+headroom. The stable USDC→USDT route used the
+same header verifier and no fee-rate pin; its mechanism was
 `whirlpool-stable-upgrade-authority.1`, with the slot 440170207 and 457152296
-generations kept for existing operations.
+generations kept for existing operations. Since 0.5.46 those identities only
+finish existing operations; USDC to USDT runs as `--pool usdc-usdt`.

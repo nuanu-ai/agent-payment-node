@@ -4,7 +4,7 @@ import type { AssetUsageReservation } from "../asset-usage-ledger.js";
 import { validateAssetUsageReservation } from "../asset-usage-ledger.js";
 import { parseAtomic } from "../money.js";
 import { validateSwapQuote, type SwapQuoteSnapshot } from "./quote.js";
-import { isOrcaStableGuardedMechanismDigest } from "./orca-solana/stable-mechanism.js";
+import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 
 export const SWAP_OPERATION_SCHEMA = "apn.swap-operation.v1" as const;
 export type SwapOperationState = "quoted" | "prepared" | "awaiting_approval" | "reserved" | "submitting" |

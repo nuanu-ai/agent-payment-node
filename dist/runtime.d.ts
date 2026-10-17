@@ -40,7 +40,7 @@ import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.
 import type { CommandRequest } from "./commands.js";
 import type { GuardedSwapRuntime } from "./swap/runtime.js";
 import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
-import type { OrcaStableQuoteRequest } from "./swap/orca-solana/stable-readonly.js";
+import type { OrcaStableLegacyFinisher } from "./legacy/orca-stable/finisher.js";
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 export interface RelayExecutionConfirmationSummary {
@@ -87,16 +87,8 @@ export interface CoreDependencies {
         readonly command: "swap.sunswap.quote";
     }>>;
     readonly orcaRuntime?: OrcaRuntimeSelector;
-    readonly orcaStableQuote?: (request: OrcaStableQuoteRequest) => Promise<unknown>;
-    readonly orcaStablePrepare?: (request: Extract<CommandRequest, {
-        readonly command: "swap.orca.stable-prepare";
-    }>) => Promise<unknown>;
-    readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableExecute?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
+    /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
+    readonly orcaStableLegacy?: OrcaStableLegacyFinisher;
     readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.jupiter.quote";
     }>>;
@@ -165,16 +157,8 @@ export declare class RuntimeContext {
         readonly command: "swap.sunswap.quote";
     }>>;
     readonly orcaRuntime?: OrcaRuntimeSelector;
-    readonly orcaStableQuote?: (request: OrcaStableQuoteRequest) => Promise<unknown>;
-    readonly orcaStablePrepare?: (request: Extract<CommandRequest, {
-        readonly command: "swap.orca.stable-prepare";
-    }>) => Promise<unknown>;
-    readonly orcaStableStatus?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableApprove?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableExecute?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableRecoverNoSend?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
-    readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
+    /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
+    readonly orcaStableLegacy?: OrcaStableLegacyFinisher;
     readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.jupiter.quote";
     }>>;
