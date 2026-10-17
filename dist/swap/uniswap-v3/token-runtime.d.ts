@@ -37,6 +37,7 @@ export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommand
         readonly quoteHash: string;
     }>;
     prepare(request: Prepare): Promise<import("./token-operation.js").UniswapTokenOperation>;
+    private prepareBody;
     approve(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     execute(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     status(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;

@@ -34,6 +34,7 @@ import { requiredProviderBinding as requiredBinding, requiredProviderDirectProfi
 import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
 import { allowlistProfileHash } from "./allowlist-policy-overlay.js";
 import { resolveProviderPrepare } from "./provider-prepare-identity.js";
+import { evmConflictDomain } from "./operation-conflict-domain.js";
 const DIRECT_POLICY = {
   identity: "apn.direct.foreground-approval.v1",
   verdict: "foreground_approval_required",
@@ -100,8 +101,10 @@ export class ProviderDirectTransferService {
         kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash,
       }, hashObject({ ...materialRequest, rpcBindingHash }));
       if (existing !== null) return publicOperation(existing.record as OperationRecord);
-      await this.operations.assertEvmAccountAvailable(profileHash, CHAIN_ID, bound.public_address);
-      await this.operations.assertProviderAccountAvailable(bound.provider_id, bound.account_binding_hash, bound.public_address);
+      // The account and provider claims are written before any RPC or provider read and dropped if no operation is written.
+      return await this.operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [evmConflictDomain(CHAIN_ID, bound.public_address)],
+          provider: { providerId: bound.provider_id, accountBindingHash: bound.account_binding_hash, payer: bound.public_address } }, async () => {
       const rpcIdentity = await this.context.requireRpc().assertBaseChain();
       const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
       const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
@@ -175,6 +178,7 @@ export class ProviderDirectTransferService {
       });
       await this.durable.persist(operation);
       return publicOperation(operation);
+      });
     });
   }
   async prepareCoinbaseGasless(request: Extract<CommandRequest, { command: "gasless.transfer.prepare" }>): Promise<unknown> {

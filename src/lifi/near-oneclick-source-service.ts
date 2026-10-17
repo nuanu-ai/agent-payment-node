@@ -17,6 +17,8 @@ import { assertOneClickNativePostApproval, assertOneClickPostApproval, OneClickE
 import { LEGACY_ONECLICK_LANE, oneClickLane, oneClickRecipient, type OneClickLane } from "./near-oneclick-lanes.js";
 import { OneClickSourceJournal, oneClickRecordLane, oneClickSourceCall, type OneClickSourceRecord } from "./near-oneclick-source-journal.js";
 import { bridgeAddress, bridgeFailure, bridgeRecord, bridgeUint } from "./validation.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim } from "../operation-index/adapters/family-claims.js";
 export { assertOneClickPostApproval } from "./near-oneclick-evm-source.js";
 
 const ORIGIN = "https://1click.chaindefuser.com";
@@ -128,6 +130,9 @@ export class OneClickSourceService {
     const source = new OneClickEvmSource(lane, this.rpcUrl(lane.origin.rpcEnvironment, lane.origin.network), https);
     const walletStore = new EncryptedWalletStore(this.state, this.wrapping);
     await this.state.initialize();
+    // The payer's claim is written before the quote, any RPC read or signature; it is held until the source receipt is final.
+    return await admitOperation(this.state, { family: "oneclick_source", profileHash, operationId, idempotencyHash: null, requestHash: null },
+      [evmClaim(lane.origin.chainId, payer)], async () => {
     const loaded = await walletStore.describe(profile); if (loaded === null) fail("wallet_missing");
     try {
       if (loaded.identity.profile !== profile || loaded.identity.address !== payer ||
@@ -190,6 +195,7 @@ export class OneClickSourceService {
         submissionAttempts: 1, oneClickDepositAddress: record.depositAddress, sourceReceiptObserved: false };
       return lane.id === LEGACY_ONECLICK_LANE ? { ...common, tronDestinationDelivered: false } : { ...common, destinationDelivered: false };
     } finally { walletStore.clear(loaded.secret); }
+    });
   }
   /**
    * An earlier operation's nonce reservation is released only when it can no longer land: its quote deadline passed and the

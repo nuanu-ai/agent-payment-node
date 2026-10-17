@@ -4,7 +4,10 @@ import { canonicalJson } from "../canonical.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import type { Address } from "../model.js";
 import { StateStore } from "../state.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim, namedProfileHash } from "../operation-index/adapters/family-claims.js";
 import type { StargateNativeJournal, StargateNativeOperation } from "./native-execution.js";
+import type { StargateAdmission } from "./token-model.js";
 import { address, fail, validateRecord, validateAdvance } from "./native-record.js";
 
 export class FileStargateNativeJournal implements StargateNativeJournal {
@@ -23,6 +26,11 @@ export class FileStargateNativeJournal implements StargateNativeJournal {
   /** The same per-account lock every other EVM writer holds, so no other family can race this nonce. */
   async withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T> {
     await this.locks.initialize(); return await this.locks.withLocks([evmAddressLock(address(owner))], work, { waitMs: 30_000 });
+  }
+  async admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T> {
+    const state = new StateStore(this.root); await state.initialize();
+    return await admitOperation(state, { family: "stargate_native", profileHash: namedProfileHash(operation.profile), operationId: operation.operationId,
+      idempotencyHash: null, requestHash: null }, [evmClaim(1, address(operation.owner))], work);
   }
   async load(id: string): Promise<StargateNativeOperation | null> {
     try {

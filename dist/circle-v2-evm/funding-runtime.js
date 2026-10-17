@@ -12,6 +12,7 @@ import { evmAmbiguousSendOutcome, evmSentOutcome, evmUnsentOutcome } from "../ev
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import { BridgeHttps } from "../lifi/https.js";
 import { exactChainConsent } from "../tty-approval.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -119,34 +120,38 @@ export class CircleFundingEvmService {
             }
             await assertExclusiveEvmRawSigner(this.state, sourceCustody.walletAddress, sourceCustody.profileHash);
             await assertExclusiveEvmRawSigner(this.state, destinationCustody.walletAddress, destinationCustody.profileHash);
-            const { source, destination } = this.remotes(route.chainId), deployments = await currentCircleDeployments(source, destination, route.chainId), fee = await this.fee(funding);
-            assertCircleFundingFee(funding, fee, this.now());
-            const sourceAccount = await source.account(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER), src = this.sourceAccount(sourceAccount, sourceCustody.walletAddress, funding.amountAtomic);
-            // This lane starts at zero allowance. Pre-existing grants require normal cleanup before preparing.
-            if (!src.approvalRequired)
-                circleBlocked("initial_zero_allowance_required");
-            const dst = verifyCircleDestinationAccount(await destination.account(destinationCustody.walletAddress, route.token, CIRCLE_TRANSMITTER), route.chainId, destinationCustody.walletAddress);
-            void dst;
-            const approvalEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(false, funding), src.nonceAtomic);
-            const burnEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_MESSENGER, encodeCircleBurn(route.chainId, funding), (BigInt(src.nonceAtomic) + 1n).toString(), "600000");
-            verifyCircleGasEnvelope(approvalEnvelope, 42161);
-            verifyCircleGasEnvelope(burnEnvelope, 42161);
-            if (BigInt(sourceAccount.nativeBalanceAtomic) < 75000000000000n)
-                circleBlocked("source_native_total_balance");
-            const preparedAt = new Date(this.now()).toISOString(), expiresAt = new Date(this.now() + 15 * 60_000).toISOString(), fingerprint = "0".repeat(64);
-            let op = sealCircle({ schemaVersion: "apn.circle-v2-evm-operation.v2", funding, feeQuote: fee, operationId, profile, profileHash: sourceCustody.profileHash, destinationProfile, destinationProfileHash: destinationCustody.profileHash,
-                idempotencyHash, requestHash, fingerprint, destinationChain: route.chainId, sourceCustody, destinationCustody, policies: [], preparedAt, expiresAt, deploymentDigest: deployments.digest, feeQuoteAtomic: fee.quotedFeeAtomic,
-                state: "awaiting_source", terminal: false, effects: [{ role: "approval", phase: "prepared", envelope: approvalEnvelope, transactionHash: null, materialHash: null, proof: null },
-                    { role: "burn", phase: "prepared", envelope: burnEnvelope, transactionHash: null, materialHash: null, proof: null }], source: null, attestation: null, destination: null,
-                residualAllowanceAtomic: "0", usage: [], usageFinalized: false, transitions: [] });
-            op = sealCircle({ ...op, policies: await this.usage.policies(op) });
-            op = sealCircle({ ...op, fingerprint: circleFundingFingerprint(op) });
-            const initial = advanceCircle(op, {}, "exact_route_prepared", this.now());
-            await this.operations.assertCircleAccountsAvailable(initial);
-            await this.repo.saveFunding(initial);
-            const usage = await this.usage.reserve(initial), reserved = advanceCircle(initial, { usage }, "all_assets_reserved", this.now());
-            await this.repo.saveFunding(reserved);
-            return reserved;
+            // Both signing accounts are claimed (the destination profile held too) before any RPC or fee read, and dropped if no
+            // operation is written. Another Circle route may queue only behind a source burn that is canonical.
+            return await this.operations.admit({ kind: "circle_route", profileHash: sourceCustody.profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(42161, sourceCustody.walletAddress), evmConflictDomain(route.chainId, destinationCustody.walletAddress)],
+                otherProfiles: [destinationCustody.profileHash], tag: { kind: "circle_source_after_burn" } }, async () => {
+                const { source, destination } = this.remotes(route.chainId), deployments = await currentCircleDeployments(source, destination, route.chainId), fee = await this.fee(funding);
+                assertCircleFundingFee(funding, fee, this.now());
+                const sourceAccount = await source.account(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER), src = this.sourceAccount(sourceAccount, sourceCustody.walletAddress, funding.amountAtomic);
+                // This lane starts at zero allowance. Pre-existing grants require normal cleanup before preparing.
+                if (!src.approvalRequired)
+                    circleBlocked("initial_zero_allowance_required");
+                const dst = verifyCircleDestinationAccount(await destination.account(destinationCustody.walletAddress, route.token, CIRCLE_TRANSMITTER), route.chainId, destinationCustody.walletAddress);
+                void dst;
+                const approvalEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(false, funding), src.nonceAtomic);
+                const burnEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_MESSENGER, encodeCircleBurn(route.chainId, funding), (BigInt(src.nonceAtomic) + 1n).toString(), "600000");
+                verifyCircleGasEnvelope(approvalEnvelope, 42161);
+                verifyCircleGasEnvelope(burnEnvelope, 42161);
+                if (BigInt(sourceAccount.nativeBalanceAtomic) < 75000000000000n)
+                    circleBlocked("source_native_total_balance");
+                const preparedAt = new Date(this.now()).toISOString(), expiresAt = new Date(this.now() + 15 * 60_000).toISOString(), fingerprint = "0".repeat(64);
+                let op = sealCircle({ schemaVersion: "apn.circle-v2-evm-operation.v2", funding, feeQuote: fee, operationId, profile, profileHash: sourceCustody.profileHash, destinationProfile, destinationProfileHash: destinationCustody.profileHash,
+                    idempotencyHash, requestHash, fingerprint, destinationChain: route.chainId, sourceCustody, destinationCustody, policies: [], preparedAt, expiresAt, deploymentDigest: deployments.digest, feeQuoteAtomic: fee.quotedFeeAtomic,
+                    state: "awaiting_source", terminal: false, effects: [{ role: "approval", phase: "prepared", envelope: approvalEnvelope, transactionHash: null, materialHash: null, proof: null },
+                        { role: "burn", phase: "prepared", envelope: burnEnvelope, transactionHash: null, materialHash: null, proof: null }], source: null, attestation: null, destination: null,
+                    residualAllowanceAtomic: "0", usage: [], usageFinalized: false, transitions: [] });
+                op = sealCircle({ ...op, policies: await this.usage.policies(op) });
+                op = sealCircle({ ...op, fingerprint: circleFundingFingerprint(op) });
+                const initial = advanceCircle(op, {}, "exact_route_prepared", this.now());
+                await this.repo.saveFunding(initial);
+                const usage = await this.usage.reserve(initial), reserved = advanceCircle(initial, { usage }, "all_assets_reserved", this.now());
+                await this.repo.saveFunding(reserved);
+                return reserved;
+            });
         }));
     }
     async status(id) { return publicCircle(await this.required(id)); }

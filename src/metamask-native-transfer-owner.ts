@@ -1,6 +1,8 @@
 import { nativeContextDeadline, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDeadline, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { takeMetaMaskNativeProcessFailureDiagnostic } from "./metamask-process-runner.js";
 import { OperationService } from "./operation-service.js";
+import { admitOperation } from "./operation-index/admission.js";
+import { evmClaim } from "./operation-index/adapters/family-claims.js";
 import { evmAddressLock } from "./evm-address-ownership.js";
 import { listLocalWallets, listEncryptedWalletEnvelopes } from "./wallet-import-collision.js";
 import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
@@ -33,7 +35,7 @@ import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNa
 export type { MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
 /** Journal readers, also reachable here for callers that name the command module. */
 export { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease,
-  assertMetaMaskNativeConflictDomainAvailable, metaMaskNativeOperationExists } from "./metamask-native-journal.js";
+  metaMaskNativeOperationExists } from "./metamask-native-journal.js";
 
 /** One guarded USDC transfer from the profile's MetaMask Agent Wallet; every field is the caller's explicit input. */
 export interface MetaMaskNativeTransferInput {
@@ -165,6 +167,10 @@ export async function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMa
   return state.withLocks([`profile:${allowlistProfileHash(profileName)}`,`profile:${state.profileHash(profileName)}`,`operation:${id}`,"provider-session:metamask-agent-wallet",evmAddressLock(payer),`account-chain-nonce:${payer}:${chainId}`], async () => {
     const existing = await journal.read(id);
     if (existing !== null) return replay(existing);
+    // The account claim is written before any vendor, RPC or ledger read: every family's prepare on this account and chain
+    // waits for it from here, and this transfer waits for theirs.
+    return await admitOperation(state, { family: "metamask_native", profileHash: state.profileHash(profileName), operationId: id,
+      idempotencyHash: null, requestHash }, [evmClaim(chainId, payer)], async () => {
     await assertAccountAvailable(state,journal,chainId,profileName,payer,id);
     const owner = await loadMetaMaskNativeOwner(state,profileName), ledger = new AssetUsageLedger(stateRoot), now = new Date(), day = now.toISOString().slice(0,10);
     if(owner.profile.public_address.toLowerCase()!==payer || owner.profile.account_binding_hash!==initial.profile.account_binding_hash || owner.profile.revision!==initial.profile.revision)blocked("MetaMask profile changed before acquiring custody locks.");
@@ -231,6 +237,7 @@ export async function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMa
       for (const r of reservations) await ledger.transition({...transitionIdentity(r),state:"failed_before_effect",now:new Date(),outcomeDigest:hashObject({id,kind:"failed_before_effect"}),expectedCurrentStates:["reserved"]});
       throw error;
     } finally { if (scope !== undefined) { const e=scopes.get(scope); if(e!==undefined){e.state="invalid";e.lockActive=false;} scopes.delete(scope); } }
+    });
   });
 }
 function transitionIdentity(r:AssetUsageReservation) { return {account:r.account,chain:r.chain,asset:r.asset,reservationId:r.reservationId,policyDigest:r.policyDigest}; }

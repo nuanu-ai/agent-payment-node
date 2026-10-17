@@ -62,6 +62,8 @@ export declare function publicCircleApproval(record: CircleApprovalRecord): {
  * inputs and the approval's own simulation), and the estimate and fee quote reuse it.
  */
 export declare function circleApprovalRpcFromBridge(input: BridgeRpcPort | (() => BridgeRpcPort)): CircleApprovalRpc;
+/** Lock-free read of one approval journal (the operation index's reader). */
+export declare function loadCircleApproval(root: string, id: string): Promise<CircleApprovalRecord | null>;
 /** APN encrypted local wallet is opened solely in the signing call; no secret enters the journal. */
 export declare class LocalCircleApprovalSigner implements CircleApprovalSigner {
     private readonly state;

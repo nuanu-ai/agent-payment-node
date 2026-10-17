@@ -9,6 +9,8 @@ import { approvalIncluded } from "./transaction.js";
 import { prepareCircleV2BaseUsdcApprovalReadOnly } from "./circle-v2-approval-preparation.js";
 import { bridgeOwner } from "./owner.js";
 import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
+import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
+import { evmClaim } from "../operation-index/adapters/family-claims.js";
 export function publicCircleApproval(record) {
     const { rawTransaction: _raw, ...publicRecord } = record;
     return publicRecord;
@@ -81,6 +83,10 @@ class CircleApprovalJournal extends SecureStateStore {
         await this.ensureDirectory("circle-approvals");
         await this.writeJson(`circle-approvals/${record.id}.json`, record);
     }
+}
+/** Lock-free read of one approval journal (the operation index's reader). */
+export async function loadCircleApproval(root, id) {
+    return await new CircleApprovalJournal(root).load(id);
 }
 function update(record, patch) {
     const { integrityHash: _ignored, ...body } = { ...record, ...patch };
@@ -175,8 +181,11 @@ export class CircleV2ApprovalExecutor {
     }
     async prepare(input) {
         await this.state.initialize();
-        const profileHash = this.state.profileHash(input.profile);
+        const profileHash = this.state.profileHash(input.profile), claims = [evmClaim(8453, input.payer)];
         return await this.state.withLocks([`profile:${profileHash}`], async () => {
+            // The ID is the digest of what the reads return, so the claim is written atomically once it is known (before the
+            // record and before anything is signed); this check refuses an account another operation holds before any read.
+            await assertClaimsAvailable(this.state, profileHash, claims);
             const p = await prepareCircleV2BaseUsdcApprovalReadOnly({ chainId: 8453, payer: input.payer,
                 token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", spender: "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408",
                 approvalCapAtomic: input.approvalCapAtomic }, this.rpc.read, this.limits, this.now);
@@ -193,8 +202,7 @@ export class CircleV2ApprovalExecutor {
                 phase: "prepared", rawTransaction: null, transactionHash: null,
                 submissionAttempts: 0, observedAllowanceAtomic: null };
             const record = { ...body, integrityHash: hashObject(body) };
-            await this.journal.save(record);
-            return record;
+            return await admitOperation(this.state, { family: "circle_approval", profileHash, operationId: id, idempotencyHash: null, requestHash: null }, claims, async () => { await this.journal.save(record); return record; });
         });
     }
     async execute(id, confirm) {

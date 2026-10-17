@@ -20,7 +20,10 @@ function systemFailure(error: unknown): boolean {
 export class OperationIndexReconciler {
   constructor(private readonly root: string, private readonly store: OperationIndexStore, private readonly registry: OperationRegistry) {}
 
-  /** Names only: each adapter store and `entries/` are listed; a record is read only when its name has no entry yet. */
+  /**
+   * Names only: each adapter store and `entries/` are listed; a record is read only when its name has no entry yet.
+   * Terminal records found by one walk (the bulk after an upgrade) are written together through `putTerminal`.
+   */
   async reconcile(force = false): Promise<void> {
     const indexed = force ? new Set<string>() : await this.store.entryIds();
     const seen = new Map<string, Named[]>();
@@ -32,10 +35,15 @@ export class OperationIndexReconciler {
         }
       }
     }
+    const terminal: OperationIndexEntry[] = [];
     for (const [operationId, named] of seen) {
-      if (named.length > 1) await this.indexDuplicate(operationId, named, force);
-      else if (!indexed.has(operationId)) await this.write(await this.derive(named[0]!.adapter, named[0]!.name), force);
+      if (named.length > 1) { await this.indexDuplicate(operationId, named, force); continue; }
+      if (indexed.has(operationId)) continue;
+      const entry = await this.derive(named[0]!.adapter, named[0]!.name);
+      // A repair (force) keeps the one-file-at-a-time path; it is rare and rewrites files that may already exist.
+      if (!force && entry?.state === "terminal") terminal.push(entry); else await this.write(entry, force);
     }
+    if (terminal.length > 0) await this.store.putTerminal(terminal, async (hash, id) => await this.bindPointer(hash, id));
   }
 
   /** The entry a record yields today: claims and terminality from its own reader, or a quarantine when it is unreadable. */

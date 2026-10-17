@@ -16,7 +16,9 @@ import { validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.j
 import { METAMASK_NATIVE_FEE_QUOTE_SCHEMA, METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote, validateMetaMaskNativeFeeReceipt } from "./metamask-native-fee-evidence.js";
 const V1 = "apn.metamask-native-operation.v1", V2 = "apn.metamask-native-operation.v2";
 const DIRECTORY = "metamask-native-operations";
-const RESOLVED = ["confirmed", "failed_before_effect", "abandoned_unknown"];
+/** Outcomes after which a native transfer can no longer sign, hand off or land. */
+export const METAMASK_NATIVE_RESOLVED_STATES = ["confirmed", "failed_before_effect", "abandoned_unknown"];
+const RESOLVED = METAMASK_NATIVE_RESOLVED_STATES;
 const STATES = ["prepared", "failed_before_effect", "effect_started", "acknowledged", "unknown", "confirmed", "abandoned_unknown"];
 const CONTEXT_KEYS = ["profile", "profileHash", "accountBindingHash", "capabilityHash", "profileRevision", "policyDigest", "policyRevision",
     "activationDigest", "vendorPolicyHash", "vendorProjectHash", "quote", "operationId", "consentExpiresAt", "issuedDay"];
@@ -102,14 +104,6 @@ export class MetaMaskNativeJournal extends SecureStateStore {
                 blocked("Another native transfer for this account and chain is unresolved.");
         }
     }
-    /** Every other family's EVM check on this account and chain waits for a native transfer that may have been handed off. */
-    async assertSignedDomainAvailable(chainId, account, exceptId) {
-        for (const op of await this.all()) {
-            if (op.operationId !== exceptId && String(op.context.quote.chainId) === String(chainId) && op.context.quote.sender.toLowerCase() === account.toLowerCase() &&
-                (op.effectAttempts === 1 || op.providerRequestId !== null || op.transactionHash !== null) && !RESOLVED.includes(op.state))
-                blocked("An unresolved native transfer holds this EVM account and chain.");
-        }
-    }
     async matchingHold(reservation) {
         for (const op of await this.all()) {
             const q = op.context.quote;
@@ -155,10 +149,6 @@ export function publicMetaMaskNativeOperation(o) {
         effect_attempts: o.effectAttempts, proof_class: o.state === "confirmed" ? receipt?.transferAccepted ? "canonical_native_fee_transfer" : "canonical_reverted_native_fee" : "durable_public_state",
         ...(o.diagnostic === undefined ? {} : { diagnostic: o.diagnostic }),
         ...(receipt === null ? {} : { receipt }) };
-}
-/** Read-only central conflict guard. `exceptOperationId` is passed only by the claimed owner of that exact operation. */
-export async function assertMetaMaskNativeConflictDomainAvailable(stateRoot, chainId, account, exceptOperationId) {
-    await new MetaMaskNativeJournal(stateRoot).assertSignedDomainAvailable(chainId, account, exceptOperationId);
 }
 export async function metaMaskNativeOperationExists(stateRoot, id) {
     return await new MetaMaskNativeJournal(stateRoot).read(canonicalOperationId(id)) !== null;

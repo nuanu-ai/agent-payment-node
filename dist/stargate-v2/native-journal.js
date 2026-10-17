@@ -3,6 +3,8 @@ import { dirname, join, relative } from "node:path";
 import { canonicalJson } from "../canonical.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import { StateStore } from "../state.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim, namedProfileHash } from "../operation-index/adapters/family-claims.js";
 import { address, fail, validateRecord, validateAdvance } from "./native-record.js";
 export class FileStargateNativeJournal {
     root;
@@ -24,6 +26,12 @@ export class FileStargateNativeJournal {
     async withOwnerLock(owner, work) {
         await this.locks.initialize();
         return await this.locks.withLocks([evmAddressLock(address(owner))], work, { waitMs: 30_000 });
+    }
+    async admit(operation, work) {
+        const state = new StateStore(this.root);
+        await state.initialize();
+        return await admitOperation(state, { family: "stargate_native", profileHash: namedProfileHash(operation.profile), operationId: operation.operationId,
+            idempotencyHash: null, requestHash: null }, [evmClaim(1, address(operation.owner))], work);
     }
     async load(id) {
         try {

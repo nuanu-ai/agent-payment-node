@@ -41,95 +41,98 @@ export async function prepareStargateV2Token(request, ports, journal) {
             fail("APN_OPERATION_BLOCKED", "idempotency_conflict");
         return existing;
     }
-    const options = drop === 0n ? "0x" : encodeStargateNativeDrop(drop.toString(), recipient);
-    const nativeCap = await readExecutorCap(ports.sourceCall, "latest");
-    if (drop > nativeCap)
-        fail("APN_OPERATION_BLOCKED", "native_drop_cap_exceeded");
-    const quote = await quoteStargateV2Direct({ sourceChainId: 10, destinationChainId: 137, sourceToken: STARGATE_TOKEN_SOURCE_TOKEN,
-        destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, recipient, amountAtomic: amount.toString(), extraOptions: options }, ports.sourceCall);
-    assertLane(quote);
-    if (quote.quote.amountSentAtomic !== amount.toString())
-        fail("APN_OPERATION_BLOCKED", "dust_amount_not_supported");
-    if (BigInt(quote.quote.minimumOutputAtomic) < minOut)
-        fail("APN_OPERATION_BLOCKED", "minimum_output_not_met");
-    const source = await readPoolConfig(ports.sourceCall, 10, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, 30111, "latest");
-    const destination = await readPoolConfig(ports.destinationCall, 137, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, 30109, "latest");
-    const finalityPolicy = stargateV2RouteFinalityPolicy(STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN);
-    const [allowance, tokenBalance, dest] = await Promise.all([readAllowance(ports.sourceCall, owner, "pending"), readTokenBalance(ports.sourceCall, STARGATE_TOKEN_SOURCE_TOKEN, owner, "pending"),
-        ports.destinationBalances(recipient, finalityPolicy.destination.blockTag)]);
-    if (tokenBalance < amount)
-        fail("APN_OPERATION_BLOCKED", "insufficient_token_balance");
-    if (allowance !== 0n && allowance !== amount)
-        fail("APN_OPERATION_BLOCKED", "residual_allowance_cleanup_required");
-    const sendParam = { dstEid: 30109, to: pad(recipient, { size: 32 }), amountLD: amount, minAmountLD: BigInt(quote.quote.minimumOutputAtomic),
-        extraOptions: options, composeMsg: "0x", oftCmd: "0x" };
-    const exactFee = await requoteSend(ports.sourceCall, sendParam, `0x${BigInt(quote.block.numberAtomic).toString(16)}`);
-    if (exactFee !== BigInt(quote.quote.nativeMessageFeeAtomic))
-        fail("APN_REPREPARE_REQUIRED", "exact_send_fee_changed");
-    const sendData = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken", args: [sendParam,
-            { nativeFee: BigInt(quote.quote.nativeMessageFeeAtomic), lzTokenFee: 0n }, owner] });
-    const approvalRequired = allowance === 0n;
-    const approvalData = encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "approve", args: [STARGATE_TOKEN_SOURCE_POOL, amount] });
-    const approvalPrepared = approvalRequired ? await ports.prepareEnvelope({ chainId: 10, from: owner, to: STARGATE_TOKEN_SOURCE_TOKEN, data: approvalData, valueAtomic: "0" }) : undefined;
-    const baseNonce = approvalPrepared?.nonceAtomic;
-    const exactSendPrepared = approvalRequired ? undefined : await ports.prepareEnvelope({ chainId: 10, from: owner, to: STARGATE_TOKEN_SOURCE_POOL, data: sendData,
-        valueAtomic: quote.quote.nativeMessageFeeAtomic });
-    const quotedPrepared = approvalPrepared ?? exactSendPrepared;
-    const quotedMaxFee = uint(quotedPrepared.maxFeePerGasAtomic, true), quotedPriority = uint(quotedPrepared.maxPriorityFeePerGasAtomic);
-    if (quotedPriority > quotedMaxFee)
-        fail("APN_RPC_PROTOCOL", "priority_fee");
-    const approvedMaxFee = requestedMaxFee ?? quotedMaxFee, approvedPriority = requestedPriority ?? quotedPriority;
-    if (approvedMaxFee < quotedMaxFee || approvedPriority < quotedPriority)
-        fail("APN_INVALID_INPUT", "fee_ceiling_below_fresh_quote");
-    const feeApproval = { provenance: requestedMaxFee === undefined ? "exact_snapshot" : "owner_ceiling",
-        quotedMaxFeePerGasWei: quotedMaxFee.toString(), quotedMaxPriorityFeePerGasWei: quotedPriority.toString(),
-        approvedMaxFeePerGasWei: approvedMaxFee.toString(), approvedMaxPriorityFeePerGasWei: approvedPriority.toString() };
-    const envelope = (to, data, value, p) => ({ chainId: 10, from: owner, to, data,
-        valueAtomic: value, nonceAtomic: uint(p.nonceAtomic).toString(), gasLimitAtomic: uint(p.gasLimitAtomic, true).toString(),
-        maxFeePerGasAtomic: approvedMaxFee.toString(), maxPriorityFeePerGasAtomic: approvedPriority.toString() });
-    const approvalEnvelope = approvalPrepared === undefined ? undefined : envelope(STARGATE_TOKEN_SOURCE_TOKEN, approvalData, "0", approvalPrepared);
-    const approvalDebit = approvalEnvelope === undefined ? 0n : BigInt(approvalEnvelope.gasLimitAtomic) * BigInt(approvalEnvelope.maxFeePerGasAtomic);
-    const messageValue = BigInt(quote.quote.nativeMessageFeeAtomic);
-    if (approvalDebit + messageValue >= cap)
-        fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
-    const stagedGasCeiling = approvalRequired ? (cap - approvalDebit - messageValue) / approvedMaxFee : 0n;
-    if (approvalRequired && stagedGasCeiling < 1n)
-        fail("APN_OPERATION_BLOCKED", "bridge_gas_budget_empty");
-    const boundedStagedGas = stagedGasCeiling > STARGATE_TOKEN_MAX_BRIDGE_GAS ? STARGATE_TOKEN_MAX_BRIDGE_GAS : stagedGasCeiling;
-    const sendPrepared = exactSendPrepared ?? { nonceAtomic: (BigInt(baseNonce) + 1n).toString(), gasLimitAtomic: boundedStagedGas.toString(),
-        maxFeePerGasAtomic: approvedMaxFee.toString(), maxPriorityFeePerGasAtomic: approvedPriority.toString(),
-        nativeBalanceAtomic: approvalPrepared.nativeBalanceAtomic };
-    const sendEnvelope = envelope(STARGATE_TOKEN_SOURCE_POOL, sendData, quote.quote.nativeMessageFeeAtomic, sendPrepared);
-    for (const e of [approvalEnvelope, sendEnvelope].filter((x) => x !== undefined))
-        if (BigInt(e.maxPriorityFeePerGasAtomic) > BigInt(e.maxFeePerGasAtomic))
+    // The owner's claim is written before the quote and every RPC read: any other money operation on this account waits.
+    return await journal.admit({ operationId, profile, owner }, async () => {
+        const options = drop === 0n ? "0x" : encodeStargateNativeDrop(drop.toString(), recipient);
+        const nativeCap = await readExecutorCap(ports.sourceCall, "latest");
+        if (drop > nativeCap)
+            fail("APN_OPERATION_BLOCKED", "native_drop_cap_exceeded");
+        const quote = await quoteStargateV2Direct({ sourceChainId: 10, destinationChainId: 137, sourceToken: STARGATE_TOKEN_SOURCE_TOKEN,
+            destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, recipient, amountAtomic: amount.toString(), extraOptions: options }, ports.sourceCall);
+        assertLane(quote);
+        if (quote.quote.amountSentAtomic !== amount.toString())
+            fail("APN_OPERATION_BLOCKED", "dust_amount_not_supported");
+        if (BigInt(quote.quote.minimumOutputAtomic) < minOut)
+            fail("APN_OPERATION_BLOCKED", "minimum_output_not_met");
+        const source = await readPoolConfig(ports.sourceCall, 10, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, 30111, "latest");
+        const destination = await readPoolConfig(ports.destinationCall, 137, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, 30109, "latest");
+        const finalityPolicy = stargateV2RouteFinalityPolicy(STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN);
+        const [allowance, tokenBalance, dest] = await Promise.all([readAllowance(ports.sourceCall, owner, "pending"), readTokenBalance(ports.sourceCall, STARGATE_TOKEN_SOURCE_TOKEN, owner, "pending"),
+            ports.destinationBalances(recipient, finalityPolicy.destination.blockTag)]);
+        if (tokenBalance < amount)
+            fail("APN_OPERATION_BLOCKED", "insufficient_token_balance");
+        if (allowance !== 0n && allowance !== amount)
+            fail("APN_OPERATION_BLOCKED", "residual_allowance_cleanup_required");
+        const sendParam = { dstEid: 30109, to: pad(recipient, { size: 32 }), amountLD: amount, minAmountLD: BigInt(quote.quote.minimumOutputAtomic),
+            extraOptions: options, composeMsg: "0x", oftCmd: "0x" };
+        const exactFee = await requoteSend(ports.sourceCall, sendParam, `0x${BigInt(quote.block.numberAtomic).toString(16)}`);
+        if (exactFee !== BigInt(quote.quote.nativeMessageFeeAtomic))
+            fail("APN_REPREPARE_REQUIRED", "exact_send_fee_changed");
+        const sendData = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken", args: [sendParam,
+                { nativeFee: BigInt(quote.quote.nativeMessageFeeAtomic), lzTokenFee: 0n }, owner] });
+        const approvalRequired = allowance === 0n;
+        const approvalData = encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "approve", args: [STARGATE_TOKEN_SOURCE_POOL, amount] });
+        const approvalPrepared = approvalRequired ? await ports.prepareEnvelope({ chainId: 10, from: owner, to: STARGATE_TOKEN_SOURCE_TOKEN, data: approvalData, valueAtomic: "0" }) : undefined;
+        const baseNonce = approvalPrepared?.nonceAtomic;
+        const exactSendPrepared = approvalRequired ? undefined : await ports.prepareEnvelope({ chainId: 10, from: owner, to: STARGATE_TOKEN_SOURCE_POOL, data: sendData,
+            valueAtomic: quote.quote.nativeMessageFeeAtomic });
+        const quotedPrepared = approvalPrepared ?? exactSendPrepared;
+        const quotedMaxFee = uint(quotedPrepared.maxFeePerGasAtomic, true), quotedPriority = uint(quotedPrepared.maxPriorityFeePerGasAtomic);
+        if (quotedPriority > quotedMaxFee)
             fail("APN_RPC_PROTOCOL", "priority_fee");
-    const gasDebit = [approvalEnvelope, sendEnvelope].filter((x) => x !== undefined)
-        .reduce((sum, e) => sum + BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic), 0n);
-    const maximumDebit = BigInt(quote.quote.nativeMessageFeeAtomic) + gasDebit;
-    if (maximumDebit > cap)
-        fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
-    if (BigInt(sendPrepared.nativeBalanceAtomic) < maximumDebit)
-        fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
-    const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString(), operationId });
-    const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
-    const body = { schemaVersion: "apn.stargate-v2-token-operation.v5", operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy, finalityPolicyProvenance: "pinned_v2",
-        amountAtomic: amount.toString(), nativeDropAtomic: drop.toString(), maxNativeDebitAtomic: cap.toString(), minOutputAtomic: minOut.toString(),
-        sourceToken: STARGATE_TOKEN_SOURCE_TOKEN, destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, sourcePool: STARGATE_TOKEN_SOURCE_POOL,
-        destinationPool: STARGATE_TOKEN_DESTINATION_POOL, sourceEid: 30111, destinationEid: 30109,
-        executor: STARGATE_TOKEN_SOURCE_EXECUTOR, executorNativeCapAtomic: nativeCap.toString(), options, quote,
-        sourceCodeHash: source.poolCodeHash, destinationCodeHash: destination.poolCodeHash, sourceTokenCodeHash: source.tokenCodeHash,
-        destinationTokenCodeHash: destination.tokenCodeHash, policy, destinationTokenBalanceBeforeAtomic: dest.tokenAtomic,
-        destinationNativeBalanceBeforeAtomic: dest.nativeAtomic, destinationBalanceBlock: { numberAtomic: dest.blockNumberAtomic, hash: dest.blockHash },
-        initialAllowanceAtomic: allowance.toString(), allowanceRequired: approvalRequired, feeApproval, ...(approvalEnvelope === undefined ? {} : { approvalEnvelope }),
-        bridgeSimulation: { mode: approvalRequired ? "pending_post_approval" : "exact_at_prepare",
-            prepareStatus: approvalRequired ? "pending_post_approval" : "succeeded", gasCeilingAtomic: sendEnvelope.gasLimitAtomic }, sendEnvelope,
-        approvalFinalityWindowMs: STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS,
-        maximumDebitAtomic: maximumDebit.toString(), preparedAt, expiresAt, phase: "prepared",
-        transitions: [{ phase: "prepared", at: preparedAt, reason: "fresh_quote_caps_allowance_and_envelopes_frozen" }],
-    };
-    const operation = seal(body);
-    await journal.save(operation);
-    return operation;
+        const approvedMaxFee = requestedMaxFee ?? quotedMaxFee, approvedPriority = requestedPriority ?? quotedPriority;
+        if (approvedMaxFee < quotedMaxFee || approvedPriority < quotedPriority)
+            fail("APN_INVALID_INPUT", "fee_ceiling_below_fresh_quote");
+        const feeApproval = { provenance: requestedMaxFee === undefined ? "exact_snapshot" : "owner_ceiling",
+            quotedMaxFeePerGasWei: quotedMaxFee.toString(), quotedMaxPriorityFeePerGasWei: quotedPriority.toString(),
+            approvedMaxFeePerGasWei: approvedMaxFee.toString(), approvedMaxPriorityFeePerGasWei: approvedPriority.toString() };
+        const envelope = (to, data, value, p) => ({ chainId: 10, from: owner, to, data,
+            valueAtomic: value, nonceAtomic: uint(p.nonceAtomic).toString(), gasLimitAtomic: uint(p.gasLimitAtomic, true).toString(),
+            maxFeePerGasAtomic: approvedMaxFee.toString(), maxPriorityFeePerGasAtomic: approvedPriority.toString() });
+        const approvalEnvelope = approvalPrepared === undefined ? undefined : envelope(STARGATE_TOKEN_SOURCE_TOKEN, approvalData, "0", approvalPrepared);
+        const approvalDebit = approvalEnvelope === undefined ? 0n : BigInt(approvalEnvelope.gasLimitAtomic) * BigInt(approvalEnvelope.maxFeePerGasAtomic);
+        const messageValue = BigInt(quote.quote.nativeMessageFeeAtomic);
+        if (approvalDebit + messageValue >= cap)
+            fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
+        const stagedGasCeiling = approvalRequired ? (cap - approvalDebit - messageValue) / approvedMaxFee : 0n;
+        if (approvalRequired && stagedGasCeiling < 1n)
+            fail("APN_OPERATION_BLOCKED", "bridge_gas_budget_empty");
+        const boundedStagedGas = stagedGasCeiling > STARGATE_TOKEN_MAX_BRIDGE_GAS ? STARGATE_TOKEN_MAX_BRIDGE_GAS : stagedGasCeiling;
+        const sendPrepared = exactSendPrepared ?? { nonceAtomic: (BigInt(baseNonce) + 1n).toString(), gasLimitAtomic: boundedStagedGas.toString(),
+            maxFeePerGasAtomic: approvedMaxFee.toString(), maxPriorityFeePerGasAtomic: approvedPriority.toString(),
+            nativeBalanceAtomic: approvalPrepared.nativeBalanceAtomic };
+        const sendEnvelope = envelope(STARGATE_TOKEN_SOURCE_POOL, sendData, quote.quote.nativeMessageFeeAtomic, sendPrepared);
+        for (const e of [approvalEnvelope, sendEnvelope].filter((x) => x !== undefined))
+            if (BigInt(e.maxPriorityFeePerGasAtomic) > BigInt(e.maxFeePerGasAtomic))
+                fail("APN_RPC_PROTOCOL", "priority_fee");
+        const gasDebit = [approvalEnvelope, sendEnvelope].filter((x) => x !== undefined)
+            .reduce((sum, e) => sum + BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic), 0n);
+        const maximumDebit = BigInt(quote.quote.nativeMessageFeeAtomic) + gasDebit;
+        if (maximumDebit > cap)
+            fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
+        if (BigInt(sendPrepared.nativeBalanceAtomic) < maximumDebit)
+            fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
+        const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString(), operationId });
+        const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
+        const body = { schemaVersion: "apn.stargate-v2-token-operation.v5", operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy, finalityPolicyProvenance: "pinned_v2",
+            amountAtomic: amount.toString(), nativeDropAtomic: drop.toString(), maxNativeDebitAtomic: cap.toString(), minOutputAtomic: minOut.toString(),
+            sourceToken: STARGATE_TOKEN_SOURCE_TOKEN, destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, sourcePool: STARGATE_TOKEN_SOURCE_POOL,
+            destinationPool: STARGATE_TOKEN_DESTINATION_POOL, sourceEid: 30111, destinationEid: 30109,
+            executor: STARGATE_TOKEN_SOURCE_EXECUTOR, executorNativeCapAtomic: nativeCap.toString(), options, quote,
+            sourceCodeHash: source.poolCodeHash, destinationCodeHash: destination.poolCodeHash, sourceTokenCodeHash: source.tokenCodeHash,
+            destinationTokenCodeHash: destination.tokenCodeHash, policy, destinationTokenBalanceBeforeAtomic: dest.tokenAtomic,
+            destinationNativeBalanceBeforeAtomic: dest.nativeAtomic, destinationBalanceBlock: { numberAtomic: dest.blockNumberAtomic, hash: dest.blockHash },
+            initialAllowanceAtomic: allowance.toString(), allowanceRequired: approvalRequired, feeApproval, ...(approvalEnvelope === undefined ? {} : { approvalEnvelope }),
+            bridgeSimulation: { mode: approvalRequired ? "pending_post_approval" : "exact_at_prepare",
+                prepareStatus: approvalRequired ? "pending_post_approval" : "succeeded", gasCeilingAtomic: sendEnvelope.gasLimitAtomic }, sendEnvelope,
+            approvalFinalityWindowMs: STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS,
+            maximumDebitAtomic: maximumDebit.toString(), preparedAt, expiresAt, phase: "prepared",
+            transitions: [{ phase: "prepared", at: preparedAt, reason: "fresh_quote_caps_allowance_and_envelopes_frozen" }],
+        };
+        const operation = seal(body);
+        await journal.save(operation);
+        return operation;
+    });
 }
 export async function executeStargateV2Token(id, ports, journal) {
     const initial = await journal.load(id);

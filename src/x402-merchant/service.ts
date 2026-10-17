@@ -7,6 +7,7 @@ import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -64,7 +65,9 @@ export class MerchantService {
             }
             await assertEvmNativeCustody(this.state, profile, custody);
             await assertExclusiveEvmRawSigner(this.state, payer, profileHash);
-            await this.operations.assertEvmAccountAvailable(profileHash, 4326, payer);
+            // The account claim is written before the merchant challenge and any RPC read, and dropped if no operation is written.
+            return await this.operations.admit({ kind: "merchant_x402", profileHash, operationId, idempotencyHash, requestHash },
+                { domains: () => [evmConflictDomain(4326, payer)] }, async () => {
             // Only a profile whose active policy names its own wallet reaches the merchant; the challenge then names payee,
             // amount and asset, which the owner's admission (asset, mechanism, caps, optional payee pin) must cover.
             await this.owner.assertPayerPolicy(profile, payer);
@@ -84,6 +87,7 @@ export class MerchantService {
             const o = sealMerchant({ ...body, fingerprint: merchantFingerprint(body) });
             await this.records.persist(o);
             return o;
+            });
         });
     }
     async approve(id: string): Promise<MerchantOperation> {

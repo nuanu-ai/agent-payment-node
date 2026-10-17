@@ -22,6 +22,8 @@ import type { CircleV2PreflightTransport } from "./circle-v2-preflight.js";
 import type { NonEvmSourceJournal, NonEvmSourceJournalV3 } from "./non-evm-source-journal.js";
 import type { CircleV2SourcePreparation } from "./circle-v2-source-preparation.js";
 import { bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRIDGE_MIN_REMAINING_MS } from "./validation.js";
+import { admitOperation } from "../operation-index/admission.js";
+import { evmClaim } from "../operation-index/adapters/family-claims.js";
 
 const CIRCLE = "https://iris-api.circle.com";
 const USDC = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
@@ -68,6 +70,9 @@ export interface CircleV2SourceResult {
 }
 export interface CircleV2SourceApprovalPort { approve(preparation: CircleV2SourcePreparation): Promise<void> }
 
+/** The submit command signs only before its preparation expires: at most this long after it was prepared. */
+export const CIRCLE_V2_SOURCE_TTL_MS = 60_000;
+
 /** Production adapters use one pinned HTTPS Circle origin and one explicitly configured Base RPC origin. */
 export class CircleV2SourceService {
   constructor(private readonly state: StateStore, private readonly wrapping: WrappingSecretPort,
@@ -87,6 +92,13 @@ export class CircleV2SourceService {
     const rpc = new CircleBaseJsonRpc(rpcUrl, transport);
     const walletStore = new EncryptedWalletStore(this.state, this.wrapping);
     await this.state.initialize();
+    const journal = new NonEvmSourceJournalRepository(this.state.root);
+    // The payer's Base claim is written before the wallet, the quote and every RPC read. A key that already has a journal
+    // keeps its earlier refusal at staging (its fresh quote never matches the staged one).
+    const admitted = async <T>(work: () => Promise<T>): Promise<T> => await journal.load(profileHash, operationId) !== null ? await work()
+      : await admitOperation(this.state, { family: "circle_source", profileHash, operationId, idempotencyHash: null, requestHash: null },
+        [evmClaim(8453, payer)], work);
+    return await admitted(async () => {
     // No wallet.ensure or import is called here; an operator must import the exact payer profile separately.
     const loaded = await walletStore.describe(profile);
     if (loaded === null) fail("wallet_missing");
@@ -120,7 +132,7 @@ export class CircleV2SourceService {
         solanaRecipientAta: ata, recipientSetup: request.recipientSetup, profileHash, operationId,
         limits: { maxAllowanceAtomic: request.maxAllowanceAtomic, maxGasLimitAtomic: request.maxGasLimitAtomic,
           maxFeePerGasWei: request.maxFeePerGasWei, maxPriorityFeePerGasWei: request.maxPriorityFeePerGasWei,
-          maxNativeDebitWei: request.maxNativeDebitWei, ttlMs: 60_000 },
+          maxNativeDebitWei: request.maxNativeDebitWei, ttlMs: CIRCLE_V2_SOURCE_TTL_MS },
         claimedValidationHash: hash(canonicalJson({ quoteRequest, operationId })) }, {
         freshDraft: async () => {
           const response = bridgeRecord(await circlePost("/v2/quote/burn/usdc/6/5", quoteRequest));
@@ -141,7 +153,7 @@ export class CircleV2SourceService {
         sendRawTransaction: raw => rpc.send(raw),
         approve: p => new TtyCircleV2SourceApproval().approve(p),
         admission,
-        journal: new NonEvmSourceJournalRepository(this.state.root),
+        journal,
         admitLive: async p => {
           if (validationHash === undefined) fail("validation_missing");
           return { kind: "circle_v2_live_transport_v1", circleOrigin: CIRCLE, rpcOrigin: rpc.origin,
@@ -154,6 +166,7 @@ export class CircleV2SourceService {
         submissionAttempts: 1, bridgeCompletion: false, circleAttestationObserved: false,
         solanaDestinationFinalized: false };
     } finally { walletStore.clear(loaded.secret); }
+    });
   }
 }
 

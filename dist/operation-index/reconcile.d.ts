@@ -12,7 +12,10 @@ export declare class OperationIndexReconciler {
     private readonly store;
     private readonly registry;
     constructor(root: string, store: OperationIndexStore, registry: OperationRegistry);
-    /** Names only: each adapter store and `entries/` are listed; a record is read only when its name has no entry yet. */
+    /**
+     * Names only: each adapter store and `entries/` are listed; a record is read only when its name has no entry yet.
+     * Terminal records found by one walk (the bulk after an upgrade) are written together through `putTerminal`.
+     */
     reconcile(force?: boolean): Promise<void>;
     /** The entry a record yields today: claims and terminality from its own reader, or a quarantine when it is unreadable. */
     derive(adapter: OperationFamilyAdapter, name: StoredRecordName): Promise<OperationIndexEntry | null>;

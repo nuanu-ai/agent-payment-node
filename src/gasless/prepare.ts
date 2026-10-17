@@ -1,6 +1,7 @@
 import { hashObject } from "../canonical.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import type { OperationService } from "../operation-service.js";
+import { evmConflictDomain } from "../operation-conflict-domain.js";
 import type { StateStore } from "../state.js";
 import { canonicalIdempotencyKey } from "../transfer-policy.js";
 import { canonicalProfile } from "../wallet-policy.js";
@@ -46,7 +47,9 @@ export class GaslessPreparation {
       const binding = await gaslessOwner(state, profile), row = gaslessDeployment(request.chainId);
       const allowlist = gaslessPolicyChain(request.chainId) !== null ? await this.o.policy.prepare({ profile, owner: binding.owner,
         request, token: row.token }, operationId) : undefined;
-      await this.o.operations.assertEvmAccountAvailable(profileHash, request.chainId, binding.owner.address);
+      // The account claim is written before any RPC or provider read, and dropped if no operation is written.
+      return await this.o.operations.admit({ kind: "gasless_transfer", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [evmConflictDomain(request.chainId, binding.owner.address)] }, async () => {
       if ([GASLESS_ZERO_ADDRESS, binding.owner.address, row.token, row.paymaster, row.entryPoint, row.delegate].includes(request.recipient)) {
         gaslessFailure("APN_INVALID_INPUT", "gasless_recipient_alias");
       }
@@ -71,6 +74,7 @@ export class GaslessPreparation {
       const intent = { ...unsigned, unsignedEnvelopeHash: hashObject(gaslessEnvelopeBinding(unsigned)) };
       const operation = newGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash, intent });
       await this.o.records.persist(operation); return operation;
+      });
     }));
   }
 }

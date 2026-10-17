@@ -101,17 +101,6 @@ export class Permit2ProductionRepository extends SecureStateStore {
     if (record.exposureJournal?.signed != null) await validatePermit2ProductionSigned(record.exposureJournal.signed, record);
     return record;
   }
-  async listAllOperations(): Promise<readonly Permit2ProductionRecord[]> {
-    const records: Permit2ProductionRecord[] = [];
-    for (const entry of await this.readDirectory("permit2-production")) {
-      if (!entry.isFile() || !/^[a-f0-9]{64}\.json$/u.test(entry.name)) corrupt();
-      const record = await this.findOperation(entry.name.slice(0, -5)); if (record === null) corrupt(); records.push(record);
-    }
-    return records;
-  }
-  async listOperations(profileHash: string): Promise<readonly Permit2ProductionRecord[]> {
-    if (!HASH.test(profileHash)) corrupt(); return (await this.listAllOperations()).filter(record => record.profileHash === profileHash);
-  }
   /** Caller holds profile + operation locks. Only unsigned preparation/lease states can be written in P2. */
   async persistLocked(record: Permit2ProductionRecord, createOnly = false): Promise<void> {
     if (createOnly || record.state === "prepared" || record.exposureJournal !== undefined) blocked("Prepared Permit2 material requires deadline-checked persistence.");

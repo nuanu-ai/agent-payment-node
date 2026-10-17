@@ -8,6 +8,7 @@ import { ApnError } from "./errors.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { evmConflictDomain, sharedEvmConflictDomain } from "./operation-conflict-domain.js";
 import {
   assertUnattendedX402Balance,
   effectiveX402Cap,
@@ -97,15 +98,16 @@ export class X402Service extends X402PaidRequest {
       });
       if (existing !== null) return publicX402Operation(existing.record as X402OperationRecord);
       const payer = await resolveX402Payer(this.context, profileHash, network.chainId);
-      // EIP-3009 uses its own random nonce: purchases share the account, but nonce and EIP-7702 spenders still exclude them.
-      if (payer.transferMethod === "eip3009") await this.operations.assertEvmAccountSharedAvailable(profileHash, network.chainId, payer.wallet);
-      else await this.operations.assertEvmAccountAvailable(profileHash, network.chainId, payer.wallet);
-
       const profilePolicy = requireProfilePolicy(
         await this.context.requirePolicy().load(payer.policy),
       );
       const capAtomic = effectiveX402Cap(profilePolicy, callerCap);
       const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic, chainId: network.chainId, ...requestFields });
+      // The account claim is written before the seller challenge and any RPC read, and dropped if no operation is written.
+      // EIP-3009 uses its own random nonce: purchases share the account, but nonce and EIP-7702 spenders still exclude them.
+      return await this.operations.admit({ kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash },
+        { domains: () => [payer.transferMethod === "eip3009" ? sharedEvmConflictDomain(network.chainId, payer.wallet)
+          : evmConflictDomain(network.chainId, payer.wallet)] }, async () => {
       const wallet = payer.wallet;
       const http = this.context.requireHttp();
       const rpc = selectX402Rpc(this.context.requireRpc(), network.chainId);
@@ -230,6 +232,7 @@ export class X402Service extends X402PaidRequest {
       });
       await state.writeX402Operation(operation);
       return publicX402Operation(operation);
+      });
     });
   }
 
