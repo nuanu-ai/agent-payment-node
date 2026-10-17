@@ -83,7 +83,7 @@ test("chain binders reject excess fields, inherited objects, malformed integers,
 test("inventories expose frozen chain identities without admission and runtime factory installs no swap dependency", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const uniswap = createApnCore(bindArgv(["swap", "ethereum", "uniswap", "inventory"]), { stateRoot: temporary.root });
-  assert.equal(uniswap.context.uniswap, undefined); assert.equal(uniswap.context.sunswap, undefined); assert.equal(uniswap.context.jupiter, undefined);
+  assert.equal(uniswap.context.sunswap, undefined); assert.equal(uniswap.context.jupiter, undefined);
   const core = new ApnCore({ state: new StateStore(temporary.root) });
   const sun = await core.execute({ command: "swap.sunswap.inventory" });
   assert.equal(sun.ok, true); assert.equal((sun.data as any).ownerAdmission.evaluated, false); assert.equal((sun.data as any).execution, "dormant");

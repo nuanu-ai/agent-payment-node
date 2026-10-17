@@ -4,7 +4,7 @@ import { ApnError } from "../../../errors.js";
 import { parseAtomic } from "../../../money.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../../model.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry, type SwapProtocolRegistry } from "../../protocol-registry.js";
-import type { UniswapTransactionEnvelope } from "../../uniswap-codec.js";
+import type { UniswapTransactionEnvelope } from "../../uniswap-v3/envelope.js";
 import { UNISWAP_CHAIN, UNISWAP_ROUTER } from "../../uniswap-pin.js";
 import { decodeUniswapRouterCalldataFor } from "../../uniswap-router.js";
 import type { UniswapExecutionApprovalRequest, UniswapExecutionBinding, UniswapExecutionFreshness, UniswapOwnerAdmission } from "./types.js";

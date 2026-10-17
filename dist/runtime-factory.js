@@ -187,7 +187,7 @@ export function createApnCore(bound, options = {}) {
         ? new StargateTokenService(state, wrappingSecret, process.env, () => clock.now().getTime()) : undefined);
     // Keyless Uniswap is built per swap.uniswap.* command, like bridge and 1Click. Only CLI approve gets a terminal;
     // MCP intercepts approve/execute with a CLI handoff before this factory runs.
-    const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.") && options.uniswap === undefined
+    const uniswapRuntime = options.uniswapRuntime ?? (bound.request.command.startsWith("swap.uniswap.")
         ? createUniswapKeylessRuntime({ state, wrapping: wrappingSecret, call: lazyEthereumRpcCall(process.env), verifyPins: verifyUniswapV3CodePins, verifySendPins: verifyUniswapV3MutablePins, clock,
             // The owner's activated allowlist revision; none active means preparation refuses with swap_owner_admission_required.
             policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
@@ -288,7 +288,6 @@ export function createApnCore(bound, options = {}) {
             orcaStableObserve: async (operationId) => await new OrcaStableFinalizedObserver(new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)), new SavedOrcaStableMaterialStore(state.root), new OrcaStableExecutionBindingStore(state.root), chainAccounts, solanaRpc, () => clock.now()).observe(operationId),
             orcaStableRelease: async (operationId) => await releaseOrcaStableNoEffect(new GuardedSwapService(new SwapOperationRepository(state.root), new AssetUsageLedger(state.root)), new SavedOrcaStableMaterialStore(state.root), operationId, clock.now()),
         } : {}),
-        ...(options.uniswap === undefined ? {} : { uniswap: options.uniswap }),
         ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
         ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
         ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
