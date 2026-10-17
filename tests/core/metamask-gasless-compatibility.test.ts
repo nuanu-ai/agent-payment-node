@@ -436,7 +436,8 @@ async function regularFileBytes(root: string): Promise<Map<string, Buffer>> {
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       const path = join(directory, entry.name);
-      if (entry.isDirectory() && relative(root, path) === "locks") continue;
+      // Locks and the derived operation index are not records; every record byte is compared.
+      if (entry.isDirectory() && ["locks", "operation-index"].includes(relative(root, path))) continue;
       if (entry.isDirectory()) await visit(path);
       else if (entry.isFile()) result.set(relative(root, path), await readFile(path));
     }
