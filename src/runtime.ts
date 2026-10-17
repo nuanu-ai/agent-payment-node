@@ -47,7 +47,6 @@ import type { FacilitatorGaslessDependencies } from "./facilitator-gasless/servi
 import type { OperationAbandonApprovalPort } from "./operation-abandon-approval.js";
 import type { UniswapTokenCommandRuntime } from "./swap/uniswap-v3/token-execution.js";
 import type { SunSwapReadOnlyQuoteBuilder } from "./swap/sunswap-tron/command-service.js";
-import type { JupiterReadOnlyQuoteBuilder } from "./swap/jupiter-solana/command-service.js";
 import type { PortfolioDependencies } from "./portfolio/command.js";
 import type { AllowlistPolicyApprovalPort } from "./allowlist-policy-activation.js";
 import type { CommandRequest } from "./commands.js";
@@ -107,7 +106,6 @@ export interface CoreDependencies {
   readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
   readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-  readonly jupiter?: JupiterReadOnlyQuoteBuilder;
   readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
@@ -182,7 +180,6 @@ export class RuntimeContext {
   readonly orcaStableRelease?: (operationId: string) => Promise<unknown>;
   readonly orcaStableObserve?: (operationId: string) => Promise<unknown>;
   readonly sunswap?: SunSwapReadOnlyQuoteBuilder;
-  readonly jupiter?: JupiterReadOnlyQuoteBuilder;
   readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
@@ -258,7 +255,6 @@ export class RuntimeContext {
     if (dependencies.orcaStableRelease !== undefined) this.orcaStableRelease = dependencies.orcaStableRelease;
     if (dependencies.orcaStableObserve !== undefined) this.orcaStableObserve = dependencies.orcaStableObserve;
     if (dependencies.sunswap !== undefined) this.sunswap = dependencies.sunswap;
-    if (dependencies.jupiter !== undefined) this.jupiter = dependencies.jupiter;
     if (dependencies.jupiterV1Runtime !== undefined) this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
     if (dependencies.facilitatorGasless !== undefined) this.facilitatorGasless = dependencies.facilitatorGasless;
     if (dependencies.smartAccountGasless !== undefined) this.smartAccountGasless = dependencies.smartAccountGasless;

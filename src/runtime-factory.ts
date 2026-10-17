@@ -260,7 +260,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
       policy: options.swapPolicy ?? (async (profile) => (await loadActiveAssetPolicyRegistry({ state, clock }, profile))?.registry ?? null),
       foreground: bound.request.command === "swap.orca.approve" ? "tty" : REFUSING_SWAP_APPROVAL })
     : undefined);
-  const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.") && options.jupiter === undefined
+  const jupiterV1Runtime = (bound.request.command.startsWith("swap.jupiter.")
     ? createJupiterV1Runtime({ state, clock, rpc: solanaRpc, wrappingSecret,
       foreground: bound.request.command === "swap.jupiter.approve" || bound.request.command === "swap.jupiter.execute" }) : undefined);
   const stablePorts = () => ({ state, clock, accounts: chainAccounts, rpc: solanaRpc, verifyPins: options.orcaStablePinVerifier ?? verifyOrcaProgramPins });
@@ -346,7 +346,6 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
         new SavedOrcaStableMaterialStore(state.root), operationId, clock.now()),
     } : {}),
     ...(options.sunswap === undefined ? {} : { sunswap: options.sunswap }),
-    ...(options.jupiter === undefined ? {} : { jupiter: options.jupiter }),
     ...(bound.request.command.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
       circleApproval: options.circleApproval ?? new CircleV2ApprovalExecutor(state,
         circleApprovalRpcFromBridge(() => bridgeRpcFactory(process.env)(8453)),

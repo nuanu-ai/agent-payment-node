@@ -3,10 +3,7 @@ import { ApnError } from "../../errors.js";
 import type { RuntimeContext } from "../../runtime.js";
 import { SwapOperationRepository } from "../repository.js";
 import { SWAP_TERMINAL_STATES } from "../model.js";
-import {
-  EMPTY_PROGRAM_SNAPSHOT, JUPITER_SOLANA_SCHEMA, JUPITER_SWAP_API_V2, JUPITER_V2_SOURCE, JUPITER_V6_PROGRAM,
-  SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, WRAPPED_SOL_MINT,
-} from "./catalog.js";
+import { JUPITER_V6_PROGRAM, SOLANA_MAINNET_GENESIS, SOLANA_USDC_MINT, WRAPPED_SOL_MINT } from "./catalog.js";
 import { JUPITER_V1_HISTORICAL_ROUTES, JUPITER_V1_KNOWN_ROUTES, JUPITER_V1_ROUTES } from "./v1-route-config.js";
 import { JUPITER_V1_IMMUTABLE_PROGRAMS, JUPITER_V1_PROGRAM_AUTHORITIES } from "./v1-pins.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "../route-admission.js";
@@ -15,53 +12,29 @@ import { swapMechanismDigest } from "../pin.js";
 import { JupiterV1DispatchStore } from "./v1-dispatch.js";
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
 
-export interface JupiterReadOnlyQuoteBuilder {
-  quote(input: Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }> & { readonly now: Date }): Promise<unknown>;
-}
-
 type Request = Extract<CommandRequest, { readonly command: `swap.jupiter.${string}` }>;
 export async function executeJupiterCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
   if (request.command === "swap.jupiter.inventory") return data(jupiterInventory(context.jupiterV1Runtime !== undefined), "official_catalog_not_owner_admission");
+  // The runtime factory installs the V1 runtime for every swap.jupiter.* command; only a bare test core lacks it.
   const runtime=context.jupiterV1Runtime;
-  if(runtime!==undefined){
-    assertJupiterV1Runtime(runtime,context.state.root);
-    if(request.command==="swap.jupiter.quote")return data(await runtime.quote(request,context.clock.now()),"unsigned_exact_simulated_swap_quote");
-    if(request.command==="swap.jupiter.prepare")return operationOutcome(await runtime.prepare(request,context.clock.now()));
-    const op=await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
-    if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Swap operation was not found.");
-    if(!JUPITER_V1_KNOWN_ROUTES.some(route=>op.mechanismDigest===swapMechanismDigest(route.mechanismPin)))throw new ApnError("APN_OPERATION_BLOCKED","This operation belongs to another mechanism.");
-    if(request.command==="swap.jupiter.status")return await withDispatch(await runtime.status(request.operationId,context.clock.now()),context);
-    if(request.command==="swap.jupiter.approve")return await withDispatch(await runtime.approveAndExecute(request.operationId,context.clock.now()),context);
-    if(request.command==="swap.jupiter.execute")return await withDispatch(await runtime.execute(request.operationId,context.clock.now()),context);
-  }
-  if (request.command === "swap.jupiter.quote") {
-    if (context.jupiter === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
-      "Jupiter quote requires an explicitly injected read-only builder.", { reason: "jupiter_runtime_unavailable" });
-    return data(await context.jupiter.quote({ ...request, now: context.clock.now() }), "unsigned_read_only_swap_quote");
-  }
-  if (request.command === "swap.jupiter.prepare") throw new ApnError("APN_OPERATION_BLOCKED",
-    "No active owner swap admission is installed; catalog presence does not authorize preparation.",
-    { reason: "jupiter_owner_admission_required" });
-  if (request.command === "swap.jupiter.status") return await status(request.operationId, context);
-  throw new ApnError("APN_OPERATION_BLOCKED",
-    "Jupiter approval and execution remain blocked because the JUP6 instruction and account ABI is not verified for signing.",
-    { reason: "jupiter_v6_instruction_unverified" });
-}
-
-async function status(operationId: string, context: RuntimeContext): Promise<CommandOutcome> {
-  const operation = await new SwapOperationRepository(context.state.root).loadAny(operationId);
-  if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
-  return { proofClass: operation.state, data: null, operation, receipt: null, nextActions: [] };
+  if(runtime===undefined)throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE","Jupiter commands require the installed Jupiter V1 runtime.",{reason:"jupiter_runtime_unavailable"});
+  assertJupiterV1Runtime(runtime,context.state.root);
+  if(request.command==="swap.jupiter.quote")return data(await runtime.quote(request,context.clock.now()),"unsigned_exact_simulated_swap_quote");
+  if(request.command==="swap.jupiter.prepare")return operationOutcome(await runtime.prepare(request,context.clock.now()));
+  const op=await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
+  if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Swap operation was not found.");
+  if(!JUPITER_V1_KNOWN_ROUTES.some(route=>op.mechanismDigest===swapMechanismDigest(route.mechanismPin)))throw new ApnError("APN_OPERATION_BLOCKED","This operation belongs to another mechanism.");
+  if(request.command==="swap.jupiter.status")return await withDispatch(await runtime.status(request.operationId,context.clock.now()),context);
+  if(request.command==="swap.jupiter.approve")return await withDispatch(await runtime.approveAndExecute(request.operationId,context.clock.now()),context);
+  return await withDispatch(await runtime.execute(request.operationId,context.clock.now()),context);
 }
 /** One current route per pool quotes; the byte-pinned generations of APN 0.5.42 and earlier stay listed for observation only. */
 function jupiterInventory(installed: boolean): unknown {
   const route = (r: (typeof JUPITER_V1_KNOWN_ROUTES)[number]) => ({ routeId: r.routeId, pool: r.pool, route: swapRouteOf(r.mechanismPin),
     routeDigest: swapRouteDigest(r.mechanismPin), mechanismPin: r.mechanismPin, mechanismDigest: swapMechanismDigest(r.mechanismPin),
     protocolRegistryDigest: r.protocolRegistry.registryDigest });
-  return { catalog: Object.freeze({ schemaVersion: JUPITER_SOLANA_SCHEMA, genesis: SOLANA_MAINNET_GENESIS, api: JUPITER_SWAP_API_V2,
-    program: JUPITER_V6_PROGRAM, nativeInput: WRAPPED_SOL_MINT, outputToken: SOLANA_USDC_MINT, source: JUPITER_V2_SOURCE, programSnapshot: EMPTY_PROGRAM_SNAPSHOT }),
+  return { catalog: Object.freeze({ genesis: SOLANA_MAINNET_GENESIS, program: JUPITER_V6_PROGRAM, nativeInput: WRAPPED_SOL_MINT, outputToken: SOLANA_USDC_MINT }),
     ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION, execution: installed ? "foreground_cli_after_owner_admission" : "dormant",
-    v2Quantum: { signable: false, execution: "dormant" },
     v1: { installed, provenance: "upgrade_authority", programAuthorities: [...JUPITER_V1_PROGRAM_AUTHORITIES, ...JUPITER_V1_IMMUTABLE_PROGRAMS],
       routes: JUPITER_V1_ROUTES.map(route),
       historicalObserveOnly: JUPITER_V1_HISTORICAL_ROUTES.map((r) => ({ routeId: r.routeId, mechanismDigest: swapMechanismDigest(r.mechanismPin) })) } };
