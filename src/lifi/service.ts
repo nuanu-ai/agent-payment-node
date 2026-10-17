@@ -71,11 +71,6 @@ export class BridgeService {
     return await this.locked(operationId, async (op) => publicBridgeOperation(
       op.terminal || op.state === "awaiting_approval" ? op : await this.execution(op).resume(op, this.dependencies().approval)));
   }
-  async status(operationId: string): Promise<StoredPublicBridgeOperation> {
-    const found = await this.operations.required(operationId);
-    if (found.kind !== "bridge_route") bridgeFailure("APN_OPERATION_BLOCKED", "operation_is_not_bridge");
-    return publicStoredBridgeOperation(found.record);
-  }
   async receipt(operationId: string): Promise<BridgeReceipt | Record<string, unknown>> {
     const found = await this.operations.required(operationId);
     if (found.kind !== "bridge_route") bridgeFailure("APN_OPERATION_BLOCKED", "operation_is_not_bridge");

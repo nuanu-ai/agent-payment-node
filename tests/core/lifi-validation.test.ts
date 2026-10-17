@@ -14,6 +14,7 @@ import { bridgeDecimal } from "../../src/lifi/asset-registry.js";
 import { bridgeUint } from "../../src/lifi/validation.js";
 import { temporaryState, savedBridgeOperations } from "./helpers.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_KEY, LIFI_SYNTHETIC_SENDER, lifiFixture, lifiRoute } from "./lifi-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 test("LI.FI integer parsing preserves exact USDC and wei boundaries without coercion or rounding", () => {
   assert.equal(bridgeDecimal("0.000001", 6, true), "1"); assert.equal(bridgeDecimal("10.123456", 6, true), "10123456"); assert.equal(bridgeDecimal("0", 6), "0");
@@ -163,7 +164,7 @@ test("LI.FI independent post-approval gas over the frozen ceiling stops the brid
   const maximum = operation.effects.at(-1)!.envelope.economics.gasLimitAtomic;
   const send = s.source.send.bind(s.source); s.source.send = async (raw) => { const hash = await send(raw); s.source.estimateGas = (BigInt(maximum) + 1n).toString(); return hash; };
   const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
-  const current = (await s.core.bridges.records.findOperation(id))!; assert.equal(current.state, "failed_after_approval");
+  const current = (await findStored(s.core.bridges.records, id))!; assert.equal(current.state, "failed_after_approval");
   assert.equal(current.effects[1]!.envelope.economics.gasLimitAtomic, maximum); assert.equal(current.effects[1]!.phase, "unsealed"); assert.equal(s.source.submissions.length, 1);
 });
 
@@ -186,7 +187,7 @@ test("LI.FI encrypted effect is role-bound, tamper-evident and unavailable custo
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root); const { id, operation } = await s.prepare();
   await assert.rejects(s.custody.seal(operation, "approval", operation.intent.owner), { code: "APN_PROVIDER_EFFECT_UNAVAILABLE" }); assert.equal(s.wrapping.loads, 0);
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, true);
-  const current = (await s.core.bridges.records.findOperation(id))!, directory = join(temporary.root, "bridge-effects", current.profileHash);
+  const current = (await findStored(s.core.bridges.records, id))!, directory = join(temporary.root, "bridge-effects", current.profileHash);
   const approvalPath = join(directory, `${id}-approval.json`), bridgePath = join(directory, `${id}-bridge.json`), original = await readFile(bridgePath, "utf8");
   const approval = await readFile(approvalPath, "utf8"); assert.ok(!original.includes(LIFI_SYNTHETIC_KEY)); assert.ok(!original.includes(current.effects[1]!.envelope.data));
   await writeFile(bridgePath, approval, { mode: 0o600 }); await assert.rejects(s.custody.load(current, "bridge"), { code: "APN_STATE_CORRUPT" });

@@ -1,10 +1,11 @@
 import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
+import { tokenEffectRound } from "./token-operation.js";
 export class UniswapTokenEffectJournal extends SecureStateStore {
     async load(op, kind) {
         await this.initialize();
-        const value = await this.readJson(this.path(op.operationId, kind));
+        const value = await this.readJson(this.path(op, kind));
         return value === null ? null : validate(value, op, kind);
     }
     async seal(op, kind, transactionHash, envelope, now, primaryProviderId = null) {
@@ -29,12 +30,12 @@ export class UniswapTokenEffectJournal extends SecureStateStore {
                 if (primaryProviderId !== null) {
                     const { integrityHash: _old, schemaVersion: _schema, ...legacy } = prior, upgraded = { ...legacy, schemaVersion: "apn.uniswap-token-effect.v2", primaryProviderId };
                     const next = validate({ ...upgraded, integrityHash: hashObject(upgraded) }, op, kind);
-                    await this.writeJson(this.path(op.operationId, kind), next);
+                    await this.writeJson(this.path(op, kind), next);
                     return next;
                 }
                 return prior;
             }
-            await this.writeJson(this.path(op.operationId, kind), effect, true);
+            await this.writeJson(this.path(op, kind), effect, true);
             return effect;
         });
     }
@@ -55,11 +56,16 @@ export class UniswapTokenEffectJournal extends SecureStateStore {
                 blocked("Uniswap token effect was already attempted.", "uniswap_token_single_send");
             const { integrityHash: _old, ...old } = current, body = { ...old, phase, sendAttempts: 1, updatedAt: instant(now) };
             const next = validate({ ...body, integrityHash: hashObject(body) }, op, kind);
-            await this.writeJson(this.path(op.operationId, kind), next);
+            await this.writeJson(this.path(op, kind), next);
             return next;
         });
     }
-    path(id, kind) { stateIdentifier(id, "Uniswap token operation"); return `uniswap-token-effects/${id}-${kind}.json`; }
+    /** Round 0 keeps the original file; a re-armed cleanup (round n) seals its own effect beside it. */
+    path(op, kind) {
+        stateIdentifier(op.operationId, "Uniswap token operation");
+        const round = tokenEffectRound(op, kind);
+        return `uniswap-token-effects/${op.operationId}-${kind}${round === 0 ? "" : `-r${round}`}.json`;
+    }
 }
 function validate(value, op, kind) {
     const keys = ["schemaVersion", "operationId", "kind", "markerHash", "envelopeHash", "transactionHash",

@@ -80,7 +80,8 @@ const CASES: Readonly<Record<Exclude<OperationFamily, "relay_unsigned">, readonl
   gasless_usdt: [{ label: "usdt", states: USDT_EXECUTION_STATES, terminal: state => !(USDT_EXECUTION_OPEN_STATES as readonly string[]).includes(state),
     record: state => ({ state }) }],
   oneclick_source: [byPhase("1click", Object.keys(ONECLICK_SOURCE_EDGES), noExit(ONECLICK_SOURCE_EDGES), { effectiveDeadline: FUTURE })],
-  // No observer of the source receipt exists for this route: no phase is an outcome, and only its window ends the claim.
+  // No phase is an outcome: its signing window ends the claim, or earlier a finalized burn receipt its status records
+  // beside the journal (a record without a burn hash, like these, never reads one).
   circle_source: [byPhase("cctp source", NON_EVM_SOURCE_PHASES, () => false, { createdAt: new Date().toISOString() })],
   circle_approval: [byPhase("circle approval", CIRCLE_APPROVAL_PHASES, listed(CIRCLE_APPROVAL_RESOLVED_PHASES), { preparation: { expiresAt: FUTURE } })],
   metamask_native: [{ label: "metamask native", states: METAMASK_NATIVE_STATES, terminal: listed(METAMASK_NATIVE_RESOLVED_STATES),

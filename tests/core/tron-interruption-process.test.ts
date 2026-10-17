@@ -6,6 +6,7 @@ import test from "node:test";
 import { RailOperationRepository } from "../../src/rail-operation-repository.js";
 import type { TronTransaction } from "../../src/tron/transaction.js";
 import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 type WorkerMessage =
   | { kind: "prepared"; operationId: string }
@@ -48,7 +49,7 @@ test("TRON real SIGKILL after received broadcast restarts as observation only", 
   assert.equal(received.broadcastCalls, 1);
   const transaction = received.transaction;
   const repository = new RailOperationRepository(temporary.root);
-  const before = await repository.findOperation(prepared.operationId);
+  const before = await findStored(repository, prepared.operationId);
   assert.ok(before);
   assert.equal(before.state, "submitting");
   assert.equal(before.reason, "submission_intent_persisted");
@@ -83,7 +84,7 @@ test("TRON real SIGKILL after received broadcast restarts as observation only", 
   const [resumeCode, resumeSignal] = await once(resumed, "exit");
   assert.equal(resumeCode, 0); assert.equal(resumeSignal, null);
 
-  const after = await repository.findOperation(prepared.operationId);
+  const after = await findStored(repository, prepared.operationId);
   assert.ok(after);
   assert.deepEqual(after.transitions.slice(0, before.transitions.length), before.transitions);
   assert.deepEqual(after.transitions.slice(-2).map((entry) => entry.state), ["unknown_finality", "completed"]);

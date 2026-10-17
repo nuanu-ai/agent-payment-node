@@ -26,7 +26,7 @@ for (const advance of ["foreground", "wallet", "policy"] as const) test(`WBTC ${
   }
   const result = await f.core.execute({ command: "bridge.approve", operationId: op.operationId });
   assert.equal(result.ok, false); assert.equal(f.source.submissions.length, 0);
-  const latest = (await f.core.bridges.records.findOperation(op.operationId))!;
+  const latest = (await findStored(f.core.bridges.records, op.operationId))!;
   assert(latest.effects.every(e => e.transactionHash === null));
 });
 
@@ -52,7 +52,7 @@ test("queued physical send rejects disposed grant and exact raw substitution", a
   const { op, f } = await preparedWbtc(temp.root, new Date("2026-10-09T03:44:00Z"));
   f.source.failObserve = true;
   assert((await f.core.execute({ command: "bridge.approve", operationId: op.operationId })).ok);
-  const current = (await f.core.bridges.records.findOperation(op.operationId))!, material = (await f.custody.load(current, "approval"))!;
+  const current = (await findStored(f.core.bridges.records, op.operationId))!, material = (await f.custody.load(current, "approval"))!;
   let now = f.now.getTime(), posts = 0;
   const factory = bridgeRpcFactory({ APN_ETHEREUM_RPC_URL: "https://rpc.example" }, { transport: {
     request: async (_url, _method, body, _max, _code, beforeSend) => {
@@ -74,7 +74,7 @@ test("permanent SIGN/SEND claims survive valid journal restoration and usage rem
   const path = join(temp.root, "bridge-operations", op.profileHash, `${op.operationId}.json`), saved = await readFile(path);
   f.source.failObserve = true;
   assert((await f.core.execute({ command: "bridge.approve", operationId: op.operationId })).ok);
-  const current = (await f.core.bridges.records.findOperation(op.operationId))!, material = (await f.custody.load(current, "approval"))!;
+  const current = (await findStored(f.core.bridges.records, op.operationId))!, material = (await f.custody.load(current, "approval"))!;
   await writeFile(path, saved); await rm(join(temp.root, "asset-usage"), { recursive: true, force: true });
   const claims = new BridgeEffectClaims(temp.root);
   // The same claim is the same effect; a different effect for a claimed boundary is refused.
@@ -83,7 +83,7 @@ test("permanent SIGN/SEND claims survive valid journal restoration and usage rem
   assert.equal((await claims.sendClaim(op, "approval"))?.transactionHash, material.transactionHash);
   // The restored journal cannot release or resend the claimed approval.
   const again = await f.core.execute({ command: "bridge.approve", operationId: op.operationId });
-  assert.equal(again.ok, false); assert.equal((await f.core.bridges.records.findOperation(op.operationId))!.terminal, false);
+  assert.equal(again.ok, false); assert.equal((await findStored(f.core.bridges.records, op.operationId))!.terminal, false);
   assert.equal(f.source.submissions.length, 1);
 });
 
@@ -96,7 +96,7 @@ for (const stage of ["DNS", "TLS", "queue"] as const) test(`normal WBTC async Br
   const temp = await temporaryState(); t.after(temp.cleanup);
   const { op, f } = await preparedWbtc(temp.root, new Date("2026-10-09T03:44:00Z"));
   f.source.failObserve = true; assert((await f.core.execute({ command: "bridge.approve", operationId: op.operationId })).ok);
-  const current = (await f.core.bridges.records.findOperation(op.operationId))!, material = (await f.custody.load(current, "approval"))!;
+  const current = (await findStored(f.core.bridges.records, op.operationId))!, material = (await f.custody.load(current, "approval"))!;
   const requests: Array<{ ends: number; tls(): void; respond(): void }> = [];
   t.mock.method(https, "request", ((_url: unknown, _options: unknown, callback: (response: unknown) => void) => {
     const req = new EventEmitter() as any, socket = new EventEmitter() as any; socket.remoteAddress = "8.8.8.8";
@@ -146,7 +146,7 @@ test("old WBTC absent activation remains readable and never requests signing con
   await writeFile(join(temp.root, "bridge-operations", op.profileHash, `${op.operationId}.json`), `${canonicalJson(legacy)}\n`);
   const before = hashObject(legacy), result = await f.core.execute({ command: "bridge.approve", operationId: op.operationId });
   assert.equal(result.ok, false); assert.equal(result.error?.details?.reason, "bridge_activation_binding_missing"); assert.equal(f.approval.calls.length, 0); assert.equal(f.source.submissions.length, 0);
-  assert.equal(hashObject((await f.core.bridges.records.findOperation(op.operationId))!), before);
+  assert.equal(hashObject((await findStored(f.core.bridges.records, op.operationId))!), before);
 });
 
 test("true policy lock defers concurrent revocation until WBTC effects finish", async t => {
@@ -189,7 +189,7 @@ async function partialWbtc(root: string) {
   assert((await result.f.core.execute({ command: "bridge.approve", operationId: result.op.operationId })).ok);
   result.f.source.failObserve = false; result.f.source.safeApproval = false;
   assert((await result.f.core.execute({ command: "operation.resume", operationId: result.op.operationId })).ok);
-  const current = (await result.f.core.bridges.records.findOperation(result.op.operationId))!;
+  const current = (await findStored(result.f.core.bridges.records, result.op.operationId))!;
   assert.equal(result.f.source.submissions.length, 1); assert.equal(current.effects[1]!.phase, "unsealed");
   assert.equal(current.effects[0]!.phase, "included_success");
   return result;
@@ -202,7 +202,7 @@ test("normal non-TTY WBTC continuation refuses before remaining SIGN or SEND", a
   assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_NATIVE_REJECTED");
   assert.equal(result.error?.details?.nativeCode, "APN_TTY_UNAVAILABLE");
   assert.equal(f.source.submissions.length, 1);
-  assert.equal((await core.bridges.records.findOperation(op.operationId))!.effects[1]!.phase, "unsealed");
+  assert.equal((await findStored(core.bridges.records, op.operationId))!.effects[1]!.phase, "unsealed");
 });
 test("normal genuine TTY WBTC second resume prompts fresh consent; attempted effects remain observer-only", async t => {
   const title = "normal genuine TTY WBTC second resume prompts fresh consent; attempted effects remain observer-only";
@@ -214,7 +214,7 @@ test("normal genuine TTY WBTC second resume prompts fresh consent; attempted eff
   const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: { ...f.dependencies, approval } });
   const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
   assert.equal(result.ok, true, JSON.stringify(result.error)); assert.equal(f.source.submissions.length, 2);
-  const current = (await core.bridges.records.findOperation(op.operationId))!;
+  const current = (await findStored(core.bridges.records, op.operationId))!;
   assert.deepEqual(current.effects.map(e => e.submissionAttempts), [1, 1]);
   const before = f.wrapping.loads;
   f.now.setTime(Date.parse(current.intent.expiresAt) + 1);
@@ -263,7 +263,7 @@ test(`expired guarded WBTC ${phase} continuation uses only canonical terminal or
   const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
   f.source.safeApproval = phase !== "included";
   if (phase === "signing_started") {
-    const current = (await f.core.bridges.records.findOperation(op.operationId))!;
+    const current = (await findStored(f.core.bridges.records, op.operationId))!;
     await f.core.bridges.records.persist(transitionBridge(current, { effects: current.effects.map(e =>
       e.role === "bridge" ? { ...e, phase: "signing_started" as const } : e) }, f.now.toISOString()));
   }
@@ -274,7 +274,7 @@ test(`expired guarded WBTC ${phase} continuation uses only canonical terminal or
   const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
   assert.equal(result.ok, true, JSON.stringify(result.error)); assert.equal(f.source.submissions.length, 1);
   assert.equal(f.wrapping.loads, before);
-  const current = (await core.bridges.records.findOperation(op.operationId))!;
+  const current = (await findStored(core.bridges.records, op.operationId))!;
   assert.equal(current.intent.expiresAt, op.intent.expiresAt);
   assert.equal(current.effects[1]!.submissionAttempts, 0);
   // An interrupted seal (signing_started, no material, no SEND claim) signed nothing: it ends like the unsealed remainder.
@@ -302,12 +302,13 @@ import { privateKeyToAccount } from "viem/accounts";
 import { keccak256 } from "viem";
 import { LIFI_SYNTHETIC_KEY } from "./lifi-helpers.js";
 import { verifyBridgeSigned } from "../../src/lifi/transaction.js";
+import { findStored } from "./stored-operations.js";
 // APN broadcasts only after a SEND claim. A SEND claim (valid without sealed material, or malformed) keeps the expired
 // unsent bridge held; a SIGN claim alone proves no broadcast, so the expired remainder ends as failed_after_approval.
 for (const boundary of ["sign", "send", "malformed", "malformedSend", "lateSign"] as const)
 test(`expired valid UNSEALED journal with permanent bridge ${boundary} claim ${["send", "malformedSend"].includes(boundary) ? "keeps held usage" : "ends the unsent remainder"}`, async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
-  const current = (await f.core.bridges.records.findOperation(op.operationId))!, claims = new BridgeEffectClaims(temp.root);
+  const current = (await findStored(f.core.bridges.records, op.operationId))!, claims = new BridgeEffectClaims(temp.root);
   if (boundary === "send") {
     const e = current.effects[1]!.envelope, economic = e.economics;
     const rawTransaction = await privateKeyToAccount(LIFI_SYNTHETIC_KEY).signTransaction({ type: "eip1559", chainId: e.chainId,
@@ -335,7 +336,7 @@ test(`expired valid UNSEALED journal with permanent bridge ${boundary} claim ${[
   const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
   const before = f.wrapping.loads, lease = current.usageLease!;
   const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
-  const latest = (await core.bridges.records.findOperation(op.operationId))!;
+  const latest = (await findStored(core.bridges.records, op.operationId))!;
   assert.equal(f.source.submissions.length, 1); assert.equal(f.wrapping.loads, before); assert.equal(latest.effects[1]!.phase, "unsealed");
   if (boundary === "send" || boundary === "malformedSend") {
     assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_OPERATION_BLOCKED");
@@ -357,7 +358,7 @@ test("expired SAFE approval with unavailable residual allowance still ends the u
   const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
   const before = f.wrapping.loads, result = await core.execute({ command: "operation.resume", operationId: op.operationId });
   assert.equal(result.ok, true, JSON.stringify(result.error));
-  const current = (await core.bridges.records.findOperation(op.operationId))!;
+  const current = (await findStored(core.bridges.records, op.operationId))!;
   // The residual allowance is reported, never required: the proven outcome stays terminal and says the read was unavailable.
   assert.equal(current.state, "failed_after_approval"); assert.equal(current.terminal, true);
   assert.equal(current.failure!.residualAllowance, null); assert.equal(current.failure!.residualAllowanceStatus, "unavailable");
@@ -367,7 +368,7 @@ test("expired SAFE approval with unavailable residual allowance still ends the u
 
 test("expired partial release rejects an unsafe permanent claim directory", async t => {
   const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await partialWbtc(temp.root);
-  const current = (await f.core.bridges.records.findOperation(op.operationId))!;
+  const current = (await findStored(f.core.bridges.records, op.operationId))!;
   await new BridgeEffectClaims(temp.root).claim(current, "bridge", "sign");
   await chmod(join(temp.root, "bridge-effect-claims", current.profileHash), 0o755);
   f.source.safeApproval = true; f.now.setTime(Date.parse(op.intent.expiresAt) + 1);
@@ -375,7 +376,7 @@ test("expired partial release rejects an unsafe permanent claim directory", asyn
   const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
   const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
   assert.equal(result.ok, false); assert.equal(result.error?.code, "APN_STATE_SECURITY");
-  assert.equal((await core.bridges.records.findOperation(op.operationId))!.terminal, false);
+  assert.equal((await findStored(core.bridges.records, op.operationId))!.terminal, false);
   assert.equal((await new AssetUsageLedger(temp.root).usage(current.usageLease!, new Date(f.now))).amountAtomic, "1000");
   assert.equal(f.source.submissions.length, 1);
 });

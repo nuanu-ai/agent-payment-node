@@ -19,6 +19,7 @@ import type { GaslessApprovalPort, GaslessCustodyPort, GaslessRpcPort, GaslessSe
 import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/registry.js";
 import { gaslessPolicyChain, localGaslessMechanism } from "../../src/gasless/asset-policy.js";
 import { gaslessFailure } from "../../src/gasless/validation.js";
+import { findStored } from "./stored-operations.js";
 
 export const GASLESS_TEST_RECIPIENT = getAddress("0x4444444444444444444444444444444444444444");
 export const GASLESS_TEST_OUTER = getAddress("0x5555555555555555555555555555555555555555");
@@ -172,9 +173,9 @@ export async function gaslessFixture(root: string, chainId: GaslessChainId = 845
     const input = { command: "gasless.transfer.prepare", profile, request, idempotencyKey } as const;
     const result = await core.execute(input); assert.equal(result.ok, true, result.error?.message);
     const id = (result.operation as { operation_id: string }).operation_id;
-    const operation = (await core.gasless.records.findOperation(id))!;
+    const operation = (await findStored(core.gasless.records, id))!;
     return { id, input, operation };
   };
-  const record = async (id: string): Promise<GaslessOperationRecord> => (await core.gasless.records.findOperation(id))!;
+  const record = async (id: string): Promise<GaslessOperationRecord> => (await findStored(core.gasless.records, id))!;
   return { now, key, account, profile, state, wrapping, wallets, rpc, approval, custody, dependencies, core, request, prepare, record, wait };
 }

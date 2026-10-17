@@ -69,7 +69,7 @@ export class UniswapTokenUsage {
         this.assert(op, current.reservationId, current.policyDigest, current.amountAtomic, current.rail);
         if (current.state === target || target === "submitted" && current.state === "unknown_finality")
             return { reservationId: expected, state: current.state };
-        if (["finalized", "failed_before_effect", "failed_confirmed_revert"].includes(current.state))
+        if (["finalized", "failed_before_effect", "failed_confirmed_revert", "released_unsubmitted"].includes(current.state))
             corrupt("Uniswap token usage reached a conflicting terminal state.");
         const move = async (state, terminal = false) => {
             current = await this.ledger.transition({ ...identity, reservationId: expected, policyDigest: op.policyDigest, state, now: this.clock.now(),
@@ -85,6 +85,15 @@ export class UniswapTokenUsage {
         else if (target === "failed_confirmed_revert") {
             if (current.state === "reserved")
                 await move("submitted");
+            await move(target, true);
+        }
+        // A swap proven never to land (R4): its hold is released as unsubmitted, nothing of it was spent. A hold a crash left
+        // reserved after the swap was bound releases directly (the ledger allows both).
+        else if (target === "released_unsubmitted") {
+            if (op.swapAttempt?.transactionHash == null)
+                corrupt("Uniswap token usage can release as unsubmitted only a bound swap.");
+            if (current.state === "submitted")
+                await move("unknown_finality");
             await move(target, true);
         }
         else if (target === "failed_before_effect") {

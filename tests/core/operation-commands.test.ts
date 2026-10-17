@@ -108,13 +108,15 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
   // An unmarked swap: its lane's status reads it, and its owner exit refuses because no outcome is unknown.
   swap: async t => ({ ...await WP2_FAMILY_RECORDS.swap(t), cli: true, status: "ok", resume: RESUME_BY_FAMILY,
     abandon: { code: "APN_OPERATION_BLOCKED", reason: "swap_abandon_unmarked" }, receipt: NO_RECEIPT }),
-  uniswap_token: async t => ({ ...await WP2_FAMILY_RECORDS.uniswap_token(t), cli: true, status: "ok", resume: RESUME_BY_FAMILY, abandon: EXIT_BY_FAMILY,
-    receipt: NO_RECEIPT }),
+  // Its owner exit (R4, last resort) refuses before the route deadline.
+  uniswap_token: async t => ({ ...await WP2_FAMILY_RECORDS.uniswap_token(t), cli: true, status: "ok", resume: RESUME_BY_FAMILY,
+    abandon: { code: "APN_OPERATION_BLOCKED", reason: "uniswap_token_abandon_not_eligible" }, receipt: NO_RECEIPT }),
   // A prepared Stargate journal: observe refuses an unattempted operation, and there is no receipt before observation.
   stargate_native: async t => ({ ...await WP2_FAMILY_RECORDS.stargate_native(t), cli: true, status: "ok", resume: { code: "APN_OPERATION_BLOCKED" },
     abandon: EXIT_BY_FAMILY, receipt: { code: "APN_OPERATION_BLOCKED", reason: "receipt_not_observed" } }),
+  // Its owner exit (R4, last resort) refuses before the prepare expiry.
   stargate_token: async t => ({ ...await WP2_FAMILY_RECORDS.stargate_token(t), cli: true, status: "ok", resume: { code: "APN_OPERATION_BLOCKED" },
-    abandon: EXIT_BY_FAMILY, receipt: { code: "APN_OPERATION_BLOCKED", reason: "receipt_not_observed" } }),
+    abandon: { code: "APN_OPERATION_BLOCKED", reason: "stargate_token_abandon_not_eligible" }, receipt: { code: "APN_OPERATION_BLOCKED", reason: "receipt_not_observed" } }),
   gasless_usdt: async t => ({ ...await WP2_FAMILY_RECORDS.gasless_usdt(t), cli: true, status: "ok", resume: "ok", abandon: TERMINAL,
     receipt: NO_RECEIPT }),
   oneclick_source: async t => ({ ...await WP2_FAMILY_RECORDS.oneclick_source(t), cli: true, status: "ok", resume: TERMINAL,

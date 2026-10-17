@@ -17,6 +17,7 @@ import { associatedToken } from "../../src/solana/accounts.js";
 import { SolanaLocalAdapter } from "../../src/solana/local-adapter.js";
 import type { SolanaBatchRead, SolanaMethod, SolanaRpcPort } from "../../src/solana/rpc.js";
 import { SOLANA_CHAIN, activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
+import { findStored } from "./stored-operations.js";
 
 export const SOL_RECIPIENT = "So11111111111111111111111111111111111111112";
 export const SOL_BLOCKHASH = "11111111111111111111111111111111";
@@ -187,7 +188,7 @@ export async function solanaFixture(root: string, options: { rpc?: SolanaTestRpc
       recipient: SOL_RECIPIENT, amount: asset === "sol" ? "0.000001" : "1", maximumFee: "0.003", idempotencyKey });
     assert.equal(result.ok, true, result.error?.message);
     const id = (result.operation as { operation_id: string }).operation_id;
-    rpc.prepared = (await core.rails.records.findOperation(id))!.prepared;
+    rpc.prepared = (await findStored(core.rails.records, id))!.prepared;
     return id;
   };
   return { core, storage, wrapping, adapter, approval, account, rpc, now, prepare, advance, wait };

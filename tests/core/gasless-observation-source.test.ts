@@ -16,6 +16,7 @@ import type { GaslessTransport } from "../../src/gasless/https.js";
 import { gaslessFixture, GaslessTestRpc, testWord } from "./gasless-helpers.js";
 import { ObservationTransport } from "./gasless-fixtures/observation-transport.js";
 import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 const OBSERVATION_ENV = "APN_ETHEREUM_ARCHIVE_RPC_URL";
 const ALTERNATE_ORIGIN = "https://archive.example";
@@ -327,7 +328,7 @@ test("provenance binding rejects exact-schema faults and rehashed historical for
   writable.integrityHash = hashObject(operationBody);
   const operationPath = resolve(temporaryRoot(fixture), "gasless-operations", accepted.profileHash, `${id}.json`);
   await writeFile(operationPath, `${canonicalJson(forged)}\n`, { mode: 0o600 });
-  await assert.rejects(runtime.core.gasless.records.findOperation(id), { code: "APN_STATE_CORRUPT" });
+  await assert.rejects(findStored(runtime.core.gasless.records, id), { code: "APN_STATE_CORRUPT" });
 });
 
 test("ordinary recovery keeps original endpoint binding and legacy observations byte-stable", async (t) => {

@@ -3,7 +3,7 @@ import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from 
 import { ApnError } from "../../errors.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
 import type { TokenEffectKind } from "./token-execution.js";
-import type { UniswapTokenOperation } from "./token-operation.js";
+import { tokenEffectRound, type UniswapTokenOperation } from "./token-operation.js";
 
 export type TokenEffectPhase = "sealed" | "send_started" | "send_accepted" | "send_ambiguous";
 export interface TokenSignedEffect {
@@ -24,7 +24,7 @@ export interface TokenSignedEffect {
 export class UniswapTokenEffectJournal extends SecureStateStore {
   async load(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<TokenSignedEffect | null> {
     await this.initialize();
-    const value = await this.readJson(this.path(op.operationId, kind));
+    const value = await this.readJson(this.path(op, kind));
     return value === null ? null : validate(value, op, kind);
   }
   async seal(op: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: Hex, envelope: object, now: Date,
@@ -46,10 +46,10 @@ export class UniswapTokenEffectJournal extends SecureStateStore {
         if (primaryProviderId !== null) { const { integrityHash: _old, schemaVersion: _schema, ...legacy } = prior,
           upgraded = { ...legacy, schemaVersion: "apn.uniswap-token-effect.v2" as const, primaryProviderId };
           const next = validate({ ...upgraded, integrityHash: hashObject(upgraded) }, op, kind);
-          await this.writeJson(this.path(op.operationId, kind), next); return next; }
+          await this.writeJson(this.path(op, kind), next); return next; }
         return prior;
       }
-      await this.writeJson(this.path(op.operationId, kind), effect, true); return effect;
+      await this.writeJson(this.path(op, kind), effect, true); return effect;
     });
   }
   async markStarted(op: UniswapTokenOperation, kind: TokenEffectKind, now: Date) {
@@ -66,10 +66,12 @@ export class UniswapTokenEffectJournal extends SecureStateStore {
       if (!allowed[current.phase].includes(phase)) blocked("Uniswap token effect was already attempted.", "uniswap_token_single_send");
       const { integrityHash: _old, ...old } = current, body = { ...old, phase, sendAttempts: 1 as const, updatedAt: instant(now) };
       const next = validate({ ...body, integrityHash: hashObject(body) }, op, kind);
-      await this.writeJson(this.path(op.operationId, kind), next); return next;
+      await this.writeJson(this.path(op, kind), next); return next;
     });
   }
-  private path(id: string, kind: TokenEffectKind) { stateIdentifier(id, "Uniswap token operation"); return `uniswap-token-effects/${id}-${kind}.json`; }
+  /** Round 0 keeps the original file; a re-armed cleanup (round n) seals its own effect beside it. */
+  private path(op: UniswapTokenOperation, kind: TokenEffectKind) { stateIdentifier(op.operationId, "Uniswap token operation");
+    const round = tokenEffectRound(op, kind); return `uniswap-token-effects/${op.operationId}-${kind}${round === 0 ? "" : `-r${round}`}.json`; }
 }
 
 function validate(value: unknown, op: UniswapTokenOperation, kind: TokenEffectKind): TokenSignedEffect {
