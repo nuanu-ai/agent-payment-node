@@ -31,7 +31,7 @@ export class RelayBaseObserveService {
                 return false;
             const deposit = journal.effects[1];
             if (deposit.attempt?.attemptNumber !== 1 || deposit.attempt.transactionHash !== sourceHash ||
-                !["submitting", "tx_known", "confirmed"].includes(deposit.phase))
+                !["submitting", "confirmed"].includes(deposit.phase))
                 return false;
             const identity = { account: getAddress(op.sourceAccount), chain: "eip155:1",
                 asset: { kind: "token", identifier: ETHEREUM_USDC } };
@@ -75,7 +75,7 @@ export class RelayBaseObserveService {
         const deposit = journal?.effects[1];
         const sourceHash = journal?.effects[0].phase === "confirmed" &&
             deposit?.attempt?.attemptNumber === 1 &&
-            ["submitting", "tx_known", "confirmed"].includes(deposit.phase)
+            ["submitting", "confirmed"].includes(deposit.phase)
             ? deposit.attempt.transactionHash : null;
         // Fixed, non-sensitive reasons distinguish an RPC failure from a pending or
         // mismatched source proof. Never return the RPC error or transaction payload.

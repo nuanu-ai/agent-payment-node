@@ -7,7 +7,7 @@ import type { Hex } from "viem";
 import { hashObject } from "../../src/canonical.js";
 import { sealAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { ArbitrumSourceEffectJournalRepository, advanceArbitrumSourceEffectJournal,
-  arbitrumSourceRecoveryClass, createArbitrumSourceEffectJournal, validateArbitrumSourceEffectJournal,
+  createArbitrumSourceEffectJournal, validateArbitrumSourceEffectJournal,
   type ArbitrumVerifiedAllowanceRead } from
   "../../src/relay/arbitrum-source-effect-journal.js";
 import { RELAY_ARBITRUM_USDC } from "../../src/relay/arbitrum-usdc-ethereum-quote.js";
@@ -72,12 +72,12 @@ test("offline journal seals exact signed approval/deposit, marks send first, and
   const { temporary, op: real } = await prepared(); t.after(temporary.cleanup);
   const op = syntheticSignerOp(real);
   let j = await createArbitrumSourceEffectJournal(op, t0);
-  assert.equal(await arbitrumSourceRecoveryClass(j, op), "not_started");
+  assert.deepEqual(j.effects.map(e => e.phase), ["pending", "pending"]);
   await assert.rejects(advanceArbitrumSourceEffectJournal(j, op,
     { kind: "begin_signing", role: "deposit", marker: "a".repeat(64), at: t1 }), { code: "APN_OPERATION_BLOCKED" });
   j = await advanceArbitrumSourceEffectJournal(j, op,
     { kind: "begin_signing", role: "approval", marker: "a".repeat(64), at: t1 });
-  assert.equal(await arbitrumSourceRecoveryClass(j, op), "observation_only");
+  assert.deepEqual(j.effects.map(e => e.phase), ["signing_started", "pending"]);
   await assert.rejects(advanceArbitrumSourceEffectJournal(j, op,
     { kind: "begin_signing", role: "approval", marker: "b".repeat(64), at: t1 }), { code: "APN_OPERATION_BLOCKED" });
   const approvalRaw = await sign(op, "approval", 7);
@@ -122,7 +122,7 @@ test("offline journal seals exact signed approval/deposit, marks send first, and
   await assert.rejects(advanceArbitrumSourceEffectJournal(j, op,
     { kind: "record_send", role: "approval", outcome: "accepted" }), { code: "APN_OPERATION_BLOCKED" });
   j = await advanceArbitrumSourceEffectJournal(j, op, { kind: "mark_submitting", role: "approval", at: t1 });
-  assert.equal(await arbitrumSourceRecoveryClass(j, op), "observation_only");
+  assert.deepEqual(j.effects.map(e => e.phase), ["submitting", "pending"]);
   await assert.rejects(advanceArbitrumSourceEffectJournal(j, op,
     { kind: "mark_submitting", role: "approval", at: t1 }), { code: "APN_OPERATION_BLOCKED" });
   j = await advanceArbitrumSourceEffectJournal(j, op,
@@ -132,7 +132,7 @@ test("offline journal seals exact signed approval/deposit, marks send first, and
     { kind: "begin_signing", role: "deposit", marker: "b".repeat(64), at: t1 }), { code: "APN_OPERATION_BLOCKED" });
   j = await advanceArbitrumSourceEffectJournal(j, op,
     { kind: "record_verified_observation", role: "approval", outcome: "confirmed", proofDigest: "c".repeat(64) });
-  assert.equal(await arbitrumSourceRecoveryClass(j, op), "approval_confirmed");
+  assert.deepEqual(j.effects.map(e => e.phase), ["confirmed", "pending"]);
   j = await advanceArbitrumSourceEffectJournal(j, op,
     { kind: "begin_signing", role: "deposit", marker: "d".repeat(64), at: t1 });
   const depositRaw = await sign(op, "deposit", 8);
@@ -143,7 +143,7 @@ test("offline journal seals exact signed approval/deposit, marks send first, and
   j = await advanceArbitrumSourceEffectJournal(j, op, { kind: "mark_submitting", role: "deposit", at: t1 });
   j = await advanceArbitrumSourceEffectJournal(j, op,
     { kind: "record_send", role: "deposit", outcome: "accepted" });
-  assert.equal(await arbitrumSourceRecoveryClass(j, op), "observation_only");
+  assert.deepEqual(j.effects.map(e => e.phase), ["confirmed", "submitted"]);
   const tampered = structuredClone(j) as any;
   tampered.effects[1].attempt.rawTransaction = approvalRaw;
   const { integrityHash: _hash, ...body } = tampered; tampered.integrityHash = hashObject(body);
@@ -155,7 +155,7 @@ test("offline journal seals exact signed approval/deposit, marks send first, and
   await assert.rejects(validateArbitrumSourceEffectJournal(wrongHash, op), { code: "APN_STATE_CORRUPT" });
   j = await advanceArbitrumSourceEffectJournal(j, op,
     { kind: "record_verified_observation", role: "deposit", outcome: "confirmed", proofDigest: "e".repeat(64) });
-  assert.equal(await arbitrumSourceRecoveryClass(j, op), "completed");
+  assert.deepEqual(j.effects.map(e => e.phase), ["confirmed", "confirmed"]);
 });
 
 test("repository binds saved operation and CAS, detects corruption even with recalculated journal hash", async t => {
@@ -164,15 +164,16 @@ test("repository binds saved operation and CAS, detects corruption even with rec
   const j = await repository.create(op.profileHash, op.operationId, t0);
   assert.deepEqual(await repository.load(op.profileHash, op.operationId), j);
   await assert.rejects(repository.create(op.profileHash, op.operationId, t0), { code: "APN_OPERATION_BLOCKED" });
-  const marked = await repository.beginSigning(op.profileHash, op.operationId, j.integrityHash, "approval", t1);
+  const marked = await repository.transition(op.profileHash, op.operationId, j.integrityHash,
+    { kind: "begin_signing", role: "approval", marker: "a".repeat(64), at: t1 });
   assert.equal(marked.effects[0].phase, "signing_started");
   await assert.rejects(repository.transition(op.profileHash, op.operationId, marked.integrityHash,
     { kind: "record_verified_observation", role: "approval", outcome: "confirmed", proofDigest: "c".repeat(64) }),
     { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects(repository.beginSigning(op.profileHash, op.operationId, j.integrityHash, "approval", t1),
-    { code: "APN_OPERATION_BLOCKED" });
-  assert.equal(await arbitrumSourceRecoveryClass((await new ArbitrumSourceEffectJournalRepository(temporary.root)
-    .load(op.profileHash, op.operationId))!, op), "observation_only");
+  await assert.rejects(repository.transition(op.profileHash, op.operationId, j.integrityHash,
+    { kind: "begin_signing", role: "approval", marker: "b".repeat(64), at: t1 }), { code: "APN_OPERATION_BLOCKED" });
+  assert.deepEqual((await new ArbitrumSourceEffectJournalRepository(temporary.root)
+    .load(op.profileHash, op.operationId))!.effects.map(e => e.phase), ["signing_started", "pending"]);
   const path = join(temporary.root, "relay-arbitrum-source-effect-journals", state.profileHash("default"),
     `${op.operationId}.json`);
   const forged = JSON.parse(await readFile(path, "utf8")) as any;
@@ -193,7 +194,8 @@ test("repository persists only an injected verified observation and reopens its 
   };
   const withoutProof = syntheticRepository();
   let j = await withoutProof.create(op.profileHash, op.operationId, t0);
-  j = await withoutProof.beginSigning(op.profileHash, op.operationId, j.integrityHash, "approval", t1);
+  j = await withoutProof.transition(op.profileHash, op.operationId, j.integrityHash,
+    { kind: "begin_signing", role: "approval", marker: "a".repeat(64), at: t1 });
   j = await withoutProof.transition(op.profileHash, op.operationId, j.integrityHash,
     { kind: "seal_signed", role: "approval", rawTransaction: await sign(op, "approval", 7), nonce: "7" });
   j = await withoutProof.transition(op.profileHash, op.operationId, j.integrityHash,
@@ -221,22 +223,19 @@ test("repository persists only an injected verified observation and reopens its 
   assert.equal(confirmed.effects[0].attempt?.observationDigest, proofDigest);
   assert.deepEqual(await syntheticRepository()
     .load(op.profileHash, op.operationId), confirmed);
-  assert.equal(await arbitrumSourceRecoveryClass(confirmed, op), "approval_confirmed");
+  assert.deepEqual(confirmed.effects.map(e => e.phase), ["confirmed", "pending"]);
 });
 
 test("approval skip persists a canonical allowance proof and permits a separate guarded deposit stage", async t => {
   const { temporary, state, op } = await prepared(); t.after(temporary.cleanup);
   const verified: ArbitrumVerifiedAllowanceRead = { policyDigest: op.policyDigest!, policyRevision: op.policyRevision!,
     allowanceAtomic: op.amountAtomic, blockNumber: "293510000", blockHash: `0x${"b".repeat(64)}`, observedAt: t1 };
-  const repository = (read?: ArbitrumVerifiedAllowanceRead | null, clock = new Date(t1)) =>
-    new ArbitrumSourceEffectJournalRepository(temporary.root, undefined,
-      read === undefined ? undefined : async () => read, () => clock);
+  const repository = (clock = new Date(t1)) => new ArbitrumSourceEffectJournalRepository(temporary.root, undefined, () => clock);
+  const skip = (read: ArbitrumVerifiedAllowanceRead | null, expected: string | null, clock = new Date(t1)) =>
+    repository(clock).skipApprovalIfVerified(op.profileHash, op.operationId, expected, async () => read, async () => active());
   const initial = await repository().create(op.profileHash, op.operationId, t0);
-  await assert.rejects(repository().skipApproval(op.profileHash, op.operationId, initial.integrityHash),
-    { code: "APN_OPERATION_BLOCKED" });
-  // A verifier that loses its canonical pin (for example on a reorg) returns no observation.
-  await assert.rejects(repository(null).skipApproval(op.profileHash, op.operationId, initial.integrityHash),
-    { code: "APN_OPERATION_BLOCKED" });
+  // A verifier that loses its canonical pin (for example on a reorg) returns no observation and nothing is written.
+  assert.equal(await skip(null, initial.integrityHash), null);
   for (const bad of [
     { ...verified, allowanceAtomic: (BigInt(op.amountAtomic) - 1n).toString() },
     { ...verified, policyDigest: "f".repeat(64) },
@@ -244,18 +243,15 @@ test("approval skip persists a canonical allowance proof and permits a separate 
     { ...verified, blockHash: `0x${"0".repeat(64)}` },
     { ...verified, blockHash: "0xdead" },
   ]) {
-    await assert.rejects(repository(bad).skipApproval(
-      op.profileHash, op.operationId, initial.integrityHash), { code: "APN_OPERATION_BLOCKED" });
+    await assert.rejects(skip(bad, initial.integrityHash), { code: "APN_OPERATION_BLOCKED" });
   }
-  await assert.rejects(repository(verified, new Date(now.getTime() + 40_000)).skipApproval(
-    op.profileHash, op.operationId, initial.integrityHash), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(skip(verified, initial.integrityHash, new Date(now.getTime() + 40_000)), { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(await repository().load(op.profileHash, op.operationId), initial);
-  const skipped = await repository(verified).skipApproval(op.profileHash, op.operationId, initial.integrityHash);
+  const skipped = (await skip(verified, initial.integrityHash))!;
   assert.equal(skipped.effects[0].phase, "approval_skipped");
   assert.equal(skipped.effects[0].attempt, null);
   assert.equal(skipped.effects[0].skipProof?.allowanceAtomic, op.amountAtomic);
   assert.equal(skipped.effects[0].skipProof?.operationIntegrityHash, op.integrityHash);
-  assert.equal(await arbitrumSourceRecoveryClass(skipped, op), "approval_skipped");
   assert.deepEqual(await repository().load(op.profileHash, op.operationId), skipped);
   const observe = new RelayArbitrumSourceObserveService(state, { observeRevert: async () => null, observeUnsent: async () => ({ outcome: "nonce_not_consumed" as const, proof: null }), observe: async () => {
     throw new Error("skipped approval has no receipt to observe");
@@ -264,12 +260,10 @@ test("approval skip persists a canonical allowance proof and permits a separate 
   assert.equal(reported.state, "approval_skipped");
   assert.equal(reported.sourceProof, null);
   assert.equal(reported.sourceFinalized, false);
-  await assert.rejects(repository(verified).skipApproval(op.profileHash, op.operationId, initial.integrityHash),
-    { code: "APN_OPERATION_BLOCKED" });
-  await assert.rejects(repository(verified).skipApproval(op.profileHash, op.operationId, skipped.integrityHash),
-    { code: "APN_OPERATION_BLOCKED" });
-  const depositStarted = await repository().beginSigning(op.profileHash, op.operationId, skipped.integrityHash,
-    "deposit", t1);
+  await assert.rejects(skip(verified, initial.integrityHash), { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(skip(verified, skipped.integrityHash), { code: "APN_OPERATION_BLOCKED" });
+  const depositStarted = await repository().transition(op.profileHash, op.operationId, skipped.integrityHash,
+    { kind: "begin_signing", role: "deposit", marker: "d".repeat(64), at: t1 });
   assert.equal(depositStarted.effects[1].phase, "signing_started");
   const tampered = structuredClone(skipped) as any;
   tampered.effects[0].skipProof.spender = owner;
@@ -284,9 +278,10 @@ test("an Arbitrum route with a skipped approval and no deposit is abandoned only
   const { temporary, state, op } = await prepared(); t.after(temporary.cleanup);
   const verified: ArbitrumVerifiedAllowanceRead = { policyDigest: op.policyDigest!, policyRevision: op.policyRevision!,
     allowanceAtomic: op.amountAtomic, blockNumber: "293510000", blockHash: `0x${"b".repeat(64)}`, observedAt: t1 };
-  const repository = new ArbitrumSourceEffectJournalRepository(temporary.root, undefined, async () => verified, () => new Date(t1));
+  const repository = new ArbitrumSourceEffectJournalRepository(temporary.root, undefined, () => new Date(t1));
   const initial = await repository.create(op.profileHash, op.operationId, t0);
-  const skipped = await repository.skipApproval(op.profileHash, op.operationId, initial.integrityHash);
+  const skipped = (await repository.skipApprovalIfVerified(op.profileHash, op.operationId, initial.integrityHash,
+    async () => verified, async () => active()))!;
   const operations = new OperationService(state);
   await assert.rejects(operations.assertEvmAccountAvailable(op.profileHash, 42161, owner), { code: "APN_OPERATION_BLOCKED" });
   let prompts = 0;
@@ -299,6 +294,6 @@ test("an Arbitrum route with a skipped approval and no deposit is abandoned only
   const retired = await retire(true);
   assert.equal(retired.state, "retired"); assert.equal(prompts, 2);
   await operations.assertEvmAccountAvailable(op.profileHash, 42161, owner);
-  await assert.rejects(repository.beginSigning(op.profileHash, op.operationId, skipped.integrityHash, "deposit", t1),
-    { code: "APN_OPERATION_BLOCKED" });
+  await assert.rejects(repository.transition(op.profileHash, op.operationId, skipped.integrityHash,
+    { kind: "begin_signing", role: "deposit", marker: "d".repeat(64), at: t1 }), { code: "APN_OPERATION_BLOCKED" });
 });

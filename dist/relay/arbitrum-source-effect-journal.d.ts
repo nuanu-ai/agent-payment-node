@@ -80,10 +80,8 @@ export type ArbitrumEffectEvent = {
 export declare function validateArbitrumSourceEffectJournal(value: unknown, op: RelayUnsignedOperation): Promise<ArbitrumSourceEffectJournal>;
 export declare function createArbitrumSourceEffectJournal(op: RelayUnsignedOperation, createdAt: string): Promise<ArbitrumSourceEffectJournal>;
 export declare function advanceArbitrumSourceEffectJournal(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation, event: ArbitrumEffectEvent): Promise<ArbitrumSourceEffectJournal>;
-export declare function arbitrumSourceRecoveryClass(j: ArbitrumSourceEffectJournal, op: RelayUnsignedOperation): Promise<"not_started" | "observation_only" | "approval_confirmed" | "approval_skipped" | "completed" | "failed">;
 export declare class ArbitrumSourceEffectJournalRepository extends SecureStateStore {
     private readonly verifiedObservation?;
-    private readonly verifiedAllowance?;
     private readonly clock;
     constructor(root: string, verifiedObservation?: ((input: {
         readonly operation: RelayUnsignedOperation;
@@ -91,10 +89,7 @@ export declare class ArbitrumSourceEffectJournalRepository extends SecureStateSt
         readonly role: ArbitrumEffectRole;
         readonly outcome: "confirmed" | "failed" | "never_landed";
         readonly proofDigest: string;
-    }) => Promise<boolean>) | undefined, verifiedAllowance?: ((input: {
-        readonly operation: RelayUnsignedOperation;
-        readonly journal: ArbitrumSourceEffectJournal;
-    }) => Promise<ArbitrumVerifiedAllowanceRead | null>) | undefined, clock?: () => Date);
+    }) => Promise<boolean>) | undefined, clock?: () => Date);
     private readonly operations;
     private path;
     private operation;
@@ -105,11 +100,8 @@ export declare class ArbitrumSourceEffectJournalRepository extends SecureStateSt
     transition(profileHash: string, operationId: string, expectedIntegrityHash: string, event: ArbitrumEffectEvent): Promise<ArbitrumSourceEffectJournal>;
     /** Caller holds profile, operation and effect locks in the shared canonical order. */
     transitionUnderLocks(profileHash: string, operationId: string, expectedIntegrityHash: string, event: ArbitrumEffectEvent): Promise<ArbitrumSourceEffectJournal>;
-    beginSigning(profileHash: string, operationId: string, expectedIntegrityHash: string, role: ArbitrumEffectRole, at: string): Promise<ArbitrumSourceEffectJournal>;
     /** Caller holds profile, operation and effect locks in the shared canonical order. */
     beginSigningUnderLocks(profileHash: string, operationId: string, expectedIntegrityHash: string, role: ArbitrumEffectRole, at: string): Promise<ArbitrumSourceEffectJournal>;
-    /** Only a separately wired canonical read may create this proof. It does not authorize deposit dispatch. */
-    skipApproval(profileHash: string, operationId: string, expectedIntegrityHash: string): Promise<ArbitrumSourceEffectJournal>;
     /** Atomically create a skipped journal only after an injected fresh canonical allowance read. */
     skipApprovalIfVerified(profileHash: string, operationId: string, expectedIntegrityHash: string | null, verifier: (input: {
         readonly operation: RelayUnsignedOperation;

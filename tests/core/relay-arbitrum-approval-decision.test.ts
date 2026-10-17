@@ -116,7 +116,7 @@ test("buyer approval check uses its own active profile and rejects a different p
 
 test("production locked policy read returns without recursively acquiring its profile lock", async t => {
   const { temporary, operation } = await prepared(); t.after(temporary.cleanup);
-  const repository = new ArbitrumSourceEffectJournalRepository(temporary.root, undefined, undefined, () => now);
+  const repository = new ArbitrumSourceEffectJournalRepository(temporary.root, undefined, () => now);
   await assert.rejects(repository.skipApprovalIfVerified(operation.profileHash, operation.operationId, null,
     async () => { throw new Error("verifier must not run without active policy"); }),
   { code: "APN_OPERATION_BLOCKED", details: { reason: "active_owner_policy_required" } });
