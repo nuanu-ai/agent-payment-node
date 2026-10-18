@@ -18,7 +18,11 @@ import type { CircleFundingMaterial } from "../../src/circle-v2-evm/funding-cust
 import { circleEnvelope, type CircleEffect } from "../../src/circle-v2-evm/operation-model.js";
 import { encodeCircleApproval, encodeCircleBurn } from "../../src/circle-v2-evm/protocol.js";
 import { validateCircleFundingAdvance } from "../../src/circle-v2-evm/repository.js";
-import { evmSentOutcome, type EvmUnsentOutcome } from "../../src/evm-unsent-outcome.js";
+import type { CircleSentOutcome } from "../../src/circle-v2-evm/funding-never-lands.js";
+import { abandonCircleFunding } from "../../src/circle-v2-evm/funding-abandon.js";
+import { CircleRepository } from "../../src/circle-v2-evm/repository.js";
+import { StateStore } from "../../src/state.js";
+import { temporaryState } from "./helpers.js";
 import { at, fundingIdentity, initial } from "./circle-v2-evm-nonce-runtime-fixtures.js";
 
 const params = { recipient: getAddress(`0x${"55".repeat(20)}`), amountAtomic: "1000000", maxFeeAtomic: "1000", minMintAtomic: "999000" };
@@ -49,7 +53,7 @@ const receipt = (hash: Hex) => ({ transactionHash: hash, blockHash: hash, blockN
   finalityBlockNumberAtomic: "10", transactionHashBinding: "a".repeat(64), logsHash: "b".repeat(64), finalityTag: "included" as const });
 
 /** The real v2 lifecycle; the broadcast of `lost` fails after its submission fence (a lost RPC answer). */
-function harness(lost: "approval" | "burn", outcome: EvmUnsentOutcome) {
+function harness(lost: "approval" | "burn", outcome: CircleSentOutcome) {
   let current = reserved(), sends = 0, discarded = 0, outcomes = 0;
   const material = (o: CircleFundingOperationV2, e: CircleEffect): CircleFundingMaterial => ({ schemaVersion: "apn.circle-v2-evm-effect.v2", operationId: o.operationId, role: e.role, fingerprint: o.fingerprint,
     envelopeHash: e.envelope.envelopeHash, rawTransaction: "0x02", transactionHash: e.role === "burn" ? burnTx : tx, materialHash: "9".repeat(64) });
@@ -79,7 +83,7 @@ test("a lost approval whose nonce another transaction consumed, with no transact
   assert.deepEqual(await approveCircleFundingSource(op, h.ports), op); assert.deepEqual([h.sends(), h.outcomes()], [1, 1]);
 });
 
-for (const outcome of ["own_transaction_known", "nonce_not_consumed"] as const)
+for (const outcome of ["own_transaction_known", "not_proven"] as const)
 test(`a lost approval stays unknown and observe-only when the proof says ${outcome}`, async () => {
   const h = harness("approval", outcome), op = await approveCircleFundingSource(h.start(), h.ports);
   assert.equal(op.state, "source_unknown"); assert.equal(op.terminal, false); assert.equal(op.effects[0]!.phase, "unknown"); assert.equal(op.effects[1]!.phase, "prepared");
@@ -97,14 +101,24 @@ test("a lost burn that can never land leaves the confirmed approval to the expli
   assert.equal(cleaned.effects.find(e => e.role === "cleanup")!.phase, "confirmed"); assert.equal(cleaned.state, "cleaned"); assert.equal(cleaned.terminal, true);
 });
 
-test("the RPC proof: nonce past at safe, no transaction and no receipt; any known transaction or receipt means observe only", async () => {
-  const account = getAddress(`0x${"aa".repeat(20)}`), input = { account, nonce: 7n, transactionHash: tx };
-  const reader = (safeNonce: bigint, transaction: unknown, rcpt: unknown, calls: string[] = []) => async (method: string, params: readonly unknown[]) => {
-    calls.push(method); if (method === "eth_getTransactionCount") { assert.deepEqual(params, [account, "safe"]); return `0x${safeNonce.toString(16)}`; }
-    assert.deepEqual(params, [tx]); return method === "eth_getTransactionByHash" ? transaction : rcpt; };
-  const calls: string[] = [];
-  assert.equal(await evmSentOutcome(reader(8n, null, null, calls), input), "never_lands"); assert.deepEqual(calls, ["eth_getTransactionCount", "eth_getTransactionByHash", "eth_getTransactionReceipt"]);
-  assert.equal(await evmSentOutcome(reader(7n, null, null), input), "nonce_not_consumed");
-  assert.equal(await evmSentOutcome(reader(8n, { hash: tx }, null), input), "own_transaction_known");
-  assert.equal(await evmSentOutcome(reader(8n, null, { transactionHash: tx }), input), "own_transaction_known");
+test("a lost approval no proof decides (no era, or a pruned node) takes the owner's abandon past expiry: terminal, holds charged, nothing sent", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root), repo = new CircleRepository(temporary.root), h = harness("approval", "not_proven"), start = h.start();
+  // The route enters the real repository from its first transition, as prepare writes it.
+  const first = sealCircleFundingOperation({ ...start, usage: [], transitions: start.transitions.slice(0, 1) });
+  await repo.saveFunding(first); await repo.saveFunding(start);
+  const open = await approveCircleFundingSource(start, { ...h.ports, save: async o => { await repo.saveFunding(o); } });
+  assert.deepEqual([open.state, open.effects[0]!.phase], ["source_unknown", "unknown"]);
+  const intents: string[] = [], consent = { approve: async (intent: { outcomeNote: string }) => { intents.push(intent.outcomeNote); } };
+  await assert.rejects(abandonCircleFunding(state, open.operationId, consent, () => Date.parse(open.expiresAt) - 1),
+    (e: { details?: { reason?: string } }) => e.details?.reason === "circle_funding_abandon_before_expiry");
+  const closed = await abandonCircleFunding(state, open.operationId, consent, () => Date.parse(open.expiresAt)) as { state: string; terminal: boolean };
+  assert.deepEqual([closed.state, closed.terminal, intents.length], ["abandoned_unknown", true, 1]);
+  assert.match(intents[0]!, new RegExp(`UNKNOWN\\. approval ${tx} may still land`, "u"));
+  const saved = (await repo.loadAny(open.operationId)) as CircleFundingOperationV2;
+  assert.ok(saved.usage.every(u => u.state === "unknown_finality"), "every usage hold stays charged"); assert.equal(saved.usageFinalized, false);
+  assert.equal(h.sends(), 1, "nothing is sent again");
+  // A replay asks nothing; a terminal route is never abandoned.
+  assert.equal(((await abandonCircleFunding(state, open.operationId, consent, () => Date.parse(open.expiresAt))) as { state: string }).state, "abandoned_unknown");
+  assert.equal(intents.length, 1);
 });

@@ -17,6 +17,11 @@ export interface CircleEnvelope {
     readonly gasLimitAtomic: string;
     readonly maxFeePerGasAtomic: string;
     readonly maxPriorityFeePerGasAtomic: string;
+    /** v2 envelopes frozen since the never-lands index proof: the latest block read while freezing it (bound by envelopeHash). */
+    readonly eraBlock?: {
+        readonly numberAtomic: string;
+        readonly hash: Hex;
+    };
     readonly envelopeHash: string;
 }
 export interface CircleEffect {
