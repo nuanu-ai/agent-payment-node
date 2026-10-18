@@ -42,7 +42,8 @@ async function setup(t: test.TestContext) {
         if (method === "eth_chainId") return "0x2105";
         if (method === "eth_getTransactionCount") { assert.deepEqual(params, [account.address, "finalized"]); return toHex(BigInt(chain.finalizedNonce)); }
         if (method === "eth_getTransactionReceipt") { assert.deepEqual(params, [hash]); return null; }
-        if (method === "eth_getBlockByNumber") { assert.deepEqual(params, ["0x3039", false]); return { number: "0x3039", hash: ERA_HASH, transactions: [PROBE] }; }
+        if (method === "eth_getBlockTransactionCountByNumber") { assert.deepEqual(params, ["0x3039"]); return "0x2"; }
+        if (method === "eth_getTransactionByBlockNumberAndIndex") { assert.deepEqual(params, ["0x3039", "0x0"]); return { hash: PROBE, blockHash: ERA_HASH, blockNumber: "0x3039" }; }
         if (method === "eth_getTransactionByHash") return params[0] === hash ? (chain.known ? { hash } : null)
           : chain.indexed ? { hash: PROBE, blockHash: ERA_HASH, blockNumber: "0x3039" } : null;
         throw new Error(`unexpected ${method}`);
@@ -91,12 +92,12 @@ test("status of a completed approval names the allowance it leaves, what spends 
   assert.equal(f.chain.unlandedReads, 0);
 });
 
-test("the production proof reads APN_BASE_RPC_URL at the finalized tag (first batch, era body, deciding batch), and refuses without that endpoint", async t => {
+test("the production proof reads APN_BASE_RPC_URL at the finalized tag (first batch, era block data, deciding batch), and refuses without that endpoint", async t => {
   const posts: unknown[] = [], hash = `0x${"b".repeat(64)}` as Hex;
   t.mock.method(BridgeHttps.prototype, "request", async (url: string, _verb: string, body: string) => {
     const rows = JSON.parse(body) as { id: number; method: string; params: unknown[] }[]; posts.push({ url, rows: rows.map(row => [row.method, row.params]) });
     const values: Record<string, unknown> = { eth_chainId: "0x2105", eth_getTransactionCount: "0x8", eth_getTransactionReceipt: null,
-      eth_getBlockByNumber: { number: "0x3039", hash: ERA_HASH, transactions: [PROBE] } };
+      eth_getBlockTransactionCountByNumber: "0x2", eth_getTransactionByBlockNumberAndIndex: { hash: PROBE, blockHash: ERA_HASH, blockNumber: "0x3039" } };
     const result = (row: { method: string; params: unknown[] }) => row.method !== "eth_getTransactionByHash" ? values[row.method]
       : row.params[0] === PROBE ? { hash: PROBE, blockHash: ERA_HASH, blockNumber: "0x3039" } : null;
     return { status: 200, body: JSON.stringify(rows.map(row => ({ jsonrpc: "2.0", id: row.id, result: result(row) }))) };
@@ -106,7 +107,7 @@ test("the production proof reads APN_BASE_RPC_URL at the finalized tag (first ba
   assert.deepEqual(check, { neverLands: true, finalizedNonce: 8n });
   const own = [["eth_getTransactionCount", [account.address, "finalized"]], ["eth_getTransactionReceipt", [hash]], ["eth_getTransactionByHash", [hash]]];
   assert.deepEqual(posts, [{ url: "https://base.example/rpc", rows: [["eth_chainId", []], ...own] },
-    { url: "https://base.example/rpc", rows: [["eth_getBlockByNumber", ["0x3039", false]]] },
+    { url: "https://base.example/rpc", rows: [["eth_getBlockTransactionCountByNumber", ["0x3039"]], ["eth_getTransactionByBlockNumberAndIndex", ["0x3039", "0x0"]]] },
     { url: "https://base.example/rpc", rows: [...own, ["eth_getTransactionByHash", [PROBE]]] }]);
   assert.throws(() => environmentFinalizedReader({})(8453), { code: "APN_RPC_CONFIG" });
 });

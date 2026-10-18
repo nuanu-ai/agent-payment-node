@@ -39,7 +39,8 @@ async function setup(t: test.TestContext) {
     ? (chain.indexed ? { hash: PROBE, blockHash: BLOCK_HASH, blockNumber: "0x10" } : null)
     : !chain.landed && (method === "eth_getTransactionReceipt" || method === "eth_getTransactionByHash") ? null
     : method === "eth_getTransactionCount" && params[1] === "finalized" ? chain.finalizedNonce
-    : method === "eth_getBlockByNumber" && params[0] === "0x10" && params[1] === false ? { ...await base(method, params) as object, transactions: [PROBE] }
+    : method === "eth_getBlockTransactionCountByNumber" && params[0] === "0x10" ? "0x1"
+    : method === "eth_getTransactionByBlockNumberAndIndex" && params[0] === "0x10" && params[1] === "0x0" ? { hash: PROBE, blockHash: BLOCK_HASH, blockNumber: "0x10" }
     : await base(method, params);
   t.mock.method(BridgeHttps.prototype, "request", async (_url: string, _verb: string, body?: string) => {
     const request = JSON.parse(body!) as { id: number; method: string; params: unknown[] } | { id: number; method: string; params: unknown[] }[];

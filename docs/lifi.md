@@ -903,9 +903,9 @@ before an outcome: a signed source has one fixed nonce, so it and any later
 transaction at that nonce cannot both land, and that release is what lets a later
 transaction take the nonce the never-lands proof needs. Like every nonce-moved
 exit, the proof counts a missing transaction only from a node that indexes the
-operation's era: after the first batch it reads the pinned block's body and, in one
-deciding batch with the nonce and both lookups, asks the node for one of that
-block's transactions by hash. A node that pruned its transaction index (geth
+operation's era: after the first batch it reads the pinned block's transaction count
+and first transaction (block data, never the whole body) and, in one deciding batch
+with the nonce and both lookups, asks the node for that transaction by hash. A node that pruned its transaction index (geth
 `--history.transactions`) does not return it, so nothing is proven and the source
 stays open for a receipt or the owner's abandon.
 
