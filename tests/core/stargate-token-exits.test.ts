@@ -13,7 +13,7 @@ import { executeStargateV2Token, prepareStargateV2Token, type StargateTokenExecu
   type StargateTokenOperation } from "../../src/stargate-v2/token-execution.js";
 import { StargateTokenService } from "../../src/stargate-v2/token-runtime.js";
 import { temporaryState } from "./helpers.js";
-import { mockChain } from "./stargate-legacy-support.js";
+import { finalizedNode } from "./finalized-node.js";
 import { AMOUNT, OWNER, request, seedTokenFixture, setup } from "./stargate-token-support.js";
 
 /**
@@ -43,8 +43,10 @@ async function dropped(root: string) {
     prepareEnvelope: async tx => ({ ...await s.ports.prepareEnvelope(tx), nonceAtomic: String(++nonce) }),
     waitSourceReceipt: async (hash, finality) => receipts[hash] === undefined ? null
       : { transactionHash: hash, status: receipts[hash]!, blockNumberAtomic: "30", blockHash: `0x${"ab".repeat(32)}`, finality, logs: [] },
-    neverLands: async effect => await checkNeverLands({ chainId: 10, account: OWNER, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash },
-      mockChain(10, finalized).batch) };
+    // The real R4 check against a finalized-tag node that indexes the operation's quote block (passed by the execution).
+    neverLands: async effect => { const era = { hash: effect.before.hash, number: BigInt(effect.before.numberAtomic) };
+      return await checkNeverLands({ chainId: 10, account: OWNER, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash, before: era },
+        finalizedNode(10, () => finalized, { era }).batch); } };
   const state = new StateStore(root), service = new StargateTokenService(state, wrapping,
     { APN_OPTIMISM_RPC_URL: "https://optimism.example", APN_POLYGON_RPC_URL: "https://polygon.example" }, () => 2_000_000_000_000);
   (service as unknown as { ports: () => Promise<StargateTokenExecutionPorts> }).ports = async () => ports;

@@ -20,19 +20,27 @@ import { MerchantRepository } from "../../src/x402-merchant/repository.js";
 import { MerchantService } from "../../src/x402-merchant/service.js";
 import { merchantTerms } from "../../src/x402-merchant/terms.js";
 import { temporaryState } from "./helpers.js";
-import { MERCHANT_URL, merchantFixture, PROFILE, TX_HASH } from "./merchant-x402-fixtures.js";
+import { BLOCK_HASH, MERCHANT_URL, merchantFixture, PROFILE, TX_HASH } from "./merchant-x402-fixtures.js";
 
 type Fixture = Awaited<ReturnType<typeof merchantFixture>>;
 class Approval implements OperationAbandonApprovalPort {
   readonly calls: OperationAbandonIntent[] = [];
   async approve(intent: OperationAbandonIntent): Promise<void> { this.calls.push(intent); }
 }
-/** The fixture chain behind the real HTTP transport; `landed: false` hides the transaction, `finalizedNonce` is the payer's. */
+/**
+ * The fixture chain behind the real HTTP transport; `landed: false` hides the transaction, `finalizedNonce` is the payer's.
+ * The prepare-time fee anchor (block 0x10) holds PROBE, which the node indexes unless `indexed` is off.
+ */
+const PROBE = `0x${"9a".repeat(32)}`;
 async function setup(t: test.TestContext) {
   const temp = await temporaryState(); t.after(temp.cleanup);
-  const f = await merchantFixture(temp.root), base = f.rpc.value.bind(f.rpc), chain = { landed: true, finalizedNonce: "0x0" };
-  f.rpc.value = async (method, params) => !chain.landed && (method === "eth_getTransactionReceipt" || method === "eth_getTransactionByHash") ? null
-    : method === "eth_getTransactionCount" && params[1] === "finalized" ? chain.finalizedNonce : await base(method, params);
+  const f = await merchantFixture(temp.root), base = f.rpc.value.bind(f.rpc), chain = { landed: true, finalizedNonce: "0x0", indexed: true };
+  f.rpc.value = async (method, params) => method === "eth_getTransactionByHash" && params[0] === PROBE
+    ? (chain.indexed ? { hash: PROBE, blockHash: BLOCK_HASH, blockNumber: "0x10" } : null)
+    : !chain.landed && (method === "eth_getTransactionReceipt" || method === "eth_getTransactionByHash") ? null
+    : method === "eth_getTransactionCount" && params[1] === "finalized" ? chain.finalizedNonce
+    : method === "eth_getBlockByNumber" && params[0] === "0x10" && params[1] === false ? { ...await base(method, params) as object, transactions: [PROBE] }
+    : await base(method, params);
   t.mock.method(BridgeHttps.prototype, "request", async (_url: string, _verb: string, body?: string) => {
     const request = JSON.parse(body!) as { id: number; method: string; params: unknown[] } | { id: number; method: string; params: unknown[] }[];
     const rows = Array.isArray(request) ? request : [request];
@@ -150,7 +158,11 @@ test("sealed signed bytes never sent: open and held while the finalized nonce is
   assert.equal(data(await merchant(f, "observe", "--operation", o.operationId)).state, "unknown_finality");
   assert.deepEqual(await usage(f, o), HELD);
   assert.equal(await indexState(f, o.operationId), "active");
-  chain.finalizedNonce = "0x1";
+  // A node whose index does not reach the fee anchor would not know a landed payment: the nonce past alone proves nothing.
+  chain.finalizedNonce = "0x1"; chain.indexed = false;
+  assert.equal(data(await merchant(f, "observe", "--operation", o.operationId)).state, "unknown_finality");
+  assert.deepEqual(await usage(f, o), HELD);
+  chain.indexed = true;
   const done = data(await merchant(f, "observe", "--operation", o.operationId));
   assert.deepEqual([done.state, done.exit], ["failed_proven_superseded", { reason: "finalized_nonce_superseded", finalizedNonce: "1", transactionHash: TX_HASH }]);
   assert.deepEqual(await usage(f, o), FREE);

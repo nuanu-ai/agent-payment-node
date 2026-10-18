@@ -144,12 +144,13 @@ export class OneClickEvmSource {
   async transactionKnown(hash: Hex): Promise<boolean> { await this.chain(); return await this.raw("eth_getTransactionByHash", [hash]) !== null; }
   /**
    * R4 exit 2 for a signed source without a receipt: the payer's nonce at the `finalized` tag past the source nonce, while
-   * the node knows neither the transaction nor a receipt (one batch). The finalized nonce, or null while not proven.
+   * a node indexing the pinned source block (read before signing) knows neither the transaction nor a receipt. The
+   * finalized nonce, or null while not proven.
    */
   async unlanded(record: OneClickSourceRecord): Promise<string | null> {
     if (record.transactionHash === null) return null;
     const check = await checkNeverLands({ chainId: this.lane.origin.chainId, account: record.payer, nonce: BigInt(record.sourceCall.nonce),
-      transactionHash: record.transactionHash }, publicFinalizedRead(this.url, "1Click origin RPC", this.https).batch);
+      transactionHash: record.transactionHash, before: { hash: record.sourceBlockHash } }, publicFinalizedRead(this.url, "1Click origin RPC", this.https).batch);
     return check.neverLands ? check.finalizedNonce.toString() : null;
   }
   /** Safe-block receipt observation. It never implies destination delivery. */

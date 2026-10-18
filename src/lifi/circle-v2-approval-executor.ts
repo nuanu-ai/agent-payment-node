@@ -303,10 +303,11 @@ export class CircleV2ApprovalExecutor {
       if (await verifySigned(r.rawTransaction, r) !== r.transactionHash) throw new Error("signed hash");
       const found = await this.rpc.observe(r.transactionHash);
       if (found === null) {
-        // No safe receipt. Once another transaction took its nonce at finality and the node knows neither this one nor a
-        // receipt, the approval can never land: no allowance changed, and the payer's account is free again.
-        const check = await checkNeverLands({ chainId: 8453, account: r.preparation.transaction.from, nonce: BigInt(r.preparation.transaction.nonceAtomic),
-          transactionHash: r.transactionHash }, this.rpc.finalizedBatch);
+        // No safe receipt. Once another transaction took its nonce at finality and a node indexing the preparation's
+        // block knows neither this one nor a receipt, the approval can never land: no allowance changed, the account is free.
+        const p = r.preparation;
+        const check = await checkNeverLands({ chainId: 8453, account: p.transaction.from, nonce: BigInt(p.transaction.nonceAtomic),
+          transactionHash: r.transactionHash, before: { hash: p.sourceBlock.hash, number: BigInt(p.sourceBlock.number) } }, this.rpc.finalizedBatch);
         if (!check.neverLands) return await this.unknown(r);
         r = update(r, { phase: "failed_proven_superseded", finalizedNonceAtomic: check.finalizedNonce.toString() }); await this.journal.save(r); return r;
       }
