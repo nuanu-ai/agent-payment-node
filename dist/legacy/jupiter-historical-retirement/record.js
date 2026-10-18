@@ -75,9 +75,8 @@ export function historicalRetirementUsage(records, retirements, now) {
         if (ids.has(row.reservationId) || !records.some(v => canonicalJson(v) === canonicalJson(row)))
             corrupt();
         ids.add(row.reservationId);
-        if (at.slice(0, 10) < r.accountingAt.slice(0, 10))
-            blocked();
-        if (at.slice(0, 10) === r.accountingAt.slice(0, 10))
+        // Charged on its accounting day, and while the clock is behind that day (a read never drops a future-stamped charge).
+        if (at.slice(0, 10) <= r.accountingAt.slice(0, 10))
             charge += 6000000n;
     }
     const total = BigInt(sumUsage(records.filter(r => !ids.has(r.reservationId)), now)) + charge;
@@ -169,5 +168,4 @@ function instant(v) { if (typeof v !== "string" || !Number.isFinite(Date.parse(v
 function isHash(v) { return typeof v === "string" && HASH.test(v); }
 function isUint(v) { return typeof v === "string" && UINT.test(v); }
 function corrupt() { throw new ApnError("APN_STATE_CORRUPT", "Historical Jupiter retirement evidence is invalid."); }
-function blocked() { throw new ApnError("APN_OPERATION_BLOCKED", "Historical Jupiter retirement accounting cannot move backward."); }
 //# sourceMappingURL=record.js.map
