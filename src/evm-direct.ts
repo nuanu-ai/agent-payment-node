@@ -136,8 +136,8 @@ export function validateEvmOperation(operation: OperationRecord): void {
     awaiting_approval: ["started", "failed_before_effect"],
     started: ["signed_not_submitted", "failed_before_effect"],
     signed_not_submitted: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"],
-    submitted_pending: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded"],
-    unknown_finality: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded"],
+    submitted_pending: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"],
+    unknown_finality: ["submitted_pending", "unknown_finality", "completed", "failed_confirmed_revert", "failed_proven_superseded", "abandoned_unknown"],
     completed: [], failed_before_effect: [], failed_confirmed_revert: [], failed_proven_superseded: [], abandoned_unknown: [],
   };
   if (operation.transitions[0]?.state !== "awaiting_approval" ||

@@ -289,11 +289,15 @@ this path.
   kept for `operation resume`: resume sends a signature APN never dispatched, and
   after an ambiguous dispatch it re-sends the identical bytes only when the RPC
   holds neither a receipt nor the pending transaction. A sender nonce finalized
-  past the frozen one with no receipt for this hash ends the transfer as
-  `failed_proven_superseded` and releases its usage hold. A signature APN never
+  past the frozen one, while a node whose transaction index reaches the block
+  read at prepare knows neither the transaction nor a receipt, ends the transfer
+  as `failed_proven_superseded` and releases its usage hold. A signature APN never
   dispatched can be closed with `apn operation abandon` after foreground owner
   acknowledgement; APN then never sends it and the account's next transfer
-  reuses its nonce.
+  reuses its nonce. A dispatched transfer that no proof decides (a pruned node,
+  or a Base USDC record written before the prepared block hash was recorded) can
+  be closed the same way after its approval window: it ends `abandoned_unknown`,
+  is never sent again, and its usage hold stays charged.
 - Native completion requires the exact included transaction and successful
   receipt. ERC-20 completion additionally requires that receipt's sole
   `Transfer` log out of the sender to be the exact amount to the exact
