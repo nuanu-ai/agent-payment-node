@@ -79,7 +79,7 @@ export function validateOperation(value: unknown): OperationRecord {
     "proofClass", "transitions", "integrityHash",
   ];
   const optionalKeys = [
-    "transactionData", "economics", "preparedBlockNumberAtomic", "providerDirect", "providerEffect",
+    "transactionData", "economics", "preparedBlockNumberAtomic", "preparedBlockHash", "providerDirect", "providerEffect",
     "transactionHash", "rawTransactionHash", "lastSubmissionAt", "evm", "coinbaseGaslessLocator",
     "coinbaseGaslessCursor", "coinbaseGaslessSettlement", "allowlist", "allowlistLease",
   ];
@@ -179,6 +179,9 @@ function validateLocalDirect(operation: OperationRecord): void {
     stateCorrupt("Local direct operation is missing its transaction economics.");
   }
   parseAtomic(operation.preparedBlockNumberAtomic);
+  if (operation.preparedBlockHash !== undefined && (operation.evm !== undefined || !/^0x[0-9a-f]{64}$/u.test(operation.preparedBlockHash))) {
+    stateCorrupt("Local direct operation has an invalid prepared block hash.");
+  }
   parseAtomic(operation.economics.nonceAtomic);
   parseAtomic(operation.economics.gasLimitAtomic, { positive: true });
   parseAtomic(operation.economics.maxFeePerGasAtomic, { positive: true });
@@ -189,7 +192,7 @@ function validateLocalDirect(operation: OperationRecord): void {
 function validateProviderDirect(operation: OperationRecord, binding: ProviderDirectBinding): void {
   if (
     operation.transactionData !== undefined || operation.economics !== undefined ||
-    operation.preparedBlockNumberAtomic !== undefined || operation.rawTransactionHash !== undefined ||
+    operation.preparedBlockNumberAtomic !== undefined || operation.preparedBlockHash !== undefined || operation.rawTransactionHash !== undefined ||
     !isPlainRecord(binding) || !exactKeys(binding, [
       "schemaVersion", "providerId", "profileRevision", "capabilityHash", "accountBindingHash", "executionMode",
       "executionOwner", "retryOwner", "rpcBindingHash", "rpcOriginHash", "policy",

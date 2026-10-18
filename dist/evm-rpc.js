@@ -163,20 +163,19 @@ export class EvmRpc {
     async evidence(operation, receipt) {
         return await observeEvmTransfer(calls => this.read(directEvmChain(operation.chainId), calls), operation, receipt);
     }
-    /** A finalized nonce past the frozen one, with no receipt for this hash from the same node, proves another transaction took it. */
-    async unlandedEvidence(chainId, address, transactionHash) {
+    /**
+     * The never-lands proof's batches on one network, each one POST. This instance proves the endpoint's chain id once, in
+     * its first POST (P2), so the proof's own chain-id row is answered from that proof instead of being read again.
+     */
+    finalizedBatch(chainId) {
         if (this.batchCall === undefined)
             throw new ApnError("APN_RPC_CONFIG", "Unlanded-transfer evidence requires one batched RPC read.");
-        const [nonce, receipt, transaction] = await this.read(directEvmChain(chainId), [
-            { method: "eth_getTransactionCount", params: [address, "finalized"] },
-            { method: "eth_getTransactionReceipt", params: [transactionHash] }, { method: "eth_getTransactionByHash", params: [transactionHash] },
-        ]);
-        if (receipt !== null)
-            evmRpcRecord(receipt);
-        if (transaction !== null && evmRpcHex(evmRpcRecord(transaction).hash, 32) !== transactionHash.toLowerCase()) {
-            throw new ApnError("APN_RPC_PROTOCOL", "EVM transaction lookup returned a different hash.");
-        }
-        return { finalizedNonce: evmRpcQuantity(nonce).toString(), receiptFound: receipt !== null, transactionKnown: transaction !== null };
+        const chain = directEvmChain(chainId);
+        return async (calls) => {
+            const values = await this.read(chain, calls.filter(call => call.method !== "eth_chainId"));
+            let next = 0;
+            return calls.map(call => call.method === "eth_chainId" ? `0x${chain.toString(16)}` : values[next++]);
+        };
     }
 }
 function chainMismatch() {
