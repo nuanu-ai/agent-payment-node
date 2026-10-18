@@ -150,7 +150,9 @@ export declare const CIRCLE_RPC_ABI: readonly [{
 /** Read plans of the live rails in calls per client (P4): chain identity; functional configuration with its head;
  * the attester set (head, threshold, count, at most 20 attesters); one account; one envelope (head, tip, estimate);
  * one effect preflight (two nonces, balance, allowance, estimate, simulation, mint head and used nonce); one
- * observation (transaction, receipt, finality head, canonical block). */
+ * observation (transaction, receipt, finality head, canonical block); one ambiguous-send check on the shared never-lands
+ * rule (chain id, finalized nonce, receipt, transaction; the era block's count and first transaction; the deciding nonce,
+ * receipt, transaction and probe). */
 export declare const CIRCLE_READ_PLAN: {
     readonly identity: 1;
     readonly configuration: 13;
@@ -160,10 +162,10 @@ export declare const CIRCLE_READ_PLAN: {
     readonly preflight: 8;
     readonly observation: 4;
     readonly single: 1;
-    readonly ambiguous: 4;
+    readonly ambiguous: 10;
 };
 /** The longest live command: identity, configuration, attesters, two accounts, two envelopes, three effect preflights,
- * eight observations, one ambiguous-send check (two nonces, transaction, receipt) and four single reads (allowance,
+ * eight observations, one ambiguous-send check (above) and four single reads (allowance,
  * used nonce, cleanup nonce, mint head), each retried once. */
 export declare const CIRCLE_COMMAND_REQUEST_BUDGET: number;
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
@@ -204,6 +206,11 @@ export declare class CircleRpc {
     private leanObservation;
     account(address: Address, token: Address, spender: Address): Promise<CircleAccountPreflight>;
     envelope(from: Address, to: Address, data: Hex, nonceAtomic: string, gasLimit?: string): Promise<CircleEnvelope>;
+    /** One JSON-RPC batch (one POST, so one node answers every read in it) for the never-lands proof; never retried read by read. */
+    finalizedBatch(calls: readonly {
+        readonly method: string;
+        readonly params: readonly unknown[];
+    }[]): Promise<readonly unknown[]>;
 }
 /** The live rails read functional configuration only, at the latest head, as one batch: domains, remote messenger,
  * local minter/transmitter, token pair, versions, decimals and paused flags (P1/P5). Implementation addresses and

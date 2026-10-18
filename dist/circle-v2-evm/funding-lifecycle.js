@@ -420,10 +420,10 @@ async function abandonNeverLanding(input, ports) {
     return op;
 }
 /** R4 for an ambiguous send: an approval or burn whose bytes may have been broadcast (submission fence crossed) and which
- * no receipt proves. When another transaction consumed its nonce at safe depth and the node knows neither its
- * transaction nor a receipt, it can never land: the approval ends the route (every hold released, nothing counted),
- * the burn leaves the confirmed approval to the explicit approve-zero cleanup. A known hash keeps observing; an
- * unconsumed nonce keeps the effect as it is. */
+ * no receipt proves. On the shared never-lands rule (finalized nonce past it while a node indexing the envelope's era
+ * block knows neither its transaction nor a receipt) it can never land: the approval ends the route (every hold released,
+ * nothing counted), the burn leaves the confirmed approval to the explicit approve-zero cleanup. Anything else keeps the
+ * effect as it is; an envelope without an era never proves it, and the owner's abandon is its exit. */
 async function sentNeverLanded(input, role, ports) {
     let op = input;
     const effect = op.effects.find(e => e.role === role);
@@ -441,8 +441,8 @@ async function sentNeverLanded(input, role, ports) {
 }
 /** R4 for a possibly-broadcast mint or cleanup (submission fence crossed) that no receipt proves. If the node knows neither
  * its transaction nor a receipt and the signer's latest nonce has not passed the effect's nonce, the identical sealed
- * bytes are sent again, once per command, never re-signed (same hash and nonce: at most one inclusion). If the safe nonce
- * is past it, another transaction took the nonce and the bytes can never land: the effect is abandoned, its bytes
+ * bytes are sent again, once per command, never re-signed (same hash and nonce: at most one inclusion). If the shared
+ * never-lands rule proves another transaction took the nonce, the bytes can never land: the effect is abandoned, its bytes
  * discarded, and approve-mint (or cleanup) may re-arm a fresh envelope under fresh foreground consent. A mint the node
  * does not know whose issuer message the destination already consumed can only revert: it is closed (see externalMint),
  * never sent again. Otherwise observe. */

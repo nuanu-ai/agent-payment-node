@@ -12,7 +12,10 @@ export type CircleRole = "approval" | "burn" | "mint" | "cleanup";
 export type CircleEffectPhase = "prepared" | "signing_started" | "sealed" | "submission_started" | "submitted" | "unknown" | "confirmed" | "reverted" | "abandoned_unsent";
 export interface CircleEnvelope { readonly chainId: number; readonly from: Address; readonly to: Address; readonly data: Hex;
   readonly valueAtomic: "0"; readonly nonceAtomic: string; readonly gasLimitAtomic: string;
-  readonly maxFeePerGasAtomic: string; readonly maxPriorityFeePerGasAtomic: string; readonly envelopeHash: string; }
+  readonly maxFeePerGasAtomic: string; readonly maxPriorityFeePerGasAtomic: string;
+  /** v2 envelopes frozen since the never-lands index proof: the latest block read while freezing it (bound by envelopeHash). */
+  readonly eraBlock?: { readonly numberAtomic: string; readonly hash: Hex };
+  readonly envelopeHash: string; }
 export interface CircleEffect { readonly role: CircleRole; readonly phase: CircleEffectPhase; readonly envelope: CircleEnvelope;
   readonly transactionHash: Hex | null; readonly materialHash: string | null; readonly proof: CircleReceiptProof | null; }
 export interface CirclePolicy { readonly profile: string; readonly profileHash: string; readonly policyDigest: string; readonly revision: number; readonly activationDigest?: string; }
