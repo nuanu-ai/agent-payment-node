@@ -144,13 +144,17 @@ function validateTransitions(values) {
     if (values.length === 0)
         stateCorrupt("Operation has no transition history.");
 }
+/** The reason of a dispatched local transfer the owner abandoned without a decided outcome (its usage hold stays charged). */
+export const LOCAL_DIRECT_SENT_ABANDON = "owner_abandoned_unknown";
 function validateLocalDirect(operation) {
-    // The owner may abandon only a signature APN never dispatched; it is then the final transition.
+    // The owner abandons a signature APN never dispatched, or a dispatched transfer no proof decided; it is the final transition.
     const abandoned = operation.transitions.findIndex((transition) => transition.state === "abandoned_unknown");
-    if (abandoned !== -1 && (abandoned !== operation.transitions.length - 1 || operation.transitions[abandoned - 1]?.state !== "signed_not_submitted" ||
-        operation.reason !== "owner_abandoned_undispatched_signature" || operation.proofClass !== "owner_acknowledgement_only" ||
-        !operation.terminal || operation.transactionHash === undefined)) {
-        stateCorrupt("Local direct abandonment is valid only as the final transition of an undispatched signature.");
+    const before = operation.transitions[abandoned - 1]?.state;
+    if (abandoned !== -1 && (abandoned !== operation.transitions.length - 1 || operation.proofClass !== "owner_acknowledgement_only" ||
+        !operation.terminal || operation.transactionHash === undefined ||
+        !(operation.reason === "owner_abandoned_undispatched_signature" && before === "signed_not_submitted" ||
+            operation.reason === LOCAL_DIRECT_SENT_ABANDON && ["signed_not_submitted", "submitted_pending", "unknown_finality"].includes(before ?? "")))) {
+        stateCorrupt("Local direct abandonment is valid only as the final transition of an undispatched signature or an undecided dispatch.");
     }
     if (operation.transactionData === undefined || operation.economics === undefined ||
         operation.preparedBlockNumberAtomic === undefined || operation.providerEffect !== undefined) {

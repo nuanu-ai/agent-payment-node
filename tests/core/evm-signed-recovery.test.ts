@@ -131,4 +131,17 @@ test("only a signature APN never dispatched can be abandoned; the owner's acknow
   await assert.rejects(setup.local.request({ requestId: "mismatched-signed-material", version: "apn.native.v1", operation: "directTransfer.signedMaterial.get",
     payload: { profile: sent.profile, operationId: sent.operationId, fingerprint: sent.fingerprint,
       expectedTransactionHash: `0x${"e".repeat(64)}`, expectedRawTransactionHash: `0x${"e".repeat(64)}` } }), { code: "APN_NATIVE_PROTOCOL" });
+  // Past its approval window, a dispatched transfer no proof decided takes the owner's abandon (R4 exit 3): one last receipt
+  // read finds nothing, consent ends it abandoned_unknown, its usage hold stays charged, and nothing is ever sent again.
+  assert.equal(refused.error?.details?.reason, "local_direct_abandon_before_expiry");
+  setup.clock.advance(Date.parse(sent.expiresAt) - setup.clock.now().getTime() + 1);
+  const closedSent = await core.execute({ command: "operation.abandon", operationId: dispatched.operation_id });
+  assert.equal(closedSent.ok, true, JSON.stringify(closedSent.error));
+  const closedOperation = closedSent.operation as { state: string; reason: string; terminal: boolean };
+  assert.deepEqual([closedOperation.state, closedOperation.reason, closedOperation.terminal], ["abandoned_unknown", "owner_abandoned_unknown", true]);
+  assert.equal(abandon.intents.length, 3); assert.match(abandon.intents.at(-1)!.outcomeNote, /may still land/u);
+  assert.equal(await ledgerState(temporary.root, (await setup.state.findOperation(dispatched.operation_id))!), "unknown_finality");
+  assert.equal(rpc.broadcastCount, 1);
+  assert.equal((await core.execute({ command: "operation.abandon", operationId: dispatched.operation_id })).ok, true);
+  assert.equal(abandon.intents.length, 3, "a replay asks nothing");
 });

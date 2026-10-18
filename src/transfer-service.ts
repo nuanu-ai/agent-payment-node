@@ -252,7 +252,7 @@ export class TransferService {
     return await this.observation.recoverProviderRequest(operationId, providerRequestId);
   }
   async status(operationId: string): Promise<unknown> { return await this.observation.status(operationId); }
-  async abandonUndispatched(operationId: string): Promise<unknown> { return await this.observation.abandonUndispatched(operationId); }
+  async abandonLocal(operationId: string): Promise<unknown> { return await this.observation.abandonLocal(operationId); }
   async receipt(operationId: string): Promise<unknown> { return await this.observation.receipt(operationId); }
   private async inspectReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord> {
     return await this.observation.inspectReceipt(operation, rpc);
@@ -283,7 +283,7 @@ export class TransferService {
   /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently, after each durable write. */
   private async followUsage<T extends OperationRecord>(operation: T): Promise<T> {
     if (operation.allowlist !== undefined) {
-      await this.allowlist.follow(evmAllowlistSubject(operation), evmUsageTarget(operation.state), operation.transitions.at(-1)!.hash);
+      await this.allowlist.follow(evmAllowlistSubject(operation), evmUsageTarget(operation), operation.transitions.at(-1)!.hash);
     }
     return operation;
   }

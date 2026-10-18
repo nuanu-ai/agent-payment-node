@@ -1,6 +1,6 @@
 import { type DirectAllowlistSubject, type DirectUsageTarget } from "./direct-allowlist-gate.js";
 import { type EvmAssetSelection } from "./evm-asset.js";
-import type { OperationRecord, OperationState } from "./model.js";
+import type { OperationRecord } from "./model.js";
 export interface ListedEvmAsset {
     readonly selection: EvmAssetSelection;
     /** Decimals come from the pinned direct row, never from the caller or the token contract. */
@@ -15,4 +15,4 @@ export declare function evmAllowlistSubject(operation: Pick<OperationRecord, "pr
 /** A binding is optional so records written before the gate still validate; once present its lease is mandatory past `started`. */
 export declare function validateEvmAllowlist(operation: OperationRecord): void;
 /** The shared ledger follows the EVM journal: a signature alone stays reserved; a broadcast is charged until proven. */
-export declare function evmUsageTarget(state: OperationState): DirectUsageTarget;
+export declare function evmUsageTarget(operation: Pick<OperationRecord, "state" | "reason">): DirectUsageTarget;

@@ -5,6 +5,7 @@ import { EvmDirectSubmissionJournal } from "./evm-direct-submission.js";
 import { ApnError } from "./errors.js";
 import { assertDirectTerminalReceiptAuthority, hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
 import { armDirectEvmStep, requireEvmRpc } from "./evm-direct.js";
+import { LOCAL_DIRECT_SENT_ABANDON } from "./state-integrity.js";
 import { directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { checkNeverLands, type EraBlock, type NeverLandsCheck } from "./evm-finalized-proof.js";
 import type { Economics, Hex, OperationRecord } from "./model.js";
@@ -178,8 +179,13 @@ export class TransferServiceObservation {
     return effect.rawTransaction;
   }
 
-  /** Signed but never dispatched by APN: after the owner's foreground acknowledgement it is closed and never sent. */
-  async abandonUndispatched(operationIdInput: string): Promise<unknown> {
+  /**
+   * The owner's exit (R4 exit 3) of a local transfer, after foreground acknowledgement; nothing is signed or sent. A
+   * signature APN never dispatched is closed and never sent (its hold released: nothing left the account). A dispatched
+   * one that no proof decided (no receipt, never-lands not proven) closes past its approval window with its usage hold
+   * still charged, since the transaction may still land; one last receipt read closes it by proof instead when it landed.
+   */
+  async abandonLocal(operationIdInput: string): Promise<unknown> {
     const operationId = canonicalOperationId(operationIdInput);
     await this.context.ready();
     const found = requiredLocal(await this.requiredOperation(operationId));
@@ -187,17 +193,34 @@ export class TransferServiceObservation {
       let operation = requiredLocal(await this.requiredOperation(operationId));
       if (operation.state === "abandoned_unknown" && operation.terminal) return publicOperation(operation);
       const submissions = new EvmDirectSubmissionJournal(this.context.state.root), publicJournal = new DirectPublicEffectJournal(this.context.state);
-      if (operation.terminal || !["started", "signed_not_submitted"].includes(operation.state) || !await publicJournal.hasSigned(operation) ||
-          await submissions.exists(operation)) {
-        throw new ApnError("APN_OPERATION_BLOCKED", "Only a local transfer APN signed but never dispatched can be abandoned; resume the others.",
+      const signed = !operation.terminal && ["started", "signed_not_submitted"].includes(operation.state) && await publicJournal.hasSigned(operation);
+      const dispatched = !operation.terminal && operation.transactionHash !== undefined && (["submitted_pending", "unknown_finality"].includes(operation.state) ||
+        operation.state === "signed_not_submitted" && await submissions.exists(operation));
+      if (signed && !dispatched && !await submissions.exists(operation)) {
+        const effect = await publicJournal.effect(operation);
+        await this.context.requireOperationAbandonApproval().approve(undispatchedAbandonIntent(operation));
+        if (operation.state === "started") operation = await this.lifecycle.transition(operation, "signed_not_submitted", false,
+          "same_public_signature_recovered", "public_native_transaction_hash", effect);
+        return publicOperation(await this.lifecycle.transition(operation, "abandoned_unknown", true,
+          "owner_abandoned_undispatched_signature", "owner_acknowledgement_only"));
+      }
+      if (!dispatched) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Only a local transfer APN signed, or dispatched without a decided outcome, can be abandoned; resume the others.",
           { reason: "local_direct_not_abandonable", nextActions: [`apn operation resume --operation ${operationId}`] });
       }
-      const effect = await publicJournal.effect(operation);
-      await this.context.requireOperationAbandonApproval().approve(undispatchedAbandonIntent(operation));
-      if (operation.state === "started") operation = await this.lifecycle.transition(operation, "signed_not_submitted", false,
-        "same_public_signature_recovered", "public_native_transaction_hash", effect);
-      return publicOperation(await this.lifecycle.transition(operation, "abandoned_unknown", true,
-        "owner_abandoned_undispatched_signature", "owner_acknowledgement_only"));
+      if (this.context.clock.now().getTime() < Date.parse(operation.expiresAt)) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "A dispatched local transfer can be abandoned only after its approval window.",
+          { reason: "local_direct_abandon_before_expiry", nextActions: [`apn operation resume --operation ${operationId}`] });
+      }
+      // A receipt that landed closes the transfer by proof; an unreachable RPC leaves the owner's consent as the exit.
+      const rpc = this.context.rpc;
+      if (rpc !== undefined) {
+        if (operation.evm !== undefined) armDirectEvmStep(rpc, operation.evm.asset.chainId, "resume"); else rpc.armEvmDirectRpcGuard?.();
+        operation = (await this.observeReceipt(operation, rpc)).operation;
+        if (operation.terminal) return publicOperation(operation);
+      }
+      await this.context.requireOperationAbandonApproval().approve(sentAbandonIntent(operation));
+      return publicOperation(await this.lifecycle.transition(operation, "abandoned_unknown", true, LOCAL_DIRECT_SENT_ABANDON, "owner_acknowledgement_only"));
     });
   }
 
@@ -311,6 +334,11 @@ function undispatchedAbandonIntent(operation: LocalOperationRecord): OperationAb
     unit: asset === undefined ? "USDC" : asset.kind === "native" ? network?.nativeSymbol ?? "native" : "token",
     outcomeNote: "Financial outcome: APN signed this transfer but holds no record of dispatching it. After abandonment APN never sends it; " +
       `the next transfer from this account reuses nonce ${operation.economics.nonceAtomic}, which voids these signed bytes.` };
+}
+
+function sentAbandonIntent(operation: LocalOperationRecord): OperationAbandonIntent {
+  return { ...undispatchedAbandonIntent(operation), outcomeNote: `Financial outcome: UNKNOWN. Transaction ${operation.transactionHash} was dispatched ` +
+    "and no proof decided it; it may still land. APN never sends it again, and its usage hold stays charged." };
 }
 
 /**
