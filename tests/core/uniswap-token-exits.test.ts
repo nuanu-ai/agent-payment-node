@@ -19,7 +19,7 @@ import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { ETHEREUM_USDT } from "../../src/swap/uniswap-v3/pins.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { temporaryState } from "./helpers.js";
-import { mockChain } from "./stargate-legacy-support.js";
+import { ERA, finalizedNode } from "./finalized-node.js";
 
 /**
  * R4 exits of a Uniswap token swap, through the CLI: a bound approval, swap or cleanup the node no longer knows, once
@@ -39,7 +39,7 @@ async function fixture(root: string, allowanceAtPrepare = "0") {
   const journal = new UniswapTokenJournal(root);
   await journal.save(newUniswapTokenOperation({ operationId: ID, profile: PROFILE, account: ACCOUNT, route, approvalCapAtomic: "1000000",
     allowanceAtPrepare, approvalGas: gas, swapGas: gas, cleanupGas: gas, maximumNativeDebitWei: "600000", policyDigest: domainHash("p", "p"),
-    mechanismDigest: domainHash("m", "m"), now: NOW }));
+    mechanismDigest: domainHash("m", "m"), quoteBlock: { number: ERA.number.toString(), hash: ERA.hash }, now: NOW }));
   const sends: string[] = [], consents: string[] = [], observations = new Map<string, TokenEffectObservation>();
   let allowance = allowanceAtPrepare, now = NOW, usage: AssetUsageState = "reserved", nonce = 7, finalizedNonce = 0n;
   const ports = { now: () => now, foregroundApprove: async () => { consents.push("approve"); }, foregroundCleanup: async (op: UniswapTokenOperation) => { consents.push(`cleanup:${op.integrityHash}`); },
@@ -51,9 +51,10 @@ async function fixture(root: string, allowanceAtPrepare = "0") {
     seal: async (op: UniswapTokenOperation, kind: TokenEffectKind) => ({ transactionHash: hashOf(op, kind), envelopeHash: "e".repeat(64) }),
     probeSealed: async () => null, send: async (op: UniswapTokenOperation, kind: TokenEffectKind) => { sends.push(`${kind}:${hashOf(op, kind)}`); return "ambiguous" as const; },
     observe: async (_op: unknown, _kind: TokenEffectKind, hash: string) => observations.get(hash) ?? null,
-    // The real R4 check against a finalized-tag stand-in: unknown hashes are not found.
+    // The real R4 check against a finalized-tag node indexing the quote block: unknown hashes are not found.
     neverLands: async (op: UniswapTokenOperation, _kind: TokenEffectKind, attempt: { nonce: string; transactionHash: string | null }) =>
-      await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash! }, mockChain(1, finalizedNonce).batch) };
+      await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash!,
+        before: { hash: op.quoteBlock!.hash, number: BigInt(op.quoteBlock!.number) } }, finalizedNode(1, () => finalizedNonce).batch) };
   // One execution per command, as each CLI process builds its own runtime.
   const execution = () => new UniswapTokenExecution(journal, ports);
   const runtime: UniswapTokenCommandRuntime = { inventory: () => ({}), quote: async () => ({}), prepare: async () => { throw new Error("unused"); },

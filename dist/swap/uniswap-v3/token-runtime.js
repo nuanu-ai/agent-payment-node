@@ -77,7 +77,7 @@ export class InstalledUniswapTokenRuntime {
             route: material.route, approvalCapAtomic: material.approvalCapAtomic, allowanceAtPrepare: material.allowanceAtPrepare,
             approvalGas: material.approvalGas, swapGas: material.swapGas, cleanupGas: material.cleanupGas,
             maximumNativeDebitWei: material.maximumNativeDebitWei, policyDigest: material.policyDigest,
-            mechanismDigest: material.mechanismDigest, now: this.ports.now() }));
+            mechanismDigest: material.mechanismDigest, quoteBlock: { number: material.blockNumber, hash: material.blockHash }, now: this.ports.now() }));
         await this.rpcBudget?.reconcile(operationId);
         return saved;
     }
@@ -94,7 +94,7 @@ export class InstalledUniswapTokenRuntime {
             return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] : [0, cap, "recovery"];
         }, async () => await this.execution.execute(id));
     }
-    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(8), "recovery"], async () => await this.execution.status(id)); }
+    async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"], async () => await this.execution.status(id)); }
     async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"], async () => await this.execution.cleanup(id)); }
     async budgeted(id, command, budget, work) {
         return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => {

@@ -14,7 +14,7 @@ import {
 import { SecureStateStore } from "./secure-state-store.js";
 
 import { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, validateAssetUsageReservation,
-  expectedStates, assetUsageReservationId, reservationIdFor, seal, assertReplay, assertBucketWindow, assertTransition,
+  expectedStates, assetUsageReservationId, reservationIdFor, seal, assertReplay, bucketStamp, assertTransition,
   validateIdentity, exactIdentity, exactAsset, withoutDigest, canonicalAccount, idempotency, atomic, instant, digest, invalid, blocked, corrupt,
 } from "./asset-usage-ledger-record.js";
 export { ASSET_USAGE_RESERVATION_SCHEMA, ASSET_USAGE_WINDOW, assetUsageReservationId, validateAssetUsageReservation } from "./asset-usage-ledger-record.js";
@@ -58,7 +58,8 @@ export class AssetUsageLedger extends SecureStateStore {
   async reserveWithinOwnerCap(input: AssetUsageIdentity & { readonly rail: "x402"; readonly amountAtomic: string;
     readonly maximumAtomic: string; readonly policyDigest: string; readonly registryVersion: string; readonly idempotencyKey: string;
     readonly now: Date }): Promise<AssetUsageReservation> {
-    const identity = validateIdentity(input), at = instant(input.now), idempotencyHash = idempotency(input.idempotencyKey);
+    const identity = validateIdentity(input), idempotencyHash = idempotency(input.idempotencyKey);
+    instant(input.now);
     const policyDigest = digest(input.policyDigest, "Policy digest"), amountAtomic = atomic(input.amountAtomic, true, false).toString();
     if (input.rail !== "x402" || BigInt(amountAtomic) > atomic(input.maximumAtomic, true, false)) throw blocked("The payment exceeds the owner's per-request cap.");
     const reservationId = reservationIdFor(identity, idempotencyHash);
@@ -70,7 +71,7 @@ export class AssetUsageLedger extends SecureStateStore {
         assertReplay(existing, policyDigest, input.registryVersion, input.rail, amountAtomic, idempotencyHash);
         return existing;
       }
-      assertBucketWindow(records, at);
+      const at = bucketStamp(records, input.now);
       const record = seal({ schemaVersion: ASSET_USAGE_RESERVATION_SCHEMA, reservationId, idempotencyHash, policyDigest,
         registryVersion: input.registryVersion, ...identity, rail: input.rail, amountAtomic, state: "reserved",
         reservedAt: at, updatedAt: at, effectAt: null, outcomeDigest: null });
@@ -107,20 +108,20 @@ export class AssetUsageLedger extends SecureStateStore {
         if(canonicalJson(existing.metamaskNativeReservation ?? null)!==canonicalJson(mm ?? null))throw blocked("MetaMask reservation marker changed.");
         assertReplay(existing, initial.policyDigest, initial.registryVersion, input.rail, initial.amountAtomic, idempotencyHash);
         if (input.retryFailedBeforeEffect === true && existing.state === "failed_before_effect") {
-          assertBucketWindow(reservations, at);
+          const stamp = bucketStamp(reservations, input.now);
           const usage = await this.sumBucketUsage(identity, reservations, input.now);
           evaluateAssetPolicy(registry, {
             chain: identity.chain, asset: identity.asset, rail: input.rail, ...(input.mechanism === undefined ? {} : { mechanism: input.mechanism }),
             amountAtomic: initial.amountAtomic, dailyUsageAtomic: usage, asOfDate: at.slice(0, 10), asOf: at,
           });
-          const reopened = seal({ ...withoutDigest(existing), state: "reserved", reservedAt: at, updatedAt: at,
+          const reopened = seal({ ...withoutDigest(existing), state: "reserved", reservedAt: stamp, updatedAt: stamp,
             effectAt: null, outcomeDigest: null });
           await this.writeJson(this.recordPath(identity, reservationId), reopened);
           return reopened;
         }
         return existing;
       }
-      assertBucketWindow(reservations, at);
+      const stamp = bucketStamp(reservations, input.now);
       const usage = await this.sumBucketUsage(identity, reservations, input.now);
       evaluateAssetPolicy(registry, {
         chain: identity.chain, asset: identity.asset, rail: input.rail, ...(input.mechanism === undefined ? {} : { mechanism: input.mechanism }),
@@ -137,8 +138,8 @@ export class AssetUsageLedger extends SecureStateStore {
         rail: input.rail,
         amountAtomic: initial.amountAtomic,
         state: "reserved",
-        reservedAt: at,
-        updatedAt: at,
+        reservedAt: stamp,
+        updatedAt: stamp,
         effectAt: null,
         outcomeDigest: null,
       };
@@ -164,9 +165,8 @@ export class AssetUsageLedger extends SecureStateStore {
         throw blocked("The exact no-private-entry reservation is no longer held unchanged.");
       }
       await assertMetaMaskNativeGenericCapacityRelease(this.root,expected);
-      const outcome = await persistOutcome();
-      const at = instant(outcome.now), outcomeDigest = digest(outcome.outcomeDigest, "Outcome digest");
-      if (at < expected.updatedAt) throw blocked("The usage reservation transition cannot move backward in time.");
+      const records = await this.loadBucket(identity, false), outcome = await persistOutcome();
+      const at = bucketStamp(records, outcome.now), outcomeDigest = digest(outcome.outcomeDigest, "Outcome digest");
       const released = seal({ ...withoutDigest(expected), state: "failed_before_effect", updatedAt: at,
         effectAt: null, outcomeDigest });
       await this.writeJson(this.recordPath(identity, expected.reservationId), released);
@@ -178,7 +178,7 @@ export class AssetUsageLedger extends SecureStateStore {
     const identity = validateIdentity(input);
     const reservationId = digest(input.reservationId, "Reservation id");
     const policyDigest = digest(input.policyDigest, "Policy digest");
-    const at = instant(input.now);
+    instant(input.now);
     const expectedCurrentStates = input.expectedCurrentStates === undefined
       ? undefined
       : expectedStates(input.expectedCurrentStates);
@@ -204,7 +204,7 @@ export class AssetUsageLedger extends SecureStateStore {
       if (expectedCurrentStates !== undefined && !expectedCurrentStates.includes(current.state)) {
         throw blocked("The usage reservation is no longer in an expected source state.");
       }
-      if (at < current.updatedAt) throw blocked("The usage reservation transition cannot move backward in time.");
+      const at = bucketStamp(bucketRecords, input.now);
       const terminal = input.state === "finalized" || input.state === "failed_before_effect" ||
         input.state === "released_unsubmitted" || input.state === "failed_confirmed_revert";
       // The historical cleanup85 native hold (src/legacy) settled only through its deleted controller; it is read-only.
@@ -242,11 +242,12 @@ export class AssetUsageLedger extends SecureStateStore {
     if(durable===null||canonicalJson(durable)!==canonicalJson(o)||durable.submissionAttempts!==1||durable.signingAttempts!==1||durable.txHash!==receipt.transactionHash||durable.receipt===null||canonicalJson(durable.receipt)!==canonicalJson(o.receipt)||!["payment_finalized","delivery_unknown","delivered"].includes(durable.state))throw blocked("Merchant actual fee is not bound to this ledger root durable paid operation.");
     const identity:AssetUsageIdentity={account:o.custody.walletAddress,chain:"eip155:4326",asset:{kind:"native",identifier:null}},key=`apn.merchant-native:${o.operationId}`;
     // The payer is the operation's own custody (validated with it above); any local profile may pay a merchant.
-    const reservationId=assetUsageReservationId(identity,key),at=instant(now);await this.ready();
+    const reservationId=assetUsageReservationId(identity,key);instant(now);await this.ready();
     return this.withLocks([this.bucketLock(identity)],async()=>{
       const value=await this.readJson(this.recordPath(identity,reservationId));if(value===null)throw blocked("Merchant native hold missing.");
+      const at=bucketStamp(await this.loadBucket(identity,false),now);
       const current=validateAssetUsageReservation(value),outcomeDigest=hashObject(proof);
-      if(current.reservationId!==reservationId||current.idempotencyHash!==idempotency(key)||current.rail!=="x402"||current.policyDigest!==o.policy.digest||current.amountAtomic!==proof.reservedFee||at<current.updatedAt||BigInt(proof.actualFee)>BigInt(current.amountAtomic))throw blocked("Merchant actual fee hold mismatch.");
+      if(current.reservationId!==reservationId||current.idempotencyHash!==idempotency(key)||current.rail!=="x402"||current.policyDigest!==o.policy.digest||current.amountAtomic!==proof.reservedFee||BigInt(proof.actualFee)>BigInt(current.amountAtomic))throw blocked("Merchant actual fee hold mismatch.");
       if(current.state==="finalized"){if(current.outcomeDigest!==outcomeDigest||canonicalJson(current.merchantNativeActualFee)!==canonicalJson(proof))throw blocked("Merchant fee outcome changed.");return current;}
       if(!["submitted","unknown_finality"].includes(current.state))throw blocked("Merchant fee hold not exposed.");
       const next=seal({...withoutDigest(current),state:"finalized",updatedAt:at,effectAt:at,outcomeDigest,consumedAtomic:proof.actualFee,merchantNativeActualFee:proof});await this.writeJson(this.recordPath(identity,reservationId),next);return next;
@@ -255,13 +256,14 @@ export class AssetUsageLedger extends SecureStateStore {
 
   /** Static normal-owner canonical proof; public DTOs cannot release capacity. */
   async settleMetaMaskNativeActual(operationId:string,now:Date):Promise<void> {
-    const p=await readMetaMaskNativeSettlement(this.root,operationId),at=instant(now);
+    const p=await readMetaMaskNativeSettlement(this.root,operationId);instant(now);
     for(const expected of p.reservations){
       const identity=validateIdentity(expected);await this.ready();
       await this.withLocks([this.bucketLock(identity)],async()=>{
         const value=await this.readJson(this.recordPath(identity,expected.reservationId));if(value===null)throw blocked("MetaMask settlement hold is absent.");
+        const at=bucketStamp(await this.loadBucket(identity,false),now);
         const current=validateAssetUsageReservation(value),native=identity.asset.kind==="native",outcomeDigest=hashObject(p.proof);
-        if(current.reservationId!==expected.reservationId||current.idempotencyHash!==expected.idempotencyHash||current.policyDigest!==p.policyDigest||current.amountAtomic!==expected.amountAtomic||canonicalJson(current.metamaskNativeReservation)!==canonicalJson(expected.metamaskNativeReservation)||current.rail!=="direct"||at<current.updatedAt)throw blocked("MetaMask settlement prior hold changed.");
+        if(current.reservationId!==expected.reservationId||current.idempotencyHash!==expected.idempotencyHash||current.policyDigest!==p.policyDigest||current.amountAtomic!==expected.amountAtomic||canonicalJson(current.metamaskNativeReservation)!==canonicalJson(expected.metamaskNativeReservation)||current.rail!=="direct")throw blocked("MetaMask settlement prior hold changed.");
         if(current.state==="finalized"||current.state==="failed_confirmed_revert") {if(current.outcomeDigest!==outcomeDigest)throw blocked("MetaMask settlement outcome changed.");return;}
         if(!["submitted","unknown_finality"].includes(current.state))throw blocked("MetaMask settlement has no durable effect hold.");
         const consumed=native?p.receipt.nativeFeeAtomic:p.receipt.transferAccepted?p.tokenAmountAtomic:"0";
@@ -281,22 +283,22 @@ export class AssetUsageLedger extends SecureStateStore {
         typeof input.registryVersion !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(input.registryVersion)) {
       throw invalid("Unsigned cancellation is restricted to a frozen Permit2 production lease.");
     }
-    const identity = validateIdentity(input), at = instant(input.now), idempotencyHash = idempotency(input.idempotencyKey);
+    const identity = validateIdentity(input), idempotencyHash = idempotency(input.idempotencyKey);
+    instant(input.now);
     const reservationId = reservationIdFor(identity, idempotencyHash);
     const policyDigest = digest(input.policyDigest, "Policy digest"), outcomeDigest = digest(input.outcomeDigest, "Outcome digest");
     const amountAtomic = atomic(input.amountAtomic, true, false).toString();
     await this.ready();
     return this.withLocks([this.bucketLock(identity)], async () => {
-      const records = await this.loadBucket(identity); assertBucketWindow(records, at);
+      const records = await this.loadBucket(identity), at = bucketStamp(records, input.now);
       const current = records.find(record => record.reservationId === reservationId);
       if (current !== undefined) {
         assertReplay(current, policyDigest, input.registryVersion, input.rail, amountAtomic, idempotencyHash);
-        if (at < current.updatedAt) throw blocked("Unsigned cancellation cannot move backward in time.");
         if (current.state === "released_unsubmitted") {
           if (current.outcomeDigest !== outcomeDigest) throw blocked("Unsigned cancellation outcome changed.");
           return current;
         }
-        if (current.state !== "reserved" || at < current.updatedAt) throw blocked("An exposed or terminal reservation cannot be cancelled.");
+        if (current.state !== "reserved") throw blocked("An exposed or terminal reservation cannot be cancelled.");
       }
       const body: ReservationBody = current === undefined
         ? { schemaVersion: ASSET_USAGE_RESERVATION_SCHEMA, ...identity, reservationId, idempotencyHash, policyDigest,

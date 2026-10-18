@@ -36,6 +36,7 @@ export declare const DIRECT_EVM_READ_PLAN: {
     readonly receipt: 1;
     readonly evidence: 1;
     readonly unlanded: 1;
+    readonly indexProof: 2;
 };
 /** The cap of a step is its planned POSTs times this: one more attempt of every planned POST, never an open-ended loop. */
 export declare const DIRECT_EVM_BUDGET_HEADROOM = 2;

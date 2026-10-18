@@ -12,3 +12,5 @@ export declare function sealReceipt(value: Omit<ReceiptRecord, "integrityHash">)
 export declare function validateWallet(value: unknown): WalletRecord;
 export declare function validateOperation(value: unknown): OperationRecord;
 export declare function validateReceipt(value: unknown): ReceiptRecord;
+/** The reason of a dispatched local transfer the owner abandoned without a decided outcome (its usage hold stays charged). */
+export declare const LOCAL_DIRECT_SENT_ABANDON = "owner_abandoned_unknown";

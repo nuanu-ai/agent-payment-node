@@ -82,7 +82,8 @@ export declare class OneClickEvmSource {
     transactionKnown(hash: Hex): Promise<boolean>;
     /**
      * R4 exit 2 for a signed source without a receipt: the payer's nonce at the `finalized` tag past the source nonce, while
-     * the node knows neither the transaction nor a receipt (one batch). The finalized nonce, or null while not proven.
+     * a node indexing the pinned source block (read before signing) knows neither the transaction nor a receipt. The
+     * finalized nonce, or null while not proven.
      */
     unlanded(record: OneClickSourceRecord): Promise<string | null>;
     /** Safe-block receipt observation. It never implies destination delivery. */

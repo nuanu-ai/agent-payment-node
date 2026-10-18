@@ -146,6 +146,7 @@ export class TransferService {
                     economics,
                     preparedAt: preparedAt.toISOString(),
                     preparedBlockNumberAtomic: balances.blockNumberAtomic,
+                    preparedBlockHash: balances.blockHash,
                     expiresAt: expiresAt.toISOString(),
                     state: initial.state,
                     terminal: initial.terminal,
@@ -232,7 +233,7 @@ export class TransferService {
         return await this.observation.recoverProviderRequest(operationId, providerRequestId);
     }
     async status(operationId) { return await this.observation.status(operationId); }
-    async abandonUndispatched(operationId) { return await this.observation.abandonUndispatched(operationId); }
+    async abandonLocal(operationId) { return await this.observation.abandonLocal(operationId); }
     async receipt(operationId) { return await this.observation.receipt(operationId); }
     async inspectReceipt(operation, rpc) {
         return await this.observation.inspectReceipt(operation, rpc);
@@ -261,7 +262,7 @@ export class TransferService {
     /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently, after each durable write. */
     async followUsage(operation) {
         if (operation.allowlist !== undefined) {
-            await this.allowlist.follow(evmAllowlistSubject(operation), evmUsageTarget(operation.state), operation.transitions.at(-1).hash);
+            await this.allowlist.follow(evmAllowlistSubject(operation), evmUsageTarget(operation), operation.transitions.at(-1).hash);
         }
         return operation;
     }

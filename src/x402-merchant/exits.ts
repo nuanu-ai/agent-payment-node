@@ -43,7 +43,8 @@ class MerchantFences extends SecureStateStore {
  * The exits of a merchant payment that holds no payment receipt (phase 4c R4). Proof first, with no consent: a payment
  * never signed, or whose signature never left a process that died before sealing it, ends `failed_before_effect` once
  * its local deadline passed (custody refuses to sign after it); a signed transaction ends `failed_proven_superseded`
- * once another transaction took its nonce at the finalized tag and the node knows neither it nor a receipt. Both
+ * once another transaction took its nonce at the finalized tag and a node indexing the prepare-time fee anchor block
+ * knows neither it nor a receipt. Both
  * release the payment's holds. When no proof decides, the owner's TTY consent ends it `abandoned_unknown` with both
  * holds still charged. Nothing here signs, sends or delivers.
  */
@@ -71,9 +72,10 @@ export class MerchantExits {
       if (this.now().toISOString() < o.expiresAt) return open;
       return { next: await this.finish(o, "failed_before_effect", { reason: fence.sign ? "signature_never_left_process" : "never_signed" }), landed: false };
     }
-    const hash = o.txHash ?? fence.signed!;
-    const check = await checkNeverLands({ chainId: 4326, account: merchantTerms(o).payer, nonce: BigInt(o.envelope.nonce), transactionHash: hash },
-      async calls => await this.rpc.batch(calls));
+    const hash = o.txHash ?? fence.signed!, anchor = o.feeContext;
+    // The fee anchor is the head read at prepare, before anything was signed; a record without one never proves never-lands.
+    const check = await checkNeverLands({ chainId: 4326, account: merchantTerms(o).payer, nonce: BigInt(o.envelope.nonce), transactionHash: hash,
+      ...(anchor === undefined ? {} : { before: { hash: anchor.anchorHash, number: BigInt(anchor.anchorNumber) } }) }, async calls => await this.rpc.batch(calls));
     if (!check.neverLands) return { next: null, landed: check.receiptFound };
     return { next: await this.finish(o, "failed_proven_superseded", { reason: "finalized_nonce_superseded", finalizedNonce: check.finalizedNonce.toString(),
       transactionHash: hash }), landed: false };

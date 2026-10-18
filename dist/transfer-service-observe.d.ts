@@ -25,15 +25,21 @@ export declare class TransferServiceObservation {
     private dispatchAndInspect;
     resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
     /**
-     * No receipt. A finalized sender nonce past the frozen one, read in the same POST as the missing receipt, proves another
-     * transaction consumed it: this one can never land. A hash the RPC does not hold at all is re-sent as the identical
+     * No receipt. The shared never-lands rule (R4 exit 2) decides first: a finalized sender nonce past the frozen one while
+     * a node indexing the prepared block knows neither the transaction nor a receipt proves another transaction consumed
+     * it, so this one can never land. Below that nonce, a hash the RPC does not hold at all is re-sent as the identical
      * signed bytes; at most one copy of them can ever be included, so observing first and re-sending never adds an effect.
      */
     private settleUnlanded;
     /** The persisted signed bytes, read back from encrypted custody and checked against the frozen transfer; never a new signature. */
     private signedRawTransaction;
-    /** Signed but never dispatched by APN: after the owner's foreground acknowledgement it is closed and never sent. */
-    abandonUndispatched(operationIdInput: string): Promise<unknown>;
+    /**
+     * The owner's exit (R4 exit 3) of a local transfer, after foreground acknowledgement; nothing is signed or sent. A
+     * signature APN never dispatched is closed and never sent (its hold released: nothing left the account). A dispatched
+     * one that no proof decided (no receipt, never-lands not proven) closes past its approval window with its usage hold
+     * still charged, since the transaction may still land; one last receipt read closes it by proof instead when it landed.
+     */
+    abandonLocal(operationIdInput: string): Promise<unknown>;
     recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown>;
     status(operationIdInput: string): Promise<unknown>;
     receipt(operationIdInput: string): Promise<unknown>;

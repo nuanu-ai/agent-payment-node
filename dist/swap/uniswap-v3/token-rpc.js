@@ -291,9 +291,10 @@ function capabilityResponse(body) {
     }
 }
 /**
- * The never-lands batch through the token lane's own pool and budget: everything but the receipt in one primary batch
- * (one node answers the finalized nonce and the transaction lookup together), the receipt on its route, as the observer
- * reads it (the receipt route's shape is exactly chain id + receipt).
+ * The never-lands batches through the token lane's own pool and budget: everything but the receipt in one primary batch
+ * (one node answers the finalized nonce, the transaction lookup and the index probe together; the deciding batch carries
+ * no chain id, so it fits the three-item bound), the receipt on its route, as the observer reads it (the receipt route's
+ * shape is exactly chain id + receipt).
  */
 export function tokenFinalizedBatch(call) {
     const item = (read) => ({ method: read.method, params: read.params,

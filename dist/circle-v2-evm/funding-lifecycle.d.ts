@@ -1,5 +1,6 @@
 import { type CircleFundingOperationV2 } from "./funding-operation.js";
-import type { EvmAmbiguousSendOutcome, EvmUnsentOutcome } from "../evm-unsent-outcome.js";
+import type { EvmUnsentOutcome } from "../evm-unsent-outcome.js";
+import type { CircleAmbiguousOutcome, CircleSentOutcome } from "./funding-never-lands.js";
 import type { Hex } from "viem";
 import type { CircleFundingMaterial } from "./funding-custody.js";
 import { type CircleEffect, type CircleEnvelope, type CircleRole } from "./operation-model.js";
@@ -34,8 +35,8 @@ export interface CircleFundingLifecyclePorts {
      * `resend` serve a possibly-sent mint or cleanup: the same proofs plus "send the identical sealed bytes again". */
     unsent?: Readonly<{
         outcome(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
-        sentOutcome?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmUnsentOutcome>;
-        ambiguous?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<EvmAmbiguousSendOutcome>;
+        sentOutcome?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<CircleSentOutcome>;
+        ambiguous?(op: CircleFundingOperationV2, effect: CircleEffect): Promise<CircleAmbiguousOutcome>;
         /** Sends exactly these sealed bytes once per command; false when nothing was sent (refused or not accepted). */
         resend?(op: CircleFundingOperationV2, effect: CircleEffect, rawTransaction: Hex): Promise<boolean>;
         discard(op: CircleFundingOperationV2, effect: CircleEffect): Promise<void>;

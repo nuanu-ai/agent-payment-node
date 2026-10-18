@@ -20,13 +20,14 @@ import { temporaryState } from "./helpers.js";
 const account = privateKeyToAccount(`0x${"11".repeat(32)}`), token = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", spender = "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408";
 const limits = { maxGasLimitAtomic: "100000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60000 };
 const now = () => 1_800_000_000_000;
+const ERA_HASH = `0x${"a".repeat(64)}`, PROBE = `0x${"9a".repeat(32)}`;
 
 async function setup(t: test.TestContext) {
   const temp = await temporaryState(); t.after(temp.cleanup);
   const state = new StateStore(temp.root); await state.initialize();
   await state.writeWallet(sealWallet({ schemaVersion: "apn.state.v1", profile: "test", profileHash: state.profileHash("test"), address: account.address,
     createdAt: "2026-01-01T00:00:00.000Z", bindingHash: "binding" }));
-  const chain = { ambiguous: true, include: false, finalizedNonce: "7", known: false, unlandedReads: 0 }, sent: Hex[] = [];
+  const chain = { ambiguous: true, include: false, finalizedNonce: "7", known: false, indexed: true, unlandedReads: 0 }, sent: Hex[] = [];
   const rpc: CircleApprovalRpc = { chainId: 8453, origin: "https://base.example",
     read: async () => ({ chainId: 8453, payer: account.address, token, spender, blockNumber: "12345", blockHash: `0x${"a".repeat(64)}`, latestNonceAtomic: "7",
       pendingNonceAtomic: "7", usdcBalanceAtomic: "434611", usdcAllowanceAtomic: chain.include ? "430000" : "0", nativeBalanceWei: "200000000000000",
@@ -35,10 +36,18 @@ async function setup(t: test.TestContext) {
     observe: async hash => chain.include ? { status: "success", safe: true, receipt: { chainId: 8453, transactionHash: hash, blockNumberAtomic: "12345",
       blockHash: `0x${"a".repeat(64)}` as Hex, logs: [{ address: token as Hex, topics: [keccak256(Buffer.from("Approval(address,address,uint256)")),
         pad(account.address).toLowerCase() as Hex, pad(spender).toLowerCase() as Hex], data: toHex(430000n, { size: 32 }) }] } } : null,
+    // The finalized-tag node: the preparation's block (12345, 0xaa..) holds PROBE, which the node indexes unless `indexed` is off.
     finalizedBatch: async calls => { chain.unlandedReads++; const hash = keccak256(sent[0]!);
-      assert.deepEqual(calls.map(c => [c.method, c.params]), [["eth_chainId", []], ["eth_getTransactionCount", [account.address, "finalized"]],
-        ["eth_getTransactionReceipt", [hash]], ["eth_getTransactionByHash", [hash]]]);
-      return ["0x2105", toHex(BigInt(chain.finalizedNonce)), null, chain.known ? { hash } : null]; } };
+      return calls.map(({ method, params }) => {
+        if (method === "eth_chainId") return "0x2105";
+        if (method === "eth_getTransactionCount") { assert.deepEqual(params, [account.address, "finalized"]); return toHex(BigInt(chain.finalizedNonce)); }
+        if (method === "eth_getTransactionReceipt") { assert.deepEqual(params, [hash]); return null; }
+        if (method === "eth_getBlockTransactionCountByNumber") { assert.deepEqual(params, ["0x3039"]); return "0x2"; }
+        if (method === "eth_getTransactionByBlockNumberAndIndex") { assert.deepEqual(params, ["0x3039", "0x0"]); return { hash: PROBE, blockHash: ERA_HASH, blockNumber: "0x3039" }; }
+        if (method === "eth_getTransactionByHash") return params[0] === hash ? (chain.known ? { hash } : null)
+          : chain.indexed ? { hash: PROBE, blockHash: ERA_HASH, blockNumber: "0x3039" } : null;
+        throw new Error(`unexpected ${method}`);
+      }); } };
   const signer = { sign: async (r: CircleApprovalRecord) => { const e = r.preparation.transaction;
     return await account.signTransaction({ type: "eip1559", chainId: 8453, to: token, data: e.data as Hex, value: 0n, nonce: Number(e.nonceAtomic),
       gas: BigInt(e.gasLimitAtomic), maxFeePerGas: BigInt(e.maxFeePerGasWei), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGasWei), accessList: [] }); } };
@@ -62,7 +71,10 @@ test("an ambiguous approval without a receipt stays open while the finalized non
   assert.equal(await f.indexState(), "active");
   f.chain.finalizedNonce = "8"; f.chain.known = true;
   assert.equal((await f.status()).phase, "unknown_finality");
-  f.chain.known = false;
+  // A node whose transaction index does not reach the preparation's block proves nothing: it would not know a landed approval.
+  f.chain.known = false; f.chain.indexed = false;
+  assert.equal((await f.status()).phase, "unknown_finality");
+  f.chain.indexed = true;
   const ended = await f.status();
   assert.deepEqual([ended.phase, ended.finalizedNonceAtomic, ended.allowance], ["failed_proven_superseded", "8", { effect: "allowance_unchanged" }]);
   assert.equal(await f.indexState(), "terminal");
@@ -80,18 +92,23 @@ test("status of a completed approval names the allowance it leaves, what spends 
   assert.equal(f.chain.unlandedReads, 0);
 });
 
-test("the production proof reads one batch on APN_BASE_RPC_URL at the finalized tag, and refuses without that endpoint", async t => {
+test("the production proof reads APN_BASE_RPC_URL at the finalized tag (first batch, era block data, deciding batch), and refuses without that endpoint", async t => {
   const posts: unknown[] = [], hash = `0x${"b".repeat(64)}` as Hex;
   t.mock.method(BridgeHttps.prototype, "request", async (url: string, _verb: string, body: string) => {
     const rows = JSON.parse(body) as { id: number; method: string; params: unknown[] }[]; posts.push({ url, rows: rows.map(row => [row.method, row.params]) });
-    const values: Record<string, unknown> = { eth_chainId: "0x2105", eth_getTransactionCount: "0x8", eth_getTransactionReceipt: null, eth_getTransactionByHash: null };
-    return { status: 200, body: JSON.stringify(rows.map(row => ({ jsonrpc: "2.0", id: row.id, result: values[row.method] }))) };
+    const values: Record<string, unknown> = { eth_chainId: "0x2105", eth_getTransactionCount: "0x8", eth_getTransactionReceipt: null,
+      eth_getBlockTransactionCountByNumber: "0x2", eth_getTransactionByBlockNumberAndIndex: { hash: PROBE, blockHash: ERA_HASH, blockNumber: "0x3039" } };
+    const result = (row: { method: string; params: unknown[] }) => row.method !== "eth_getTransactionByHash" ? values[row.method]
+      : row.params[0] === PROBE ? { hash: PROBE, blockHash: ERA_HASH, blockNumber: "0x3039" } : null;
+    return { status: 200, body: JSON.stringify(rows.map(row => ({ jsonrpc: "2.0", id: row.id, result: result(row) }))) };
   });
-  const check = await checkNeverLands({ chainId: 8453, account: account.address, nonce: 7n, transactionHash: hash },
+  const check = await checkNeverLands({ chainId: 8453, account: account.address, nonce: 7n, transactionHash: hash, before: { hash: ERA_HASH, number: 12345n } },
     environmentFinalizedReader({ APN_BASE_RPC_URL: "https://base.example/rpc" })(8453).batch);
   assert.deepEqual(check, { neverLands: true, finalizedNonce: 8n });
-  assert.deepEqual(posts, [{ url: "https://base.example/rpc", rows: [["eth_chainId", []], ["eth_getTransactionCount", [account.address, "finalized"]],
-    ["eth_getTransactionReceipt", [hash]], ["eth_getTransactionByHash", [hash]]] }]);
+  const own = [["eth_getTransactionCount", [account.address, "finalized"]], ["eth_getTransactionReceipt", [hash]], ["eth_getTransactionByHash", [hash]]];
+  assert.deepEqual(posts, [{ url: "https://base.example/rpc", rows: [["eth_chainId", []], ...own] },
+    { url: "https://base.example/rpc", rows: [["eth_getBlockTransactionCountByNumber", ["0x3039"]], ["eth_getTransactionByBlockNumberAndIndex", ["0x3039", "0x0"]]] },
+    { url: "https://base.example/rpc", rows: [...own, ["eth_getTransactionByHash", [PROBE]]] }]);
   assert.throws(() => environmentFinalizedReader({})(8453), { code: "APN_RPC_CONFIG" });
 });
 

@@ -2,7 +2,8 @@ import { type EvmAssetSelection } from "./evm-asset.js";
 import { type DirectEvmChainId } from "./evm-direct-networks.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcReceipt } from "./ports.js";
-import type { EvmBalanceSnapshot, EvmDirectReads, EvmFeeQuote, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence, EvmUnlandedEvidence } from "./evm-ports.js";
+import type { EvmBalanceSnapshot, EvmDirectReads, EvmFeeQuote, EvmRpcBatchCall, EvmRpcCall, EvmRpcPort, EvmTransactionInput, EvmTransferEvidence } from "./evm-ports.js";
+import type { FinalizedBatchRead } from "./evm-finalized-proof.js";
 export declare class EvmRpc implements EvmRpcPort {
     private readonly call;
     private readonly rpcOrigin;
@@ -25,6 +26,9 @@ export declare class EvmRpc implements EvmRpcPort {
     nativeFeeRead(method: "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getBlockByNumber" | "eth_call", params: readonly unknown[]): Promise<unknown>;
     /** One POST after the receipt: its block, the transaction and, where finality is `safe`, the safe head. */
     evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence>;
-    /** A finalized nonce past the frozen one, with no receipt for this hash from the same node, proves another transaction took it. */
-    unlandedEvidence(chainId: DirectEvmChainId, address: Address, transactionHash: Hex): Promise<EvmUnlandedEvidence>;
+    /**
+     * The never-lands proof's batches on one network, each one POST. This instance proves the endpoint's chain id once, in
+     * its first POST (P2), so the proof's own chain-id row is answered from that proof instead of being read again.
+     */
+    finalizedBatch(chainId: DirectEvmChainId): FinalizedBatchRead;
 }

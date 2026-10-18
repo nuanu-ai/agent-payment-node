@@ -183,6 +183,8 @@ export interface OperationRecord {
   readonly coinbaseGaslessSettlement?: CoinbaseGaslessSettlement;
   readonly preparedAt: string;
   readonly preparedBlockNumberAtomic?: string;
+  /** The hash of that block, on Base USDC transfers prepared since the never-lands index proof (an explicit EVM transfer keeps its block in `evm.feeQuote`). */
+  readonly preparedBlockHash?: Hex;
   readonly expiresAt: string;
   readonly state: OperationState;
   readonly terminal: boolean;

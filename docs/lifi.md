@@ -890,9 +890,10 @@ lane. Ethereum nonce reservations are scoped under `eip155-1`.
 
 A signed source with no receipt (sealed, submitting, submitted or
 `unknown_finality`) ends `failed_proven_superseded` through status once the
-payer's nonce at the `finalized` tag is past the source nonce while the node
-knows neither the transaction nor a receipt (one JSON-RPC batch; the record keeps
-`finalizedNonceAtomic`). A nonce that is not past keeps it open. A deposit that
+payer's nonce at the `finalized` tag is past the source nonce while a node whose
+transaction index reaches the source block pinned before signing knows neither the
+transaction nor a receipt (the record keeps `finalizedNonceAtomic`). A nonce that is
+not past keeps it open. A deposit that
 lands late, even after the quote deadline, is still observed as
 `source_observed`: the deposit address is 1Click's, the quote is dead, and 1Click
 refunds such a deposit to the payer (the refund address); its status is reported
@@ -900,9 +901,13 @@ as provider data and no destination proof is claimed. The payer's account is
 released by the operation index at the deposit deadline plus 10 minutes even
 before an outcome: a signed source has one fixed nonce, so it and any later
 transaction at that nonce cannot both land, and that release is what lets a later
-transaction take the nonce the never-lands proof needs. Like the other nonce-moved
-exits, the proof trusts the node's transaction lookup (a node that pruned its
-transaction index could report a long-landed deposit as absent).
+transaction take the nonce the never-lands proof needs. Like every nonce-moved
+exit, the proof counts a missing transaction only from a node that indexes the
+operation's era: after the first batch it reads the pinned block's transaction count
+and first transaction (block data, never the whole body) and, in one deciding batch
+with the nonce and both lookups, asks the node for that transaction by hash. A node that pruned its transaction index (geth
+`--history.transactions`) does not return it, so nothing is proven and the source
+stays open for a receipt or the owner's abandon.
 
 `apn circle approval status --operation <id>` ends an approval without a safe
 receipt the same way (`failed_proven_superseded`, read on `APN_BASE_RPC_URL`).
