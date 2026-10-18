@@ -1,10 +1,11 @@
 import { BridgeHttps } from "./lifi/https.js";
 /**
  * The public reads that prove, at the FINALIZED tag, that nothing more of an operation can land on its signing account
- * (R4): the chain id, the account's finalized nonce, lookups of transactions by hash, and the body of one block (its
- * transaction hashes). No state is read at an old block (P1), so any keyless public endpoint answers them.
+ * (R4): the chain id, the account's finalized nonce, lookups of transactions by hash, and one block's transaction count
+ * and first transaction (block data, never a whole body). No state is read at an old block (P1), so any keyless public
+ * endpoint answers them.
  */
-export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getBlockByNumber" | "eth_getBlockByHash";
+export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getBlockByNumber" | "eth_getBlockTransactionCountByNumber" | "eth_getTransactionByBlockNumberAndIndex" | "eth_getBlockTransactionCountByHash" | "eth_getTransactionByBlockHashAndIndex";
 export interface FinalizedChainRead {
     call(method: FinalizedReadMethod, params: readonly unknown[]): Promise<unknown>;
 }
@@ -95,7 +96,8 @@ export type NeverLandsCheck = {
  * its index (geth `--history.transactions`, by default the last 2,350,000 blocks) answers null for a transaction that
  * landed before its window. Every client prunes the index from its tail, so a node that returns a transaction of the
  * era block (`before`) as included in that very block indexes every canonical block above it, which is where the effect
- * could be. The probe hash comes from the era block's body (a block read, not the index, not state). Without `before`, or
+ * could be. The probe is the era block's first transaction, read with the block's transaction count from block data
+ * (not the index, not state, never the whole body, which on a busy chain can exceed the response bound). Without `before`, or
  * when the node does not hold the era block as canonical, has no transaction in it or does not index it, nothing is
  * proven: the effect waits for a receipt or its owner's abandon.
  *

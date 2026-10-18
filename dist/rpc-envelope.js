@@ -12,6 +12,7 @@ export const BATCH_READ_METHODS = new Set([
     "eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_call",
     "eth_getTransactionCount", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_gasPrice",
     "eth_maxPriorityFeePerGas", "eth_estimateGas", "eth_getStorageAt", "debug_traceTransaction",
+    "eth_getBlockTransactionCountByNumber", "eth_getTransactionByBlockNumberAndIndex",
 ]);
 /** Trace admission is a fixed exhaustive callTracer read, never a supplied JavaScript tracer. */
 export function readOnlyBatchMethod(method, params) {

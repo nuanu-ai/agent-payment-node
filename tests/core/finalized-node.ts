@@ -20,8 +20,9 @@ export interface FinalizedNodeOptions {
 }
 
 /**
- * A finalized-tag node for the never-lands proof: chain id, the account's finalized nonce, block bodies (never pruned
- * here) and a transaction index pruned from its tail. Each batch is one node's answer; `batches` records their methods.
+ * A finalized-tag node for the never-lands proof: chain id, the account's finalized nonce, block data (never pruned
+ * here; whole bodies are never served) and a transaction index pruned from its tail. Each batch is one node's answer;
+ * `batches` records their methods.
  */
 export function finalizedNode(chainId: number, finalizedNonce: () => bigint, options: FinalizedNodeOptions = {}) {
   const era = options.era ?? ERA, body = options.eraBody ?? "held", batches: string[][] = [];
@@ -30,11 +31,15 @@ export function finalizedNode(chainId: number, finalizedNonce: () => bigint, opt
     const [first] = params;
     if (method === "eth_chainId") return hex(BigInt(chainId));
     if (method === "eth_getTransactionCount") { assert.equal(params[1], "finalized", "the nonce is read at the finalized tag only"); return hex(finalizedNonce()); }
-    if (method === "eth_getBlockByNumber" || method === "eth_getBlockByHash") {
-      const asked = method === "eth_getBlockByNumber" ? first === hex(era.number) : String(first).toLowerCase() === era.hash.toLowerCase();
-      if (!asked || body === "absent") return null;
-      if (body === "reorged") return method === "eth_getBlockByNumber" ? { number: hex(era.number), hash: `0x${"0f".repeat(32)}`, transactions: [`0x${"0e".repeat(32)}`] } : null;
-      return { number: hex(era.number), hash: era.hash, transactions: body === "empty" ? [] : [ERA_PROBE] };
+    if (["eth_getBlockTransactionCountByNumber", "eth_getTransactionByBlockNumberAndIndex", "eth_getBlockTransactionCountByHash",
+      "eth_getTransactionByBlockHashAndIndex"].includes(method)) {
+      const byNumber = method.includes("Number"), count = method.startsWith("eth_getBlockTransactionCount");
+      const asked = byNumber ? first === hex(era.number) : String(first).toLowerCase() === era.hash.toLowerCase();
+      if (!count) assert.equal(params[1], "0x0", "only the era block's first transaction is read");
+      if (!asked || body === "absent" || body === "reorged" && !byNumber) return null;
+      if (body === "empty") return count ? "0x0" : null;
+      const blockHash = body === "reorged" ? `0x${"0f".repeat(32)}` : era.hash, hash = body === "reorged" ? `0x${"0e".repeat(32)}` : ERA_PROBE;
+      return count ? "0x3" : { hash, blockHash, blockNumber: hex(era.number), transactionIndex: "0x0" };
     }
     if (method === "eth_getTransactionByHash" || method === "eth_getTransactionReceipt") {
       const hash = String(first).toLowerCase();

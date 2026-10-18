@@ -7,11 +7,13 @@ import { parseRpcBatchResultEnvelope, parseRpcResultEnvelope } from "./rpc-envel
 
 /**
  * The public reads that prove, at the FINALIZED tag, that nothing more of an operation can land on its signing account
- * (R4): the chain id, the account's finalized nonce, lookups of transactions by hash, and the body of one block (its
- * transaction hashes). No state is read at an old block (P1), so any keyless public endpoint answers them.
+ * (R4): the chain id, the account's finalized nonce, lookups of transactions by hash, and one block's transaction count
+ * and first transaction (block data, never a whole body). No state is read at an old block (P1), so any keyless public
+ * endpoint answers them.
  */
 export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" |
-  "eth_getBlockByNumber" | "eth_getBlockByHash";
+  "eth_getBlockByNumber" | "eth_getBlockTransactionCountByNumber" | "eth_getTransactionByBlockNumberAndIndex" |
+  "eth_getBlockTransactionCountByHash" | "eth_getTransactionByBlockHashAndIndex";
 export interface FinalizedChainRead { call(method: FinalizedReadMethod, params: readonly unknown[]): Promise<unknown> }
 export interface FinalizedReadCall { readonly method: FinalizedReadMethod; readonly params: readonly unknown[] }
 /** One JSON-RPC batch: one POST, so one node answers every call in it. */
@@ -149,16 +151,20 @@ function ownAnswer(effect: SignedEffectFacts, [nonce, receipt, transaction]: rea
 const notProven = ({ finalizedNonce, receiptFound, transactionKnown }: ReturnType<typeof ownAnswer>): NeverLandsCheck =>
   ({ neverLands: false, finalizedNonce, receiptFound, transactionKnown });
 
-/** One transaction hash of the era block, or null when this node does not hold that block as canonical or it has none. */
-function probeOf(value: unknown, era: EraBlock): string | null {
-  if (value === null) return null;
-  const block = evmRpcRecord(value), hash = evmRpcHex(block.hash, 32);
-  if (era.number === undefined ? hash !== era.hash.toLowerCase() : evmRpcQuantity(block.number) !== era.number) {
-    throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered another block than the one asked for.");
+/** The era block's transaction count and its first transaction, read from block data (not the index, never the whole body). */
+const eraReads = (era: EraBlock): FinalizedReadCall[] => era.number === undefined
+  ? [{ method: "eth_getBlockTransactionCountByHash", params: [era.hash] }, { method: "eth_getTransactionByBlockHashAndIndex", params: [era.hash, "0x0"] }]
+  : [{ method: "eth_getBlockTransactionCountByNumber", params: [`0x${era.number.toString(16)}`] },
+    { method: "eth_getTransactionByBlockNumberAndIndex", params: [`0x${era.number.toString(16)}`, "0x0"] }];
+/** The hash of the era block's first transaction, or null when this node does not hold that block as canonical or it is empty. */
+function probeOf([count, first]: readonly unknown[], era: EraBlock): string | null {
+  if (count === null || evmRpcQuantity(count) === 0n || first === null) return null;
+  const transaction = evmRpcRecord(first), blockHash = evmRpcHex(transaction.blockHash, 32);
+  if (era.number === undefined ? blockHash !== era.hash.toLowerCase() : evmRpcQuantity(transaction.blockNumber) !== era.number) {
+    throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered a transaction of another block than the one asked for.");
   }
-  if (!Array.isArray(block.transactions)) throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered a block without its transaction hashes.");
-  // Read by number, another hash means the era block is not canonical on this node (a reorg): nothing is proven.
-  return hash !== era.hash.toLowerCase() || block.transactions.length === 0 ? null : evmRpcHex(block.transactions[0], 32);
+  // Read by number, another block hash means the era block is not canonical on this node (a reorg): nothing is proven.
+  return blockHash !== era.hash.toLowerCase() ? null : evmRpcHex(transaction.hash, 32);
 }
 /** The node's transaction index holds the era block: it answered the probe as included in exactly that block. */
 function indexed(found: Record<string, unknown> | null, era: EraBlock): boolean {
@@ -175,7 +181,8 @@ function indexed(found: Record<string, unknown> | null, era: EraBlock): boolean 
  * its index (geth `--history.transactions`, by default the last 2,350,000 blocks) answers null for a transaction that
  * landed before its window. Every client prunes the index from its tail, so a node that returns a transaction of the
  * era block (`before`) as included in that very block indexes every canonical block above it, which is where the effect
- * could be. The probe hash comes from the era block's body (a block read, not the index, not state). Without `before`, or
+ * could be. The probe is the era block's first transaction, read with the block's transaction count from block data
+ * (not the index, not state, never the whole body, which on a busy chain can exceed the response bound). Without `before`, or
  * when the node does not hold the era block as canonical, has no transaction in it or does not index it, nothing is
  * proven: the effect waits for a receipt or its owner's abandon.
  *
@@ -188,9 +195,7 @@ export async function checkNeverLands(effect: SignedEffectFacts, batch: Finalize
   assertChain(chain, effect.chainId);
   const first = ownAnswer(effect, own), era = effect.before;
   if (!first.unknown || era === undefined) return notProven(first);
-  const [block] = await batch([era.number === undefined ? { method: "eth_getBlockByHash", params: [era.hash, false] }
-    : { method: "eth_getBlockByNumber", params: [`0x${era.number.toString(16)}`, false] }]);
-  const probe = probeOf(block, era);
+  const probe = probeOf(await batch(eraReads(era)), era);
   if (probe === null) return notProven(first);
   const [nonce, receipt, transaction, probed] = await batch([...ownReads(effect), { method: "eth_getTransactionByHash", params: [probe] }]);
   const last = ownAnswer(effect, [nonce, receipt, transaction]);

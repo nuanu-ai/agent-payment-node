@@ -48,7 +48,8 @@ async function setup(t: test.TestContext) {
     if (method === "eth_getTransactionReceipt") return chain.landed ? receipt() : null;
     // The pinned source block (read before signing) holds PROBE, which the node indexes unless `indexed` is off.
     if (method === "eth_getTransactionByHash" && params[0] === PROBE) return chain.indexed ? { hash: PROBE, blockHash: SOURCE_BLOCK, blockNumber: "0x5" } : null;
-    if (method === "eth_getBlockByHash") { assert.deepEqual(params, [SOURCE_BLOCK, false]); return { number: "0x5", hash: SOURCE_BLOCK, transactions: [PROBE] }; }
+    if (method === "eth_getBlockTransactionCountByHash") { assert.deepEqual(params, [SOURCE_BLOCK]); return "0x1"; }
+    if (method === "eth_getTransactionByBlockHashAndIndex") { assert.deepEqual(params, [SOURCE_BLOCK, "0x0"]); return { hash: PROBE, blockHash: SOURCE_BLOCK, blockNumber: "0x5" }; }
     if (method === "eth_getTransactionByHash") return chain.landed || chain.known ? { hash } : null;
     if (method === "eth_getBlockByNumber") return { number: "0x20", hash: params[0] === "0x10" ? BLOCK : `0x${"f".repeat(64)}`, transactions: [hash] };
     throw new Error(`unexpected ${method}`);
@@ -79,9 +80,10 @@ test("an ambiguous source without a receipt stays open while the finalized nonce
   const ended = view(await f.cli("oneclick", "source", "status", "--operation", f.id));
   assert.equal(ended.sourceState, "failed_proven_superseded");
   assert.deepEqual(ended.sourceNeverLands, { proof: "finalized_nonce_past_without_transaction_or_receipt", sourceNonce: "7", finalizedNonceAtomic: "8" });
-  // After the receipt read: the first batch, the source block's body, the deciding batch; a never-landing deposit asks 1Click nothing.
+  // After the receipt read: the first batch, the source block's count and first transaction, the deciding batch; a never-landing deposit asks 1Click nothing.
   assert.deepEqual(f.seen, ["eth_chainId", "eth_getTransactionReceipt", "eth_chainId", "eth_getTransactionCount", "eth_getTransactionReceipt", "eth_getTransactionByHash",
-    "eth_getBlockByHash", "eth_getTransactionCount", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getTransactionByHash"]);
+    "eth_getBlockTransactionCountByHash", "eth_getTransactionByBlockHashAndIndex",
+    "eth_getTransactionCount", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getTransactionByHash"]);
   assert.equal(await f.indexState(), "terminal");
   // Replays answer from the journal, generic status included, with no network read.
   f.seen.length = 0;
