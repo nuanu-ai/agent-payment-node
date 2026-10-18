@@ -35,7 +35,7 @@ export function validateUniswapTokenOperation(value) {
         "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"];
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
-            ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : [])] : common))
+            ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -60,6 +60,9 @@ export function validateUniswapTokenOperation(value) {
         validateFailureDiagnostic(op.preSignFailure);
         if (op.retiredEffects !== undefined)
             validateRetired(op.retiredEffects, op.updatedAt);
+        if (op.quoteBlock !== undefined && (!isPlainRecord(op.quoteBlock) || !exactKeys(op.quoteBlock, ["number", "hash"]) ||
+            uint(op.quoteBlock.number) < 0n || !/^0x[a-f0-9]{64}$/u.test(op.quoteBlock.hash)))
+            corrupt("Uniswap token quote block is invalid.");
     }
     const evidence = op.cleanupEvidence ?? null, failure = op.preSignFailure ?? null;
     const approvalStarted = ["approval_submission_started", "approval_submitted", "approval_unknown_finality"].includes(op.phase) || op.approvalAttempt !== null, swapStarted = ["submission_started", "submitted", "unknown_finality", "observed"].includes(op.phase), cleanupStarted = ["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase) || op.phase === "cleaned" && evidence === null;

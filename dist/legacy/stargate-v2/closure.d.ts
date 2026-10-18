@@ -1,9 +1,9 @@
+import type { OwnTransactionSeen } from "../../evm-finalized-proof.js";
 import { SecureStateStore } from "../../secure-state-store.js";
 import { type LegacyStargateFamily, type LegacyStargateRecord } from "./reader.js";
 export declare const LEGACY_CLOSURE_SCHEMA = "apn.stargate-v2-legacy-closure.v1";
 /** The only closure: at the finalized block the signer's nonce is past every envelope of the record and none of its own transactions is pending. */
 export declare const LEGACY_CLOSURE_REASON = "legacy_closed_nonce_consumed";
-export type LegacyOwnTransactionSeen = "not_found" | "included";
 export interface LegacyStargateClosure {
     readonly schemaVersion: typeof LEGACY_CLOSURE_SCHEMA;
     readonly family: LegacyStargateFamily;
@@ -19,7 +19,7 @@ export interface LegacyStargateClosure {
     readonly finalizedNonceAtomic: string;
     readonly ownTransactions: readonly {
         readonly transactionHash: string;
-        readonly seen: LegacyOwnTransactionSeen;
+        readonly seen: OwnTransactionSeen;
     }[];
     readonly closedAt: string;
     readonly integrityHash: string;

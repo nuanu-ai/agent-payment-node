@@ -33,9 +33,11 @@ export function createUniswapTokenRuntime(input) {
             await custody.bindEffectProvider(op, kind, hash);
             return await observer.observe(op, kind, hash);
         },
+        // The quote block was read before any of the swap's effects was signed; a record without one never proves never-lands.
         neverLands: async (op, kind, attempt) => {
             await custody.bindEffectProvider(op, kind, attempt.transactionHash);
-            return await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash }, tokenFinalizedBatch(call));
+            return await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash,
+                ...(op.quoteBlock === undefined ? {} : { before: { hash: op.quoteBlock.hash, number: BigInt(op.quoteBlock.number) } }) }, tokenFinalizedBatch(call));
         },
         foregroundApprove: async (op) => { await approveOwner(op); await foreground(input.foreground === "approve", op, false, clock.now(), input.tty); await approveOwner(op); },
         foregroundCleanup: async (op) => { await approveOwner(op); await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty); await approveOwner(op); },

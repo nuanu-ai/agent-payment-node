@@ -18,7 +18,8 @@ export interface MerchantRpcPort {
         params: readonly unknown[];
     }[]): Promise<readonly unknown[]>;
 }
-const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_sendRawTransaction"]);
+const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_sendRawTransaction",
+  "eth_getBlockTransactionCountByNumber", "eth_getTransactionByBlockNumberAndIndex"]);
 export class MerchantRpc implements MerchantRpcPort {
     private sequence = 0;
     private readonly guard: EvmDirectRpcGuard;

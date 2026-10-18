@@ -58,7 +58,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             route: material.route, approvalCapAtomic: material.approvalCapAtomic, allowanceAtPrepare: material.allowanceAtPrepare,
             approvalGas: material.approvalGas, swapGas: material.swapGas, cleanupGas: material.cleanupGas,
             maximumNativeDebitWei: material.maximumNativeDebitWei, policyDigest: material.policyDigest,
-            mechanismDigest: material.mechanismDigest, now: this.ports.now() }));
+            mechanismDigest: material.mechanismDigest, quoteBlock: { number: material.blockNumber, hash: material.blockHash }, now: this.ports.now() }));
         await this.rpcBudget?.reconcile(operationId); return saved;
     }
     async approve(id: string) { return await this.budgeted(id, "swap.uniswap-token.approve", async () => { const cap = this.poolCap(14);
@@ -68,7 +68,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
       const cap = 24;
       return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] as const : [0, cap, "recovery"] as const;
     }, async () => await this.execution.execute(id)); }
-    async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(8), "recovery"] as const, async () => await this.execution.status(id)); }
+    async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"] as const, async () => await this.execution.status(id)); }
     async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"] as const, async () => await this.execution.cleanup(id)); }
     private async budgeted<T>(id: string, command: string,
       budget: () => Promise<readonly [number, number, NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>]>, work: () => Promise<T>) {

@@ -28,7 +28,7 @@ function command(action: string, options: readonly CommandOption[], summary: str
   return { path: ["circle", "evm", action], synopsis: `apn circle evm ${action}${options.map(o => o.required ? ` ${o.name} <${o.type}>` : ` [${o.name} <${o.type}>]`).join("")}`, summary, options,
     effect: { class: effect, summary }, approval: { class: foreground ? "foreground_tty" : "none", when: foreground ? "Exact physical foreground TTY consent before signing; MCP provides the CLI handoff." : "No financial effect." },
     output: { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1, success: "Checked Circle operation, receipts and usage state.", failures: ["Classified refusal; ambiguous effects hold all reservations and are never resent."] },
-    states: { terminal: ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled"], non_terminal: ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required"] },
+    states: { terminal: ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled", "abandoned_unknown"], non_terminal: ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required"] },
     recovery: [{ command_path: ["circle", "evm", "observe"], when: "Any prior effect marker exists." }], examples: [`apn circle evm ${action}`] };
 }
 export function bindCircleEvmCommand(path: string, input: Readonly<Record<string, string>>): CommandRequest {

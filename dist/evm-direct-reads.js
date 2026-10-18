@@ -12,7 +12,7 @@ export const OP_STACK_GAS_ORACLE_ABI = [
  * Physical POSTs of each phase of a direct EVM step. Every phase below is one `read`, so one POST; the endpoint's
  * chain id rides inside the first POST of the invocation and never costs one of its own.
  */
-export const DIRECT_EVM_READ_PLAN = { balance: 1, nonceEstimate: 1, opStackFees: 1, send: 1, receipt: 1, evidence: 1, unlanded: 1 };
+export const DIRECT_EVM_READ_PLAN = { balance: 1, nonceEstimate: 1, opStackFees: 1, send: 1, receipt: 1, evidence: 1, unlanded: 1, indexProof: 2 };
 /** The cap of a step is its planned POSTs times this: one more attempt of every planned POST, never an open-ended loop. */
 export const DIRECT_EVM_BUDGET_HEADROOM = 2;
 /** The hard POST cap of one direct EVM step, derived from the read plan above rather than counted by hand. */
@@ -21,8 +21,9 @@ export function directEvmStepBudget(chainId, step) {
     const funding = plan.balance + plan.nonceEstimate + (directEvmNetwork(chainId).feeModel === "op-stack" ? plan.opStackFees : 0);
     const observe = plan.receipt + plan.evidence;
     const planned = step === "balance" ? plan.balance : step === "prepare" ? funding : step === "approve" ? funding + plan.send + observe :
-        // Resume observes, proves an unlanded hash, re-sends the identical bytes once and observes them again.
-        observe + plan.unlanded + plan.send + observe;
+        // Resume observes and reads the never-lands batch; then either proves the node's index covers the prepared block (its
+        // body, then the deciding batch) or re-sends the identical bytes once and observes them again, never both.
+        observe + plan.unlanded + Math.max(plan.indexProof, plan.send + observe);
     return planned * DIRECT_EVM_BUDGET_HEADROOM;
 }
 /**

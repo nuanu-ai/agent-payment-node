@@ -1,10 +1,11 @@
 import { BridgeHttps } from "./lifi/https.js";
 /**
  * The public reads that prove, at the FINALIZED tag, that nothing more of an operation can land on its signing account
- * (R4): the chain id, the account's finalized nonce, and lookups of the operation's own transactions by hash. No state
- * is read at an old block (P1), so any keyless public endpoint answers them.
+ * (R4): the chain id, the account's finalized nonce, lookups of transactions by hash, and one block's transaction count
+ * and first transaction (block data, never a whole body). No state is read at an old block (P1), so any keyless public
+ * endpoint answers them.
  */
-export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getBlockByNumber";
+export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getBlockByNumber" | "eth_getBlockTransactionCountByNumber" | "eth_getTransactionByBlockNumberAndIndex" | "eth_getBlockTransactionCountByHash" | "eth_getTransactionByBlockHashAndIndex";
 export interface FinalizedChainRead {
     call(method: FinalizedReadMethod, params: readonly unknown[]): Promise<unknown>;
 }
@@ -27,6 +28,11 @@ export declare const FINALIZED_RPC_ENV: Readonly<Record<number, string>>;
 /** The production reader: the chain's own APN_<CHAIN>_RPC_URL, read keyless; a missing setting is named in the refusal. */
 export declare function environmentFinalizedReader(environment: Readonly<Record<string, string | undefined>>): (chainId: number) => PublicFinalizedRead;
 export declare function assertFinalizedChain(rpc: FinalizedChainRead, chainId: number): Promise<void>;
+/**
+ * What the node answered for one of a record's own hashes: `included` in a block, or `not_found`. `not_found` is only
+ * this node's answer: a node whose transaction index does not reach back to the transaction's block answers it for a
+ * transaction that landed, so nothing may read it as "never landed" (a nonce closure does not: it closes on the nonce).
+ */
 export type OwnTransactionSeen = "not_found" | "included";
 /** What a record says a nonce closure must prove: its signing chain and account, the highest nonce it froze, its own hashes. */
 export interface NonceClosureFacts {
@@ -49,30 +55,54 @@ export type NonceClosureCheck = {
 /**
  * Closed when, at the finalized block of its signing chain, the signer's nonce is past every nonce the record froze (so
  * none of its envelopes can ever be included again) and none of its own transaction hashes is pending. Hashes are read
- * only once the nonce is past.
+ * only once the nonce is past. The closure never depends on a null lookup: an envelope that landed closes it the same
+ * way, so it claims nothing about what landed and releases no ledger hold (those stay charged).
  */
 export declare function checkNonceClosure(facts: NonceClosureFacts, rpc: FinalizedChainRead): Promise<NonceClosureCheck>;
-/** One signed effect: its chain, signer, nonce and transaction hash. */
+/**
+ * A block of the signing chain read before the effect first left APN (at prepare, before anything was signed). The
+ * effect can only be in a canonical block above it: while this block is canonical, every block at or below its height is
+ * it or one of its ancestors, all fixed before the effect existed. `number` is set when the record kept it; a block the
+ * record kept by hash alone is read by hash.
+ */
+export interface EraBlock {
+    readonly hash: string;
+    readonly number?: bigint;
+}
+/** One signed effect: its chain, signer, nonce, transaction hash and, when its record kept one, the block it postdates. */
 export interface SignedEffectFacts {
     readonly chainId: number;
     readonly account: string;
     readonly nonce: bigint;
     readonly transactionHash: string;
+    readonly before?: EraBlock;
 }
-/** Not proven: `receiptFound` says the node holds a receipt, so the effect's observation (not an exit) decides it. */
+/** Not proven: what the deciding node answered (`receiptFound`: the effect's observation, not an exit, decides it). */
 export type NeverLandsCheck = {
     readonly neverLands: true;
     readonly finalizedNonce: bigint;
 } | {
     readonly neverLands: false;
+    readonly finalizedNonce: bigint;
     readonly receiptFound: boolean;
+    readonly transactionKnown: boolean;
 };
 /**
  * R4 exit 2 for one signed effect, the one rule every family uses: at the finalized tag the signer's nonce is past the
  * effect's nonce (a finalized transaction spent it) and the node knows neither the effect's transaction nor a receipt
- * for it, so that transaction was not the one and can never be included. A nonce not yet past proves nothing. Chain id,
- * nonce, receipt and transaction are one batch: a load balancer could route separate requests to a node behind the
- * finalized head, which would not know a transaction the finalized nonce already covers. Current state only, never a
- * historical (archive) read.
+ * for it, so that transaction was not the one and can never be included. A nonce not yet past proves nothing.
+ *
+ * A null lookup counts only from a node whose transaction index provably reaches the effect's era: a node that prunes
+ * its index (geth `--history.transactions`, by default the last 2,350,000 blocks) answers null for a transaction that
+ * landed before its window. Every client prunes the index from its tail, so a node that returns a transaction of the
+ * era block (`before`) as included in that very block indexes every canonical block above it, which is where the effect
+ * could be. The probe is the era block's first transaction, read with the block's transaction count from block data
+ * (not the index, not state, never the whole body, which on a busy chain can exceed the response bound). Without `before`, or
+ * when the node does not hold the era block as canonical, has no transaction in it or does not index it, nothing is
+ * proven: the effect waits for a receipt or its owner's abandon.
+ *
+ * The deciding answer is one batch: a load balancer could route separate requests to a node behind the finalized head,
+ * which would not know a transaction the finalized nonce already covers, or to a node with a shorter index. The chain id
+ * is the endpoint's, proven by the first batch of this check (P2). Current state only, never a historical (archive) read.
  */
 export declare function checkNeverLands(effect: SignedEffectFacts, batch: FinalizedBatchRead): Promise<NeverLandsCheck>;

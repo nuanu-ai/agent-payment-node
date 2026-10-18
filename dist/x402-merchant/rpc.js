@@ -10,7 +10,8 @@ import { refuse } from "./protocol.js";
 const canonicalReceipts = new WeakMap();
 export function requireMerchantCanonicalReceipt(o, r) { const b = canonicalReceipts.get(r); if (b === undefined || b.fingerprint !== o.fingerprint || b.hash !== hashObject(r))
     refuse("merchant_native_actual_fee_authority_required"); return b.hash; }
-const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_sendRawTransaction"]);
+const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_sendRawTransaction",
+    "eth_getBlockTransactionCountByNumber", "eth_getTransactionByBlockNumberAndIndex"]);
 export class MerchantRpc {
     transport;
     sequence = 0;

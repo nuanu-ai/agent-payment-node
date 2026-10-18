@@ -45,7 +45,7 @@ const TRANSIENT_TRANSPORT_REASONS = new Set(["DNS_deadline", "request_deadline",
 export const RPC_READ_METHODS = [
     "eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount",
     "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt",
-    "eth_getLogs", "debug_traceTransaction",
+    "eth_getLogs", "debug_traceTransaction", "eth_getBlockTransactionCountByNumber", "eth_getTransactionByBlockNumberAndIndex",
 ];
 const RPC_READ_METHOD_SET = new Set(RPC_READ_METHODS);
 const IMMUTABLE_READ_METHODS = new Set(["eth_getBlockByNumber", "eth_getCode", "eth_getStorageAt", "eth_call", "eth_getTransactionReceipt",

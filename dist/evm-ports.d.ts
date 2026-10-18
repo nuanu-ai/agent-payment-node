@@ -1,5 +1,6 @@
 import type { EvmAsset, EvmAssetSelection } from "./evm-asset.js";
 import type { DirectEvmChainId, DirectEvmQuoteFeeModel } from "./evm-direct-networks.js";
+import type { FinalizedBatchRead } from "./evm-finalized-proof.js";
 import type { Address, Economics, Hex, OperationRecord } from "./model.js";
 import type { FeeEstimate, RpcProvenance, RpcReceipt } from "./ports.js";
 export interface EvmBalanceSnapshot extends RpcProvenance {
@@ -46,13 +47,8 @@ export interface EvmRpcPort {
     feeQuote(chainId: DirectEvmChainId, economics: Economics): Promise<EvmFeeQuote>;
     receipt(chainId: DirectEvmChainId, transactionHash: Hex): Promise<RpcReceipt | null>;
     evidence(operation: OperationRecord, receipt: RpcReceipt): Promise<EvmTransferEvidence>;
-    /** One POST, so one node answers: the sender's finalized nonce, and whether it knows this hash as a receipt or a pending transaction. */
-    unlandedEvidence?(chainId: DirectEvmChainId, address: Address, transactionHash: Hex): Promise<EvmUnlandedEvidence>;
-}
-export interface EvmUnlandedEvidence {
-    readonly finalizedNonce: string;
-    readonly receiptFound: boolean;
-    readonly transactionKnown: boolean;
+    /** The shared never-lands proof's reads on the selected network, each batch one POST (so one node answers it). */
+    finalizedBatch?(chainId: DirectEvmChainId): FinalizedBatchRead;
 }
 export type EvmRpcCall = (method: string, params: readonly unknown[], beforeSend?: () => Promise<void>) => Promise<unknown>;
 export type EvmRpcBatchCall = (calls: readonly {

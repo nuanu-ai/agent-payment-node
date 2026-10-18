@@ -14,6 +14,7 @@ import { TtyStargateTokenApproval } from "./token-tty.js";
 import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW } from "./destination-scan.js";
 import { legacyStargateStatusAfter } from "../legacy/stargate-v2/status.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
+import { uint } from "./token-codec.js";
 function stargateUsageState(state) {
     return state;
 }
@@ -159,7 +160,8 @@ export class StargateTokenService {
             sendRawTransaction: async (raw) => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw))
                 throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateTokenSourceReceipt(source, txHash, finalityTag),
             observeDestination: async (input) => await observeStargateTokenDestination(destination, input, tokenAt, cursor), now: this.now,
-            neverLands: async (effect) => await checkNeverLands({ chainId: 10, account: owner, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash }, async (calls) => await remotes.source.batchCall(calls)) };
+            neverLands: async (effect) => await checkNeverLands({ chainId: 10, account: owner, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash,
+                before: { hash: effect.before.hash, number: uint(effect.before.numberAtomic) } }, async (calls) => await remotes.source.batchCall(calls)) };
     }
     async reserveUsage(op) {
         const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);

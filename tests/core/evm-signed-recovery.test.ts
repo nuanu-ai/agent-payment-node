@@ -5,7 +5,10 @@ import { ApnError } from "../../src/errors.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
 import type { OperationRecord } from "../../src/model.js";
-import { EVM_REQUEST, EvmTestRpc, ensureDirectWallet, evmCore } from "./evm-helpers.js";
+import { keccak256, type Hex } from "viem";
+import type { FinalizedBatchRead } from "../../src/evm-finalized-proof.js";
+import { EVM_BLOCK_HASH, EVM_REQUEST, EvmTestRpc, ensureDirectWallet, evmCore } from "./evm-helpers.js";
+import { finalizedNode } from "./finalized-node.js";
 import { directUsage } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
@@ -18,8 +21,16 @@ class Abandon implements OperationAbandonApprovalPort {
   }
 }
 
-function unlanded(rpc: EvmTestRpc, seen: { finalizedNonce: string; transactionKnown: boolean }): void {
-  Object.assign(rpc.evm, { unlandedEvidence: async () => ({ ...seen, receiptFound: rpc.receiptEnabled && rpc.submissions.length > 0 }) });
+/**
+ * The finalized-tag node the shared never-lands proof reads: the sender's finalized nonce, the transfer's hash (landed
+ * with a receipt, pending, or unknown) and the prepared fee-quote block (12345, EVM_BLOCK_HASH), indexed from `indexFrom`.
+ */
+function unlanded(rpc: EvmTestRpc, seen: { finalizedNonce: string; transactionKnown: boolean; indexFrom?: bigint }): void {
+  Object.assign(rpc.evm, { finalizedBatch: (chainId: number): FinalizedBatchRead => async calls => {
+    const hash = keccak256(rpc.submissions[0]! as Hex), landed = rpc.receiptEnabled && rpc.submissions.length > 0;
+    return await finalizedNode(chainId, () => BigInt(seen.finalizedNonce), { era: { number: 12345n, hash: EVM_BLOCK_HASH }, indexFrom: seen.indexFrom ?? 0n,
+      ...(landed ? { landed: { [hash]: 12346n } } : seen.transactionKnown ? { pending: [hash] } : {}) }).batch(calls);
+  } });
 }
 
 async function ledgerState(root: string, operation: OperationRecord): Promise<string | undefined> {
@@ -60,6 +71,13 @@ test("a finalized nonce taken by another transaction ends the transfer as supers
   assert.equal((await setup.core.transfer.approve(prepared.operation_id) as { state: string }).state, "submitted_pending");
   unlanded(rpc, { finalizedNonce: rpc.nonceAtomic, transactionKnown: true });
   assert.equal((await setup.core.transfer.resume(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  // The node still knows the transaction: the nonce past alone never proves never-lands (the copy T2 removed did).
+  unlanded(rpc, { finalizedNonce: (BigInt(rpc.nonceAtomic) + 1n).toString(), transactionKnown: true });
+  assert.equal((await setup.core.transfer.resume(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  // A node whose index starts after the prepared block would not know a landed transfer either: nothing is proven, nothing re-sent.
+  unlanded(rpc, { finalizedNonce: (BigInt(rpc.nonceAtomic) + 1n).toString(), transactionKnown: false, indexFrom: 12346n });
+  assert.equal((await setup.core.transfer.resume(prepared.operation_id) as { state: string }).state, "submitted_pending");
+  assert.equal(rpc.broadcastCount, 1);
   unlanded(rpc, { finalizedNonce: (BigInt(rpc.nonceAtomic) + 1n).toString(), transactionKnown: false });
   const superseded = await setup.core.transfer.resume(prepared.operation_id) as { state: string; terminal: boolean };
   assert.equal(superseded.state, "failed_proven_superseded"); assert.equal(superseded.terminal, true);
@@ -113,4 +131,17 @@ test("only a signature APN never dispatched can be abandoned; the owner's acknow
   await assert.rejects(setup.local.request({ requestId: "mismatched-signed-material", version: "apn.native.v1", operation: "directTransfer.signedMaterial.get",
     payload: { profile: sent.profile, operationId: sent.operationId, fingerprint: sent.fingerprint,
       expectedTransactionHash: `0x${"e".repeat(64)}`, expectedRawTransactionHash: `0x${"e".repeat(64)}` } }), { code: "APN_NATIVE_PROTOCOL" });
+  // Past its approval window, a dispatched transfer no proof decided takes the owner's abandon (R4 exit 3): one last receipt
+  // read finds nothing, consent ends it abandoned_unknown, its usage hold stays charged, and nothing is ever sent again.
+  assert.equal(refused.error?.details?.reason, "local_direct_abandon_before_expiry");
+  setup.clock.advance(Date.parse(sent.expiresAt) - setup.clock.now().getTime() + 1);
+  const closedSent = await core.execute({ command: "operation.abandon", operationId: dispatched.operation_id });
+  assert.equal(closedSent.ok, true, JSON.stringify(closedSent.error));
+  const closedOperation = closedSent.operation as { state: string; reason: string; terminal: boolean };
+  assert.deepEqual([closedOperation.state, closedOperation.reason, closedOperation.terminal], ["abandoned_unknown", "owner_abandoned_unknown", true]);
+  assert.equal(abandon.intents.length, 3); assert.match(abandon.intents.at(-1)!.outcomeNote, /may still land/u);
+  assert.equal(await ledgerState(temporary.root, (await setup.state.findOperation(dispatched.operation_id))!), "unknown_finality");
+  assert.equal(rpc.broadcastCount, 1);
+  assert.equal((await core.execute({ command: "operation.abandon", operationId: dispatched.operation_id })).ok, true);
+  assert.equal(abandon.intents.length, 3, "a replay asks nothing");
 });

@@ -48,7 +48,8 @@ function transactionByHash(value, requested) {
     }
 }
 const STARGATE_BATCH_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount",
-    "eth_getCode", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt", "eth_getTransactionByHash"]);
+    "eth_getCode", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionReceipt", "eth_getTransactionByHash",
+    "eth_getBlockTransactionCountByNumber", "eth_getTransactionByBlockNumberAndIndex"]);
 const STARGATE_RPC_METHODS = ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount",
     "eth_getCode", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt",
     "eth_getTransactionByHash", "eth_getLogs"];

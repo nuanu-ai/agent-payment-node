@@ -25,7 +25,7 @@ export declare const RPC_DEFAULT_HTTP_REQUESTS = 8;
 export declare const RPC_DEFAULT_HTTP_ATTEMPTS = 10;
 export declare const RPC_DEFAULT_DEADLINE_MS = 180000;
 export declare const RPC_BATCH_MAX_ITEMS = 33;
-export declare const RPC_READ_METHODS: readonly ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction"];
+export declare const RPC_READ_METHODS: readonly ["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_getTransactionCount", "eth_call", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs", "debug_traceTransaction", "eth_getBlockTransactionCountByNumber", "eth_getTransactionByBlockNumberAndIndex"];
 export type RpcReadMethod = typeof RPC_READ_METHODS[number];
 export declare function rpcEndpointIdentity(endpoint: string): string;
 export declare function invalidRpcReadMethod(): ApnError;

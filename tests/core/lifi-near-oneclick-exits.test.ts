@@ -18,6 +18,7 @@ import { temporaryState } from "./helpers.js";
 const ACCOUNT = privateKeyToAccount(`0x${"11".repeat(32)}`), TOKEN = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
 const DEPOSIT = getAddress("0x76b4c56085ED136a8744D52bE956396624a730E8"), BLOCK = `0x${"e".repeat(64)}` as Hex;
 const TRANSFER = keccak256(Buffer.from("Transfer(address,address,uint256)"));
+const SOURCE_BLOCK = `0x${"d".repeat(64)}`, PROBE = `0x${"9a".repeat(32)}`;
 const NO_SECRET = { load: async () => null, create: async () => { throw new Error("no wrapping secret in this test"); } };
 
 /** An unknown_finality Base USDC source (nonce 7) whose deposit deadline passed a minute ago: inside the index margin. */
@@ -29,7 +30,7 @@ async function setup(t: test.TestContext) {
   let record: OneClickSourceRecord = await journal.stage({ lane: "base-usdc-to-tron-usdt", operationId: "a".repeat(64), profileHash: state.profileHash("oneclick-exits"),
     payer: ACCOUNT.address, recipient: "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t", refundTo: ACCOUNT.address, depositAddress: DEPOSIT, quoteHash: "c".repeat(64),
     quoteRequestDeadline: deadline, quoteDeadline: deadline, effectiveDeadline: deadline, amountInAtomic: "3000000", minAmountOutAtomic: "1251525",
-    quotedAmountOutAtomic: "1264167", sourceBlockHash: `0x${"d".repeat(64)}`, sourceCall: { to: TOKEN, data, value: "0", nonce: "7", gas: "100000",
+    quotedAmountOutAtomic: "1264167", sourceBlockHash: SOURCE_BLOCK, sourceCall: { to: TOKEN, data, value: "0", nonce: "7", gas: "100000",
       maxFeePerGas: "2000000000", maxPriorityFeePerGas: "100000000", maxNativeDebitWei: "200000000000000" } });
   record = await journal.advance(record.operationId, record.integrityHash, "signing_started");
   const raw = await ACCOUNT.signTransaction({ type: "eip1559", chainId: 8453, to: TOKEN, data, value: 0n, nonce: 7, gas: 100000n,
@@ -37,7 +38,7 @@ async function setup(t: test.TestContext) {
   record = await journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) });
   record = await journal.advance(record.operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
   record = await journal.advance(record.operationId, record.integrityHash, "unknown_finality");
-  const hash = record.transactionHash!, chain = { finalizedNonce: "0x7", landed: false, known: false }, seen: string[] = [];
+  const hash = record.transactionHash!, chain = { finalizedNonce: "0x7", landed: false, known: false, indexed: true }, seen: string[] = [];
   const receipt = () => ({ transactionHash: hash, to: TOKEN, from: ACCOUNT.address, blockNumber: "0x10", blockHash: BLOCK, transactionIndex: "0x0", status: "0x1",
     logs: [{ address: TOKEN, topics: [TRANSFER, pad(ACCOUNT.address).toLowerCase(), pad(DEPOSIT).toLowerCase()], data: toHex(3000000n, { size: 32 }), transactionHash: hash, blockHash: BLOCK }] });
   const answer = (method: string, params: readonly unknown[]): unknown => {
@@ -45,6 +46,10 @@ async function setup(t: test.TestContext) {
     if (method === "eth_chainId") return "0x2105";
     if (method === "eth_getTransactionCount") { assert.equal(params[1], "finalized"); return chain.finalizedNonce; }
     if (method === "eth_getTransactionReceipt") return chain.landed ? receipt() : null;
+    // The pinned source block (read before signing) holds PROBE, which the node indexes unless `indexed` is off.
+    if (method === "eth_getTransactionByHash" && params[0] === PROBE) return chain.indexed ? { hash: PROBE, blockHash: SOURCE_BLOCK, blockNumber: "0x5" } : null;
+    if (method === "eth_getBlockTransactionCountByHash") { assert.deepEqual(params, [SOURCE_BLOCK]); return "0x1"; }
+    if (method === "eth_getTransactionByBlockHashAndIndex") { assert.deepEqual(params, [SOURCE_BLOCK, "0x0"]); return { hash: PROBE, blockHash: SOURCE_BLOCK, blockNumber: "0x5" }; }
     if (method === "eth_getTransactionByHash") return chain.landed || chain.known ? { hash } : null;
     if (method === "eth_getBlockByNumber") return { number: "0x20", hash: params[0] === "0x10" ? BLOCK : `0x${"f".repeat(64)}`, transactions: [hash] };
     throw new Error(`unexpected ${method}`);
@@ -68,12 +73,17 @@ test("an ambiguous source without a receipt stays open while the finalized nonce
   const open = view(await f.cli("oneclick", "source", "status", "--operation", f.id));
   assert.deepEqual([open.sourceState, open.sourceNeverLands], ["unknown_finality", null]);
   assert.equal(await f.indexState(), "active");
-  f.chain.finalizedNonce = "0x8"; f.seen.length = 0;
+  // A node whose index does not reach the pinned source block would not know a landed deposit: nothing is proven.
+  f.chain.finalizedNonce = "0x8"; f.chain.indexed = false;
+  assert.equal(view(await f.cli("oneclick", "source", "status", "--operation", f.id)).sourceState, "unknown_finality");
+  f.chain.indexed = true; f.seen.length = 0;
   const ended = view(await f.cli("oneclick", "source", "status", "--operation", f.id));
   assert.equal(ended.sourceState, "failed_proven_superseded");
   assert.deepEqual(ended.sourceNeverLands, { proof: "finalized_nonce_past_without_transaction_or_receipt", sourceNonce: "7", finalizedNonceAtomic: "8" });
-  // The proof is one batch after the receipt read, and a never-landing deposit asks 1Click nothing.
-  assert.deepEqual(f.seen, ["eth_chainId", "eth_getTransactionReceipt", "eth_chainId", "eth_getTransactionCount", "eth_getTransactionReceipt", "eth_getTransactionByHash"]);
+  // After the receipt read: the first batch, the source block's count and first transaction, the deciding batch; a never-landing deposit asks 1Click nothing.
+  assert.deepEqual(f.seen, ["eth_chainId", "eth_getTransactionReceipt", "eth_chainId", "eth_getTransactionCount", "eth_getTransactionReceipt", "eth_getTransactionByHash",
+    "eth_getBlockTransactionCountByHash", "eth_getTransactionByBlockHashAndIndex",
+    "eth_getTransactionCount", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getTransactionByHash"]);
   assert.equal(await f.indexState(), "terminal");
   // Replays answer from the journal, generic status included, with no network read.
   f.seen.length = 0;

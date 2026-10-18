@@ -8,7 +8,8 @@ export declare function merchantLocks(profileHash: string, operationId: string, 
  * The exits of a merchant payment that holds no payment receipt (phase 4c R4). Proof first, with no consent: a payment
  * never signed, or whose signature never left a process that died before sealing it, ends `failed_before_effect` once
  * its local deadline passed (custody refuses to sign after it); a signed transaction ends `failed_proven_superseded`
- * once another transaction took its nonce at the finalized tag and the node knows neither it nor a receipt. Both
+ * once another transaction took its nonce at the finalized tag and a node indexing the prepare-time fee anchor block
+ * knows neither it nor a receipt. Both
  * release the payment's holds. When no proof decides, the owner's TTY consent ends it `abandoned_unknown` with both
  * holds still charged. Nothing here signs, sends or delivers.
  */

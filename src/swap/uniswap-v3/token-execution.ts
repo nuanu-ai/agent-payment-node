@@ -97,6 +97,9 @@ export class UniswapTokenExecution {
   private async continueStart(op: UniswapTokenOperation, kind: TokenEffectKind) {
     const attempt = attemptOf(op, kind); if (attempt.transactionHash !== null) return op;
     const recovered = await this.ports.recoverSealed?.(op, kind, attempt.nonce) ?? null;
+    // Not provably never signed, so no R4 exit 2: custody saves the signed bytes in the encrypted wallet before it writes the
+    // public sealed effect, and recovery never opens custody, so this record cannot show that no signed bytes exist (none
+    // was sent: a send needs the public effect). The exit is the owner's abandon past the route deadline (R4 exit 3).
     if (recovered === null) blocked("Started token effect has no public transaction evidence.", "uniswap_token_public_effect_missing");
     // A sealed transaction may or may not have reached the provider. Recovery observes it only.
     const usage = kind === "swap" ? await this.ports.followUsage(op, "unknown_finality") : null;

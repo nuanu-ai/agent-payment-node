@@ -11,8 +11,9 @@ import { circleBlocked, circleCorrupt, circleSame, validateCircle, publicCircle 
 import { validateCircleFundingBinding, assertCircleFundingFee } from "./funding-binding.js";
 /** Every state a v2 (funding) Circle route may hold, and its outcomes (the record's `terminal` flag must equal membership). */
 export const CIRCLE_V2_STATES = ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality",
-    "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"];
-export const CIRCLE_V2_TERMINAL_STATES = ["completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled"];
+    "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled", "abandoned_unknown"];
+/** `abandoned_unknown`: the owner's exit (R4 exit 3) of a route a possibly-sent effect kept open; its holds stay charged. */
+export const CIRCLE_V2_TERMINAL_STATES = ["completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled", "abandoned_unknown"];
 /** Initial source envelopes and the economic/authority context remain immutable through every transition. */
 export function circleFundingFingerprint(op) {
     return hashObject({ schemaVersion: "apn.circle-v2-evm-operation.v2", requestHash: op.requestHash, funding: op.funding, feeQuote: op.feeQuote,
@@ -32,8 +33,13 @@ export function advanceCircleFundingOperation(op, patch, reason, now) {
 /** Source effects are signed by the binding's source wallet and the mint by its gas wallet; the operation validator binds
  * both to the operation's own custody records. */
 export function validateCircleFundingEnvelope(e, role, chain, attestation, funding) {
-    if (!isPlainRecord(e) || !exactKeys(e, ["chainId", "from", "to", "data", "valueAtomic", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "envelopeHash"]))
+    if (!isPlainRecord(e) || !exactKeys(e, ["chainId", "from", "to", "data", "valueAtomic", "nonceAtomic", "gasLimitAtomic", "maxFeePerGasAtomic", "maxPriorityFeePerGasAtomic", "envelopeHash",
+        ...(Object.hasOwn(e, "eraBlock") ? ["eraBlock"] : [])]))
         circleCorrupt("envelope_shape");
+    // The era block (never-lands index proof) is optional: envelopes frozen before it was recorded never prove never-lands.
+    if (e.eraBlock !== undefined && (!shape(e.eraBlock, ["numberAtomic", "hash"]) || !/^(?:0|[1-9][0-9]{0,77})$/u.test(e.eraBlock.numberAtomic) ||
+        !/^0x[0-9a-f]{64}$/u.test(e.eraBlock.hash)))
+        circleCorrupt("envelope_era");
     const { envelopeHash, ...body } = e, route = circleRoute(chain), destination = role === "mint";
     const data = destination ? attestation === null ? null : encodeCircleMint(attestation) : role === "burn" ? encodeCircleBurn(chain, funding) : encodeCircleApproval(role === "cleanup", funding);
     if (envelopeHash !== hashObject(body) || e.chainId !== (destination ? chain : 42161) || e.from !== (destination ? funding.gasPayer : funding.sourceOwner) ||
@@ -149,6 +155,10 @@ export function validateCircleFundingOperation(value) {
     const { integrityHash: _hash, transitions: _transitions, ...snapshot } = op;
     if (op.transitions.at(-1).snapshotHash !== hashObject(snapshot))
         circleCorrupt("snapshot_binding");
+    // The owner's abandon closes only a route a possibly-sent effect kept open; nothing was settled, so no hold is finalized.
+    if (op.state === "abandoned_unknown" && (op.usageFinalized || op.transitions.at(-1)?.reason !== "owner_abandoned_unknown" ||
+        !op.effects.some(e => ["submission_started", "submitted", "unknown"].includes(e.phase) && e.transactionHash !== null)))
+        circleCorrupt("owner_abandon_binding");
     return op;
 }
 /** Journal reason of an owned mint closed because the destination consumed its issuer message without it. */

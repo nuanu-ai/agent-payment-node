@@ -50,6 +50,8 @@ export const circleAdapter = {
             throw new ApnError("APN_RECEIPT_NOT_FOUND", "Circle finality is pending.", { operationId: record.operationId, nextActions: [`apn circle evm observe --operation ${record.operationId}`] });
         return receiptOutcome(publicKnownCircle(validateKnownCircle(record)));
     },
+    // The last-resort owner exit (R4 exit 3) of a v2 route a possibly-sent effect keeps open: past expiry, TTY consent, holds charged.
+    abandon: async (context, record) => await (await import("../../circle-v2-evm/funding-abandon.js")).abandonCircleFunding(context.state, record.operationId, context.requireOperationAbandonApproval(), () => context.clock.now().getTime()),
     // Approval, mint, observation and cleanup are Circle's own foreground and network commands.
     commands: { status: "apn circle evm status --operation <operation-id>", resume: "apn circle evm observe --operation <operation-id>",
         exit: "apn circle evm cleanup --operation <operation-id>" },

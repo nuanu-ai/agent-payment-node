@@ -316,8 +316,10 @@ function uniswapTokenRpcBudget(command) {
         return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
     if (command === "swap.uniswap-token.execute")
         return { maxHttpRequests: 24, deadlineMs: 150_000 };
+    // Status: observation (2), the never-lands batch (2) and, once that suggests never-lands, its index proof (era block,
+    // then the deciding batch and its receipt route: 3 more), plus an allowance read and retry headroom.
     if (command === "swap.uniswap-token.status")
-        return { maxHttpRequests: 8 + overhead, deadlineMs: 45_000 };
+        return { maxHttpRequests: 11 + overhead, deadlineMs: 45_000 };
     return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
 }
 /**

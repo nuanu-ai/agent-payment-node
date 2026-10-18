@@ -18,7 +18,7 @@ export async function abandonDirectTransfer(context, operationId) {
     if (found.kind !== "direct_transfer")
         return ineligible();
     if (found.record.providerDirect === undefined)
-        return await new TransferService(context).abandonUndispatched(operationId);
+        return await new TransferService(context).abandonLocal(operationId);
     const profileHash = found.record.profileHash;
     return await context.state.withLocks([
         `profile:${profileHash}`,

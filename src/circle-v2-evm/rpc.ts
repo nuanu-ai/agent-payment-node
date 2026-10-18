@@ -9,6 +9,7 @@ import { CIRCLE_MINTER, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, CIRCLE_SOURCE_TOKE
 import { circleHex, circleRecord, circleUint, type CircleAttesterSnapshot, type CircleObservation } from "./protocol.js";
 import { circleTokenPairKey, verifyCircleDeployments, type CircleDeploymentSnapshot, type CircleAccountPreflight } from "./preflight.js";
 import { circleBlocked, circleEnvelope, type CircleEnvelope } from "./operation-model.js";
+import { circleEnvelopeEra } from "./funding-never-lands.js";
 export const CIRCLE_RPC_ABI = parseAbi([
   "function localDomain() view returns(uint32)", "function version() view returns(uint32)", "function paused() view returns(bool)",
   "function remoteTokenMessengers(uint32) view returns(bytes32)", "function localMinter() view returns(address)",
@@ -19,15 +20,18 @@ export const CIRCLE_RPC_ABI = parseAbi([
   "function signatureThreshold() view returns(uint256)", "function getNumEnabledAttesters() view returns(uint256)", "function getEnabledAttester(uint256) view returns(address)",
 ]);
 const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getTransactionCount", "eth_getCode", "eth_getStorageAt", "eth_call",
-  "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getLogs"]);
+  "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_sendRawTransaction", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getLogs",
+  "eth_getBlockTransactionCountByNumber", "eth_getTransactionByBlockNumberAndIndex"]);
 const READ_METHODS = new Set([...METHODS].filter(method => method !== "eth_sendRawTransaction"));
 /** Read plans of the live rails in calls per client (P4): chain identity; functional configuration with its head;
  * the attester set (head, threshold, count, at most 20 attesters); one account; one envelope (head, tip, estimate);
  * one effect preflight (two nonces, balance, allowance, estimate, simulation, mint head and used nonce); one
- * observation (transaction, receipt, finality head, canonical block). */
-export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23, account: 5, envelope: 3, preflight: 8, observation: 4, single: 1, ambiguous: 4 } as const;
+ * observation (transaction, receipt, finality head, canonical block); one ambiguous-send check on the shared never-lands
+ * rule (chain id, finalized nonce, receipt, transaction; the era block's count and first transaction; the deciding nonce,
+ * receipt, transaction and probe). */
+export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23, account: 5, envelope: 3, preflight: 8, observation: 4, single: 1, ambiguous: 10 } as const;
 /** The longest live command: identity, configuration, attesters, two accounts, two envelopes, three effect preflights,
- * eight observations, one ambiguous-send check (two nonces, transaction, receipt) and four single reads (allowance,
+ * eight observations, one ambiguous-send check (above) and four single reads (allowance,
  * used nonce, cleanup nonce, mint head), each retried once. */
 export const CIRCLE_COMMAND_REQUEST_BUDGET = 2 * (CIRCLE_READ_PLAN.identity + CIRCLE_READ_PLAN.configuration + CIRCLE_READ_PLAN.attesters +
   2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + CIRCLE_READ_PLAN.ambiguous + 4 * CIRCLE_READ_PLAN.single);
@@ -132,7 +136,12 @@ export class CircleRpc {
     await this.identity(); const [block, rawTip, rawEstimate] = await Promise.all([this.block("latest"), this.chainId === 42161 ? Promise.resolve("0x0") : this.call("eth_maxPriorityFeePerGas", []),
       gasLimit === undefined ? this.call("eth_estimateGas", [{ from, to, data, value: "0x0" }, "latest"]) : Promise.resolve(null)]);
     const tip = circleUint(rawTip), gas = gasLimit === undefined ? circleUint(rawEstimate) * 12n / 10n + 1n : BigInt(gasLimit);
-    return circleEnvelope({ chainId: this.chainId, from, to, data, valueAtomic: "0", nonceAtomic, gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: (circleUint(block.baseFeePerGas) * 2n + tip).toString(), maxPriorityFeePerGasAtomic: tip.toString() });
+    return circleEnvelope({ chainId: this.chainId, from, to, data, valueAtomic: "0", nonceAtomic, gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: (circleUint(block.baseFeePerGas) * 2n + tip).toString(), maxPriorityFeePerGasAtomic: tip.toString(),
+      eraBlock: circleEnvelopeEra(block) });
+  }
+  /** One JSON-RPC batch (one POST, so one node answers every read in it) for the never-lands proof; never retried read by read. */
+  async finalizedBatch(calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]> {
+    return await this.scopes.run({ retryRead: false }, async () => await Promise.all(calls.map(call => this.call(call.method, call.params))));
   }
 }
 function hexQuantity(input: unknown): string { return `0x${circleUint(input).toString(16)}`; }

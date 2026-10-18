@@ -1,6 +1,7 @@
 import { getAddress } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
+import type { OwnTransactionSeen } from "../../evm-finalized-proof.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
 import type { LegacyStargateEnvelope } from "./native-record.js";
 import { fail, LEGACY_NATIVE_LANE, LEGACY_TOKEN_LANE, UINT } from "./pins.js";
@@ -9,13 +10,12 @@ import { LEGACY_STARGATE_DIRECTORY, legacyStargateFamily, type LegacyStargateFam
 export const LEGACY_CLOSURE_SCHEMA = "apn.stargate-v2-legacy-closure.v1";
 /** The only closure: at the finalized block the signer's nonce is past every envelope of the record and none of its own transactions is pending. */
 export const LEGACY_CLOSURE_REASON = "legacy_closed_nonce_consumed";
-export type LegacyOwnTransactionSeen = "not_found" | "included";
 export interface LegacyStargateClosure {
   readonly schemaVersion: typeof LEGACY_CLOSURE_SCHEMA; readonly family: LegacyStargateFamily; readonly operationId: string;
   readonly recordSchemaVersion: string; readonly recordIntegrityHash: string; readonly recordPhase: string;
   readonly reason: typeof LEGACY_CLOSURE_REASON; readonly chainId: number; readonly account: string; readonly blockTag: "finalized";
   readonly highestEnvelopeNonceAtomic: string; readonly finalizedNonceAtomic: string;
-  readonly ownTransactions: readonly { readonly transactionHash: string; readonly seen: LegacyOwnTransactionSeen }[];
+  readonly ownTransactions: readonly { readonly transactionHash: string; readonly seen: OwnTransactionSeen }[];
   readonly closedAt: string; readonly integrityHash: string;
 }
 const CLOSURE_KEYS = ["account", "blockTag", "chainId", "closedAt", "family", "finalizedNonceAtomic", "highestEnvelopeNonceAtomic",

@@ -6,12 +6,13 @@ import { type CircleFundingBindingV2, type CircleFundingFeeV2 } from "./funding-
 import type { CircleExternalMintNotice } from "./funding-external-mint.js";
 /** Every state a v2 (funding) Circle route may hold, and its outcomes (the record's `terminal` flag must equal membership). */
 export declare const CIRCLE_V2_STATES: readonly string[];
+/** `abandoned_unknown`: the owner's exit (R4 exit 3) of a route a possibly-sent effect kept open; its holds stay charged. */
 export declare const CIRCLE_V2_TERMINAL_STATES: readonly string[];
 export interface CircleFundingOperationV2 extends Omit<CircleOperationV1, "schemaVersion" | "externalFulfillment" | "nonceRetirement" | "state"> {
     readonly schemaVersion: "apn.circle-v2-evm-operation.v2";
     readonly funding: CircleFundingBindingV2;
     readonly feeQuote: CircleFundingFeeV2;
-    readonly state: Exclude<CircleOperationV1["state"], "nonce_retired">;
+    readonly state: Exclude<CircleOperationV1["state"], "nonce_retired"> | "abandoned_unknown";
     readonly externalFulfillment?: CircleFundingExternalFulfillment;
 }
 /** Initial source envelopes and the economic/authority context remain immutable through every transition. */
@@ -35,7 +36,7 @@ export declare function publicCircleFundingOperation(op: CircleFundingOperationV
     external_destination_fee_payer?: `0x${string}`;
     operation_id: string;
     kind: string;
-    state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled";
+    state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled" | "abandoned_unknown";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;
@@ -99,7 +100,7 @@ export declare function publicKnownCircle(op: CircleKnownOperation): {
     external_destination_fee_payer?: `0x${string}`;
     operation_id: string;
     kind: string;
-    state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled";
+    state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled" | "abandoned_unknown";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;

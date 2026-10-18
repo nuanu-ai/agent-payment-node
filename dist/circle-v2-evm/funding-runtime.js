@@ -8,7 +8,8 @@ import { verifyCircleFinalizedRevert } from "./revert-proof.js";
 import { getAddress, keccak256 } from "viem";
 import { approvalCode } from "../approval-code.js";
 import { canonicalJson, hashObject } from "../canonical.js";
-import { evmAmbiguousSendOutcome, evmSentOutcome, evmUnsentOutcome } from "../evm-unsent-outcome.js";
+import { evmUnsentOutcome } from "../evm-unsent-outcome.js";
+import { circleAmbiguousOutcome, circleSentOutcome } from "./funding-never-lands.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../evm-address-ownership.js";
 import { assertEvmNativeCustody, evmNativeCustody } from "../evm-native-custody.js";
 import { OperationService } from "../operation-service.js";
@@ -296,18 +297,9 @@ export class CircleFundingEvmService {
                     return evmUnsentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
                         nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
                 },
-                sentOutcome: async (_op, effect) => {
-                    const remote = rpc(effect);
-                    await remote.identity();
-                    return evmSentOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
-                        nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
-                },
-                ambiguous: async (_op, effect) => {
-                    const remote = rpc(effect);
-                    await remote.identity();
-                    return evmAmbiguousSendOutcome((method, params) => remote.call(method, params), { account: effect.envelope.from,
-                        nonce: BigInt(effect.envelope.nonceAtomic), transactionHash: effect.transactionHash ?? circleCorrupt("unsent_hash_missing") });
-                },
+                // Possibly-sent bytes: the shared never-lands rule on the effect's own chain, one batched finalized reader (R4 exit 2).
+                sentOutcome: async (_op, effect) => await circleSentOutcome(rpc(effect), effect),
+                ambiguous: async (_op, effect) => await circleAmbiguousOutcome(rpc(effect), effect),
                 // The same sealed bytes the owner approved: same hash and nonce, so they can be included at most once. Nothing is signed.
                 resend: async (input, effectInput, raw) => {
                     const op = snapshotCircleFundingOperation(input), effect = snapshotCircleFundingEffect(op, effectInput), hash = effect.transactionHash;
