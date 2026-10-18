@@ -166,6 +166,7 @@ export class TransferService {
         economics,
         preparedAt: preparedAt.toISOString(),
         preparedBlockNumberAtomic: balances.blockNumberAtomic,
+        preparedBlockHash: balances.blockHash,
         expiresAt: expiresAt.toISOString(),
         state: initial.state,
         terminal: initial.terminal,

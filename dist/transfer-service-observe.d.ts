@@ -25,8 +25,9 @@ export declare class TransferServiceObservation {
     private dispatchAndInspect;
     resume(operationIdInput: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
     /**
-     * No receipt. A finalized sender nonce past the frozen one, read in the same POST as the missing receipt, proves another
-     * transaction consumed it: this one can never land. A hash the RPC does not hold at all is re-sent as the identical
+     * No receipt. The shared never-lands rule (R4 exit 2) decides first: a finalized sender nonce past the frozen one while
+     * a node indexing the prepared block knows neither the transaction nor a receipt proves another transaction consumed
+     * it, so this one can never land. Below that nonce, a hash the RPC does not hold at all is re-sent as the identical
      * signed bytes; at most one copy of them can ever be included, so observing first and re-sending never adds an effect.
      */
     private settleUnlanded;

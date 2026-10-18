@@ -6,6 +6,7 @@ import { ApnError } from "./errors.js";
 import { assertDirectTerminalReceiptAuthority, hasSafeEvmInclusion } from "./direct-terminal-receipt.js";
 import { armDirectEvmStep, requireEvmRpc } from "./evm-direct.js";
 import { directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
+import { checkNeverLands } from "./evm-finalized-proof.js";
 import { canonicalOperationId, hasExactTransfer, hasSoleExactTransfer, parseEffect, publicOperation, publicReceipt, verifyEffect } from "./transfer-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
@@ -121,27 +122,27 @@ export class TransferServiceObservation {
         });
     }
     /**
-     * No receipt. A finalized sender nonce past the frozen one, read in the same POST as the missing receipt, proves another
-     * transaction consumed it: this one can never land. A hash the RPC does not hold at all is re-sent as the identical
+     * No receipt. The shared never-lands rule (R4 exit 2) decides first: a finalized sender nonce past the frozen one while
+     * a node indexing the prepared block knows neither the transaction nor a receipt proves another transaction consumed
+     * it, so this one can never land. Below that nonce, a hash the RPC does not hold at all is re-sent as the identical
      * signed bytes; at most one copy of them can ever be included, so observing first and re-sending never adds an effect.
      */
     async settleUnlanded(operation, rpc, observeOnly) {
-        const evm = rpc.evm;
-        if (evm?.unlandedEvidence === undefined || operation.transactionHash === undefined)
+        const evm = rpc.evm, nonce = BigInt(operation.economics.nonceAtomic);
+        if (evm?.finalizedBatch === undefined || operation.transactionHash === undefined)
             return operation;
-        let seen;
+        let check;
         try {
-            seen = await evm.unlandedEvidence(operation.chainId, operation.walletAddress, operation.transactionHash);
+            check = await checkNeverLands({ chainId: operation.chainId, account: operation.walletAddress, nonce, transactionHash: operation.transactionHash,
+                ...preparedBlock(operation) }, evm.finalizedBatch(operation.chainId));
         }
         catch {
             return operation;
         }
-        if (seen.receiptFound)
-            return operation;
-        if (BigInt(seen.finalizedNonce) > BigInt(operation.economics.nonceAtomic)) {
+        if (check.neverLands) {
             return await this.lifecycle.transition(operation, "failed_proven_superseded", true, "frozen_nonce_finalized_by_another_transaction", "finalized_nonce_without_receipt");
         }
-        if (seen.transactionKnown || observeOnly)
+        if (check.receiptFound || check.transactionKnown || check.finalizedNonce > nonce || observeOnly)
             return operation;
         const rawTransaction = await this.signedRawTransaction(operation);
         const journal = new EvmDirectSubmissionJournal(this.context.state.root);
@@ -309,6 +310,17 @@ function undispatchedAbandonIntent(operation) {
         unit: asset === undefined ? "USDC" : asset.kind === "native" ? network?.nativeSymbol ?? "native" : "token",
         outcomeNote: "Financial outcome: APN signed this transfer but holds no record of dispatching it. After abandonment APN never sends it; " +
             `the next transfer from this account reuses nonce ${operation.economics.nonceAtomic}, which voids these signed bytes.` };
+}
+/**
+ * The block a direct transfer read at prepare, before it was signed: an explicit EVM transfer's fee-quote head, a Base
+ * USDC transfer's balance head (recorded with its hash since the never-lands index proof; older ones kept no hash).
+ */
+function preparedBlock(operation) {
+    const quote = operation.evm?.feeQuote;
+    if (quote !== undefined)
+        return { before: { hash: quote.blockHash, number: BigInt(quote.blockNumberAtomic) } };
+    return operation.preparedBlockHash === undefined || operation.preparedBlockNumberAtomic === undefined ? {}
+        : { before: { hash: operation.preparedBlockHash, number: BigInt(operation.preparedBlockNumberAtomic) } };
 }
 export function requiredLocal(operation) {
     if (operation.providerDirect !== undefined || operation.transactionData === undefined ||
