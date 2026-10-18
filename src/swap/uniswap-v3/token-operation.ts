@@ -83,6 +83,8 @@ export interface UniswapTokenOperation {
     readonly maximumNativeDebitWei: string;
     readonly policyDigest: string;
     readonly mechanismDigest: string;
+    /** The quote's Ethereum block, read before anything of the swap was signed (R4 exit 2 needs a node indexing it); absent on older records. */
+    readonly quoteBlock?: { readonly number: string; readonly hash: string };
     readonly accumulatedNativeDebitWei: string;
     readonly usageReservationId: string | null;
     readonly usageState: AssetUsageState | null;
@@ -117,7 +119,7 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
         "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"];
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
-          ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : [])] : common))
+          ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value as unknown as UniswapTokenOperation, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -138,7 +140,9 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
     attempt(op.swapAttempt);
     attempt(op.cleanupAttempt);
     if (op.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA) { validateCleanupEvidence(op.cleanupEvidence); validateFailureDiagnostic(op.preSignFailure);
-        if (op.retiredEffects !== undefined) validateRetired(op.retiredEffects, op.updatedAt); }
+        if (op.retiredEffects !== undefined) validateRetired(op.retiredEffects, op.updatedAt);
+        if (op.quoteBlock !== undefined && (!isPlainRecord(op.quoteBlock) || !exactKeys(op.quoteBlock, ["number", "hash"]) ||
+            uint(op.quoteBlock.number) < 0n || !/^0x[a-f0-9]{64}$/u.test(op.quoteBlock.hash))) corrupt("Uniswap token quote block is invalid."); }
     const evidence = op.cleanupEvidence ?? null, failure = op.preSignFailure ?? null;
     const approvalStarted = ["approval_submission_started", "approval_submitted", "approval_unknown_finality"].includes(op.phase) || op.approvalAttempt !== null, swapStarted = ["submission_started", "submitted", "unknown_finality", "observed"].includes(op.phase), cleanupStarted = ["cleanup_submission_started", "cleanup_submitted", "cleanup_unknown_finality"].includes(op.phase) || op.phase === "cleaned" && evidence === null;
     if (approvalStarted && op.allowanceAtPrepare === "0" && op.approvalAttempt === null || swapStarted && op.swapAttempt === null || cleanupStarted && op.cleanupAttempt === null)

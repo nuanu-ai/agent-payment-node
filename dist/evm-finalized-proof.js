@@ -75,7 +75,8 @@ async function transactionSeen(rpc, transactionHash) {
 /**
  * Closed when, at the finalized block of its signing chain, the signer's nonce is past every nonce the record froze (so
  * none of its envelopes can ever be included again) and none of its own transaction hashes is pending. Hashes are read
- * only once the nonce is past.
+ * only once the nonce is past. The closure never depends on a null lookup: an envelope that landed closes it the same
+ * way, so it claims nothing about what landed and releases no ledger hold (those stay charged).
  */
 export async function checkNonceClosure(facts, rpc) {
     await assertFinalizedChain(rpc, facts.chainId);
@@ -91,23 +92,63 @@ export async function checkNonceClosure(facts, rpc) {
     }
     return { closed: true, finalizedNonce: finalized, ownTransactions };
 }
+const ownReads = (effect) => [{ method: "eth_getTransactionCount", params: [effect.account, "finalized"] },
+    { method: "eth_getTransactionReceipt", params: [effect.transactionHash] }, { method: "eth_getTransactionByHash", params: [effect.transactionHash] }];
+function ownAnswer(effect, [nonce, receipt, transaction]) {
+    const finalizedNonce = evmRpcQuantity(nonce), receiptFound = ownLookup(receipt, "transactionHash", effect.transactionHash) !== null;
+    const transactionKnown = ownLookup(transaction, "hash", effect.transactionHash) !== null;
+    return { neverLands: false, finalizedNonce, receiptFound, transactionKnown, unknown: finalizedNonce > effect.nonce && !receiptFound && !transactionKnown };
+}
+const notProven = ({ finalizedNonce, receiptFound, transactionKnown }) => ({ neverLands: false, finalizedNonce, receiptFound, transactionKnown });
+/** One transaction hash of the era block, or null when this node does not hold that block as canonical or it has none. */
+function probeOf(value, era) {
+    if (value === null)
+        return null;
+    const block = evmRpcRecord(value), hash = evmRpcHex(block.hash, 32);
+    if (era.number === undefined ? hash !== era.hash.toLowerCase() : evmRpcQuantity(block.number) !== era.number) {
+        throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered another block than the one asked for.");
+    }
+    if (!Array.isArray(block.transactions))
+        throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered a block without its transaction hashes.");
+    // Read by number, another hash means the era block is not canonical on this node (a reorg): nothing is proven.
+    return hash !== era.hash.toLowerCase() || block.transactions.length === 0 ? null : evmRpcHex(block.transactions[0], 32);
+}
+/** The node's transaction index holds the era block: it answered the probe as included in exactly that block. */
+function indexed(found, era) {
+    if (found === null || found.blockHash === null || found.blockHash === undefined)
+        return false;
+    return evmRpcHex(found.blockHash, 32) === era.hash.toLowerCase() && (era.number === undefined || evmRpcQuantity(found.blockNumber) === era.number);
+}
 /**
  * R4 exit 2 for one signed effect, the one rule every family uses: at the finalized tag the signer's nonce is past the
  * effect's nonce (a finalized transaction spent it) and the node knows neither the effect's transaction nor a receipt
- * for it, so that transaction was not the one and can never be included. A nonce not yet past proves nothing. Chain id,
- * nonce, receipt and transaction are one batch: a load balancer could route separate requests to a node behind the
- * finalized head, which would not know a transaction the finalized nonce already covers. Current state only, never a
- * historical (archive) read.
+ * for it, so that transaction was not the one and can never be included. A nonce not yet past proves nothing.
+ *
+ * A null lookup counts only from a node whose transaction index provably reaches the effect's era: a node that prunes
+ * its index (geth `--history.transactions`, by default the last 2,350,000 blocks) answers null for a transaction that
+ * landed before its window. Every client prunes the index from its tail, so a node that returns a transaction of the
+ * era block (`before`) as included in that very block indexes every canonical block above it, which is where the effect
+ * could be. The probe hash comes from the era block's body (a block read, not the index, not state). Without `before`, or
+ * when the node does not hold the era block as canonical, has no transaction in it or does not index it, nothing is
+ * proven: the effect waits for a receipt or its owner's abandon.
+ *
+ * The deciding answer is one batch: a load balancer could route separate requests to a node behind the finalized head,
+ * which would not know a transaction the finalized nonce already covers, or to a node with a shorter index. The chain id
+ * is the endpoint's, proven by the first batch of this check (P2). Current state only, never a historical (archive) read.
  */
 export async function checkNeverLands(effect, batch) {
-    const hash = effect.transactionHash;
-    const [chain, nonce, receipt, transaction] = await batch([
-        { method: "eth_chainId", params: [] }, { method: "eth_getTransactionCount", params: [effect.account, "finalized"] },
-        { method: "eth_getTransactionReceipt", params: [hash] }, { method: "eth_getTransactionByHash", params: [hash] }
-    ]);
+    const [chain, ...own] = await batch([{ method: "eth_chainId", params: [] }, ...ownReads(effect)]);
     assertChain(chain, effect.chainId);
-    const finalized = evmRpcQuantity(nonce), receiptFound = ownLookup(receipt, "transactionHash", hash) !== null;
-    const transactionKnown = ownLookup(transaction, "hash", hash) !== null;
-    return finalized > effect.nonce && !receiptFound && !transactionKnown ? { neverLands: true, finalizedNonce: finalized } : { neverLands: false, receiptFound };
+    const first = ownAnswer(effect, own), era = effect.before;
+    if (!first.unknown || era === undefined)
+        return notProven(first);
+    const [block] = await batch([era.number === undefined ? { method: "eth_getBlockByHash", params: [era.hash, false] }
+            : { method: "eth_getBlockByNumber", params: [`0x${era.number.toString(16)}`, false] }]);
+    const probe = probeOf(block, era);
+    if (probe === null)
+        return notProven(first);
+    const [nonce, receipt, transaction, probed] = await batch([...ownReads(effect), { method: "eth_getTransactionByHash", params: [probe] }]);
+    const last = ownAnswer(effect, [nonce, receipt, transaction]);
+    return last.unknown && indexed(ownLookup(probed, "hash", probe), era) ? { neverLands: true, finalizedNonce: last.finalizedNonce } : notProven(last);
 }
 //# sourceMappingURL=evm-finalized-proof.js.map

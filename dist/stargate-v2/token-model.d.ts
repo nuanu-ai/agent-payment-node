@@ -297,10 +297,14 @@ export interface StargateTokenExecutionPorts {
         finalityTag: StargateV2FinalityTag;
     }>) => Promise<StargateTokenDestinationEvidence | null>;
     readonly now?: () => number;
-    /** R4 exit 2 on the source chain: the owner's finalized nonce passed the effect's nonce and the node knows neither its transaction nor a receipt. */
+    /**
+     * R4 exit 2 on the source chain: the owner's finalized nonce passed the effect's nonce and a node indexing `before` (the
+     * operation's quote block, read before any of its effects was signed) knows neither its transaction nor a receipt.
+     */
     readonly neverLands?: (effect: Readonly<{
         transactionHash: Hex;
         nonceAtomic: string;
+        before: StargateV2QuoteEvidence["block"];
     }>) => Promise<NeverLandsCheck>;
 }
 export interface StargateTokenJournal {

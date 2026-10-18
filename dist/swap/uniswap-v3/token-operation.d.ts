@@ -91,6 +91,11 @@ export interface UniswapTokenOperation {
     readonly maximumNativeDebitWei: string;
     readonly policyDigest: string;
     readonly mechanismDigest: string;
+    /** The quote's Ethereum block, read before anything of the swap was signed (R4 exit 2 needs a node indexing it); absent on older records. */
+    readonly quoteBlock?: {
+        readonly number: string;
+        readonly hash: string;
+    };
     readonly accumulatedNativeDebitWei: string;
     readonly usageReservationId: string | null;
     readonly usageState: AssetUsageState | null;

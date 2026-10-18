@@ -478,14 +478,14 @@ async function observeCleanup(op, ports, journal, sentNow = false) {
     return await finishCleanup({ ...op, residualAllowanceAtomic: "0" }, ports, journal, "cleanup_safe_zero_allowance");
 }
 /**
- * R4 exit 2 for the bridge send: the finalized nonce passed it and the node knows neither its transaction nor a receipt.
+ * R4 exit 2 for the bridge send: the finalized nonce passed it and a node indexing the quote block knows neither its transaction nor a receipt.
  * Its hold is released as unsubmitted, and the allowance it would have spent goes to cleanup (closed at once when zero).
  */
 async function retireSendIfNeverLanded(op, ports, journal) {
     if (ports.neverLands === undefined || op.transactionHash === undefined || op.usageState !== "unknown_finality" || op.usageTarget !== undefined)
         return op;
     const nonceAtomic = (op.postApprovalQuote?.sendEnvelope ?? op.sendEnvelope).nonceAtomic;
-    const check = await ports.neverLands({ transactionHash: op.transactionHash, nonceAtomic });
+    const check = await ports.neverLands({ transactionHash: op.transactionHash, nonceAtomic, before: op.quote.block });
     if (!check.neverLands)
         return op;
     op = seal({ ...op, retiredEffects: [...op.retiredEffects ?? [], { role: "bridge", transactionHash: op.transactionHash, nonceAtomic, reason: "never_landed",
@@ -498,7 +498,7 @@ async function retireSendIfNeverLanded(op, ports, journal) {
 async function rearmCleanupIfNeverLanded(op, ports, journal) {
     if (ports.neverLands === undefined || op.cleanupTransactionHash === undefined || op.cleanupEnvelope === undefined)
         return op;
-    const check = await ports.neverLands({ transactionHash: op.cleanupTransactionHash, nonceAtomic: op.cleanupEnvelope.nonceAtomic });
+    const check = await ports.neverLands({ transactionHash: op.cleanupTransactionHash, nonceAtomic: op.cleanupEnvelope.nonceAtomic, before: op.quote.block });
     return check.neverLands ? await rearmCleanup(op, journal, "never_landed", check.finalizedNonce.toString(), (ports.now ?? Date.now)()) : op;
 }
 /** The cleanup slot is freed: the retired cleanup is kept, and `stargate token cleanup` freezes and consents a new one. */

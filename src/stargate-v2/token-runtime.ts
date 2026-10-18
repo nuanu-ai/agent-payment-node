@@ -23,6 +23,7 @@ import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_W
 import type { StargateTokenUsageState } from "./token-model.js";
 import { legacyStargateStatusAfter, type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
+import { uint } from "./token-codec.js";
 
 function stargateUsageState(state: AssetUsageState): StargateTokenUsageState {
   return state;
@@ -102,8 +103,8 @@ export class StargateTokenService {
       followUsage: async (op, target) => await this.followUsage(op, target),
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateTokenSourceReceipt(source, txHash, finalityTag),
       observeDestination: async input => await observeStargateTokenDestination(destination, input, tokenAt, cursor), now: this.now,
-      neverLands: async effect => await checkNeverLands({ chainId: 10, account: owner, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash },
-        async calls => await remotes.source.batchCall(calls)) };
+      neverLands: async effect => await checkNeverLands({ chainId: 10, account: owner, nonce: BigInt(effect.nonceAtomic), transactionHash: effect.transactionHash,
+        before: { hash: effect.before.hash, number: uint(effect.before.numberAtomic) } }, async calls => await remotes.source.batchCall(calls)) };
   }
   private async reserveUsage(op: StargateTokenOperation): Promise<StargateTokenUsageState> { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);
     if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again.");
