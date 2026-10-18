@@ -122,8 +122,8 @@ export function historicalRetirementUsage(records: readonly AssetUsageReservatio
  for (const r of retirements) {
    validateHistoricalRetirementRecord(r);const row=r.originalOperation.usageLease!;
    if (ids.has(row.reservationId) || !records.some(v=>canonicalJson(v)===canonicalJson(row))) corrupt();ids.add(row.reservationId);
-   if(at.slice(0,10)<r.accountingAt.slice(0,10)) blocked();
-   if(at.slice(0,10)===r.accountingAt.slice(0,10))charge+=6_000_000n;
+   // Charged on its accounting day, and while the clock is behind that day (a read never drops a future-stamped charge).
+   if(at.slice(0,10)<=r.accountingAt.slice(0,10))charge+=6_000_000n;
  }
  const total=BigInt(sumUsage(records.filter(r=>!ids.has(r.reservationId)),now))+charge;
  if(total>(1n<<256n)-1n)corrupt();return total.toString();
@@ -178,4 +178,3 @@ function instant(v:unknown):string {if(typeof v!=="string" || !Number.isFinite(D
 function isHash(v:unknown):v is string{return typeof v==="string"&&HASH.test(v);}
 function isUint(v:unknown):v is string{return typeof v==="string"&&UINT.test(v);}
 function corrupt():never{throw new ApnError("APN_STATE_CORRUPT","Historical Jupiter retirement evidence is invalid.");}
-function blocked():never{throw new ApnError("APN_OPERATION_BLOCKED","Historical Jupiter retirement accounting cannot move backward.");}

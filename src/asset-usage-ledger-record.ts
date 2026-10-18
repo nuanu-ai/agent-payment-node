@@ -99,14 +99,19 @@ export function seal(body: ReservationBody): AssetUsageReservation {
   return validateAssetUsageReservation({ ...body, reservationDigest: domainHash(RESERVATION_DIGEST_DOMAIN, canonicalJson(body)) });
 }
 
+/**
+ * The day's usage at `now`: every open hold, and every spend whose effect is stamped on now's UTC day or later. A stamp
+ * after the clock (the clock moved back below the bucket's newest stamp) still counts: a read never drops a record
+ * because its stamp is in the future (R9).
+ */
 export function sumUsage(records: readonly AssetUsageReservation[], now: Date): string {
   const day = instant(now).slice(0, 10);
   let total = 0n;
   for (const record of records) {
     if (record.state === "failed_before_effect" || record.state === "released_unsubmitted") continue;
     if (record.state === "failed_confirmed_revert" && record.consumedAtomic === undefined) continue;
-    if (record.state === "finalized" && record.effectAt!.slice(0, 10) !== day) continue;
-    if (record.state === "failed_confirmed_revert" && record.effectAt!.slice(0, 10) !== day) continue;
+    if (record.state === "finalized" && record.effectAt!.slice(0, 10) < day) continue;
+    if (record.state === "failed_confirmed_revert" && record.effectAt!.slice(0, 10) < day) continue;
     total += atomic(record.state === "failed_confirmed_revert" || record.merchantNativeActualFee!==undefined || record.cleanup85NativeActual!==undefined || record.metamaskNativeActualFee!==undefined ? record.consumedAtomic! : record.amountAtomic,
       record.state !== "failed_confirmed_revert" && record.merchantNativeActualFee===undefined && record.cleanup85NativeActual===undefined && record.metamaskNativeActualFee===undefined, true);
     if (total > MAX_UINT256) corrupt("The usage ledger total exceeds uint256.");
@@ -121,11 +126,13 @@ export function assertReplay(record: AssetUsageReservation, policyDigest: string
   }
 }
 
-export function assertBucketWindow(records: readonly AssetUsageReservation[], at: string): void {
-  const day = at.slice(0, 10);
-  if (records.some((record) => record.updatedAt.slice(0, 10) > day)) {
-    throw blocked("The usage reservation window cannot move backward in time.");
-  }
+/**
+ * A ledger write's stamp: the clock, but never earlier than the newest stamp stored in its bucket. When the clock moves
+ * back (NTP correction, manual change) a write is neither refused nor stamped before a record it follows, so a payment
+ * can never be backdated out of a later day's cap (R9).
+ */
+export function bucketStamp(records: readonly AssetUsageReservation[], now: Date): string {
+  return records.reduce((newest, record) => record.updatedAt > newest ? record.updatedAt : newest, instant(now));
 }
 
 export function assertTransition(from: AssetUsageState, to: Exclude<AssetUsageState, "reserved">): void {

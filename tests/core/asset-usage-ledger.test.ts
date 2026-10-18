@@ -195,15 +195,15 @@ test("reservations and unresolved usage survive a new store instance", async (t)
     { code: "APN_OPERATION_BLOCKED" });
 });
 
-test("transition time is monotonic so a late finality update cannot backdate usage out of the current window", async (t) => {
+test("transition time is monotonic: a late finality update behind the clock is stamped at the bucket's newest stamp, never backdated", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const ledger = new AssetUsageLedger(temporary.root);
   const record = await reserve(ledger, "monotonic-transition-1", "100", "direct", new Date("2026-09-17T10:00:00.000Z"));
   await ledger.transition({ ...identity, reservationId: record.reservationId, policyDigest: record.policyDigest,
     state: "submitted", now: new Date("2026-09-19T10:00:00.000Z") });
-  await assert.rejects(ledger.transition({ ...identity, reservationId: record.reservationId, policyDigest: record.policyDigest,
-    state: "finalized", now: new Date("2026-09-17T11:00:00.000Z"), outcomeDigest: "d".repeat(64) }),
-  { code: "APN_OPERATION_BLOCKED" });
+  const finalized = await ledger.transition({ ...identity, reservationId: record.reservationId, policyDigest: record.policyDigest,
+    state: "finalized", now: new Date("2026-09-17T11:00:00.000Z"), outcomeDigest: "d".repeat(64) });
+  assert.deepEqual([finalized.updatedAt, finalized.effectAt], ["2026-09-19T10:00:00.000Z", "2026-09-19T10:00:00.000Z"]);
   const usage = await ledger.usage(identity, new Date("2026-09-19T11:00:00.000Z"));
   assert.equal(usage.windowPolicy, ASSET_USAGE_WINDOW);
   assert.equal(usage.amountAtomic, "100");
@@ -217,6 +217,8 @@ test("a future-dated terminal update cannot open an earlier daily window for a n
   const record = await reserve(ledger, "future-terminal-guard", "100", "direct", new Date("2026-09-17T10:00:00.000Z"));
   await ledger.transition({ ...identity, reservationId: record.reservationId, policyDigest: record.policyDigest,
     state: "finalized", now: new Date("2026-09-19T10:00:00.000Z"), outcomeDigest: "f".repeat(64) });
+  // The clock behind the stored spend still counts it: the cap refuses, the window does not reopen.
+  assert.equal((await ledger.usage(identity, new Date("2026-09-18T10:00:00.000Z"))).amountAtomic, "100");
   await assert.rejects(reserve(ledger, "future-window-bypass", "100", "bridge", new Date("2026-09-18T10:00:00.000Z")),
     { code: "APN_OPERATION_BLOCKED" });
   assert.equal((await reserve(ledger, "after-future-window", "100", "bridge", new Date("2026-09-20T10:00:00.000Z"))).amountAtomic,

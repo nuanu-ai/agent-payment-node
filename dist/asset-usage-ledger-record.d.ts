@@ -11,9 +11,19 @@ export declare function validateAssetUsageReservation(value: unknown): AssetUsag
 export declare function expectedStates(value: readonly AssetUsageState[]): readonly AssetUsageState[];
 export declare function reservationIdFor(identity: AssetUsageIdentity, idempotencyHash: string): string;
 export declare function seal(body: ReservationBody): AssetUsageReservation;
+/**
+ * The day's usage at `now`: every open hold, and every spend whose effect is stamped on now's UTC day or later. A stamp
+ * after the clock (the clock moved back below the bucket's newest stamp) still counts: a read never drops a record
+ * because its stamp is in the future (R9).
+ */
 export declare function sumUsage(records: readonly AssetUsageReservation[], now: Date): string;
 export declare function assertReplay(record: AssetUsageReservation, policyDigest: string, registryVersion: string, rail: AssetPolicyRail, amount: string, idempotencyHash: string): void;
-export declare function assertBucketWindow(records: readonly AssetUsageReservation[], at: string): void;
+/**
+ * A ledger write's stamp: the clock, but never earlier than the newest stamp stored in its bucket. When the clock moves
+ * back (NTP correction, manual change) a write is neither refused nor stamped before a record it follows, so a payment
+ * can never be backdated out of a later day's cap (R9).
+ */
+export declare function bucketStamp(records: readonly AssetUsageReservation[], now: Date): string;
 export declare function assertTransition(from: AssetUsageState, to: Exclude<AssetUsageState, "reserved">): void;
 export declare function validateIdentity(value: AssetUsageIdentity, stored?: boolean): AssetUsageIdentity;
 export declare function exactIdentity(value: AssetUsageIdentity): AssetUsageIdentity;
