@@ -10,7 +10,8 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { toHex } from "viem";
 import * as mcpRuntime from "../../src/mcp-server.js";
 import type { OutputEnvelope } from "../../src/commands.js";
-import { deriveEvmActualFee, readEvmReceiptFeeFields, validateEvmActualFee, type EvmActualFeeInput } from "../../src/evm-direct-actual-fee.js";
+import { deriveEvmActualFee as deriveWithModel, readEvmReceiptFeeFields, validateEvmActualFee, type EvmActualFeeInput } from "../../src/evm-direct-actual-fee.js";
+import { directEvmChain, directEvmNetwork } from "../../src/evm-direct-networks.js";
 import { sealOperation, validateOperation } from "../../src/state-integrity.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { EVM_USDC } from "./direct-allowlist-helpers.js";
@@ -19,6 +20,8 @@ import { testRuntime } from "./installed-runtime.js";
 
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
 const HASH = `0x${"ab".repeat(32)}` as const;
+/** A new observation takes the network's current charge rule, as the observer does. */
+const deriveEvmActualFee = (fee: EvmActualFeeInput) => deriveWithModel(fee, directEvmNetwork(directEvmChain(fee.chainId)).feeModel);
 const input = (chainId: number, gasLimit: bigint, maxFee: bigint, raw: Record<string, unknown>): EvmActualFeeInput => ({ chainId, transactionHash: HASH,
   blockNumberAtomic: "100", gasLimitAtomic: gasLimit.toString(), maxFeePerGasAtomic: maxFee.toString(), receiptFields: readEvmReceiptFeeFields(raw) });
 
@@ -60,6 +63,10 @@ test("a component the receipt does not prove leaves the fee incomplete, never es
   }
   const fee = deriveEvmActualFee(input(1, 65000n, 2000000000n, { gasUsed: "0x5208", effectiveGasPrice: "0x1" }));
   assert.throws(() => validateEvmActualFee({ ...fee, totalFeeAtomic: "1" }), { code: "APN_STATE_CORRUPT" });
+  // R2: a stored observation is re-derived by the rule it names, never by the network table of a later release.
+  const stored = deriveWithModel(input(8453, 65000n, 2000000000n, { gasUsed: "0x5208", effectiveGasPrice: "0x1" }), "eip1559");
+  assert.equal(stored.totalFeeAtomic, "21000"); assert.deepEqual(validateEvmActualFee(stored), stored);
+  assert.throws(() => validateEvmActualFee({ ...stored, feeModel: "op-stack" }), { code: "APN_STATE_CORRUPT" });
   assert.throws(() => validateEvmActualFee({ ...fee, receiptFields: { ...fee.receiptFields, extra: "0x1" } }), { code: "APN_STATE_CORRUPT" });
 });
 

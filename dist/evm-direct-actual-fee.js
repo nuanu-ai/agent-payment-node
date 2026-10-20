@@ -17,8 +17,10 @@ export function readEvmReceiptFeeFields(receipt) {
     }
     return fields;
 }
-export function deriveEvmActualFee(input) {
-    const chainId = directEvmChain(input.chainId), feeModel = directEvmNetwork(chainId).feeModel;
+const FEE_MODELS = ["eip1559", "op-stack", "arbitrum-inclusive", "monad-gas-limit"];
+/** A new observation names the network's current charge rule; a stored one is re-derived by the rule it names (R2). */
+export function deriveEvmActualFee(input, feeModel) {
+    const chainId = input.chainId;
     const base = { schemaVersion: "apn.evm-direct-actual-fee.v1", chainId, feeModel, transactionHash: input.transactionHash,
         blockNumberAtomic: input.blockNumberAtomic, gasLimitAtomic: input.gasLimitAtomic, maxFeePerGasAtomic: input.maxFeePerGasAtomic,
         receiptFields: input.receiptFields };
@@ -62,13 +64,14 @@ export function validateEvmActualFee(value) {
     if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "chainId", "feeModel", "transactionHash", "blockNumberAtomic", "gasLimitAtomic",
         "maxFeePerGasAtomic", "receiptFields", "complete", "incompleteReason", "gasBilledAtomic", "executionFeeAtomic", "l1DataFeeAtomic",
         "operatorFeeAtomic", "totalFeeAtomic"]) || value.schemaVersion !== "apn.evm-direct-actual-fee.v1" ||
+        !Number.isSafeInteger(value.chainId) || !FEE_MODELS.includes(value.feeModel) ||
         typeof value.transactionHash !== "string" || !/^0x[0-9a-f]{64}$/u.test(value.transactionHash) ||
         ![value.blockNumberAtomic, value.gasLimitAtomic, value.maxFeePerGasAtomic].every(x => typeof x === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(x)) ||
         !isPlainRecord(value.receiptFields) || Object.entries(value.receiptFields).some(([name, field]) => !EVM_RECEIPT_FEE_FIELDS.includes(name) || typeof field !== "string" || field.length > 66))
         corrupt();
     let derived;
     try {
-        derived = deriveEvmActualFee(value);
+        derived = deriveEvmActualFee(value, value.feeModel);
     }
     catch {
         return corrupt();

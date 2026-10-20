@@ -30,7 +30,8 @@ export interface EvmActualFee {
     readonly totalFeeAtomic: string | null;
 }
 export type EvmActualFeeInput = Pick<EvmActualFee, "chainId" | "transactionHash" | "blockNumberAtomic" | "gasLimitAtomic" | "maxFeePerGasAtomic" | "receiptFields">;
-export declare function deriveEvmActualFee(input: EvmActualFeeInput): EvmActualFee;
+/** A new observation names the network's current charge rule; a stored one is re-derived by the rule it names (R2). */
+export declare function deriveEvmActualFee(input: EvmActualFeeInput, feeModel: DirectEvmFeeModel): EvmActualFee;
 /** A stored fee observation must be exactly what its own receipt fields derive (R2: no current constant is consulted). */
 export declare function validateEvmActualFee(value: unknown): EvmActualFee;
 /** Only the proven outcomes carry it, and only for this operation's own signed transaction. */

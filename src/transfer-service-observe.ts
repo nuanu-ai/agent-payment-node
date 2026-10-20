@@ -298,7 +298,8 @@ export class TransferServiceObservation {
     // The verified transaction's own receipt states what it paid; it is recorded with the proven outcome only.
     const paid = operation.evm === undefined || receipt.evmFeeFields === undefined ? {} : { evmActualFee: deriveEvmActualFee({
       chainId: operation.chainId, transactionHash: operation.transactionHash, blockNumberAtomic: receipt.blockNumberAtomic,
-      gasLimitAtomic: operation.economics.gasLimitAtomic, maxFeePerGasAtomic: operation.economics.maxFeePerGasAtomic, receiptFields: receipt.evmFeeFields }) };
+      gasLimitAtomic: operation.economics.gasLimitAtomic, maxFeePerGasAtomic: operation.economics.maxFeePerGasAtomic, receiptFields: receipt.evmFeeFields },
+      directEvmNetwork(operation.chainId).feeModel) };
     if (receipt.status === "reverted") {
       return await this.lifecycle.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", paid, receipt);
     }
