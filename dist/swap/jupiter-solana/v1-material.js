@@ -1,3 +1,4 @@
+import { getBase58Decoder, getCompiledTransactionMessageDecoder } from "@solana/kit";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
@@ -77,6 +78,36 @@ export function validateJupiterV1Material(value) {
     if (typed.compiledAccounts.some(a => !typed.semanticAccounts.some(row => row.address === a.address)))
         corrupt();
     return typed;
+}
+/**
+ * True when two v0 messages are byte-identical except for the 32-byte recent blockhash: same header, static accounts,
+ * instructions, data and lookup-table indexes. The approval re-freezes only the lifetime of the quoted message.
+ */
+export function jupiterV1SameMessageExceptLifetime(quotedMessageBase64, messageBase64) {
+    try {
+        const quoted = Buffer.from(quotedMessageBase64, "base64"), other = Buffer.from(messageBase64, "base64"), offset = lifetimeOffset(quoted);
+        return offset > 0 && offset === lifetimeOffset(other) && quoted.length === other.length && offset + 32 <= quoted.length &&
+            quoted.subarray(0, offset).equals(other.subarray(0, offset)) && quoted.subarray(offset + 32).equals(other.subarray(offset + 32)) &&
+            [quoted, other].every(bytes => getCompiledTransactionMessageDecoder().decode(bytes).lifetimeToken === getBase58Decoder().decode(bytes.subarray(offset, offset + 32)));
+    }
+    catch {
+        return false;
+    }
+}
+/** v0 layout: version prefix, three header bytes, a short-vec static key count, the keys, then the recent blockhash. */
+function lifetimeOffset(bytes) {
+    if (bytes[0] !== 0x80)
+        return -1;
+    let offset = 4, count = 0;
+    for (let shift = 0; shift <= 14; shift += 7) {
+        const byte = bytes[offset++];
+        if (byte === undefined)
+            return -1;
+        count |= (byte & 0x7f) << shift;
+        if ((byte & 0x80) === 0)
+            return offset + 32 * count;
+    }
+    return -1;
 }
 export function assertJupiterV1FreshMaterial(material) {
     validateJupiterV1Material(material);

@@ -8,6 +8,7 @@ import { whirlpoolV2NamedRoles, type WhirlpoolV2NamedRoles } from "./v1-route-co
 import { JUPITER_V1_WHIRLPOOL_PROGRAM as ORCA, JUPITER_V1_MEMO_PIN, JUPITER_V1_WHIRLPOOL_V2_FIXED_PROGRAM_PINS } from "./v1-pins.js";
 import { reviewedWhirlpoolV2Pool } from "./v1-whirlpool-v2-pools.js";
 import { TOKEN_PROGRAM, WRAPPED_SOL_MINT as SOL, SOLANA_USDC_MINT as USDC } from "./catalog.js";
+import { assertWhirlpoolTickArraySequence } from "./v1-tick-sequence.js";
 export interface MutableByteRange { readonly offset: number; readonly length: number }
 export interface WhirlpoolV2PoolState { readonly config: string; readonly bump: number; readonly feeTierIndexSeed: number; readonly tickSpacing: 2 | 4; readonly feeRate: number; readonly protocolFeeRate: number; readonly mintA: string; readonly mintB: string; readonly vaultA: string; readonly vaultB: string; readonly liquidity: bigint; readonly sqrtPrice: bigint; readonly tickCurrentIndex: number; readonly mutableRanges: readonly MutableByteRange[] }
 export interface WhirlpoolV2Tick { readonly initialized: boolean; readonly liquidityNet: bigint; readonly liquidityGross: bigint; readonly feeGrowthOutsideA: bigint; readonly feeGrowthOutsideB: bigint; readonly rewardGrowthsOutside: readonly bigint[] }
@@ -104,8 +105,8 @@ export function decodeWhirlpoolV2AccountSnapshot(build: JupiterV1RawBuildRespons
     assertWhirlpoolV2ClassicTokenAccount(row(r.vaultA),SOL,r.pool);assertWhirlpoolV2ClassicTokenAccount(row(r.vaultB),USDC,r.pool);assertWhirlpoolV2ClassicTokenAccount(row(r.destination),USDC,r.payer);
     if(row(r.source).existence === "present") assertWhirlpoolV2ClassicTokenAccount(row(r.source),SOL,r.payer);
     assertWhirlpoolV2ClassicMint(row(SOL),SOL);assertWhirlpoolV2ClassicMint(row(USDC),USDC);assertWhirlpoolV2Memo(row(JUPITER_V1_MEMO_PIN.programId));
-    const width=pool.tickSpacing*88;
-    for(const [i,t] of ticks.entries())if(t.whirlpool!==r.pool||t.startTickIndex!==Math.floor(pool.tickCurrentIndex/width)*width-i*width)blocked("tick pool/direction/order");
+    if(ticks.some(t=>t.whirlpool!==r.pool))blocked("tick pool/direction/order");
+    assertWhirlpoolTickArraySequence(ticks.map(t=>t.startTickIndex),pool.tickCurrentIndex,pool.tickSpacing,()=>blocked("tick pool/direction/order"));
     return Object.freeze({roles:r,pool,ticks:Object.freeze(ticks),oracle});
 }
 export async function validateWhirlpoolV2AccountSnapshot(payer: string, build: JupiterV1RawBuildResponse, accounts: readonly JupiterV1SemanticAccount[]): Promise<WhirlpoolV2AccountSnapshot> {

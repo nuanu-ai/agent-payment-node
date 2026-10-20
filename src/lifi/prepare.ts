@@ -17,6 +17,7 @@ import type { BridgeRpcFactory, LifiProviderPort } from "./ports.js";
 import { BridgeRpcPhysicalBudget, RpcProviderScheduler, RpcReadSession } from "./rpc.js";
 import { BridgeQuoteRepository, newBridgeQuote } from "./quote-repository.js";
 import { bridgeRouteProjection, materializeBridgeRoute, parseBridgeRoutes } from "./routes.js";
+import { bridgeNoRouteEvidence } from "./no-route.js";
 import { newBridgeOperation } from "./transitions.js";
 import { bridgePreparePostBudget } from "./send-budget.js";
 import { bridgeExecutionDestination, bridgeExecutionSource, bridgeNativePrincipal, validateBridgeRequest } from "./asset-registry.js";
@@ -41,8 +42,10 @@ export class BridgePreparation {
       const quote = newBridgeQuote({ profileHash: binding.owner.profileHash, ...binding, request, rawResponse: response.body,
         createdAt: new Date(this.o.now()).toISOString() });
       await this.o.quotes.save(quote);
+      // An empty list is LI.FI's answer, never a route APN dropped: show what the provider said it filtered or failed.
       return { quote_hash: quote.snapshotHash, profile, request, response_hash: quote.responseHash,
-        created_at: quote.createdAt, routes: quote.routes.map(bridgeRouteProjection), mainnet_acceptance: "open" };
+        created_at: quote.createdAt, routes: quote.routes.map(bridgeRouteProjection), mainnet_acceptance: "open",
+        ...(quote.routes.length === 0 ? { no_route: bridgeNoRouteEvidence(response.body, request) } : {}) };
     });
   }
   async prepare(input: { readonly profile: string; readonly quote: string; readonly route: string; readonly idempotencyKey: string }): Promise<StoredBridgeOperationRecord> {

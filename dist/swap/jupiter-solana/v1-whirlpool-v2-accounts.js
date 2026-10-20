@@ -6,6 +6,7 @@ import { whirlpoolV2NamedRoles } from "./v1-route-config.js";
 import { JUPITER_V1_WHIRLPOOL_PROGRAM as ORCA, JUPITER_V1_MEMO_PIN, JUPITER_V1_WHIRLPOOL_V2_FIXED_PROGRAM_PINS } from "./v1-pins.js";
 import { reviewedWhirlpoolV2Pool } from "./v1-whirlpool-v2-pools.js";
 import { TOKEN_PROGRAM, WRAPPED_SOL_MINT as SOL, SOLANA_USDC_MINT as USDC } from "./catalog.js";
+import { assertWhirlpoolTickArraySequence } from "./v1-tick-sequence.js";
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", `Jupiter WhirlpoolSwapV2 ${reason} is missing or malformed.`); }
 function bytes(a, owner) {
     const d = Buffer.from(a.dataBase64, "base64");
@@ -135,10 +136,9 @@ export function decodeWhirlpoolV2AccountSnapshot(build, accounts) {
     assertWhirlpoolV2ClassicMint(row(SOL), SOL);
     assertWhirlpoolV2ClassicMint(row(USDC), USDC);
     assertWhirlpoolV2Memo(row(JUPITER_V1_MEMO_PIN.programId));
-    const width = pool.tickSpacing * 88;
-    for (const [i, t] of ticks.entries())
-        if (t.whirlpool !== r.pool || t.startTickIndex !== Math.floor(pool.tickCurrentIndex / width) * width - i * width)
-            blocked("tick pool/direction/order");
+    if (ticks.some(t => t.whirlpool !== r.pool))
+        blocked("tick pool/direction/order");
+    assertWhirlpoolTickArraySequence(ticks.map(t => t.startTickIndex), pool.tickCurrentIndex, pool.tickSpacing, () => blocked("tick pool/direction/order"));
     return Object.freeze({ roles: r, pool, ticks: Object.freeze(ticks), oracle });
 }
 export async function validateWhirlpoolV2AccountSnapshot(payer, build, accounts) {
