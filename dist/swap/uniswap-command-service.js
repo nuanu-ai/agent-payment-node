@@ -3,7 +3,7 @@ import { SwapOperationRepository } from "./repository.js";
 import { swapMechanismDigest } from "./pin.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "./route-admission.js";
 import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS, USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
-import { swapActualEconomics } from "./receipt-facts.js";
+import { swapActualEconomics, swapStatusReceipt } from "./receipt-facts.js";
 export async function executeUniswapCommand(request, context) {
     if (request.command === "swap.uniswap-token.prepare" || request.command === "swap.uniswap-token.approve" ||
         request.command === "swap.uniswap-token.execute" || request.command === "swap.uniswap-token.cleanup" || request.command === "swap.uniswap-token.status" || request.command === "swap.uniswap-token.inventory" || request.command === "swap.uniswap-token.quote") {
@@ -46,14 +46,14 @@ export async function executeUniswapCommand(request, context) {
     }
     if (request.command === "swap.uniswap.status") {
         if (context.uniswapRuntime !== undefined) {
-            const operation = await context.uniswapRuntime.status(request.operationId, context.clock.now());
-            return operationOutcome({ ...operation, ...await context.uniswapRuntime.actualEconomics(operation) });
+            const runtime = context.uniswapRuntime, operation = await runtime.status(request.operationId, context.clock.now());
+            return { ...operationOutcome(operation), receipt: await swapStatusReceipt(operation, async () => await runtime.actualEconomics(operation)) };
         }
         const operation = await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
         if (operation === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
-        return { proofClass: operation.state, data: null, receipt: null, nextActions: [],
-            operation: { ...operation, ...await swapActualEconomics(context.state.root, operation, undefined, context.clock.now()) } };
+        return { proofClass: operation.state, data: null, operation, nextActions: [],
+            receipt: await swapStatusReceipt(operation, async () => await swapActualEconomics(context.state.root, operation, undefined, context.clock.now())) };
     }
     if (request.command === "swap.uniswap.approve") {
         if (context.uniswapRuntime === undefined)
@@ -73,7 +73,7 @@ function tokenOutcome(value) {
     const receipt = value.receipt, actualEconomics = receipt === null ? null : { inputAtomic: receipt.inputDebitAtomic,
         outputAtomic: receipt.outputCreditAtomic, networkFeeAtomic: (BigInt(receipt.approvalGasWei) + BigInt(receipt.swapGasWei) + BigInt(receipt.cleanupGasWei)).toString(),
         nativeDebitAtomic: receipt.nativeDebitWei };
-    return { proofClass: value.phase, data: null, operation: { ...value, actualEconomics }, receipt: value.receipt, nextActions: [] };
+    return { proofClass: value.phase, data: null, operation: value, receipt: receipt === null ? null : { ...receipt, actualEconomics }, nextActions: [] };
 }
 function data(value, proofClass) {
     return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };

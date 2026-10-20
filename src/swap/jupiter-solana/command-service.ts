@@ -11,6 +11,7 @@ import { assertJupiterV1Runtime } from "./v1-runtime-factory.js";
 import { swapMechanismDigest } from "../pin.js";
 import { JupiterV1DispatchStore } from "./v1-dispatch.js";
 import { JupiterV1ExecutionFailureStore } from "./v1-execution-failure.js";
+import { swapStatusReceipt } from "../receipt-facts.js";
 
 type Request = Extract<CommandRequest, { readonly command: `swap.jupiter.${string}` }>;
 export async function executeJupiterCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
@@ -24,7 +25,7 @@ export async function executeJupiterCommand(request: Request, context: RuntimeCo
   const op=await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
   if(op===null)throw new ApnError("APN_OPERATION_NOT_FOUND","Swap operation was not found.");
   if(!JUPITER_V1_KNOWN_ROUTES.some(route=>op.mechanismDigest===swapMechanismDigest(route.mechanismPin)))throw new ApnError("APN_OPERATION_BLOCKED","This operation belongs to another mechanism.");
-  if(request.command==="swap.jupiter.status"){const current=await runtime.status(request.operationId,context.clock.now());return await withDispatch({...current,...await runtime.actualEconomics(current)},context);}
+  if(request.command==="swap.jupiter.status"){const current=await runtime.status(request.operationId,context.clock.now());return {...await withDispatch(current,context),receipt:await swapStatusReceipt(current,async()=>await runtime.actualEconomics(current))};}
   if(request.command==="swap.jupiter.approve")return await withDispatch(await runtime.approveAndExecute(request.operationId,context.clock.now()),context);
   return await withDispatch(await runtime.execute(request.operationId,context.clock.now()),context);
 }

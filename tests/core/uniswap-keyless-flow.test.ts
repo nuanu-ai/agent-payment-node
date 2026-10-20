@@ -93,14 +93,14 @@ test("a swap sealed before economics were recorded: status reads its own receipt
   const context = { uniswapRuntime: f.runtime, state: f.state, clock: f.clock } as never;
   f.rpc.calls = [];
   const first = await executeUniswapCommand({ command: "swap.uniswap.status", operationId: sent.operationId }, context);
-  const view = first.operation as Record<string, unknown>;
-  assert.equal(view.integrityHash, old.integrityHash, "the sealed record itself is unchanged");
+  const view = first.receipt as Record<string, unknown>;
+  assert.deepEqual(first.operation, old, "the operation slot is the sealed record itself, unchanged");
   assert.deepEqual(view.actualEconomics, { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: "21000000000000", nativeDebitAtomic: "21000000000000" });
   assert.equal(view.actualEconomicsSource, "receipt_facts");
   assert.equal(f.rpc.calls.filter(method => method === "eth_getTransactionReceipt").length, 1);
   f.rpc.calls = [];
   const second = await executeUniswapCommand({ command: "swap.uniswap.status", operationId: sent.operationId }, context);
-  assert.deepEqual((second.operation as Record<string, unknown>).actualEconomics, view.actualEconomics);
+  assert.deepEqual((second.receipt as Record<string, unknown>).actualEconomics, view.actualEconomics);
   assert.deepEqual(f.rpc.calls.filter(method => method === "eth_getTransactionReceipt"), [], "the sidecar answers; no RPC");
   assert.equal(f.rpc.sends.length, 1);
 });

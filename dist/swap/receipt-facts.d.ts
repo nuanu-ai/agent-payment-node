@@ -33,5 +33,10 @@ export declare class SwapReceiptFactsStore extends SecureStateStore {
     /** Create-only: a concurrent reader's file wins and is returned after the same validation. */
     create(record: SwapOperationRecord, economics: SwapReceiptEconomics, observedAt: string): Promise<SwapReceiptFacts>;
 }
+/**
+ * The status envelope's receipt slot for a swap (the record itself stays exactly as sealed in the operation slot): null
+ * before an outcome, otherwise what its finalized transaction moved and paid, or why that could not be read.
+ */
+export declare function swapStatusReceipt(record: SwapOperationRecord, view: () => Promise<SwapActualEconomicsView>): Promise<SwapActualEconomicsView | null>;
 /** The record's own economics, its facts sidecar, or one read now; never a failure of the status it serves. */
 export declare function swapActualEconomics(root: string, record: SwapOperationRecord, read: SwapEconomicsRead | undefined, now: Date): Promise<SwapActualEconomicsView>;
