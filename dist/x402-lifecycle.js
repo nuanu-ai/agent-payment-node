@@ -1,7 +1,7 @@
 import { canonicalJson } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { OperationService } from "./operation-service.js";
-import { appendX402Transition, deliversX402Result, sealX402Operation, sealX402Receipt, sealX402Result, x402OperationBindingHash, } from "./x402-state-integrity.js";
+import { appendX402Transition, x402ResultAttempt, sealX402Operation, sealX402Receipt, sealX402Result, x402OperationBindingHash, } from "./x402-state-integrity.js";
 import { settlementResponseTransaction, terminalClassification } from "./x402-service-rpc.js";
 import { X402Usage } from "./x402-usage.js";
 export class X402Lifecycle {
@@ -74,12 +74,8 @@ export class X402Lifecycle {
         const result = await this.context.state.loadX402RecoveryResult(operation.profileHash, operation.operationId);
         if (result === null)
             return operation;
-        const response = operation.settlementResponseObservation;
-        const attemptIndex = Number(response?.httpAttemptNumber ?? "0") - 1;
-        const attempt = Number.isSafeInteger(attemptIndex) && attemptIndex >= 0
-            ? operation.attempts[attemptIndex]
-            : undefined;
-        if (!deliversX402Result(response?.classification) || attempt?.phase !== "observed" ||
+        const attempt = x402ResultAttempt(operation);
+        if (attempt?.phase !== "observed" ||
             attempt.observation?.status !== result.responseStatus || attempt.observation.bodyHash !== result.resultHash ||
             attempt.observation.bodyByteLength !== result.byteLength || attempt.observation.mediaType !== result.mediaType)
             throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 result lacks its designated successful response.");

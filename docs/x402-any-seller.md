@@ -45,7 +45,7 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
   record's proof tag in unattended `x402 fetch`, like the EIP-3009 prepare read; the foreground `x402 permit2 approve`
   lane reads them at `latest`, pinned by block hash, under its 30 s block-age bound, and freezes its proof tag in the
   record (records from before 0.5.53 keep `finalized`). Either way they predict settlement and cannot move money (the
-  signature binds token, amount, payee, nonce and a deadline of at most 300 s).
+  signature binds token, amount, payee, nonce and a deadline of at most 3,600 s, the seller-window bound below).
 
 ## Method choice (deterministic)
 
@@ -108,7 +108,12 @@ substituted.
   but the wSOL mint is not in the frozen allowlist inventory, so no owner can admit it yet.
 - Execution: a fresh blockhash is bound (its height checked against it), the bytes simulated, the owner cap reserved,
   the payer signs (fee-payer slot empty) and the exposure is recorded before the single paid request. A replay never
-  sends again.
+  sends again. A failure once the payment has a record (a seller HTTP error, a transport error, a malformed response
+  after exposure, or a refusal before it) keeps its own error and answers with the operation itself in `operation`
+  (its id, state and `exposed_at`, no signed bytes) and its next actions, the first being the no-send
+  `apn x402 solana observe --operation <id>`; after exposure the payment may have landed, and observe proves it.
+  EVM x402 answers the same way after its header is sent: the operation in `effect_unknown` with `operation.resume`
+  and `operation.status`; a resume re-presents only the same signed authorization, once, while its nonce reads unused.
 - Settlement: the fee payer's signature is the transaction id, unknown to APN in advance. The seller's
   PAYMENT-RESPONSE `transaction` is only a hint; otherwise the payer token account's finalized `getSignaturesForAddress`
   page is opened above the binding's floor slot. A candidate counts when `getSignatureStatuses` says `finalized` and

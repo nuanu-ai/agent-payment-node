@@ -202,14 +202,14 @@ const BASE_COMMANDS = [
     ], "local_write", "Writes an encrypted wallet-bound profile policy.", "foreground_tty", "Required when a policy is created, any limit increases or the x402 payee pin widens; a pure decrease or a new pin is non-interactive.", completedStates, [], ["apn wallet policy set --profile default --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>",
         "apn wallet policy set --profile default --chain eip155:1 --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>",
         "apn wallet policy set --profile default --chain eip155:137 --asset <token-contract> --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>"]),
-    command(["x402", "inspect"], "apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; a seller may still process its application payload.", [
+    command(["x402", "inspect"], "apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; an offer APN cannot sign is refused by its deciding field (payment window above 3600 s, an understood extra key such as spenderAddress or chainId); a seller may still process its application payload.", [
         chainOptional,
         assetOptional,
         ...httpOptions,
         option("--payer", "address", false, noDefault, ["canonical_evm_address"], "public"),
         option("--url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "maximum_2048_utf8_bytes", "canonical_whatwg_serialization", "public_target_required_at_runtime"], "public"),
     ], "network_request", "Performs one unpaid HTTPS request; application side effects depend on the seller.", "none", "Never signs or pays; caller must authorize the application request.", completedStates, [], ["apn x402 inspect --url https://seller.example/resource", "apn x402 inspect --chain eip155:1 --url https://seller.example/resource"]),
-    command(["x402", "fetch", "prepare"], "apn x402 fetch prepare --profile <profile> [--chain <caip2>] [--asset <token>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]" + httpSynopsis, "Freeze a policy-bounded standard x402 purchase.", [
+    command(["x402", "fetch", "prepare"], "apn x402 fetch prepare --profile <profile> [--chain <caip2>] [--asset <token>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]" + httpSynopsis, "Freeze a policy-bounded standard x402 purchase (seller payment window at most 3600 s; unknown offer extra keys are echoed unchanged).", [
         profileRequired,
         chainOptional,
         assetOptional,

@@ -1,0 +1,38 @@
+{
+  "note": "Captured unpaid HTTP 402 of a real public x402 seller (QA packet 053, read 2026-10-20 by APN 0.5.53 QA): Base USDC offered only through Permit2, maxTimeoutSeconds 600, extra with chainId, challengeId and the canonical x402 exact Permit2 proxy as spenderAddress. Only the PAYMENT-REQUIRED body is kept (resource and accepts verbatim); nothing here was paid or signed.",
+  "challengeHash": "3c033e9053e96874eacc9a31e36acf2d71301fc3831c76ef4c9e092a4b7acac9",
+  "paymentRequired": {
+    "x402Version": 2,
+    "resource": {
+      "description": "Options-style volatility regime: ATR percentile and market-regime detection for a futures instrument.",
+      "mimeType": "application/json",
+      "serviceName": "Volatility Regime",
+      "tags": [
+        "volatility",
+        "regime",
+        "market-data",
+        "finance",
+        "x402"
+      ],
+      "url": "https://api.edifiedlab.com/v1/market/vol-regime"
+    },
+    "accepts": [
+      {
+        "amount": "11000",
+        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+        "extra": {
+          "assetTransferMethod": "permit2",
+          "chainId": 8453,
+          "challengeId": "cdp-472bfbeeaa6b628de54009b0341de32d",
+          "name": "USDC",
+          "spenderAddress": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001",
+          "version": "2"
+        },
+        "maxTimeoutSeconds": 600,
+        "network": "eip155:8453",
+        "payTo": "0x5037546753d64F77A6fA95B6f85659B6a4A7F6FD",
+        "scheme": "exact"
+      }
+    ]
+  }
+}
