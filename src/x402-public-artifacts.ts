@@ -6,6 +6,7 @@ import type { ProviderX402OperationRecord, ProviderX402ReceiptRecord } from "./p
 import type { X402RpcBlock, X402RpcHead } from "./ports.js";
 import {
   publicX402ResultData,
+  X402_RESULT_HASH_RULE,
   validateX402Receipt,
   type X402ReceiptRecord,
   type X402ResultRecord,
@@ -94,8 +95,12 @@ interface LocalPublicResult {
   readonly body_encoding?: "base64";
   readonly media_type: string;
   readonly body: unknown;
+  /** Plain SHA-256 of the exact body bytes. */
   readonly sha256: string;
   readonly byte_length: string;
+  /** The domain-separated hash the operation and receipt link to (`resultHash`), computed by `result_hash_rule`. */
+  readonly result_hash: string;
+  readonly result_hash_rule: typeof X402_RESULT_HASH_RULE;
 }
 
 interface NormalizedProviderResult {
@@ -216,16 +221,19 @@ export function validatePublicX402Result(value: unknown): PublicX402Result {
     return value as unknown as NormalizedProviderResult;
   }
   if (
-    !exactKeys(value, ["kind", "media_type", "body", "sha256", "byte_length", ...(value.body_encoding === undefined ? [] : ["body_encoding"])]) ||
+    !exactKeys(value, ["kind", "media_type", "body", "sha256", "byte_length", "result_hash", "result_hash_rule",
+      ...(value.body_encoding === undefined ? [] : ["body_encoding"])]) || !hash(value.result_hash) ||
+    value.result_hash_rule !== X402_RESULT_HASH_RULE ||
     typeof value.media_type !== "string" || value.media_type.length < 1 || value.media_type.length > 128
   ) throw new TypeError("Invalid public x402 result.");
-  if (value.body_encoding !== undefined) {
-    if (value.body_encoding !== "base64" || typeof value.body !== "string" || value.body.length > Math.ceil(256 * 1024 / 3) * 4) {
-      throw new TypeError("Invalid opaque public x402 result.");
-    }
-    const bytes = Buffer.from(value.body, "base64");
-    if (bytes.length > 256 * 1024 || bytes.toString("base64") !== value.body || value.byte_length !== String(bytes.length) ||
-      value.sha256 !== domainHash("apn.x402.result-body.v1", bytes)) throw new TypeError("Invalid opaque public x402 result binding.");
+  if (value.body_encoding !== undefined && (value.body_encoding !== "base64" || typeof value.body !== "string" ||
+    value.body.length > Math.ceil(256 * 1024 / 3) * 4)) throw new TypeError("Invalid opaque public x402 result.");
+  // Exact bytes are known for base64 and text bodies (a JSON body is shown parsed): both hashes must bind them.
+  if (typeof value.body === "string" && (value.body_encoding !== undefined || value.media_type !== "application/json")) {
+    const bytes = Buffer.from(value.body, value.body_encoding === undefined ? "utf8" : "base64");
+    if (bytes.length > 256 * 1024 || (value.body_encoding !== undefined && bytes.toString("base64") !== value.body) ||
+      value.byte_length !== String(bytes.length) || value.sha256 !== sha256(bytes) ||
+      value.result_hash !== domainHash("apn.x402.result-body.v1", bytes)) throw new TypeError("Invalid public x402 result binding.");
   }
   return value as unknown as LocalPublicResult;
 }
