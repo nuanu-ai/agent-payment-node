@@ -253,13 +253,17 @@ test("Base observe reads one provider candidate and never promotes credit to pai
     assert.equal(diagnostic.operationalAcceptance, false);
     assert.equal(JSON.stringify(diagnostic).includes("private RPC response and credential"), false);
   }
+  // QA 0.5.51 (receiver 101-06): the solver paid with a direct native transfer. It is a qualifying credit like the router
+  // event, as on every native lane; the same payout stays this operation's (create-only claim).
   const directOnly = await new RelayBaseObserveService(state, () => ({ ...ports }),
     new RelayKeylessStatusService(state, boundFetcher), finalized, usage).observe("default", op.operationId);
-  assert.equal(directOnly.state, "recipient_credit_observed");
-  assert.equal(directOnly.operationalAcceptance, false);
+  assert.equal(directOnly.state, "operational_acceptance");
+  assert.equal(directOnly.destinationProof?.status === "recipient_credit_proven" ? directOnly.destinationProof.proof.method : null, "direct_native_transaction");
+  assert.equal(directOnly.paidAcceptance, false);
   const unfinalized = await new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
     new RelayKeylessStatusService(state, boundFetcher), { finalizedDeposit: async () => null }, usage).observe("default", op.operationId);
   assert.equal(unfinalized.state, "recipient_credit_observed");
+  assert.equal(unfinalized.reason, "source_not_finalized");
   assert.equal(unfinalized.operationalAcceptance, false);
   const unboundFetcher = (async () => new Response(JSON.stringify({ status: "success", originChainId: 1,
     destinationChainId: 8453, inTxHashes: [`0x${"9".repeat(64)}`], txHashes: [hash] }),
@@ -267,11 +271,22 @@ test("Base observe reads one provider candidate and never promotes credit to pai
   const unbound = await new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
     new RelayKeylessStatusService(state, unboundFetcher), finalized, usage).observe("default", op.operationId);
   assert.equal(unbound.state, "recipient_credit_observed");
+  assert.equal(unbound.reason, "provider_source_binding_unproven");
   assert.equal(unbound.operationalAcceptance, false);
   const missingUsage = await new RelayBaseObserveService(state, () => ({ ...fallbackPorts }),
     new RelayKeylessStatusService(state, boundFetcher), finalized,
     { load: async () => null } as any).observe("default", op.operationId);
+  assert.equal(missingUsage.reason, "source_journal_unreconciled");
   assert.equal(missingUsage.operationalAcceptance, false);
+  const failedProvider = await new RelayBaseObserveService(state, () => ({ ...ports }), new RelayKeylessStatusService(state, (async () =>
+    new Response(JSON.stringify({ status: "failure", originChainId: 1, destinationChainId: 8453, inTxHashes: [sourceHash], txHashes: [hash] }),
+      { status: 200 })) as typeof fetch), finalized, usage).observe("default", op.operationId);
+  assert.deepEqual([failedProvider.state, failedProvider.reason], ["recipient_credit_observed", "provider_success_unproven"]);
+  // A different credit of the same payout transaction cannot accept this operation a second way.
+  const otherCredit = await new RelayBaseObserveService(state, () => ({ ...ports, transaction: async () => ({ hash, chainId: 8453, to: recipient,
+    valueWei: BigInt(op.minOutputAtomic) + 1n, blockNumber: 100n, blockHash }) }), new RelayKeylessStatusService(state, boundFetcher), finalized, usage)
+    .observe("default", op.operationId);
+  assert.deepEqual([otherCredit.state, otherCredit.reason], ["provider_candidate_unproven", "destination_payout_claim_conflict"]);
 });
 
 test("Base adapter proves one candidate in two batched POSTs with the chain id read once", async t => {

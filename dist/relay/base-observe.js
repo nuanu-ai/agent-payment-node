@@ -3,6 +3,7 @@ import { ApnError } from "../errors.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
+import { RelayDestinationClaimRepository } from "./destination-claim.js";
 import { proveRelayBaseDestination } from "./destination-proof.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { verifyDepositObservation } from "./deposit-effect.js";
@@ -90,10 +91,20 @@ export class RelayBaseObserveService {
         const proof = await proveRelayBaseDestination(op, provider.txHashes, destination);
         if (proof.status !== "recipient_credit_proven")
             return result("provider_candidate_unproven", proof.reason, provider.status, proof, sourceFinalized, sourceBound);
-        if (sourceFinalized && sourceBound && usageBound && provider.status === "success" &&
-            proof.proof.method === "relay_router_event")
-            return result("operational_acceptance", "source_finalized_provider_bound_safe_base_recipient_credit", provider.status, proof, true, true, true, sourceHash);
-        return result("recipient_credit_observed", "safe_base_native_credit_without_complete_source_binding", provider.status, proof, sourceFinalized, sourceBound, usageBound, sourceHash ?? null);
+        // Any qualifying Base credit (the solver's direct native transfer or one Relay router v3 event) counts, as on every native
+        // lane: the reason names the first layer still missing; paid and causal acceptance stay unproven.
+        const missing = !sourceFinalized ? "source_not_finalized" : !sourceBound ? "provider_source_binding_unproven"
+            : provider.status !== "success" ? "provider_success_unproven" : !usageBound ? "source_journal_unreconciled" : null;
+        if (missing !== null)
+            return result("recipient_credit_observed", missing, provider.status, proof, sourceFinalized, sourceBound, usageBound, sourceHash ?? null);
+        // One payout accepts one operation (create-only claim), whichever credit method proved it.
+        try {
+            await new RelayDestinationClaimRepository(this.state.root).claimEthereumSource(op, sourceHash, proof.proof);
+        }
+        catch {
+            return result("provider_candidate_unproven", "destination_payout_claim_conflict", provider.status, proof, true, true, true, sourceHash);
+        }
+        return result("operational_acceptance", "source_finalized_provider_bound_safe_base_recipient_credit", provider.status, proof, true, true, true, sourceHash);
     }
 }
 //# sourceMappingURL=base-observe.js.map
