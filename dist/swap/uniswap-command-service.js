@@ -4,6 +4,8 @@ import { swapMechanismDigest } from "./pin.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "./route-admission.js";
 import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS, USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
 import { swapActualEconomics, swapStatusReceipt } from "./receipt-facts.js";
+import { walletAllowanceRevokeCommand } from "../wallet-allowance/view.js";
+import { UNISWAP_TOKEN_CHAIN_ID } from "../operation-index/adapters/uniswap-token.js";
 export async function executeUniswapCommand(request, context) {
     if (request.command === "swap.uniswap-token.prepare" || request.command === "swap.uniswap-token.approve" ||
         request.command === "swap.uniswap-token.execute" || request.command === "swap.uniswap-token.cleanup" || request.command === "swap.uniswap-token.status" || request.command === "swap.uniswap-token.inventory" || request.command === "swap.uniswap-token.quote") {
@@ -22,7 +24,8 @@ export async function executeUniswapCommand(request, context) {
             return data(runtime.inventory(), "exact_token_route_inventory");
         if (request.command === "swap.uniswap-token.quote")
             return data(await runtime.quote(request), "unsigned_exact_simulated_swap_quote");
-        return tokenOutcome(await runtime.status(request.operationId));
+        const status = await runtime.status(request.operationId);
+        return tokenOutcome(status, await runtime.residualAllowance?.(status) ?? null);
     }
     if (request.command === "swap.uniswap.inventory")
         return data({ ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION,
@@ -69,11 +72,18 @@ export async function executeUniswapCommand(request, context) {
  * The token lane's observed receipt already holds what the swap proved; `actualEconomics` gives it the shared swap shape:
  * the exact input debit, the output credit, every gas the operation paid (approval, swap, cleanup) and the ETH that left.
  */
-function tokenOutcome(value) {
+function tokenOutcome(value, residual = null) {
     const receipt = value.receipt, actualEconomics = receipt === null ? null : { inputAtomic: receipt.inputDebitAtomic,
         outputAtomic: receipt.outputCreditAtomic, networkFeeAtomic: (BigInt(receipt.approvalGasWei) + BigInt(receipt.swapGasWei) + BigInt(receipt.cleanupGasWei)).toString(),
         nativeDebitAtomic: receipt.nativeDebitWei };
-    return { proofClass: value.phase, data: null, operation: value, receipt: receipt === null ? null : { ...receipt, actualEconomics }, nextActions: uniswapTokenNextActions(value) };
+    const outcome = { proofClass: value.phase, data: null, operation: value, receipt: receipt === null ? null : { ...receipt, actualEconomics },
+        nextActions: uniswapTokenNextActions(value) };
+    if (residual === null || residual === "0")
+        return outcome;
+    // A swap the earlier expired-approval exit cleaned with its approval standing: the live residual and its exact revoke.
+    const target = { profile: value.profile, chainId: UNISWAP_TOKEN_CHAIN_ID, token: value.route.inputToken, spender: value.route.router };
+    return { ...outcome, data: { residualAllowance: { chain: `eip155:${target.chainId}`, token: target.token, owner: value.account, spender: target.spender,
+                allowanceAtomic: residual, readAt: "latest" } }, nextActions: [...outcome.nextActions, walletAllowanceRevokeCommand(target)] };
 }
 /**
  * A swap that requires cleanup names its one exit, the owner's consented cleanup; when the fee cap refused it before

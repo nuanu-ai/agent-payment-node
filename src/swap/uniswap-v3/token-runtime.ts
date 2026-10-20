@@ -81,6 +81,11 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
       return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] as const : [0, cap, "recovery"] as const;
     }, async () => await this.execution.execute(id)); }
     async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"] as const, async () => await this.execution.status(id)); }
+    async residualAllowance(op: import("./token-operation.js").UniswapTokenOperation) {
+      if (op.phase !== "cleaned" || op.cleanupEvidence?.kind !== "expired_approval_no_swap") return null;
+      return await this.budgeted(op.operationId, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"] as const,
+        async () => await this.ports.currentAllowance(op));
+    }
     async cleanup(id: string, fees?: TokenCleanupFees) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"] as const, async () => await this.execution.cleanup(id, fees)); }
     private async budgeted<T>(id: string, command: string,
       budget: () => Promise<readonly [number, number, NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>]>, work: () => Promise<T>) {

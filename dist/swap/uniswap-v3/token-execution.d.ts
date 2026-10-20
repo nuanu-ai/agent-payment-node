@@ -68,6 +68,8 @@ export interface UniswapTokenCommandRuntime {
     execute(id: string): Promise<UniswapTokenOperation>;
     status(id: string): Promise<UniswapTokenOperation>;
     cleanup(id: string, fees?: TokenCleanupFees): Promise<UniswapTokenOperation>;
+    /** The live allowance a swap the earlier expired-approval exit cleaned with its approval standing still has; null for any other record. */
+    residualAllowance?(operation: UniswapTokenOperation): Promise<string | null>;
 }
 export declare class UniswapTokenExecution {
     private readonly journal;

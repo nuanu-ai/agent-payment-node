@@ -154,6 +154,9 @@ and read the current allowance: if it is still above zero the swap becomes
 already zero the swap is `cleaned` at once. Either way the principal hold is released
 with `cleaned` and the approval gas stays charged. Every `cleanup_required` swap names
 the `cleanup` command in its `next_actions`.
+A swap an earlier release cleaned with its approval still standing
+(`expired_approval_no_swap`) shows the live residual in its `status` (`data.residualAllowance`,
+read at `latest`) and names the exact `apn wallet allowance revoke` command for it.
 A `cleaned` swap whose approval landed releases its principal hold only on proof
 that no swap of it can land, recorded as `principalRelease`: no swap marker is left
 (`swap_never_signed`), or its hashless marker's nonce is held, at the finalized tag,
