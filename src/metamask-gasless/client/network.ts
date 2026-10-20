@@ -1,12 +1,13 @@
-import type { ReadNetwork, ReadValidationPredicate, RelaySupportFacts, SentinelFeeFacts, TokenFeesKind } from "./read-diagnostic.js";
+import type { ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
+import { captureSponsoredQuote, parseSentinelResponse, sentinelFailure, sentinelQuotedFee, validateSentinelResponse,
+  type SentinelFailure } from "./sentinel.js";
 import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT } from "./provider-endpoints.js";
 import { request as httpsRequest } from "node:https";
-import { canonicalJson, hashObject, sha256, exactKeys, isPlainRecord } from "../../canonical.js";
+import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
-import { MM_MAX_UINT, type MetaMaskGaslessIntent, type MetaMaskGaslessQuote } from "../model.js";
+import type { MetaMaskGaslessIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 import { MM_SENTINEL_SLUG, mmRegistry } from "../registry.js";
-import { mmQuoteHash } from "../economics.js";
 import { mmFail } from "../reasons.js";
 import { encodeFunctionData, parseAbi } from "viem";
 
@@ -31,7 +32,7 @@ export interface FetchExchangeRequest {
 }
 export interface FetchExchangeResponse { readonly status: number; readonly headers?: Readonly<Record<string, string>>; readonly body: string }
 export interface FetchExchange { request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> }
-type ModeContext =
+export type ModeContext =
   | { readonly mode: "inspect" | "buildUnsigned" }
   | { readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput; readonly owner: string; readonly authToken: string }
   | { readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessIntent; readonly projectId: string;
@@ -50,11 +51,24 @@ export class HelperNetworkPolicy {
   private sessionFailure = false;
   #relayListing: RelaySupportFacts["relayServerWalletNetwork"] | undefined;
   #relayFlag: RelaySupportFacts["relaySentinelFlag"] | undefined;
+  #usdcBalance: bigint | undefined;
+  #quotedFee: bigint | undefined;
   readonly #readFailures = new WeakMap<object, ReadFailure>();
   /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
   relaySupportFacts(): RelaySupportFacts | undefined {
     return this.#relayListing === undefined || this.#relayFlag === undefined ? undefined
       : { relayServerWalletNetwork: this.#relayListing, relaySentinelFlag: this.#relayFlag };
+  }
+  /**
+   * APN's own proof that the server wallet's USDC does not cover the quote: the validated `balanceOf` read is below the
+   * net amount plus the validated Sentinel fee, raised as the pinned SDK raises it before funding (5% on Ethereum,
+   * vendor chunk-6XX5MONG.mjs `quoteGaslessTransfer`). Without both reads there is no proof and no fact.
+   */
+  usdcShortfall(): UsdcShortfallFacts | undefined {
+    if (this.context.mode !== "quote" || this.#usdcBalance === undefined || this.#quotedFee === undefined) return undefined;
+    const fee = this.context.input.chainId === 1 ? this.#quotedFee * 105n / 100n : this.#quotedFee;
+    const required = BigInt(this.context.input.netAtomic) + fee;
+    return this.#usdcBalance < required ? { usdcCurrentAtomic: this.#usdcBalance.toString(), usdcRequiredAtomic: required.toString() } : undefined;
   }
   /** Transient fixed metadata, never response content or permission. */
   readFailureContext(error: unknown): ReadFailure {
@@ -129,7 +143,7 @@ export class HelperNetworkPolicy {
         if (key === "sentinel-quote" && response.status === 200 && this.context.mode === "quote" && body !== null)
           this.#sponsoredProof = captureSponsoredQuote(response.body, body, this.context);
         validateResponse(key, response.body, body, this.context);
-        if (this.context.mode === "quote") this.recordRelayFacts(key, response.body, this.context.input.chainId);
+        if (this.context.mode === "quote") { this.recordRelayFacts(key, response.body, this.context.input.chainId); this.recordUsdcFacts(key, response.body); }
       }
       catch (error) { validationFailed = true; throw error; }
       this.successes.add(key);
@@ -139,10 +153,7 @@ export class HelperNetworkPolicy {
     } catch (error) {
       if (this.context.mode === "quote" && error !== null && typeof error === "object")
         this.#readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed,
-          ...(validationFailed && readNetwork === "sentinel-quote" && validationPredicates.has(error)
-            ? { validationPredicate: validationPredicates.get(error)!,
-                ...(tokenFeesShapes.has(error) ? { tokenFeesShape: tokenFeesShapes.get(error)! } : {}),
-                ...(feeFacts.has(error) ? { feeFacts: feeFacts.get(error)! } : {}) } : {}) });
+          ...(validationFailed && readNetwork === "sentinel-quote" ? sentinelFailure(error) : {}) });
       throw error;
     }
   }
@@ -154,6 +165,12 @@ export class HelperNetworkPolicy {
       const value = parseBody(body), row = Object.hasOwn(value, String(chainId)) ? value[String(chainId)] as Record<string, unknown> : undefined;
       this.#relayFlag = row === undefined ? "absent" : row.relayTransactions === true ? "enabled" : "disabled";
     }
+  }
+  /** Both bodies already passed `validateResponse`; only the owner's balance word and the matching fee entry are read. */
+  private recordUsdcFacts(key: string, body: string): void {
+    if (this.context.mode !== "quote") return;
+    if (key === "rpc-balance") this.#usdcBalance = BigInt(parseBody(body).result as string);
+    if (key === "sentinel-quote") this.#quotedFee = sentinelQuotedFee(parseBody(body), this.context.input.token);
   }
   private assertSubmitDeadline(): void {
     if (this.context.mode !== "submit") return;
@@ -328,111 +345,7 @@ function validateResponse(key: string, body: string, requestBody: string | null,
       (key === "rpc-decimals" && BigInt(value.result) !== 6n)) mmFail("mm_gasless_provider_unavailable");
   } else if (key === "sentinel-quote") validateSentinelResponse(value, context);
 }
-interface ReadFailure { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean;
-  readonly validationPredicate?: ReadValidationPredicate; readonly tokenFeesShape?: TokenFeesKind; readonly feeFacts?: SentinelFeeFacts }
-const validationPredicates = new WeakMap<object, ReadValidationPredicate>();
-const tokenFeesShapes = new WeakMap<object, TokenFeesKind>();
-const feeFacts = new WeakMap<object, SentinelFeeFacts>();
-function sentinelRequire(condition: boolean, predicate: ReadValidationPredicate, shape?: TokenFeesKind, facts?: SentinelFeeFacts): void {
-  if (condition) return;
-  // A well-formed answer without a token-fee list is MetaMask's own answer (its SDK reads it as an uncovered
-  // transfer plus fee); any other shape stays a provider protocol failure.
-  try { mmFail(shape === "missing" || shape === "null" ? "mm_gasless_fee_unquoted" : "mm_gasless_provider_unavailable"); }
-  catch (error) {
-    if (error !== null && typeof error === "object") {
-      validationPredicates.set(error, predicate);
-      if (shape !== undefined) tokenFeesShapes.set(error, shape);
-      if (facts !== undefined) feeFacts.set(error, facts);
-    }
-    throw error;
-  }
-}
-function parseSentinelResponse(body: string): Record<string, unknown> {
-  let value: unknown;
-  try { value = JSON.parse(body); } catch { sentinelRequire(false, "response_json"); }
-  sentinelRequire(isPlainRecord(value), "response_root");
-  return value as Record<string, unknown>;
-}
-function validateSentinelResponse(value: Record<string, unknown>, context: ModeContext): void {
-  sentinelRequire(context.mode === "quote", "sentinel_mode");
-  sentinelRequire(exactKeys(value, ["jsonrpc", "id", "result"]), "sentinel_keys");
-  sentinelRequire(value.jsonrpc === "2.0", "sentinel_jsonrpc");
-  sentinelRequire(value.id === 10, "sentinel_id");
-  sentinelRequire(isPlainRecord(value.result), "sentinel_result");
-  const result = value.result as Record<string, unknown>;
-  sentinelRequire(Array.isArray(result.transactions), "sentinel_transactions");
-  const transactions = result.transactions as unknown[];
-  sentinelRequire(transactions.length >= 1 && transactions.length <= 8, "sentinel_transactions_length");
-  // The pinned SDK consumes only the last transaction's low tier with the requested fee token.
-  const transaction = transactions.at(-1);
-  sentinelRequire(isPlainRecord(transaction), "sentinel_last_transaction");
-  const tx = transaction as Record<string, unknown>;
-  sentinelRequire(Array.isArray(tx.fees), "sentinel_fees");
-  const fees = tx.fees as unknown[];
-  sentinelRequire(fees.length >= 1 && fees.length <= 8, "sentinel_fees_length");
-  sentinelRequire(isPlainRecord(fees[0]), "sentinel_low_tier");
-  const fee = fees[0] as Record<string, unknown>;
-  if (!Array.isArray(fee.tokenFees)) {
-    const present = Object.hasOwn(fee, "tokenFees"), value = fee.tokenFees;
-    // Parsed JSON supplies only these closed kinds; no value or arbitrary field is retained.
-    const kind = !present ? "missing" : value === null ? "null" : typeof value === "object" ? "object" :
-      typeof value === "string" ? "string" : typeof value === "number" ? "number" : "boolean";
-    sentinelRequire(false, "sentinel_token_fees", kind, sentinelFeeFacts(result, tx, fee));
-  }
-  const tokenFees = fee.tokenFees as unknown[];
-  sentinelRequire(tokenFees.length >= 1 && tokenFees.length <= 32, "sentinel_token_fees_length");
-  const matching: Record<string, unknown>[] = [];
-  for (const candidate of tokenFees) {
-    sentinelRequire(isPlainRecord(candidate), "sentinel_entry");
-    const entry = candidate as Record<string, unknown>;
-    sentinelRequire(isPlainRecord(entry.token), "sentinel_token");
-    const token = entry.token as Record<string, unknown>;
-    sentinelRequire(typeof token.address === "string" && /^0x[0-9a-fA-F]{40}$/u.test(token.address), "sentinel_token_address");
-    if (context.mode === "quote" && (token.address as string).toLowerCase() === context.input.token) matching.push(entry);
-  }
-  // Duplicated matching tokens remain ambiguous; no SDK first-match relaxation.
-  sentinelRequire(matching.length === 1, "sentinel_token_match");
-  const entry = matching[0]!, token = entry.token as Record<string, unknown>;
-  sentinelRequire(!entry.error, "sentinel_entry_error");
-  sentinelRequire(typeof token.symbol === "string" && token.symbol.length >= 1 && token.symbol.length <= 32, "sentinel_symbol");
-  sentinelRequire(token.decimals === 6, "sentinel_decimals");
-  sentinelRequire(tokenFeeQuantity(entry.balanceNeededToken), "sentinel_fee_quantity");
-  sentinelRequire(typeof entry.feeRecipient === "string" && /^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient), "sentinel_fee_recipient");
-}
-/** Closed kinds only; the provider's own error text and values never leave this function. */
-function sentinelFeeFacts(result: Record<string, unknown>, tx: Record<string, unknown>, fee: Record<string, unknown>): SentinelFeeFacts {
-  const sponsorship = result.sponsorship, error = fee.error;
-  return { sentinelSimulation: !Object.hasOwn(tx, "status") ? "absent" : tx.status === "0x1" ? "succeeded" : tx.status === "0x0" ? "reverted" : "other",
-    sentinelFeeError: error === undefined || error === null || error === "" ? "absent" : typeof error === "string" ? "present" : "other",
-    sentinelSponsorship: !Object.hasOwn(result, "sponsorship") ? "absent" : !isPlainRecord(sponsorship) ? "other" :
-      sponsorship.isSponsored === true ? "sponsored" : sponsorship.isSponsored === false ? "not_sponsored" : "other" };
-}
-/** Parse only a successful principal simulation from the already validated original request. */
-function captureSponsoredQuote(body: string, request: string, context: Extract<ModeContext, { mode: "quote" }>): MetaMaskGaslessQuote | undefined {
-  let value: unknown;
-  try { value = JSON.parse(body); } catch { return undefined; }
-  if (!isPlainRecord(value) || !exactKeys(value, ["jsonrpc", "id", "result"]) || value.jsonrpc !== "2.0" ||
-    value.id !== 10 || !isPlainRecord(value.result)) return undefined;
-  const result = value.result;
-  if (Object.hasOwn(result, "error") || !isPlainRecord(result.sponsorship) || result.sponsorship.isSponsored !== true ||
-    !(result.sponsorship.error === null || result.sponsorship.error === "" || !Object.hasOwn(result.sponsorship, "error")) ||
-    !Array.isArray(result.transactions) || result.transactions.length !== 1) return undefined;
-  const tx = result.transactions[0];
-  if (!isPlainRecord(tx) || tx.status !== "0x1" || Object.hasOwn(tx, "error") || !Array.isArray(tx.fees) ||
-    tx.fees.length < 1 || tx.fees.length > 8 || !isPlainRecord(tx.fees[0]) || Object.hasOwn(tx.fees[0], "tokenFees")) return undefined;
-  const material = { netAtomic: context.input.netAtomic, feeAtomic: "0", feeRecipient: null, feeMode: "sponsored" as const,
-    sponsorshipHash: hashObject({ purpose: "apn.metamask.sponsored-simulation.v1", input: context.input,
-      requestHash: hashObject(JSON.parse(request)), responseHash: sha256(body) }),
-    executions: [{ target: context.input.token, value: "0", callData: encodeFunctionData({ abi: transferAbi,
-      functionName: "transfer", args: [context.input.recipient, BigInt(context.input.netAtomic)] }) }] as const };
-  return Object.freeze({ ...material, executions: Object.freeze(material.executions.map(e => Object.freeze(e))) as unknown as typeof material.executions,
-    hash: mmQuoteHash(material) });
-}
-function tokenFeeQuantity(value: unknown): boolean {
-  // Sentinel emits hex quantities; the SDK also accepts decimal strings through BigInt.
-  return typeof value === "string" && /^(?:0|[1-9][0-9]{0,77}|0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,63}))$/u.test(value) &&
-    BigInt(value) <= MM_MAX_UINT;
-}
+interface ReadFailure extends Partial<SentinelFailure> { readonly network: ReadNetwork; readonly httpStatus: number | null; readonly validationFailed: boolean }
 export class HttpsFetchExchange implements FetchExchange {
   async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
     const url = parsePublicHttpsUrl(request.url, "APN_HTTP_CONFIG", "MetaMask service", 2048);

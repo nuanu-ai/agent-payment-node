@@ -1,0 +1,78 @@
+{
+  "abandoned": {
+    "chainNonce": "10",
+    "operation": {
+      "account": "0x48231D2Aecd5d0CDD3FA3792497186b2dE32Fb1a",
+      "accumulatedNativeDebitWei": "5234015175424",
+      "allowanceAtPrepare": "0",
+      "approvalAttempt": {
+        "attempts": 1,
+        "markedAt": "2026-10-20T08:06:15.597Z",
+        "markerHash": "d8d7413bce9eb91a806d3cdd6f50a3cd9993f9e7917b123aed48c85922b7cf26",
+        "nonce": "9",
+        "transactionHash": "0x240ad98c27699696fc78bb24e971f5c603b10c5f2a60d487a28a94526972a336"
+      },
+      "approvalCapAtomic": "1000000",
+      "approvalGas": {
+        "gasLimit": "100000",
+        "maxFeePerGas": "400000000",
+        "maxPriorityFeePerGas": "50000000"
+      },
+      "cleanupAttempt": null,
+      "cleanupEvidence": null,
+      "cleanupGas": {
+        "gasLimit": "70000",
+        "maxFeePerGas": "400000000",
+        "maxPriorityFeePerGas": "50000000"
+      },
+      "cleanupReason": "owner_abandoned_unknown",
+      "createdAt": "2026-10-20T08:05:44.825Z",
+      "integrityHash": "324717707727e039f93d195ee9b098493ccb8fbc5bc4757127d73437040a1cd7",
+      "maximumNativeDebitWei": "150000000000000",
+      "mechanismDigest": "88166af2bee373780a52f993f1765cf78f13366d4ada32be3a12e658c2448e01",
+      "operationId": "867244e91ffb11d3898a55fc5787e2398719c843f9345e09da0ad4122e99f5cc",
+      "phase": "abandoned_unknown",
+      "policyDigest": "7c91940591a333e4ce2d7c81558a6d2554de6d12fcd48fa09aee75a84e19415a",
+      "preSignFailure": null,
+      "previousIntegrityHash": "1b9bfc27b18f464f99aea7363573b1e5c42a0cc106b779d14a1f0b4492133710",
+      "profile": "qa-20261013-evm-gasless",
+      "quoteBlock": {
+        "hash": "0x9a29b6a235cadb75f2d3f81bd37f90f689a9fda5b56133a0ac1c1c9436f5fe6e",
+        "number": "26232485"
+      },
+      "receipt": null,
+      "route": {
+        "amountIn": "1000000",
+        "amountOutMinimum": "980000",
+        "calldata": "0x414bf389000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000000000000000000000000000000000000000006400000000000000000000000048231d2aecd5d0cdd3fa3792497186b2de32fb1a000000000000000000000000000000000000000000000000000000006ad7256500000000000000000000000000000000000000000000000000000000000f424000000000000000000000000000000000000000000000000000000000000ef4200000000000000000000000000000000000000000000000000000000000000000",
+        "deadline": 1792484709,
+        "fee": 100,
+        "inputToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "outputToken": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "pool": "0x3416cF6C708Da44DB2624D63ea0AAef7113527C6",
+        "recipient": "0x48231D2Aecd5d0CDD3FA3792497186b2dE32Fb1a",
+        "routeHash": "1da04be3e5c5d672d9217da2ef26dcb8700d8d2a4e5e6c8f98cf141123601b21",
+        "router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+        "schemaVersion": "apn.uniswap-v3.swap-router.exact-input-single.v1"
+      },
+      "schemaVersion": "apn.uniswap-token-operation.v2",
+      "swapAttempt": {
+        "attempts": 1,
+        "markedAt": "2026-10-20T08:21:52.062Z",
+        "markerHash": "4da4c555ed672bf21fcf94b284cb4a1262767902c1c50de56f6ab7388f3c96f3",
+        "nonce": "10",
+        "transactionHash": null
+      },
+      "swapGas": {
+        "gasLimit": "200000",
+        "maxFeePerGas": "400000000",
+        "maxPriorityFeePerGas": "50000000"
+      },
+      "updatedAt": "2026-10-20T08:37:26.309Z",
+      "usageReservationId": "284b2111cba7c5e1974a939a5c3c8c9aa2bebd7a0ffde44abbed220566ee0145",
+      "usageState": "reserved"
+    },
+    "routerAllowanceAtomic": "1000000"
+  },
+  "source": "QA APN 0.5.54 retest 2026-10-20 (UNISWAP-TOKEN-SEND-CAPACITY-001-partial054): the owner-abandoned 867244e9\u2026 journal as the normal execute and status return it; Ethereum before-read nonce latest/pending/finalized 10, USDC router allowance 1000000"
+}

@@ -71,12 +71,15 @@ export function validateX402ReceiptUnsafe(value: unknown): X402ReceiptRecord {
     const result = exactRecord(receipt.result, ["resultHash", "mediaType", "byteLength", "resultIntegrityHash"]);
     hash(result.resultHash); mediaType(result.mediaType); uint(result.byteLength); hash(result.resultIntegrityHash);
   }
-  if (terminalState === "completed" && (receipt.settlementResponseHash === undefined || settlementEvidence === undefined || receipt.result === undefined || unusedExpiryEvidence !== undefined)) stateCorrupt("x402 completed receipt is incomplete.");
+  // Without the seller's settlement answer only the token's own nonce state (v2) proves a completed payment.
+  if (terminalState === "completed" && ((receipt.settlementResponseHash === undefined && settlementEvidence?.schemaVersion !== "apn.x402.settlement-evidence.v2") ||
+    settlementEvidence === undefined || receipt.result === undefined || unusedExpiryEvidence !== undefined)) stateCorrupt("x402 completed receipt is incomplete.");
   if (terminalState === "failed_settled_without_result" && (settlementEvidence === undefined || receipt.result !== undefined || unusedExpiryEvidence !== undefined)) stateCorrupt("x402 spent-without-result receipt is invalid.");
   // A finalized nonce-state proof (v2) outranks a seller's settlement claim or an unpaid delivered body.
   const stateUnused = unusedExpiryEvidence?.schemaVersion === "apn.x402.unused-expiry-evidence.v2";
+  const scanUnused = unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1";
   if (terminalState === "failed_expired_unused" && (unusedExpiryEvidence === undefined || settlementEvidence !== undefined ||
-    (!stateUnused && (receipt.settlementResponseHash !== undefined || receipt.result !== undefined)))) stateCorrupt("x402 expired-unused receipt is invalid.");
+    (!stateUnused && (receipt.settlementResponseHash !== undefined || (receipt.result !== undefined && !scanUnused))))) stateCorrupt("x402 expired-unused receipt is invalid.");
   if (terminalState === "failed_before_effect" && (receipt.settlementResponseHash !== undefined || settlementEvidence !== undefined || unusedExpiryEvidence !== undefined || receipt.result !== undefined)) stateCorrupt("x402 failed-before-effect receipt is invalid.");
   if (terminalState === "abandoned_unknown" && (settlementEvidence !== undefined || unusedExpiryEvidence !== undefined)) stateCorrupt("x402 abandonment receipt cannot carry a proven outcome.");
   hash(receipt.operationBindingHash); hash(receipt.previousLinkHash); timestamp(receipt.createdAt); hash(receipt.integrityHash);

@@ -15,17 +15,41 @@ import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
 import { revokeMetaMaskGasless } from "./revocation/service.js";
 import { canonicalProfile } from "../wallet-policy.js";
+import { directEvmNetwork } from "../evm-direct-networks.js";
+import { formatAtomic } from "../money.js";
+import { mmFeeCapNextAction } from "./refusals.js";
 /**
- * MetaMask quoted no USDC relay fee. Its own client reads that answer as the server wallet's USDC not covering the
- * transfer plus the fee, so the useful step is to read that balance. APN states the reading, it does not promise a fix.
+ * Next actions follow only what the refusal proves (METAMASK-FEE-REFUSAL-ASSET-GUIDANCE-001): the native gas shortfall
+ * MetaMask's own simulation states, APN's own USDC balance read below the transfer plus its fee (at the fee quote or at
+ * the chain snapshot), a quoted fee above the owner's cap, or no proven cause. USDC is named as short only on APN's
+ * read; no native transfer or other relay stands in for this one, and a higher cap is offered only as the owner's choice.
  */
-function feeQuoteGuidance(error, profile, chainId) {
-    if (!(error instanceof ApnError) || error.details?.reason !== "mm_gasless_fee_unquoted")
+function prepareGuidance(error, profile, request) {
+    if (!(error instanceof ApnError))
         return error;
-    return new ApnError(error.code, error.message, { ...error.details, nextActions: [
-            `apn gasless balance --profile ${canonicalProfile(profile)} --chain ${chainId}`,
-            "MetaMask's own client reads this answer as a server-wallet USDC balance below the transfer plus its relay fee; compare it with the balance above. No operation was written, so the same prepare may run again.",
-        ] });
+    const d = error.details ?? {}, chainId = request.chainId, again = "No operation was written, so the same prepare may run again";
+    // Named only inside a refusal that already proved the chain; any other error passes through untouched.
+    const where = () => `on ${directEvmNetwork(chainId).name} (chain ${chainId})`;
+    let nextActions;
+    if (d.reason === "mm_gasless_fee_unquoted") {
+        const required = d.mm_read_native_required_wei, current = d.mm_read_native_current_wei, symbol = d.native_symbol;
+        nextActions = typeof required === "string" && typeof current === "string" && typeof symbol === "string"
+            ? [`MetaMask's relay simulation for this transfer ${where()} needs ${required} wei of native ${symbol} for gas on the server wallet, which ` +
+                    `holds ${current} wei. APN neither sends this transfer with native gas instead nor reads it as a USDC shortfall. ${again} once MetaMask quotes a USDC relay fee.`]
+            : [`MetaMask's fee quote named no cause APN can verify, so APN cannot tell whether USDC, native gas or the relay itself is short. ${again}.`];
+    }
+    else if (d.reason === "mm_gasless_balance" && typeof d.usdc_current_atomic === "string" && typeof d.usdc_required_atomic === "string") {
+        const required = d.usdc_required_atomic, short = (BigInt(required) - BigInt(d.usdc_current_atomic)).toString();
+        nextActions = [`apn gasless balance --profile ${canonicalProfile(profile)} --chain ${chainId}`,
+            `The server wallet's USDC ${where()} is ${short} atoms (${formatAtomic(short, 6)} USDC) short of this transfer plus MetaMask's quoted relay fee. ` +
+                `${again} once it holds at least ${required} USDC atoms.`];
+    }
+    else if (d.reason === "mm_gasless_fee_cap" && typeof d.fee_atomic === "string") {
+        nextActions = [mmFeeCapNextAction(request, BigInt(d.fee_atomic))];
+    }
+    else
+        return error;
+    return new ApnError(error.code, error.message, { ...error.details, nextActions });
 }
 export class MetaMaskGaslessService {
     context;
@@ -63,7 +87,7 @@ export class MetaMaskGaslessService {
             return publicMetaMaskGaslessOperation(await preparation.prepare(input));
         }
         catch (error) {
-            throw feeQuoteGuidance(await this.sessionGuidance(error, input.profile), input.profile, input.request.chainId);
+            throw prepareGuidance(await this.sessionGuidance(error, input.profile), input.profile, input.request);
         }
     }
     /**

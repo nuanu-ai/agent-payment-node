@@ -7,6 +7,7 @@ import { ApnError } from "./errors.js";
 import { DirectAllowlistGate } from "./direct-allowlist-gate.js";
 import { EVM_NETWORKS, evmAmount, evmDecimals, evmUint, type EvmAssetSelection, type EvmChainId } from "./evm-asset.js";
 import { directEvmNetwork, type DirectEvmChainId } from "./evm-direct-networks.js";
+import { directRpcChain } from "./rpc-requirement.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { armDirectEvmStep, evmDirectFingerprint, evmTransaction, requireDirectEvmReads, requireEvmFunding, type EvmDirectBinding } from "./evm-direct.js";
 import type { OperationRecord } from "./model.js";
@@ -83,7 +84,7 @@ export async function prepareEvmTransfer(
     const allowlist = await new DirectAllowlistGate(context).admit({ profile, operationId, family: "evm", account: wallet.address,
       chain: `eip155:${selection.chainId}`, amountAtomic: amount.atomic, recipient,
       asset: selection.token === "native" ? { kind: "native", identifier: null } : { kind: "token", identifier: selection.token } });
-    const rpcPort = context.requireRpc();
+    const rpcPort = context.requireRpc(directRpcChain(selection.chainId));
     armDirectEvmStep(rpcPort, selection.chainId, "prepare");
     const reads = requireDirectEvmReads(rpcPort, selection.chainId);
     const balance = await reads.balance(wallet.address, { ...selection, decimals: listed.decimals });

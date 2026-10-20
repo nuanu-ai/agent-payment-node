@@ -1,9 +1,9 @@
-import { type X402Asset, type X402Network } from "./x402-network.js";
+import { type X402Network } from "./x402-network.js";
 import type { PaymentPayload, PaymentRequired, PaymentRequirements } from "@x402/core/types";
-import type { InspectCandidate } from "./x402-model.js";
 export type X402PaymentPayload = PaymentPayload;
 export type X402PaymentRequired = PaymentRequired;
 export type X402PaymentRequirements = PaymentRequirements;
+export { inspectCandidates } from "./x402-offer-inspect.js";
 export declare function encodeCanonicalBase64Json(value: unknown): string;
 export declare function decodeCanonicalBase64Json(value: string): unknown;
 export declare function encodePaymentRequiredHeader(value: PaymentRequired): string;
@@ -25,5 +25,3 @@ export declare function decodeAndNormalizePaymentResponseHeader(value: string, e
     readonly amountAtomic: string;
     readonly network?: X402Network;
 }): DecodedPaymentResponse;
-/** Offers of exactly the selected network and token (a bare chain id: its released USDC); others are skipped, never repaired. */
-export declare function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, asset: X402Asset): readonly InspectCandidate[];

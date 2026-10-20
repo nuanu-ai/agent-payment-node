@@ -26,14 +26,40 @@ export interface RelaySupportFacts {
   /** `GET tx-sentinel-ethereum-mainnet/networks`: the chain row's `relayTransactions` flag. */
   readonly relaySentinelFlag: "enabled" | "disabled" | "absent";
 }
-export type ReadFacts = Partial<SentinelFeeFacts & RelaySupportFacts>;
-const FACT_VALUES: Readonly<Record<keyof ReadFacts, readonly string[]>> = {
+/**
+ * The same answer's low fee tier, when its own numbers prove a native gas shortfall (decimal strings): the gas it
+ * simulated, its maximum fee per gas in wei, `balanceNeeded` = their product in wei, and the lower `currentBalance`.
+ */
+export interface NativeGasFacts {
+  readonly nativeGasUnits: string;
+  readonly nativeMaxFeePerGasWei: string;
+  readonly nativeRequiredWei: string;
+  readonly nativeCurrentWei: string;
+}
+/** APN's validated `balanceOf` read below the net amount plus MetaMask's quoted USDC relay fee (USDC atoms). */
+export interface UsdcShortfallFacts { readonly usdcCurrentAtomic: string; readonly usdcRequiredAtomic: string }
+export type ReadFacts = Partial<SentinelFeeFacts & RelaySupportFacts & NativeGasFacts & UsdcShortfallFacts>;
+const FACT_VALUES: Readonly<Record<keyof (SentinelFeeFacts & RelaySupportFacts), readonly string[]>> = {
   sentinelSimulation: ["succeeded", "reverted", "absent", "other"], sentinelFeeError: ["present", "absent", "other"],
   sentinelSponsorship: ["sponsored", "not_sponsored", "absent", "other"],
   relayServerWalletNetwork: ["listed", "unlisted"], relaySentinelFlag: ["enabled", "disabled", "absent"],
 };
 const FEE_FACTS = ["sentinelSimulation", "sentinelFeeError", "sentinelSponsorship"] as const;
 const RELAY_FACTS = ["relayServerWalletNetwork", "relaySentinelFlag"] as const;
+const NATIVE_FACTS = ["nativeGasUnits", "nativeMaxFeePerGasWei", "nativeRequiredWei", "nativeCurrentWei"] as const;
+const USDC_FACTS = ["usdcCurrentAtomic", "usdcRequiredAtomic"] as const;
+const decimal = (value: unknown): bigint | undefined =>
+  typeof value === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(value) ? BigInt(value) : undefined;
+/** Native facts carry a proven shortfall only: required = gas x max fee per gas, above the current balance. */
+function nativeShortfall(d: Record<string, unknown>): boolean {
+  const [gas, price, required, current] = NATIVE_FACTS.map(key => decimal(d[key]));
+  return gas !== undefined && price !== undefined && required !== undefined && current !== undefined &&
+    gas > 0n && price > 0n && required === gas * price && current < required;
+}
+function usdcShortfall(d: Record<string, unknown>): boolean {
+  const current = decimal(d.usdcCurrentAtomic), required = decimal(d.usdcRequiredAtomic);
+  return current !== undefined && required !== undefined && current < required;
+}
 
 export interface MetaMaskReadDiagnostic extends ReadFacts {
   readonly tokenFeesKind?: TokenFeesKind;
@@ -77,8 +103,9 @@ export function validateReadDiagnostic(value: unknown, mode: ReadMode): MetaMask
     typeof v === "number" && Number.isSafeInteger(v) && v >= low && v <= high;
   const hasShape = Object.hasOwn(d, "tokenFeesKind");
   const feeFacts = FEE_FACTS.filter(key => Object.hasOwn(d, key)), relayFacts = RELAY_FACTS.filter(key => Object.hasOwn(d, key));
+  const nativeFacts = NATIVE_FACTS.filter(key => Object.hasOwn(d, key)), usdcFacts = USDC_FACTS.filter(key => Object.hasOwn(d, key));
   if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) + (hasShape ? 1 : 0) +
-    feeFacts.length + relayFacts.length || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
+    feeFacts.length + relayFacts.length + nativeFacts.length + usdcFacts.length || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
     typeof d.stage !== "string" || !stages.includes(d.stage) || typeof d.invariant !== "string" || !invariants.includes(d.invariant) ||
     typeof d.network !== "string" || !networks.includes(d.network) ||
     !bounded(d.httpStatus, 100, 599) || !bounded(d.exitCode, 0, 255) ||
@@ -104,11 +131,17 @@ export function validateReadDiagnostic(value: unknown, mode: ReadMode): MetaMask
     [...feeFacts, ...relayFacts].some(key => typeof d[key] !== "string" || !FACT_VALUES[key].includes(d[key] as string))) {
     mmFail("mm_gasless_provider_unavailable");
   }
+  // Native facts ride only on an answered missing fee list whose tier carried an error; USDC facts only on APN's own
+  // closed balance refusal at the fee quote.
+  if (nativeFacts.length !== 0 && (nativeFacts.length !== NATIVE_FACTS.length || feeFacts.length !== FEE_FACTS.length ||
+      d.sentinelFeeError !== "present" || (d.tokenFeesKind !== "missing" && d.tokenFeesKind !== "null") || !nativeShortfall(d)) ||
+    usdcFacts.length !== 0 && (usdcFacts.length !== USDC_FACTS.length || mode !== "quote" || d.stage !== "fee_quote" ||
+      d.invariant !== "closed_failure" || d.network !== "none" || hasShape || !usdcShortfall(d))) mmFail("mm_gasless_provider_unavailable");
   // Construct a new closed object; never retain caller-owned properties.
   return Object.freeze(Object.fromEntries([...keys.map(key => [key, d[key]]),
     ...(Object.hasOwn(d, "validationPredicate") ? [["validationPredicate", d.validationPredicate]] : []),
     ...(hasShape ? [["tokenFeesKind", d.tokenFeesKind]] : []),
-    ...[...feeFacts, ...relayFacts].map(key => [key, d[key]])])) as unknown as MetaMaskReadDiagnostic;
+    ...[...feeFacts, ...relayFacts, ...nativeFacts, ...usdcFacts].map(key => [key, d[key]])])) as unknown as MetaMaskReadDiagnostic;
 }
 export function readDiagnostic(mode: ReadMode, stage: ReadStage,
   invariant: MetaMaskReadDiagnostic["invariant"], network: ReadNetwork = "none", httpStatus: number | null = null,
@@ -120,7 +153,10 @@ export function readDiagnostic(mode: ReadMode, stage: ReadStage,
 }
 const FACT_DETAILS: Readonly<Record<keyof ReadFacts, string>> = { sentinelSimulation: "mm_read_sentinel_simulation",
   sentinelFeeError: "mm_read_sentinel_fee_error", sentinelSponsorship: "mm_read_sentinel_sponsorship",
-  relayServerWalletNetwork: "mm_read_relay_server_wallet_network", relaySentinelFlag: "mm_read_relay_sentinel_flag" };
+  relayServerWalletNetwork: "mm_read_relay_server_wallet_network", relaySentinelFlag: "mm_read_relay_sentinel_flag",
+  nativeGasUnits: "mm_read_native_gas_units", nativeMaxFeePerGasWei: "mm_read_native_max_fee_per_gas_wei",
+  nativeRequiredWei: "mm_read_native_required_wei", nativeCurrentWei: "mm_read_native_current_wei",
+  usdcCurrentAtomic: "mm_read_usdc_current_atomic", usdcRequiredAtomic: "mm_read_usdc_required_atomic" };
 export function readFailureError(reason: MetaMaskGaslessFailureReason, d: MetaMaskReadDiagnostic): ApnError {
   const plain = readDataRecord(d);
   if (plain.mode !== "inspect" && plain.mode !== "quote") mmFail("mm_gasless_provider_unavailable");
@@ -129,7 +165,7 @@ export function readFailureError(reason: MetaMaskGaslessFailureReason, d: MetaMa
     mm_read_mode: diagnostic.mode, mm_read_stage: diagnostic.stage, mm_read_invariant: diagnostic.invariant,
     ...(diagnostic.validationPredicate === undefined ? {} : { mm_read_validation_predicate: diagnostic.validationPredicate }),
     ...(diagnostic.tokenFeesKind === undefined ? {} : { mm_read_token_fees_kind: diagnostic.tokenFeesKind }),
-    ...Object.fromEntries([...FEE_FACTS, ...RELAY_FACTS].filter(key => diagnostic[key] !== undefined)
+    ...Object.fromEntries([...FEE_FACTS, ...RELAY_FACTS, ...NATIVE_FACTS, ...USDC_FACTS].filter(key => diagnostic[key] !== undefined)
       .map(key => [FACT_DETAILS[key], diagnostic[key]!])),
     mm_read_network: diagnostic.network, mm_read_signal: diagnostic.signal, mm_read_timed_out: diagnostic.timedOut,
     ...(diagnostic.httpStatus === null ? {} : { mm_read_http_status: diagnostic.httpStatus }),

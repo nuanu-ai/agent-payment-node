@@ -20,6 +20,7 @@ import { GaszipFundingRpc, assertGaszipFundingFresh, proveGaszipDelivery, proveG
 import { GaszipFundingService } from "../../src/lifi/gaszip-direct-service.js";
 const SEI_ROUTE=GASZIP_DIRECT_ROUTES.sei,MEGA_ROUTE=GASZIP_DIRECT_ROUTES.mega,seiCodec=gaszipCodec(SEI_ROUTE),megaCodec=gaszipCodec(MEGA_ROUTE);
 import { gaszipNativeNet } from "../../src/lifi/gaszip-native-delivery.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 const SOURCE_BLOCK=`0x${"1".repeat(64)}` as Hex,DEST_BLOCK=`0x${"2".repeat(64)}` as Hex,PREV_BLOCK=`0x${"3".repeat(64)}` as Hex,DEST_HASH=`0x${"4".repeat(64)}` as Hex;
 const SIGNER="0x2222222222222222222222222222222222222222",OUTPUT="358965737575087424";
 const h=(v:bigint):Hex=>`0x${v.toString(16)}`;
@@ -199,7 +200,8 @@ test("fresh lower fees cannot weaken the frozen signed envelope affordability ch
 
  test("true allowlist revocation waits through the physical send and response",async(t)=>{
  const f=await setup(t),r=await f.service.prepare(f.input) as GaszipFundingRecord;let revoked=false;let revocation:Promise<unknown>|undefined;
- f.source.queueHook=async()=>{revocation=runCli(["allowlist","policy","revoke","--profile","gaszip-test","--revision","1"],{},{stateRoot:f.temp.root,allowlistPolicyApproval:f.approval}).then(result=>{assert.equal(result.ok,true,JSON.stringify(result.error));revoked=true;});await new Promise(resolve=>setTimeout(resolve,40));assert.equal(revoked,false);};
+ // The revocation is seen refused by the policy lock the send holds (an event, not a pause).
+ const locks=lockRefusals(t);f.source.queueHook=async()=>{const blocked=locks.refused();revocation=runCli(["allowlist","policy","revoke","--profile","gaszip-test","--revision","1"],{},{stateRoot:f.temp.root,allowlistPolicyApproval:f.approval}).then(result=>{assert.equal(result.ok,true,JSON.stringify(result.error));revoked=true;});await blocked;assert.equal(revoked,false);};
  f.source.tlsHook=async()=>{assert.equal(revoked,false);};await f.service.approve(r.operationId);await revocation;assert.equal(revoked,true);assert.equal(f.source.sends,1);
  });
  test("revoke and reactivate same revision invalidates the frozen activation",async(t)=>{

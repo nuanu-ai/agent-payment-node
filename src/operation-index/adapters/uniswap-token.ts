@@ -25,7 +25,8 @@ export const uniswapTokenAdapter: OperationFamilyAdapter<UniswapTokenOperation> 
   // Its status reads the journal and observes an attempted approval, swap or cleanup; execute and cleanup are its own steps.
   status: async (context, record) => await (await import("../../swap/uniswap-command-service.js")).executeUniswapCommand(
     { command: "swap.uniswap-token.status", operationId: record.operationId }, context),
-  // The last-resort owner exit (R4): past the route deadline, with TTY consent; the usage hold stays charged.
+  // The last-resort owner exit (R4): past the route deadline, with TTY consent; the usage hold stays charged until execute
+  // proves no swap of it can land (no swap marker, or custody holding no signed bytes for its hashless one).
   abandon: async (context, record) => await (await import("../../swap/uniswap-v3/token-abandon.js")).abandonUniswapToken(context.state.root,
     record.operationId, async intent => await context.requireOperationAbandonApproval().approve(intent), () => context.clock.now()),
   commands: { status: OPERATION_STATUS, resume: "apn swap ethereum uniswap-token execute --operation <operation-id>",

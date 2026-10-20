@@ -202,14 +202,14 @@ const BASE_COMMANDS = [
     ], "local_write", "Writes an encrypted wallet-bound profile policy.", "foreground_tty", "Required when a policy is created, any limit increases or the x402 payee pin widens; a pure decrease or a new pin is non-interactive.", completedStates, [], ["apn wallet policy set --profile default --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>",
         "apn wallet policy set --profile default --chain eip155:1 --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>",
         "apn wallet policy set --profile default --chain eip155:137 --asset <token-contract> --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>"]),
-    command(["x402", "inspect"], "apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; a seller may still process its application payload.", [
+    command(["x402", "inspect"], "apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; an offer APN cannot sign is refused by its deciding field (payment window above 3600 s, an understood extra key such as spenderAddress or chainId); a seller may still process its application payload.", [
         chainOptional,
         assetOptional,
         ...httpOptions,
         option("--payer", "address", false, noDefault, ["canonical_evm_address"], "public"),
         option("--url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "maximum_2048_utf8_bytes", "canonical_whatwg_serialization", "public_target_required_at_runtime"], "public"),
     ], "network_request", "Performs one unpaid HTTPS request; application side effects depend on the seller.", "none", "Never signs or pays; caller must authorize the application request.", completedStates, [], ["apn x402 inspect --url https://seller.example/resource", "apn x402 inspect --chain eip155:1 --url https://seller.example/resource"]),
-    command(["x402", "fetch", "prepare"], "apn x402 fetch prepare --profile <profile> [--chain <caip2>] [--asset <token>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]" + httpSynopsis, "Freeze a policy-bounded standard x402 purchase.", [
+    command(["x402", "fetch", "prepare"], "apn x402 fetch prepare --profile <profile> [--chain <caip2>] [--asset <token>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]" + httpSynopsis, "Freeze a policy-bounded standard x402 purchase (seller payment window at most 3600 s; unknown offer extra keys are echoed unchanged).", [
         profileRequired,
         chainOptional,
         assetOptional,
@@ -225,7 +225,7 @@ const BASE_COMMANDS = [
         { command_path: ["operation", "status"], when: "To inspect any returned non-terminal state." },
         { command_path: ["operation", "resume"], when: "When documented durable recovery is permitted." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },
-    ], ["apn x402 fetch approve --operation <operation-id> --rpc-url <https-base-rpc-url>"]),
+    ], ["apn x402 fetch approve --operation <operation-id> --rpc-url <https-rpc-url-of-the-operation-network>"]),
     command(["pay", "transfer", "prepare"], "apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>", "Freeze one exact direct Base-USDC transfer.", [
         profileRequired,
         option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_200_safe_ascii_characters"], "operator_input"),
@@ -237,7 +237,7 @@ const BASE_COMMANDS = [
         { command_path: ["operation", "status"], when: "To inspect any returned non-terminal state." },
         { command_path: ["operation", "resume"], when: "When documented durable recovery is permitted." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },
-    ], ["apn pay transfer approve --operation <operation-id> --rpc-url <https-base-rpc-url>"]),
+    ], ["apn pay transfer approve --operation <operation-id> --rpc-url <https-rpc-url-of-the-operation-network>"]),
     command(["operation", "status"], "apn operation status --operation <operation-id> [--refresh-allowance]", "Inspect one durable operation of any family through its own status, which observes the chain only where that family's status does (swaps, Uniswap token, 1Click, Circle approval, a Circle Base to Solana burn until its finalized receipt and residual wrapper allowance are stored, and the closure check of a Stargate record of an unreleased schema).", [operationRequired,
         option("--refresh-allowance", "boolean", false, { kind: "literal", value: "false" }, ["circle_base_to_solana_source_only", "one_finalized_allowance_read_replaces_the_stored_value"], "public")], "local_write", "May initialize local state, index saved operations and repair saved operation or direct receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", allOperationStates, [
         { command_path: ["operation", "resume"], when: "When the returned state documents resumable recovery; a family recovered by its own command names that command." },
@@ -252,7 +252,7 @@ const BASE_COMMANDS = [
         option("--observe-only", "string", false, noDefault, ["literal_true", "already_submitted_local_direct_only", "receipt_observation_without_rebroadcast"], "public")], "recovery", "Reuses protected effect material and may reconcile or resubmit only when the stored state permits. --observe-only true inspects one already submitted local direct receipt without custody access or resubmission.", "prior_operation_authorization", "Uses the authorization already bound to the durable operation; it cannot widen the frozen effect.", allOperationStates, [
         { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
         { command_path: ["receipt", "get"], when: "After terminal completion." },
-    ], ["apn operation resume --operation <operation-id> --rpc-url <https-base-rpc-url> --wait-seconds 60"]),
+    ], ["apn operation resume --operation <operation-id> --rpc-url <https-rpc-url-of-the-operation-network> --wait-seconds 60"]),
     command(["operation", "recover-provider-request"], "apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>", "Bind one independently known provider request to an eligible ambiguous direct transfer without replaying it.", [
         operationRequired,
         option("--provider-request-id", "provider_request_id", true, noDefault, ["1_to_256_safe_ascii_characters"], "operator_input"),

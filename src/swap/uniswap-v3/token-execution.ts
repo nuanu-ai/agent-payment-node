@@ -2,7 +2,7 @@ import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { NeverLandsCheck } from "../../evm-finalized-proof.js";
 import type { UniswapTokenAttempt, UniswapTokenOperation, UniswapTokenPhase, UniswapTokenReceipt, UniswapTokenRetiredEffect } from "./token-operation.js";
-import { principalReleaseCandidate, type TokenNonceConsumption } from "./token-principal.js";
+import { abandonedPrincipalCandidate, principalReleaseCandidate, type TokenNonceConsumption } from "./token-principal.js";
 import type { TokenUsageBinding } from "./token-usage.js";
 import { sanitizeUniswapTokenFailureField, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
 
@@ -46,7 +46,7 @@ export interface UniswapTokenCommandRuntime {
   prepare(request: Extract<import("../../commands.js").CommandRequest, { readonly command: "swap.uniswap-token.prepare" }>): Promise<UniswapTokenOperation>;
   approve(id: string): Promise<UniswapTokenOperation>; execute(id: string): Promise<UniswapTokenOperation>;
   status(id: string): Promise<UniswapTokenOperation>; cleanup(id: string, fees?: TokenCleanupFees): Promise<UniswapTokenOperation>;
-  /** The live allowance a swap the earlier expired-approval exit cleaned with its approval standing still has; null for any other record. */
+  /** The live allowance a terminal record may leave standing (an expired approval cleaned without a swap, an owner abandon); null otherwise. */
   residualAllowance?(operation: UniswapTokenOperation): Promise<string | null>;
 }
 export class UniswapTokenExecution {
@@ -61,7 +61,9 @@ export class UniswapTokenExecution {
     return approvalActive(op.phase) ? await this.observeApproval(await this.continueStart(op, "approval")) : op;
   }
   async execute(id: string): Promise<UniswapTokenOperation> {
-    let op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id))); if (["observed", "cleaned", "cleanup_required", "abandoned_unknown"].includes(op.phase)) return op;
+    let op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id)));
+    if (op.phase === "abandoned_unknown") return await this.releaseAbandoned(op);
+    if (["observed", "cleaned", "cleanup_required"].includes(op.phase)) return op;
     // A dropped marker leaves this command on the recovery budget it reserved: it may close an expired route (no effect),
     // otherwise it stops, and the next execute starts the effect afresh under an effect budget.
     const marked = op.phase; op = await this.resumeUnsigned(op, ["approval", "swap"]);
@@ -288,6 +290,24 @@ export class UniswapTokenExecution {
       return await this.persist(transitionUniswapToken(current, kind === "approval" ? "approved" : kind === "swap" ? "approval_observed" : "cleanup_required",
         { [`${kind}Attempt`]: null }, this.ports.now())); });
   }
+  /**
+   * The owner's abandon keeps the principal held only while an effect of the swap could still land. With no swap marker, or
+   * a hashless one whose custody (opened under the account lock) holds no signed bytes and so frees its nonce, nothing of
+   * the principal can move: that proof is saved first, then the hold released. Gas, attempts, the marker and the terminal
+   * phase stay; signed bytes (found now or committed earlier) change nothing. Nothing is signed or sent here.
+   */
+  private async releaseAbandoned(op: UniswapTokenOperation): Promise<UniswapTokenOperation> {
+    const candidate = abandonedPrincipalCandidate(op); if (candidate === null) return op;
+    const swap = candidate.swap;
+    if (swap !== null && await this.ports.recoverSealed?.(op, "swap", swap.nonce) != null) return op;
+    op = await this.ports.withAccountLock(op, async () => { const current = await this.required(op.operationId);
+      if (current.integrityHash !== op.integrityHash || swap !== null && !await this.ports.releaseNonce(current, "swap", swap.nonce)) return current;
+      const now = this.ports.now();
+      return await this.persist(transitionUniswapToken(current, "abandoned_unknown", { principalRelease: { schemaVersion: "apn.uniswap-token-principal-release.v1",
+        kind: "swap_never_signed", ...(swap === null ? {} : { swapNonce: swap.nonce, swapMarkerHash: swap.markerHash }), observedAt: now.toISOString() } }, now)); });
+    if (op.principalRelease === undefined || op.usageState !== "reserved") return op;
+    return await this.persist(transitionUniswapToken(op, "abandoned_unknown", usagePatch(await this.ports.followUsage(op, "failed_before_effect")), this.ports.now()));
+  }
   private async cleanupRequired(op: UniswapTokenOperation, reason: string, native = op.accumulatedNativeDebitWei, usage?: TokenUsageBinding,
     preSignFailure?: import("./token-operation.js").UniswapTokenFailureDiagnostic, unmarkedAttempt: Partial<UniswapTokenOperation> = {}) {
     return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: reason, accumulatedNativeDebitWei: native,
@@ -305,11 +325,12 @@ export class UniswapTokenExecution {
   }
   private async syncUsage(op: UniswapTokenOperation) { if (op.usageReservationId === null) return op;
     // A recorded release whose ledger step did not complete (records of the earlier expired-approval exit, or principalRelease).
-    if (op.phase === "cleaned" && (op.cleanupEvidence?.kind === "expired_approval_no_swap" || op.principalRelease !== undefined)) {
+    if (op.phase === "cleaned" && (op.cleanupEvidence?.kind === "expired_approval_no_swap" || op.principalRelease !== undefined) ||
+        op.phase === "abandoned_unknown" && op.principalRelease !== undefined) {
       const current = await this.ports.currentUsage(op);
       if (current.state === "reserved") {
         const released = await this.ports.followUsage(op, "failed_before_effect");
-        return await this.persist(transitionUniswapToken(op, "cleaned", usagePatch(released), this.ports.now()));
+        return await this.persist(transitionUniswapToken(op, op.phase, usagePatch(released), this.ports.now()));
       }
     }
     const usage = await this.ports.currentUsage(op);

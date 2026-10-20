@@ -17,6 +17,7 @@ import {
 } from "../../src/stargate-v2/native-execution.js";
 import { StateStore } from "../../src/state.js";
 import { evmAddressLock } from "../../src/evm-address-ownership.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 
 const PRIVATE_KEY = `0x${"11".repeat(32)}` as Hex;
 const OWNER = privateKeyToAccount(PRIVATE_KEY).address;
@@ -414,8 +415,9 @@ test("production file journal lock is released by process crash while its stable
   t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
   await new Promise<void>((resolve, reject) => { child.stdout!.once("data", () => resolve()); child.once("error", reject);
     child.once("exit", code => reject(new Error(`lock holder exited before ready: ${code}`))); });
-  let acquired = false; const contender = journal.withLock(id, async () => { acquired = true; });
-  await new Promise<void>(resolve => setTimeout(resolve, 50)); assert.equal(acquired, false);
+  // The contender is seen refused by the kernel lock the crashed-to-be holder keeps (an event, not a pause).
+  let acquired = false; const blocked = lockRefusals(t).refused(`stargate-native:${id}`), contender = journal.withLock(id, async () => { acquired = true; });
+  await blocked; assert.equal(acquired, false);
   child.kill("SIGKILL"); await new Promise<void>(resolve => child.once("exit", () => resolve()));
   await contender; assert.equal(acquired, true);
 });

@@ -228,9 +228,13 @@ export class X402PaidRequest extends X402Lifecycle {
             }
             catch {
                 const observed = await this.finishPaidAttempt(pending, "observed", paid.observation, purpose === "payment" ? "effect_unknown" : "seller_result_recovery_pending");
-                return publicX402Operation(purpose === "result_recovery" && terminalizeFromExistingEvidence && observed.settlementEvidence !== undefined
-                    ? await this.commitTerminal(observed, "failed_settled_without_result")
-                    : observed);
+                // No usable PAYMENT-RESPONSE (absent, malformed, or copies that differ) gives no settlement hint, but the paid body
+                // is still the purchase: it is kept, and the chain alone proves the payment (never resent once a body is kept).
+                const kept = paid.result !== undefined && observed.settlementResponseObservation === undefined
+                    ? await this.persistAndLinkResult(observed, paid.result, paid.observation.observedAt) : observed;
+                return publicX402Operation(purpose === "result_recovery" && terminalizeFromExistingEvidence && kept.settlementEvidence !== undefined
+                    ? kept.resultLink === undefined ? await this.commitTerminal(kept, "failed_settled_without_result") : await this.finishReconciledEvidence(kept)
+                    : kept);
             }
             const response = {
                 schemaVersion: "apn.x402.settlement-response.v1",
@@ -302,7 +306,7 @@ export class X402PaidRequest extends X402Lifecycle {
         if (BigInt(operation.capAtomic) > BigInt(policy.maxX402AmountAtomic)) {
             throw new ApnError("APN_X402_PROFILE_LIMIT_EXCEEDED", "The current profile maximum is below the frozen x402 cap.");
         }
-        const balance = await this.context.requireRpc().getBalances(operation.wallet);
+        const balance = await requireX402Rpc(this.context, x402AssetOf(operation)).getBalances(operation.wallet);
         if (balance.address.toLowerCase() !== operation.wallet) {
             throw new ApnError("APN_RPC_PROTOCOL", "RPC balance response does not match the frozen Smart Account owner.");
         }

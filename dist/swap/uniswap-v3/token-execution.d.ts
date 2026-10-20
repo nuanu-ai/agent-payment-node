@@ -69,7 +69,7 @@ export interface UniswapTokenCommandRuntime {
     execute(id: string): Promise<UniswapTokenOperation>;
     status(id: string): Promise<UniswapTokenOperation>;
     cleanup(id: string, fees?: TokenCleanupFees): Promise<UniswapTokenOperation>;
-    /** The live allowance a swap the earlier expired-approval exit cleaned with its approval standing still has; null for any other record. */
+    /** The live allowance a terminal record may leave standing (an expired approval cleaned without a swap, an owner abandon); null otherwise. */
     residualAllowance?(operation: UniswapTokenOperation): Promise<string | null>;
 }
 export declare class UniswapTokenExecution {
@@ -116,6 +116,13 @@ export declare class UniswapTokenExecution {
      * nonce committed, and recovery only observes them. Nothing is signed or sent here.
      */
     private resumeUnsigned;
+    /**
+     * The owner's abandon keeps the principal held only while an effect of the swap could still land. With no swap marker, or
+     * a hashless one whose custody (opened under the account lock) holds no signed bytes and so frees its nonce, nothing of
+     * the principal can move: that proof is saved first, then the hold released. Gas, attempts, the marker and the terminal
+     * phase stay; signed bytes (found now or committed earlier) change nothing. Nothing is signed or sent here.
+     */
+    private releaseAbandoned;
     private cleanupRequired;
     private retireExpiredPrepared;
     private syncUsage;

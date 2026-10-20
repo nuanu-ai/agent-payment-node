@@ -43,16 +43,19 @@ export function walletFundingGuidance(usdcAtomic, ethAtomic, policy, postureActi
 }
 /** `wallet balance --chain --asset` advice: the selected asset follows its posture; a token read also applies the rule to native gas. */
 export function selectedAssetFundingGuidance(input) {
-    const chain = `eip155:${input.chainId}`;
-    const gas = assetAdvice(input.nativeAtomic, input.nativeLimit, {
-        label: `native ${input.nativeSymbol} on ${chain}`, purpose: " for gas", unit: "wei", symbol: input.nativeSymbol, decimals: 18,
-        atLimitEffect: "", overEffect: "unattended x402 is gated by the USDC limit only, so this native excess does not block it",
-    });
+    const chain = `eip155:${input.chainId}`, token = input.tokenSymbol ?? "token";
+    const gas = input.kind === "native" && input.nativeScope === "token_policies" ? { fundable: true, overfunded: false,
+        sentence: `Fund native ${input.nativeSymbol} on ${chain} for gas manually with a small amount only; its owner limit lives in each token's ` +
+            "x402 policy on this network, so read it with apn wallet balance --asset set to that token." }
+        : assetAdvice(input.nativeAtomic, input.nativeLimit, {
+            label: `native ${input.nativeSymbol} on ${chain}`, purpose: " for gas", unit: "wei", symbol: input.nativeSymbol, decimals: 18,
+            atLimitEffect: "", overEffect: "unattended x402 is gated by the token's own limit only, so this native excess does not block it",
+        });
     const selected = input.kind === "native" ? gas : assetAdvice(input.assetAtomic, input.assetLimit, {
-        label: `the selected ${input.x402Token ? "USDC" : "token"} on ${chain}`, purpose: "", unit: "atomic units",
-        symbol: input.x402Token ? "USDC" : "", decimals: input.decimals,
-        atLimitEffect: "; any further inbound USDC blocks new unattended x402 on this network",
-        overEffect: "new unattended x402 on this network is blocked until the owner reduces the excess manually",
+        label: `the selected ${token} on ${chain}`, purpose: "", unit: "atomic units",
+        symbol: input.tokenSymbol ?? "", decimals: input.decimals,
+        atLimitEffect: `; any further inbound ${token} blocks new unattended x402 with it on this network`,
+        overEffect: "new unattended x402 with this token on this network is blocked until the owner reduces the excess manually",
     });
     const action = input.kind === "native" ? selected.sentence : `${selected.sentence} ${gas.sentence}`;
     return {

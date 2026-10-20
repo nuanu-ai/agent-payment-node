@@ -3,6 +3,7 @@ import { performance } from "node:perf_hooks";
 import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { BASE_RPC_CHAIN, rpcUrlRequired } from "./rpc-requirement.js";
 export class RuntimeContext {
     relayPrepare;
     relayRetire;
@@ -210,10 +211,10 @@ export class RuntimeContext {
         }
         return this.keychainProbe;
     }
-    requireRpc() {
-        if (this.rpc === undefined) {
-            throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
-        }
+    /** The command's single `--rpc-url` endpoint; a missing one is refused naming the chain this command reads. */
+    requireRpc(chain) {
+        if (this.rpc === undefined)
+            throw rpcUrlRequired(chain);
         return this.rpc;
     }
     requireCoinbaseRpc() {
@@ -221,7 +222,7 @@ export class RuntimeContext {
             return this.coinbaseRpc;
         if (this.coinbaseRpcFactory !== undefined)
             return this.coinbaseRpcInstance ??= this.coinbaseRpcFactory();
-        return this.requireRpc();
+        return this.requireRpc(BASE_RPC_CHAIN);
     }
     requireHttp() {
         if (this.http === undefined) {
@@ -263,15 +264,15 @@ export class RuntimeContext {
         }
         return this.transferApproval;
     }
-    requireRpcUrl() {
+    requireRpcUrl(chain) {
         if (this.rpcUrl === undefined)
-            throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
+            throw rpcUrlRequired(chain);
         return this.rpcUrl;
     }
     requireCoinbaseRpcUrl() {
         if (this.coinbaseRpcUrl !== undefined)
             return this.coinbaseRpcUrl;
-        return this.requireRpcUrl();
+        return this.requireRpcUrl(BASE_RPC_CHAIN);
     }
     requireProviderAuthorizationStore() {
         if (this.providerAuthorizationStore === undefined) {

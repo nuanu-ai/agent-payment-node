@@ -278,15 +278,13 @@ test("authenticated policy revocation waits through the one send and then comple
     assert.equal(revoked, false);
     return (await import("viem")).keccak256(raw);
   } });
-  const result = await Promise.race([
-    h.service.execute("default", op.operationId),
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error("execute lock deadlock")), 3000)),
-  ]);
+  // No wall-clock deadline (a loaded machine is slow, not deadlocked): every lock here has its own bounded wait, so a lock
+  // cycle ends as APN_STATE_BUSY instead of a hang.
+  const result = await h.service.execute("default", op.operationId);
   assert.equal(result.state, "approval_submitted");
   assert.equal(h.counts().sends, 1);
   assert.ok(revocation);
-  await Promise.race([revocation, new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("revocation lock deadlock")), 3000))]);
+  await revocation;
   assert.equal(revoked, true);
   assert.equal(activeAssetPolicyFromState(await stored.store.read("default"), now), null);
 });
