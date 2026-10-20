@@ -1,6 +1,6 @@
 # x402 to any seller (EVM and Solana)
 
-APN pays a seller's `exact` offer on any EVM network and token the owner admitted. The seller still supplies only
+APN pays a seller's `exact` offer on any EVM network and token, and on Solana for any SPL mint, the owner admitted. The seller still supplies only
 `payTo`, amount and resource; the network and token must be admitted by the owner, and the token's identity is read
 from the chain at prepare. Nothing is inferred from the seller's words alone.
 
