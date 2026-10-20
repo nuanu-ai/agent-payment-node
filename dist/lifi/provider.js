@@ -8,6 +8,15 @@ import { bridgeFailure, bridgeJson, bridgeRecord } from "./validation.js";
 const ORIGIN = LIFI_API_ORIGIN;
 export const LIFI_ROUTE_RESPONSE_BYTES = 512 * 1024;
 export const LIFI_INVENTORY_RESPONSE_BYTES = 4 * 1024 * 1024;
+export const LIFI_ROUTES_ENDPOINT = `${ORIGIN}/advanced/routes`;
+/**
+ * The tools a route request lets LI.FI use: the reviewed bridges, and an exchange plus a destination call only for the
+ * one reviewed composite (Ethereum ETH to BNB through Across and fly). Every other native lane is a direct bridge fill.
+ */
+export function lifiRouteTools(request) {
+    const composite = bridgeCrossNativeConversion(request);
+    return { bridges: composite ? ["across"] : ["across", "stargateV2"], exchanges: composite ? ["fly"] : [], allowDestinationCall: composite };
+}
 export class LifiProvider {
     transport;
     now;
@@ -121,14 +130,13 @@ export class LifiProvider {
     }
     async routes(request, sender) {
         validateBridgeRequest(request);
-        const bnbComposite = bridgeCrossNativeConversion(request);
-        return await this.transport.request(`${ORIGIN}/advanced/routes`, "POST", canonicalJson({
+        const tools = lifiRouteTools(request);
+        return await this.transport.request(LIFI_ROUTES_ENDPOINT, "POST", canonicalJson({
             fromChainId: request.fromChainId, toChainId: request.toChainId, fromTokenAddress: request.fromToken,
             toTokenAddress: request.toToken, fromAmount: request.amountAtomic, fromAddress: sender, toAddress: request.recipient,
-            options: { slippage: request.slippageBps / 10_000, allowSwitchChain: false, allowDestinationCall: bnbComposite,
+            options: { slippage: request.slippageBps / 10_000, allowSwitchChain: false, allowDestinationCall: tools.allowDestinationCall,
                 executionType: "transaction", gasless: false, fee: 0, integrator: "lifi-api",
-                bridges: { allow: bnbComposite ? ["across"] : ["across", "stargateV2"] },
-                exchanges: { allow: bnbComposite ? ["fly"] : [] } },
+                bridges: { allow: [...tools.bridges] }, exchanges: { allow: [...tools.exchanges] } },
         }), LIFI_ROUTE_RESPONSE_BYTES, "APN_HTTP_CONFIG");
     }
     async materialize(step) {
