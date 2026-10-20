@@ -1,6 +1,8 @@
 # x402 to any seller (EVM and Solana)
 
-APN pays a seller's `exact` offer on any EVM network and token, and on Solana for any SPL mint, the owner admitted. The seller still supplies only
+APN pays a seller's `exact` offer on any EVM network and token the owner admitted, and on Solana for an admitted classic
+SPL mint. Admissions through an allowlist row (Permit2, Solana) can name only an asset of the frozen allowlist inventory:
+on Solana that is USDC and USDT (`wallet capabilities-solana` lists them; wSOL is not in it). The seller still supplies only
 `payTo`, amount and resource; the network and token must be admitted by the owner, and the token's identity is read
 from the chain at prepare. Nothing is inferred from the seller's words alone.
 

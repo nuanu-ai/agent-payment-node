@@ -180,8 +180,8 @@ authorization; `operation resume` owns the paid request, settlement observation 
 for Permit2, USDC included) and [ERC-20 transfer-proof merchants](docs/x402-merchant-usdm.md) (`x402 merchant *`,
 MegaETH USDm first) are CLI commands with foreground approval. `x402 permit2 allowance set|revoke` sets the wallet's
 bounded allowance to Permit2 for an owner-admitted chain and token (foreground, one send, observed to proof).
-`x402 solana pay` pays a Solana `exact` offer unattended (CLI or MCP) for a mint the owner's allowlist row admits, under
-the owner's Solana x402 policy (`wallet policy set --chain solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp --asset <mint>`); the
+`x402 solana pay` pays a Solana `exact` offer unattended (CLI or MCP) for a mint the owner's allowlist row admits
+(inventory USDC or USDT), under the owner's Solana x402 policy (`wallet policy set --chain solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp --asset <mint>`); the
 seller's facilitator pays the fee and `APN_SOLANA_RPC_URL` must be set. `x402 solana observe` proves settlement or that
 the payment can no longer land ([any seller](docs/x402-any-seller.md)).
 [Offer selection](docs/x402-offer-selection.md) and [settlement fields](docs/x402-settlement-compatibility.md) are
