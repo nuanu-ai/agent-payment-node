@@ -1,12 +1,12 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.55",
+  "version": "0.5.56",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@nuanu-ai/apn",
-      "version": "0.5.55",
+      "version": "0.5.56",
       "cpu": [
         "arm64"
       ],
