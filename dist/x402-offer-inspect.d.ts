@@ -1,4 +1,4 @@
-import type { PaymentRequired, PaymentRequirements } from "@x402/core/types";
+import type { X402PaymentRequired as PaymentRequired, X402PaymentRequirements as PaymentRequirements } from "./x402-codec.js";
 import { ApnError } from "./errors.js";
 import type { InspectCandidate } from "./x402-model.js";
 import { type X402Asset } from "./x402-network.js";
