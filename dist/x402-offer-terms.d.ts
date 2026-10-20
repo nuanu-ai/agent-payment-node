@@ -8,7 +8,7 @@
 export declare const X402_OFFER_MAX_TIMEOUT_SECONDS = 3600;
 /** The shortest window unattended x402 signs for: prepare, the owner's approval, signing and the paid request must fit. */
 export declare const X402_OFFER_MIN_TIMEOUT_SECONDS = 30;
-export type X402OfferRefusalReason = "x402_offer_scheme_unsupported" | "x402_offer_amount_invalid" | "x402_offer_payee_invalid" | "x402_offer_method_unsupported" | "x402_offer_timeout_exceeds_bound" | "x402_offer_timeout_below_bound" | "x402_offer_extra_invalid" | "x402_offer_spender_mismatch" | "x402_offer_chain_mismatch" | "x402_offer_field_unsupported" | "x402_token_decimals_mismatch" | "x402_solana_fee_payer_invalid";
+export type X402OfferRefusalReason = "x402_offer_scheme_unsupported" | "x402_offer_amount_invalid" | "x402_offer_payee_invalid" | "x402_offer_method_unsupported" | "x402_offer_timeout_exceeds_bound" | "x402_offer_timeout_below_bound" | "x402_offer_extra_invalid" | "x402_offer_spender_mismatch" | "x402_offer_chain_mismatch" | "x402_token_decimals_mismatch" | "x402_solana_fee_payer_invalid";
 /** Why one seller offer cannot be signed: the deciding field, the seller's value and what APN accepts there. */
 export interface X402OfferRefusal {
     readonly reason: X402OfferRefusalReason;

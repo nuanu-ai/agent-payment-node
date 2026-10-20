@@ -28,13 +28,18 @@ foreground Permit2 lane:
   `x402_token_decimals_mismatch`), Permit2 `spenderAddress` (exactly the x402 exact Permit2 proxy
   `0x402085c248EeA27D92E8b30b2C58ed07f9E20001`, else `x402_offer_spender_mismatch`) and `chainId` (exactly the offer's
   chain, else `x402_offer_chain_mismatch`). Every other key (`signerAddress`, `x402PaymentConfigId`, `challengeId`, …)
-  is the seller's own: never a reason to refuse, sent back unchanged in `accepted`. The seller's `resource` is echoed
-  unchanged too (its `serviceName`, `tags`, …), for Permit2 as for EIP-3009. Solana offers follow the same rule for
-  `feePayer` and `memo`.
+  is the seller's own: never a reason to refuse, sent back unchanged in `accepted`. The same holds for offer fields
+  outside `extra`: the ones APN understands (`scheme`, `network`, `asset`, `amount`, `payTo`, `maxTimeoutSeconds`) are
+  strict, while v1-style fields (`maxAmountRequired`, `resource`, `description`, `mimeType`, `outputSchema`, …) are
+  carried unchanged, for Permit2 as for EIP-3009. The seller's `resource` is echoed unchanged too (its `serviceName`,
+  `tags`, …). Solana offers follow the same rule for `feePayer` and `memo`.
+- Resource: the challenge's `resource.url` must name the requested endpoint, the same scheme, host, port and path
+  after WHATWG normalisation; query and fragment may differ (most sellers name the resource without the caller's
+  query). The paid request goes to the requested URL, and the seller's `resource` is echoed unchanged. Another origin
+  or path is refused as `x402_resource_url_mismatch`.
 - A refusal names the real reason per offer: `reason`, the deciding `field`, the seller's value (`sellerValue`) and
   what APN accepts (`accepted`), plus one line per refused offer of the selected chain and token (`refused`), in CLI
-  and MCP alike. `x402_offer_asset_not_offered` means the seller offers that chain and token not at all;
-  `x402_resource_url_mismatch` means the challenge names another resource URL than the one requested.
+  and MCP alike. `x402_offer_asset_not_offered` means the seller offers that chain and token not at all.
 
 ## Seller PAYMENT-RESPONSE
 
@@ -42,6 +47,18 @@ Several PAYMENT-RESPONSE (or `X-PAYMENT-RESPONSE`) copies count as one settlemen
 byte-identical. Copies that differ, a folded or padded value, bytes outside printable ASCII or an oversized value are
 no hint at all. Either way the paid body is kept in the record (EVM x402 and Solana): settlement is proven on chain,
 never by this header, and a body kept without a hint is never paid for again.
+
+## Lanes these rules leave as they are
+
+- Foreground `x402 permit2 approve`: its challenge must name exactly the requested URL, and its own transport holds
+  an attempt whose PAYMENT-RESPONSE copies are duplicated or malformed until `observe` proves the outcome on chain.
+  That lane never stores a seller body, so nothing is lost; identical copies are not taken as a hint there.
+- ERC-7710 (MetaMask Smart Account, Base USDC): settlement is proven only through the seller's transaction, so a
+  body kept without a usable PAYMENT-RESPONSE ends through the delegated transfer-scan expiry proof or the owner's
+  abandon, never as settled.
+- The Rust Keychain agent (`native/src/x402.rs`) still signs only Base EIP-3009 within 30–300 s; the npm CLI signs
+  through its local wallet custody and does not use it.
+- Coinbase provider x402 (Base USDC): it still needs exactly one eligible offer, and any method's candidate counts.
 
 Durable records retain the selected index, exact requirement and existing
 hashes. Every offer occupies bytes, so an index at or beyond the complete

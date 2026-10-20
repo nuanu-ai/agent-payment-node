@@ -25,8 +25,9 @@ export type Permit2OfferRefusal = "x402_permit2_no_listed_offer" | "x402_permit2
 /**
  * Select the lowest-index seller offer whose (network, token) `resolve` admits, paid through the exact Permit2 flow.
  * Unsupported offers may coexist; they are skipped, never repaired. An admitted offer that APN cannot sign (another
- * scheme or transfer method, an unknown top-level field, a timeout outside the bound, an `extra` key APN understands
- * with a wrong value) is refused by the field that decided it.
+ * scheme or transfer method, a timeout outside the bound, a field or `extra` key APN understands with a wrong value) is
+ * refused by the field that decided it. Fields APN does not understand (v1-style `maxAmountRequired`, `resource`,
+ * `description`, …) are the seller's own and stay in the requirement unchanged.
  */
 export declare function selectPermit2Offer(accepts: readonly unknown[], payer: Address, resolve: Permit2AssetResolver): Permit2OfferSelection;
 /** Revalidate a frozen selection against the asset it carries; any drift is state corruption. */

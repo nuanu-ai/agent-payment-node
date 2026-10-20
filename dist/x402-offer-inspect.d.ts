@@ -7,7 +7,7 @@ export interface X402OfferInspection {
     readonly candidates: readonly InspectCandidate[];
     /** Offers of exactly the selected network and token that APN refused, each with its deciding field. */
     readonly refused: readonly X402RefusedOffer[];
-    /** The challenge's own resource URL when it is not the requested URL (then no offer is a candidate); else null. */
+    /** The challenge's own resource URL when its origin or path is not the requested one (then no offer is a candidate); else null. */
     readonly resourceMismatch: string | null;
 }
 /** Offers of exactly the selected network and token (a bare chain id: its released USDC); others are skipped, never repaired. */
@@ -21,7 +21,7 @@ export declare function inspectOffers(paymentRequired: PaymentRequired, requeste
  */
 export declare function inspectOffer(requirements: PaymentRequirements, index: number, selected: X402Asset): InspectCandidate | X402OfferRefusal | null;
 /**
- * The refusal when no offer of the selected network and token can be signed: the resource the seller names is not the
- * requested one, every such offer was refused (each with its reason), or the seller offers this network and token not at all.
+ * The refusal when no offer of the selected network and token can be signed: the resource the seller names is another
+ * origin or path, every such offer was refused (each with its reason), or the seller offers this network and token not at all.
  */
 export declare function unsupportedOfferError(asset: X402Asset, paymentRequired: PaymentRequired, inspection: X402OfferInspection): ApnError;
