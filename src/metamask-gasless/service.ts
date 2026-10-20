@@ -21,6 +21,8 @@ import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
 import { revokeMetaMaskGasless, type MetaMaskRevocationDependencies } from "./revocation/service.js";
 import { canonicalProfile } from "../wallet-policy.js";
+import { directEvmNetwork } from "../evm-direct-networks.js";
+import { formatAtomic } from "../money.js";
 
 export interface MetaMaskGaslessDependencies {
   readonly rpcFor: MetaMaskGaslessRpcFactory;
@@ -32,15 +34,29 @@ export interface MetaMaskGaslessDependencies {
   readonly revocation?: MetaMaskRevocationDependencies;
 }
 /**
- * MetaMask quoted no USDC relay fee. Its own client reads that answer as the server wallet's USDC not covering the
- * transfer plus the fee, so the useful step is to read that balance. APN states the reading, it does not promise a fix.
+ * Next actions follow only what the refusal proves (METAMASK-FEE-REFUSAL-ASSET-GUIDANCE-001): the native gas shortfall
+ * MetaMask's own simulation states, APN's own USDC balance read below the transfer plus its fee, or no proven cause.
+ * USDC is named as short only on APN's read; no native transfer or other relay stands in for this one.
  */
 function feeQuoteGuidance(error: unknown, profile: string, chainId: MetaMaskGaslessChainId): unknown {
-  if (!(error instanceof ApnError) || error.details?.reason !== "mm_gasless_fee_unquoted") return error;
-  return new ApnError(error.code, error.message, { ...error.details, nextActions: [
-    `apn gasless balance --profile ${canonicalProfile(profile)} --chain ${chainId}`,
-    "MetaMask's own client reads this answer as a server-wallet USDC balance below the transfer plus its relay fee; compare it with the balance above. No operation was written, so the same prepare may run again.",
-  ] });
+  if (!(error instanceof ApnError)) return error;
+  const d = error.details ?? {}, again = "No operation was written, so the same prepare may run again";
+  const where = `on ${directEvmNetwork(chainId).name} (chain ${chainId})`;
+  let nextActions: string[];
+  if (d.reason === "mm_gasless_fee_unquoted") {
+    const required = d.mm_read_native_required_wei, current = d.mm_read_native_current_wei, symbol = d.native_symbol;
+    nextActions = typeof required === "string" && typeof current === "string" && typeof symbol === "string"
+      ? [`MetaMask's relay simulation for this transfer ${where} needs ${required} wei of native ${symbol} for gas on the server wallet, which ` +
+        `holds ${current} wei. APN neither sends this transfer with native gas instead nor reads it as a USDC shortfall. ${again} once MetaMask quotes a USDC relay fee.`]
+      : [`MetaMask's fee quote named no cause APN can verify, so APN cannot tell whether USDC, native gas or the relay itself is short. ${again}.`];
+  } else if (d.reason === "mm_gasless_balance" && typeof d.mm_read_usdc_current_atomic === "string" &&
+    typeof d.mm_read_usdc_required_atomic === "string") {
+    const required = d.mm_read_usdc_required_atomic, short = (BigInt(required) - BigInt(d.mm_read_usdc_current_atomic)).toString();
+    nextActions = [`apn gasless balance --profile ${canonicalProfile(profile)} --chain ${chainId}`,
+      `The server wallet's USDC ${where} is ${short} atoms (${formatAtomic(short, 6)} USDC) short of this transfer plus MetaMask's quoted relay fee. ` +
+      `${again} once it holds at least ${required} USDC atoms.`];
+  } else return error;
+  return new ApnError(error.code, error.message, { ...error.details, nextActions });
 }
 export class MetaMaskGaslessService {
   readonly records: MetaMaskGaslessRepositoryPort;

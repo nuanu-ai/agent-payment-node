@@ -626,7 +626,8 @@ failure is `mm_gasless_rpc_unavailable`. In every case the blocks already
 proved in that resume stay proved, and the next resume continues from there.
 
 Two provider answers end a prepare before anything is written, each as
-`APN_PROVIDER_CAPABILITY_UNAVAILABLE`, naming the network and the provider read:
+`APN_PROVIDER_CAPABILITY_UNAVAILABLE`, naming the network and the provider read,
+and so does one USDC balance refusal:
 
 - `mm_gasless_relay_unsupported`: MetaMask's relay lists do not offer the chain.
   The refusal says which list withholds it: the server-wallet network list
@@ -635,12 +636,23 @@ Two provider answers end a prepare before anything is written, each as
   `relayTransactions` flag, `mm_read_relay_sentinel_flag`).
 - `mm_gasless_fee_unquoted`: MetaMask's fee quote (`tx-sentinel-<network>`,
   `infura_simulateTransactions`) answered without
-  `result.transactions[-1].fees[0].tokenFees`. The pinned MetaMask client reads
-  that answer as "Insufficient balance to cover the transfer and gasless relay
-  fee.", so the next action is `apn gasless balance` for the same profile and
-  chain. The refusal also carries the answer's closed facts: the simulated
-  transfer's status, whether the fee tier carried an error, and the sponsorship
-  flag; the provider's own text is never shown.
+  `result.transactions[-1].fees[0].tokenFees`. APN never reads that alone as a
+  USDC shortfall. When the same low fee tier carries an error and its own native
+  gas terms prove a shortfall (`balanceNeeded` equals `gas` x `maxFeePerGas`
+  exactly and exceeds `currentBalance`), the refusal states the native gas
+  required and held in wei and in the network's native unit
+  (`mm_read_native_*`, `provider_cause: native_gas_below_required`); otherwise
+  it says no cause is proven (`provider_cause: unverified`). Neither points at
+  USDC, and APN never sends the transfer with native gas instead. The refusal
+  also carries the answer's closed facts: the simulated transfer's status,
+  whether the fee tier carried an error, and the sponsorship flag; the
+  provider's own text is never shown.
+- `APN_INSUFFICIENT_USDC / mm_gasless_balance`: the fee quote priced the relay,
+  but APN's own validated `balanceOf` read of the server wallet is below the net
+  amount plus the quoted fee (raised 5% on Ethereum, as the pinned client signs
+  it). The refusal carries both numbers (`mm_read_usdc_current_atomic`,
+  `mm_read_usdc_required_atomic`) and its next action is `apn gasless balance`
+  for the same profile and chain.
 
 Any other malformed quote stays `APN_PROVIDER_UNAVAILABLE / mm_gasless_provider_unavailable`.
 
