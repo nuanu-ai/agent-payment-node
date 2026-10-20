@@ -101,6 +101,7 @@ export type BridgeObservationRpcReason = "bridge_RPC_HTTP_status" | "bridge_RPC_
   "destination_log_identity" | "destination_log_hash" | "destination_scan_cursor_reorg" |
   "destination_scan_membership" | "destination_scan_reorg" | "destination_candidate_unresolved" |
   "duplicate_destination_delivery" | "destination_not_safe_success" | "destination_transaction_reverted" | "destination_trace_rebind" |
+  "destination_fill_unmatched" | "destination_fill_ambiguous" |
   "bridge_deployment_code_changed" | "bridge_deployment_configuration_changed" |
   "historical_deployment_contract_hash" | "historical_deployment_code_hash" |
   "historical_deployment_configuration_hash" | "historical_deployment_block" |
