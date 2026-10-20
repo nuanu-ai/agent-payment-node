@@ -10,7 +10,9 @@ import { decodePaymentRequiredHeader, decodePaymentSignatureHeader } from "../..
 import { x402Asset } from "../../src/x402-network.js";
 import { inspectOffers } from "../../src/x402-offer-inspect.js";
 import { X402_OFFER_MAX_TIMEOUT_SECONDS } from "../../src/x402-offer-terms.js";
-import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
+import { checkPermit2Challenge } from "../../src/x402-permit2/checked-challenge.js";
+import { inspectPermit2Offer } from "../../src/x402-permit2/inspection.js";
+import { selectPermit2Offer, selectPermit2OfferToSign } from "../../src/x402-permit2/offer.js";
 import { X402_EXACT_PERMIT2_PROXY, wirePermit2Asset } from "../../src/x402-permit2/registry.js";
 import { validateX402Operation } from "../../src/x402-state-integrity.js";
 import { testRuntime } from "./installed-runtime.js";
@@ -132,7 +134,8 @@ test("CLI and MCP refuse a 7,200-second counterfactual with the same named reaso
   assert.deepEqual(cli.error?.details, { reason: "x402_offer_timeout_exceeds_bound", field: "maxTimeoutSeconds", sellerValue: "7200", accepted: "30..3600",
     refused: [`offer 0 eip155:8453 ${BASE_USDC.token.toLowerCase()} permit2: x402_offer_timeout_exceeds_bound maxTimeoutSeconds=7200 (APN accepts 30..3600)`],
     chain: "eip155:8453", asset: BASE_USDC.token, offered: [`eip155:8453 ${BASE_USDC.token.toLowerCase()} permit2`] });
-  assert.match(cli.error?.message ?? "", /offer 0 .* was refused: x402_offer_timeout_exceeds_bound maxTimeoutSeconds=7200/u);
+  assert.match(cli.error?.message ?? "", /offer 0 for eip155:8453 0x[0-9a-f]{40} was refused: x402_offer_timeout_exceeds_bound \(maxTimeoutSeconds\)/u);
+  assert.equal(cli.error?.message.includes("7200"), false, "the seller's value is only in details");
 });
 
 test("the resource must name the requested origin and path; query and fragment may differ, another host, port or path refuses", () => {
@@ -156,6 +159,32 @@ test("a Permit2 offer's fields outside extra that APN does not understand are ca
     (error as { details?: Record<string, unknown> }).details?.reason === "x402_offer_amount_invalid");
   assert.throws(() => selectPermit2Offer([{ ...V1_STYLE.accepts[0], payTo: X402_EXACT_PERMIT2_PROXY }], PAYER, wirePermit2Asset), (error: unknown) =>
     (error as { details?: Record<string, unknown> }).details?.reason === "x402_offer_payee_invalid");
+});
+
+test("a Permit2 offer custody cannot sign (under 30 s) is refused by name at selection to sign; the shape check that re-derives saved records keeps 1 s", () => {
+  for (const seconds of [1, 29]) {
+    const accepts = edified({ maxTimeoutSeconds: seconds }).accepts;
+    assert.equal(selectPermit2Offer(accepts, PAYER, wirePermit2Asset).maxTimeoutSeconds, seconds, "an earlier record with this window still loads");
+    for (const select of [() => selectPermit2OfferToSign(accepts, PAYER, wirePermit2Asset), () => inspectPermit2Offer({ accepts, payer: PAYER })]) {
+      assert.throws(select, (error: unknown) => {
+        const details = (error as { details?: Record<string, unknown> }).details;
+        return details?.reason === "x402_offer_timeout_below_bound" && details.field === "maxTimeoutSeconds" && details.sellerValue === String(seconds) &&
+          details.accepted === "30..3600" && (error as Error).message === `The seller's offer 0 for eip155:8453 ${BASE_USDC.token.toLowerCase()} was ` +
+          "refused: x402_offer_timeout_below_bound (maxTimeoutSeconds); details name the seller's value and what APN accepts.";
+      });
+    }
+  }
+  assert.equal(selectPermit2OfferToSign(edified({ maxTimeoutSeconds: 30 }).accepts, PAYER, wirePermit2Asset).maxTimeoutSeconds, 30);
+});
+
+test("the foreground Permit2 checked challenge takes the origin-and-path rule: the caller's query may differ, another path refuses", () => {
+  const request = (url: string) => ({ schemaVersion: "apn.http-request.v1", url, method: "GET", headers: {}, bodyBase64: null });
+  const challenge = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader(CAPTURED.paymentRequired));
+  assert.equal(checkPermit2Challenge(challenge, request(`${URL_}?instrument=ES`)).request.url, `${URL_}?instrument=ES`);
+  assert.equal(checkPermit2Challenge(challenge, request(URL_)).challenge.resource.url, URL_);
+  for (const other of ["https://api.edifiedlab.com/v1/market/other", "https://other.example/v1/market/vol-regime"]) {
+    assert.throws(() => checkPermit2Challenge(challenge, request(other)), { code: "APN_INVALID_INPUT" });
+  }
 });
 
 test("the Permit2 selector names the deciding field of an admitted offer it cannot sign", () => {

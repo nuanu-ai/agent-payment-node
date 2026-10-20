@@ -1,6 +1,6 @@
 import type { Address } from "../model.js";
 import type { Permit2Requirement } from "./offer.js";
-import { selectPermit2Offer, type Permit2OfferSelection } from "./offer.js";
+import { selectPermit2OfferToSign, type Permit2OfferSelection } from "./offer.js";
 import { wirePermit2Asset } from "./registry.js";
 
 /** Input for the pure Permit2 offer inspection boundary. No RPC, wallet or state port is accepted. */
@@ -30,7 +30,8 @@ export interface Permit2OfferInspection {
  */
 export function inspectPermit2Offer(input: Permit2OfferInspectionInput): Permit2OfferInspection {
   // Inspect has no profile: it shows the lowest-index well-formed Permit2 offer on any EVM network; approve admits it.
-  const selection = selectPermit2Offer(input.accepts, input.payer, wirePermit2Asset);
+  // A window shorter than signing through custody allows is refused here as at prepare, before any consent.
+  const selection = selectPermit2OfferToSign(input.accepts, input.payer, wirePermit2Asset);
   return Object.freeze({
     index: selection.index,
     requirement: freezeRequirement(selection.requirement),

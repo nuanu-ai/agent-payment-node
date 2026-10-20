@@ -6,7 +6,7 @@ import type { X402PaymentRequired } from "../x402-codec.js";
 import { planPermit2Authorization, type Permit2SigningPlan } from "./authorization.js";
 import { tokenDomainSeparator } from "../x402-policy.js";
 import { isEip2612GasSponsoringDeclaration } from "./extension.js";
-import { selectPermit2Offer, type Permit2Requirement } from "./offer.js";
+import { selectPermit2Offer, selectPermit2OfferToSign, type Permit2Requirement } from "./offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_EXACT_PERMIT2_PROXY_CODE_HASH, X402_PERMIT2_MECHANISM,
   type Permit2Asset, type Permit2AssetResolver } from "./registry.js";
 
@@ -199,7 +199,7 @@ export async function preparePermit2WithPort(
 ): Promise<Permit2PreparedMaterial> {
   const challengeHash = hashChallenge(input.challenge);
   const sellerSponsorsEip2612 = validateChallenge(input.challenge);
-  const selection = selectPermit2Offer(input.challenge.accepts, input.payer, input.assets);
+  const selection = selectPermit2OfferToSign(input.challenge.accepts, input.payer, input.assets);
   if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
       canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) {
     blocked("The merchant challenge or selected terms changed.", "x402_permit2_merchant_terms_mismatch");

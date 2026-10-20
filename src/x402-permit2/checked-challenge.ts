@@ -2,6 +2,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonica
 import { ApnError } from "../errors.js";
 import { decodePaymentRequiredHeader, encodePaymentRequiredHeader, type X402PaymentRequired } from "../x402-codec.js";
 import { normalizeX402HttpRequest, type X402HttpRequestV1 } from "../x402-http-request.js";
+import { x402ResourceNamesRequest } from "../x402-offer-inspect.js";
 import { hashChallenge } from "./prepare.js";
 
 export interface Permit2CheckedChallenge {
@@ -10,11 +11,14 @@ export interface Permit2CheckedChallenge {
   readonly request: X402HttpRequestV1;
   readonly requestHash: string;
 }
-/** Internal checked inspection material; no private request is added to public inspection output. */
+/**
+ * Internal checked inspection material; no private request is added to public inspection output. The seller's resource
+ * must name the requested endpoint by the rule every x402 lane uses (same origin and path; query and fragment may differ).
+ */
 export function checkPermit2Challenge(challenge: X402PaymentRequired, requestValue: unknown): Permit2CheckedChallenge {
   const request = normalizeX402HttpRequest(requestValue);
   const checked = decodePaymentRequiredHeader(encodePaymentRequiredHeader(challenge));
-  if (checked.resource.url !== request.url || canonicalJson(checked) !== canonicalJson(challenge)) {
+  if (!x402ResourceNamesRequest(checked.resource.url, request.url) || canonicalJson(checked) !== canonicalJson(challenge)) {
     throw new ApnError("APN_INVALID_INPUT", "The checked challenge does not bind the exact merchant request.");
   }
   return { challenge: checked, challengeHash: hashChallenge(checked), request,

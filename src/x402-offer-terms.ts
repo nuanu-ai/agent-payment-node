@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { X402_EXACT_PERMIT2_PROXY } from "./x402-permit2/registry.js";
 
 /**
@@ -37,9 +38,23 @@ export type X402EvmMethod = "eip3009" | "permit2" | "erc7710";
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const MAX_TEXT = 128;
+/** The only shape of seller text a refusal repeats verbatim: no spaces, quotes, brackets or other words-forming marks. */
+const SELLER_VERBATIM = /^[A-Za-z0-9._:/-]{1,64}$/u;
+
+/**
+ * A seller-controlled value as a refusal's structured details show it, never its `message`: verbatim only when its text
+ * (a string itself, anything else as JSON) matches {@link SELLER_VERBATIM}, otherwise only the UTF-8 byte length and
+ * sha256 of that text. Seller text is untrusted input an agent reads; this way it cannot reach the agent as instructions.
+ */
+export function sellerValue(value: unknown): string {
+  const text = typeof value === "string" ? value : JSON.stringify(value) ?? typeof value;
+  if (SELLER_VERBATIM.test(text)) return text;
+  const bytes = Buffer.from(text, "utf8");
+  return `length:${bytes.byteLength} sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
 
 export function offerRefusal(reason: X402OfferRefusalReason, field: string, value?: unknown, expected?: string): X402OfferRefusal {
-  return { reason, field, ...(value === undefined ? {} : { value: shown(value) }), ...(expected === undefined ? {} : { expected }) };
+  return { reason, field, ...(value === undefined ? {} : { value: sellerValue(value) }), ...(expected === undefined ? {} : { expected }) };
 }
 
 export function isOfferRefusal(value: unknown): value is X402OfferRefusal {
@@ -108,13 +123,14 @@ export function decimalsRefusal(extra: Readonly<Record<string, unknown>>, decima
 /** The method an offer names, as text for a refusal's details (never trusted for anything else). */
 export function declaredMethod(extra: unknown): string {
   const declared = typeof extra === "object" && extra !== null ? (extra as Record<string, unknown>).assetTransferMethod : undefined;
-  return declared === undefined ? "eip3009" : shown(declared);
+  return declared === undefined ? "eip3009" : sellerValue(declared);
 }
 
 /**
  * The refusal details for offers of the selected chain and token that were all refused: the reason they share (or
  * `x402_offers_refused` when they differ), the first one's deciding field with the seller's value and what APN accepts
- * there, a message naming it, and every refused offer in seller order as one line each (at most 16).
+ * there, and every refused offer in seller order as one line each (at most 16). The message names only APN's own words
+ * (the offer's place, the selected network and token, the reason and field); every seller value stays in the details.
  */
 export function refusedOffersDetails(refused: readonly X402RefusedOffer[]): {
   readonly message: string;
@@ -124,16 +140,16 @@ export function refusedOffersDetails(refused: readonly X402RefusedOffer[]): {
   if (first === undefined) throw new Error("No refused offer to name.");
   const reason = refused.every((offer) => offer.reason === first.reason) ? first.reason : "x402_offers_refused";
   return {
-    message: `The seller's offer ${first.index} (${first.network} ${first.asset} ${first.method}) was refused: ${refusedLine(first, false)}.`,
+    message: `The seller's offer ${first.index} for ${first.network} ${first.asset} was refused: ${first.reason} (${first.field}); ` +
+      "details name the seller's value and what APN accepts.",
     details: { reason, field: first.field, ...(first.value === undefined ? {} : { sellerValue: first.value }),
-      ...(first.expected === undefined ? {} : { accepted: first.expected }), refused: refused.slice(0, 16).map((offer) => refusedLine(offer, true)) },
+      ...(first.expected === undefined ? {} : { accepted: first.expected }), refused: refused.slice(0, 16).map(refusedLine) },
   };
 }
 
-function refusedLine(offer: X402RefusedOffer, withOffer: boolean): string {
-  const head = withOffer ? `offer ${offer.index} ${offer.network} ${offer.asset} ${offer.method}: ` : "";
-  return `${head}${offer.reason} ${offer.field}${offer.value === undefined ? "" : `=${offer.value}`}` +
-    (offer.expected === undefined ? "" : ` (APN accepts ${offer.expected})`);
+function refusedLine(offer: X402RefusedOffer): string {
+  return `offer ${offer.index} ${offer.network} ${offer.asset} ${offer.method}: ${offer.reason} ${offer.field}` +
+    `${offer.value === undefined ? "" : `=${offer.value}`}${offer.expected === undefined ? "" : ` (APN accepts ${offer.expected})`}`;
 }
 
 function sameChain(value: unknown, chainId: number): boolean {
@@ -144,7 +160,3 @@ function boundedText(value: unknown): boolean {
   return typeof value === "string" && value.length > 0 && Buffer.byteLength(value, "utf8") <= MAX_TEXT;
 }
 
-function shown(value: unknown): string {
-  const text = typeof value === "string" ? value : JSON.stringify(value) ?? typeof value;
-  return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT)}…` : text;
-}

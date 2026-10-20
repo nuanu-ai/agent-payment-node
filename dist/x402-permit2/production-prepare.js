@@ -14,7 +14,7 @@ import { validatePermit2CheckedChallenge } from "./checked-challenge.js";
 import { permit2WalletBinding } from "./owner-binding.js";
 import { createPermit2ProductionReadPort } from "./read-port.js";
 import { createPermit2ProductionMaterial, PERMIT2_PRODUCTION_SCHEMA, reconstructPermit2ProductionMaterial } from "./production-material.js";
-import { selectPermit2Offer } from "./offer.js";
+import { selectPermit2OfferToSign } from "./offer.js";
 import { permit2SellerSponsorsEip2612 } from "./prepare.js";
 import { admittedPermit2Assets } from "./admission.js";
 import { X402_PERMIT2_MECHANISM } from "./registry.js";
@@ -106,7 +106,7 @@ export class Permit2ProductionPreparation {
         if (active === null) {
             throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No active owner allowlist policy admits a Permit2 token for this profile.", { reason: "x402_permit2_owner_admission_required", rail: "x402" });
         }
-        return selectPermit2Offer(validatePermit2CheckedChallenge(checked).challenge.accepts, account, admittedPermit2Assets(active));
+        return selectPermit2OfferToSign(validatePermit2CheckedChallenge(checked).challenge.accepts, account, admittedPermit2Assets(active));
     }
     async required(id) {
         const record = await this.records.findOperation(id);
