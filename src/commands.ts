@@ -197,7 +197,7 @@ export type CommandRequest =
     readonly transactionHash: string;
     readonly idempotencyKey: string;
   }
-  | { readonly command: "operation.status"; readonly operationId: string }
+  | { readonly command: "operation.status"; readonly operationId: string; readonly refreshAllowance?: true }
   | { readonly command: "receipt.get"; readonly operationId: string };
 
 export interface CommandOutcome {

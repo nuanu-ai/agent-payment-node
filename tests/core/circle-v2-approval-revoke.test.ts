@@ -10,6 +10,10 @@ import { keccak256, pad, parseTransaction, toHex, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { runCli } from "../../src/cli.js";
 import { CircleV2ApprovalExecutor, type CircleApprovalRecord, type CircleApprovalRpc } from "../../src/lifi/circle-v2-approval-executor.js";
+import { sha256 } from "../../src/canonical.js";
+import { circleResidualAllowance, CircleResidualAllowanceStore } from "../../src/lifi/circle-v2-residual-allowance.js";
+import { BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES } from "../../src/lifi/circle-v2-source-receipt.js";
+import { NonEvmSourceJournalRepository } from "../../src/lifi/non-evm-source-journal.js";
 import { sealWallet, StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 
@@ -44,9 +48,23 @@ async function setup(t: test.TestContext) {
     return await account.signTransaction({ type: "eip1559", chainId: 8453, to: token, data: e.data as Hex, value: 0n, nonce: Number(e.nonceAtomic),
       gas: BigInt(e.gasLimitAtomic), maxFeePerGas: BigInt(e.maxFeePerGasWei), maxPriorityFeePerGas: BigInt(e.maxPriorityFeePerGasWei), accessList: [] }); } };
   const circleApproval = new CircleV2ApprovalExecutor(state, rpc, signer, limits, now);
+  // A finished Base to Solana burn of this payer whose stored residual is 18870 at finalized block 100.
+  const H = (c: string) => c.repeat(64), data = "0xc62fa55e" as const, owner = "95eqQDmQG7y8gad3yReqXqzyFoiQ4LYD9iAY1PMtuyRj";
+  const journal = await new NonEvmSourceJournalRepository(temp.root).stageLiveCircle({ profileHash: state.profileHash("payer"), operationId: H("b"),
+    draftIntegrityHash: H("c"), route: "base_usdc_to_solana_usdc_circle_cctp_v2", createdAt: "2026-01-01T00:00:00.000Z", maxSourceNativeDebitWei: "1000000000000000",
+    sourceCall: { chainId: 8453, from: account.address, to: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES, valueAtomic: "0", data,
+      dataSha256: sha256(Buffer.from(data.slice(2), "hex")), type: "eip1559", nonceAtomic: "6", gasLimitAtomic: "100000",
+      maxFeePerGasAtomic: "1000000000", maxPriorityFeePerGasAtomic: "1000000", accessList: [] },
+    admissionProof: { kind: "circle_v2_live_transport_v1", circleOrigin: "https://iris-api.circle.com", rpcOrigin: "https://base.example",
+      quoteHash: H("d"), validationHash: H("d"), sourceBlockHash: `0x${H("9")}`, preparationDigest: H("8"), payer: account.address,
+      recipientOwner: owner, recipientAta: owner, feeTotalAtomic: "131130" }, protocolInputHash: H("1") });
+  const finalized = { call: async (method: string) => method === "eth_chainId" ? "0x2105"
+    : method === "eth_getBlockByNumber" ? { number: "0x64", hash: `0x${H("e")}` } : `0x${(18870n).toString(16).padStart(64, "0")}` } as never;
+  await circleResidualAllowance(temp.root, journal, () => finalized, false, now);
+  const residual = async () => await new CircleResidualAllowanceStore(temp.root).load(journal);
   const wrappingSecret = { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) };
   const cli = async (argv: readonly string[]) => await runCli(argv, {}, { stateRoot: temp.root, circleApproval, wrappingSecret } as never);
-  return { chain, sent, circleApproval, cli };
+  return { chain, sent, circleApproval, cli, residual };
 }
 type ApprovalView = CircleApprovalRecord & { allowance: Record<string, unknown> };
 
@@ -73,10 +91,15 @@ test("a completed approval names the revoke command for its profile; revoke clea
   const revoked = await f.circleApproval.execute(intent.id, async record => { consents += 1; assert.equal(record.preparation.approvalCapAtomic, "0"); return true; });
   assert.deepEqual([revoked.phase, revoked.observedAllowanceAtomic, f.sent.length, consents, f.chain.allowance], ["completed", "0", 2, 1, 0n]);
   const second = intent.id;
+  // The proven revoke set the burn's stored residual to 0 at the revoke's own fresh-read block; no chain read was made for it.
+  assert.deepEqual(await f.residual().then(r => r && [r.allowanceAtomic, r.block, r.proof, r.revokeOperationId]),
+    ["0", { numberAtomic: "12345", hash: `0x${"a".repeat(64)}` }, "revoke_approval", second]);
   const shown = (await f.cli(["circle", "approval", "status", "--operation", second])).data as ApprovalView;
   assert.deepEqual(shown.allowance, { effect: "allowance_revoked", token, owner: account.address, spender, approvedAtomic: "0", observedAtCompletionAtomic: "0" });
   assert.equal((await f.cli(["circle", "approval", "status", "--operation", second])).ok, true);
   assert.equal(f.sent.length, 2, "status observes without any resend");
+  const refresh = await f.cli(["operation", "status", "--operation", second, "--refresh-allowance"]);
+  assert.deepEqual([refresh.error?.code, refresh.error?.details?.family], ["APN_INVALID_INPUT", "circle_approval"]);
 });
 
 test("revoke with nothing left on the wrapper is refused before any record, signature or send", async t => {

@@ -919,13 +919,18 @@ Its `allowance` field says what the approval leaves: a completed approval leaves
 the Base USDC allowance it set for the Circle V2 TokenMessengerWithFees wrapper,
 which `apn circle source submit` spends. A burn spends the principal plus
 Circle's fee, so whatever the approval granted beyond that stays on the
-wrapper. `apn operation status` of a finished source burn reads that residual
-allowance at the finalized tag (`residualAllowance`; `null` with its reason when
-it cannot be read) and, when it is above zero, names `apn circle approval revoke
---profile <profile> ...`: the same approval family with a zero cap, prepared
+wrapper. The `apn operation status` that records a source burn's finalized
+receipt reads that residual allowance once, at the same finalized head, and
+stores it beside the journal with its block (`residualAllowance`); later
+statuses show the stored value and read no chain, unless the caller passes
+`--refresh-allowance` or nothing is stored yet (an unreadable value is shown as
+`null` with its reason, never guessed). When it is above zero the status names
+`apn circle approval revoke --profile <profile> ...`: the same approval family with a zero cap, prepared
 unsigned, confirmed in the foreground by `apn circle approval execute`, sent
 once and observed by `apn circle approval status` (Approval event with value 0
-and a fresh zero allowance). Revoke refuses when the allowance is already 0.
+and a fresh zero allowance). A completed revoke sets the payer's stored
+residuals to 0 at its own fresh-read block, without another read. Revoke
+refuses when the allowance is already 0.
 Every other outcome changed no allowance.
 
 ## Stargate fee refusal and funding checkpoint, 2026-10-08

@@ -12,6 +12,7 @@ import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridg
 import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
+import { CircleResidualAllowanceStore } from "./circle-v2-residual-allowance.js";
 /**
  * Every phase of a Circle Base USDC approval, and its outcomes: a safe receipt either way, proven never sent, or proven
  * never to land (another transaction took its nonce at finality while the node knows neither it nor a receipt).
@@ -324,7 +325,7 @@ export class CircleV2ApprovalExecutor {
     }
     async observe(r) {
         if (CIRCLE_APPROVAL_RESOLVED_PHASES.includes(r.phase) || r.phase === "prepared")
-            return r;
+            return await this.revoked(r);
         if (r.submissionAttempts === 0 || r.transactionHash === null || r.rawTransaction === null)
             return await this.unknown(r, "no_submission_marker");
         try {
@@ -360,13 +361,25 @@ export class CircleV2ApprovalExecutor {
                 bridgeUint(state.blockNumber) < bridgeUint(receipt.blockNumberAtomic) ||
                 bridgeUint(state.usdcAllowanceAtomic) !== bridgeUint(p.approvalCapAtomic))
                 throw new Error("fresh allowance");
-            r = update(r, { phase: "completed", observedAllowanceAtomic: state.usdcAllowanceAtomic });
+            r = update(r, { phase: "completed", observedAllowanceAtomic: state.usdcAllowanceAtomic,
+                observedAllowanceBlock: { numberAtomic: bridgeUint(state.blockNumber).toString(), hash: bridgeHex(state.blockHash, 32, 32) } });
             await this.journal.save(r);
-            return r;
         }
         catch {
             return await this.unknown(r);
         }
+        return await this.revoked(r);
+    }
+    /**
+     * A completed revoke proved the wrapper allowance 0 at its fresh read's block: every stored Circle Base to Solana residual
+     * of this payer and wrapper at an earlier block becomes 0 (no chain read). Re-applied on each status; idempotent.
+     */
+    async revoked(r) {
+        const p = r.preparation, block = r.observedAllowanceBlock;
+        if (r.phase !== "completed" || p.approvalCapAtomic !== "0" || block === undefined)
+            return r;
+        await new CircleResidualAllowanceStore(this.state.root).revoked(r.profileHash, p.transaction.from, p.spender, block, r.id, new Date(this.now()).toISOString());
+        return r;
     }
 }
 /**

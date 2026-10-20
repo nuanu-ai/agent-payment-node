@@ -17,6 +17,7 @@ import { admitOperation, assertClaimsAvailable } from "../operation-index/admiss
 import { checkNeverLands, type FinalizedBatchRead } from "../evm-finalized-proof.js";
 import type { OperationAbandonApprovalPort } from "../operation-abandon-approval.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
+import { CircleResidualAllowanceStore } from "./circle-v2-residual-allowance.js";
 
 /**
  * Every phase of a Circle Base USDC approval, and its outcomes: a safe receipt either way, proven never sent, or proven
@@ -45,6 +46,8 @@ export interface CircleApprovalRecord {
   readonly failureReason?: string;
   /** `failed_proven_superseded` only: the payer's nonce at the `finalized` tag when status proved the approval can never land. */
   readonly finalizedNonceAtomic?: string;
+  /** `completed` (written since 0.5.52): the block of the fresh read that proved the allowance equal to the approved cap. */
+  readonly observedAllowanceBlock?: { readonly numberAtomic: string; readonly hash: string };
   readonly integrityHash: string;
 }
 export interface CircleApprovalRpc {
@@ -301,7 +304,7 @@ export class CircleV2ApprovalExecutor {
     await this.journal.save(r); return r;
   }
   private async observe(r: CircleApprovalRecord): Promise<CircleApprovalRecord> {
-    if (CIRCLE_APPROVAL_RESOLVED_PHASES.includes(r.phase) || r.phase === "prepared") return r;
+    if (CIRCLE_APPROVAL_RESOLVED_PHASES.includes(r.phase) || r.phase === "prepared") return await this.revoked(r);
     if (r.submissionAttempts === 0 || r.transactionHash === null || r.rawTransaction === null) return await this.unknown(r, "no_submission_marker");
     try {
       if (await verifySigned(r.rawTransaction, r) !== r.transactionHash) throw new Error("signed hash");
@@ -328,9 +331,22 @@ export class CircleV2ApprovalExecutor {
         bridgeAddress(state.token) !== p.token || bridgeAddress(state.spender) !== p.spender ||
         bridgeUint(state.blockNumber) < bridgeUint(receipt.blockNumberAtomic) ||
         bridgeUint(state.usdcAllowanceAtomic) !== bridgeUint(p.approvalCapAtomic)) throw new Error("fresh allowance");
-      r = update(r, { phase: "completed", observedAllowanceAtomic: state.usdcAllowanceAtomic });
-      await this.journal.save(r); return r;
+      r = update(r, { phase: "completed", observedAllowanceAtomic: state.usdcAllowanceAtomic,
+        observedAllowanceBlock: { numberAtomic: bridgeUint(state.blockNumber).toString(), hash: bridgeHex(state.blockHash, 32, 32) } });
+      await this.journal.save(r);
     } catch { return await this.unknown(r); }
+    return await this.revoked(r);
+  }
+  /**
+   * A completed revoke proved the wrapper allowance 0 at its fresh read's block: every stored Circle Base to Solana residual
+   * of this payer and wrapper at an earlier block becomes 0 (no chain read). Re-applied on each status; idempotent.
+   */
+  private async revoked(r: CircleApprovalRecord): Promise<CircleApprovalRecord> {
+    const p = r.preparation, block = r.observedAllowanceBlock;
+    if (r.phase !== "completed" || p.approvalCapAtomic !== "0" || block === undefined) return r;
+    await new CircleResidualAllowanceStore(this.state.root).revoked(r.profileHash, p.transaction.from, p.spender, block, r.id,
+      new Date(this.now()).toISOString());
+    return r;
   }
 }
 /**

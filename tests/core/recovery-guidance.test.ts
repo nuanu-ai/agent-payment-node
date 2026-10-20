@@ -16,6 +16,7 @@ import { GaslessRpc } from "../../src/gasless/rpc.js";
 import { LifiProvider } from "../../src/lifi/provider.js";
 import type { BridgeDependencies } from "../../src/lifi/service.js";
 import { createMcpServer } from "../../src/mcp-server.js";
+import { externalWalletRequest } from "../../src/external-wallet-request.js";
 import { failureEnvelope } from "../../src/output.js";
 import { StateProfileRepository } from "../../src/profile-repository.js";
 import type { ProviderAdapterBundle } from "../../src/provider-ports.js";
@@ -51,22 +52,54 @@ test("an aborted anonymous bridge inventory read is retried as a read in CLI and
   assert.ok(requests >= 2);
 });
 
-test("wallet-provider advice follows only commands an external wallet profile can run; session handoff is unchanged", () => {
-  const provider = (code: "APN_PROVIDER_UNAVAILABLE" | "APN_PROVIDER_PROTOCOL" | "APN_PROVIDER_EFFECT_UNAVAILABLE") => new ApnError(code, "x");
-  for (const command of ["bridge.inventory", "bridge.prepare", "circle.source.submit", "relay.observe", "swap.uniswap.quote", "mega.funding.status",
-    "gasless.usdt.prepare", "allowlist.inventory", "invalid"]) {
-    for (const code of ["APN_PROVIDER_UNAVAILABLE", "APN_PROVIDER_PROTOCOL", "APN_PROVIDER_EFFECT_UNAVAILABLE"] as const) {
-      assert.deepEqual(failureEnvelope(command, "r", provider(code)).next_actions, [], `${command} ${code}`);
+const WALLET_ONLY = {
+  APN_PROFILE_DRIFT: "Run the foreground wallet connect handoff with --expected-revision set to the current revision.",
+  APN_PROVIDER_UNAVAILABLE: "Verify the exact pinned provider client, then retry foreground wallet connect.",
+  APN_PROVIDER_PROTOCOL: "Stop and verify the pinned provider client before retrying.",
+  APN_PROVIDER_EFFECT_UNAVAILABLE: "Use a local profile for payment effects in this APN version.",
+  APN_PROFILE_REVISION_CONFLICT: "Read current wallet status, then retry foreground connect with the exact current revision.",
+} as const;
+
+test("every generic wallet-provider step needs a request that acted through an external wallet; the rest stay generic", () => {
+  for (const [code, advice] of Object.entries(WALLET_ONLY) as [keyof typeof WALLET_ONLY, string][]) {
+    for (const command of ["bridge.inventory", "wallet.balance", "pay.transfer", "transfer.prepare", "x402.fetch.prepare", "gasless.transfer.prepare",
+      "operation.status", "receipt.get", "allowlist.policy.activate", "invalid"]) {
+      assert.deepEqual(failureEnvelope(command, "r", new ApnError(code, "x")).next_actions, [], `${command} ${code}`);
     }
+    assert.deepEqual(failureEnvelope("wallet.status", "r", new ApnError(code, "x"), true).next_actions, [advice], code);
   }
-  assert.deepEqual(failureEnvelope("wallet.connect", "r", provider("APN_PROVIDER_UNAVAILABLE")).next_actions,
-    ["Verify the exact pinned provider client, then retry foreground wallet connect."]);
-  assert.deepEqual(failureEnvelope("x402.fetch.prepare", "r", provider("APN_PROVIDER_EFFECT_UNAVAILABLE")).next_actions,
-    ["Use a local profile for payment effects in this APN version."]);
+  // A handoff the error carries, the provider-session handoff (only an external session raises it) and an error's own
+  // next actions are unchanged; the other generic steps name no wallet.
+  assert.deepEqual(failureEnvelope("wallet.balance", "r", new ApnError("APN_PROFILE_DRIFT", "x", { cli_handoff: "apn wallet connect --profile p" })).next_actions,
+    ["apn wallet connect --profile p"]);
   assert.deepEqual(failureEnvelope("gasless.transfer.prepare", "r", new ApnError("APN_PROVIDER_SESSION_REQUIRED", "x")).next_actions,
     ["Run the foreground wallet connect handoff again."]);
   assert.deepEqual(failureEnvelope("bridge.inventory", "r", new ApnError("APN_PROVIDER_UNAVAILABLE", "x", { nextActions: ["apn bridge inventory"] })).next_actions,
     ["apn bridge inventory"]);
+  assert.deepEqual(failureEnvelope("circle.approval.execute", "r", new ApnError("APN_REPREPARE_REQUIRED", "x")).next_actions,
+    ["Prepare a new operation (with a new idempotency key where the command takes one); this one can no longer proceed."]);
+  for (const code of ["APN_NATIVE_CHANNEL_REQUIRED", "APN_RPC_CONFIG", "APN_RPC_RATE_LIMITED", "APN_STATE_BUSY"] as const) {
+    assert.equal(failureEnvelope("bridge.inventory", "r", new ApnError(code, "x")).next_actions.some(action => WALLET_ADVICE.test(action)), false, code);
+  }
+});
+
+test("a request through an external wallet profile keeps the wallet step; a local or anonymous request never gets it", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root), state = f.state;
+  const failing = { ...f.dependencies, rpcFor: () => { throw new ApnError("APN_PROVIDER_PROTOCOL", "synthetic provider fault"); } };
+  const external = await new ApnCore({ state, clock: f.clock, wait: f.wait, metaMaskGasless: failing })
+    .execute({ command: "gasless.transfer.prepare", profile: f.profile, request: f.request, idempotencyKey: "external-guidance-0001" });
+  assert.deepEqual([external.error?.code, external.next_actions], ["APN_PROVIDER_PROTOCOL", [WALLET_ONLY.APN_PROVIDER_PROTOCOL]]);
+  assert.equal(await externalWalletRequest(state, { command: "wallet.status", profile: f.profile }), true);
+  assert.equal(await externalWalletRequest(state, { command: "wallet.connect", profile: "new", providerId: "metamask-agent-wallet" }), true);
+  for (const request of [{ command: "wallet.status", profile: "never-bound" }, { command: "bridge.inventory" },
+    { command: "operation.status", operationId: "a".repeat(64) }, { command: "wallet.status", profile: "NOT A PROFILE" }] as const) {
+    assert.equal(await externalWalletRequest(state, request as never), false, JSON.stringify(request));
+  }
+  const local = await new ApnCore({ state, clock: f.clock, wait: f.wait, metaMaskGasless: failing })
+    .execute({ command: "gasless.transfer.prepare", profile: "local-never-bound", request: f.request, idempotencyKey: "local-guidance-0001" });
+  assert.equal(local.ok, false);
+  assert.equal(local.next_actions.some(action => WALLET_ADVICE.test(action)), false, JSON.stringify(local));
 });
 
 test("permission list on an Agent Wallet profile says permissions belong to a Smart Account and names the profile's own status", async t => {

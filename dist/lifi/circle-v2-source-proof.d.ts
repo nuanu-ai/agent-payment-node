@@ -1,4 +1,5 @@
 import { type FinalizedReader } from "../evm-finalized-proof.js";
+import { type CircleResidualView } from "./circle-v2-residual-allowance.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
 export declare const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
@@ -43,21 +44,14 @@ export interface CircleSourceStatus {
     readonly journal: NonEvmSourceJournal;
     readonly proofClass: string;
     readonly nextActions: readonly string[];
-    /** Once nothing of the operation can still spend it: the payer's allowance left on the wrapper (see residualAllowance). */
-    readonly residualAllowance?: CircleResidualAllowance;
-}
-/** The Base USDC allowance the payer still grants the Circle wrapper, read at the finalized tag; null when it could not be read. */
-export interface CircleResidualAllowance {
-    readonly token: string;
-    readonly owner: string;
-    readonly spender: string;
-    readonly blockTag: "finalized";
-    readonly allowanceAtomic: string | null;
-    readonly unreadReason?: string;
+    /** Once nothing of the operation can still spend it: the payer's allowance left on the wrapper, stored with its block. */
+    readonly residualAllowance?: CircleResidualView;
 }
 /**
  * `operation status` of a Circle CCTP V2 Base source burn: the saved journal and, when its burn transaction is known,
  * that transaction's receipt at the finalized tag (chain id, receipt, finalized head; no archive read). A receipt in a
  * finalized block is recorded once as the operation's proof; otherwise nothing is written and the status says why.
+ * Once nothing of the operation can still spend the payer's wrapper allowance, its residual is read once, at that same
+ * finalized head, and stored (circle-v2-residual-allowance.ts); later statuses read no chain unless `refreshAllowance`.
  */
-export declare function circleSourceStatus(root: string, journal: NonEvmSourceJournal, read: FinalizedReader | undefined, now: () => number): Promise<CircleSourceStatus>;
+export declare function circleSourceStatus(root: string, journal: NonEvmSourceJournal, read: FinalizedReader | undefined, now: () => number, refreshAllowance?: boolean): Promise<CircleSourceStatus>;

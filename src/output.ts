@@ -18,7 +18,13 @@ export function successEnvelope(request: CommandRequest, requestId: string, outc
   };
 }
 
-export function failureEnvelope(command: string, requestId: string, error: unknown): OutputEnvelope {
+/**
+ * `externalWallet` is true only when the failed request acted through an external wallet provider (a connect to one, or
+ * a profile bound to one; see external-wallet-request.ts). Only then are wallet-provider steps (pinned client, foreground
+ * connect, local profile, revision) suggested; a local-profile or anonymous request gets its error's own next actions or
+ * none, never those.
+ */
+export function failureEnvelope(command: string, requestId: string, error: unknown, externalWallet = false): OutputEnvelope {
   // A caller sees an HTTP 429 as a rate limit in every family, whichever transport first classified it.
   const safe = asApnError(asRateLimited(error));
   return {
@@ -35,18 +41,12 @@ export function failureEnvelope(command: string, requestId: string, error: unkno
       message: safe.message,
       ...(safe.details === undefined ? {} : { details: safe.details }),
     },
-    next_actions: nextActions(safe, command),
+    next_actions: nextActions(safe, externalWallet),
   };
 }
 
-/**
- * The wallet-provider advice (pinned client, foreground connect, local profile) fits only commands an external wallet
- * profile can run. Bridges, swaps, Circle, Relay, GasZip and the rest raise the same codes for public services and local
- * checks, where a wallet step would mislead; there only an error's own next actions are shown.
- */
-const WALLET_PROVIDER_COMMAND = /^(?:wallet|transfer|x402\.(?:fetch|inspect)|gasless\.(?:transfer|balance|capabilities)|operation|receipt)(?:\.|$)/u;
-
-function nextActions(error: ReturnType<typeof asApnError>, command: string): readonly string[] {
+function nextActions(error: ReturnType<typeof asApnError>, externalWallet: boolean): readonly string[] {
+  const wallet = (advice: string): readonly string[] => externalWallet ? [advice] : [];
   const explicit = error.details?.nextActions;
   if (Array.isArray(explicit) && explicit.every((value) => typeof value === "string")) return explicit;
   switch (error.code) {
@@ -58,13 +58,14 @@ function nextActions(error: ReturnType<typeof asApnError>, command: string): rea
       const handoff = error.details?.cli_handoff;
       return typeof handoff === "string"
         ? [handoff]
-        : ["Run the foreground wallet connect handoff with --expected-revision set to the current revision."];
+        : wallet("Run the foreground wallet connect handoff with --expected-revision set to the current revision.");
     }
+    // Only an external wallet's own session raises this code, so its handoff never reaches a local or anonymous request.
     case "APN_PROVIDER_SESSION_REQUIRED": return ["Run the foreground wallet connect handoff again."];
-    case "APN_PROVIDER_UNAVAILABLE": return WALLET_PROVIDER_COMMAND.test(command) ? ["Verify the exact pinned provider client, then retry foreground wallet connect."] : [];
-    case "APN_PROVIDER_PROTOCOL": return WALLET_PROVIDER_COMMAND.test(command) ? ["Stop and verify the pinned provider client before retrying."] : [];
-    case "APN_PROVIDER_EFFECT_UNAVAILABLE": return WALLET_PROVIDER_COMMAND.test(command) ? ["Use a local profile for payment effects in this APN version."] : [];
-    case "APN_PROFILE_REVISION_CONFLICT": return ["Read current wallet status, then retry foreground connect with the exact current revision."];
+    case "APN_PROVIDER_UNAVAILABLE": return wallet("Verify the exact pinned provider client, then retry foreground wallet connect.");
+    case "APN_PROVIDER_PROTOCOL": return wallet("Stop and verify the pinned provider client before retrying.");
+    case "APN_PROVIDER_EFFECT_UNAVAILABLE": return wallet("Use a local profile for payment effects in this APN version.");
+    case "APN_PROFILE_REVISION_CONFLICT": return wallet("Read current wallet status, then retry foreground connect with the exact current revision.");
     case "APN_FOREGROUND_APPROVAL_REQUIRED": {
       const handoff = error.details?.cli_handoff;
       return typeof handoff === "string" ? [handoff] : [];
@@ -77,7 +78,7 @@ function nextActions(error: ReturnType<typeof asApnError>, command: string): rea
         : ["Correct the selected network's RPC setting named in the error (its --rpc-url or APN_*_RPC_URL), then retry."];
     }
     case "APN_RPC_RATE_LIMITED": return ["Wait for the RPC provider's rate-limit window, then rerun the same command; prepared operations are idempotent."];
-    case "APN_REPREPARE_REQUIRED": return ["Prepare a new operation with a new idempotency key; this one can no longer proceed."];
+    case "APN_REPREPARE_REQUIRED": return ["Prepare a new operation (with a new idempotency key where the command takes one); this one can no longer proceed."];
     case "APN_STATE_BUSY": return ["The kernel lock stayed busy through the bounded wait; retry after the active APN process exits. APN keeps stable lock files in place."];
     case "APN_OPERATION_BLOCKED": {
       // The operation index names the blocker for every family; its status shows what it waits for (and, for a record
