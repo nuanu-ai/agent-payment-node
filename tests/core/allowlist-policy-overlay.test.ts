@@ -14,6 +14,7 @@ import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { temporaryState, UUID } from "./helpers.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 
 const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1";
 const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
@@ -138,8 +139,9 @@ test("status serializes with writes for the same policy profile", async (t) => {
   const lock = store.withLocks([`profile:${first.overlay.profileHash}`], async () => { acquired(); await held; });
   await acquiredPromise;
   let settled = false;
+  const blocked = lockRefusals(t).refused(`profile:${first.overlay.profileHash}`);
   const status = store.status("card2-test").then((value) => { settled = true; return value; });
-  await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  await blocked; // status is seen refused by the held profile lock (an event, not a pause)
   assert.equal(settled, false);
   release(); await lock;
   assert.equal((await status)?.recordDigest, first.recordDigest);

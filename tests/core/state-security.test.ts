@@ -11,6 +11,7 @@ import { EvmWrappingSecret } from "./evm-helpers.js";
 import { StateStore } from "../../src/state.js";
 import { SecureStateStore } from "../../src/secure-state-store.js";
 import { WALLET, RECIPIENT, TestNative, TestRpc, activateBaseUsdcDirectPolicy, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 
 test("state root rejects wrong mode and symlinked ancestors", async (t) => {
   const temporary = await temporaryState();
@@ -280,11 +281,14 @@ test("concurrent contenders serialize the protected action", async (t) => {
   let active = 0;
   let maximumActive = 0;
   const trace: string[] = [];
+  // Whoever enters first stays inside until the other contender is seen refused by the kernel lock (an event, not a pause).
+  const contended = lockRefusals(t).refused("serialize-key");
+  let first = true;
   const enter = async (name: string): Promise<void> => {
     active += 1;
     maximumActive = Math.max(maximumActive, active);
     trace.push(`${name}:enter`);
-    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 25));
+    if (first) { first = false; await contended; }
     trace.push(`${name}:exit`);
     active -= 1;
   };
@@ -300,11 +304,10 @@ function lockPath(root: string, key: string): string {
   return join(root, "locks", `${sha256(`lock\0${key}`)}.lock`);
 }
 
+/** The kernel-lock child's own readiness line or its exit, never a wall-clock deadline (a loaded machine starts it late). */
 async function childReady(child: ReturnType<typeof spawn>): Promise<string> {
   return await new Promise<string>((resolveReady, rejectReady) => {
-    const timeout = setTimeout(() => rejectReady(new Error("kernel-lock child did not become ready")), 1_000);
     const finish = (value?: string, error?: Error): void => {
-      clearTimeout(timeout);
       child.removeAllListeners("exit");
       if (error !== undefined) rejectReady(error);
       else resolveReady(value ?? "");
