@@ -36,12 +36,17 @@ async function legacy(t: test.TestContext, name: string) {
   let time = Date.parse("2026-10-17T10:00:00.000Z"), prompts = 0, height = LAST_VALID;
   let statuses: unknown = { context: { slot: 450_687_950 }, value: [null] }, transaction: unknown = null;
   const methods: string[] = [];
+  // A block height is read as a JSON-RPC array beside the finalized latest blockhash (solana/rpc.ts).
   const fetcher: typeof fetch = async (_url, init) => {
-    const body = JSON.parse(init!.body as string) as { id: string; method: string };
-    methods.push(body.method);
-    const result = body.method === "getGenesisHash" ? SOLANA_GENESIS : body.method === "getBlockHeight" ? Number(height) :
-      body.method === "getSignatureStatuses" ? statuses : body.method === "getTransaction" ? transaction : assert.fail(`unexpected ${body.method}`);
-    return new Response(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }), { status: 200, headers: { "content-type": "application/json" } });
+    const parsed = JSON.parse(init!.body as string) as { id: string; method: string } | { id: string; method: string }[];
+    const answer = (body: { id: string; method: string }) => {
+      methods.push(body.method);
+      const result = body.method === "getGenesisHash" ? SOLANA_GENESIS : body.method === "getBlockHeight" ? Number(height) :
+        body.method === "getLatestBlockhash" ? { context: { slot: 450_687_950 }, value: { blockhash: "11111111111111111111111111111111", lastValidBlockHeight: Number(height) + 150 } } :
+        body.method === "getSignatureStatuses" ? statuses : body.method === "getTransaction" ? transaction : assert.fail(`unexpected ${body.method}`);
+      return { jsonrpc: "2.0", id: body.id, result };
+    };
+    return new Response(JSON.stringify(Array.isArray(parsed) ? parsed.map(answer) : answer(parsed)), { status: 200, headers: { "content-type": "application/json" } });
   };
   const clock = { now: () => new Date(time) };
   const custody = { account: async () => fixture.account, effectByOperationId: async () => fixture.effect } as never;
@@ -109,7 +114,7 @@ test("submitting, signed but never claimed: no local release; observation expire
   assert.equal((await l.lease(expired))?.state, "released_unsubmitted");
   assert.equal((await l.finisher().observe(l.fixture.operationId)).integrityHash, expired.integrityHash);
   assert.equal((await l.finisher().status(l.fixture.operationId) as { phase: string }).phase, "expired_unlanded");
-  assert.deepEqual(l.methods, ["getGenesisHash", "getBlockHeight", "getGenesisHash", "getBlockHeight"]);
+  assert.deepEqual(l.methods, ["getGenesisHash", "getBlockHeight", "getLatestBlockhash", "getGenesisHash", "getBlockHeight", "getLatestBlockhash"]);
 });
 
 test("submitting with a claim: recovery refuses; observation records the possible send, then expiry or finality settles it", async (t) => {
