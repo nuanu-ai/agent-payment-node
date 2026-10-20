@@ -50,6 +50,18 @@ const FEE_MODELS: readonly DirectEvmFeeModel[] = ["eip1559", "op-stack", "arbitr
 
 /** A new observation names the network's current charge rule; a stored one is re-derived by the rule it names (R2). */
 export function deriveEvmActualFee(input: EvmActualFeeInput, feeModel: DirectEvmFeeModel): EvmActualFee {
+  return derive(input, feeModel, false);
+}
+
+/**
+ * A direct transfer signs an EIP-1559 (type 2) transaction (evm-native-intent pins it), so it carries no blob and pays no
+ * blob fee. OP stack (Jovian) reports the transaction's DA footprint as `blobGasUsed` with no `blobGasPrice`: block-limit
+ * metadata, not a charge (the data is paid through `l1Fee`), so it is neither a reason for `incomplete` nor added again.
+ * Anywhere else, or beside a blob price, a nonzero `blobGasUsed` claims a blob charge APN does not model: incomplete.
+ * `blobAlwaysCharged` is the rule 0.5.52 applied (every nonzero `blobGasUsed` was unmodeled, OP stack included); a fee it
+ * stored that way is still that rule's honest reading of the same receipt fields, and is shown by the corrected rule.
+ */
+function derive(input: EvmActualFeeInput, feeModel: DirectEvmFeeModel, blobAlwaysCharged: boolean): EvmActualFee {
   const chainId = input.chainId;
   const base = { schemaVersion: "apn.evm-direct-actual-fee.v1" as const, chainId, feeModel, transactionHash: input.transactionHash,
     blockNumberAtomic: input.blockNumberAtomic, gasLimitAtomic: input.gasLimitAtomic, maxFeePerGasAtomic: input.maxFeePerGasAtomic,
@@ -64,7 +76,8 @@ export function deriveEvmActualFee(input: EvmActualFeeInput, feeModel: DirectEvm
   const { gasUsed, effectiveGasPrice: price } = parsed, gasLimit = BigInt(input.gasLimitAtomic);
   if (gasUsed === undefined || price === undefined) return incomplete("receipt_execution_fee_fields_unavailable");
   if (gasUsed > gasLimit || price > BigInt(input.maxFeePerGasAtomic)) return incomplete("receipt_fee_fields_contradict_signed_transaction");
-  if ((parsed.blobGasUsed ?? 0n) !== 0n) return incomplete("receipt_blob_fee_unmodeled");
+  const daFootprint = !blobAlwaysCharged && feeModel === "op-stack" && (parsed.blobGasPrice ?? 0n) === 0n;
+  if ((parsed.blobGasUsed ?? 0n) !== 0n && !daFootprint) return incomplete("receipt_blob_fee_unmodeled");
   const billed = feeModel === "monad-gas-limit" ? gasLimit : gasUsed, execution = billed * price;
   const complete = (l1: bigint | null, operator: bigint | null): EvmActualFee => ({ ...base, complete: true, incompleteReason: null,
     gasBilledAtomic: billed.toString(), executionFeeAtomic: execution.toString(), l1DataFeeAtomic: l1?.toString() ?? null,
@@ -85,7 +98,10 @@ export function deriveEvmActualFee(input: EvmActualFeeInput, feeModel: DirectEvm
   return scalar !== undefined && operator !== derived ? incomplete("op_operator_fee_fields_inconsistent") : complete(l1, operator);
 }
 
-/** A stored fee observation must be exactly what its own receipt fields derive (R2: no current constant is consulted). */
+/**
+ * A stored fee observation must be exactly what its own receipt fields derive (R2: no current constant is consulted), by
+ * the rule now or by the 0.5.52 blob reading; either way the answer is the current rule's reading of those same fields.
+ */
 export function validateEvmActualFee(value: unknown): EvmActualFee {
   if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "chainId", "feeModel", "transactionHash", "blockNumberAtomic", "gasLimitAtomic",
     "maxFeePerGasAtomic", "receiptFields", "complete", "incompleteReason", "gasBilledAtomic", "executionFeeAtomic", "l1DataFeeAtomic",
@@ -95,9 +111,12 @@ export function validateEvmActualFee(value: unknown): EvmActualFee {
     ![value.blockNumberAtomic, value.gasLimitAtomic, value.maxFeePerGasAtomic].every(x => typeof x === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(x)) ||
     !isPlainRecord(value.receiptFields) || Object.entries(value.receiptFields).some(([name, field]) =>
       !(EVM_RECEIPT_FEE_FIELDS as readonly string[]).includes(name) || typeof field !== "string" || field.length > 66)) corrupt();
-  let derived: EvmActualFee;
-  try { derived = deriveEvmActualFee(value as unknown as EvmActualFeeInput, value.feeModel as DirectEvmFeeModel); } catch { return corrupt(); }
-  if (canonicalJson(derived) !== canonicalJson(value)) corrupt();
+  let derived: EvmActualFee, stored052: EvmActualFee;
+  try {
+    derived = derive(value as unknown as EvmActualFeeInput, value.feeModel as DirectEvmFeeModel, false);
+    stored052 = derive(value as unknown as EvmActualFeeInput, value.feeModel as DirectEvmFeeModel, true);
+  } catch { return corrupt(); }
+  if (canonicalJson(derived) !== canonicalJson(value) && canonicalJson(stored052) !== canonicalJson(value)) corrupt();
   return derived;
 }
 
@@ -111,9 +130,13 @@ export function assertEvmActualFeeBinding(operation: OperationRecord): void {
     proven.gasLimitAtomic !== operation.economics.gasLimitAtomic || proven.maxFeePerGasAtomic !== operation.economics.maxFeePerGasAtomic) corrupt();
 }
 
-/** Public form: the fact when complete, its known parts and reason when not, null when nothing was observed. */
-export function publicEvmActualFee(fee: EvmActualFee | undefined, asset: { readonly kind: string } | undefined, amountAtomic: string, state: string) {
-  if (fee === undefined) return { actual_network_fee: null, actual_sender_native_debit_atomic: null };
+/**
+ * Public form: the fact when complete, its known parts and reason when not, null when nothing was observed. A stored
+ * observation is shown as the current rule reads its own receipt fields (a 0.5.52 blob reading is not frozen in).
+ */
+export function publicEvmActualFee(stored: EvmActualFee | undefined, asset: { readonly kind: string } | undefined, amountAtomic: string, state: string) {
+  if (stored === undefined) return { actual_network_fee: null, actual_sender_native_debit_atomic: null };
+  const fee = validateEvmActualFee(stored);
   const network = directEvmNetwork(directEvmChain(fee.chainId));
   // The transfer value leaves the sender only when the native transfer succeeded; a revert charged the fee alone.
   const value = asset?.kind === "native" && state === "completed" ? BigInt(amountAtomic) : 0n;
