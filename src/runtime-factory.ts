@@ -78,6 +78,7 @@ import { TtyAllowlistPolicyApproval } from "./allowlist-policy-activation.js";
 import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
 import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-factory.js";
 import { createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
+import { UNISWAP_TOKEN_EXECUTE_PLAN, uniswapTokenProbedCap } from "./swap/uniswap-v3/token-runtime.js";
 import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins, verifyUniswapV3MutablePins } from "./swap/uniswap-v3/pins.js";
@@ -372,7 +373,7 @@ function uniswapTokenRpcBudget(command: string): { readonly maxHttpRequests: num
   if (command === "swap.uniswap-token.quote") return { maxHttpRequests: (overhead === 0 ? 8 : 7 + overhead), deadlineMs: 60_000 };
   if (command === "swap.uniswap-token.prepare") return { maxHttpRequests: (overhead === 0 ? 9 : 8 + overhead), deadlineMs: 60_000 };
   if (command === "swap.uniswap-token.approve") return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
-  if (command === "swap.uniswap-token.execute") return { maxHttpRequests: 24, deadlineMs: 150_000 };
+  if (command === "swap.uniswap-token.execute") return { maxHttpRequests: uniswapTokenProbedCap(UNISWAP_TOKEN_EXECUTE_PLAN, overhead), deadlineMs: 150_000 };
   // Status: observation (2), the never-lands batch (2) and, once that suggests never-lands, its index proof (era block,
   // then the deciding batch and its receipt route: 3 more), plus an allowance read and retry headroom.
   if (command === "swap.uniswap-token.status") return { maxHttpRequests: 11 + overhead, deadlineMs: 45_000 };
