@@ -1,5 +1,6 @@
-/** Relay cross-chain observation; native source reconciliation may update local state. */
+/** Relay cross-chain observation; a finality-proven source effect is reconciled into local state (never signed or sent). */
 import type { Hex } from "viem";
+import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
@@ -10,6 +11,7 @@ import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayKeylessStatusService } from "./status.js";
 import { BNB_NATIVE, ETHEREUM_USDC } from "./quote.js";
 import { RelayNativeObserveService } from "./native-observe.js";
+import { reconcileRelayFinalizedSource } from "./source-reconcile.js";
 
 const OPERATION = /^[a-f0-9]{64}$/u;
 export interface RelaySourceFinalityPorts {
@@ -40,7 +42,8 @@ export class RelayObserveService {
   /** The factory must return a fresh budgeted BNB adapter for each observation. */
   private readonly bnbInvocation: () => RelayBnbProofPorts;
   constructor(private readonly state: StateStore, private readonly source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts,
-    private readonly status = new RelayKeylessStatusService(state), private readonly native?: RelayNativeObserveService) {
+    private readonly status = new RelayKeylessStatusService(state), private readonly native?: RelayNativeObserveService,
+    private readonly usage: Pick<AssetUsageLedger, "load" | "transition"> = new AssetUsageLedger(state.root)) {
     this.bnbInvocation = bnbInvocation;
   }
 
@@ -87,6 +90,9 @@ export class RelayObserveService {
       if (verifyDepositObservation(op, sourceHash as Hex, observation) !== "confirmed")
         return result("source_unproven", "source_receipt_failed");
     } catch { return result("source_unproven", "source_receipt_binding_failed"); }
+    // The finalized deposit closes the source attempt (journal confirmed, hold finalized) whatever the destination shows,
+    // as an observation-only execute would; acceptance is claimed only once the saved source state says so too.
+    const sourceSettled = await reconcileRelayFinalizedSource(this.state, this.usage, op, sourceHash) || deposit.phase === "confirmed";
     if (op.statusLocator === undefined) return result("source_finalized", "status_locator_missing", true);
     let provider: Awaited<ReturnType<RelayKeylessStatusService["status"]>>;
     try { provider = await this.status.statusOf(op); }
@@ -109,6 +115,7 @@ export class RelayObserveService {
       true, provider.status, sourceBound, proof);
     if (provider.status !== "success" || !sourceBound) return result("recipient_credit_observed",
       "provider_success_or_source_binding_unproven", true, provider.status, sourceBound, proof);
+    if (!sourceSettled) return result("recipient_credit_observed", "source_journal_unreconciled", true, provider.status, true, proof);
     return result("operational_acceptance", "source_finalized_provider_success_and_safe_recipient_credit",
       true, provider.status, true, proof);
   }

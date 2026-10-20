@@ -1,14 +1,13 @@
 /** Base observation and idempotent finalized source reconciliation; no signer or sender is reachable. */
 import { ApnError } from "../errors.js";
-import { getAddress } from "viem";
-import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
+import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import { proveRelayBaseDestination } from "./destination-proof.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { verifyDepositObservation } from "./deposit-effect.js";
+import { reconcileRelayFinalizedSource } from "./source-reconcile.js";
 import { RelayKeylessStatusService } from "./status.js";
-import { ETHEREUM_USDC } from "./quote.js";
 export class RelayBaseObserveService {
     state;
     destinationInvocation;
@@ -22,36 +21,6 @@ export class RelayBaseObserveService {
         this.status = status;
         this.source = source;
         this.usage = usage;
-    }
-    async reconcileFinalizedSource(op, sourceHash) {
-        return this.state.withLocks([`relay-base-source-reconcile:${op.operationId}`], async () => {
-            const effects = new RelayEffectJournalRepository(this.state.root);
-            let journal = await effects.load(op.profileHash, op.operationId);
-            if (journal === null || journal.effects[0].phase !== "confirmed")
-                return false;
-            const deposit = journal.effects[1];
-            if (deposit.attempt?.attemptNumber !== 1 || deposit.attempt.transactionHash !== sourceHash ||
-                !["submitting", "confirmed"].includes(deposit.phase))
-                return false;
-            const identity = { account: getAddress(op.sourceAccount), chain: "eip155:1",
-                asset: { kind: "token", identifier: ETHEREUM_USDC } };
-            const reservationId = assetUsageReservationId(identity, `relay-execute:${op.operationId}`);
-            const reservation = await this.usage.load(identity, reservationId);
-            if (reservation === null || !["submitted", "finalized"].includes(reservation.state) ||
-                reservation.policyDigest !== op.policyDigest || reservation.amountAtomic !== op.amountAtomic ||
-                reservation.rail !== "bridge" ||
-                (reservation.state === "finalized" && (deposit.phase !== "confirmed" ||
-                    reservation.outcomeDigest !== journal.integrityHash)))
-                return false;
-            const at = new Date(Math.max(Date.now(), Date.parse(deposit.attempt.markedAt), Date.parse(reservation.updatedAt)));
-            if (deposit.phase !== "confirmed")
-                journal = await effects.transition(op.profileHash, op.operationId, journal.integrityHash, { kind: "observe", role: "deposit", outcome: "confirmed", at: at.toISOString() });
-            if (reservation.state === "submitted")
-                await this.usage.transition({ ...identity, reservationId,
-                    policyDigest: op.policyDigest, state: "finalized", outcomeDigest: journal.integrityHash, now: at,
-                    expectedCurrentStates: ["submitted"] });
-            return true;
-        });
     }
     /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
     async observe(profile, operationId) {
@@ -101,7 +70,7 @@ export class RelayBaseObserveService {
                 }
             }
         }
-        const usageBound = sourceFinalized && sourceHash ? await this.reconcileFinalizedSource(op, sourceHash) : false;
+        const usageBound = sourceFinalized && sourceHash ? await reconcileRelayFinalizedSource(this.state, this.usage, op, sourceHash) : false;
         if (op.statusLocator === undefined)
             return result("prepared_waiting", "status_locator_missing");
         let provider;
