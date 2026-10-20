@@ -4,13 +4,16 @@
  * refusal. Uses the real Iris quote QA retained (fee 130431) at its own expiry block, offline.
  */
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { getBase58Encoder } from "@solana/kit";
 import { encodeFunctionData, parseAbi, type Hex } from "viem";
 import { ApnError } from "../../src/errors.js";
 import { circleV2FeeWithinBudget, circleV2GasWithinBudget, circleV2NativeWithinBudget } from "../../src/lifi/circle-v2-budget.js";
 import { inspectCircleV2UpfrontOffline } from "../../src/lifi/circle-v2-upfront-offline.js";
+import { CircleV2SourceService } from "../../src/lifi/circle-v2-source-service.js";
+import { StateStore } from "../../src/state.js";
+import { temporaryState } from "./helpers.js";
 import { prepareCircleV2BaseUsdcApprovalReadOnly, type CircleV2ApprovalState } from "../../src/lifi/circle-v2-approval-preparation.js";
 import { failureEnvelope } from "../../src/output.js";
 import { associatedUsdc } from "../../src/solana/accounts.js";
@@ -109,4 +112,25 @@ test("the separate approval refuses caller gas, native and balance shortfalls ec
   await assert.rejects(approve("500001"), { code: "APN_INSUFFICIENT_USDC" });
   await assert.rejects(approve("320000", { gasLimitAtomic: "0" }), { code: "APN_PROVIDER_PROTOCOL" });
   await assert.rejects(approve("320000", { usdcAllowanceAtomic: "320001" }), { code: "APN_PROVIDER_PROTOCOL" });
+});
+
+test("circle source submit without a usable APN_BASE_RPC_URL is APN_RPC_CONFIG naming it, before any state, wallet or network", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const request = { profile: "payer", expectedPayer: PAYER, recipientOwner: "3C2rcV1uQpFX79cY7ALfKeJiD7JiLQFvSB2kZjjE11Yv",
+    recipientSetup: "existing_ata" as const, amountAtomic: "170000", maxSourceFeeAtomic: "150000", maxAllowanceAtomic: "320000",
+    maxGasLimitAtomic: "650000", maxFeePerGasWei: "11000000", maxPriorityFeePerGasWei: "1000000", maxNativeDebitWei: "15000000000000",
+    idempotencyKey: "circle-missing-rpc-0001" };
+  const wrapping = { load: async () => Buffer.alloc(32), create: async () => Buffer.alloc(32) };
+  for (const [environment, state] of [[{}, "it is not set"], [{ APN_BASE_RPC_URL: "" }, "it is not set"],
+    [{ APN_BASE_RPC_URL: "http://base.example" }, "its value is not one"], [{ APN_BASE_RPC_URL: "https://base.example/rpc?key=1" }, "its value is not one"]] as const) {
+    const refused = await new CircleV2SourceService(new StateStore(temporary.root), wrapping, environment).submit(request).then(() => null, refusal);
+    assert.ok(refused !== null);
+    assert.deepEqual([refused.code, refused.details?.environmentVariable, refused.details?.reason],
+      ["APN_RPC_CONFIG", "APN_BASE_RPC_URL", "circle_v2_source_service_base_rpc_missing"]);
+    assert.match(refused.message, new RegExp(`APN_BASE_RPC_URL.*eip155:8453|eip155:8453.*APN_BASE_RPC_URL`, "u"));
+    assert.ok(refused.message.endsWith(`${state}.`));
+    assert.deepEqual(failureEnvelope("circle.source.submit", "r", refused).next_actions,
+      ["Set APN_BASE_RPC_URL to a public HTTPS RPC endpoint of that chain, then rerun the same command."]);
+  }
+  await assert.rejects(access(temporary.root), "no state root was created");
 });
