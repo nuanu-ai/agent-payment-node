@@ -1,5 +1,6 @@
 import { ApnError } from "../errors.js";
 import { SwapOperationRepository } from "./repository.js";
+import { abandonedPrincipalCandidate } from "./uniswap-v3/token-principal.js";
 import { swapMechanismDigest } from "./pin.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "./route-admission.js";
 import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS, USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
@@ -16,8 +17,10 @@ export async function executeUniswapCommand(request, context) {
             return tokenOutcome(await runtime.prepare(request));
         if (request.command === "swap.uniswap-token.approve")
             return tokenOutcome(await runtime.approve(request.operationId));
-        if (request.command === "swap.uniswap-token.execute")
-            return tokenOutcome(await runtime.execute(request.operationId));
+        if (request.command === "swap.uniswap-token.execute") {
+            const executed = await runtime.execute(request.operationId);
+            return tokenOutcome(executed, await runtime.residualAllowance?.(executed) ?? null, "execute");
+        }
         if (request.command === "swap.uniswap-token.cleanup")
             return tokenOutcome(await runtime.cleanup(request.operationId, request.cleanupFees));
         if (request.command === "swap.uniswap-token.inventory")
@@ -72,24 +75,29 @@ export async function executeUniswapCommand(request, context) {
  * The token lane's observed receipt already holds what the swap proved; `actualEconomics` gives it the shared swap shape:
  * the exact input debit, the output credit, every gas the operation paid (approval, swap, cleanup) and the ETH that left.
  */
-function tokenOutcome(value, residual = null) {
+function tokenOutcome(value, residual = null, after) {
     const receipt = value.receipt, actualEconomics = receipt === null ? null : { inputAtomic: receipt.inputDebitAtomic,
         outputAtomic: receipt.outputCreditAtomic, networkFeeAtomic: (BigInt(receipt.approvalGasWei) + BigInt(receipt.swapGasWei) + BigInt(receipt.cleanupGasWei)).toString(),
         nativeDebitAtomic: receipt.nativeDebitWei };
     const outcome = { proofClass: value.phase, data: null, operation: value, receipt: receipt === null ? null : { ...receipt, actualEconomics },
-        nextActions: uniswapTokenNextActions(value) };
+        nextActions: uniswapTokenNextActions(value, after) };
     if (residual === null || residual === "0")
         return outcome;
-    // A swap the earlier expired-approval exit cleaned with its approval standing: the live residual and its exact revoke.
+    // A terminal swap with its approval standing (cleaned by the earlier expired-approval exit, or abandoned by the owner, whose
+    // own cleanup can no longer reopen): the live residual and the generic exact revoke.
     const target = { profile: value.profile, chainId: UNISWAP_TOKEN_CHAIN_ID, token: value.route.inputToken, spender: value.route.router };
     return { ...outcome, data: { residualAllowance: { chain: `eip155:${target.chainId}`, token: target.token, owner: value.account, spender: target.spender,
                 allowanceAtomic: residual, readAt: "latest" } }, nextActions: [...outcome.nextActions, walletAllowanceRevokeCommand(target)] };
 }
 /**
  * A swap that requires cleanup names its one exit, the owner's consented cleanup; when the fee cap refused it before
- * signing, the same cleanup may instead re-quote its own caps under fresh consent.
+ * signing, the same cleanup may instead re-quote its own caps under fresh consent. An owner-abandoned swap still holding a
+ * principal no proof released names execute, which opens custody to prove its swap never signed; execute itself, having
+ * found signed bytes and changed nothing, does not name itself again.
  */
-export function uniswapTokenNextActions(op) {
+export function uniswapTokenNextActions(op, after) {
+    if (abandonedPrincipalCandidate(op) !== null)
+        return after === "execute" ? [] : [`apn swap ethereum uniswap-token execute --operation ${op.operationId}`];
     if (op.phase !== "cleanup_required")
         return [];
     const cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;

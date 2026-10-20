@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
-import { principalReleaseCandidate } from "./token-principal.js";
+import { abandonedPrincipalCandidate, principalReleaseCandidate } from "./token-principal.js";
 import { sanitizeUniswapTokenFailureField, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
 export class UniswapTokenExecution {
     journal;
@@ -23,7 +23,9 @@ export class UniswapTokenExecution {
     }
     async execute(id) {
         let op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id)));
-        if (["observed", "cleaned", "cleanup_required", "abandoned_unknown"].includes(op.phase))
+        if (op.phase === "abandoned_unknown")
+            return await this.releaseAbandoned(op);
+        if (["observed", "cleaned", "cleanup_required"].includes(op.phase))
             return op;
         // A dropped marker leaves this command on the recovery budget it reserved: it may close an expired route (no effect),
         // otherwise it stops, and the next execute starts the effect afresh under an effect budget.
@@ -351,6 +353,31 @@ export class UniswapTokenExecution {
             return await this.persist(transitionUniswapToken(current, kind === "approval" ? "approved" : kind === "swap" ? "approval_observed" : "cleanup_required", { [`${kind}Attempt`]: null }, this.ports.now()));
         });
     }
+    /**
+     * The owner's abandon keeps the principal held only while an effect of the swap could still land. With no swap marker, or
+     * a hashless one whose custody (opened under the account lock) holds no signed bytes and so frees its nonce, nothing of
+     * the principal can move: that proof is saved first, then the hold released. Gas, attempts, the marker and the terminal
+     * phase stay; signed bytes (found now or committed earlier) change nothing. Nothing is signed or sent here.
+     */
+    async releaseAbandoned(op) {
+        const candidate = abandonedPrincipalCandidate(op);
+        if (candidate === null)
+            return op;
+        const swap = candidate.swap;
+        if (swap !== null && await this.ports.recoverSealed?.(op, "swap", swap.nonce) != null)
+            return op;
+        op = await this.ports.withAccountLock(op, async () => {
+            const current = await this.required(op.operationId);
+            if (current.integrityHash !== op.integrityHash || swap !== null && !await this.ports.releaseNonce(current, "swap", swap.nonce))
+                return current;
+            const now = this.ports.now();
+            return await this.persist(transitionUniswapToken(current, "abandoned_unknown", { principalRelease: { schemaVersion: "apn.uniswap-token-principal-release.v1",
+                    kind: "swap_never_signed", ...(swap === null ? {} : { swapNonce: swap.nonce, swapMarkerHash: swap.markerHash }), observedAt: now.toISOString() } }, now));
+        });
+        if (op.principalRelease === undefined || op.usageState !== "reserved")
+            return op;
+        return await this.persist(transitionUniswapToken(op, "abandoned_unknown", usagePatch(await this.ports.followUsage(op, "failed_before_effect")), this.ports.now()));
+    }
     async cleanupRequired(op, reason, native = op.accumulatedNativeDebitWei, usage, preSignFailure, unmarkedAttempt = {}) {
         return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: reason, accumulatedNativeDebitWei: native,
             ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }), ...unmarkedAttempt }, this.ports.now()));
@@ -371,11 +398,12 @@ export class UniswapTokenExecution {
         if (op.usageReservationId === null)
             return op;
         // A recorded release whose ledger step did not complete (records of the earlier expired-approval exit, or principalRelease).
-        if (op.phase === "cleaned" && (op.cleanupEvidence?.kind === "expired_approval_no_swap" || op.principalRelease !== undefined)) {
+        if (op.phase === "cleaned" && (op.cleanupEvidence?.kind === "expired_approval_no_swap" || op.principalRelease !== undefined) ||
+            op.phase === "abandoned_unknown" && op.principalRelease !== undefined) {
             const current = await this.ports.currentUsage(op);
             if (current.state === "reserved") {
                 const released = await this.ports.followUsage(op, "failed_before_effect");
-                return await this.persist(transitionUniswapToken(op, "cleaned", usagePatch(released), this.ports.now()));
+                return await this.persist(transitionUniswapToken(op, op.phase, usagePatch(released), this.ports.now()));
             }
         }
         const usage = await this.ports.currentUsage(op);
