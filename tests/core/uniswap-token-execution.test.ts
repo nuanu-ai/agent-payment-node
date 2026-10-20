@@ -49,19 +49,32 @@ async function fixture(root: string, allowance = "0") {
     /** Custody holds signed bytes the record has no hash for (a crash between wallet save and the public marker). */
     custodySigned: () => { custodySigned = true; } };
 }
-test("expired quote retires a canonical safe approval and releases principal without sending a swap", async (t) => {
+test("an expired route after a landed approval is cleaned only with no residual allowance; the hold is released with cleaned", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
   let op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "approval_submitted");
   f.now(new Date("2030-03-18T00:00:01.000Z"));
   op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "approval_submitted"); assert.equal(op.usageState, "reserved");
-  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" });
-  op = await f.runtime.status(op.operationId); assert.equal(op.phase, "cleaned"); assert.equal(op.usageState, "failed_before_effect");
-  assert.equal(op.cleanupReason, "deadline_expired_after_approval"); assert.deepEqual(op.cleanupEvidence, {
-    schemaVersion: "apn.uniswap-token-expired-approval-evidence.v1", kind: "expired_approval_no_swap",
-    approvalTransactionHash: H("1"), observedAllowanceAtomic: "1000000", observedAt: "2030-03-18T00:00:01.000Z" });
-  assert.equal(op.approvalAttempt?.transactionHash, H("1")); assert.equal(op.swapAttempt, null); assert.equal(op.accumulatedNativeDebitWei, "100");
-  assert.deepEqual(f.sends, ["approval"]); assert.equal((await f.runtime.execute(op.operationId)).integrityHash, op.integrityHash);
+  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" }); f.allowance("1000000");
+  // The approval still stands: the swap needs the owner's revoke before it is cleaned, and its hold waits for that.
+  op = await f.runtime.status(op.operationId);
+  assert.deepEqual([op.phase, op.cleanupReason, op.cleanupEvidence, op.usageState, op.swapAttempt, op.accumulatedNativeDebitWei],
+    ["cleanup_required", "deadline_expired_after_approval", null, "reserved", null, "100"]);
+  assert.equal((await f.runtime.execute(op.operationId)).integrityHash, op.integrityHash);
+  op = await f.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.deepEqual(f.sends, ["approval", "cleanup"]);
+  f.observations.set(H("3"), { status: "success", transactionHash: H("3"), gasDebitWei: "50", allowanceAtomic: "0" }); f.allowance("0");
+  op = await f.runtime.status(op.operationId);
+  assert.deepEqual([op.phase, op.usageState, op.principalRelease?.kind, op.accumulatedNativeDebitWei], ["cleaned", "failed_before_effect", "swap_never_signed", "150"]);
+  assert.deepEqual(f.sends, ["approval", "cleanup"]); assert.equal((await f.runtime.execute(op.operationId)).integrityHash, op.integrityHash);
   assert.equal((await f.runtime.status(op.operationId)).integrityHash, op.integrityHash);
+
+  // An allowance already zero (revoked elsewhere) closes the expired route at once, without a send.
+  const other = await temporaryState(); t.after(other.cleanup); const g = await fixture(other.root);
+  op = await g.runtime.approve(g.operation.operationId); g.now(new Date("2030-03-18T00:00:01.000Z"));
+  g.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" });
+  op = await g.runtime.status(op.operationId);
+  assert.deepEqual([op.phase, op.cleanupReason, op.cleanupEvidence?.kind, op.usageState, op.principalRelease?.kind, op.accumulatedNativeDebitWei],
+    ["cleaned", "zero_allowance_after_effect", "zero_allowance_after_effect", "failed_before_effect", "swap_never_signed", "100"]);
+  assert.deepEqual(g.sends, ["approval"]);
 });
 test("expired prepared token swap closes without owner approval, reservation, or a transaction", async (t) => {
   for (const command of ["status", "execute"] as const) {
