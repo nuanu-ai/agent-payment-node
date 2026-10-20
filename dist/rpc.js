@@ -341,6 +341,8 @@ export class HttpsBaseRpc {
         const baseFee = rpcQuantity(block.baseFeePerGas);
         return { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: (baseFee * 2n + priority).toString(), maxPriorityFeePerGasAtomic: priority.toString() };
     }
+    /** The pre-transport refusal a guarded POST would meet now (cap spent, provider cooling down); sends nothing. */
+    async assertPostCapacity() { await this.directGuard?.assertCanPost(this.endpoint.toString()); }
     async submitRawTransaction(rawTransaction, beforeSend) {
         try {
             return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction], beforeSend), 32);

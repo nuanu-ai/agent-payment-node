@@ -298,6 +298,8 @@ apn x402 permit2 allowance set --profile <profile> --chain <caip2> --asset <toke
 apn x402 permit2 allowance revoke --profile <profile> --chain <caip2> --asset <token> --rpc-url <https-rpc> --max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --idempotency-key <key>
 apn x402 permit2 allowance observe --operation <operation-id> --rpc-url <https-rpc>
 apn x402 permit2 allowance status --operation <operation-id>
+apn wallet allowance revoke --profile <profile> --chain eip155:<id> --asset <token-address> --spender <address> --max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>
+apn wallet allowance status --profile <profile> --chain eip155:<id> --asset <token-address> --spender <address>
 apn x402 merchant prepare --profile <profile> --url <https-url> [--asset <token>] --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]

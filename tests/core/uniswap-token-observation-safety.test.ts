@@ -28,7 +28,7 @@ async function fixture(root: string, kind: TokenEffectKind = "approval", hash: s
   let usage: "reserved" | "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert" | "released_unsubmitted" = "reserved", success = false;
   const ports: UniswapTokenExecutionPorts = { now: () => NOW, foregroundApprove: async () => { counts.foreground++; throw new Error("foreground forbidden"); }, foregroundCleanup: forbidden,
     withAccountLock: forbidden, allocateNonce: async () => { counts.nonce++; throw new Error("nonce forbidden"); }, currentAllowance: forbidden, releaseNonce: forbidden, commitNonce: forbidden,
-    guard: forbidden, revalidate: forbidden, reserveUsage: forbidden, currentUsage: async () => ({ reservationId: "d".repeat(64), state: usage }),
+    guard: forbidden, reserveUsage: forbidden, currentUsage: async () => ({ reservationId: "d".repeat(64), state: usage }),
     followUsage: async (_op, target) => { if (target === "finalized") counts.finalized++; usage = target; return { reservationId: "d".repeat(64), state: usage }; },
     seal: async () => { counts.sign++; throw new Error("sign forbidden"); }, probeSealed: forbidden,
     recoverSealed: async (op, kind, nonce) => await custody.probeJournaled(op, kind, nonce), send: async () => { counts.send++; throw new Error("send forbidden"); },
@@ -64,7 +64,8 @@ test("hashless started recovery uses public hash, never submits, and finalizes s
 test("missing public journal refuses hashed and hashless recovery without custody", async (t) => {
   for (const hash of [HASH, null]) {
     const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root, "approval", hash);
-    for (const command of ["status", "execute"] as const) await assert.rejects(f.runtime()[command](f.op.operationId), (e: any) => e.code === "APN_OPERATION_BLOCKED" && e.details?.reason === "uniswap_token_public_effect_missing");
+    // A hashless marker's forward command (execute) settles it through custody under the account lock; status never opens it.
+    for (const command of hash === null ? ["status"] as const : ["status", "execute"] as const) await assert.rejects(f.runtime()[command](f.op.operationId), (e: any) => e.code === "APN_OPERATION_BLOCKED" && e.details?.reason === "uniswap_token_public_effect_missing");
     assert.equal((await f.journal.load(f.op.operationId))?.integrityHash, f.op.integrityHash); noCustody(f.counts);
   }
 });

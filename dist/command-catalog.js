@@ -4,6 +4,7 @@ import { MERCHANT_COMMANDS } from "./x402-merchant/command-catalog.js";
 import { PERMIT2_COMMANDS } from "./x402-permit2/command-catalog.js";
 import { X402_SOLANA_COMMAND_GROUPS, X402_SOLANA_COMMANDS } from "./x402-solana/command-catalog.js";
 import { PERMIT2_ALLOWANCE_COMMANDS, PERMIT2_ALLOWANCE_GROUPS } from "./x402-permit2/allowance/catalog.js";
+import { WALLET_ALLOWANCE_COMMANDS, WALLET_ALLOWANCE_GROUPS } from "./wallet-allowance/catalog.js";
 import { RELAY_COMMANDS, RELAY_COMMAND_GROUPS } from "./relay/command-catalog.js";
 import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
@@ -108,6 +109,7 @@ export const COMMAND_GROUPS = [
     { path: ["wallet", "permission"], summary: "Inspect and manage bounded provider permission state.", kind: "group" },
     { path: ["wallet", "metamask"], summary: "Guarded MetaMask Agent Wallet USDC transfer that pays its network fee in the native coin.", kind: "group" },
     { path: ["wallet", "policy"], summary: "Inspect or change owner-approved wallet policy.", kind: "group" },
+    ...WALLET_ALLOWANCE_GROUPS,
     { path: ["x402"], summary: "Inspect and pay standard x402 resources.", kind: "group" },
     { path: ["x402", "merchant"], summary: "x402 ERC-20 transfer-proof merchant payment and delivery.", kind: "group" },
     { path: ["x402", "permit2"], summary: "Read owner admission and intents, approve one foreground Permit2 GET and observe chain evidence.", kind: "group" },
@@ -123,6 +125,7 @@ const BASE_COMMANDS = [
     ...PERMIT2_COMMANDS,
     ...X402_SOLANA_COMMANDS,
     ...PERMIT2_ALLOWANCE_COMMANDS,
+    ...WALLET_ALLOWANCE_COMMANDS,
     ...MERCHANT_COMMANDS,
     ...RELAY_COMMANDS,
     command(["stargate", "native", "prepare"], "apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>", "Freeze a fresh quote and exact Ethereum Stargate sendToken envelope.", [profileRequired, option("--amount-atomic", "wei", true, noDefault, ["positive_integer", "dust_free_quote_amount"], "operator_input"), option("--max-native-debit-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_128_safe_ascii_characters"], "operator_input")], "payment_prepare", "Reads both chains and writes a crash-durable unsigned operation.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [{ command_path: ["stargate", "native", "execute"], when: "After reviewing the frozen operation." }], ["apn stargate native prepare --profile owner --amount-atomic 10000000000000000 --max-native-debit-atomic 12000000000000000 --idempotency-key eth-unichain-0001"]),

@@ -372,6 +372,32 @@ transactions were confirmed, and Base USDC funding was skipped as unnecessary.
 That is pre-release source/live proof, not APN 0.5.10 publication, Homebrew
 installation, merchant availability or x402 settlement proof.
 
+## Reading and revoking an allowance the wallet granted
+
+`apn wallet allowance status --profile <p> --chain eip155:<id> --asset <token-address> --spender <address>`
+reads one ERC-20 allowance of the profile's local wallet at the chain's latest block
+(CLI and MCP; read-only). `apn wallet allowance revoke` with the same selectors plus
+`--max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>`
+sends `approve(spender, 0)` from that wallet and nothing else: it never sets a
+nonzero amount and calls no other contract. Revoking only removes a permission, so
+no asset admission applies, but the chain's own `APN_<CHAIN>_RPC_URL` setting is
+required (a chain APN names no setting for, or an unset one, is refused by name).
+Before the foreground consent (chain, token, spender, the current allowance and the
+maximum gas debit) it reads the allowance at one block and refuses when it is
+already zero. It is an owned operation (`wallet_allowance_revoke` in the operation
+index): one send, observed by `apn operation status --operation <id>` to an
+`Approval(owner, spender, 0)` log in a canonical block at the chain's proof tag (or
+a zero allowance there); the shared finalized never-lands proof closes one that can
+never land (`superseded`, naming the same revoke again), and `apn operation abandon`
+is the owner's last exit (`abandoned_unknown`, naming the allowance read, since it may
+still land). Repeating the command continues the open revoke of the same profile,
+chain, token and spender and never sends twice. A send the RPC refuses before
+transport (the command's POST cap, the provider's cooldown, HTTP 429) leaves the
+revoke `signed`, and the error and its status name the same revoke command with its
+frozen caps, which later sends the same sealed bytes once. A revoke never consented
+stops holding the wallet's chain once its 240 s consent window plus the 10 minute
+unstarted margin has passed. MCP returns the CLI handoff for the revoke.
+
 ## Capability boundary
 
 | Profile | Native and list ERC-20 direct on the eleven list EVM networks (owner allowlist caps) | Base-USDC direct | Standard x402 |

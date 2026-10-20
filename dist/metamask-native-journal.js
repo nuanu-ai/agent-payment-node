@@ -26,13 +26,26 @@ const STATES = METAMASK_NATIVE_STATES;
 const CONTEXT_KEYS = ["profile", "profileHash", "accountBindingHash", "capabilityHash", "profileRevision", "policyDigest", "policyRevision",
     "activationDigest", "vendorPolicyHash", "vendorProjectHash", "quote", "operationId", "consentExpiresAt", "issuedDay"];
 export const METAMASK_NATIVE_OPERATION_SCHEMA = V2;
+export function metaMaskNativeMfaTask(requestId, evidence, source, now = new Date()) {
+    return { requestId, expiresAt: evidence.expiresAt, authMethod: evidence.authMethod, observedAt: now.toISOString(), source, evidenceHash: evidence.evidenceHash };
+}
+function validateMfaTask(o) {
+    const t = o.mfaTask;
+    if (t === undefined)
+        return;
+    if (!isPlainRecord(t) || !exactKeys(t, ["requestId", "expiresAt", "authMethod", "observedAt", "source", "evidenceHash"]) || t.requestId !== o.providerRequestId ||
+        o.transactionHash !== null || o.effectAttempts !== 1 || !["unknown", "abandoned_unknown"].includes(o.state) || !(t.expiresAt === null || instant(t.expiresAt)) ||
+        !(t.authMethod === null || typeof t.authMethod === "string" && /^[a-z][a-z0-9_-]{0,31}$/u.test(t.authMethod)) || !instant(t.observedAt) ||
+        t.observedAt < o.createdAt || !["send", "watch"].includes(t.source) || !digest(t.evidenceHash))
+        corrupt("Native transfer MFA task is invalid.");
+}
 function blocked(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
 function corrupt(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 const digest = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 const instant = (value) => typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
 /** Checked against the record's own seal and fields only (R2): a changed constant or a moved APN home never voids it. */
 function validateOperation(value) {
-    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "requestHash", "context", "reservations", "state", "effectAttempts", "transactionHash", "providerRequestId", "receiptEvidence", "createdAt", "updatedAt", "recordHash", ...(value.diagnostic === undefined ? [] : ["diagnostic"])]))
+    if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion", "operationId", "requestHash", "context", "reservations", "state", "effectAttempts", "transactionHash", "providerRequestId", "receiptEvidence", "createdAt", "updatedAt", "recordHash", ...(value.diagnostic === undefined ? [] : ["diagnostic"]), ...(value.mfaTask === undefined ? [] : ["mfaTask"])]))
         corrupt("Native transfer journal schema is invalid.");
     const o = value, { recordHash, ...body } = o, v2 = o.schemaVersion === V2, c = o.context;
     if ((o.schemaVersion !== V1 && !v2) || recordHash !== hashObject(body))
@@ -74,6 +87,7 @@ function validateOperation(value) {
         corrupt("Native transfer confirmed journal has no receipt.");
     if (o.transactionHash !== null && !/^0x[0-9a-f]{64}$/u.test(o.transactionHash))
         corrupt("Native transfer transaction hash is invalid.");
+    validateMfaTask(o);
     return o;
 }
 /**
@@ -154,18 +168,46 @@ export function metaMaskNativeRequestMatches(op, request) {
     return op.requestHash === hashObject({ chainId: request.chainId, key: request.key, profile: request.profile }) &&
         transfer.recipient === request.recipient && transfer.amountAtomic === request.amountAtomic;
 }
+/** A field given as undefined (the MFA task once the request is past it) leaves the record. */
 export function patchMetaMaskNativeOperation(op, fields) {
-    const { recordHash: _, ...body } = op;
-    return { ...body, ...fields, updatedAt: new Date().toISOString() };
+    const { recordHash: _, ...body } = op, next = { ...body, ...fields, updatedAt: new Date().toISOString() };
+    for (const [key, value] of Object.entries(next))
+        if (value === undefined)
+            delete next[key];
+    return next;
 }
-export function publicMetaMaskNativeOperation(o) {
+/** The family's own no-send observer: it reads the stored request or transaction and never signs or sends again. */
+export const metaMaskNativeObserveCommand = (id) => `apn wallet metamask native-transfer-observe --operation ${id}`;
+const OWNER_CONFIRMS = { social: "from the email registered to your MetaMask dashboard",
+    qr: "in MetaMask Mobile" };
+/**
+ * The owner's open MetaMask approval, beside (never instead of) the financial state: shown while the transfer is unresolved
+ * and has no transaction hash. `expired` once its own `expiresAt` has passed; the outcome then comes from observing.
+ */
+function publicMfaTask(o, now) {
+    const t = o.mfaTask;
+    if (t === undefined || RESOLVED.includes(o.state) || o.transactionHash !== null)
+        return {};
+    const expired = t.expiresAt !== null && now.getTime() >= Date.parse(t.expiresAt), observe = metaMaskNativeObserveCommand(o.operationId);
+    const how = OWNER_CONFIRMS[t.authMethod ?? ""] ?? "from your paired device or the email registered to your MetaMask dashboard";
+    return { mfa_task: { status: expired ? "expired" : "awaiting_owner", provider: "metamask-agent-wallet", provider_state: "AWAITING_MFA",
+            request_id: t.requestId, auth_method: t.authMethod, expires_at: t.expiresAt, observed_at: t.observedAt, source: t.source, evidence_hash: t.evidenceHash,
+            owner_action: expired
+                ? `The MetaMask approval window for request ${t.requestId} closed at ${t.expiresAt}. Observe to read what the provider did; the transfer stays UNKNOWN until the chain proves it, and APN never sends it again.`
+                : `Approve MetaMask request ${t.requestId} ${how}${t.expiresAt === null ? "" : ` before ${t.expiresAt}`}. APN never approves it for you and never sends again; then observe.`,
+            observe_command: observe } };
+}
+export function publicMetaMaskNativeOperation(o, now = new Date()) {
     const receipt = o.receiptEvidence === null ? null : validateMetaMaskNativeFeeReceipt(o.receiptEvidence, o.context.quote), transfer = metaMaskNativeQuoteTransfer(o.context.quote);
+    // Only an outcome that a no-send observation can still move (a stored request or transaction) names the observer.
+    const observable = ["acknowledged", "unknown"].includes(o.state) && (o.transactionHash !== null || o.providerRequestId !== null);
     return { operation_id: o.operationId, state: o.state === "confirmed" && receipt?.transferAccepted === false ? "confirmed_reverted" : o.state, chain_id: o.context.quote.chainId, profile: o.context.profile,
         sender: o.context.quote.sender, recipient: transfer.recipient, token: o.context.quote.token, usdc_atomic: transfer.amountAtomic, usdc: formatAtomic(transfer.amountAtomic, 6),
         maximum_native_fee_atomic: o.context.quote.feeQuote.totalQuoteWei, transaction_hash: o.transactionHash,
         effect_attempts: o.effectAttempts, proof_class: o.state === "confirmed" ? receipt?.transferAccepted ? "canonical_native_fee_transfer" : "canonical_reverted_native_fee" : "durable_public_state",
         ...(o.diagnostic === undefined ? {} : { diagnostic: o.diagnostic }),
-        ...(receipt === null ? {} : { receipt }) };
+        ...(receipt === null ? {} : { receipt }), ...publicMfaTask(o, now),
+        next_actions: observable ? [metaMaskNativeObserveCommand(o.operationId)] : [] };
 }
 export async function metaMaskNativeOperationExists(stateRoot, id) {
     return await new MetaMaskNativeJournal(stateRoot).read(canonicalOperationId(id)) !== null;

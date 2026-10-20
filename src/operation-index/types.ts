@@ -11,6 +11,8 @@ export const OPERATION_FAMILIES = [
   "circle_approval", "metamask_native",
   // x402 exact on Solana mainnet and the owner's bounded Permit2 allowance (0.5.53).
   "x402_solana", "permit2_allowance",
+  // The generic revoke of an ERC-20 allowance the local wallet granted (0.5.53+).
+  "wallet_allowance_revoke",
 ] as const;
 export type OperationFamily = typeof OPERATION_FAMILIES[number];
 

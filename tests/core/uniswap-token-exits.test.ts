@@ -44,7 +44,7 @@ async function fixture(root: string, allowanceAtPrepare = "0") {
   let allowance = allowanceAtPrepare, now = NOW, usage: AssetUsageState = "reserved", nonce = 7, finalizedNonce = 0n;
   const ports = { now: () => now, foregroundApprove: async () => { consents.push("approve"); }, foregroundCleanup: async (op: UniswapTokenOperation) => { consents.push(`cleanup:${op.integrityHash}`); },
     withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(), allocateNonce: async () => String(nonce++),
-    releaseNonce: async () => true, commitNonce: async () => {}, currentAllowance: async () => allowance, guard: async () => {}, revalidate: async () => {},
+    releaseNonce: async () => true, commitNonce: async () => {}, currentAllowance: async () => allowance, guard: async () => {},
     reserveUsage: async () => { usage = "reserved"; return { reservationId: "d".repeat(64), state: usage }; },
     currentUsage: async () => ({ reservationId: "d".repeat(64), state: usage }),
     followUsage: async (_op: unknown, target: AssetUsageState) => { usage = target; return { reservationId: "d".repeat(64), state: usage }; },

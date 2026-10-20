@@ -8,6 +8,18 @@ import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
 import { admitOperation } from "../../operation-index/admission.js";
 import { evmClaim, namedProfileHash } from "../../operation-index/adapters/family-claims.js";
 import { UNISWAP_TOKEN_CHAIN_ID } from "../../operation-index/adapters/uniswap-token.js";
+/**
+ * Execute's request plan in HTTP POSTs, counted from its code path (up to three reads per batch, one POST each, no retries).
+ * An effect reads the pending nonce (1), the signing block (1), the code pins at it (4: four batches with the archive chain id
+ * in the first, or the pooled archive's anchor and three), the state at it (1: allowance and balance, plus a swap's fresh
+ * quote), the simulation (1) and gas estimate (1; a swap's carries the block recheck), the fees and native balance with
+ * the block recheck (1); then the send (1; its slot is held before the attempt marker, so no read can take it) and the
+ * first observation (at most 3: transaction, receipt, then block and safe head). A swap is 14; an approval execute
+ * resumes reads the allowance first, 15. Each further candidate of a pooled primary may cost one more probe.
+ */
+export const UNISWAP_TOKEN_EXECUTE_PLAN = 15;
+/** The plan's cap for a command whose first primary batch may probe each candidate of a pooled primary once. */
+export function uniswapTokenProbedCap(plan, poolCandidates) { return plan + Math.max(0, poolCandidates - 1); }
 export class InstalledUniswapTokenRuntime {
     builder;
     materials;
@@ -28,7 +40,7 @@ export class InstalledUniswapTokenRuntime {
     inventory() { return this.builder.inventory(); }
     async quote(request) {
         const binding = domainHash("apn.uniswap-token-quote-attempt.v1", canonicalJson(request));
-        const cap = this.quotePrepareCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote");
+        const cap = this.probedCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote");
         let result;
         try {
             result = await this.builder.quote(request);
@@ -59,7 +71,7 @@ export class InstalledUniswapTokenRuntime {
             idempotencyHash: null, requestHash: null }, [evmClaim(UNISWAP_TOKEN_CHAIN_ID, material.account)], async () => await this.prepareBody(request, material, operationId));
     }
     async prepareBody(request, material, operationId) {
-        const cap = this.quotePrepareCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
+        const cap = this.probedCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
         try {
             await this.ports.confirm(material);
         }
@@ -90,11 +102,16 @@ export class InstalledUniswapTokenRuntime {
     async execute(id) {
         return await this.budgeted(id, "swap.uniswap-token.execute", async () => {
             const phase = (await this.journal.load(id))?.phase;
-            const cap = 24;
+            const cap = this.probedCap(UNISWAP_TOKEN_EXECUTE_PLAN);
             return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] : [0, cap, "recovery"];
         }, async () => await this.execution.execute(id));
     }
     async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"], async () => await this.execution.status(id)); }
+    async residualAllowance(op) {
+        if (op.phase !== "cleaned" || op.cleanupEvidence?.kind !== "expired_approval_no_swap")
+            return null;
+        return await this.budgeted(op.operationId, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"], async () => await this.ports.currentAllowance(op));
+    }
     async cleanup(id, fees) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"], async () => await this.execution.cleanup(id, fees)); }
     async budgeted(id, command, budget, work) {
         return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => {
@@ -112,7 +129,7 @@ export class InstalledUniswapTokenRuntime {
         });
     }
     poolCap(base) { return base + (this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
-    quotePrepareCap(base) { return this.rpc?.primaryPoolEnabled?.() === true ? this.poolCap(base) - 1 : base; }
+    probedCap(plan) { return uniswapTokenProbedCap(plan, this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
 }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-runtime.js.map

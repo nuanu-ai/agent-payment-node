@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -18,6 +17,7 @@ import type { EvmChainId } from "../../src/evm-asset.js";
 import type { X402OperationRecord } from "../../src/x402-state-integrity.js";
 import { testRuntime } from "./installed-runtime.js";
 import { temporaryState } from "./helpers.js";
+import { FRESH_PROCESS_TEST_TIMEOUT_MS, freshProcess } from "./fresh-process.js";
 import { initializeNetworkFixture, networkFixture, networkPaid, networkSettlement } from "./evm-x402-helpers.js";
 import { challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_REQUIREMENTS, X402_URL, paymentIdentifierDeclaration } from "./x402-vectors.js";
@@ -104,7 +104,7 @@ test("larger lists retain byte, schema, supported-mechanism and selected-network
 
 for (const chainId of [8453, 1, 42161] as const) {
   for (const bodyBase64 of [undefined, null, "", Buffer.from('{"planId":"synthetic","idempotencyKey":"merchant-one"}').toString("base64")]) {
-    test(`${chainId} late-index ${JSON.stringify(bodyBase64)} survives real sign/send crashes without replacement`, async context => {
+    test(`${chainId} late-index ${JSON.stringify(bodyBase64)} survives real sign/send crashes without replacement`, { timeout: FRESH_PROCESS_TEST_TIMEOUT_MS }, async context => {
       const temporary = await temporaryState(); context.after(temporary.cleanup);
       const fixture = networkFixture(temporary.root, chainId);
       await initializeNetworkFixture(fixture, chainId);
@@ -128,19 +128,17 @@ for (const chainId of [8453, 1, 42161] as const) {
       const alternateChain = chainId === 1 ? 42161 : 1;
       assert.equal((await fixture.core.execute({ ...request, chainId: alternateChain })).error?.code, "APN_IDEMPOTENCY_CONFLICT");
       const worker = fileURLToPath(new URL("./evm-x402-crash-worker.js", import.meta.url));
-      const run = (phase: string) => spawnSync(process.execPath, [worker, phase, temporary.root, operationId], {
-        encoding: "utf8", timeout: 30000, env: process.env,
-      });
-      assert.equal(run("sign-crash").status, 75);
-      const signed = run("recover-sign");
+      const run = async (phase: string) => await freshProcess(context, [worker, phase, temporary.root, operationId]);
+      assert.equal((await run("sign-crash")).status, 75);
+      const signed = await run("recover-sign");
       assert.equal(signed.status, 0, signed.stderr);
       assert.equal(JSON.parse(signed.stdout).signatures, 0);
       assert.equal(JSON.parse(signed.stdout).result.operation.state, "authorized_not_sent");
-      assert.equal(run("send-crash").status, 76);
-      const recovered = run("recover-send");
+      assert.equal((await run("send-crash")).status, 76);
+      const recovered = await run("recover-send");
       assert.equal(recovered.status, 0, recovered.stderr);
       assert.equal(JSON.parse(recovered.stdout).signatures, 0);
-      const settlement = run("settle");
+      const settlement = await run("settle");
       assert.equal(settlement.status, 0, settlement.stderr);
       assert.equal(JSON.parse(settlement.stdout).signatures, 0);
       const completed = (await fixture.state.findX402Operation(operationId))!;
@@ -153,7 +151,7 @@ for (const chainId of [8453, 1, 42161] as const) {
       assert.equal(completed.settlementEvidence?.chainId, String(chainId));
       validateX402Operation(completed);
       assert.equal((await fixture.core.execute({ command: "receipt.get", operationId })).ok, true);
-      const replay = run("settle");
+      const replay = await run("settle");
       assert.equal(replay.status, 0, replay.stderr);
       assert.equal(JSON.parse(replay.stdout).signatures, 0);
       assert.equal(JSON.parse(replay.stdout).httpCalls, 0);

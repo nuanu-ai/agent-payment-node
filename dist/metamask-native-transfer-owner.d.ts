@@ -24,6 +24,38 @@ export declare function assertMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwne
 export declare function assertMetaMaskNativeOwnedContextCurrent(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void>;
 /** One foreground command: admission, vendor Guard check, quote, consent, the single hand-off and its durable outcome. */
 export declare function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMaskNativeTransferInput): Promise<{
+    next_actions: string[];
+    mfa_task?: never;
+    receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    diagnostic?: MetaMaskNativeDiagnostic;
+    operation_id: string;
+    state: string;
+    chain_id: 1 | 10 | 59144 | 143 | 1329;
+    profile: string;
+    sender: `0x${string}`;
+    recipient: `0x${string}`;
+    token: `0x${string}`;
+    usdc_atomic: string;
+    usdc: string;
+    maximum_native_fee_atomic: string;
+    transaction_hash: `0x${string}` | null;
+    effect_attempts: 0 | 1;
+    proof_class: string;
+} | {
+    next_actions: string[];
+    mfa_task: {
+        status: string;
+        provider: string;
+        provider_state: string;
+        request_id: string;
+        auth_method: string | null;
+        expires_at: string | null;
+        observed_at: string;
+        source: "send" | "watch";
+        evidence_hash: string;
+        owner_action: string;
+        observe_command: string;
+    };
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
@@ -48,6 +80,39 @@ export declare function runMetaMaskNativeTransfer(stateRoot: string, input: Meta
 export declare function closeExpiredNativeTransfersOf(stateRoot: string, chainId: number, payer: string): Promise<void>;
 export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: string, observe?: boolean): Promise<{
     read_observation?: MetaMaskNativeReadObservation;
+    next_actions: string[];
+    mfa_task?: never;
+    receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    diagnostic?: MetaMaskNativeDiagnostic;
+    operation_id: string;
+    state: string;
+    chain_id: 1 | 10 | 59144 | 143 | 1329;
+    profile: string;
+    sender: `0x${string}`;
+    recipient: `0x${string}`;
+    token: `0x${string}`;
+    usdc_atomic: string;
+    usdc: string;
+    maximum_native_fee_atomic: string;
+    transaction_hash: `0x${string}` | null;
+    effect_attempts: 0 | 1;
+    proof_class: string;
+} | {
+    read_observation?: MetaMaskNativeReadObservation;
+    next_actions: string[];
+    mfa_task: {
+        status: string;
+        provider: string;
+        provider_state: string;
+        request_id: string;
+        auth_method: string | null;
+        expires_at: string | null;
+        observed_at: string;
+        source: "send" | "watch";
+        evidence_hash: string;
+        owner_action: string;
+        observe_command: string;
+    };
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
@@ -70,6 +135,38 @@ export declare function readMetaMaskNativeTransfer(stateRoot: string, idInput: s
  * never reached its effect marker and whose consent has passed is closed as failed before effect instead (no consent).
  */
 export declare function abandonMetaMaskNativeTransfer(stateRoot: string, idInput: string, approve: (intent: OperationAbandonIntent) => Promise<void>, now: () => Date): Promise<{
+    next_actions: string[];
+    mfa_task?: never;
+    receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    diagnostic?: MetaMaskNativeDiagnostic;
+    operation_id: string;
+    state: string;
+    chain_id: 1 | 10 | 59144 | 143 | 1329;
+    profile: string;
+    sender: `0x${string}`;
+    recipient: `0x${string}`;
+    token: `0x${string}`;
+    usdc_atomic: string;
+    usdc: string;
+    maximum_native_fee_atomic: string;
+    transaction_hash: `0x${string}` | null;
+    effect_attempts: 0 | 1;
+    proof_class: string;
+} | {
+    next_actions: string[];
+    mfa_task: {
+        status: string;
+        provider: string;
+        provider_state: string;
+        request_id: string;
+        auth_method: string | null;
+        expires_at: string | null;
+        observed_at: string;
+        source: "send" | "watch";
+        evidence_hash: string;
+        owner_action: string;
+        observe_command: string;
+    };
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;

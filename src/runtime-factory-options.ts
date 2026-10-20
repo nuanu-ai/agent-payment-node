@@ -18,6 +18,7 @@ import type { TransferApprovalPort } from "./tty-approval.js";
 import type { TtyTransferApprovalOptions } from "./tty-approval.js";
 import type { SolanaRpcPort } from "./solana/rpc.js";
 import type { Permit2AllowanceRpc } from "./x402-permit2/allowance/chain.js";
+import type { WalletAllowanceRpc } from "./wallet-allowance/chain.js";
 import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, ProviderRegistryPort, X402PaymentMaterialPort } from "./provider-ports.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
@@ -118,6 +119,9 @@ export interface RuntimeFactoryOptions {
   /** Offline Permit2 allowance chain port and TTY; production uses the explicit --rpc-url and the owner's terminal. */
   readonly permit2AllowanceRpc?: Permit2AllowanceRpc;
   readonly permit2AllowanceTtyOptions?: TtyTransferApprovalOptions;
+  /** Offline allowance-revoke chain port (by chain) and TTY; production uses the chain's APN_<CHAIN>_RPC_URL and the owner's terminal. */
+  readonly walletAllowanceRpc?: (chainId: number) => WalletAllowanceRpc;
+  readonly walletAllowanceTtyOptions?: TtyTransferApprovalOptions;
   /** Offline acceptance only; production reads separate recovery consent from the owner TTY. */
   readonly orcaStableRecoveryConsent?: OrcaStableConsentPort;
   readonly tronRpcUrl?: string;

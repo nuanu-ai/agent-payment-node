@@ -61,7 +61,7 @@ function livePorts(root: string, state: StateStore, chain: { allowance: string; 
     foregroundCleanup: async () => { counts.consent += 1; }, withAccountLock: async (op, work) => await custody.withAccountLock(op, work),
     allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
     releaseNonce: async (op, kind, nonce) => await custody.releaseNonce(op, kind, nonce), commitNonce: async (op, kind, nonce) => await custody.commitNonce(op, kind, nonce),
-    guard: async () => { if (chain.guard !== null) throw chain.guard; }, revalidate: async () => { throw new Error("no swap"); },
+    guard: async () => { if (chain.guard !== null) throw chain.guard; },
     reserveUsage: async () => { throw new Error("no reservation"); },
     currentUsage: async (op) => ({ reservationId: op.usageReservationId!, state: op.usageState! }),
     followUsage: async (op, target) => ({ reservationId: op.usageReservationId!, state: target }),
@@ -98,7 +98,7 @@ test("the captured fee-refused swaps clean up through the normal cleanup: same j
     chain.observation = { status: "success", transactionHash: H("0"), gasDebitWei: "21000", allowanceAtomic: "0" }; chain.allowance = "0";
     current = await reopen().status(op.operationId);
     assert.equal(current.phase, "cleaned"); assert.equal(current.accumulatedNativeDebitWei, (BigInt(op.accumulatedNativeDebitWei) + 21000n).toString());
-    assert.equal(current.usageState, "reserved", "a landed approval keeps the principal charged, as before");
+    assert.equal(current.usageState, "reserved", "without a finalized-chain proof that the swap's nonce is spent, the principal stays charged");
     current = await reopen().cleanup(op.operationId); assert.equal(current.phase, "cleaned");
     assert.deepEqual([counts.consent, counts.seal, counts.sends], [1, 1, ["cleanup"]]);
   }

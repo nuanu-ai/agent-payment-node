@@ -8,12 +8,13 @@ import type { StateStore } from "../../state.js";
 import type { TokenEffectKind } from "./token-execution.js";
 import type { UniswapTokenMaterial } from "./token-material.js";
 import type { UniswapTokenOperation } from "./token-operation.js";
+import { UNISWAP_V3_QUOTER_V2 } from "./pins.js";
 import { encodeUniswapTokenApproval, verifyUniswapTokenRoutePins } from "./token-route.js";
-import { UniswapTokenRevalidator } from "./token-revalidation.js";
 import type { UniswapTokenUsage } from "./token-usage.js";
-import { tokenBatch, tokenBlock, tokenChain, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
+import { tokenBatch, tokenBlock, tokenChain, tokenHex, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
 
 const ERC20 = parseAbi(["function allowance(address owner,address spender) view returns (uint256)", "function balanceOf(address owner) view returns (uint256)"]);
+const QUOTER = parseAbi(["function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)"]);
 export class UniswapTokenSigningGuard {
   private readonly wallets: EncryptedWalletStore;
   constructor(private readonly state: StateStore, wrapping: WrappingSecretPort, private readonly call: EvmRpcCall,
@@ -45,14 +46,16 @@ export class UniswapTokenSigningGuard {
     const gas = kind === "approval" ? op.approvalGas : kind === "swap" ? op.swapGas : op.cleanupGas;
     const block = await this.common(op.account, op.route.inputToken, op.route.router, op.route.deadline), pending = block.pending;
     if (BigInt(nonce) < pending) blocked("Reserved nonce is stale.", "uniswap_token_nonce_drift");
+    // Every read below is at the block whose chain and code pins were just verified: the swap's fresh quote rides in the
+    // same batch as its allowance and balance, so nothing is read twice.
     const reads = [request("allowance", op.account, op.route.inputToken, op.route.router, block.tag),
-      ...(kind === "cleanup" ? [] : [request("balanceOf", op.account, op.route.inputToken, op.route.router, block.tag)])];
+      ...(kind === "cleanup" ? [] : [request("balanceOf", op.account, op.route.inputToken, op.route.router, block.tag)]), ...(kind === "swap" ? [quote(op, block.tag)] : [])];
     const values = await tokenBatch(this.call as TokenRpcCall, "archive", reads), allowance = word(values[0]);
     if (kind === "approval" && allowance !== 0n || kind === "swap" && allowance !== BigInt(op.route.amountIn) || kind === "cleanup" && allowance === 0n) {
       blocked("Token allowance changed before signing.", "uniswap_token_allowance_drift");
     }
     if (kind !== "cleanup" && word(values[1]) < BigInt(op.route.amountIn)) blocked("Source token balance is below the exact input.", "uniswap_token_source_balance");
-    if (kind === "swap") await new UniswapTokenRevalidator(this.call, this.verifyPins).revalidate(op);
+    if (kind === "swap") await swapAt(this.call, op, values[2], block);
     else { const approval = encodeUniswapTokenApproval(op.route.inputToken, kind === "approval" ? op.route.amountIn : "0");
       await simulate(this.call, { from: op.account, to: approval.to, data: approval.data, value: "0x0" }, block.tag, gas.gasLimit, true); }
     await finish(this.call, block, op.account, (BigInt(op.maximumNativeDebitWei) - BigInt(op.accumulatedNativeDebitWei)).toString(), gas.maxFeePerGas, gas.maxPriorityFeePerGas);
@@ -77,6 +80,23 @@ function request(kind: "allowance" | "balanceOf", owner: string, token: string, 
   functionName: kind, args: kind === "allowance" ? [owner as Hex, router as Hex] : [owner as Hex] });
   return { method: "eth_call", params: [{ to: token, data }, tag], cachePolicy: "snapshot" as const,
     decoder: (value: unknown) => { decodeFunctionResult({ abi: ERC20, functionName: kind, data: evmRpcHex(value, 32) }); return value; } }; }
+function quote(op: UniswapTokenOperation, tag: Hex) { const data = encodeFunctionData({ abi: QUOTER, functionName: "quoteExactInputSingle",
+  args: [{ tokenIn: op.route.inputToken as Hex, tokenOut: op.route.outputToken as Hex, amountIn: BigInt(op.route.amountIn), fee: 100, sqrtPriceLimitX96: 0n }] });
+  return { method: "eth_call", params: [{ to: UNISWAP_V3_QUOTER_V2, data }, tag], cachePolicy: "none" as const,
+    decoder: (value: unknown) => { decodeFunctionResult({ abi: QUOTER, functionName: "quoteExactInputSingle", data: evmRpcHex(value) }); return value; } }; }
+/** The swap at the guard's block: the fresh quote meets the approved minimum, the exact transaction simulates, its gas fits. */
+async function swapAt(call: EvmRpcCall, op: UniswapTokenOperation, rawQuote: unknown, block: ReturnType<typeof decodedBlock>) {
+  const [amountOut] = decodeFunctionResult({ abi: QUOTER, functionName: "quoteExactInputSingle", data: evmRpcHex(rawQuote) });
+  if (amountOut < BigInt(op.route.amountOutMinimum)) blocked("Fresh quote is below the approved minimum.", "uniswap_token_output_floor");
+  const tx = { from: op.account, to: op.route.router, data: op.route.calldata, value: "0x0" }, rpc = call as TokenRpcCall;
+  await tokenBatch(rpc, "archive", [{ method: "eth_call", params: [tx, block.tag], cachePolicy: "none", decoder: tokenHex() }]);
+  const [estimate, rechecked] = await tokenBatch(rpc, "primary", [
+    { method: "eth_estimateGas", params: [tx, block.tag], cachePolicy: "none", decoder: tokenQuantity },
+    { method: "eth_getBlockByNumber", params: [block.tag, false], cachePolicy: "none", decoder: tokenBlock },
+  ]);
+  if (evmRpcQuantity(estimate) > BigInt(op.swapGas.gasLimit)) blocked("Fresh swap gas exceeds the approved cap.", "uniswap_token_gas_cap");
+  if (decodedBlock(rechecked).hash !== block.hash) throw new ApnError("APN_RPC_PROTOCOL", "EVM block changed around pinned reads.");
+}
 function word(value: unknown) { return BigInt(evmRpcHex(value, 32)); }
 function decodedBlock(value: unknown) { const raw = evmRpcRecord(value), number = evmRpcQuantity(raw.number), hash = evmRpcHex(raw.hash, 32);
   return { tag: `0x${number.toString(16)}` as Hex, number: number.toString(), hash, raw }; }
