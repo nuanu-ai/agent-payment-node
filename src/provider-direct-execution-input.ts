@@ -1,6 +1,7 @@
 import type { OperationRecord, ProviderDirectBinding } from "./model.js";
 import type { ProviderDirectExecutionInput } from "./provider-ports.js";
 import type { RuntimeContext } from "./runtime.js";
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 
 export function providerDirectExecutionInput(
   context: RuntimeContext,
@@ -15,7 +16,7 @@ export function providerDirectExecutionInput(
     recipient: operation.recipient,
     amountAtomic: operation.amountAtomic,
     amountDecimal: operation.amountDecimal,
-    rpcUrl: binding.coinbaseGasless === undefined ? context.requireRpcUrl() : context.requireCoinbaseRpcUrl(),
+    rpcUrl: binding.coinbaseGasless === undefined ? context.requireRpcUrl(BASE_RPC_CHAIN) : context.requireCoinbaseRpcUrl(),
     preparedAt: operation.preparedAt,
     expiresAt: operation.expiresAt,
     requestHash: operation.requestHash,

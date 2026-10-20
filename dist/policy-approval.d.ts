@@ -36,5 +36,7 @@ export declare class TtyProfilePolicyApproval implements ProfilePolicyApprovalPo
     constructor(options?: TtyProfilePolicyApprovalOptions);
     approve(intent: ProfilePolicyApprovalIntent): Promise<void>;
 }
+/** The native cap in the chain's own currency (QA 0.5.54: Sei showed "ETH"); the atomic value and its field stay as they are. */
+export declare function nativeCapLine(chainId: number, maxBalanceWei: string | undefined): string;
 export declare function profilePolicyApprovalPhrase(fingerprint: string): string;
 export {};

@@ -12,6 +12,7 @@ import type { RelayArbitrumApprovalExecuteService } from "./relay/arbitrum-appro
 import type { RelayArbitrumDepositDispatchService } from "./relay/arbitrum-deposit-dispatch.js";
 import type { RelayEffectJournal } from "./relay/effect-journal.js";
 import type { RelayNativeSourceRuntime } from "./relay/native-source.js";
+import { type RpcChain } from "./rpc-requirement.js";
 import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, WaitPort } from "./ports.js";
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { StateStore } from "./state.js";
@@ -216,7 +217,8 @@ export declare class RuntimeContext {
     ready(): Promise<void>;
     requireNative(): NativePort;
     requireKeychainProbe(): Pick<WrappingSecretPort, "load">;
-    requireRpc(): RpcPort;
+    /** The command's single `--rpc-url` endpoint; a missing one is refused naming the chain this command reads. */
+    requireRpc(chain: RpcChain): RpcPort;
     requireCoinbaseRpc(): RpcPort;
     requireHttp(): HttpPort;
     requirePolicy(): ProfilePolicyPort;
@@ -225,7 +227,7 @@ export declare class RuntimeContext {
     requireForegroundAuthentication(): ForegroundAuthenticationPort;
     requireOperationAbandonApproval(): OperationAbandonApprovalPort;
     requireTransferApproval(): TransferApprovalPort;
-    requireRpcUrl(): string;
+    requireRpcUrl(chain: RpcChain): string;
     requireCoinbaseRpcUrl(): string;
     requireProviderAuthorizationStore(): ProviderAuthorizationStorePort;
     nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest;

@@ -1,3 +1,4 @@
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 export function providerDirectExecutionInput(context, operation, binding) {
     return {
         operationId: operation.operationId,
@@ -7,7 +8,7 @@ export function providerDirectExecutionInput(context, operation, binding) {
         recipient: operation.recipient,
         amountAtomic: operation.amountAtomic,
         amountDecimal: operation.amountDecimal,
-        rpcUrl: binding.coinbaseGasless === undefined ? context.requireRpcUrl() : context.requireCoinbaseRpcUrl(),
+        rpcUrl: binding.coinbaseGasless === undefined ? context.requireRpcUrl(BASE_RPC_CHAIN) : context.requireCoinbaseRpcUrl(),
         preparedAt: operation.preparedAt,
         expiresAt: operation.expiresAt,
         requestHash: operation.requestHash,

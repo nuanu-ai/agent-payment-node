@@ -16,7 +16,8 @@ const PROVIDER_TEXT = "Not enough funds (provider text canary)";
 
 /**
  * QA 0.5.51 rows GASLESS-MM-002..008: HTTP 200 fee quotes whose low fee tier had no `tokenFees` on Arbitrum, Polygon,
- * Ethereum, Linea and Monad. The answer is shaped as the provider sends a simulated transfer it will not price.
+ * Ethereum, Linea and Monad. The answer is shaped as the provider sends a simulated transfer it will not price; its
+ * tier carries an error but no native gas terms, so no cause is proven (METAMASK-FEE-REFUSAL-ASSET-GUIDANCE-001).
  */
 class UnpricedExchange extends SdkExchange {
   override async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
@@ -45,7 +46,7 @@ const ENDPOINTS: Readonly<Record<number, string>> = { 42161: "arbitrum-mainnet",
   59144: "linea-mainnet", 143: "monad-mainnet" };
 const NETWORKS: Readonly<Record<number, string>> = { 42161: "Arbitrum One", 137: "Polygon PoS", 1: "Ethereum", 59144: "Linea", 143: "Monad" };
 
-test("an unpriced MetaMask fee quote is refused as the provider's answer, naming network, read and missing field", async t => {
+test("an unpriced MetaMask fee quote without proven terms is refused as the provider's answer and claims no cause", async t => {
   for (const chainId of [42161, 137, 1, 59144, 143] as const) await t.test(String(chainId), async t => {
     const exchange = new UnpricedExchange(chainId), { home, client } = await clientFor(exchange); t.after(home.cleanup);
     const raw = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, chainId) },
@@ -55,8 +56,8 @@ test("an unpriced MetaMask fee quote is refused as the provider's answer, naming
       assert.ok(error instanceof ApnError);
       assert.equal(error.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
       assert.equal(error.message, `MetaMask quoted no USDC relay fee for this transfer on ${NETWORKS[chainId]} (chain ${chainId}): ` +
-        "its fee quote answered HTTP 200 with result.transactions[-1].fees[0].tokenFees missing. The pinned MetaMask client reads " +
-        "this answer as: Insufficient balance to cover the transfer and gasless relay fee.");
+        "its fee quote answered HTTP 200 with result.transactions[-1].fees[0].tokenFees missing and named no cause APN can verify. " +
+        "APN does not read a missing relay fee as a USDC or native gas shortfall.");
       assert.deepEqual(error.details, { reason: "mm_gasless_fee_unquoted", mm_read_mode: "quote", mm_read_stage: "fee_quote",
         mm_read_invariant: "network_validation", mm_read_validation_predicate: "sentinel_token_fees", mm_read_token_fees_kind: "missing",
         mm_read_sentinel_simulation: "succeeded", mm_read_sentinel_fee_error: "present", mm_read_sentinel_sponsorship: "not_sponsored",
@@ -64,8 +65,7 @@ test("an unpriced MetaMask fee quote is refused as the provider's answer, naming
         provider_read: "metamask-tx-sentinel fee quote",
         provider_endpoint: `https://agentic-proxy.workers.cx.metamask.io/proxy/prd/tx-sentinel-${ENDPOINTS[chainId]}`,
         provider_method: "infura_simulateTransactions", provider_missing_field: "result.transactions[-1].fees[0].tokenFees",
-        chain_id: chainId, network: NETWORKS[chainId],
-        provider_client_reading: "Insufficient balance to cover the transfer and gasless relay fee." });
+        chain_id: chainId, network: NETWORKS[chainId], provider_cause: "unverified" });
       assert.equal(JSON.stringify(error).includes(PROVIDER_TEXT), false);
       return true;
     });
@@ -90,7 +90,7 @@ test("a relay MetaMask does not offer is refused naming the provider list that w
   assert.equal(exchange.requests.some(request => request.method === "POST"), false);
 });
 
-test("prepare reports the unpriced quote with the balance read as its next action and writes nothing", async () => {
+test("prepare reports the unpriced quote without pointing at USDC and writes nothing", async () => {
   const root = await mkdtemp(join(await realpath(tmpdir()), "apn-mm-refusal-"));
   try {
     const chainId: MetaMaskGaslessChainId = 42161;
@@ -104,8 +104,8 @@ test("prepare reports the unpriced quote with the balance read as its next actio
       assert.equal(result.ok, false); assert.equal(result.operation, null);
       assert.equal(result.error?.code, "APN_PROVIDER_CAPABILITY_UNAVAILABLE");
       assert.equal(result.error?.details?.reason, "mm_gasless_fee_unquoted");
-      assert.deepEqual(result.next_actions, [`apn gasless balance --profile ${f.profile} --chain 42161`,
-        "MetaMask's own client reads this answer as a server-wallet USDC balance below the transfer plus its relay fee; compare it with the balance above. No operation was written, so the same prepare may run again."]);
+      assert.deepEqual(result.next_actions, ["MetaMask's fee quote named no cause APN can verify, so APN cannot tell whether USDC, " +
+        "native gas or the relay itself is short. No operation was written, so the same prepare may run again."]);
       assert.equal((await f.core.metaMaskGasless.records.listAllOperations()).length, 0);
       assert.equal(f.provider.submissions.length, 0);
     } finally { await home.cleanup(); }

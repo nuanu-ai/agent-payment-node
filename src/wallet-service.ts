@@ -3,6 +3,7 @@ import { BASE_USDC, CHAIN_CAIP2, ETH_DECIMALS, STATE_VERSION, USDC_DECIMALS } fr
 import { ApnError } from "./errors.js";
 import { formatAtomic } from "./money.js";
 import type { RuntimeContext } from "./runtime.js";
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import type { CommandRequest } from "./commands.js";
 import { sealWallet } from "./state.js";
 import {
@@ -172,7 +173,7 @@ export class WalletService {
       const wallet = await this.context.state.loadWallet(profileHash);
       if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
       const policy = await this.context.requirePolicy().load(policyBinding(wallet));
-      const snapshot = await this.context.requireRpc().getBalances(wallet.address);
+      const snapshot = await this.context.requireRpc(BASE_RPC_CHAIN).getBalances(wallet.address);
       validateBalance(snapshot, wallet.address);
       const posture = fundingPosture(snapshot.usdcAtomic, snapshot.ethAtomic, policy);
       const guidance = walletFundingGuidance(snapshot.usdcAtomic, snapshot.ethAtomic, policy, posture.next_actions);
