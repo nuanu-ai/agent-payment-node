@@ -625,6 +625,25 @@ blocks. A refusal at that width ends the resume as
 failure is `mm_gasless_rpc_unavailable`. In every case the blocks already
 proved in that resume stay proved, and the next resume continues from there.
 
+Two provider answers end a prepare before anything is written, each as
+`APN_PROVIDER_CAPABILITY_UNAVAILABLE`, naming the network and the provider read:
+
+- `mm_gasless_relay_unsupported`: MetaMask's relay lists do not offer the chain.
+  The refusal says which list withholds it: the server-wallet network list
+  (`agentic-mimir-service …/v1/supportedNetworks`, `mm_read_relay_server_wallet_network`)
+  or the relay network list (`tx-sentinel-ethereum-mainnet/networks`, the chain's
+  `relayTransactions` flag, `mm_read_relay_sentinel_flag`).
+- `mm_gasless_fee_unquoted`: MetaMask's fee quote (`tx-sentinel-<network>`,
+  `infura_simulateTransactions`) answered without
+  `result.transactions[-1].fees[0].tokenFees`. The pinned MetaMask client reads
+  that answer as "Insufficient balance to cover the transfer and gasless relay
+  fee.", so the next action is `apn gasless balance` for the same profile and
+  chain. The refusal also carries the answer's closed facts: the simulated
+  transfer's status, whether the fee tier carried an error, and the sponsorship
+  flag; the provider's own text is never shown.
+
+Any other malformed quote stays `APN_PROVIDER_UNAVAILABLE / mm_gasless_provider_unavailable`.
+
 For MetaMask, `--amount` is the exact successful sender debit `G`. APN quotes the
 provider's USDC fee `F` and recipient amount `N`, requiring `G = N + F`,
 `F <= --max-fee` and `N >= --min-received`. It makes at most three quote attempts

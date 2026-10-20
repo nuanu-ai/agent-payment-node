@@ -3,6 +3,10 @@ export const MM_REASON_CODES = {
     mm_gasless_input: "APN_INVALID_INPUT",
     mm_gasless_unsupported_chain: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
     mm_gasless_capability_unavailable: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+    /** MetaMask's relay network lists do not offer this chain (the refusal names which list). */
+    mm_gasless_relay_unsupported: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+    /** MetaMask's fee quote answered without a token-fee list for this transfer: a provider answer, not a fault. */
+    mm_gasless_fee_unquoted: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
     mm_gasless_identity: "APN_PROFILE_DRIFT",
     mm_gasless_binding_changed: "APN_PROFILE_DRIFT",
     mm_gasless_session_unavailable: "APN_PROVIDER_SESSION_REQUIRED",

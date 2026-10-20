@@ -13,6 +13,18 @@ import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
 import { canonicalProfile } from "../wallet-policy.js";
+/**
+ * MetaMask quoted no USDC relay fee. Its own client reads that answer as the server wallet's USDC not covering the
+ * transfer plus the fee, so the useful step is to read that balance. APN states the reading, it does not promise a fix.
+ */
+function feeQuoteGuidance(error, profile, chainId) {
+    if (!(error instanceof ApnError) || error.details?.reason !== "mm_gasless_fee_unquoted")
+        return error;
+    return new ApnError(error.code, error.message, { ...error.details, nextActions: [
+            `apn gasless balance --profile ${canonicalProfile(profile)} --chain ${chainId}`,
+            "MetaMask's own client reads this answer as a server-wallet USDC balance below the transfer plus its relay fee; compare it with the balance above. No operation was written, so the same prepare may run again.",
+        ] });
+}
 export class MetaMaskGaslessService {
     context;
     records;
@@ -49,7 +61,7 @@ export class MetaMaskGaslessService {
             return publicMetaMaskGaslessOperation(await preparation.prepare(input));
         }
         catch (error) {
-            throw await this.sessionGuidance(error, input.profile);
+            throw feeQuoteGuidance(await this.sessionGuidance(error, input.profile), input.profile, input.request.chainId);
         }
     }
     /**

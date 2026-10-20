@@ -28,6 +28,17 @@ export interface MetaMaskGaslessDependencies {
   readonly approval?: MetaMaskGaslessApprovalPort;
   readonly records?: MetaMaskGaslessRepositoryPort;
 }
+/**
+ * MetaMask quoted no USDC relay fee. Its own client reads that answer as the server wallet's USDC not covering the
+ * transfer plus the fee, so the useful step is to read that balance. APN states the reading, it does not promise a fix.
+ */
+function feeQuoteGuidance(error: unknown, profile: string, chainId: MetaMaskGaslessChainId): unknown {
+  if (!(error instanceof ApnError) || error.details?.reason !== "mm_gasless_fee_unquoted") return error;
+  return new ApnError(error.code, error.message, { ...error.details, nextActions: [
+    `apn gasless balance --profile ${canonicalProfile(profile)} --chain ${chainId}`,
+    "MetaMask's own client reads this answer as a server-wallet USDC balance below the transfer plus its relay fee; compare it with the balance above. No operation was written, so the same prepare may run again.",
+  ] });
+}
 export class MetaMaskGaslessService {
   readonly records: MetaMaskGaslessRepositoryPort;
   readonly operations: OperationService;
@@ -55,7 +66,7 @@ export class MetaMaskGaslessService {
     const preparation = new MetaMaskGaslessPreparation({ state: this.context.state, records: this.records,
       operations: this.operations, rpcFor: d.rpcFor, provider: d.provider, clock: this.context.clock, ids: this.context.ids });
     try { return publicMetaMaskGaslessOperation(await preparation.prepare(input)); }
-    catch (error) { throw await this.sessionGuidance(error, input.profile); }
+    catch (error) { throw feeQuoteGuidance(await this.sessionGuidance(error, input.profile), input.profile, input.request.chainId); }
   }
   /**
    * A lost provider session is normally renewed with the foreground wallet connect handoff, but wallet lifecycle
