@@ -92,21 +92,23 @@ export async function circleSourceStatus(root, journal, read, now) {
         blockNumberAtomic: receipt.blockNumber.toString(), blockHash: receipt.blockHash, blockTag: "finalized",
         finalizedBlockNumberAtomic: finalized.toString(), observedAt: new Date(now()).toISOString() };
     const proof = await store.create(journal, Object.freeze({ ...fields, integrityHash: hashObject(fields) }));
-    return view(proof, null, "chain_verified_public_read", await residualAllowance(read, journal));
+    return view(proof, null, "chain_verified_public_read", await residualAllowance(read, journal, rpc));
 }
 /**
  * The allowance the payer still grants the wrapper once this operation can spend nothing more: the current value at the
  * finalized tag (one eth_call; no state at an old block). A burn spends principal plus fee of whatever was approved, and
  * the rest stays until `apn circle approval revoke` clears it. An unreadable value is reported as unread, never guessed.
  */
-async function residualAllowance(read, journal) {
+async function residualAllowance(read, journal, proven) {
     const owner = journal.sourceCall.from, spender = journal.sourceCall.to;
     const base = { token: BASE_USDC, owner, spender, blockTag: "finalized" };
     if (read === undefined)
         return { ...base, allowanceAtomic: null, unreadReason: "This runtime has no finalized-tag reader for Base." };
     try {
-        const rpc = read(8453);
-        await assertFinalizedChain(rpc, 8453);
+        // An endpoint this status already proved to serve Base is not asked for its chain id again.
+        const rpc = proven ?? read(8453);
+        if (proven === undefined)
+            await assertFinalizedChain(rpc, 8453);
         const word = (address) => address.slice(2).toLowerCase().padStart(64, "0");
         const value = await rpc.call("eth_call", [{ to: BASE_USDC, data: `0xdd62ed3e${word(owner)}${word(spender)}` }, "finalized"]);
         if (typeof value !== "string" || !WORD.test(value.toLowerCase()))

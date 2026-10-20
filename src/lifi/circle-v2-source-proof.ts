@@ -1,6 +1,6 @@
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { assertFinalizedChain, type FinalizedReader } from "../evm-finalized-proof.js";
+import { assertFinalizedChain, type FinalizedChainRead, type FinalizedReader } from "../evm-finalized-proof.js";
 import { evmRpcQuantity } from "../evm-rpc-codec.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { pastUnstartedDeadline } from "../unstarted-deadline.js";
@@ -107,7 +107,7 @@ export async function circleSourceStatus(root: string, journal: NonEvmSourceJour
     blockNumberAtomic: receipt.blockNumber.toString(), blockHash: receipt.blockHash, blockTag: "finalized" as const,
     finalizedBlockNumberAtomic: finalized.toString(), observedAt: new Date(now()).toISOString() };
   const proof = await store.create(journal, Object.freeze({ ...fields, integrityHash: hashObject(fields) }));
-  return view(proof, null, "chain_verified_public_read", await residualAllowance(read, journal));
+  return view(proof, null, "chain_verified_public_read", await residualAllowance(read, journal, rpc));
 }
 
 /**
@@ -115,13 +115,15 @@ export async function circleSourceStatus(root: string, journal: NonEvmSourceJour
  * finalized tag (one eth_call; no state at an old block). A burn spends principal plus fee of whatever was approved, and
  * the rest stays until `apn circle approval revoke` clears it. An unreadable value is reported as unread, never guessed.
  */
-async function residualAllowance(read: FinalizedReader | undefined, journal: NonEvmSourceJournal): Promise<CircleResidualAllowance> {
+async function residualAllowance(read: FinalizedReader | undefined, journal: NonEvmSourceJournal,
+  proven?: FinalizedChainRead): Promise<CircleResidualAllowance> {
   const owner = journal.sourceCall.from, spender = journal.sourceCall.to;
   const base = { token: BASE_USDC, owner, spender, blockTag: "finalized" as const };
   if (read === undefined) return { ...base, allowanceAtomic: null, unreadReason: "This runtime has no finalized-tag reader for Base." };
   try {
-    const rpc = read(8453);
-    await assertFinalizedChain(rpc, 8453);
+    // An endpoint this status already proved to serve Base is not asked for its chain id again.
+    const rpc = proven ?? read(8453);
+    if (proven === undefined) await assertFinalizedChain(rpc, 8453);
     const word = (address: string) => address.slice(2).toLowerCase().padStart(64, "0");
     const value = await rpc.call("eth_call", [{ to: BASE_USDC, data: `0xdd62ed3e${word(owner)}${word(spender)}` }, "finalized"]);
     if (typeof value !== "string" || !WORD.test(value.toLowerCase())) throw new ApnError("APN_RPC_PROTOCOL", "The allowance read is malformed.");

@@ -106,14 +106,14 @@ test("a finalized receipt is recorded once and ends the payer's claim inside the
   assert.deepEqual([view.outcome, view.sourceProof.status, view.sourceProof.blockNumberAtomic, view.sourceProof.finalizedBlockNumberAtomic,
     view.sourceProof.nonceAtomic, view.residualAllowance.allowanceAtomic, proved.proof_class, proved.next_actions],
   ["reverted", "reverted", "100", "100", "7", "0", "chain_verified_public_read", []]);
-  assert.deepEqual(chain.calls, ["eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_chainId", "eth_call"]);
+  assert.deepEqual(chain.calls, ["eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_call"]);
   assert.equal(await exists(sidecar(temporary.root, journal)), true);
   assert.equal(await held(temporary.root), false, "the recorded proof released the payer before the signing window ended");
   assert.equal((await new OperationIndex(state).find(journal.operationId))?.state, "terminal");
   await rm(join(temporary.root, "operation-index"), { recursive: true, force: true });
   assert.equal((await new OperationIndex(state).find(journal.operationId))?.state, "terminal", "rm -r operation-index keeps the proof");
   const again = await status(temporary.root, () => chain.rpc);
-  assert.deepEqual([(again.operation as { outcome: string }).outcome, again.proof_class, chain.calls.slice(5)],
+  assert.deepEqual([(again.operation as { outcome: string }).outcome, again.proof_class, chain.calls.slice(4)],
     ["reverted", "durable_public_state", ["eth_chainId", "eth_call"]], "a recorded proof is never re-read; only the residual allowance is");
 });
 
