@@ -116,12 +116,12 @@ export function validateReceipt(value) {
         evmUint(receipt.amountAtomic, true);
         if (receipt.evmEvidence !== undefined)
             validateEvmTransferEvidence(receipt.evmEvidence);
-        if (receipt.evmActualFee !== undefined && (validateEvmActualFee(receipt.evmActualFee).transactionHash !== receipt.transactionHash ||
-            receipt.evmActualFee.blockNumberAtomic !== receipt.blockNumberAtomic))
-            stateCorrupt("Receipt actual fee is not this receipt's transaction.");
     }
-    else if (receipt.amountAtomic !== undefined || receipt.evmEvidence !== undefined || receipt.evmActualFee !== undefined)
+    else if (receipt.amountAtomic !== undefined || receipt.evmEvidence !== undefined)
         stateCorrupt("Receipt asset fields have no binding.");
+    if (receipt.evmActualFee !== undefined && (validateEvmActualFee(receipt.evmActualFee).transactionHash !== receipt.transactionHash?.toLowerCase() ||
+        receipt.evmActualFee.blockNumberAtomic !== receipt.blockNumberAtomic))
+        stateCorrupt("Receipt actual fee is not this receipt's transaction.");
     if (receipt.coinbaseGaslessSettlement !== undefined) {
         const settlement = receipt.coinbaseGaslessSettlement;
         if (!validCoinbaseSettlementKeys(settlement) || !validCoinbaseObservationSource(settlement.observationSource, settlement.observationSource?.callRpcOrigin ?? ""))

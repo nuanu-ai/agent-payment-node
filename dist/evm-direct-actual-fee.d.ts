@@ -34,7 +34,7 @@ export type EvmActualFeeInput = Pick<EvmActualFee, "chainId" | "transactionHash"
 export declare function deriveEvmActualFee(input: EvmActualFeeInput, feeModel: DirectEvmFeeModel): EvmActualFee;
 /** A stored fee observation must be exactly what its own receipt fields derive (R2: no current constant is consulted). */
 export declare function validateEvmActualFee(value: unknown): EvmActualFee;
-/** Only the proven outcomes carry it, and only for this operation's own signed transaction. */
+/** Only a local transfer's proven outcomes carry it, and only for this operation's own signed transaction. */
 export declare function assertEvmActualFeeBinding(operation: OperationRecord): void;
 /** Public form: the fact when complete, its known parts and reason when not, null when nothing was observed. */
 export declare function publicEvmActualFee(fee: EvmActualFee | undefined, asset: {

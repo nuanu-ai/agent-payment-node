@@ -283,8 +283,15 @@ this path.
   already includes L1 posting; Monad bills the gas limit. A component the
   receipt does not carry makes it `incomplete` with the reason and no total, never
   an estimate. `actual_sender_native_debit_atomic` adds the transferred value for a
-  completed native transfer. Both are null until an outcome is proven, and on
-  records completed before APN recorded them; `fee_budget` stays the approved cap.
+  completed native transfer. Both are null until an outcome is proven;
+  `fee_budget` stays the approved cap. The Base USDC lane (`pay transfer`)
+  reports the same fields. For a transfer completed before APN recorded its fee,
+  status and receipt read that transfer's own receipt once through the chain's
+  `APN_<CHAIN>_RPC_URL` (bound to its stored hash and the block its record
+  proved), keep the fee in `receipt-facts/<operation>.direct.json` bound to the
+  record's integrity hash, and never read it again; the sealed record is not
+  rewritten. Without the setting the answer still comes, with the fee null and
+  `actual_facts_refusal` naming the variable.
 
 - Chain, asset kind/address/decimals, amount, recipient, payer, nonce and fee
   budget are frozen. Wrong-chain RPC fails before submission or recovery.

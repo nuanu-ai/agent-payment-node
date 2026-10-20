@@ -101,13 +101,13 @@ export function validateEvmActualFee(value: unknown): EvmActualFee {
   return derived;
 }
 
-/** Only the proven outcomes carry it, and only for this operation's own signed transaction. */
+/** Only a local transfer's proven outcomes carry it, and only for this operation's own signed transaction. */
 export function assertEvmActualFeeBinding(operation: OperationRecord): void {
   const fee = operation.evmActualFee;
   if (fee === undefined) return;
   const proven = validateEvmActualFee(fee);
-  if (operation.evm === undefined || operation.economics === undefined || !["completed", "failed_confirmed_revert"].includes(operation.state) ||
-    proven.chainId !== operation.chainId || proven.transactionHash !== operation.transactionHash ||
+  if (operation.providerDirect !== undefined || operation.economics === undefined || !["completed", "failed_confirmed_revert"].includes(operation.state) ||
+    proven.chainId !== operation.chainId || proven.transactionHash !== operation.transactionHash?.toLowerCase() ||
     proven.gasLimitAtomic !== operation.economics.gasLimitAtomic || proven.maxFeePerGasAtomic !== operation.economics.maxFeePerGasAtomic) corrupt();
 }
 

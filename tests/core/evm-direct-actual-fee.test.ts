@@ -112,7 +112,7 @@ for (const s of scenarios) test(`chain ${s.chainId} ${s.asset} ${s.status}: the 
 
 test("a transfer completed before fee evidence, or by a reader without it, still loads and shows no fee fact", async context => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
-  const setup = evmCore(temporary.root); setup.rpc.sender = (await ensureDirectWallet(setup)).address;
+  const setup = evmCore(temporary.root); setup.rpc.sender = (await ensureDirectWallet(setup)).address; setup.rpc.receiptFeeFields = null;
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   const approved = await setup.core.transfer.approve(prepared.operation_id) as Record<string, unknown>;
   assert.equal(approved.state, "completed"); assert.equal(approved.actual_network_fee, null); assert.equal(approved.actual_sender_native_debit_atomic, null);
