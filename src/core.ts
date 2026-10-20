@@ -8,6 +8,7 @@ import { TransferService } from "./transfer-service.js";
 import { WalletService } from "./wallet-service.js";
 import { OperationService } from "./operation-service.js";
 import { inspectX402 } from "./x402-http.js";
+import { x402Asset } from "./x402-network.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
@@ -85,6 +86,8 @@ export class ApnCore {
   private async dispatch(request: CommandRequest): Promise<CommandOutcome> {
     switch (request.command) {
       case "x402.merchant.prepare": case "x402.merchant.approve": case "x402.merchant.observe": case "x402.merchant.status": case "x402.merchant.retire-unsent": case "x402.permit2.preflight": case "x402.permit2.approve": case "x402.permit2.observe":
+      case "x402.solana.pay": case "x402.solana.observe": case "x402.solana.status":
+      case "x402.permit2.allowance.set": case "x402.permit2.allowance.revoke": case "x402.permit2.allowance.observe": case "x402.permit2.allowance.status":
         throw new ApnError("APN_UNSUPPORTED_COMMAND", "This provider command requires its dedicated bounded CLI path.");
       case "x402.permit2.status":
         return dataOutcome(await readPermit2ProductionStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_operation_status");
@@ -317,9 +320,10 @@ case "mega.funding.prepare": case "mega.funding.approve": case "mega.funding.sta
         "chain_verified_public_read",
       );
       case "wallet.portfolio": return dataOutcome(await readProfilePortfolio(this.context, request.profile, request.refresh), "chain_verified_public_read");
-      case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId), "encrypted_profile_policy_status");
+      case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId, request.asset, request.solanaMint), "encrypted_profile_policy_status");
       case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
-      case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, request.chainId, request.payer), "seller_challenge_static");
+      case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest,
+        x402Asset(request.chainId ?? 8453, request.asset), request.payer), "seller_challenge_static");
       case "x402.fetch.prepare": {
         if ((request.chainId ?? 8453) === 8453) await this.providerWallet.assertPaymentAvailable(request.profile, "x402", request.idempotencyKey);
         return operationOutcome(await this.x402.prepare(request));

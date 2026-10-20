@@ -11,7 +11,8 @@ import {
 import type { CommandRequest } from "./commands.js";
 import type { Address } from "./model.js";
 import { ApnError } from "./errors.js";
-import { evmChain, evmDecimals, evmToken, type EvmAssetSelection } from "./evm-asset.js";
+import { evmDecimals, evmToken, type EvmAssetSelection } from "./evm-asset.js";
+import { solanaAccount, x402Chain, X402_SOLANA_POLICY_NETWORK } from "./x402-network.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { directEvmChain } from "./evm-direct-networks.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
@@ -29,6 +30,8 @@ import { bindUniswapTokenCommand } from "./swap/uniswap-token-command-catalog.js
 import { bindSunSwapCommand } from "./swap/sunswap-tron/command-catalog.js";
 import { bindJupiterCommand } from "./swap/jupiter-solana/command-catalog.js";
 import { bindOrcaCommand } from "./swap/orca-solana/command-catalog.js";
+import { bindX402SolanaCommand } from "./x402-solana/command-catalog.js";
+import { bindPermit2AllowanceCommand } from "./x402-permit2/allowance/catalog.js";
 import { bindAllowlistCommand } from "./allowlist-command-catalog.js";
 import { bindRelayPrepare } from "./relay/command-route.js";
 
@@ -95,6 +98,8 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   if (parsed.command.path.join(" ") === "x402 merchant observe") return { request: { command: "x402.merchant.observe", operationId: value(options, "--operation"), deliver: options["--deliver"] === "true" } };
   if (parsed.command.path.join(" ") === "x402 merchant retire-unsent") return { request: { command:"x402.merchant.retire-unsent",operationId:value(options,"--operation") } };
   if (parsed.command.path.join(" ") === "x402 merchant status") return { request: { command: "x402.merchant.status", operationId: value(options, "--operation") } };
+  if (parsed.command.path.slice(0, 3).join(" ") === "x402 permit2 allowance") return bindPermit2AllowanceCommand(parsed.command.path.join(" "), options);
+  if (parsed.command.path.slice(0, 2).join(" ") === "x402 solana") return { request: bindX402SolanaCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path.join(" ") === "x402 permit2 status") return { request: { command: "x402.permit2.status", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
   if (parsed.command.path[0] === "relay") return bindRelayCommand(parsed.command.path.join(" "), options);
   if (parsed.command.path[0] === "stargate") {
@@ -367,8 +372,28 @@ function tronAsset(options: Readonly<Record<string, string>>): "trx" | "usdt" {
   return asset;
 }
 
+/** The x402 network and token a command names: `--chain` is any eip155 chain, `--asset` an exact ERC-20 contract. */
 function bindNetwork(options: Readonly<Record<string, string>>) {
-  return options["--chain"] === undefined ? {} : { chainId: evmChain(options["--chain"]) };
+  // Solana x402 (`--chain solana:5eykt4…`) names its SPL mint and has neither an ETH cap nor an EVM payee pin.
+  if (options["--chain"] === X402_SOLANA_POLICY_NETWORK) {
+    if (options["--asset"] === undefined || !solanaAccount(options["--asset"])) {
+      throw new ApnError("APN_INVALID_INPUT", "A Solana x402 policy names its mint with --asset <canonical mint address>.");
+    }
+    if (options["--max-balance-eth-wei"] !== undefined || options["--x402-payees"] !== undefined) {
+      throw new ApnError("APN_INVALID_INPUT", "A Solana x402 policy takes no --max-balance-eth-wei or --x402-payees; its payee pin is the allowlist x402 row's recipients.");
+    }
+    return { solanaMint: options["--asset"] };
+  }
+  return {
+    ...(options["--chain"] === undefined ? {} : { chainId: x402Chain(options["--chain"]) }),
+    ...(options["--asset"] === undefined ? {} : { asset: x402Token(options["--asset"]) }),
+  };
+}
+/** An x402 token is an exact ERC-20 contract, never the native coin. */
+function x402Token(value: string): Address {
+  const token = evmToken(value);
+  if (token === "native") throw new ApnError("APN_INVALID_INPUT", "The x402 --asset is an exact ERC-20 contract address.");
+  return token;
 }
 
 function bindAsset(options: Readonly<Record<string, string>>): EvmAssetSelection {

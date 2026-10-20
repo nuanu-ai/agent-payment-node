@@ -11,7 +11,6 @@ import { canonicalProfile } from "../wallet-policy.js";
 import { HttpsX402Http } from "../x402-http.js";
 import { normalizeX402HttpRequest } from "../x402-http-request.js";
 import { inspectCheckedPermit2Challenge } from "./checked-inspection.js";
-import { inspectPermit2Offer } from "./inspection.js";
 import { permit2WalletBinding } from "./owner-binding.js";
 import { permit2PublicRpc } from "./preflight.js";
 import { Permit2ApprovalRiskCoordinator } from "./production-approval-risk.js";
@@ -28,7 +27,7 @@ export async function executePermit2ProductionCli(bound, options, root) {
         if (request.command !== "x402.permit2.approve" && request.command !== "x402.permit2.observe")
             throw new ApnError("APN_UNSUPPORTED_COMMAND", "Permit2 production command is CLI-only.");
         if (bound.rpcUrl === undefined)
-            throw new ApnError("APN_RPC_CONFIG", "Avalanche RPC URL is required.");
+            throw new ApnError("APN_RPC_CONFIG", "Pass --rpc-url with a public HTTPS RPC of the admitted Permit2 network.", { reason: "x402_rpc_required" });
         const state = new StateStore(root), records = new Permit2ProductionRepository(root), clock = () => options.clock?.now() ?? new Date();
         if (request.command === "x402.permit2.observe") {
             const record = await records.findOperation(request.operationId);
@@ -56,7 +55,8 @@ export async function executePermit2ProductionCli(bound, options, root) {
         const preparation = new Permit2ProductionPreparation(root, { rpc: permit2PublicRpc(bound.rpcUrl, root), now: clock });
         if (saved === null) {
             const checked = await inspectCheckedPermit2Challenge(options.http ?? new HttpsX402Http(), exact, wallet.account);
-            const selected = inspectPermit2Offer({ accepts: checked.challenge.accepts, payer: wallet.account });
+            // The lowest-index Permit2 offer on a chain and token the owner admitted for Permit2 is the one prepared.
+            const selected = await preparation.admittedSelection(profile, wallet.account, checked);
             await preparation.prepare({ profile, idempotencyKey: key, checked,
                 expected: { index: selected.index, requirement: selected.requirement, challengeHash: checked.challengeHash } });
         }

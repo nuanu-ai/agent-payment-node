@@ -1,14 +1,18 @@
-import type { EvmChainId } from "./evm-asset.js";
+import { type X402Asset } from "./x402-network.js";
 import type { RpcPort, X402RpcPort } from "./ports.js";
+import type { RuntimeContext } from "./runtime.js";
 import type { SettlementResponseObservation, X402OperationRecord, X402ProofClass, X402Reason, X402TerminalState, X402SettlementWaitProjection } from "./x402-state-integrity.js";
-export declare function selectX402Rpc(rpc: RpcPort, chainId?: EvmChainId): RpcPort;
-export declare function assertX402RpcChain(rpc: Partial<X402RpcPort>, chainId?: EvmChainId): Promise<{
-    readonly chainId: EvmChainId;
+/** The command's explicit --rpc-url; a missing one is refused naming the network it must serve, never substituted. */
+export declare function requireX402Rpc(context: RuntimeContext, asset: X402Asset): RpcPort;
+/** The RPC bound to exactly this network and token (Base USDC included); no instance carries an implied asset. */
+export declare function selectX402Rpc(rpc: RpcPort, asset: X402Asset): RpcPort;
+export declare function assertX402RpcChain(rpc: Partial<X402RpcPort>, chainId: number): Promise<{
+    readonly chainId: number;
     readonly rpcOrigin: string;
 }>;
 /** The production RPC adapter always carries the x402 read surface; an adapter without it cannot observe x402. */
-export declare function x402ReadPort(rpc: RpcPort, chainId?: EvmChainId): X402RpcPort;
-export declare function boundedX402ReadPort(rpc: RpcPort, timeoutMs: number, chainId?: EvmChainId): X402RpcPort;
+export declare function x402ReadPort(rpc: RpcPort, asset: X402Asset): X402RpcPort;
+export declare function boundedX402ReadPort(rpc: RpcPort, timeoutMs: number, asset: X402Asset): X402RpcPort;
 /**
  * A settlement wait first proves the endpoint's chain (read once per invocation and endpoint). The safe head is not
  * read here: every poll reads it inside authorizationState, and the reconciler ignores a safe head behind the prepared block.

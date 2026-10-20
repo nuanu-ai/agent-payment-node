@@ -4,8 +4,8 @@ export { parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelop
 export { isPublicIp } from "./network-policy.js";
 import { performance } from "node:perf_hooks";
 import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
-import { x402Network } from "./x402-network.js";
-import type { EvmChainId } from "./evm-asset.js";
+import { releasedX402Pair, x402Asset, type X402Asset } from "./x402-network.js";
+import { readX402Permit2NonceBit, readX402Permit2PrepareEvidence, type X402Permit2PrepareEvidence } from "./x402-permit2-rpc.js";
 import { sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -33,7 +33,8 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   private sequence = 0n;
   private readonly observationCounters = rpcObservationCounters();
   get observationMetrics() { return rpcObservationSnapshot(this.observationCounters); }
-  private readonly x402ChainId: EvmChainId;
+  /** The x402 network and token every x402 read of this instance binds; none unless the caller selected one. */
+  private readonly x402: X402Asset | undefined;
   private pinnedAddresses: Promise<readonly PinnedAddress[]> | undefined;
   /** One eth_chainId per command invocation and endpoint, shared by every bounded or network-selected copy. */
   private chainIdCell: { value?: Promise<bigint> } = {};
@@ -42,7 +43,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
   private directGuard: EvmDirectRpcGuard | undefined;
   private readonly directGuardState: StateStore | undefined;
 
-  constructor(endpoint: string, options: { readonly totalDeadlineMs?: number; readonly x402ChainId?: EvmChainId;
+  constructor(endpoint: string, options: { readonly totalDeadlineMs?: number; readonly x402Asset?: X402Asset;
     readonly abortSignal?: AbortSignal; readonly directGuardState?: StateStore } = {}) {
     const parsed = parsePublicHttpsUrl(endpoint, "APN_RPC_CONFIG", "RPC endpoint");
     this.endpoint = parsed;
@@ -52,7 +53,13 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     this.totalDeadlineMs = options.totalDeadlineMs;
     this.abortSignal = options.abortSignal;
     this.directGuardState = options.directGuardState;
-    this.x402ChainId = x402Network(options.x402ChainId).chainId;
+    this.x402 = options.x402Asset;
+  }
+
+  /** The selected x402 asset; an instance built without one (direct transfers, relays, Permit2 reads) answers no x402 read. */
+  private bound(): X402Asset {
+    if (this.x402 === undefined) throw new ApnError("APN_INTERNAL", "This RPC binds no x402 network and token; select one with forX402Network.");
+    return this.x402;
   }
 
   /** The first arm of an invocation sets its cap; direct EVM steps pass the cap derived from their read plan. */
@@ -69,7 +76,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
 
   /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
   withAbortSignal(signal: AbortSignal): HttpsBaseRpc {
-    const selected = new HttpsBaseRpc(this.endpoint.toString(), { abortSignal: signal, x402ChainId: this.x402ChainId });
+    const selected = new HttpsBaseRpc(this.endpoint.toString(), { abortSignal: signal, ...(this.x402 === undefined ? {} : { x402Asset: this.x402 }) });
     selected.pinnedAddresses = this.pinnedAddresses; selected.chainIdCell = this.chainIdCell;
     return selected;
   }
@@ -85,23 +92,30 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     }
     const bounded = new HttpsBaseRpc(this.endpoint.toString(), {
       totalDeadlineMs: performance.now() + milliseconds,
-      x402ChainId: this.x402ChainId,
+      ...(this.x402 === undefined ? {} : { x402Asset: this.x402 }),
     });
     bounded.pinnedAddresses = this.pinnedAddresses; bounded.chainIdCell = this.chainIdCell;
     return bounded;
   }
 
-  forX402Network(chainId: EvmChainId): HttpsBaseRpc {
+  forX402Network(chainId: number, token?: Address): HttpsBaseRpc {
+    const asset = x402Asset(chainId, token);
+    // An instance already bound to exactly this network and token is that binding.
+    if (this.x402 !== undefined && this.x402.chainId === asset.chainId && this.x402.token === asset.token) return this;
     const selected = new HttpsBaseRpc(this.endpoint.toString(), {
-      x402ChainId: chainId, ...(this.totalDeadlineMs === undefined ? {} : { totalDeadlineMs: this.totalDeadlineMs }),
+      x402Asset: asset, ...(this.totalDeadlineMs === undefined ? {} : { totalDeadlineMs: this.totalDeadlineMs }),
     });
     selected.pinnedAddresses = this.pinnedAddresses; selected.chainIdCell = this.chainIdCell;
     return selected;
   }
 
-  async assertX402Chain(chainId: EvmChainId): Promise<{ readonly chainId: EvmChainId; readonly rpcOrigin: string }> {
-    if (chainId !== this.x402ChainId) throw new ApnError("APN_CHAIN_MISMATCH", "x402 RPC binding belongs to another network.");
-    if (await this.endpointChainId() !== BigInt(chainId)) throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");
+  async assertX402Chain(chainId: number): Promise<{ readonly chainId: number; readonly rpcOrigin: string }> {
+    if (chainId !== this.bound().chainId) throw new ApnError("APN_CHAIN_MISMATCH", "x402 RPC binding belongs to another network.");
+    const served = await this.endpointChainId();
+    if (served !== BigInt(chainId)) {
+      throw new ApnError("APN_CHAIN_MISMATCH", `The --rpc-url endpoint serves chain ${served}, not the selected x402 network eip155:${chainId}.`,
+        { reason: "x402_rpc_chain_mismatch", chain: `eip155:${chainId}` });
+    }
     return { chainId, rpcOrigin: this.rpcOrigin };
   }
 
@@ -129,25 +143,44 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     return { address, ethAtomic: eth, usdcAtomic: usdc, blockNumberAtomic: blockNumber, blockHash, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin };
   }
 
-  async getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence> {
-    const block = record(await this.call("eth_getBlockByNumber", ["safe", false]), "safe block");
+  /**
+   * One header at the asset's proof tag, then one batch pinned to it (EIP-1898, no header recheck): balance and
+   * DOMAIN_SEPARATOR; for a token outside the released USDC pairs also decimals() and authorizationState(payer, nonce)
+   * of the fresh nonce, which proves the EIP-3009 state the settlement proof reads exists and answers.
+   */
+  async getX402PrepareEvidence(address: Address, nonce?: Hex): Promise<X402PrepareEvidence> {
+    const tag = this.bound().proofTag;
+    const block = record(await this.call("eth_getBlockByNumber", [tag, false]), `${tag} block`);
     const number = rpcQuantity(block.number).toString();
-    const hash = nonzeroBytes32(block.hash, "safe block hash");
+    const hash = nonzeroBytes32(block.hash, `${tag} block hash`);
     const timestamp = rpcQuantity(block.timestamp).toString();
-    // EIP-1898: both reads are pinned to this exact canonical block, so no header recheck follows them.
-    const pinned = { blockHash: hash, requireCanonical: true }, token = x402Network(this.x402ChainId).token;
-    const [balance, domainSeparator] = await this.batchCall([
-      { method: "eth_call", params: [{ to: token, data: `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}` }, pinned] },
+    const pinned = { blockHash: hash, requireCanonical: true }, token = this.bound().token;
+    const released = releasedX402Pair(this.bound().chainId, token);
+    if (!released && (nonce === undefined || !/^0x[0-9a-f]{64}$/u.test(nonce))) throw new ApnError("APN_INTERNAL", "x402 token probe nonce is missing.");
+    const owner = address.slice(2).toLowerCase().padStart(64, "0");
+    const reads = this.batchCall([
+      { method: "eth_call", params: [{ to: token, data: `0x70a08231${owner}` }, pinned] },
       { method: "eth_call", params: [{ to: token, data: "0x3644e515" }, pinned] },
+      ...(released ? [] : [
+        { method: "eth_call", params: [{ to: token, data: "0x313ce567" }, pinned] },
+        { method: "eth_call", params: [{ to: token, data: `${AUTHORIZATION_STATE_SELECTOR}${owner}${nonce!.slice(2)}` }, pinned] },
+      ]),
     ]);
+    const values = released ? await reads : await reads.catch((error: unknown) => {
+      if (!(error instanceof ApnError) || error.code !== "APN_RPC_PROTOCOL") throw error;
+      throw new ApnError("APN_X402_UNSUPPORTED_OFFER", `The token ${token} on eip155:${this.bound().chainId} did not answer balanceOf, DOMAIN_SEPARATOR, ` +
+        "decimals and EIP-3009 authorizationState at one block: it is not an EIP-3009 token, or this RPC refused the reads.",
+      { reason: "x402_token_reads_failed", chain: this.bound().network, asset: token });
+    });
     return {
       address,
-      usdcAtomic: rpcUint256Data(balance, "USDC balance"),
-      domainSeparator: rpcHex(domainSeparator, 32),
+      usdcAtomic: rpcUint256Data(values[0], "token balance"),
+      domainSeparator: rpcHex(values[1], 32),
       rpcOriginHash: sha256(this.rpcOrigin),
       observedAt: new Date().toISOString(),
-      queriedTag: "safe",
+      queriedTag: tag,
       block: { number, hash, timestamp },
+      ...(released ? {} : { tokenFacts: tokenFacts(values[2], values[3]) }),
     };
   }
 
@@ -222,7 +255,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const identity = "tag" in block ? await this.getX402Head(block.tag) : await this.getX402Block(block.number);
     const tag = `0x${BigInt(identity.number).toString(16)}`;
     const data = `${AUTHORIZATION_STATE_SELECTOR}${authorizer.slice(2).toLowerCase().padStart(64, "0")}${rpcHex(nonce, 32).slice(2)}`;
-    const encoded = rpcHex(await this.call("eth_call", [{ to: x402Network(this.x402ChainId).token, data }, tag]), 32);
+    const encoded = rpcHex(await this.call("eth_call", [{ to: this.bound().token, data }, tag]), 32);
     const value = BigInt(encoded);
     if (value !== 0n && value !== 1n) throw new ApnError("APN_RPC_PROTOCOL", "RPC authorization state is not a canonical boolean.");
     return {
@@ -236,6 +269,20 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     };
   }
 
+  /** Prepare evidence of a Permit2 offer for this instance's asset (src/x402-permit2-rpc.ts). */
+  async getX402Permit2PrepareEvidence(address: Address, nonce: Hex, permitNeeded: (allowanceAtomic: string) => boolean): Promise<X402Permit2PrepareEvidence> {
+    return await readX402Permit2PrepareEvidence({ call: (method, params) => this.call(method, params), batch: (calls) => this.batchCall(calls),
+      rpcOrigin: this.rpcOrigin, asset: this.bound(), address, nonce, permitNeeded });
+  }
+
+  /** Permit2's nonce bit, read like `getX402AuthorizationState` at a tag's or a number's block. */
+  async getX402Permit2NonceState(owner: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState> {
+    const identity = "tag" in block ? await this.getX402Head(block.tag) : await this.getX402Block(block.number);
+    const value = await readX402Permit2NonceBit({ call: (method, params) => this.call(method, params), owner, nonce, blockNumber: identity.number });
+    return { value, blockNumber: identity.number, blockHash: identity.hash, blockTimestamp: identity.timestamp,
+      blockTag: "tag" in block ? block.tag : "number", observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin };
+  }
+
   async getX402AuthorizationUsedLogs(input: {
     readonly authorizer: Address;
     readonly nonce: Hex;
@@ -246,7 +293,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const to = parseAtomic(input.toBlock);
     if (from > to || to - from + 1n > 2048n) throw new ApnError("APN_RPC_PROTOCOL", "RPC AuthorizationUsed range exceeds the fixed bound.");
     const result = await this.callX402Logs([{
-      address: x402Network(this.x402ChainId).token,
+      address: this.bound().token,
       fromBlock: `0x${from.toString(16)}`,
       toBlock: `0x${to.toString(16)}`,
       topics: [
@@ -262,7 +309,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const logs = result.value.map((entry: unknown) => x402RpcLog(entry));
     for (const log of logs) {
       if (
-        log.address.toLowerCase() !== x402Network(this.x402ChainId).token.toLowerCase() || log.topics.length !== 3 ||
+        log.address.toLowerCase() !== this.bound().token.toLowerCase() || log.topics.length !== 3 ||
         log.topics[0] !== AUTHORIZATION_USED_TOPIC ||
         log.topics[1] !== `0x${input.authorizer.slice(2).toLowerCase().padStart(64, "0")}` ||
         log.topics[2] !== input.nonce.toLowerCase() || log.data !== "0x" ||
@@ -283,7 +330,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     if (from > to || to - from + 1n > 2048n) throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer range exceeds the fixed bound.");
     const fromTopic = `0x${input.from.slice(2).toLowerCase().padStart(64, "0")}`, toTopic = input.to === undefined ? undefined : `0x${input.to.slice(2).toLowerCase().padStart(64, "0")}`;
     const result = await this.callX402Logs([{
-      address: x402Network(this.x402ChainId).token,
+      address: this.bound().token,
       fromBlock: `0x${from.toString(16)}`,
       toBlock: `0x${to.toString(16)}`,
       topics: toTopic === undefined ? [TRANSFER_TOPIC, fromTopic] : [TRANSFER_TOPIC, fromTopic, toTopic],
@@ -295,7 +342,7 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     const logs = result.value.map((entry: unknown) => x402RpcLog(entry));
     for (const log of logs) {
       if (
-        log.address.toLowerCase() !== x402Network(this.x402ChainId).token.toLowerCase() || log.topics.length !== 3 ||
+        log.address.toLowerCase() !== this.bound().token.toLowerCase() || log.topics.length !== 3 ||
         log.topics[0] !== TRANSFER_TOPIC || log.topics[1] !== fromTopic || (toTopic !== undefined && log.topics[2] !== toTopic) || log.data.length !== 66 ||
         BigInt(log.blockNumber) < from || BigInt(log.blockNumber) > to
       ) throw new ApnError("APN_RPC_PROTOCOL", "RPC Transfer log violates the exact filter.");
@@ -425,4 +472,15 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     if (remaining < 1) throw new ApnError("APN_RPC_AMBIGUOUS", "Bounded x402 RPC observation reached its deadline.");
     return Math.min(20_000, remaining);
   }
+}
+
+/** decimals() must be a uint8 and the fresh nonce must read unused (a canonical false); anything else is not EIP-3009. */
+function tokenFacts(decimals: unknown, state: unknown): NonNullable<X402PrepareEvidence["tokenFacts"]> {
+  const places = BigInt(rpcHex(decimals, 32)), used = BigInt(rpcHex(state, 32));
+  if (places > 255n) throw new ApnError("APN_RPC_PROTOCOL", "The x402 token's decimals() is not a uint8.", { reason: "x402_token_decimals_invalid" });
+  if (used !== 0n) {
+    throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "The x402 token does not answer EIP-3009 authorizationState for a fresh nonce with false.",
+      { reason: "x402_token_not_eip3009" });
+  }
+  return { decimals: Number(places), nonceUnused: true };
 }

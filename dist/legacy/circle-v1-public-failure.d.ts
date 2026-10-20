@@ -20,7 +20,7 @@ export declare function circleV1Status(root: string, op: CircleOperationV1): Pro
     cleanup_retirement_receipt?: import("../circle-v2-evm/nonce-retirement-proof.js").CircleNonceRetirementProof;
     operation_id: string;
     kind: string;
-    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
+    state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;

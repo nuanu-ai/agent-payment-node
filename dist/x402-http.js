@@ -45,19 +45,20 @@ export class HttpsX402Http {
         return await getOnce(endpoint, addresses, request.paymentSignature, httpRequest, deadlineMs, this.nowMs, this.request, this.scheduleDeadline, this.cancelDeadline);
     }
 }
-export async function inspectX402(http, value, request, chainId = 8453, payer) {
-    const endpoint = parsePublicHttpsUrl(value, "APN_HTTP_CONFIG", "Seller URL", 2048);
-    const canonicalUrl = endpoint.toString();
-    if (canonicalUrl !== value)
-        throw httpError("APN_HTTP_CONFIG", "Seller URL must use its canonical WHATWG serialization.");
-    const httpRequest = optionalX402HttpRequest(canonicalUrl, request);
-    const observation = await http.get({ url: canonicalUrl, ...(httpRequest === undefined ? {} : { httpRequest }) });
-    validateInspectObservation(observation, endpoint);
-    const paymentRequired = decodePaymentRequiredHeader(singleControlHeader(observation.rawHeaderPairs, "payment-required"));
+export async function inspectX402(http, value, request, 
+/** The network and token whose EIP-3009/Permit2 offers become candidates; null inspects only the Permit2 offer for `payer`. */
+asset, payer) {
+    const { endpoint, canonicalUrl, paymentRequired } = await readX402Challenge(http, value, request);
     const permit2 = payer === undefined ? undefined : inspectPermit2Offer({ accepts: paymentRequired.accepts, payer });
-    const candidates = inspectCandidates(paymentRequired, canonicalUrl, chainId);
-    if (candidates.length === 0 && permit2 === undefined) {
-        throw httpError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no supported x402 offer.");
+    const candidates = asset === null ? [] : inspectCandidates(paymentRequired, canonicalUrl, asset);
+    if (asset === null && permit2 === undefined) {
+        throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no Permit2 offer this payer can inspect.", { reason: "x402_offer_asset_not_offered" });
+    }
+    if (asset !== null && candidates.length === 0 && permit2 === undefined) {
+        // Name what the seller does offer, so the caller can select another admitted network and token.
+        const offered = offeredX402Assets(paymentRequired.accepts);
+        throw new ApnError("APN_X402_UNSUPPORTED_OFFER", `Seller challenge has no supported x402 offer for ${asset.token} on ${asset.network}.`, { reason: "x402_offer_asset_not_offered", chain: asset.network, asset: asset.token,
+            offered: offered.map((offer) => `${offer.network} ${offer.asset} ${offer.method}`) });
     }
     return {
         kind: "x402_inspection",
@@ -70,6 +71,35 @@ export async function inspectX402(http, value, request, chainId = 8453, payer) {
         candidates,
         ...(permit2 === undefined ? {} : { permit2 }),
     };
+}
+/** One unpaid request to a canonical public HTTPS URL that must answer 402 with exactly one strict PAYMENT-REQUIRED header. */
+export async function readX402Challenge(http, value, request) {
+    const endpoint = parsePublicHttpsUrl(value, "APN_HTTP_CONFIG", "Seller URL", 2048);
+    const canonicalUrl = endpoint.toString();
+    if (canonicalUrl !== value)
+        throw httpError("APN_HTTP_CONFIG", "Seller URL must use its canonical WHATWG serialization.");
+    const httpRequest = optionalX402HttpRequest(canonicalUrl, request);
+    const observation = await http.get({ url: canonicalUrl, ...(httpRequest === undefined ? {} : { httpRequest }) });
+    validateInspectObservation(observation, endpoint);
+    const header = singleControlHeader(observation.rawHeaderPairs, "payment-required");
+    return { endpoint, canonicalUrl, header, paymentRequired: decodePaymentRequiredHeader(header) };
+}
+/** The seller's EVM `exact` offers as (network, lowercase asset, method), at most 16, for a refusal's details. */
+function offeredX402Assets(accepts) {
+    const out = [];
+    for (const offer of accepts) {
+        if (out.length >= 16 || typeof offer !== "object" || offer === null)
+            continue;
+        const { scheme, network, asset, extra } = offer;
+        if (scheme !== "exact" || typeof network !== "string" || !/^eip155:[1-9][0-9]{0,15}$/u.test(network) ||
+            typeof asset !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(asset))
+            continue;
+        const declared = typeof extra === "object" && extra !== null ? extra.assetTransferMethod : undefined;
+        const method = declared === undefined ? "eip3009" : typeof declared === "string" && declared.length <= 32 ? declared : "unknown";
+        if (!out.some((row) => row.network === network && row.asset === asset.toLowerCase() && row.method === method))
+            out.push({ network, asset: asset.toLowerCase(), method });
+    }
+    return out;
 }
 export function observePaidX402Response(raw, input) {
     const endpoint = new URL(input.canonicalUrl);

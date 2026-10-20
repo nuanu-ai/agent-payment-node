@@ -1,5 +1,5 @@
 import type { SolanaRpcPacer } from "./pacing.js";
-export type SolanaMethod = "getGenesisHash" | "getMultipleAccounts" | "getAccountInfo" | "getLatestBlockhash" | "getBlockHeight" | "getFeeForMessage" | "getMinimumBalanceForRentExemption" | "simulateTransaction" | "sendTransaction" | "getSignatureStatuses" | "getTransaction" | "getBlock";
+export type SolanaMethod = "getGenesisHash" | "getMultipleAccounts" | "getAccountInfo" | "getLatestBlockhash" | "getBlockHeight" | "getFeeForMessage" | "getMinimumBalanceForRentExemption" | "simulateTransaction" | "sendTransaction" | "getSignatureStatuses" | "getTransaction" | "getBlock" | "getSignaturesForAddress";
 export type SolanaReadMethod = Exclude<SolanaMethod, "simulateTransaction" | "sendTransaction">;
 export interface SolanaBatchRead {
     readonly method: SolanaReadMethod;

@@ -3,6 +3,7 @@ import { ApnError } from "../errors.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { permit2FactHash } from "./production-proxy-call.js";
+import { reconstructPermit2ProductionMaterial } from "./production-material.js";
 import { inspectPermit2ProductionReceipt } from "./production-receipt-facts.js";
 import { validatePermit2ProductionRecord } from "./production-repository.js";
 import { permit2ProductionOperationDigest, validatePermit2ProductionSigned } from "./production-signed.js";
@@ -41,11 +42,14 @@ export async function observePermit2Production(input) {
         if (supplied !== null)
             signed = await validatePermit2ProductionSigned(supplied, record);
         rpc = new Permit2ObserverRpc(endpoint, new StateStore(stateRoot));
-        const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["finalized", false] },
+        // Settlement is proven at the tag frozen in the record from the chain's stack (safe on Ethereum, Arbitrum and OP Stack,
+        // as for EIP-3009 x402; finalized elsewhere); records from before 0.5.53 keep finalized. Expiry is always finalized.
+        const tag = mode === "settlement" ? record.material.proofTag ?? "finalized" : "finalized";
+        const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: [tag, false] },
             ...(mode === "settlement" && locator !== null ? [{ method: "eth_getTransactionByHash", params: [locator] },
                 { method: "eth_getTransactionReceipt", params: [locator] }] : [])]);
-        assertObserverChain(first[0]);
-        const head = observerBlock(first[1], "finalized");
+        assertObserverChain(first[0], record.material);
+        const head = observerBlock(first[1], tag);
         if (mode === "settlement" && locator !== null) {
             // A transaction hash only names the settlement; the consumed nonce bit below decides it, whatever the facilitator's call shape.
             try {
@@ -61,7 +65,7 @@ export async function observePermit2Production(input) {
             catch { /* batched, relayed or suffixed calls cannot be attributed byte for byte; the nonce bit still settles them */ }
         }
         block = head;
-        // The nonce state is read pinned by EIP-1898 to the canonical finalized block: no header recheck, and no re-read of the
+        // The nonce state is read pinned by EIP-1898 to that canonical block: no header recheck, and no re-read of the
         // immutable Permit2/proxy code or the token domain, which settlement and expiry do not depend on.
         const reads = await rpc.batch(observerNonceCalls(record.material, block));
         if (mode === "expired_unused")

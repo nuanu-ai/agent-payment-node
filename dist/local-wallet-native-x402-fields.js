@@ -5,11 +5,14 @@ import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { x402AuthorizationIntentHash } from "./x402-state-integrity.js";
 import { ApnError } from "./errors.js";
 const HASH = /^[a-f0-9]{64}$/u;
-export function parseX402Create(payload) {
-    const baseKeys = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", "resource", "capAtomic", "payee", "amountAtomic", "tokenDomain", "authorization", "paymentIdentifierPosture", "offerHash", "intentHash"];
+const methodKey = (method) => method === "eip3009" ? "tokenDomain" : "permit2";
+export function parseX402Create(payload, method = "eip3009") {
+    const baseKeys = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", "resource", "capAtomic", "payee", "amountAtomic", methodKey(method), "authorization", "paymentIdentifierPosture", "offerHash", "intentHash"];
     const posture = payload.paymentIdentifierPosture;
     exactRecord(payload, posture === "absent" ? baseKeys : [...baseKeys, "paymentIdentifierValue"]);
-    const common = parseX402Common(payload, true);
+    if (method === "permit2" && posture !== "absent")
+        throw protocol("A Permit2 authorization carries no payment identifier.");
+    const common = parseX402Common(payload, true, method);
     const resource = exactRecord(payload.resource, ["origin", "path", "urlHash"]);
     if (typeof resource.origin !== "string" || typeof resource.path !== "string" || typeof resource.urlHash !== "string" || !HASH.test(resource.urlHash))
         throw protocol("x402 resource binding is invalid.");
@@ -34,15 +37,15 @@ export function parseX402Create(payload) {
         throw protocol("x402 authorization intent hash is invalid.");
     return { ...common, payee, amountAtomic, capAtomic, authorization };
 }
-export function parseX402Recovery(payload) {
-    const allowed = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", "tokenDomain", "authorization", "intentHash"];
+export function parseX402Recovery(payload, method = "eip3009") {
+    const allowed = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", methodKey(method), "authorization", "intentHash"];
     exactRecord(payload, payload.expectedSignatureHash === undefined ? allowed : [...allowed, "expectedSignatureHash"]);
-    const common = parseX402Common(payload, false);
+    const common = parseX402Common(payload, false, method);
     if (payload.expectedSignatureHash !== undefined && (typeof payload.expectedSignatureHash !== "string" || !HASH.test(payload.expectedSignatureHash)))
         throw protocol("x402 expected signature hash is invalid.");
     return { ...common, ...(payload.expectedSignatureHash === undefined ? {} : { expectedSignatureHash: payload.expectedSignatureHash }) };
 }
-function parseX402Common(payload, create) {
+function parseX402Common(payload, create, method) {
     const profile = canonicalProfile(payload.profile);
     const operationId = hash(payload.operationId, "operation ID");
     const fingerprint = hash(payload.fingerprint, "fingerprint");
@@ -50,9 +53,7 @@ function parseX402Common(payload, create) {
     const token = x402Address(payload.token, "token");
     if (!validX402Tuple(payload.chainId, `eip155:${String(payload.chainId)}`, token))
         throw protocol("x402 network or token is unsupported.");
-    const tokenDomain = exactRecord(payload.tokenDomain, ["name", "version"]);
-    if (typeof tokenDomain.name !== "string" || tokenDomain.name.length === 0 || typeof tokenDomain.version !== "string" || tokenDomain.version.length === 0)
-        throw protocol("x402 token domain is invalid.");
+    const domain = method === "eip3009" ? { tokenDomain: parseTokenDomain(payload.tokenDomain) } : { permit2: parsePermit2(payload.permit2) };
     const authKeys = create ? ["from", "to", "value", "validAfter", "validBefore", "nonce", "createdAt"] : ["from", "to", "value", "validAfter", "validBefore", "nonce"];
     const authorization = exactRecord(payload.authorization, authKeys);
     const from = x402Address(authorization.from, "authorization sender");
@@ -64,8 +65,7 @@ function parseX402Common(payload, create) {
         throw protocol("x402 authorization binding is invalid.");
     const intentHash = hash(payload.intentHash, "x402 intent hash");
     return {
-        profile, operationId, fingerprint, wallet, chainId: payload.chainId, token,
-        tokenDomain: { name: tokenDomain.name, version: tokenDomain.version },
+        profile, operationId, fingerprint, wallet, chainId: payload.chainId, token, ...domain,
         authorization: { from, to, value, validAfter: "0", validBefore, nonce },
         intentHash,
     };
@@ -73,9 +73,24 @@ function parseX402Common(payload, create) {
 export function x402RecoveryBinding(value) {
     return {
         profile: value.profile, operationId: value.operationId, fingerprint: value.fingerprint,
-        wallet: value.wallet, chainId: value.chainId, token: value.token, tokenDomain: value.tokenDomain,
+        wallet: value.wallet, chainId: value.chainId, token: value.token,
+        ...(value.permit2 !== undefined ? { permit2: value.permit2 } : value.tokenDomain !== undefined ? { tokenDomain: value.tokenDomain } : {}),
         authorization: publicAuthorization(value.authorization), intentHash: value.intentHash,
     };
+}
+function parseTokenDomain(value) {
+    const tokenDomain = exactRecord(value, ["name", "version"]);
+    if (typeof tokenDomain.name !== "string" || tokenDomain.name.length === 0 || typeof tokenDomain.version !== "string" || tokenDomain.version.length === 0)
+        throw protocol("x402 token domain is invalid.");
+    return { name: tokenDomain.name, version: tokenDomain.version };
+}
+function parsePermit2(value) {
+    const permit2 = exactRecord(value, ["eip2612"]);
+    if (permit2.eip2612 === null)
+        return { eip2612: null };
+    const permit = exactRecord(permit2.eip2612, ["name", "version", "nonce"]);
+    const { name, version } = parseTokenDomain({ name: permit.name, version: permit.version });
+    return { eip2612: { name, version, nonce: decimal(permit.nonce, "x402 permit nonce") } };
 }
 export function publicAuthorization(value) {
     return {

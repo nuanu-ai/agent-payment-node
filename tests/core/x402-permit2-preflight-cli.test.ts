@@ -12,6 +12,7 @@ import { encodeCanonicalBase64Json, encodePaymentRequiredHeader, type X402Paymen
 import { hashChallenge } from "../../src/x402-permit2/prepare.js";
 import { permit2PublicRpc } from "../../src/x402-permit2/preflight.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
+import { onlyPermit2Asset } from "../../src/x402-permit2/prepare.js";
 import { PERMIT2_ADDRESS, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -23,7 +24,7 @@ const challenge: X402PaymentRequired = { x402Version: 2, resource: { url: "https
   accepts: [{ scheme: "exact", network: asset.chain, asset: asset.token, amount: "10000",
     payTo: "0x2222222222222222222222222222222222222222", maxTimeoutSeconds: 60,
     extra: { assetTransferMethod: "permit2" } }] };
-const selection = selectPermit2Offer(challenge.accepts, payer);
+const selection = selectPermit2Offer(challenge.accepts, payer, onlyPermit2Asset(asset));
 const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 
 async function setup(root: string) {
@@ -70,8 +71,8 @@ test("CLI current-owner preflight is admissible and leaves no journal, POST, sig
       assert.deepEqual(params[1], { blockHash: `0x${"1".repeat(64)}`, requireCanonical: true });
       if (method === "eth_getCode") return params[0] === PERMIT2_ADDRESS ? permit2Code : proxyCode;
       if (method === "eth_call") {
-        const index = calls.filter(value => value === "eth_call").length - 1;
-        return [word(20000n), word(10000n), asset.tokenDomainSeparator, word(9n), word(0n)][index];
+        const data = String((params[0] as { data: string }).data);
+        return data.startsWith("0x70a08231") ? word(20000n) : data.startsWith("0xdd62ed3e") ? word(10000n) : word(0n);
       }
       throw new Error(`Unexpected RPC method ${method}`);
     });
@@ -89,7 +90,7 @@ test("CLI current-owner preflight is admissible and leaves no journal, POST, sig
   assert.equal(JSON.stringify(result).includes("typedData"), false);
   assert.equal(JSON.stringify(result).includes("signature"), false);
   assert.equal(projectMcpTools().some(tool => tool.name === "apn_x402_permit2_preflight"), false);
-  assert.equal(calls.length, 9); assert.deepEqual(posts, [2, 7], "two POSTs, no facilitator GET");
+  assert.equal(calls.length, 7); assert.deepEqual(posts, [2, 5], "two POSTs, no facilitator GET; the token domain only for a sponsored permit");
   assert.deepEqual(await snapshot(temp.root), before);
 
   calls.length = 0;

@@ -6,10 +6,13 @@ import { allowedRecord, bytes32, exactRecord, hash, positive, stateCorrupt, time
 
 const SETTLEMENT_V2 = "apn.x402.settlement-evidence.v2" as const;
 
-/** Settlement read from the nonce state at a safe block; `transaction` is attached only after its receipt matched. */
+/**
+ * Settlement read from the nonce state at a block of the record's proof tag (`safe`, or `finalized` off the released
+ * chains; `safeHead` names that proof block); `transaction` is attached only after its receipt matched.
+ */
 export function stateSettlementEvidence(
   operation: X402OperationRecord,
-  state: X402AuthorizationState & { readonly value: true; readonly blockTag: "safe" },
+  state: X402AuthorizationState & { readonly value: true; readonly blockTag: "safe" | "finalized" },
   rpcOrigin: string,
   transaction?: { readonly transactionHash: `0x${string}`; readonly blockNumber: string; readonly blockHash: `0x${string}` },
 ): Eip3009StateSettlementEvidence {
@@ -19,7 +22,7 @@ export function stateSettlementEvidence(
     chainId: operation.chainId,
     token: operation.token,
     safeHead: { number: state.blockNumber, hash: state.blockHash, observedAt: state.observedAt },
-    authorizationState: { value: true as const, blockNumber: state.blockNumber, blockHash: state.blockHash, blockTag: "safe" as const, observedAt: state.observedAt },
+    authorizationState: { value: true as const, blockNumber: state.blockNumber, blockHash: state.blockHash, blockTag: state.blockTag, observedAt: state.observedAt },
     ...(transaction === undefined ? {} : {
       transactionHash: transaction.transactionHash,
       transactionBlock: { number: transaction.blockNumber, hash: transaction.blockHash },
@@ -39,7 +42,10 @@ export function validateStateSettlementEvidence(value: unknown, operation?: Reco
   const safe = exactRecord(evidence.safeHead, ["number", "hash", "observedAt"]);
   positive(safe.number); bytes32(safe.hash); timestamp(safe.observedAt);
   const state = exactRecord(evidence.authorizationState, ["value", "blockNumber", "blockHash", "blockTag", "observedAt"]);
-  if (state.value !== true || state.blockTag !== "safe" || state.blockNumber !== safe.number || state.blockHash !== safe.hash ||
+  // The proof tag is the record's own: `safe` unless the record froze `finalized`; without a record, either strength.
+  const expectedTag = operation === undefined ? state.blockTag : proofTagOf(operation);
+  if (state.value !== true || (state.blockTag !== "safe" && state.blockTag !== "finalized") || state.blockTag !== expectedTag ||
+    state.blockNumber !== safe.number || state.blockHash !== safe.hash ||
     state.observedAt !== safe.observedAt) stateCorrupt("x402 state settlement does not bind its safe block.");
   if ((evidence.transactionHash === undefined) !== (evidence.transactionBlock === undefined)) stateCorrupt("x402 state settlement transaction is partial.");
   if (evidence.transactionHash !== undefined) {
@@ -54,4 +60,9 @@ export function validateStateSettlementEvidence(value: unknown, operation?: Reco
   const { evidenceHash: _hash, ...body } = evidence;
   if (evidence.evidenceHash !== domainHash(SETTLEMENT_V2, canonicalJson(body))) stateCorrupt("x402 state settlement evidence hash is invalid.");
   return evidence as unknown as Eip3009StateSettlementEvidence;
+}
+
+function proofTagOf(operation: Record<string, unknown>): "safe" | "finalized" {
+  const facts = operation.tokenFacts;
+  return typeof facts === "object" && facts !== null && (facts as Record<string, unknown>).proofTag === "finalized" ? "finalized" : "safe";
 }

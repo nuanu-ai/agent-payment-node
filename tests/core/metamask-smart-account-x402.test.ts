@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { x402Asset } from "../../src/x402-network.js";
 import test from "node:test";
 import {
   ALL_METAMASK_FACILITATOR_ADDRESSES,
@@ -41,7 +42,7 @@ test("strict inspection accepts only explicit ERC-7710 offers without EIP-3009 t
       },
     }],
   };
-  const [candidate] = inspectCandidates(paymentRequired, URL);
+  const [candidate] = inspectCandidates(paymentRequired, URL, x402Asset(8453));
   assert.ok(candidate !== undefined);
   assert.equal(candidate.assetTransferMethod, "erc7710");
   assert.deepEqual(candidate.facilitatorAddresses, [FACILITATOR]);
@@ -57,7 +58,7 @@ test("strict inspection accepts only explicit ERC-7710 offers without EIP-3009 t
       ...paymentRequired,
       accepts: [{ ...paymentRequired.accepts[0], extra }],
     } as PaymentRequired;
-    assert.deepEqual(inspectCandidates(rejected, URL), []);
+    assert.deepEqual(inspectCandidates(rejected, URL, x402Asset(8453)), []);
   }
 });
 
@@ -81,7 +82,7 @@ test("ERC-7710 facilitator sets are canonical regardless of seller order", () =>
     }],
   };
 
-  const [candidate] = inspectCandidates(paymentRequired, URL);
+  const [candidate] = inspectCandidates(paymentRequired, URL, x402Asset(8453));
   assert.ok(candidate !== undefined && candidate.assetTransferMethod === "erc7710");
   assert.deepEqual(candidate.facilitatorAddresses, [...facilitators].sort());
 });
@@ -113,7 +114,7 @@ test("current official seller shape uses the pinned MetaMask facilitator set whe
       },
     }],
   }));
-  const [candidate] = inspectCandidates(decoded, URL);
+  const [candidate] = inspectCandidates(decoded, URL, x402Asset(8453));
   assert.ok(candidate !== undefined && candidate.assetTransferMethod === "erc7710");
   assert.deepEqual(candidate.facilitatorAddresses, ALL_METAMASK_FACILITATOR_ADDRESSES.map((value) => value.toLowerCase()).sort());
   assert.equal(candidate.facilitatorAddresses.includes(METAMASK_FACILITATOR_ADDRESSES_DEV[0].toLowerCase()), true);
@@ -126,6 +127,6 @@ test("current official seller shape uses the pinned MetaMask facilitator set whe
     { assetTransferMethod: "erc7710", name: "" },
   ]) {
     const rejected = { ...decoded, accepts: [{ ...decoded.accepts[0], extra }] } as PaymentRequired;
-    assert.deepEqual(inspectCandidates(rejected, URL), []);
+    assert.deepEqual(inspectCandidates(rejected, URL, x402Asset(8453)), []);
   }
 });

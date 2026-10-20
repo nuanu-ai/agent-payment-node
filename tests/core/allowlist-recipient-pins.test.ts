@@ -170,8 +170,8 @@ test("the Permit2 x402 read port refuses a payee outside the owner's x402 pin be
   let rpcCalls = 0;
   const port = createPermit2ProductionReadPort({ profile: "owner", stateRoot: temporary.root, localAccount: async () => payer,
     usage: new AssetUsageLedger(temporary.root), now: () => instant, rpc: { batch: async () => { rpcCalls++; throw new Error("stop after admission"); } } });
-  const request = { payer, chainId: 43114 as const, token: asset.token, challengeHash: "a".repeat(64), offerHash: "b".repeat(64),
-    amountAtomic: "10000", nonceBitmapWordIndex: "0", nowSeconds: Math.floor(instant.getTime() / 1000) };
+  const request = { payer, asset: { ...asset, tokenDomainSeparator: null }, challengeHash: "a".repeat(64), offerHash: "b".repeat(64),
+    amountAtomic: "10000", nonceBitmapWordIndex: "0", nowSeconds: Math.floor(instant.getTime() / 1000), sellerSponsorsEip2612: false };
   await assert.rejects(port.read({ ...request, payTo: B }), reason("allowlist_recipient_not_admitted"));
   assert.equal(rpcCalls, 0);
   // The pinned payee passes admission and reaches the first chain read, which this test refuses.

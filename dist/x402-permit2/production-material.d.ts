@@ -2,6 +2,7 @@ import { type Permit2CheckedChallenge } from "./checked-challenge.js";
 import { type Permit2OwnerAdmission, type Permit2PrepareEvidence, type Permit2PreparedMaterial } from "./prepare.js";
 import type { Permit2ReadCheckpoint } from "./read-port.js";
 import type { Permit2WalletBinding } from "./owner-binding.js";
+import { type Permit2Asset } from "./registry.js";
 export declare const PERMIT2_PRODUCTION_SCHEMA = "apn.x402-permit2-production.v2";
 export interface Permit2ProductionMaterial {
     readonly checked: Permit2CheckedChallenge;
@@ -11,6 +12,16 @@ export interface Permit2ProductionMaterial {
     readonly evidence: Permit2PrepareEvidence;
     readonly signingSecond: number;
     readonly nonce: string;
+    /**
+     * The admitted asset (owner row, chain facts) this operation pays. Absent only on records prepared before generic
+     * admission, which reconstruct with the released Avalanche USDT row.
+     */
+    readonly asset?: Permit2Asset;
+    /**
+     * The tag settlement is proven at, frozen from the chain's stack at prepare. Absent only on records prepared before
+     * 0.5.53 (Avalanche USDT), which were proven at `finalized` and keep it.
+     */
+    readonly proofTag?: "safe" | "finalized";
     /** Canonical decimal encoding of every bigint; reconstruction never revives arbitrary fields. */
     readonly preparedCanonicalJson: string;
     readonly typedDataDigest: string;

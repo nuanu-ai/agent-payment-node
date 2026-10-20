@@ -167,14 +167,23 @@ apn operation resume --operation <operation-id> --rpc-url https://mainnet.base.o
 
 Creating a policy or raising a limit needs the foreground terminal; a pure decrease does not. `--x402-payees` optionally
 pins which sellers may be paid. `wallet policy show/set`, `x402 inspect` and `x402 fetch prepare` take
-`--chain <caip2>` (`eip155:8453`, `eip155:1` or `eip155:42161`) to select the local-wallet x402 network; omitting it
-means Base, and no network inherits another's limits. `x402 fetch prepare`
+`--chain <caip2>` (any `eip155:<id>`) and `--asset <token>` to select the local-wallet x402 network and token; omitting
+`--chain` means Base, omitting `--asset` means USDC on Base, Ethereum or Arbitrum and is refused elsewhere, and no
+network or token inherits another's limits. Prepare proves the token's EIP-3009 identity on that chain, or, for a
+seller that offers the token only through Permit2, the canonical Permit2 contracts and the wallet's allowance
+([any seller](docs/x402-any-seller.md)). `x402 fetch prepare`
 uses the owner's maximum, and `--max-amount-atomic` can only lower it for one call. Approval creates exactly one frozen
 authorization; `operation resume` owns the paid request, settlement observation and seller-result recovery. `--method`,
 `--headers-json` and `--body-base64` send POST and other requests with opaque body bytes bound into the operation.
 
-Avalanche USDT [Permit2 requests](docs/x402-non-usdc.md) (`x402 permit2 *`) and [ERC-20 transfer-proof
-merchants](docs/x402-merchant-usdm.md) (`x402 merchant *`, MegaETH USDm first) are CLI commands with foreground approval.
+[Permit2 requests](docs/x402-non-usdc.md) (`x402 permit2 *`, any chain and token the owner's allowlist policy admits
+for Permit2, USDC included) and [ERC-20 transfer-proof merchants](docs/x402-merchant-usdm.md) (`x402 merchant *`,
+MegaETH USDm first) are CLI commands with foreground approval. `x402 permit2 allowance set|revoke` sets the wallet's
+bounded allowance to Permit2 for an owner-admitted chain and token (foreground, one send, observed to proof).
+`x402 solana pay` pays a Solana `exact` offer unattended (CLI or MCP) for a mint the owner's allowlist row admits, under
+the owner's Solana x402 policy (`wallet policy set --chain solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp --asset <mint>`); the
+seller's facilitator pays the fee and `APN_SOLANA_RPC_URL` must be set. `x402 solana observe` proves settlement or that
+the payment can no longer land ([any seller](docs/x402-any-seller.md)).
 [Offer selection](docs/x402-offer-selection.md) and [settlement fields](docs/x402-settlement-compatibility.md) are
 documented separately.
 
@@ -218,7 +227,7 @@ Provider balance is never spending authority; the owner allowlist and profile po
 | Circle CCTP V2 | `circle evm *`, `circle approval *`, `circle source submit` | [Circle V2 EVM](docs/circle-v2-evm-fast.md) |
 | Stargate V2 direct | `stargate native *`, `stargate token *` | [quote](docs/stargate-v2-direct-quote.md), [native](docs/stargate-v2-native-execution.md), [token](docs/stargate-v2-token-native-drop.md) |
 | Swaps | `swap ethereum uniswap[-token] *`, `swap tron sunswap *`, `swap solana jupiter/orca *` | [Uniswap](docs/uniswap.md), [SunSwap](docs/sunswap.md), [Jupiter](docs/jupiter.md), [Orca](docs/orca.md) |
-| x402 | `x402 inspect`, `x402 fetch *`, `x402 permit2 *`, `x402 merchant *` | [above](#x402-purchases) |
+| x402 | `x402 inspect`, `x402 fetch *`, `x402 permit2 *`, `x402 solana *`, `x402 merchant *` | [above](#x402-purchases) |
 
 Each guide states its commands, recovery rules and which mainnet acceptance rows are proven or still open. Source tests
 are not live payment proof.
@@ -280,8 +289,15 @@ Generated from the catalog; `apn help <command>` and `apn help --json` give opti
 ```text
 apn x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <profile>] --idempotency-key <key>
 apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> [--profile <profile>] [--transaction <hash> | --expired-unused]
-apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>
+apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <https-rpc>
 apn x402 permit2 status --profile <profile> --operation <operation-id>
+apn x402 solana pay --profile <profile> --url <https-url> --asset <mint> --max-amount <atomic> --idempotency-key <key>
+apn x402 solana observe --operation <operation-id>
+apn x402 solana status --operation <operation-id>
+apn x402 permit2 allowance set --profile <profile> --chain <caip2> --asset <token> --amount <atomic> --rpc-url <https-rpc> --max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --idempotency-key <key>
+apn x402 permit2 allowance revoke --profile <profile> --chain <caip2> --asset <token> --rpc-url <https-rpc> --max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --idempotency-key <key>
+apn x402 permit2 allowance observe --operation <operation-id> --rpc-url <https-rpc>
+apn x402 permit2 allowance status --operation <operation-id>
 apn x402 merchant prepare --profile <profile> --url <https-url> [--asset <token>] --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]
@@ -320,10 +336,10 @@ apn wallet metamask native-transfer --profile <profile> --chain <chain> --recipi
 apn wallet metamask native-transfer-status --operation <id>
 apn wallet metamask native-transfer-observe --operation <id>
 apn wallet status [--profile <profile>]
-apn wallet policy show --profile <profile> [--chain <caip2>]
-apn wallet policy set --profile <profile> [--chain <caip2>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
-apn x402 inspect [--chain <caip2>] --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
-apn x402 fetch prepare --profile <profile> [--chain <caip2>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
+apn wallet policy show --profile <profile> [--chain <caip2>] [--asset <token>]
+apn wallet policy set --profile <profile> [--chain <caip2>] [--asset <token>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
+apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
+apn x402 fetch prepare --profile <profile> [--chain <caip2>] [--asset <token>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]

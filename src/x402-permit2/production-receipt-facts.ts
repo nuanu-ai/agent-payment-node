@@ -3,7 +3,8 @@ import { ApnError } from "../errors.js";
 import type { Hex } from "../model.js";
 import type { Permit2ProductionRecord } from "./production-repository.js";
 import type { Permit2ProductionSigned } from "./production-signed.js";
-import { attributePermit2DirectTransaction, permit2FactHash, permit2FactQuantity, snapshotPermit2DirectTransaction, type Permit2DirectAttribution } from "./production-proxy-call.js";
+import { attributePermit2DirectTransaction, permit2ChainQuantity, permit2FactHash, permit2FactQuantity, snapshotPermit2DirectTransaction,
+  type Permit2DirectAttribution } from "./production-proxy-call.js";
 import { ERC20_TRANSFER_TOPIC, PROXY_SETTLED_TOPIC, PROXY_SETTLED_WITH_PERMIT_TOPIC } from "./registry.js";
 
 export interface Permit2ReceiptLogInput {
@@ -35,7 +36,7 @@ export interface Permit2ReceiptFacts {
 /** Exact projected receipt facts. Never a settlement/failure finalizer or a chain-finality proof. */
 export async function inspectPermit2ProductionReceipt(record: Permit2ProductionRecord, signed: Permit2ProductionSigned,
   transaction: unknown, value: unknown): Promise<Permit2ReceiptFacts> {
-  transaction = snapshotPermit2DirectTransaction(transaction);
+  transaction = snapshotPermit2DirectTransaction(transaction, permit2ChainQuantity(record));
   const receipt = snapshotReceipt(value);
   const attribution = await attributePermit2DirectTransaction(record, signed, transaction);
   if (receipt.transactionHash !== attribution.transactionHash || receipt.blockHash !== attribution.blockHash ||

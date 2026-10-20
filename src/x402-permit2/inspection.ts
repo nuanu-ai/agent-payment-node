@@ -1,6 +1,7 @@
 import type { Address } from "../model.js";
 import type { Permit2Requirement } from "./offer.js";
 import { selectPermit2Offer, type Permit2OfferSelection } from "./offer.js";
+import { wirePermit2Asset } from "./registry.js";
 
 /** Input for the pure Permit2 offer inspection boundary. No RPC, wallet or state port is accepted. */
 export interface Permit2OfferInspectionInput {
@@ -24,11 +25,12 @@ export interface Permit2OfferInspection {
 }
 
 /**
- * Inspect the first listed exact Permit2 offer without reading state or preparing authorization.
+ * Inspect the first exact Permit2 offer without reading state or preparing authorization.
  * Unsupported offers and invalid payer input retain the canonical ApnError emitted by the selector.
  */
 export function inspectPermit2Offer(input: Permit2OfferInspectionInput): Permit2OfferInspection {
-  const selection = selectPermit2Offer(input.accepts, input.payer);
+  // Inspect has no profile: it shows the lowest-index well-formed Permit2 offer on any EVM network; approve admits it.
+  const selection = selectPermit2Offer(input.accepts, input.payer, wirePermit2Asset);
   return Object.freeze({
     index: selection.index,
     requirement: freezeRequirement(selection.requirement),

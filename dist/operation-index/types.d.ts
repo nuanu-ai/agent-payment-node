@@ -2,7 +2,7 @@
  * The operation index is a derived, rebuildable cache over the family journals (which stay the only source of truth).
  * It stores only what lookups and the one-operation-per-account guard need; deleting `operation-index/` is always safe.
  */
-export declare const OPERATION_FAMILIES: readonly ["direct_transfer", "x402_fetch", "rail_transfer", "bridge_route", "gasless_transfer", "metamask_gasless_transfer", "smart_account_gasless_transfer", "facilitator_gasless_transfer", "circle_route", "merchant_x402", "permit2_production", "relay_unsigned", "sei_gaszip", "mega_gaszip", "swap", "uniswap_token", "stargate_native", "stargate_token", "gasless_usdt", "oneclick_source", "circle_source", "circle_approval", "metamask_native"];
+export declare const OPERATION_FAMILIES: readonly ["direct_transfer", "x402_fetch", "rail_transfer", "bridge_route", "gasless_transfer", "metamask_gasless_transfer", "smart_account_gasless_transfer", "facilitator_gasless_transfer", "circle_route", "merchant_x402", "permit2_production", "relay_unsigned", "sei_gaszip", "mega_gaszip", "swap", "uniswap_token", "stargate_native", "stargate_token", "gasless_usdt", "oneclick_source", "circle_source", "circle_approval", "metamask_native", "x402_solana", "permit2_allowance"];
 export type OperationFamily = typeof OPERATION_FAMILIES[number];
 /**
  * A claim key is one of: an account `evm:<chainId>:<lowercase account>`, `solana:<genesis>:<address>`,

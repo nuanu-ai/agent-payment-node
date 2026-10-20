@@ -15,9 +15,11 @@ import { permit2WalletBinding } from "./owner-binding.js";
 import { createPermit2ProductionReadPort } from "./read-port.js";
 import { createPermit2ProductionMaterial, PERMIT2_PRODUCTION_SCHEMA, reconstructPermit2ProductionMaterial } from "./production-material.js";
 import { selectPermit2Offer } from "./offer.js";
-import { X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "./registry.js";
+import { permit2SellerSponsorsEip2612 } from "./prepare.js";
+import { admittedPermit2Assets } from "./admission.js";
+import { X402_PERMIT2_MECHANISM } from "./registry.js";
+import { x402ProofTag } from "../x402-network.js";
 import { Permit2ProductionRepository, permit2ProductionId, productionRecordBody, productionUsageIdentity, productionUsageKey, sealPermit2ProductionRecord } from "./production-repository.js";
-const asset = X402_PERMIT2_ASSETS[0];
 /** Durable unsigned production preparation. No custody, send, merchant HTTP or settlement port exists. */
 export class Permit2ProductionPreparation {
     ports;
@@ -64,25 +66,29 @@ export class Permit2ProductionPreparation {
                 return existing;
             }
             await assertExclusiveEvmOwner(this.state, wallet.account, profileHash);
+            // Selection is local: the owner's active policy admits the offer's chain and token, which fixes the account claim.
+            const selection = await this.admittedSelection(profile, wallet.account, checked);
+            if (input.expected.index !== selection.index || input.expected.challengeHash !== checked.challengeHash ||
+                canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement))
+                blocked("Merchant terms changed.");
+            const asset = selection.listAsset;
             // The account claim is written before any RPC read, and dropped if no operation is written.
             const idempotencyHash = sha256(`idempotency\0x402-permit2-production.v2\0${key}`);
             return await this.operations.admit({ kind: "permit2_production", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(asset.chainId, wallet.account)] }, async () => {
-                const selection = selectPermit2Offer(checked.challenge.accepts, wallet.account);
-                if (input.expected.index !== selection.index || input.expected.challengeHash !== checked.challengeHash ||
-                    canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement))
-                    blocked("Merchant terms changed.");
                 const now = this.now(), signingSecond = Math.floor(now.getTime() / 1000);
                 const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
                 const read = createPermit2ProductionReadPort({ profile, stateRoot: this.state.root,
                     localAccount: async () => (await permit2WalletBinding(this.state, profile)).account,
                     usage: { usage: (identity, at) => this.usage.usageReadOnly(identity, at) }, rpc: this.ports.rpc, now: () => this.now() });
-                const observed = await read.readChecked({ payer: wallet.account, chainId: 43114, token: asset.token,
+                const observed = await read.readChecked({ payer: wallet.account, asset,
                     challengeHash: checked.challengeHash, offerHash: selection.offerHash, amountAtomic: selection.amountAtomic,
-                    nowSeconds: signingSecond, nonceBitmapWordIndex: (nonce >> 8n).toString(), payTo: selection.payTo });
+                    nowSeconds: signingSecond, nonceBitmapWordIndex: (nonce >> 8n).toString(),
+                    sellerSponsorsEip2612: permit2SellerSponsorsEip2612(checked.challenge), payTo: selection.payTo });
                 if (canonicalJson(wallet) !== canonicalJson(await permit2WalletBinding(this.state, profile)))
                     blocked("Wallet binding changed during preparation.");
                 const material = createPermit2ProductionMaterial({ checked, wallet, checkpoint: observed.checkpoint,
-                    owner: observed.owner, evidence: observed.evidence, signingSecond, nonce: nonce.toString() });
+                    owner: observed.owner, evidence: observed.evidence, signingSecond, nonce: nonce.toString(), asset: observed.asset,
+                    proofTag: x402ProofTag(asset.chainId) });
                 const identity = { account: wallet.account, chain: asset.chain, asset: { kind: "token", identifier: asset.token } };
                 const record = sealPermit2ProductionRecord({ schemaVersion: PERMIT2_PRODUCTION_SCHEMA, operationId, profileHash,
                     idempotencyHash, requestHash, material,
@@ -93,6 +99,14 @@ export class Permit2ProductionPreparation {
                 return record;
             });
         });
+    }
+    /** The lowest-index Permit2 offer whose chain and token the profile's active allowlist policy admits for Permit2. */
+    async admittedSelection(profile, account, checked) {
+        const active = await loadActiveAssetPolicyRegistry(this.state.root, canonicalProfile(profile), this.now());
+        if (active === null) {
+            throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No active owner allowlist policy admits a Permit2 token for this profile.", { reason: "x402_permit2_owner_admission_required", rail: "x402" });
+        }
+        return selectPermit2Offer(validatePermit2CheckedChallenge(checked).challenge.accepts, account, admittedPermit2Assets(active));
     }
     async required(id) {
         const record = await this.records.findOperation(id);

@@ -68,6 +68,9 @@ export function planPermit2Authorization(selection, input) {
         }
         if (typeof input.eip2612Nonce !== "bigint" || input.eip2612Nonce < 0n || input.eip2612Nonce > MAX_UINT256)
             invalid("The token permit nonce is invalid.");
+        if (listAsset.tokenDomain === null) {
+            throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "Permit2 lacks allowance and the token's EIP-712 domain is not known for a sponsored permit.", { reason: "x402_permit2_allowance_required", rail: "x402" });
+        }
         const info = { from: input.payer, asset: listAsset.token, spender: PERMIT2_ADDRESS, amount: selection.amountAtomic,
             nonce: input.eip2612Nonce.toString(), deadline, version: "1" };
         eip2612 = { info, typedData: {

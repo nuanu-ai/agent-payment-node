@@ -79,7 +79,8 @@ export interface AssetUsageTransitionInput extends AssetUsageIdentity {
 }
 /** Permit2 production only: caller durably proved no authorization exposure before cancellation. */
 export interface CancelUnsubmittedReservationInput extends AssetUsageIdentity {
-    readonly chain: "eip155:43114";
+    /** The Permit2 production lease's own admitted EVM chain. */
+    readonly chain: `eip155:${number}`;
     readonly asset: {
         readonly kind: "token";
         readonly identifier: string;

@@ -1,6 +1,5 @@
 import { ApnError } from "./errors.js";
-import type { EvmChainId } from "./evm-asset.js";
-import { networkPolicyBinding } from "./x402-network.js";
+import { isBaseUsdc, networkPolicyBinding, type X402Asset } from "./x402-network.js";
 import { policyBinding, type ProfilePolicyBinding } from "./profile-policy.js";
 import { LOCAL_PROVIDER_ID } from "./provider-profile.js";
 import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
@@ -22,18 +21,18 @@ export interface X402PayerBinding {
 }
 
 /** The profile x402 policy binding of a payer, from local state only (no provider call). */
-export async function x402PolicyBinding(context: RuntimeContext, profileHash: string, chainId: EvmChainId): Promise<ProfilePolicyBinding> {
+export async function x402PolicyBinding(context: RuntimeContext, profileHash: string, asset: X402Asset): Promise<ProfilePolicyBinding> {
   const provider = context.profileRepository === undefined ? null : await context.requireProfileRepository().load(profileHash);
   if (provider !== null && provider.provider_id !== LOCAL_PROVIDER_ID) return policyBinding(provider);
   const wallet = await context.state.loadWallet(profileHash);
   if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-  return networkPolicyBinding(policyBinding(wallet), chainId);
+  return networkPolicyBinding(policyBinding(wallet), asset);
 }
 
 export async function resolveX402Payer(
   context: RuntimeContext,
   profileHash: string,
-  chainId: EvmChainId = 8453,
+  asset: X402Asset,
 ): Promise<X402PayerBinding> {
   let provider = context.profileRepository === undefined
     ? null
@@ -43,11 +42,11 @@ export async function resolveX402Payer(
     if (wallet === null) throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
     return {
       wallet: wallet.address.toLowerCase() as `0x${string}`,
-      policy: networkPolicyBinding(policyBinding(wallet), chainId),
+      policy: networkPolicyBinding(policyBinding(wallet), asset),
       transferMethod: "eip3009",
     };
   }
-  if (chainId !== 8453) throw new ApnError("APN_PROVIDER_UNAVAILABLE", "External x402 profile has no declared support on this network.");
+  if (!isBaseUsdc(asset)) throw new ApnError("APN_PROVIDER_UNAVAILABLE", "External x402 profile has no declared support on this network or token.");
   const repository = context.requireProfileRepository();
   const adapter = context.requireProviderRegistry().resolve(provider.provider_id);
   provider = await upgradeProviderProfile(adapter, provider, repository);

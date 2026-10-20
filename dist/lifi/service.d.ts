@@ -242,7 +242,7 @@ export declare class BridgeService {
             category: import("./operation-model.js").BridgePreSignRpcCategory;
             method: import("./operation-model.js").BridgePreSignRpcMethod | null;
         };
-        residual_allowance_status?: "unavailable" | "observed";
+        residual_allowance_status?: "observed" | "unavailable";
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;
@@ -470,7 +470,7 @@ export declare class BridgeService {
             category: import("./operation-model.js").BridgePreSignRpcCategory;
             method: import("./operation-model.js").BridgePreSignRpcMethod | null;
         };
-        residual_allowance_status?: "unavailable" | "observed";
+        residual_allowance_status?: "observed" | "unavailable";
         transfer: {
             sender: `0x${string}`;
             quoted_output_atomic: string;

@@ -25,6 +25,8 @@ export interface X402EffectMaterial {
     readonly authorization: Readonly<Record<string, string>>;
     readonly signature: Hex;
     readonly signatureHash: string;
+    /** Permit2 witness transfers only: the seller-sponsored exact-amount EIP-2612 permit to Permit2. */
+    readonly eip2612Signature?: Hex;
 }
 export interface WalletSecretState {
     version: typeof SECRET_VERSION;

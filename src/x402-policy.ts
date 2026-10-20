@@ -1,5 +1,4 @@
-import { x402Network } from "./x402-network.js";
-import type { EvmChainId } from "./evm-asset.js";
+import { releasedX402Pair, type X402Asset } from "./x402-network.js";
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -35,6 +34,8 @@ export interface SelectedPrepareOffer {
 }
 
 export interface PrepareEvidenceContext {
+  /** The selected network and token; the evidence must be read at its proof tag and, off the released pairs, carry token facts. */
+  readonly asset: X402Asset;
   readonly rpcOriginHash: string;
   readonly invocationStartedAtMs: number;
   readonly invocationCompletedAtMs: number;
@@ -50,14 +51,14 @@ export function positiveCap(value: unknown): string {
   return parseAtomic(value, { positive: true }).toString();
 }
 
-export async function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest?: X402HttpRequestV1, chainId: EvmChainId = 8453): Promise<FreshChallenge> {
+export async function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest: X402HttpRequestV1 | undefined, asset: X402Asset): Promise<FreshChallenge> {
   let captured: Awaited<ReturnType<HttpPort["get"]>> | undefined;
   const inspection = await inspectX402({
     async get(request) {
       captured = await http.get(request);
       return captured;
     },
-  }, canonicalUrl, httpRequest, chainId);
+  }, canonicalUrl, httpRequest, asset);
   if (captured === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Seller challenge observation is missing.");
   const values = captured.rawHeaderPairs.filter(([name]) => name.toLowerCase() === "payment-required").map(([, value]) => value);
   if (values.length !== 1 || values[0] === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Seller challenge requires one PAYMENT-REQUIRED header.");
@@ -85,19 +86,26 @@ export function selectPrepareOffer(
   const balance = parseAtomic(evidence.usdcAtomic);
   let hasMatchingMethod = false;
   let hasSufficientBalance = false;
+  let decimalsMismatch = false;
   for (const candidate of underCap) {
-    if (candidate.assetTransferMethod !== transferMethod) continue;
+    if (candidate.assetTransferMethod === "permit2" || candidate.assetTransferMethod !== transferMethod) continue;
     hasMatchingMethod = true;
     const amount = parseAtomic(candidate.amountAtomic, { positive: true });
     if (amount > balance) continue;
     hasSufficientBalance = true;
     // The on-chain DOMAIN_SEPARATOR equals keccak(domain(name, version, chainId, token)), so equality binds both strings.
     if (candidate.assetTransferMethod === "eip3009" &&
-      tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion, x402Network(candidate.network).chainId) !== evidence.domainSeparator
+      tokenDomainSeparator(candidate.tokenName, candidate.tokenVersion, context.asset) !== evidence.domainSeparator
     ) continue;
     const index = Number(candidate.index);
     const requirements = challenge.paymentRequired.accepts[index];
     if (requirements === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Selected seller index is missing from the fresh challenge.");
+    // A declared decimals hint must equal the token's own decimals(); the seller's word alone never sets them.
+    const declaredDecimals = (requirements.extra as Record<string, unknown> | undefined)?.decimals;
+    if (evidence.tokenFacts !== undefined && declaredDecimals !== undefined && declaredDecimals !== evidence.tokenFacts.decimals) {
+      decimalsMismatch = true;
+      continue;
+    }
     const declaredCanonicalJson = canonicalJson(requirements);
     return {
       requirements,
@@ -128,13 +136,20 @@ export function selectPrepareOffer(
   }
   if (!hasMatchingMethod) throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer matches the payer transfer method.");
   if (!hasSufficientBalance) throw new ApnError("APN_INSUFFICIENT_USDC", "USDC balance is insufficient for every offer within the explicit cap.");
-  throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer matches the pinned token domain.");
+  if (decimalsMismatch) {
+    throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's declared decimals differ from the token's on-chain decimals().",
+      { reason: "x402_token_decimals_mismatch", chain: context.asset.network, asset: context.asset.token });
+  }
+  throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer's token name and version recompute the token's on-chain DOMAIN_SEPARATOR.",
+    { reason: "x402_token_domain_mismatch", chain: context.asset.network, asset: context.asset.token });
 }
 
-export function tokenDomainSeparator(name: string, version: string, chainId: EvmChainId = 8453): `0x${string}` {
+/** EIP-712 domain separator of an EIP-3009 token on its chain; the caller always names both. */
+export function tokenDomainSeparator(name: string, version: string, asset: { readonly chainId: number; readonly token: string }): `0x${string}` {
+  const selected = asset;
   return keccak256(encodeAbiParameters(
     [{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }, { type: "address" }],
-    [DOMAIN_TYPE_HASH, keccak256(stringToHex(name)), keccak256(stringToHex(version)), BigInt(chainId), x402Network(chainId).token],
+    [DOMAIN_TYPE_HASH, keccak256(stringToHex(name)), keccak256(stringToHex(version)), BigInt(selected.chainId), selected.token as Address],
   ));
 }
 
@@ -163,22 +178,31 @@ export function materializePaymentIdentifier(
   return { ...declaration, info: { ...declaration.info, id: paymentIdentifier.value } };
 }
 
+/** The observation fields every method's prepare evidence shares; only EIP-3009 carries a token domain separator. */
+export type PrepareObservation = Omit<X402PrepareEvidence, "domainSeparator"> & { readonly domainSeparator?: `0x${string}` };
+
 export function validatePrepareEvidence(
-  evidence: X402PrepareEvidence,
+  evidence: PrepareObservation,
   wallet: Address,
   context: PrepareEvidenceContext,
-  transferMethod: "eip3009" | "erc7710",
+  transferMethod: "eip3009" | "erc7710" | "permit2",
 ): void {
   const observedAtMs = Date.parse(evidence.observedAt);
   if (
-    evidence.address.toLowerCase() !== wallet.toLowerCase() || evidence.queriedTag !== "safe" ||
+    evidence.address.toLowerCase() !== wallet.toLowerCase() || evidence.queriedTag !== context.asset.proofTag ||
     !HASH.test(evidence.rpcOriginHash) || evidence.rpcOriginHash !== context.rpcOriginHash ||
     !UTC.test(evidence.observedAt) || !Number.isFinite(observedAtMs) ||
     observedAtMs < context.invocationStartedAtMs || observedAtMs > context.invocationCompletedAtMs ||
     !BYTES32.test(evidence.block.hash) || /^0x0{64}$/u.test(evidence.block.hash)
   ) throw new ApnError("APN_RPC_PROTOCOL", "x402 prepare RPC evidence is invalid or mismatched.");
-  if (transferMethod === "eip3009" && !BYTES32.test(evidence.domainSeparator)) {
+  if (transferMethod === "eip3009" && (evidence.domainSeparator === undefined || !BYTES32.test(evidence.domainSeparator))) {
     throw new ApnError("APN_RPC_PROTOCOL", "x402 EIP-3009 token-domain evidence is invalid.");
+  }
+  // Off the released USDC pairs the token's own decimals() and an unused fresh nonce must have been read in the same batch.
+  const facts = evidence.tokenFacts;
+  if (!releasedX402Pair(context.asset.chainId, context.asset.token) && (facts === undefined || facts.nonceUnused !== true ||
+    !Number.isSafeInteger(facts.decimals) || facts.decimals < 0 || facts.decimals > 255)) {
+    throw new ApnError("APN_RPC_PROTOCOL", "x402 token identity evidence is missing.");
   }
   let blockNumber: bigint;
   let blockTimestamp: bigint;

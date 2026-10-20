@@ -20,7 +20,7 @@ export interface Permit2OfferInspection {
     readonly offerHash: string;
 }
 /**
- * Inspect the first listed exact Permit2 offer without reading state or preparing authorization.
+ * Inspect the first exact Permit2 offer without reading state or preparing authorization.
  * Unsupported offers and invalid payer input retain the canonical ApnError emitted by the selector.
  */
 export declare function inspectPermit2Offer(input: Permit2OfferInspectionInput): Permit2OfferInspection;

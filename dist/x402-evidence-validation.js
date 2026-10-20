@@ -1,4 +1,4 @@
-import { validX402Tuple } from "./x402-network.js";
+import { validX402Tuple, x402ExpiredAt } from "./x402-network.js";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { x402OperationBindingHash } from "./x402-state-model.js";
@@ -142,6 +142,12 @@ export function validateTransferMethodEvidence(method, transactionHint, authoriz
     if (settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" ||
         unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1") {
         stateCorrupt("x402 EIP-3009 operation contains ERC-7710 settlement evidence.");
+    }
+    // Permit2 operations are proven only by Permit2's nonce bit (the v2 state evidence), never by an EIP-3009 log scan.
+    if (method === "permit2" && (authorizationUsedScan !== undefined || transactionHint?.source === "authorization_used_log" ||
+        settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.settlement-evidence.v2" ||
+        unusedExpiryEvidence !== undefined && unusedExpiryEvidence.schemaVersion !== "apn.x402.unused-expiry-evidence.v2")) {
+        stateCorrupt("x402 Permit2 operation contains EIP-3009-only evidence.");
     }
 }
 export function validateAuthorizationUsedScan(value, operation) {
@@ -374,7 +380,8 @@ function validateErc7710SettlementEvidence(value, operation) {
     }
     return evidence;
 }
-export function validateUnusedExpiryEvidence(value, operation) {
+/** `transferMethod` names the method when no operation is at hand (a receipt); an operation's own resolved method wins. */
+export function validateUnusedExpiryEvidence(value, operation, transferMethod) {
     if (record(value).schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1") {
         return validateErc7710UnusedExpiryEvidence(value, operation);
     }
@@ -389,8 +396,10 @@ export function validateUnusedExpiryEvidence(value, operation) {
     bytes32(finalizedHead.hash);
     uint(finalizedHead.timestamp);
     timestamp(finalizedHead.observedAt);
-    if (BigInt(finalizedHead.timestamp) < BigInt(evidence.validBefore))
-        stateCorrupt("x402 unused-expiry head precedes authorization expiry.");
+    const method = operation === undefined ? transferMethod : record(record(record(operation.selectedOffer).resolved)).assetTransferMethod;
+    if (!x402ExpiredAt(method, BigInt(finalizedHead.timestamp), BigInt(evidence.validBefore))) {
+        stateCorrupt("x402 unused-expiry head is not past the authorization's last executable second.");
+    }
     const authorizationState = exactRecord(evidence.authorizationState, ["value", "blockNumber", "blockHash", "blockTag", "observedAt"]);
     if (authorizationState.value !== false || authorizationState.blockTag !== "finalized")
         stateCorrupt("x402 unused-expiry authorization state is invalid.");

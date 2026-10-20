@@ -26,13 +26,14 @@ async function ready(t: TestContext) {
 }
 async function held(f: Awaited<ReturnType<typeof ready>>) { assert.equal((await f.journal.findOperation(f.id))!.terminal, false); assert.equal((await f.lease()).state, "unknown_finality"); }
 
-test("strict response decoder accepts only explicit Avalanche network while default Base and generic Permit2 rejection remain unchanged", async t => {
+test("strict response decoder accepts only explicit Avalanche network while default Base stays unchanged; the generic decoder takes the Permit2 wire", async t => {
   const f = await ready(t), p = reconstructPermit2ProductionMaterial(f.r.material), expected = { payer: p.payer.toLowerCase(), amountAtomic: p.amountAtomic };
   assert.equal(decodeAndNormalizePaymentResponseHeader(f.response(), { ...expected, network: "eip155:43114" }).classification, "success");
   for (const network of ["eip155:8453", "eip155:1", "eip155:42161"]) assert.throws(() => decodeAndNormalizePaymentResponseHeader(f.response({ network }), { ...expected, network: "eip155:43114" }));
   assert.throws(() => decodeAndNormalizePaymentResponseHeader(f.response(), expected));
   assert.equal(decodeAndNormalizePaymentResponseHeader(f.response({ network: "eip155:8453" }), expected).classification, "success");
-  assert.throws(() => decodePaymentSignatureHeader(f.r.exposureJournal!.signed!.paymentSignatureHeader));
+  // The generic decoder now takes the Permit2 wire too, through the same dedicated Permit2 shape check.
+  assert.ok("permit2Authorization" in (decodePaymentSignatureHeader(f.r.exposureJournal!.signed!.paymentSignatureHeader).payload as object));
 });
 test("real owned first sidecar writes only bounded digests/classification/locator, is immutable, and never marks paid", async t => {
   const f = await ready(t), observation = f.observation([["payment-response", f.response()]]);

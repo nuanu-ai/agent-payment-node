@@ -46,6 +46,8 @@ const SELECTED_PATHS = [
     "wallet policy show",
     "wallet policy set",
     "x402 permit2 status",
+    "x402 solana pay", "x402 solana observe", "x402 solana status",
+    "x402 permit2 allowance set", "x402 permit2 allowance revoke", "x402 permit2 allowance observe", "x402 permit2 allowance status",
     "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant status", "x402 merchant retire-unsent",
     "x402 inspect",
     "x402 fetch prepare",

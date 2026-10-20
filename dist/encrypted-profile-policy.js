@@ -2,7 +2,7 @@ import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import { canonicalPolicyInput, policyIncrease, sealProfilePolicy, validateProfilePolicy, } from "./profile-policy.js";
-import { policyStorageIdentity, validPolicyNetwork } from "./x402-network.js";
+import { policyStorageIdentity, solanaAccount, validPolicyNetwork, validSolanaPolicyNetwork } from "./x402-network.js";
 const ENVELOPE_VERSION = "apn.profile-policy-envelope.v1";
 const KDF_NAME = "HKDF-SHA-256";
 const CIPHER_NAME = "AES-256-GCM";
@@ -66,6 +66,7 @@ export class EncryptedProfilePolicy {
                 profile: binding.profile,
                 walletAddress: binding.walletAddress,
                 ...(binding.x402Network === undefined ? {} : { x402Network: binding.x402Network }),
+                ...(binding.x402Solana === undefined ? {} : { x402Solana: binding.x402Solana }),
                 fingerprint,
                 change: current === null ? "create" : "increase",
                 ...effective,
@@ -95,7 +96,8 @@ export class EncryptedProfilePolicy {
         if (canonicalJson(envelope.binding) === canonicalJson(binding))
             return await this.load(binding);
         if (envelope.binding.profile !== binding.profile || envelope.binding.profileHash !== binding.profileHash ||
-            canonicalJson(envelope.binding.x402Network ?? null) !== canonicalJson(binding.x402Network ?? null))
+            canonicalJson(envelope.binding.x402Network ?? null) !== canonicalJson(binding.x402Network ?? null) ||
+            canonicalJson(envelope.binding.x402Solana ?? null) !== canonicalJson(binding.x402Solana ?? null))
             corrupt("Profile policy envelope profile binding is invalid.");
         const wrapping = await this.wrappingSecret.load();
         if (wrapping === null)
@@ -122,13 +124,17 @@ function parseEnvelope(value, binding) {
     }
     if (value.schemaVersion !== ENVELOPE_VERSION)
         corrupt("Profile policy envelope version is unsupported.");
-    if (!isPlainRecord(value.binding) || !exactKeys(value.binding, ["profile", "profileHash", "walletAddress", "walletBindingHash", ...(value.binding.x402Network === undefined ? [] : ["x402Network"])]) || !validPolicyNetwork(value.binding.x402Network)) {
+    if (!isPlainRecord(value.binding) || !exactKeys(value.binding, ["profile", "profileHash", "walletAddress", "walletBindingHash",
+        ...(value.binding.x402Network === undefined ? [] : ["x402Network"]), ...(value.binding.x402Solana === undefined ? [] : ["x402Solana"])]) ||
+        !validPolicyNetwork(value.binding.x402Network) || (value.binding.x402Solana !== undefined &&
+        (value.binding.x402Network !== undefined || !validSolanaPolicyNetwork(value.binding.x402Solana)))) {
         corrupt("Profile policy binding schema is invalid.");
     }
     const storedBinding = value.binding;
     if (typeof storedBinding.profile !== "string" || typeof storedBinding.profileHash !== "string" ||
         !/^[a-f0-9]{64}$/u.test(storedBinding.profileHash) || typeof storedBinding.walletAddress !== "string" ||
-        !/^0x[0-9a-fA-F]{40}$/u.test(storedBinding.walletAddress) || typeof storedBinding.walletBindingHash !== "string" ||
+        !(storedBinding.x402Solana === undefined ? /^0x[0-9a-fA-F]{40}$/u.test(storedBinding.walletAddress) : solanaAccount(storedBinding.walletAddress)) ||
+        typeof storedBinding.walletBindingHash !== "string" ||
         !/^[a-f0-9]{64}$/u.test(storedBinding.walletBindingHash))
         corrupt("Profile policy envelope binding is invalid.");
     if (binding !== undefined && canonicalJson(value.binding) !== canonicalJson(binding))

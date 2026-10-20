@@ -6,6 +6,7 @@ import { loadAllowlistInventory } from "../../src/allowlist-inventory.js";
 import { ApnError } from "../../src/errors.js";
 import { PERMIT2_WITNESS_TYPES, planPermit2Authorization } from "../../src/x402-permit2/authorization.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
+import { onlyPermit2Asset } from "../../src/x402-permit2/prepare.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS } from "../../src/x402-permit2/registry.js";
 
 const accepts = (JSON.parse(readFileSync("tests/fixtures/x402-permit2/payment-required-accepts.json", "utf8")) as { accepts: Record<string, unknown>[] }).accepts;
@@ -14,7 +15,7 @@ const payer = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4" as `0x${string}`;
 
 test("registry and typed-data bind chain, token, proxy, payee, amount and deadline", () => {
   assert.equal(loadAllowlistInventory().assets.some((row) => row.identifier === asset.token), true);
-  const selection = selectPermit2Offer(accepts, payer);
+  const selection = selectPermit2Offer(accepts, payer, onlyPermit2Asset(asset));
   const plan = planPermit2Authorization(selection, { payer, nowSeconds: 1_789_720_000, nonce: 7n, permit2AllowanceAtomic: "10000", eip2612Nonce: null, sellerSponsorsEip2612: false });
   assert.equal(plan.authorization.permitted.token, asset.token);
   assert.equal(plan.authorization.permitted.amount, selection.amountAtomic);
@@ -26,13 +27,13 @@ test("registry and typed-data bind chain, token, proxy, payee, amount and deadli
 });
 
 test("unsupported offers and missing allowance refuse with stable reasons", () => {
-  assert.throws(() => selectPermit2Offer([], payer), (e: unknown) => e instanceof ApnError && e.details?.reason === "x402_permit2_no_listed_offer");
-  const selection = selectPermit2Offer(accepts, payer);
+  assert.throws(() => selectPermit2Offer([], payer, onlyPermit2Asset(asset)), (e: unknown) => e instanceof ApnError && e.details?.reason === "x402_permit2_no_listed_offer");
+  const selection = selectPermit2Offer(accepts, payer, onlyPermit2Asset(asset));
   assert.throws(() => planPermit2Authorization(selection, { payer, nowSeconds: 1, nonce: 1n, permit2AllowanceAtomic: "0", eip2612Nonce: null, sellerSponsorsEip2612: false }), (e: unknown) => e instanceof ApnError && e.details?.reason === "x402_permit2_allowance_required");
 });
 
 test("signing plan rejects forged selections and unsafe deadlines", () => {
-  const selection = selectPermit2Offer(accepts, payer);
+  const selection = selectPermit2Offer(accepts, payer, onlyPermit2Asset(asset));
   const forged = { ...selection, amountAtomic: "2", requirement: { ...selection.requirement, amount: "2" } };
   assert.throws(() => planPermit2Authorization(forged, { payer, nowSeconds: 1, nonce: 1n, permit2AllowanceAtomic: "2", eip2612Nonce: null, sellerSponsorsEip2612: false }),
     (e: unknown) => e instanceof ApnError && e.code === "APN_STATE_CORRUPT");

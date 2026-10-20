@@ -1,7 +1,7 @@
 import { encodeAbiParameters } from "viem";
 import { HttpsBaseRpc, parseRpcLogEnvelope, parseRpcResultEnvelope } from "../../src/rpc.js";
 import { tokenDomainSeparator } from "../../src/x402-policy.js";
-import { x402Network } from "../../src/x402-network.js";
+import { x402Network, x402Asset } from "../../src/x402-network.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeFunctionData, toHex } from "viem";
@@ -245,7 +245,7 @@ for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain
       if (input.data.startsWith("0x70a08231")) return toHex(50000000n, { size: 32 });
       if (input.data === "0x06fdde03") return encodeAbiParameters([{ type: "string" }], ["USD Coin"]);
       if (input.data === "0x54fd4d50") return encodeAbiParameters([{ type: "string" }], ["2"]);
-      if (input.data === "0x3644e515") return tokenDomainSeparator("USD Coin", "2", chainId);
+      if (input.data === "0x3644e515") return tokenDomainSeparator("USD Coin", "2", x402Asset(chainId));
       if (input.data.startsWith("0xe94a0102")) return toHex(0n, { size: 32 });
     }
     throw new Error(`unexpected synthetic read ${method}`);
@@ -260,7 +260,7 @@ for (const chainId of [1, 42161] as const) test(`production x402 RPC binds chain
   assert.equal((await ethereum.assertX402Chain(chainId)).chainId, chainId);
   await assert.rejects(ethereum.assertBaseChain(), { code: "APN_CHAIN_MISMATCH" });
   await assert.rejects(ethereum.assertX402Chain(8453), { code: "APN_CHAIN_MISMATCH" });
-  assert.equal((await ethereum.getX402PrepareEvidence(WALLET)).domainSeparator, tokenDomainSeparator("USD Coin", "2", chainId));
+  assert.equal((await ethereum.getX402PrepareEvidence(WALLET)).domainSeparator, tokenDomainSeparator("USD Coin", "2", x402Asset(chainId)));
   await ethereum.getX402AuthorizationState(WALLET, HASH, { tag: "safe" });
   await ethereum.getX402AuthorizationUsedLogs({ authorizer: WALLET, nonce: HASH, fromBlock: "12345", toBlock: "12345" });
   const filter = calls.find(({ method }) => method === "eth_getLogs")!.params[0] as { address: string };

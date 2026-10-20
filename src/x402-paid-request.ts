@@ -24,8 +24,8 @@ import {
 } from "./x402-native.js";
 import { X402Lifecycle } from "./x402-lifecycle.js";
 import { readX402UnusedExpiryEvidence } from "./x402-expiry-proof.js";
-import { x402Network } from "./x402-network.js";
-import { isRecoverableX402RpcObservationFailure, x402ReadPort } from "./x402-service-rpc.js";
+import { x402AssetOf } from "./x402-network.js";
+import { isRecoverableX402RpcObservationFailure, requireX402Rpc, x402ReadPort } from "./x402-service-rpc.js";
 import { ProviderX402AuthorizationService } from "./provider-x402-authorization.js";
 import type { X402PaymentMaterialPort, X402SealedPaymentMaterial } from "./provider-ports.js";
 
@@ -82,11 +82,11 @@ export class X402PaidRequest extends X402Lifecycle {
    */
   protected async closeExpiredUnexposed(operation: X402OperationRecord): Promise<X402OperationRecord | null> {
     if (
-      operation.attempts.length !== 0 || operation.selectedOffer.resolved.assetTransferMethod !== "eip3009" ||
+      operation.attempts.length !== 0 || operation.selectedOffer.resolved.assetTransferMethod === "erc7710" ||
       !["authorization_material_pending", "authorized_not_sent"].includes(operation.state) || !this.authorizationExpired(operation)
     ) return null;
     if (operation.unusedExpiryEvidence !== undefined) return await this.finishReconciledEvidence(operation);
-    const rpc = x402ReadPort(this.context.requireRpc(), x402Network(operation.network).chainId);
+    const rpc = x402ReadPort(requireX402Rpc(this.context, x402AssetOf(operation)), x402AssetOf(operation));
     let evidence;
     try { evidence = await readX402UnusedExpiryEvidence(rpc, operation); }
     catch (error) {

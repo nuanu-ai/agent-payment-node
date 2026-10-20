@@ -16,6 +16,8 @@ import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { HttpsBaseRpc } from "./rpc.js";
 import type { TransferApprovalPort } from "./tty-approval.js";
 import type { TtyTransferApprovalOptions } from "./tty-approval.js";
+import type { SolanaRpcPort } from "./solana/rpc.js";
+import type { Permit2AllowanceRpc } from "./x402-permit2/allowance/chain.js";
 import type { ForegroundAuthenticationPort, ProviderProfileRepositoryPort, ProviderRegistryPort, X402PaymentMaterialPort } from "./provider-ports.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
@@ -111,6 +113,11 @@ export interface RuntimeFactoryOptions {
   readonly solanaRpcFetch?: typeof fetch;
   readonly solanaRpcNow?: () => number;
   readonly solanaRpcWait?: (milliseconds: number) => Promise<void>;
+  /** Offline Solana x402 chain port; used only when APN_SOLANA_RPC_URL (or solanaRpcUrl) is set, as in production. */
+  readonly x402SolanaRpc?: SolanaRpcPort;
+  /** Offline Permit2 allowance chain port and TTY; production uses the explicit --rpc-url and the owner's terminal. */
+  readonly permit2AllowanceRpc?: Permit2AllowanceRpc;
+  readonly permit2AllowanceTtyOptions?: TtyTransferApprovalOptions;
   /** Offline acceptance only; production reads separate recovery consent from the owner TTY. */
   readonly orcaStableRecoveryConsent?: OrcaStableConsentPort;
   readonly tronRpcUrl?: string;

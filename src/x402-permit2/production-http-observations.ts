@@ -61,7 +61,7 @@ export function permit2HttpLocatorHint(record: Permit2ProductionRecord, observat
     if (header !== undefined) {
       headerHash = domainHash("apn.x402.payment-response-header.v1", Buffer.from(header, "ascii"));
       const plan = reconstructPermit2ProductionMaterial(record.material);
-      const decoded = decodeAndNormalizePaymentResponseHeader(header, { network: "eip155:43114", payer: plan.payer.toLowerCase(), amountAtomic: plan.amountAtomic });
+      const decoded = decodeAndNormalizePaymentResponseHeader(header, { network: plan.chain, payer: plan.payer.toLowerCase(), amountAtomic: plan.amountAtomic });
       if (decoded.paymentResponseHeaderHash !== headerHash) invalid();
       locator = normalizePermit2Locator(decoded.transactionHash);
       classification = decoded.classification === "success" ? "success_hint" : decoded.classification === "settlement_pending" ? "pending_hint" : "failure_hint";

@@ -1,6 +1,6 @@
-import type { EvmChainId } from "./evm-asset.js";
 import type { Address, Hex } from "./model.js";
 import type { EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
+import type { X402Permit2PrepareEvidence } from "./x402-permit2-rpc.js";
 import type { EvmReceiptFeeFields } from "./evm-direct-actual-fee.js";
 export type { HttpGetRequest, HttpObservation, HttpPort } from "./x402-model.js";
 export interface ClockPort {
@@ -16,7 +16,7 @@ export interface WaitPort {
 export interface NativeRequest {
     readonly version: "apn.native.v1";
     readonly requestId: string;
-    readonly operation: "wallet.describe" | "wallet.ensure" | "wallet.import" | "directTransfer.approveAndSign" | "effectMaterial.get" | "directTransfer.signedMaterial.get" | "x402Exact.approveAndAuthorize" | "x402Exact.authorizationMaterial.get";
+    readonly operation: "wallet.describe" | "wallet.ensure" | "wallet.import" | "directTransfer.approveAndSign" | "effectMaterial.get" | "directTransfer.signedMaterial.get" | "x402Exact.approveAndAuthorize" | "x402Exact.authorizationMaterial.get" | "x402Permit2.approveAndAuthorize" | "x402Permit2.authorizationMaterial.get";
     readonly payload: Readonly<Record<string, unknown>>;
 }
 export interface NativePort {
@@ -40,12 +40,22 @@ export interface FeeEstimate {
 }
 export interface X402PrepareEvidence {
     readonly address: Address;
+    /** The selected token's balance (the name predates tokens other than USDC). */
     readonly usdcAtomic: string;
     /** keccak(domain(name, version, chainId, token)): binds the seller's name and version without reading them. */
     readonly domainSeparator: Hex;
     readonly rpcOriginHash: string;
     readonly observedAt: string;
-    readonly queriedTag: "safe";
+    /** The operation's proof tag: `safe` on the released chains, `finalized` elsewhere. */
+    readonly queriedTag: "safe" | "finalized";
+    /**
+     * Read in the same pinned batch for every token other than the released USDC pairs: `decimals()` and
+     * `authorizationState(payer, nonce)` of the fresh nonce, which an EIP-3009 token answers with a canonical false.
+     */
+    readonly tokenFacts?: {
+        readonly decimals: number;
+        readonly nonceUnused: true;
+    };
     readonly block: {
         readonly number: string;
         readonly hash: Hex;
@@ -136,8 +146,8 @@ export type X402TransferLogs = {
 };
 /** Read-only x402 RPC surface. It intentionally has no transaction submission method. */
 export interface X402RpcPort {
-    assertX402Chain?(chainId: EvmChainId): Promise<{
-        readonly chainId: EvmChainId;
+    assertX402Chain?(chainId: number): Promise<{
+        readonly chainId: number;
         readonly rpcOrigin: string;
     }>;
     withTotalTimeout?(milliseconds: number): X402RpcPort;
@@ -149,6 +159,8 @@ export interface X402RpcPort {
     getX402Block(number: string): Promise<X402RpcBlock>;
     getX402Receipt(transactionHash: Hex): Promise<X402RpcReceipt | null>;
     getX402AuthorizationState(authorizer: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState>;
+    /** Permit2's unordered nonce bit of `owner` (the proof of a Permit2-method operation); optional for EIP-3009-only adapters. */
+    getX402Permit2NonceState?(owner: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState>;
     getX402AuthorizationUsedLogs(input: {
         readonly authorizer: Address;
         readonly nonce: Hex;
@@ -167,15 +179,18 @@ export interface RpcPort {
     /** Arm the command-scoped public BNB transport cap before any direct BNB network read. */
     /** Arms this command's physical POST cap; a direct EVM step passes the cap derived from its read plan. */
     armEvmDirectRpcGuard?(maxPhysicalRequests?: number): void;
-    /** Command-scoped, bounded public read for native Sei balance. */
-    forX402Network?(chainId: EvmChainId): RpcPort & X402RpcPort;
+    /** The same endpoint bound to one x402 network and token; its eth_chainId must later prove the chain. */
+    forX402Network?(chainId: number, token: Address): RpcPort & X402RpcPort;
     readonly evm?: EvmRpcPort;
     assertBaseChain(): Promise<{
         readonly chainId: 8453;
         readonly rpcOrigin: string;
     }>;
     getBalances(address: Address): Promise<BalanceSnapshot>;
-    getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence>;
+    /** `nonce` is the fresh authorization nonce; it is probed only for tokens outside the released USDC pairs. */
+    getX402PrepareEvidence(address: Address, nonce?: Hex): Promise<X402PrepareEvidence>;
+    /** Prepare evidence of a Permit2 offer (src/x402-permit2-rpc.ts); absent on adapters without Permit2 support. */
+    getX402Permit2PrepareEvidence?(address: Address, nonce: Hex, permitNeeded: (allowanceAtomic: string) => boolean): Promise<X402Permit2PrepareEvidence>;
     getPendingNonce(address: Address): Promise<string>;
     estimateDirectTransfer(input: {
         readonly from: Address;

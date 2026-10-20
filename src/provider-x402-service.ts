@@ -1,3 +1,5 @@
+import { x402Asset } from "./x402-network.js";
+import { BASE_USDC } from "./constants.js";
 import { canonicalJson } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
@@ -140,7 +142,7 @@ export class ProviderX402Service {
       assertProviderHttpRequest(requireProviderX402Adapter(this.context, bound).x402, httpRequest);
       const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(bound)));
       const capAtomic = effectiveX402Cap(policy, callerCap);
-      const challenge = await freshChallenge(this.context.requireHttp(), canonicalUrl, httpRequest);
+      const challenge = await freshChallenge(this.context.requireHttp(), canonicalUrl, httpRequest, x402Asset(8453, BASE_USDC));
       const selected = soleProviderOffer(challenge);
       // Payee pin at prepare; later steps refuse any policy change (the frozen policy binds its integrity hash).
       assertX402PayeeAdmitted(policy, selected.payee);
@@ -221,7 +223,7 @@ export class ProviderX402Service {
         assertFrozenProviderX402Policy(operation, policy, balance);
         const rpc = providerX402ReadPort(this.context.requireRpc());
         const lower = await captureProviderEvidenceLowerBlock(rpc);
-        const challenge = await freshChallenge(this.context.requireHttp(), operation.request.canonicalUrl, operation.request.httpRequest);
+        const challenge = await freshChallenge(this.context.requireHttp(), operation.request.canonicalUrl, operation.request.httpRequest, x402Asset(8453, BASE_USDC));
         const selected = soleProviderOffer(challenge);
         if (
           selected.digest !== operation.requirement.digest || selected.payee !== operation.requirement.payee ||
@@ -349,7 +351,7 @@ export class ProviderX402Service {
     if (remaining !== undefined && remaining < 1) return operation;
     const rpc = remaining === undefined
       ? providerX402ReadPort(this.context.requireRpc())
-      : boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining));
+      : boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Asset(8453));
     const observation = await observeProviderSettlement(operation, rpc, this.context.clock.now().getTime());
     if (observation.kind === "pending") return operation;
     if (observation.kind === "ambiguous") {
