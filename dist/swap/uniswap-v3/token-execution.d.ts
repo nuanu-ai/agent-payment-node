@@ -15,6 +15,17 @@ export interface TokenEffectObservation {
     readonly inputDebitAtomic?: string;
     readonly outputCreditAtomic?: string;
 }
+/** The owner's own caps for one cleanup (re-quote) and the fresh fee quote they are checked against. */
+export interface TokenCleanupFees {
+    readonly maxFeePerGas: string;
+    readonly maxPriorityFeePerGas: string;
+}
+export interface TokenFeeQuote {
+    readonly blockNumber: string;
+    readonly blockHash: string;
+    readonly baseFeePerGasWei: string;
+    readonly priorityFeePerGasWei: string;
+}
 export interface UniswapTokenExecutionPorts {
     now(): Date;
     foregroundApprove(operation: UniswapTokenOperation): Promise<void>;
@@ -22,7 +33,8 @@ export interface UniswapTokenExecutionPorts {
     withAccountLock<T>(operation: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
     allocateNonce(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
     currentAllowance(operation: UniswapTokenOperation): Promise<string>;
-    releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+    /** True when custody holds no signed bytes for the effect and its reservation is free; false when a signed effect committed it. */
+    releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean>;
     commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     guard(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     reserveSendCapacity?(): void;
@@ -37,6 +49,8 @@ export interface UniswapTokenExecutionPorts {
     recoverSealed?(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null>;
     send(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<"accepted" | "ambiguous">;
     observe(operation: UniswapTokenOperation, kind: TokenEffectKind, transactionHash: string): Promise<TokenEffectObservation | null>;
+    /** Current Ethereum base and priority fee (the reads the signing guard prices the same caps with). */
+    cleanupFeeQuote?(operation: UniswapTokenOperation): Promise<TokenFeeQuote>;
 }
 export interface UniswapTokenCommandRuntime {
     inventory(): unknown;
@@ -49,7 +63,7 @@ export interface UniswapTokenCommandRuntime {
     approve(id: string): Promise<UniswapTokenOperation>;
     execute(id: string): Promise<UniswapTokenOperation>;
     status(id: string): Promise<UniswapTokenOperation>;
-    cleanup(id: string): Promise<UniswapTokenOperation>;
+    cleanup(id: string, fees?: TokenCleanupFees): Promise<UniswapTokenOperation>;
 }
 export declare class UniswapTokenExecution {
     private readonly journal;
@@ -61,7 +75,7 @@ export declare class UniswapTokenExecution {
     execute(id: string): Promise<UniswapTokenOperation>;
     private advanceApproval;
     status(id: string): Promise<UniswapTokenOperation>;
-    cleanup(id: string): Promise<UniswapTokenOperation>;
+    cleanup(id: string, fees?: TokenCleanupFees): Promise<UniswapTokenOperation>;
     private start;
     private continueStart;
     private finishStart;
@@ -85,6 +99,9 @@ export declare class UniswapTokenExecution {
     private retireExpiredPrepared;
     private syncUsage;
     private assertNoEffect;
+    private feeQuote;
     private required;
     private persist;
 }
+/** The record for one consented cleanup re-quote; refused when the caps miss the quote or a cleanup marker holds the slot. */
+export declare function requotedCleanup(op: UniswapTokenOperation, fees: TokenCleanupFees, quote: TokenFeeQuote, now: Date): UniswapTokenOperation;

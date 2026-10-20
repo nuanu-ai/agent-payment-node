@@ -35,7 +35,8 @@ export function validateUniswapTokenOperation(value) {
         "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"];
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
-            ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : [])] : common))
+            ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : []),
+            ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -84,8 +85,11 @@ export function validateUniswapTokenOperation(value) {
         corrupt("Uniswap token zero allowance evidence is invalid.");
     if (op.usageState === "released_unsubmitted" && !(op.retiredEffects ?? []).some((row) => row.kind === "swap" && row.reason === "never_landed"))
         corrupt("Uniswap token usage release has no never-landed swap.");
-    if (failure !== null && op.phase !== "cleanup_required" && op.phase !== "cleaned" && op.phase !== "abandoned_unknown")
+    // The diagnostic is the history of why cleanup became required: it stays through the owner's cleanup and its outcome.
+    if (failure !== null && !PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase))
         corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
+    if (op.cleanupFeeQuote !== undefined)
+        validateCleanupFeeQuote(op);
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
     if (op.receipt !== null)
@@ -97,6 +101,8 @@ export const UNISWAP_TOKEN_TERMINAL_PHASES = ["observed", "cleaned", "abandoned_
 export const UNISWAP_TOKEN_PHASES = ["prepared", "approved", "approval_submission_started", "approval_submitted", "approval_unknown_finality",
     "approval_observed", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started",
     "cleanup_submitted", "cleanup_unknown_finality", "cleaned", "abandoned_unknown"];
+const PRE_SIGN_DIAGNOSTIC_PHASES = ["cleanup_required", "cleanup_submission_started", "cleanup_submitted",
+    "cleanup_unknown_finality", "cleaned", "abandoned_unknown"];
 /** The round of an effect slot: how many attempts of that kind were retired before it. Round 0 keeps the original keys. */
 export function tokenEffectRound(op, kind) {
     return (op.retiredEffects ?? []).filter((row) => row.kind === kind).length;
@@ -183,6 +189,19 @@ function validateCleanupEvidence(v) {
         !["current_allowance", "legacy_usage_reconciliation"].includes(v.source) || v.observedAllowanceAtomic !== "0" ||
         !canonicalInstant(v.observedAt))
         corrupt("Uniswap token cleanup evidence is invalid.");
+}
+function validateCleanupFeeQuote(op) {
+    const q = op.cleanupFeeQuote;
+    if (!PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase) || !isPlainRecord(q) || !exactKeys(q, ["schemaVersion", "blockNumber", "blockHash", "baseFeePerGasWei",
+        "priorityFeePerGasWei", "previousCleanupGas", "previousMaximumNativeDebitWei", "quotedAt"]) || q.schemaVersion !== "apn.uniswap-token-cleanup-fee-quote.v1" ||
+        !/^0x[a-f0-9]{64}$/u.test(q.blockHash) || !canonicalInstant(q.quotedAt) || q.quotedAt > op.updatedAt)
+        corrupt("Uniswap token cleanup fee quote is invalid.");
+    uint(q.blockNumber);
+    uint(q.baseFeePerGasWei);
+    uint(q.priorityFeePerGasWei);
+    validateGas(q.previousCleanupGas);
+    if (q.previousCleanupGas.gasLimit !== op.cleanupGas.gasLimit || uint(q.previousMaximumNativeDebitWei) > uint(op.maximumNativeDebitWei))
+        corrupt("Uniswap token cleanup fee quote is invalid.");
 }
 function validateFailureDiagnostic(v) {
     if (v === null)

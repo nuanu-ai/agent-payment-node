@@ -18,6 +18,7 @@ import { BridgeHttps } from "../lifi/https.js";
 import { exactChainConsent } from "../tty-approval.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { ApnError } from "../errors.js";
+import { postEffectReadFailure } from "../post-effect-read-failure.js";
 import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, isCircleDestinationChain } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, bindCircleAttestation, decodeCircleSource, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, verifyCircleApproval, verifyCircleAttestationSigners, circleAttesterConfigurationHash } from "./protocol.js";
 import { verifyCircleDestinationAccount, verifyCircleGasEnvelope, verifyCircleMintPreflight, verifyCircleClosureFinality } from "./preflight.js";
@@ -169,6 +170,7 @@ export class CircleFundingEvmService {
         const initial = await this.required(id);
         await this.state.initialize();
         const found = { notice: null };
+        const afterEffect = { failure: null };
         const result = await this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
             evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => this.usage.withPolicyLocks([initial.profile, initial.destinationProfile], async () => {
             let op = await this.required(id);
@@ -179,14 +181,28 @@ export class CircleFundingEvmService {
                 await this.repo.saveFunding(op);
             }
             const scope = { state: this.state, fingerprint: op.fingerprint, now: this.now, grants: new Map(), active: true };
-            return fundingRuntimeScope.run(scope, async () => { try {
-                return await action(op, this.ports(op, found));
-            }
-            finally {
-                scope.active = false;
-                scope.grants.clear();
-            } });
+            const before = op;
+            return fundingRuntimeScope.run(scope, async () => {
+                try {
+                    return await action(op, this.ports(op, found));
+                }
+                catch (error) {
+                    // A command that sent an effect answers with that operation's saved state (its hashes, phase and observe step) and
+                    // names the failed later read, never a bare error that hides the effect. Nothing is resent; observe decides it.
+                    const saved = await this.repo.loadAny(id).catch(() => null);
+                    if (saved === null || saved.schemaVersion !== "apn.circle-v2-evm-operation.v2" || !sentDuring(before, saved))
+                        throw error;
+                    afterEffect.failure = postEffectReadFailure(error);
+                    return snapshotCircleFundingOperation(saved);
+                }
+                finally {
+                    scope.active = false;
+                    scope.grants.clear();
+                }
+            });
         }));
+        if (afterEffect.failure !== null)
+            return { operation: result, externalMint: null, observationFailure: afterEffect.failure };
         return settleCircleFundingExternalMint(result, found.notice, hash => this.adoptExternalMint(id, hash));
     }
     preflightDeployments(source, destination, chain) { return currentCircleDeployments(source, destination, chain); }
@@ -199,8 +215,9 @@ export class CircleFundingEvmService {
     }
     async api(path) {
         const response = await this.https.request(`https://iris-api.circle.com${path}`, "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");
+        // The issuer answering anything but 200 is the provider's state, not local configuration (no next step is guessed here).
         if (response.status !== 200)
-            throw new ApnError("APN_HTTP_CONFIG", "Circle issuer API response is unavailable.");
+            throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Circle issuer API response is unavailable.", { reason: "issuer_http_status", httpStatus: response.status, nextActions: [] });
         return JSON.parse(response.body);
     }
     async fee(funding) { const value = await this.api(`/v2/burn/USDC/fees/3/${funding.destinationDomain}`); return quoteCircleFundingFee(funding, value, this.now(), this.now()); }
@@ -391,6 +408,11 @@ export class CircleFundingEvmService {
             cleanupEnvelope: async (op) => { await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op); const nonce = circleUint(await source.call("eth_getTransactionCount", [owner, "pending"])).toString(); return source.envelope(owner, CIRCLE_SOURCE_TOKEN, encodeCircleApproval(true, op.funding), nonce); },
             usage: (op, target) => this.usage.follow(op, target), };
     }
+}
+const SENT = ["submission_started", "submitted", "unknown", "confirmed", "reverted"];
+/** An effect crossed its submission fence during this command (it may have been broadcast by it). */
+function sentDuring(before, after) {
+    return after.effects.some(e => SENT.includes(e.phase) && !SENT.includes(before.effects.find(b => b.role === e.role)?.phase ?? "prepared"));
 }
 function assertObservedEnvelope(effect, input) {
     const t = circleRecord(input), e = effect.envelope;

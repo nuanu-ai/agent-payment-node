@@ -2,6 +2,7 @@ import type { CommandOutcome, CommandRequest } from "../commands.js";
 import { ApnError } from "../errors.js";
 import type { RuntimeContext } from "../runtime.js";
 import { SwapOperationRepository } from "./repository.js";
+import type { UniswapTokenOperation } from "./uniswap-v3/token-operation.js";
 import { swapMechanismDigest } from "./pin.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "./route-admission.js";
 import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS,
@@ -16,7 +17,7 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
     if (request.command === "swap.uniswap-token.prepare") return tokenOutcome(await runtime.prepare(request));
     if (request.command === "swap.uniswap-token.approve") return tokenOutcome(await runtime.approve(request.operationId));
     if (request.command === "swap.uniswap-token.execute") return tokenOutcome(await runtime.execute(request.operationId));
-    if (request.command === "swap.uniswap-token.cleanup") return tokenOutcome(await runtime.cleanup(request.operationId));
+    if (request.command === "swap.uniswap-token.cleanup") return tokenOutcome(await runtime.cleanup(request.operationId, request.cleanupFees));
     if (request.command === "swap.uniswap-token.inventory") return data(runtime.inventory(), "exact_token_route_inventory");
     if (request.command === "swap.uniswap-token.quote") return data(await runtime.quote(request), "unsigned_exact_simulated_swap_quote");
     return tokenOutcome(await runtime.status(request.operationId));
@@ -57,7 +58,13 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
     "Uniswap signing and sending are dormant until a complete exact single-send adapter is installed.", { reason: "uniswap_execution_dormant" });
 }
 function tokenOutcome(value: Awaited<ReturnType<NonNullable<RuntimeContext["uniswapTokenRuntime"]>["status"]>>): CommandOutcome {
-  return { proofClass: value.phase, data: null, operation: value, receipt: value.receipt, nextActions: [] };
+  return { proofClass: value.phase, data: null, operation: value, receipt: value.receipt, nextActions: uniswapTokenNextActions(value) };
+}
+/** A cleanup the fee cap refused before signing: retry it as frozen, or re-quote its own caps under fresh consent. */
+export function uniswapTokenNextActions(op: Pick<UniswapTokenOperation, "operationId" | "phase" | "preSignFailure">): readonly string[] {
+  if (op.phase !== "cleanup_required" || op.preSignFailure?.reason !== "uniswap_token_fee_cap") return [];
+  const cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;
+  return [cleanup, `${cleanup} --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`];
 }
 function data(value: unknown, proofClass: string): CommandOutcome {
   return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };
