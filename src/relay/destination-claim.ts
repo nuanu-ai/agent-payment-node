@@ -41,10 +41,10 @@ export class RelayDestinationClaimRepository extends SecureStateStore {
       token: proof.token, amountAtomic: proof.creditedAtomic, blockNumber: proof.destinationBlockNumber, blockHash: proof.destinationBlockHash });
   }
 
-  /** The Base ETH payout of an Ethereum USDC operation whose deposit the saved effect journal records as final. */
+  /** The BNB or Base native payout of an Ethereum USDC operation whose deposit the saved effect journal records as final. */
   async claimEthereumSource(op: RelayUnsignedOperation, sourceHash: string, proof: RelayBnbRecipientCreditEvidence): Promise<void> {
     const quote = op.quote;
-    if (quote === undefined || op.sourceChainId !== 1 || op.destinationChainId !== 8453 || !op.statusLocator || !hash.test(sourceHash) ||
+    if (quote === undefined || op.sourceChainId !== 1 || ![56, 8453].includes(op.destinationChainId) || !op.statusLocator || !hash.test(sourceHash) ||
       !hash.test(proof.destinationTransactionHash) || proof.operationId !== op.operationId || proof.operationIntegrityHash !== op.integrityHash ||
       proof.quoteDigest !== op.quoteDigest || proof.orderId !== quote.orderId || proof.recipient !== op.recipient.toLowerCase() ||
       proof.minimumOutputWei !== op.minOutputAtomic || BigInt(proof.creditedWei) < BigInt(op.minOutputAtomic)) invalid();
