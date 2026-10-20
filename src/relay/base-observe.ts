@@ -1,16 +1,17 @@
 /** Base observation and idempotent finalized source reconciliation; no signer or sender is reachable. */
 import { ApnError } from "../errors.js";
-import { getAddress, type Hex } from "viem";
-import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
+import type { Hex } from "viem";
+import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
-import { RelayRetirementRepository, RelayUnsignedOperationRepository, type RelayUnsignedOperation } from "../relay-unsigned-operation.js";
+import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import type { StateStore } from "../state.js";
+import { RelayDestinationClaimRepository } from "./destination-claim.js";
 import { proveRelayBaseDestination, type RelayBnbProofPorts } from "./destination-proof.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { verifyDepositObservation } from "./deposit-effect.js";
 import type { RelaySourceFinalityPorts } from "./observe.js";
+import { reconcileRelayFinalizedSource } from "./source-reconcile.js";
 import { RelayKeylessStatusService } from "./status.js";
-import { ETHEREUM_USDC } from "./quote.js";
 
 export class RelayBaseObserveService {
   private readonly usedInvocations = new WeakSet<RelayBnbProofPorts>();
@@ -18,33 +19,6 @@ export class RelayBaseObserveService {
     private readonly status = new RelayKeylessStatusService(state),
     private readonly source?: RelaySourceFinalityPorts,
     private readonly usage: Pick<AssetUsageLedger, "load" | "transition"> = new AssetUsageLedger(state.root)) {}
-
-  private async reconcileFinalizedSource(op: RelayUnsignedOperation, sourceHash: string): Promise<boolean> {
-    return this.state.withLocks([`relay-base-source-reconcile:${op.operationId}`], async () => {
-      const effects = new RelayEffectJournalRepository(this.state.root);
-      let journal = await effects.load(op.profileHash, op.operationId);
-      if (journal === null || journal.effects[0].phase !== "confirmed") return false;
-      const deposit = journal.effects[1];
-      if (deposit.attempt?.attemptNumber !== 1 || deposit.attempt.transactionHash !== sourceHash ||
-        !["submitting", "confirmed"].includes(deposit.phase)) return false;
-      const identity = { account: getAddress(op.sourceAccount), chain: "eip155:1",
-        asset: { kind: "token" as const, identifier: ETHEREUM_USDC } };
-      const reservationId = assetUsageReservationId(identity, `relay-execute:${op.operationId}`);
-      const reservation = await this.usage.load(identity, reservationId);
-      if (reservation === null || !["submitted", "finalized"].includes(reservation.state) ||
-        reservation.policyDigest !== op.policyDigest || reservation.amountAtomic !== op.amountAtomic ||
-        reservation.rail !== "bridge" ||
-        (reservation.state === "finalized" && (deposit.phase !== "confirmed" ||
-          reservation.outcomeDigest !== journal.integrityHash))) return false;
-      const at = new Date(Math.max(Date.now(), Date.parse(deposit.attempt.markedAt), Date.parse(reservation.updatedAt)));
-      if (deposit.phase !== "confirmed") journal = await effects.transition(op.profileHash, op.operationId,
-        journal.integrityHash, { kind: "observe", role: "deposit", outcome: "confirmed", at: at.toISOString() });
-      if (reservation.state === "submitted") await this.usage.transition({ ...identity, reservationId,
-        policyDigest: op.policyDigest!, state: "finalized", outcomeDigest: journal.integrityHash, now: at,
-        expectedCurrentStates: ["submitted"] });
-      return true;
-    });
-  }
 
   /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
   async observe(profile: string, operationId: string) {
@@ -88,7 +62,7 @@ export class RelayBaseObserveService {
         } catch { sourceObservationReason = "source_identity_mismatch"; }
       }
     }
-    const usageBound = sourceFinalized && sourceHash ? await this.reconcileFinalizedSource(op, sourceHash) : false;
+    const usageBound = sourceFinalized && sourceHash ? await reconcileRelayFinalizedSource(this.state, this.usage, op, sourceHash) : false;
     if (op.statusLocator === undefined) return result("prepared_waiting", "status_locator_missing");
     let provider: Awaited<ReturnType<RelayKeylessStatusService["status"]>>;
     try { provider = await this.status.statusOf(op); }
@@ -103,11 +77,16 @@ export class RelayBaseObserveService {
     const proof = await proveRelayBaseDestination(op, provider.txHashes, destination);
     if (proof.status !== "recipient_credit_proven") return result("provider_candidate_unproven", proof.reason, provider.status,
       proof, sourceFinalized, sourceBound);
-    if (sourceFinalized && sourceBound && usageBound && provider.status === "success" &&
-      proof.proof.method === "relay_router_event")
-      return result("operational_acceptance", "source_finalized_provider_bound_safe_base_recipient_credit",
-        provider.status, proof, true, true, true, sourceHash);
-    return result("recipient_credit_observed", "safe_base_native_credit_without_complete_source_binding",
-      provider.status, proof, sourceFinalized, sourceBound, usageBound, sourceHash ?? null);
+    // Any qualifying Base credit (the solver's direct native transfer or one Relay router v3 event) counts, as on every native
+    // lane: the reason names the first layer still missing; paid and causal acceptance stay unproven.
+    const missing = !sourceFinalized ? "source_not_finalized" : !sourceBound ? "provider_source_binding_unproven"
+      : provider.status !== "success" ? "provider_success_unproven" : !usageBound ? "source_journal_unreconciled" : null;
+    if (missing !== null) return result("recipient_credit_observed", missing, provider.status, proof, sourceFinalized, sourceBound, usageBound,
+      sourceHash ?? null);
+    // One payout accepts one operation (create-only claim), whichever credit method proved it.
+    try { await new RelayDestinationClaimRepository(this.state.root).claimEthereumSource(op, sourceHash!, proof.proof); }
+    catch { return result("provider_candidate_unproven", "destination_payout_claim_conflict", provider.status, proof, true, true, true, sourceHash); }
+    return result("operational_acceptance", "source_finalized_provider_bound_safe_base_recipient_credit",
+      provider.status, proof, true, true, true, sourceHash);
   }
 }

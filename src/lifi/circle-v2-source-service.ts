@@ -3,6 +3,7 @@ import { encodeFunctionData, getAddress, keccak256, parseAbi, type Hex } from "v
 import { privateKeyToAccount } from "viem/accounts";
 import { getBase58Encoder } from "@solana/kit";
 import { canonicalJson, hashObject } from "../canonical.js";
+import { ApnError } from "../errors.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { MAX_DIRECT_TRANSACTION_BYTES } from "../evm-asset.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -86,10 +87,8 @@ export class CircleV2SourceService {
       request.idempotencyKey.length > 128) fail("intent");
     const profileHash = this.state.profileHash(profile);
     const operationId = hash(`circle-v2-base-source\0${profileHash}\0${request.idempotencyKey}`);
-    const rpcUrl = this.environment.APN_BASE_RPC_URL;
-    if (rpcUrl === undefined) return fail("base_rpc_missing");
     const transport = new BridgeHttps();
-    const rpc = new CircleBaseJsonRpc(rpcUrl, transport);
+    const rpc = baseRpc(this.environment.APN_BASE_RPC_URL, transport);
     const walletStore = new EncryptedWalletStore(this.state, this.wrapping);
     await this.state.initialize();
     const journal = new NonEvmSourceJournalRepository(this.state.root);
@@ -167,6 +166,18 @@ export class CircleV2SourceService {
         solanaDestinationFinalized: false };
     } finally { walletStore.clear(loaded.secret); }
     });
+  }
+}
+
+/** The Base RPC named by APN_BASE_RPC_URL; unset, empty or not a public HTTPS URL is a configuration refusal naming it. */
+function baseRpc(url: string | undefined, transport: BridgeHttps): CircleBaseJsonRpc {
+  const refuse = (state: string): never => { throw new ApnError("APN_RPC_CONFIG", `Circle source submit reads Base (eip155:8453) through ` +
+    `APN_BASE_RPC_URL, a public, credential-free HTTPS RPC endpoint without query or fragment; ${state}.`,
+  { reason: "circle_v2_source_service_base_rpc_missing", environmentVariable: "APN_BASE_RPC_URL" }); };
+  if (url === undefined || url === "") return refuse("it is not set");
+  try { return new CircleBaseJsonRpc(url, transport); } catch (error) {
+    if (error instanceof ApnError && (error.code === "APN_RPC_CONFIG" || error.code === "APN_OPERATION_BLOCKED")) return refuse("its value is not one");
+    throw error;
   }
 }
 
@@ -294,7 +305,7 @@ async function submitCircleV2BaseSourceBurnLive(intent: CircleV2SourceExecutionI
     issuedAt * 1000 > current + 30_000 || current - issuedAt * 1000 > 60_000) blocked("quote_freshness");
   if (bridgeAddress(input.payer) !== payer || input.recipientWallet !== intent.solanaWalletOwner ||
     input.recipientSetup !== intent.recipientSetup) blocked("recipient_or_payer");
-  const draft = await inspectCircleV2PreflightedDraft(input, ports.preflight);
+  const draft = await inspectCircleV2PreflightedDraft(input, ports.preflight, now);
   const burnTerms = circleV2BurnTermsFromQuote(input.quoteResponse);
   if (draft.recipientAta !== intent.solanaRecipientAta) blocked("recipient_ata");
   const p = await prepareCircleV2BaseSourceReadOnly(draft, ports.preflight, ports.readBase, intent.limits, now);

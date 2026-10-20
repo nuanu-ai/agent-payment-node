@@ -13,6 +13,7 @@ import { SUNSWAP_V2_KEYLESS_MECHANISM_PIN } from "../../src/swap/sunswap-tron/me
 import { REFUSING_SWAP_APPROVAL } from "../../src/swap/uniswap-v3/runtime-factory.js";
 import { temporaryState } from "./helpers.js";
 import { AMOUNT, OWNER, PROFILE, sunSwapFlow, sunSwapPolicy } from "./sunswap-tron-runtime-helpers.js";
+import { v2Output } from "./sunswap-tron-fixtures.js";
 
 const prepare = async (f: Awaited<ReturnType<typeof sunSwapFlow>>, key: string) =>
   await f.runtime.prepare({ profile: PROFILE, quoteHash: (await f.quote()).quoteHash, idempotencyKey: key }, f.clock.now());
@@ -44,6 +45,9 @@ test("one foreground command shows the exact screen, takes the typed code after 
   f.rpc.outcome = "success";
   const final = await f.runtime.status(sent.operationId, f.clock.now());
   assert.equal(final.state, "finalized"); assert.equal(final.receiptProof?.transactionHash, signed.txID); assert.equal(f.rpc.broadcasts.length, 1);
+  // QA 0.5.51 (SunSwap, shared SwapReceiptProof): the solidified record's call value, USDT credit and burned fee in SUN.
+  assert.deepEqual(final.receiptProof?.economics, { inputAtomic: AMOUNT, outputAtomic: v2Output(BigInt(AMOUNT)).toString(), networkFeeAtomic: "12345",
+    nativeDebitAtomic: (BigInt(AMOUNT) + 12_345n).toString() });
   assert.equal(await f.usage(), AMOUNT);
 });
 
@@ -56,6 +60,7 @@ test("a solidified REVERT becomes failed_confirmed_revert and releases the reser
   const reverted = await f.runtime.status(sent.operationId, f.clock.now());
   assert.equal(reverted.state, "failed_confirmed_revert"); assert.equal(reverted.usageLease?.state, "failed_confirmed_revert");
   assert.equal(reverted.failureProofHash, reverted.receiptProof?.receiptHash); assert.equal(f.rpc.broadcasts.length, 1);
+  assert.deepEqual(reverted.receiptProof?.economics, { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: "3000000", nativeDebitAtomic: "3000000" });
   assert.equal(await f.usage(), "0");
   assert.equal((await f.runtime.status(sent.operationId, f.clock.now())).integrityHash, reverted.integrityHash);
 });

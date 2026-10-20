@@ -3,7 +3,7 @@ import { canonicalJson, domainHash } from "../../../canonical.js";
 import { ApnError } from "../../../errors.js";
 import type { ClockPort } from "../../../ports.js";
 import { assertOperationProtocolRegistry } from "../../family-guards.js";
-import { validateSwapOperation, type SwapOperationRecord } from "../../model.js";
+import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptEconomics } from "../../model.js";
 import type { SwapProtocolRegistry } from "../../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../../runtime.js";
 import type { GuardedSwapService } from "../../service.js";
@@ -18,6 +18,7 @@ import type { UniswapEffectStorePort, UniswapExecutionBinding, UniswapExecutionG
 export interface UniswapOutcomeObserverPort {
   observeOutcome(operation: SwapOperationRecord, binding: UniswapExecutionBinding, transactionHash: Hex): Promise<UniswapObservedOutcome | null>;
   proveUnlanded(deadlineSeconds: number, loadTransactionHash: () => Promise<string | null>): Promise<SwapUnlandedProof | null>;
+  receiptEconomics?(operation: SwapOperationRecord): Promise<SwapReceiptEconomics>;
 }
 export interface UniswapExecutionDriverDependencies {
   readonly core: GuardedSwapService;
@@ -85,6 +86,13 @@ export class UniswapEthereumExecutionDriver implements GuardedSwapExecutionDrive
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation,
       effect.phase === "send_accepted" ? "submitted" : "unknown_finality", this.d.clock.now());
     return await this.observeExact(operation, binding, effect.transactionHash, true);
+  }
+
+  /** A swap finalized before its economics were recorded: one read of its own receipt (observe only). */
+  async receiptEconomics(input: GuardedSwapObservationInput): Promise<SwapReceiptEconomics> {
+    const read = this.d.observer.receiptEconomics;
+    if (read === undefined) blocked("This Uniswap observer cannot read receipt facts.", "receipt_facts_unsupported");
+    return await read.call(this.d.observer, validateSwapOperation(input.operation));
   }
 
   /** The router deadline is the quote expiry; the signed hash, when one was ever sealed, is read after the finalized block. */

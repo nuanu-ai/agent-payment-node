@@ -3,6 +3,7 @@ import { evaluateAssetPolicy, validateAssetPolicyRegistry } from "../asset-polic
 import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { SWAP_TERMINAL_STATES, validateSwapOperation } from "./model.js";
+import { swapActualEconomics } from "./receipt-facts.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry } from "./protocol-registry.js";
 import { assetAdmitsSwapMechanism } from "./route-admission.js";
 import { validateSwapQuote } from "./quote.js";
@@ -105,6 +106,15 @@ export class GuardedSwapRuntime {
         const operation = await this.required(operationId);
         instant(now);
         return operation.submissionMarker === null ? operation : await this.observe(operation);
+    }
+    /** Beside a status: the record's economics from its proof, its receipt-facts sidecar, or one read of its own transaction. */
+    async actualEconomics(record) {
+        const execution = this.dependencies.execution, read = execution.receiptEconomics;
+        return await swapActualEconomics(this.dependencies.operations.root, record, read === undefined ? undefined : async () => {
+            const material = await this.material(record.quote.quoteHash);
+            bindMaterial(record, material);
+            return await read.call(execution, { operation: record, material, dependencies: effectDependencies(this.dependencies), now: this.now() });
+        }, this.now());
     }
     /**
      * Pre-prompt checks refuse before the human is asked; after the prompt exactly one re-check runs: the stored operation

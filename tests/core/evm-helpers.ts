@@ -3,7 +3,8 @@ import * as coreRuntime from "../../src/core.js";
 import { testRuntime } from "./installed-runtime.js";
 import * as errorRuntime from "../../src/errors.js";
 import { resolveEvmAsset } from "../../src/evm-asset.js";
-import { directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "../../src/evm-direct-networks.js";
+import { directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead, type DirectEvmChainId } from "../../src/evm-direct-networks.js";
+import { readEvmReceiptFeeFields } from "../../src/evm-direct-actual-fee.js";
 import type { EvmRpcPort } from "../../src/evm-ports.js";
 import * as nativeRuntime from "../../src/local-wallet-native.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
@@ -53,6 +54,8 @@ export class EvmTestRpc extends TestRpc {
   receiptEnabled = true;
   transferLogEnabled = true;
   receiptStatus: "success" | "reverted" = "success";
+  /** The receipt's fee fields as a node answers them; null is a reader that kept none (how 0.5.51 recorded a transfer). */
+  receiptFeeFields: Record<string, string> | null | undefined = undefined;
   broadcastCount = 0;
   readonly evm: EvmRpcPort = {
     directReads: (chainId) => ({
@@ -82,7 +85,11 @@ export class EvmTestRpc extends TestRpc {
       const raw = this.submissions.at(-1)!;
       const transaction = parseTransaction(raw);
       const data = transaction.data;
-      return { transactionHash, blockNumberAtomic: "12346", blockHash: EVM_BLOCK_HASH, status: this.receiptStatus,
+      // By default the node answers gas used = the signed limit at the signed max fee, plus the OP-stack L1 fee there.
+      const fees = this.receiptFeeFields === null ? {} : { evmFeeFields: readEvmReceiptFeeFields(this.receiptFeeFields ?? {
+        gasUsed: toHex(BigInt(this.fees.gasLimitAtomic)), effectiveGasPrice: toHex(BigInt(this.fees.maxFeePerGasAtomic)),
+        ...(directEvmNetwork(chainId).feeModel === "op-stack" ? { l1Fee: toHex(this.l1Fee) } : {}) }) };
+      return { transactionHash, blockNumberAtomic: "12346", blockHash: EVM_BLOCK_HASH, status: this.receiptStatus, ...fees,
         observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin,
         logs: data === undefined || !this.transferLogEnabled ? [] : [{ address: transaction.to! as Address,
           topics: [TRANSFER_TOPIC, pad(this.sender, { size: 32 }), pad(RECIPIENT, { size: 32 })], data: toHex(BigInt(`0x${data.slice(-64)}`), { size: 32 }) }] };

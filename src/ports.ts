@@ -1,6 +1,7 @@
 import type { Address, Hex } from "./model.js";
 import type { EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
 import type { X402Permit2PrepareEvidence } from "./x402-permit2-rpc.js";
+import type { EvmReceiptFeeFields } from "./evm-direct-actual-fee.js";
 
 export type { HttpGetRequest, HttpObservation, HttpPort } from "./x402-model.js";
 
@@ -87,6 +88,8 @@ export interface RpcLog {
 
 export interface RpcReceipt {
   readonly evmEvidence?: EvmTransferEvidence;
+  /** The receipt's fee-bearing fields as the node answered them (the explicit EVM reader sets it). */
+  readonly evmFeeFields?: EvmReceiptFeeFields;
   readonly transactionHash: Hex;
   readonly status: "success" | "reverted";
   readonly blockNumberAtomic: string;

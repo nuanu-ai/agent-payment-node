@@ -7,10 +7,24 @@ import { mmRegistry } from "../../src/metamask-gasless/registry.js";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
 import type { MetaMaskGaslessIntent, MetaMaskGaslessCursor, MetaMaskGaslessProviderObservation } from "../../src/metamask-gasless/model.js";
 import type { Hex } from "../../src/model.js";
+import { toFunctionSelector } from "viem";
 const fixture = JSON.parse(readFileSync("tests/core/metamask-gasless-chain-fixtures/arbitrum-rpc-signature-quantity-20261009.json", "utf8"));
 /** Actual reads of the redemption counter and its enforcer code at the captured safe block, taken later. */
 const safeCounter = JSON.parse(readFileSync("tests/core/metamask-gasless-chain-fixtures/arbitrum-safe-counter-20261016.json", "utf8"));
 const intent = fixture.intent as MetaMaskGaslessIntent;
+/**
+ * Not part of either capture: with the count 0 the observer also asks the pinned manager whether the delegation was
+ * disabled, at the same safe block. Its code comes from the frozen public deployment bytes (runtime-code.json); the
+ * flag is the no-proof answer 0, so the captured trace keeps its captured outcome.
+ */
+const runtimeCode = JSON.parse(readFileSync("tests/core/metamask-gasless-chain-fixtures/runtime-code.json", "utf8"));
+const managerReplies = (() => {
+  const manager = mmRegistry(42161).row.protocol.manager.address, row = runtimeCode.rows.find((r: any) => r.chainId === 42161);
+  const pinned = { blockHash: fixture.result.cursor.previousEndBlock.hash, requireCanonical: true };
+  return [{ method: "eth_getCode", params: [manager, pinned], result: runtimeCode.codes[row.protocol.manager] },
+    { method: "eth_call", params: [{ to: manager, data: `${toFunctionSelector("disabledDelegations(bytes32)")}${intent.delegationHash.slice(2)}` }, pinned],
+      result: `0x${"0".repeat(64)}` }];
+})();
 const tx = fixture.replies.find((r: any) => r.method === "eth_getTransactionByHash").result;
 const hash = tx.hash as Hex;
 const error = { code: "APN_RPC_PROTOCOL", details: { reason: "mm_gasless_evidence_invalid" } };
@@ -22,7 +36,7 @@ test("untouched actual Arbitrum quantity signature traverses the complete produc
   const result = await observeMetaMaskGasless({ deployment: mmRegistry(42161), clock: { now: () => new Date(fixture.at) },
     call: async (method, params) => {
       calls.push(method);
-      const reply = [...fixture.replies, ...safeCounter.replies].find((r: any) => r.method === method && canonicalJson(r.params) === canonicalJson(params));
+      const reply = [...fixture.replies, ...safeCounter.replies, ...managerReplies].find((r: any) => r.method === method && canonicalJson(r.params) === canonicalJson(params));
       assert.ok(reply, `uncached or effect-capable method ${method}`); return structuredClone(reply.result);
     } }, intent, fixture.cursor as MetaMaskGaslessCursor, fixture.provider as MetaMaskGaslessProviderObservation);
   // The zero counter at the safe block replaces the captured empty log window; only the evidence digest names that.

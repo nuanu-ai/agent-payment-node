@@ -10,6 +10,7 @@ import { UPGRADEABLE_LOADER, verifyProgramAuthority } from "../solana-program-au
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import type { JupiterV1RawInstruction } from "./v1-codec.js";
 import { REVIEWED_WHIRLPOOL_FP, validateReviewedWhirlpoolFpPool } from "./v1-whirlpool-fp.js";
+import { assertWhirlpoolTickArraySequence } from "./v1-tick-sequence.js";
 export interface JupiterV1GuardedMaterial {readonly routeId?:JupiterV1RouteId;readonly namedRoles?:WhirlpoolV2NamedRoles;readonly material:JupiterV1ResolvedMaterial;readonly payer:string;readonly sourceTokenAccount:string;readonly destinationTokenAccount:string;readonly pool:string;readonly nativeAccounts:readonly string[];readonly inputAtomic:string;readonly quotedOutputAtomic:string;readonly instructionMinimumOutputAtomic:string;readonly quotedMinimumOutputAtomic:string;readonly minimumRoundingDeltaAtomic:string;readonly maximumNativeExpenseLamports:string;readonly admissionDigest:string}
 export function reject(message:string):never {throw new ApnError("APN_OPERATION_BLOCKED",message);}
 /** Lamports beyond the exact input that one swap may spend or temporarily need: network fee (at most 20,000) and the
@@ -36,7 +37,8 @@ async function evaluate(material:JupiterV1ResolvedMaterial,options:{readonly now
  const r=ix.accounts;if(r.length!==21)reject("Jupiter V1 remaining accounts changed.");const ticks=r.slice(17,20).map(a=>a.pubkey),oracle=await whirlpoolOracleAddress(ORCA,pool);
  native=[TOKEN,p,pool,source,state.vaultA,destination,state.vaultB,...ticks,oracle];const expected: (readonly [string,boolean,boolean])[]=[[TOKEN,false,false],[p,true,false],[source,false,true],[destination,false,true],[JUP,false,false],[USDC,false,false],[JUP,false,false],["D8cy77BBepLMngZx6ZukaTff5hCt1HrWyKk3Hnd9oitf",false,false],[JUP,false,false],[ORCA,false,false],...native.map((a,i)=>[a,false,i>=2&&i<=9] as const)];metas(ix,expected);
  tokenState(semanticAccount(material,state.vaultA),SOL,pool);tokenState(semanticAccount(material,state.vaultB),USDC,pool);tokenState(semanticAccount(material,destination),USDC,p);
- for(const [i,key] of ticks.entries()){const t=decodeTickArray(key,raw(semanticAccount(material,key)),ORCA,"4561bdbe6e0742bb");const width=state.tickSpacing*88;if(t.whirlpool!==pool||t.startTickIndex%width!==0||key!==await whirlpoolTickArrayAddress(ORCA,pool,t.startTickIndex)||t.startTickIndex!==Math.floor(state.tickCurrentIndex/width)*width-i*width)reject("Jupiter V1 tick array seed or order changed.");}
+ const starts:number[]=[];for(const key of ticks){const t=decodeTickArray(key,raw(semanticAccount(material,key)),ORCA,"4561bdbe6e0742bb");if(t.whirlpool!==pool||key!==await whirlpoolTickArrayAddress(ORCA,pool,t.startTickIndex))reject("Jupiter V1 tick array seed or order changed.");starts.push(t.startTickIndex);}
+ assertWhirlpoolTickArraySequence(starts,state.tickCurrentIndex,state.tickSpacing,()=>reject("Jupiter V1 tick array seed or order changed."));
  const o=semanticAccount(material,oracle);if(o.executable||(o.existence==="present"&&(o.owner!==SYS||o.dataBase64!=="")))reject("Jupiter V1 adaptive oracle state is unsupported.");
  }
  const src=semanticAccount(material,source),initial=src.existence==="absent"?0n:tokenState(src,SOL,p).amount;if(initial!==0n)reject("Jupiter V1 refuses to close existing WSOL funds.");

@@ -4,7 +4,8 @@ import { ApnError } from "../errors.js";
 import type { AssetUsageLedger } from "../asset-usage-ledger.js";
 import type { ClockPort } from "../ports.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
-import { SWAP_TERMINAL_STATES, validateSwapOperation, type SwapOperationRecord } from "./model.js";
+import { SWAP_TERMINAL_STATES, validateSwapOperation, type SwapOperationRecord, type SwapReceiptEconomics } from "./model.js";
+import { swapActualEconomics, type SwapActualEconomicsView } from "./receipt-facts.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry, type SwapProtocolRegistry } from "./protocol-registry.js";
 import { assetAdmitsSwapMechanism } from "./route-admission.js";
 import { validateSwapQuote, type SwapQuoteInput, type SwapQuoteSnapshot } from "./quote.js";
@@ -79,6 +80,8 @@ export interface GuardedSwapExecutionDriver {
    * deadline or expiration at finality, and no inclusion of any persisted transaction). Null while unproven.
    */
   proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
+  /** Observe only: one read of a finalized swap's own transaction for the economics its record did not keep. */
+  receiptEconomics?(input: GuardedSwapObservationInput): Promise<SwapReceiptEconomics>;
 }
 
 export interface GuardedSwapExecutionInput {
@@ -208,6 +211,14 @@ export class GuardedSwapRuntime<Request> {
     const operation = await this.required(operationId);
     instant(now);
     return operation.submissionMarker === null ? operation : await this.observe(operation);
+  }
+  /** Beside a status: the record's economics from its proof, its receipt-facts sidecar, or one read of its own transaction. */
+  async actualEconomics(record: SwapOperationRecord): Promise<SwapActualEconomicsView> {
+    const execution = this.dependencies.execution, read = execution.receiptEconomics;
+    return await swapActualEconomics(this.dependencies.operations.root, record, read === undefined ? undefined : async () => {
+      const material = await this.material(record.quote.quoteHash); bindMaterial(record, material);
+      return await read.call(execution, { operation: record, material, dependencies: effectDependencies(this.dependencies), now: this.now() });
+    }, this.now());
   }
 
   /**

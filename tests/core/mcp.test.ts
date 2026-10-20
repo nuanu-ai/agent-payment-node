@@ -202,7 +202,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
       { name: "apn_x402_fetch_approve", properties: ["operation", "rpc_url"], required: ["operation", "rpc_url"], defaults: {} },
       { name: "apn_pay_transfer_prepare", properties: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], required: ["profile", "idempotency_key", "to", "amount_usdc", "rpc_url"], defaults: {} },
       { name: "apn_pay_transfer_prepare_asset", properties: ["profile", "chain", "asset", "decimals", "rpc_url", "to", "amount", "max_fee_wei", "priority_fee_wei", "idempotency_key"], required: ["profile", "chain", "asset", "rpc_url", "to", "amount", "max_fee_wei", "idempotency_key"], defaults: {} },
-      { name: "apn_operation_status", properties: ["operation"], required: ["operation"], defaults: {} },
+      { name: "apn_operation_status", properties: ["operation", "refresh_allowance"], required: ["operation"], defaults: { refresh_allowance: false } },
       { name: "apn_operation_resume", properties: ["operation", "rpc_url", "coinbase_observation_rpc", "wait_seconds", "observe_only", "observation_rpc_env"], required: ["operation"], defaults: {} },
       {
         name: "apn_operation_recover_provider_request",
@@ -278,7 +278,8 @@ test("manifest projection is exact, strict and rejects missing, colliding or uns
   assert.equal(projected.every((tool) => tool.inputSchema.additionalProperties === false), true);
   assert.equal(projected.every((tool) => Object.entries(tool.inputSchema.properties).every(([field, schema]) => (
     typeof schema === "object" && schema !== null && !Array.isArray(schema) &&
-    schema.type === ((tool.name === "apn_wallet_portfolio" && field === "refresh") || (tool.name === "apn_x402_merchant_observe" && field === "deliver") ? "boolean" : "string")
+    schema.type === ((tool.name === "apn_wallet_portfolio" && field === "refresh") || (tool.name === "apn_x402_merchant_observe" && field === "deliver") ||
+      (tool.name === "apn_operation_status" && field === "refresh_allowance") ? "boolean" : "string")
   ))), true);
   assert.equal(projected.some((tool) => tool.name.includes("mcp")), false);
   assert.equal(projected.some((tool) => tool.name.includes("mcp") || tool.name.includes("control")), false);

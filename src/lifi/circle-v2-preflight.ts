@@ -29,13 +29,14 @@ function sourceBlock(value: unknown): { number: bigint; hash: string; timestamp:
   const block = bridgeRecord(value);
   return { number: quantity(block.number), hash: bridgeHex(block.hash, 32, 32), timestamp: quantity(block.timestamp) };
 }
-function fresh(timestamp: bigint): boolean {
-  const now = BigInt(Math.floor(Date.now() / 1000));
+function fresh(timestamp: bigint, clock: () => number): boolean {
+  const now = BigInt(Math.floor(clock() / 1000));
   return timestamp <= now + 30n && now <= timestamp + 120n;
 }
 
 /** Circle checks its own current tip; Base simulation is pinned to a separate canonical block observation. Neither authorizes execution. */
-export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, transport: CircleV2PreflightTransport): Promise<CircleV2PreflightSnapshot> {
+export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, transport: CircleV2PreflightTransport,
+  now: () => number): Promise<CircleV2PreflightSnapshot> {
   const tx = bridgeRecord(input.transaction);
   const data = bridgeHex(tx.data);
   let decoded: ReturnType<typeof decodeFunctionData<typeof ABI>>;
@@ -60,7 +61,7 @@ export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, tr
   if (expiry.mode === "BLOCK_NUMBER") {
     if (integer(expiry.expiresAtBlock) !== integer(quotedExpiry.expiresAtBlock)) fail("expiry");
   } else if (expiry.mode === "TIMESTAMP") {
-    if (integer(expiry.expiresAt) !== integer(quotedExpiry.expiresAt) || integer(expiry.expiresAt) <= BigInt(Math.floor(Date.now() / 1000))) fail("expiry");
+    if (integer(expiry.expiresAt) !== integer(quotedExpiry.expiresAt) || integer(expiry.expiresAt) <= BigInt(Math.floor(now() / 1000))) fail("expiry");
   } else fail("expiry");
   if (!Array.isArray(validation.items) || !Array.isArray(response.items) || validation.items.length !== response.items.length) fail("items");
   for (let i = 0; i < response.items.length; i += 1) {
@@ -76,7 +77,7 @@ export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, tr
   let block: ReturnType<typeof sourceBlock>;
   try { block = sourceBlock(await transport({ target: "base", method: "eth_getBlockByNumber", params: ["latest", false] })); }
   catch { return fail("base_unavailable"); }
-  if (!fresh(block.timestamp)) fail("stale_block");
+  if (!fresh(block.timestamp, now)) fail("stale_block");
   await inspectCircleV2UpfrontOffline({ ...input, sourceBlockNumber: block.number.toString() });
   if (expiry.mode === "BLOCK_NUMBER" && block.number >= integer(expiry.expiresAtBlock)) fail("expired_block");
   try {
@@ -89,8 +90,8 @@ export async function inspectCircleV2Preflight(input: CircleV2PreflightInput, tr
     pinned = sourceBlock(await transport({ target: "base", method: "eth_getBlockByNumber", params: [`0x${block.number.toString(16)}`, false] }));
   }
   catch { return fail("base_unavailable"); }
-  if (after.number < block.number || !fresh(after.timestamp) ||
+  if (after.number < block.number || !fresh(after.timestamp, now) ||
     (expiry.mode === "BLOCK_NUMBER" && after.number >= integer(expiry.expiresAtBlock)) ||
-    pinned.number !== block.number || pinned.hash !== block.hash || pinned.timestamp !== block.timestamp || !fresh(pinned.timestamp)) fail("stale_block");
+    pinned.number !== block.number || pinned.hash !== block.hash || pinned.timestamp !== block.timestamp || !fresh(pinned.timestamp, now)) fail("stale_block");
   return { kind: "circle_v2_preflight_snapshot", executionAdmitted: false, blockNumber: block.number.toString(), blockHash: block.hash, abiSignature: ABI_SIGNATURE };
 }

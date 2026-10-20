@@ -20,6 +20,8 @@ import type { MetaMaskGaslessOperationRecord } from "../../src/metamask-gasless/
 import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput,
   MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcPort, MetaMaskGaslessUnsignedInput } from "../../src/metamask-gasless/ports.js";
 import { mmRegistry } from "../../src/metamask-gasless/registry.js";
+import type { MetaMaskDisableCall } from "../../src/metamask-gasless/revocation/call.js";
+import type { MetaMaskRevocationChain } from "../../src/metamask-gasless/revocation/chain.js";
 import { MM_ANY_BENEFICIARY, MM_BATCH_MODE, MM_ROOT_AUTHORITY } from "../../src/metamask-gasless/unsigned.js";
 
 export const MM_TEST_OWNER = "0x1111111111111111111111111111111111111111" as Address;
@@ -112,6 +114,11 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
   phase: MetaMaskGaslessObservation["phase"] = "success";
   candidate: Hex | null = mmTestWord("transaction-a");
   observedAt: string | undefined;
+  /** Chain facts the disable is priced from, or the refusal its reads raise. */
+  revocationChain: MetaMaskRevocationChain | Error = { finality: mmTestBlock("103", new Date(0)), latest: mmTestBlock("104", new Date(0)),
+    nonceAtomic: "0", gasLimitAtomic: "60000", maxFeePerGasAtomic: "2000000000", maxPriorityFeePerGasAtomic: "1000000",
+    l1FeeUpperWei: "0", operatorFeeUpperWei: "0", maximumNativeCostWei: "120000000000000", nativeBalanceWei: "500000000000000" };
+  revocations: Array<{ readonly intent: MetaMaskGaslessIntent; readonly call: MetaMaskDisableCall }> = [];
   constructor(readonly chainId: MetaMaskGaslessChainId, readonly now: Date, designation: "empty" | "pinned" = "empty") {
     const row = mmRegistry(chainId).row;
     this.state = { protocolCodeHashes: Object.fromEntries(Object.entries(row.protocol).map(([key, value]) =>
@@ -131,16 +138,22 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
       observedAt: this.observedAt ?? this.now.toISOString(), safeBlock: mmTestBlock("100", this.now),
       headBlock: mmTestBlock("101", this.now), safeState: structuredClone(this.state), headState: structuredClone(this.state) };
   }
+  async revocation(intent: MetaMaskGaslessIntent, call: MetaMaskDisableCall): Promise<MetaMaskRevocationChain> {
+    this.calls.push("revocation"); this.revocations.push({ intent, call });
+    if (this.revocationChain instanceof Error) throw this.revocationChain;
+    return this.revocationChain;
+  }
   async observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor): Promise<MetaMaskGaslessRpcObservation> {
     this.calls.push("observe"); const row = mmRegistry(this.chainId).row;
     const observedAt = this.observedAt ?? this.now.toISOString();
     const transactionBlock = mmTestBlock("102", this.now), finalityBlock = mmTestBlock("103", this.now);
     const reason = { pending: "mm_gasless_pending", unavailable: "mm_gasless_rpc_unavailable", invalid: "mm_gasless_evidence_invalid",
-      reorg: "mm_gasless_scan_reorg", reverted: "mm_gasless_transaction_reverted", success: "mm_gasless_success" } as const;
-    const proved = this.phase === "success" || this.phase === "reverted";
-    const observation = { observedAt, phase: this.phase, reason: reason[this.phase], candidateTxHash: this.candidate,
-      transactionBlock: proved ? transactionBlock : null, finalityBlock: proved ? finalityBlock : null,
-      evidenceHash: proved ? hashObject("synthetic-independent-evidence") : null };
+      reorg: "mm_gasless_scan_reorg", reverted: "mm_gasless_transaction_reverted", success: "mm_gasless_success",
+      disabled: "mm_gasless_delegation_disabled" } as const;
+    const proved = this.phase === "success" || this.phase === "reverted", disabled = this.phase === "disabled";
+    const observation = { observedAt, phase: this.phase, reason: reason[this.phase], candidateTxHash: disabled ? null : this.candidate,
+      transactionBlock: proved ? transactionBlock : null, finalityBlock: proved || disabled ? finalityBlock : null,
+      evidenceHash: proved || disabled ? hashObject("synthetic-independent-evidence") : null };
     if (this.phase !== "success") return { cursor, observation, settlement: null };
     const codes = Object.fromEntries(Object.entries(row.protocol).map(([key, value]) => [key, value.codeHash]));
     const tokenProof = (block: MetaMaskGaslessBlock) => ({ block, address: row.tokenImplementationAddress,

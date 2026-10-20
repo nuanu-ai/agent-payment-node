@@ -5,7 +5,8 @@ import { fixture } from "../fixtures/jupiter-v1/material.js";
 import { JupiterV1QuoteBuilder } from "../../src/swap/jupiter-solana/v1-builder.js";
 import { JupiterV1MaterialResolver } from "../../src/swap/jupiter-solana/v1-resolver.js";
 import type { SavedJupiterV1MaterialStore } from "../../src/swap/jupiter-solana/v1-material.js";
-import { JUPITER_V1_WHIRLPOOL_V2_POOL } from "../../src/swap/jupiter-solana/v1-pins.js";
+import { JUPITER_V1_POOL, JUPITER_V1_WHIRLPOOL_FP_POOL, JUPITER_V1_WHIRLPOOL_V2_POOL, JUPITER_V1_WHIRLPOOL_4H_POOL } from "../../src/swap/jupiter-solana/v1-pins.js";
+import { capturedV2 } from "../fixtures/jupiter-v1-whirlpool-v2/capture.js";
 import type { JupiterV1RouteId } from "../../src/swap/jupiter-solana/v1-route-config.js";
 import { capturedFp } from "../fixtures/jupiter-v1-whirlpool-fp/capture.js";
 const m=fixture(),request={inputMint:m.quoteResponse.inputMint,outputMint:m.quoteResponse.outputMint,amount:"1000000",taker:m.payer,recipient:m.payer,slippageBps:50,computeUnitPriceMicroLamports:1000};
@@ -28,7 +29,7 @@ for(const maximumInnerAccounts of [0,11,13,"12",null])test(`invalid finite inner
 const unknownPool="11111111111111111111111111111111";
 function withPool(pool:string){const quote=structuredClone(m.quoteResponse);return {...quote,routePlan:quote.routePlan.map(leg=>({...leg,swapInfo:{...leg.swapInfo,ammKey:pool}}))};}
 const selected=new Error("TEST-only resolver reached after strict quote/build route admission");
-async function discover(responses:readonly (unknown|Error)[],routeId:JupiterV1RouteId="whirlpool-v1-83-sol-usdc-authority",build=m.rawBuildResponse){
+async function discover(responses:readonly (unknown|Error)[],routeId:JupiterV1RouteId="whirlpool-v1-83-sol-usdc-authority",build=m.rawBuildResponse,routeIds?:readonly JupiterV1RouteId[]){
  const urls:URL[]=[],posted:unknown[]=[];let resolved=0,proof=0,saved=0,get=0;
  const provider=new JupiterV1ReadOnlyProvider(async(input,init)=>{
   const url=new URL(String(input));urls.push(url);
@@ -39,7 +40,7 @@ async function discover(responses:readonly (unknown|Error)[],routeId:JupiterV1Ro
  class Resolver extends JupiterV1MaterialResolver {override async resolve():Promise<never>{resolved++;throw selected;}}
  const resolver=new Resolver({originHash:"0".repeat(64),async call(){throw Error("RPC forbidden in discovery test");}});
  const store={async save(){saved++;}} as unknown as SavedJupiterV1MaterialStore;
- const builder=new JupiterV1QuoteBuilder(provider,resolver,store,{resolvePayer:async()=>m.payer,resolveRouteId:async()=>routeId,computeUnitPriceMicroLamports:1000,proveQuote:async()=>{proof++;throw Error("Proof forbidden in discovery test");}});
+ const builder=new JupiterV1QuoteBuilder(provider,resolver,store,{resolvePayer:async()=>m.payer,...(routeIds===undefined?{resolveRouteId:async()=>routeId}:{resolveRouteIds:async()=>routeIds}),computeUnitPriceMicroLamports:1000,proveQuote:async()=>{proof++;throw Error("Proof forbidden in discovery test");}});
  let error:unknown;try{await builder.quote({command:"swap.jupiter.quote",profile:"TEST-only",account:m.payer,recipient:m.payer,amountAtomic:"1000000",slippageBps:50,ownerSlippageCapBps:50,now:new Date("2026-09-20T00:00:00.000Z")});}catch(e){error=e;}
  for(const url of urls.filter(url=>url.pathname.endsWith("/quote"))){assert.equal(url.origin,"https://api.jup.ag");assert.equal(url.searchParams.get("amount"),"1000000");assert.equal(url.searchParams.get("slippageBps"),"50");assert.equal(url.searchParams.get("dexes"),"Whirlpool");assert.equal(url.searchParams.get("onlyDirectRoutes"),"true");assert.equal(url.searchParams.get("platformFeeBps"),"0");}
  assert.equal(proof,0);assert.equal(saved,0);return {urls,posted,resolved,error};
@@ -77,4 +78,28 @@ test("Fp discovery can retry once but never build a foreign policy-selected pool
  assert.deepEqual((r.posted[0] as any).quoteResponse,c.quote);
  const refused=await discover([m.quoteResponse,m.quoteResponse],"whirlpool-v1-fp-sol-usdc-authority",c.build);
  assert.equal((refused.error as any)?.code,"APN_OPERATION_BLOCKED");assert.equal(refused.resolved,0);assert.equal(refused.posted.length,0);assert.equal(refused.urls.length,2);
+});
+
+// QA 0.5.51: with every current pool admitted, APN still asked Jupiter for "the" route of the first admitted pool and refused
+// any other pool Jupiter answered, although the owner admitted it. Jupiter's quote API has no pool selector.
+const ALL:readonly JupiterV1RouteId[]=["whirlpool-v1-83-sol-usdc-authority","whirlpool-v1-fp-sol-usdc-authority","whirlpool-swap-v2-esv-sol-usdc-authority","whirlpool-swap-v2-4h-sol-usdc-authority"];
+test("any admitted pool Jupiter answers is built: the unfiltered best first when a SwapV2 pool is admitted",async()=>{
+ const c=capturedV2(),r=await discover([c.quote],undefined,c.build,ALL);
+ assert.equal(r.error,selected);assert.equal(r.resolved,1);assert.equal(r.urls.length,2);assert.equal(r.urls[0]?.searchParams.has("maxAccounts"),false);
+ assert.deepEqual((r.posted[0] as any).quoteResponse,c.quote);
+});
+test("an unadmitted unfiltered answer gets one hinted read that may select an admitted legacy pool",async()=>{
+ const r=await discover([withPool(JUPITER_V1_WHIRLPOOL_4H_POOL),m.quoteResponse],undefined,m.rawBuildResponse,["whirlpool-v1-83-sol-usdc-authority","whirlpool-swap-v2-esv-sol-usdc-authority"]);
+ assert.equal(r.error,selected);assert.equal(r.resolved,1);assert.equal(r.urls.length,3);
+ assert.equal(r.urls[0]?.searchParams.has("maxAccounts"),false);assert.equal(r.urls[1]?.searchParams.get("maxAccounts"),"12");
+});
+test("the refusal names the provider condition: endpoint, network, the pools Jupiter answered and the pools admitted",async()=>{
+ const r=await discover([withPool(JUPITER_V1_WHIRLPOOL_V2_POOL),withPool(JUPITER_V1_WHIRLPOOL_V2_POOL)],undefined,m.rawBuildResponse,["whirlpool-v1-83-sol-usdc-authority","whirlpool-v1-fp-sol-usdc-authority"]);
+ const error=r.error as any;assert.equal(error?.code,"APN_OPERATION_BLOCKED");assert.match(error.message,/outside the admitted lane/);assert.equal(r.resolved,0);assert.equal(r.posted.length,0);assert.equal(r.urls.length,2);
+ assert.deepEqual(error.details,{reason:"jupiter_v1_provider_pool_not_admitted",provider:"jupiter",endpoint:"https://api.jup.ag/swap/v1/quote",
+  network:"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",amountAtomic:"1000000",returnedPools:[JUPITER_V1_WHIRLPOOL_V2_POOL],admittedPools:[JUPITER_V1_POOL,JUPITER_V1_WHIRLPOOL_FP_POOL]});
+});
+test("historical or unknown route identities never widen the admitted pools",async()=>{
+ const r=await discover([m.quoteResponse],undefined,m.rawBuildResponse,["whirlpool-v1-83-sol-usdc"]);
+ assert.equal((r.error as any)?.code,"APN_OPERATION_BLOCKED");assert.equal(r.urls.length,0);assert.equal(r.resolved,0);
 });

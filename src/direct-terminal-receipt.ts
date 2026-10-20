@@ -37,7 +37,7 @@ export function assertDirectTerminalReceiptAuthority(operation: OperationRecord,
       receipt.operationIntegrityHash !== operation.integrityHash || receipt.state !== operation.state || receipt.reason !== operation.reason ||
       receipt.proofClass !== operation.proofClass || receipt.createdAt !== operation.transitions.at(-1)?.at ||
       receipt.transactionHash !== operation.transactionHash || receipt.amountAtomic !== operation.amountAtomic ||
-      canonicalJson(receipt.evm) !== canonicalJson(operation.evm)) corrupt();
+      canonicalJson(receipt.evm) !== canonicalJson(operation.evm) || canonicalJson(receipt.evmActualFee ?? null) !== canonicalJson(operation.evmActualFee ?? null)) corrupt();
   if (operation.state === "completed" || operation.state === "failed_confirmed_revert") {
     const evidence = validateEvmTransferEvidence(receipt.evmEvidence);
     if (!evidence.transactionVerified || receipt.blockNumberAtomic === undefined) corrupt();

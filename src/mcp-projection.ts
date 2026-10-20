@@ -66,7 +66,7 @@ const SELECTED_PATHS = [
   "receipt get",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
   "gasless usdt prepare", "gasless usdt status", "gasless usdt resume",
-  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer approve-sealed",
+  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer approve-sealed", "gasless transfer revoke",
   "oneclick source submit", "oneclick source status",
 ] as const;
 

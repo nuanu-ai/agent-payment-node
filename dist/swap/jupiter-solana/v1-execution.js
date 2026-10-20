@@ -4,7 +4,7 @@ import { rpcAtomic, SolanaRpc, solanaSignature } from "../../solana/rpc.js";
 import { detached } from "./v1-admission.js";
 import { createJupiterV1ExecutionBinding, JupiterV1LocalSigner } from "./v1-effects.js";
 import { guardJupiterV1WhirlpoolMaterial, validateJupiterV1GuardedMaterial } from "./v1-guard.js";
-import { validateJupiterV1PreparedMaterial } from "./v1-material.js";
+import { jupiterV1SameMessageExceptLifetime, validateJupiterV1PreparedMaterial } from "./v1-material.js";
 import { proveJupiterV1Simulation, validateFinalizedJupiterV1Receipt } from "./v1-proof.js";
 import { JupiterV1MaterialResolver } from "./v1-resolver.js";
 import { routeConfigForMaterial } from "./v1-route-config.js";
@@ -41,9 +41,10 @@ export class JupiterV1SingleSender {
             const binding = await this.bindings.load(op, material);
             if (binding === null)
                 corrupt();
-            let observedHeight = null;
+            let observedHeight = null, lastValid = material.execution.lifetime.lastValidBlockHeight;
             try {
                 const { fresh } = await this.bindings.loadFresh(op, binding);
+                lastValid = fresh.lifetime.lastValidBlockHeight;
                 await validateJupiterV1GuardedMaterial(await guardJupiterV1WhirlpoolMaterial(fresh, { deadline: op.quote.expiresAt }));
                 const effect = await this.native.savedEffect(op, binding);
                 if (effect === null)
@@ -80,24 +81,36 @@ export class JupiterV1SingleSender {
             catch (error) {
                 // A diagnostic cannot release the marked lease or restore a first-send grant.
                 if (await this.bindings.loadClaim(op) === null)
-                    await new JupiterV1ExecutionFailureStore(this.core.operations.root).save(op, "sender_preflight", error, material.execution.lifetime.lastValidBlockHeight, observedHeight, this.clock.now());
+                    await new JupiterV1ExecutionFailureStore(this.core.operations.root).save(op, "sender_preflight", error, lastValid, observedHeight, this.clock.now());
                 throw error;
             }
         });
     }
 }
 /**
- * Every program-byte, account and simulation check that can fail runs before consent, against the same frozen message.
- * After the prompt only the lifetime reserve, the local owner re-check, the marker, the signature and the one send remain,
- * so the frozen blockhash is not spent on bulky public reads after the human typed the code.
+ * Every program-byte, account and simulation check that can fail runs before consent, against the exact message signed
+ * after it. The approval freezes its own lifetime: the configured RPC's latest blockhash, read after this command's fresh
+ * account reads, so the human gets a whole blockhash lifetime instead of what the quote and prepare commands left of the
+ * quote's. Only those 32 bytes are new; every instruction, account, privilege, lookup table and program authority must
+ * be the quoted one. After the prompt only the lifetime reserve, the local owner re-check, the marker, the signature and
+ * the one send remain.
  */
 export async function proveJupiterV1Preconsent(rpc, clock, op, materialValue) {
-    const material = validateJupiterV1PreparedMaterial(materialValue);
-    const fresh = await new JupiterV1MaterialResolver(rpc).resolve(material.execution.payer, material.execution.quoteResponse, material.execution.rawBuildResponse, material.execution.maximumNativeExpenseLamports, material.execution.quoteRpcLifetime, routeConfigForMaterial(material.execution).routeId);
+    const material = validateJupiterV1PreparedMaterial(materialValue), quoted = material.execution;
+    let fresh;
+    try {
+        fresh = await new JupiterV1MaterialResolver(rpc).resolve(quoted.payer, quoted.quoteResponse, quoted.rawBuildResponse, quoted.maximumNativeExpenseLamports, undefined, routeConfigForMaterial(quoted).routeId, true);
+    }
+    catch (error) {
+        // A lifetime outside the window ends this approval, not the operation: nothing was marked, so it may approve again.
+        if (error instanceof ApnError && error.code === "APN_REPREPARE_REQUIRED" && error.details?.minimumRemainingBlocks !== undefined)
+            throw new ApnError("APN_OPERATION_BLOCKED", "The configured Solana RPC answered a blockhash outside the approval lifetime window; nothing was signed, approve again.", { ...error.details, reason: "jupiter_v1_approval_lifetime_window" });
+        throw error;
+    }
     // A routine upgrade by the pinned authority between quote and consent is accepted: the simulation below runs against the
     // program as deployed now. The program identities and authorities must stay those the quote was built with.
-    if (fresh.transactionBase64 !== material.execution.transactionBase64 || fresh.messageHash !== material.execution.messageHash ||
-        fresh.lookupBindingDigest !== material.execution.lookupBindingDigest || canonicalJson(programIdentities(fresh)) !== canonicalJson(programIdentities(material.execution)))
+    if (fresh.lookupBindingDigest !== quoted.lookupBindingDigest || !jupiterV1SameMessageExceptLifetime(quoted.messageBase64, fresh.messageBase64) ||
+        canonicalJson(programIdentities(fresh)) !== canonicalJson(programIdentities(quoted)))
         blocked("Jupiter's frozen message, lookup or program authority changed.");
     const guarded = await guardJupiterV1WhirlpoolMaterial(fresh, { now: clock.now().getTime(), deadline: op.quote.expiresAt }), simulation = await proveJupiterV1Simulation(rpc, guarded);
     return detached({ operationId: op.operationId, materialDigest: material.execution.materialDigest, fresh, simulation });
@@ -204,10 +217,21 @@ export class JupiterV1ExecutionDriver {
             // A finalized receipt is always recorded. One clock read is both the transition instant and the proof's observedAt:
             // two reads could straddle a millisecond and fail the receipt time binding (observedAt after the transition).
             const at = this.d.clock.now();
-            return await this.d.core.finalize(op, at, { receiptHash: receipt.receiptHash, transactionHash: receipt.signature, observedAt: at.toISOString(), finalized: true });
+            // The finalized receipt proved spend = exact input + fee - closed wSOL refund; its own output, fee and spend are the facts.
+            return await this.d.core.finalize(op, at, { receiptHash: receipt.receiptHash, transactionHash: receipt.signature, observedAt: at.toISOString(), finalized: true,
+                economics: { inputAtomic: guarded.inputAtomic, outputAtomic: receipt.recipientOutputAtomic, networkFeeAtomic: receipt.feeLamports, nativeDebitAtomic: receipt.nativeSpendLamports } });
         });
     }
     async proveUnlanded(input) { return await proveJupiterV1Unlanded(this.d, input); }
+    /** A swap finalized before its economics were recorded: its own finalized receipt read once more (observe only). */
+    async receiptEconomics(input) {
+        const op = input.operation, material = validateJupiterV1PreparedMaterial(input.material), binding = await this.d.bindings.load(op, material);
+        const signature = binding === null ? null : await this.d.bindings.loadSignature(op, binding);
+        if (binding === null || signature === null || signature !== op.receiptProof?.transactionHash || op.state !== "finalized")
+            throw new ApnError("APN_RPC_PROTOCOL", "Jupiter receipt facts need the record's proven signature.", { reason: "receipt_facts_binding" });
+        const guarded = await guardReceipt((await this.d.bindings.loadFresh(op, binding)).fresh), receipt = await validateFinalizedJupiterV1Receipt(this.d.rpc, guarded, { signature });
+        return { inputAtomic: guarded.inputAtomic, outputAtomic: receipt.recipientOutputAtomic, networkFeeAtomic: receipt.feeLamports, nativeDebitAtomic: receipt.nativeSpendLamports };
+    }
 }
 /** Under the operation lock that marking, signing and the single send hold: the frozen lifetime passed at finality and
  * the persisted signature, if any, has no status. Nothing is decrypted, signed or sent. */
@@ -218,10 +242,13 @@ export async function proveJupiterV1Unlanded(d, input) {
             corrupt();
         if (op.submissionMarker === null || op.receiptProof !== null || !["submitting", "submitted", "unknown_finality"].includes(op.state))
             return null;
-        const material = validateJupiterV1PreparedMaterial(input.material);
-        return await proveSolanaUnlanded(d.rpc, { lastValidBlockHeight: material.execution.lifetime.lastValidBlockHeight, loadSignature: async () => {
-                const binding = await d.bindings.load(op, material);
-                return binding === null ? null : await d.bindings.loadSignature(op, binding);
+        const material = validateJupiterV1PreparedMaterial(input.material), binding = await d.bindings.load(op, material);
+        // The bound fresh message is the only one ever signed, so its lifetime (the approval's) bounds landing, not the quote's.
+        // Without a binding nothing was signed (signing follows the binding), so the quoted lifetime bounds nothing that exists.
+        const lastValidBlockHeight = binding === null ? material.execution.lifetime.lastValidBlockHeight : (await d.bindings.loadFresh(op, binding)).fresh.lifetime.lastValidBlockHeight;
+        return await proveSolanaUnlanded(d.rpc, { lastValidBlockHeight, loadSignature: async () => {
+                const bound = await d.bindings.load(op, material);
+                return bound === null ? null : await d.bindings.loadSignature(op, bound);
             } });
     });
 }

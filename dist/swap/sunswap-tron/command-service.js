@@ -4,6 +4,7 @@ import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "..
 import { SwapOperationRepository } from "../repository.js";
 import { SUNSWAP_PINNED_CONTRACTS, SUNSWAP_V2_CODE_HASHES, loadSunSwapPinCatalog } from "./catalog.js";
 import { SUNSWAP_V2_KEYLESS_MECHANISM_PIN, SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY } from "./mechanism.js";
+import { swapActualEconomics, swapStatusReceipt } from "../receipt-facts.js";
 export async function executeSunSwapCommand(request, context) {
     if (request.command === "swap.sunswap.inventory")
         return data({ catalog: loadSunSwapPinCatalog(), ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION,
@@ -24,7 +25,7 @@ export async function executeSunSwapCommand(request, context) {
     }
     if (request.command === "swap.sunswap.status")
         return context.sunswapRuntime === undefined
-            ? await status(request.operationId, context) : operation(await context.sunswapRuntime.status(request.operationId, context.clock.now()));
+            ? await status(request.operationId, context) : await withEconomics(await context.sunswapRuntime.status(request.operationId, context.clock.now()), context);
     if (request.command === "swap.sunswap.approve") {
         if (context.sunswapRuntime === undefined)
             throw new ApnError("APN_OPERATION_BLOCKED", "Native TRX input has no TRC20 or Permit2 approval operation.", { reason: "sunswap_native_no_approval" });
@@ -39,7 +40,12 @@ async function status(operationId, context) {
     const operation = await new SwapOperationRepository(context.state.root).loadAny(operationId);
     if (operation === null)
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
-    return { proofClass: operation.state, data: null, operation, receipt: null, nextActions: [] };
+    return { proofClass: operation.state, data: null, operation, nextActions: [],
+        receipt: await swapStatusReceipt(operation, async () => await swapActualEconomics(context.state.root, operation, undefined, context.clock.now())) };
+}
+/** A status beside its record: the swap's actual economics, or the named refusal of the one read that would prove them. */
+async function withEconomics(value, context) {
+    return { ...operation(value), receipt: await swapStatusReceipt(value, async () => await context.sunswapRuntime.actualEconomics(value)) };
 }
 function data(value, proofClass) {
     return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };

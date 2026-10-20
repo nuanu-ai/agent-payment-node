@@ -15,6 +15,8 @@ const zero = `0x${"0".repeat(64)}`;
 const hook = "0x636374702d666f72776172640000000000000000000000000000000000000000";
 const quote = "0x01020304";
 const blockHash = `0x${"a".repeat(64)}`;
+/** One injected clock: the Base block timestamps below and the freshness check read the same instant. */
+const NOW = Date.parse("2026-10-20T00:00:00.000Z"), clock = () => NOW;
 async function fixture(): Promise<CircleV2PreflightInput> {
   const recipient = `0x${Buffer.from(getBase58Encoder().encode(await associatedUsdc(wallet))).toString("hex")}` as `0x${string}`;
   const data = encodeFunctionData({ abi, functionName: "depositForBurnWithHookAndFees", args: [1_000_000n, 5, recipient, usdc, zero as `0x${string}`, hook, { signedQuote: quote, refundAddress: refund }] });
@@ -31,7 +33,7 @@ function harness(change?: (response: Record<string, any>, request: any) => void,
     sameHeightReorg?: boolean; staleTimestamp?: boolean; unavailable?: boolean; revert?: boolean; rpcError?: boolean }) {
   const calls: any[] = [];
   let blockReads = 0;
-  const timestamp = `0x${Math.floor(Date.now() / 1000).toString(16)}`;
+  const timestamp = `0x${Math.floor(NOW / 1000).toString(16)}`;
   const transport: CircleV2PreflightTransport = async request => {
     calls.push(request);
     if (request.target === "circle") {
@@ -61,7 +63,7 @@ function harness(change?: (response: Record<string, any>, request: any) => void,
 test("validates exact frozen call and simulates it from payer at one Base block", async () => {
   const { transport, calls } = harness();
   const input = await fixture();
-  const result = await inspectCircleV2Preflight(input, transport);
+  const result = await inspectCircleV2Preflight(input, transport, clock);
   assert.equal(result.executionAdmitted, false);
   assert.equal(result.blockNumber, "99");
   assert.equal(result.blockHash, blockHash);
@@ -76,14 +78,14 @@ test("accepts a new Base head while the simulated block remains canonical at its
   const input = await fixture();
   (input.quoteResponse as { expiry: { expiresAtBlock: number } }).expiry.expiresAtBlock = 101;
   const { transport, calls } = harness(v => { v.expiry.expiresAtBlock = 101; }, { headAdvance: true });
-  const result = await inspectCircleV2Preflight(input, transport);
+  const result = await inspectCircleV2Preflight(input, transport, clock);
   assert.equal(result.blockNumber, "99");
   assert.deepEqual(calls[3].params, ["latest", false]);
   assert.deepEqual(calls[4].params, ["0x63", false]);
 });
 test("accepts the SDK's sparse claimable item response", async () => {
   const { transport } = harness(v => { v.items = [{ type: "FORWARD", argsMatch: true }, { type: "PROTOCOL", argsMatch: true }]; });
-  assert.equal((await inspectCircleV2Preflight(await fixture(), transport)).executionAdmitted, false);
+  assert.equal((await inspectCircleV2Preflight(await fixture(), transport, clock)).executionAdmitted, false);
 });
 test("accepts a live-shaped FORWARD-only quote and validation", async () => {
   const input = await fixture();
@@ -92,7 +94,7 @@ test("accepts a live-shaped FORWARD-only quote and validation", async () => {
   const { transport } = harness(v => {
     v.items = [{ ...v.items[0], amount: "20000" }];
   });
-  assert.equal((await inspectCircleV2Preflight(input, transport)).executionAdmitted, false);
+  assert.equal((await inspectCircleV2Preflight(input, transport, clock)).executionAdmitted, false);
 });
 test("fails closed on Circle rejection or mismatched signed fields, items, and arguments", async () => {
   for (const change of [
@@ -103,12 +105,12 @@ test("fails closed on Circle rejection or mismatched signed fields, items, and a
     (v: any) => { v.expiry.expiresAtBlock = 101; },
     (v: any) => { v.items[0].argsMatch = false; },
     (v: any) => { v.items[0].args = ["0xdead"]; },
-  ]) await assert.rejects(inspectCircleV2Preflight(await fixture(), harness(change).transport), { code: "APN_PROVIDER_PROTOCOL" });
+  ]) await assert.rejects(inspectCircleV2Preflight(await fixture(), harness(change).transport, clock), { code: "APN_PROVIDER_PROTOCOL" });
 });
 test("fails closed on unavailable endpoint, RPC error, revert, regressed head, and pinned-block reorg", async () => {
   for (const options of [{ unavailable: true }, { rpcError: true }, { revert: true }, { headRegression: true },
     { sameHeightReorg: true }, { staleTimestamp: true }]) {
-    await assert.rejects(inspectCircleV2Preflight(await fixture(), harness(undefined, options).transport), { code: "APN_PROVIDER_PROTOCOL" });
+    await assert.rejects(inspectCircleV2Preflight(await fixture(), harness(undefined, options).transport, clock), { code: "APN_PROVIDER_PROTOCOL" });
   }
 });
 test("advancing Base head cannot pass a block-number quote expiry", async () => {
@@ -116,11 +118,11 @@ test("advancing Base head cannot pass a block-number quote expiry", async () => 
   const quote = input.quoteResponse as { expiry: { expiresAtBlock: number } };
   quote.expiry.expiresAtBlock = 100;
   const { transport } = harness(undefined, { expiredAtAdvancedHead: true });
-  await assert.rejects(inspectCircleV2Preflight(input, transport), { code: "APN_PROVIDER_PROTOCOL" });
+  await assert.rejects(inspectCircleV2Preflight(input, transport, clock), { code: "APN_PROVIDER_PROTOCOL" });
 });
 test("rejects transaction arguments that differ from the frozen quote", async () => {
   const input = await fixture();
   const tx = input.transaction as { data: string };
   tx.data = tx.data.replace(/^0x[0-9a-fA-F]{8}/u, "0x00000000");
-  await assert.rejects(inspectCircleV2Preflight(input, harness().transport), { code: "APN_PROVIDER_PROTOCOL" });
+  await assert.rejects(inspectCircleV2Preflight(input, harness().transport, clock), { code: "APN_PROVIDER_PROTOCOL" });
 });

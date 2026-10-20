@@ -4,14 +4,16 @@ import { exactChainConsent } from "../tty-approval.js";
 export async function confirmCircleApproval(record) {
     const p = record.preparation, t = p.transaction;
     const phrase = approvalCode("bridge", record.id, p.intentDigest);
-    const lines = ["Agent Payment Node Circle V2 Base USDC approval", `Profile: ${record.profile}`,
+    const revoke = p.approvalCapAtomic === "0";
+    const lines = [revoke ? "Agent Payment Node Circle V2 Base USDC allowance revoke (approve 0)" : "Agent Payment Node Circle V2 Base USDC approval", `Profile: ${record.profile}`,
         `Operation: ${record.id}`, `Base chain: ${t.chainId}`, `Owner: ${t.from}`, `USDC: ${p.token}`,
         `Circle V2 WithFees spender: ${p.spender}`, `Exact allowance cap: ${p.approvalCapAtomic} USDC atomic`,
         `Existing allowance at preparation: ${p.observedAllowanceAtomic} USDC atomic`,
         `Nonce: ${t.nonceAtomic}`, `Gas limit: ${t.gasLimitAtomic}`, `Max fee per gas: ${t.maxFeePerGasWei} wei`,
         `Max priority fee per gas: ${t.maxPriorityFeePerGasWei} wei`,
         `Maximum native debit: ${p.maximumNativeDebitWei} wei`,
-        "This separate approval transaction may cost Base ETH even if no Circle transfer follows.",
+        revoke ? "This transaction sets the wrapper's allowance to 0 and costs Base ETH; a later Circle transfer needs a new approval."
+            : "This separate approval transaction may cost Base ETH even if no Circle transfer follows.",
         "Only this exact signed transaction may be sent once. Recovery observes without resend.",
         `Intent digest: ${p.intentDigest}`, `Expires: ${p.expiresAt}`];
     try {

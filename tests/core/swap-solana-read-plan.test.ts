@@ -24,7 +24,7 @@ test("each Orca keyless and Jupiter command's Solana budget is its read plan plu
     "swap.jupiter.quote", "swap.jupiter.prepare", "swap.jupiter.approve", "swap.jupiter.execute", "swap.jupiter.status"]
     .map((command) => [command, solanaSwapCommandRequests(command)! - SOLANA_SWAP_PLAN_HEADROOM_REQUESTS]));
   assert.deepEqual(plans, { "swap.orca.quote": 9, "swap.orca.prepare": 0, "swap.orca.approve": 13, "swap.orca.execute": 13, "swap.orca.status": 4,
-    "swap.jupiter.quote": 15, "swap.jupiter.prepare": 0, "swap.jupiter.approve": 19, "swap.jupiter.execute": 19, "swap.jupiter.status": 4 });
+    "swap.jupiter.quote": 15, "swap.jupiter.prepare": 0, "swap.jupiter.approve": 20, "swap.jupiter.execute": 20, "swap.jupiter.status": 4 });
   for (const command of ["swap.orca.stable-quote", "swap.uniswap.quote", "solana.transfer"]) assert.equal(solanaSwapCommandRequests(command), null);
 });
 

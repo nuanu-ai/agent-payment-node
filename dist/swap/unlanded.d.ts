@@ -33,7 +33,7 @@ export declare function swapUnlandedProofHash(operation: SwapOperationRecord, pr
  * the signature (when one was ever persisted) has no status with full history. The height is read first: a signature
  * persisted afterwards can only be sent into an expired lifetime. Two reads at most.
  */
-export declare function proveSolanaUnlanded(rpc: Pick<SolanaRpcPort, "call">, input: {
+export declare function proveSolanaUnlanded(rpc: Pick<SolanaRpcPort, "call" | "batch">, input: {
     readonly lastValidBlockHeight: string;
     readonly loadSignature: () => Promise<string | null>;
 }): Promise<SwapUnlandedProof | null>;

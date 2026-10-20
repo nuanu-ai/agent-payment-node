@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
-import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
+import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptEconomics } from "../model.js";
 import { assertOperationProtocolRegistry } from "../family-guards.js";
 import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
@@ -26,7 +26,7 @@ export interface SunSwapTronExecutionDriverDependencies {
   readonly guard: Pick<SunSwapExecutionGuard, "inspect">;
   readonly bindings: Pick<SunSwapExecutionBindingStore, "save" | "load">;
   readonly signing: SunSwapSigningPort;
-  readonly observer: Pick<SunSwapOutcomeObserver, "observeOutcome" | "proveUnlanded">;
+  readonly observer: Pick<SunSwapOutcomeObserver, "observeOutcome" | "proveUnlanded"> & Partial<Pick<SunSwapOutcomeObserver, "receiptEconomics">>;
   readonly clock: ClockPort;
 }
 
@@ -83,6 +83,13 @@ export class SunSwapTronExecutionDriver implements GuardedSwapExecutionDriver {
     // A marker without a completed send attempt is never resumed into signing: the outcome is unknown and only observed.
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation, "unknown_finality", this.d.clock.now());
     return binding === null ? operation : await this.observeExact(operation, material);
+  }
+
+  /** A swap solidified before its economics were recorded: one read of its own solidified record (observe only). */
+  async receiptEconomics(input: GuardedSwapObservationInput): Promise<SwapReceiptEconomics> {
+    const read = this.d.observer.receiptEconomics;
+    if (read === undefined) throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "This SunSwap observer cannot read receipt facts.", { reason: "receipt_facts_unsupported" });
+    return await read.call(this.d.observer, validateSwapOperation(input.operation), validateSunSwapPreparedMaterial(input.material, "stored"));
   }
 
   /** The transaction id and expiration are fixed in the prepared material, signed or not. */

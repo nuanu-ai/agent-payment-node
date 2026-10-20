@@ -20,6 +20,7 @@ export declare class BridgePreparation {
     private readonly o;
     constructor(o: BridgePreparationOptions);
     routes(profileInput: string, requestInput: BridgeRouteRequest): Promise<{
+        no_route?: import("./no-route.js").BridgeNoRouteEvidence;
         quote_hash: string;
         profile: string;
         request: BridgeRouteRequest;

@@ -45,10 +45,12 @@ export function createJupiterV1Runtime(options:JupiterV1RuntimeOptions):GuardedS
  const prior=cached.get(route.routeId);if(prior!==undefined)return prior;
  const builder=new JupiterV1QuoteBuilder(new JupiterV1ReadOnlyProvider(options.providerFetch??jupiterV1HttpsFetch),new JupiterV1MaterialResolver(rpc),materials,{
  resolvePayer:async(profile,amount)=>(await selectedOwner(route,profile,amount,"1")).account.address,
- resolveRouteId:async(profile,amount)=>{await selectedOwner(route,profile,amount,"1");return route.routeId;},
+ // Every current route the active policy admits for this amount: Jupiter's answered pool picks one (it has no pool selector).
+ resolveRouteIds:async(profile,amount)=>{const admitted=(await admission.resolveRoute(profile,amount,"1")).routes;if(!admitted.some(r=>r.routeId===route.routeId))blocked("Jupiter active policy differs from the finite runtime mechanism.");
+  return JUPITER_V1_ROUTES.filter(r=>admitted.some(a=>a.routeId===r.routeId)).map(r=>r.routeId);},
  computeUnitPriceMicroLamports:1000,freezeRpcLifetime:true,
  proveQuote:async(execution,input)=>{
-  const owner=await selectedOwner(route,input.profile,input.amountAtomic,execution.quoteResponse.otherAmountThreshold,input.account);
+  const owner=await selectedOwner(routeConfigForMaterial(execution),input.profile,input.amountAtomic,execution.quoteResponse.otherAmountThreshold,input.account);
   if(owner.account.address!==execution.payer||input.recipient!==execution.payer||input.slippageBps>input.ownerSlippageCapBps)blocked("Jupiter V1 admits only the owned payer as recipient within the owner slippage cap.");
   return await proveJupiterV1Quote(rpc,execution,{profile:input.profile,account:input.account,recipient:input.recipient,
    amountAtomic:input.amountAtomic,slippageBps:input.slippageBps,now:input.now},new Date(input.now.getTime()+90000).toISOString());
@@ -82,7 +84,7 @@ export function createJupiterV1Runtime(options:JupiterV1RuntimeOptions):GuardedS
     inputAmountAtomic:operation.quote.inputAmountAtomic,expectedOutputAtomic:operation.quote.expectedOutputAtomic,minimumOutputAtomic:operation.quote.minimumOutputAtomic,
     slippageBps:operation.quote.slippageBps,gasOrEnergy:material.gasOrEnergy,deadline:operation.quote.expiresAt,quoteHash:operation.quote.quoteHash,
     policyDigest:operation.policyDigest,mechanismDigest:operation.mechanismDigest,protocolRegistryDigest:operation.protocolRegistryDigest});
-   const answer=await native.approve(operation,material,owner);
+   const answer=await native.approve(operation,material,owner,proved.fresh);
    const fresh=await required(operationId);if(fresh.integrityHash!==operation.integrityHash)blocked("Jupiter operation changed during approval.");
    const freshOwner=await admission.assert(fresh,material);if(canonicalJson(owner)!==canonicalJson(freshOwner))blocked("Jupiter owner admission changed during approval.");
    const artifact=validateGuardedSwapApprovalArtifact(answer,fresh,intent,clock.now());

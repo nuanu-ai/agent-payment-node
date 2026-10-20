@@ -3,6 +3,7 @@ import { getBase58Encoder } from "@solana/kit";
 import { decodeFunctionData, encodeFunctionData, getAddress, parseAbi } from "viem";
 import { associatedUsdc } from "../solana/accounts.js";
 import { bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRIDGE_ZERO_WORD } from "./validation.js";
+import { circleV2FeeWithinBudget } from "./circle-v2-budget.js";
 // Circle: /cctp/references/contract-addresses and /cctp/references/contract-interfaces.
 const WITH_FEES = getAddress("0x71f54F818671cD0D7ea140Da213e5C8b5C92a408");
 const BASE_USDC = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
@@ -53,8 +54,6 @@ export async function inspectCircleV2UpfrontOffline(input) {
     if (signedQuote === "0x")
         fail("missing_signed_quote");
     const fee = uint(response.feeTotalAmount);
-    if (fee > maxFee || fee >= amount)
-        fail("fee_ceiling");
     // Iris may return only FORWARD, or append a PROTOCOL item. Both must be priced in the total.
     if (!Array.isArray(response.items) || (response.items.length !== 1 && response.items.length !== 2))
         fail("fee_items");
@@ -129,6 +128,9 @@ export async function inspectCircleV2UpfrontOffline(input) {
     catch {
         return fail("noncanonical_calldata");
     }
+    // Only a quote and burn that passed every check above can be over budget: that refusal is economic and carries its
+    // numbers; anything malformed was refused as a protocol fault first.
+    circleV2FeeWithinBudget("circle_v2_upfront_fee_ceiling", fee, amount, maxFee);
     return { kind: "offline_circle_v2_upfront_quote_inspection", executionAdmitted: false, sourceDomain: 6,
         destinationDomain: 5, wrapper: WITH_FEES, recipientAta, amountAtomic: amount.toString(),
         quotedFeeAtomic: fee.toString(), expiry: expiryProof, recipientSetup: input.recipientSetup,

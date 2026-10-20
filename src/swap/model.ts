@@ -21,7 +21,25 @@ export interface SwapSubmissionMarker {
   readonly operationIntegrityHash: string;
   readonly unsignedTransactionPayloadHash: string;
 }
-export interface SwapReceiptProof { readonly receiptHash: string; readonly transactionHash: string; readonly observedAt: string; readonly finalized: boolean }
+/**
+ * What the finalized transaction itself moved and paid, read from its own receipt by each family's observer (absent on
+ * proofs written before APN recorded it). Amounts are atomic units: input in the source asset, output in the destination asset,
+ * fee and native debit in the chain's native coin (wei, SUN, lamports). The quote keeps its expected and minimum output.
+ */
+export interface SwapReceiptEconomics {
+  /** Source asset that left the account in this transaction; "0" when it reverted. */
+  readonly inputAtomic: string;
+  /** Destination asset credited to the recipient; null when the transaction reverted. */
+  readonly outputAtomic: string | null;
+  /** What the chain charged; null when a fee component is not in the receipt (never estimated). */
+  readonly networkFeeAtomic: string | null;
+  /** The account's native-coin decrease caused by this transaction; null with an incomplete fee. */
+  readonly nativeDebitAtomic: string | null;
+  /** Solana: rent this transaction deposited into new token accounts of the owner (recoverable on close). */
+  readonly accountRentAtomic?: string;
+}
+export interface SwapReceiptProof { readonly receiptHash: string; readonly transactionHash: string; readonly observedAt: string; readonly finalized: boolean;
+  readonly economics?: SwapReceiptEconomics }
 export interface SwapOperationRecord {
   readonly schemaVersion: typeof SWAP_OPERATION_SCHEMA;
   readonly operationId: string;
@@ -126,6 +144,9 @@ function validateStateBindings(op: SwapOperationRecord): void {
   }
   if (op.receiptProof !== null && !["submitted", "unknown_finality", "finalized", "failed_confirmed_revert"].includes(op.state)) corrupt("Swap receipt proof phase is invalid.");
   if (op.state === "finalized" && (op.receiptProof === null || !op.receiptProof.finalized)) corrupt("Finalized swap lacks final receipt proof.");
+  const economics = op.receiptProof?.economics;
+  if (economics !== undefined && (op.state === "finalized" ? economics.outputAtomic === null :
+    op.state !== "failed_confirmed_revert" || economics.outputAtomic !== null || economics.inputAtomic !== "0")) corrupt("Swap receipt economics contradict the swap outcome.");
   if (op.failureProofHash !== null) hash(op.failureProofHash, "stored");
   const failed = op.state === "failed_before_effect" || op.state === "failed_confirmed_revert" || op.state === "expired_unlanded" ||
     op.state === "abandoned_unknown";
@@ -142,9 +163,9 @@ function validateStateBindings(op: SwapOperationRecord): void {
 export function validateSwapReceiptProof(value: unknown, chain: string, earliestAt: string, latestAt: string,
   mode: "input" | "stored" = "input"): SwapReceiptProof {
   const fail = (message: string): never => failure(mode, message);
-  if (!isPlainRecord(value) || !exactKeys(value, ["receiptHash", "transactionHash", "observedAt", "finalized"]) ||
+  if (!isPlainRecord(value) || !exactKeys(value, ["receiptHash", "transactionHash", "observedAt", "finalized", ...(value.economics === undefined ? [] : ["economics"])]) ||
       typeof value.finalized !== "boolean" || typeof value.transactionHash !== "string" || value.transactionHash.length < 8 ||
-      value.transactionHash.length > 256) fail("Swap receipt proof is invalid.");
+      value.transactionHash.length > 256 || (value.economics !== undefined && (!value.finalized || !validSwapEconomics(value.economics)))) fail("Swap receipt proof is invalid.");
   const record = value as Record<string, unknown>;
   hash(record.receiptHash, mode); const observedAt = date(record.observedAt, mode);
   if (observedAt < earliestAt || observedAt > latestAt) fail("Swap receipt proof time binding is invalid.");
@@ -153,6 +174,13 @@ export function validateSwapReceiptProof(value: unknown, chain: string, earliest
   if (/^tron:/u.test(chain) && !/^[a-fA-F0-9]{64}$/u.test(transactionHash)) fail("Swap TRON transaction hash is invalid.");
   if (/^solana:/u.test(chain) && !/^[1-9A-HJ-NP-Za-km-z]{64,128}$/u.test(transactionHash)) fail("Swap Solana transaction signature is invalid.");
   return value as unknown as SwapReceiptProof;
+}
+export function validSwapEconomics(value: unknown): value is SwapReceiptEconomics {
+  const atomic = (x: unknown) => typeof x === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(x);
+  return isPlainRecord(value) && exactKeys(value, ["inputAtomic", "outputAtomic", "networkFeeAtomic", "nativeDebitAtomic",
+    ...(value.accountRentAtomic === undefined ? [] : ["accountRentAtomic"])]) && atomic(value.inputAtomic) &&
+    (value.outputAtomic === null || atomic(value.outputAtomic)) && (value.networkFeeAtomic === null ? value.nativeDebitAtomic === null :
+      atomic(value.networkFeeAtomic) && atomic(value.nativeDebitAtomic)) && (value.accountRentAtomic === undefined || atomic(value.accountRentAtomic));
 }
 function approval(value: unknown, input: string, mode: "input" | "stored"): string {
   try { if (typeof value !== "string") throw new Error(); const amount = parseAtomic(value); const maximum = BigInt(input);

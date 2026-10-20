@@ -28,7 +28,7 @@ export declare const CIRCLE_MINT_CLOSED_EXTERNAL_USE = "mint_closed_issuer_messa
 /** `externalMint` is what this command learned about a mint someone else relayed. Not found by the bounded scan, the next
  * action is the explicit adoption of a transaction the operator names; found or waiting for finality, observe again. */
 export declare function publicCircleFundingOperation(op: CircleFundingOperationV2, externalMint?: CircleExternalMintNotice | null): {
-    next_actions: string[];
+    next_actions: readonly string[];
     external_mint?: CircleExternalMintNotice;
     external_fulfillment?: CircleFundingExternalFulfillment;
     proof_class?: string;
@@ -45,6 +45,25 @@ export declare function publicCircleFundingOperation(op: CircleFundingOperationV
     minimum_output_atomic: string;
     maximum_issuer_fee_atomic: string;
     recipient: `0x${string}`;
+    actual_economics: {
+        asset: {
+            symbol: string;
+            decimals: number;
+            source_chain: string;
+            source_token: `0x${string}`;
+            destination_chain: string;
+            destination_token: `0x${string}`;
+        };
+        actual_source_gross_atomic: string | null;
+        source_burn_transaction_hash: `0x${string}` | null;
+        source_burn_finality: "safe" | "included" | "finalized" | null;
+        actual_destination_net_atomic: string | null;
+        actual_issuer_fee_atomic: string | null;
+        destination_mint: "external" | "owned" | null;
+        destination_mint_transaction_hash: `0x${string}` | null;
+        destination_mint_finality: "safe" | "included" | "finalized" | null;
+    };
+    source_signing_expires_at: string;
     effects: {
         role: CircleRole;
         phase: import("./operation-model.js").CircleEffectPhase;
@@ -79,6 +98,24 @@ export declare function publicKnownCircle(op: CircleKnownOperation): {
     destination_chain: CircleDestinationChain;
     amount_atomic: string;
     minimum_output_atomic: string;
+    actual_economics: {
+        asset: {
+            symbol: string;
+            decimals: number;
+            source_chain: string;
+            source_token: `0x${string}`;
+            destination_chain: string;
+            destination_token: `0x${string}`;
+        };
+        actual_source_gross_atomic: string | null;
+        source_burn_transaction_hash: `0x${string}` | null;
+        source_burn_finality: "safe" | "included" | "finalized" | null;
+        actual_destination_net_atomic: string | null;
+        actual_issuer_fee_atomic: string | null;
+        destination_mint: "external" | "owned" | null;
+        destination_mint_transaction_hash: `0x${string}` | null;
+        destination_mint_finality: "safe" | "included" | "finalized" | null;
+    };
     effects: {
         role: CircleRole;
         phase: import("./operation-model.js").CircleEffectPhase;
@@ -92,7 +129,7 @@ export declare function publicKnownCircle(op: CircleKnownOperation): {
     usage_finalized: boolean;
     integrity_hash: string;
 } | {
-    next_actions: string[];
+    next_actions: readonly string[];
     external_mint?: CircleExternalMintNotice;
     external_fulfillment?: CircleFundingExternalFulfillment;
     proof_class?: string;
@@ -109,6 +146,25 @@ export declare function publicKnownCircle(op: CircleKnownOperation): {
     minimum_output_atomic: string;
     maximum_issuer_fee_atomic: string;
     recipient: `0x${string}`;
+    actual_economics: {
+        asset: {
+            symbol: string;
+            decimals: number;
+            source_chain: string;
+            source_token: `0x${string}`;
+            destination_chain: string;
+            destination_token: `0x${string}`;
+        };
+        actual_source_gross_atomic: string | null;
+        source_burn_transaction_hash: `0x${string}` | null;
+        source_burn_finality: "safe" | "included" | "finalized" | null;
+        actual_destination_net_atomic: string | null;
+        actual_issuer_fee_atomic: string | null;
+        destination_mint: "external" | "owned" | null;
+        destination_mint_transaction_hash: `0x${string}` | null;
+        destination_mint_finality: "safe" | "included" | "finalized" | null;
+    };
+    source_signing_expires_at: string;
     effects: {
         role: CircleRole;
         phase: import("./operation-model.js").CircleEffectPhase;

@@ -21,7 +21,7 @@ import { block, fundingExternalFixture } from "./circle-funding-external-fixture
 const LAYOUT = { mintBlock: 10_015, head: 20_000, timeBase: 1_899_990_000, expiry: 100_000n };
 type Fixture = Awaited<ReturnType<typeof fundingExternalFixture>>;
 interface Notice { status: string; destination_chain: number; transmitter: string; message_nonce: string; transaction_hash: string | null; scan: { from_block: string; to_block: string; head_block: string; log_window_blocks: number; log_requests: number; header_requests: number } | null; }
-interface Out { state: string; terminal: boolean; next_actions: string[]; external_mint?: Notice; effects: { role: string; phase: string; transaction_hash: string | null }[]; }
+interface Out { state: string; terminal: boolean; next_actions: string[]; external_mint?: Notice; actual_economics?: Record<string, unknown>; effects: { role: string; phase: string; transaction_hash: string | null }[]; }
 const cli = (f: Fixture, action: string, extra: string[] = []) => runCli(["circle", "evm", action, "--operation", f.op.operationId, ...extra], {}, { stateRoot: f.root, circleFundingEvm: f.service, wrappingSecret: f.secret });
 async function fixture(t: test.TestContext, layout: Partial<typeof LAYOUT> = {}) { const f = await fundingExternalFixture(false, 71n, { ...LAYOUT, ...layout }); t.after(() => rm(f.root, { recursive: true, force: true })); return f; }
 async function journal(f: Fixture): Promise<CircleFundingOperationV2> { const op = await f.repo.loadAny(f.op.operationId); assert.ok(op?.schemaVersion === "apn.circle-v2-evm-operation.v2"); return validateCircleFundingOperation(op); }
@@ -31,6 +31,9 @@ async function adopted(f: Fixture, out: Out) {
   assert.equal(out.state, "external_fulfilled"); assert.equal(out.terminal, true); assert.deepEqual(out.next_actions, []);
   assert.equal(out.external_mint?.status, "adopted"); assert.equal(out.external_mint?.transaction_hash, f.txHash);
   const done = await journal(f); assert.equal(done.externalFulfillment!.destinationReceipt.transactionHash, f.txHash); assert.equal(done.externalFulfillment!.netAtomic, "509929");
+  // An external mint reports the same actual economics an owned one does, from the adopted proof.
+  assert.equal(out.actual_economics?.destination_mint, "external"); assert.equal(out.actual_economics?.actual_destination_net_atomic, "509929");
+  assert.equal(out.actual_economics?.actual_issuer_fee_atomic, done.externalFulfillment!.issuerFeeAtomic); assert.equal(out.actual_economics?.destination_mint_transaction_hash, f.txHash);
   assert.deepEqual(await holds(f), ["finalized", "finalized", "finalized", "released_unsubmitted", "released_unsubmitted"]); return done;
 }
 /** An owned mint signed at the gas payer's nonce 3 whose broadcast answer was lost: the node knows neither its hash nor a receipt. */
@@ -106,9 +109,10 @@ test("a relayed mint the destination SAFE head has not reached stays found; the 
   lagging.mock.restore(); const second = await cli(f, "observe"); assert.equal(second.ok, true, JSON.stringify(second)); await adopted(f, second.operation as Out); noEffects(f);
 });
 
-test("an unused issuer message is not scanned: observe leaves the awaiting mint as it is", async t => {
+test("an unused issuer message is not scanned: observe leaves the awaiting mint as it is and names approve-mint", async t => {
   const f = await fixture(t); f.chain.usedNonce = 0n;
   const result = await cli(f, "observe"); assert.equal(result.ok, true, JSON.stringify(result)); const out = result.operation as Out;
-  assert.equal(out.state, "awaiting_mint"); assert.equal(out.external_mint, undefined); assert.deepEqual(out.next_actions, [`apn circle evm observe --operation ${f.op.operationId}`]);
+  // QA 0.5.51 CIRCLE-NEXT-ACTION-001: a verified burn and attestation wait for the owner's mint, not for another observe.
+  assert.equal(out.state, "awaiting_mint"); assert.equal(out.external_mint, undefined); assert.deepEqual(out.next_actions, [`apn circle evm approve-mint --operation ${f.op.operationId}`]);
   assert.ok(!f.calls.includes("eth_getLogs")); assert.equal((await journal(f)).integrityHash, f.op.integrityHash); noEffects(f);
 });

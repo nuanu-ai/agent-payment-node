@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { evmRpcBlock, evmRpcHex, evmRpcQuantity } from "../evm-rpc-codec.js";
-import { rpcArray, rpcAtomic, rpcRecord, solanaSignature } from "../solana/rpc.js";
+import { readSolanaBlockHeight, rpcArray, rpcAtomic, rpcRecord, solanaSignature } from "../solana/rpc.js";
 export const SWAP_UNLANDED_PROOF_SCHEMA = "apn.swap-expired-unlanded-proof.v1";
 const UINT = /^(?:0|[1-9][0-9]{0,77})$/u;
 export function validateSwapUnlandedProof(value, chain) {
@@ -45,7 +45,8 @@ export function swapUnlandedProofHash(operation, proof) {
  */
 export async function proveSolanaUnlanded(rpc, input) {
     const lastValid = BigInt(input.lastValidBlockHeight);
-    const finalized = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "finalized" }]));
+    // Checked against the finalized latest blockhash read in the same request: a slot answered as a height is refused.
+    const finalized = await readSolanaBlockHeight(rpc, "finalized");
     if (finalized <= lastValid)
         return null;
     const signature = await input.loadSignature();

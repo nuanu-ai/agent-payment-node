@@ -2,7 +2,8 @@ import { type AssetPolicyRegistry } from "../asset-policy-registry.js";
 import type { AssetUsageLedger } from "../asset-usage-ledger.js";
 import type { ClockPort } from "../ports.js";
 import { SecureStateStore } from "../secure-state-store.js";
-import { type SwapOperationRecord } from "./model.js";
+import { type SwapOperationRecord, type SwapReceiptEconomics } from "./model.js";
+import { type SwapActualEconomicsView } from "./receipt-facts.js";
 import { type SwapProtocolRegistry } from "./protocol-registry.js";
 import { type SwapQuoteInput, type SwapQuoteSnapshot } from "./quote.js";
 import { SwapOperationRepository } from "./repository.js";
@@ -69,6 +70,8 @@ export interface GuardedSwapExecutionDriver {
      * deadline or expiration at finality, and no inclusion of any persisted transaction). Null while unproven.
      */
     proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
+    /** Observe only: one read of a finalized swap's own transaction for the economics its record did not keep. */
+    receiptEconomics?(input: GuardedSwapObservationInput): Promise<SwapReceiptEconomics>;
 }
 export interface GuardedSwapExecutionInput {
     readonly operation: SwapOperationRecord;
@@ -130,6 +133,8 @@ export declare class GuardedSwapRuntime<Request> {
     approveAndExecute(operationId: string, now: Date): Promise<SwapOperationRecord>;
     execute(operationId: string, now: Date): Promise<SwapOperationRecord>;
     status(operationId: string, now: Date): Promise<SwapOperationRecord>;
+    /** Beside a status: the record's economics from its proof, its receipt-facts sidecar, or one read of its own transaction. */
+    actualEconomics(record: SwapOperationRecord): Promise<SwapActualEconomicsView>;
     /**
      * Pre-prompt checks refuse before the human is asked; after the prompt exactly one re-check runs: the stored operation
      * and runtime caps still match the consent binding, the owner still controls the account and the active policy still

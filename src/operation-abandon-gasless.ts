@@ -9,7 +9,7 @@ import type { GaslessService } from "./gasless/service.js";
 import { transitionGasless } from "./gasless/transitions.js";
 import { mmDispatchIntent } from "./metamask-gasless/dispatch.js";
 import { mmActualGross } from "./metamask-gasless/economics.js";
-import { publicMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt.js";
+import { liveMetaMaskGaslessOperation } from "./metamask-gasless/journal/receipt.js";
 import { advanceMetaMaskGaslessOperation } from "./metamask-gasless/journal/transitions.js";
 import type { MetaMaskGaslessOperationRecord } from "./metamask-gasless/operation-model.js";
 import { mmFailure } from "./metamask-gasless/reasons.js";
@@ -48,12 +48,12 @@ export async function abandonLocalGasless(d: Base & { readonly gasless: GaslessS
 /** Owner release of a MetaMask gasless relay whose outcome stayed unknown after its approval window. */
 export async function abandonMetaMaskGasless(d: Base & { readonly metaMaskGasless: MetaMaskGaslessService }, operationId: string): Promise<unknown> {
   const initial = await metaMaskRecord(d, operationId);
-  if (initial.state === "abandoned_unknown" && initial.terminal) return publicMetaMaskGaslessOperation(initial);
+  if (initial.state === "abandoned_unknown" && initial.terminal) return liveMetaMaskGaslessOperation(initial);
   assertEligible(d, initial.terminal, initial.state, initial.settlement !== null, initial.intent.expiresAt);
   await d.metaMaskGasless.resume(operationId).catch(() => undefined);
   return await d.context.state.withLocks([`profile:${initial.profileHash}`, `operation:${operationId}`], async () => {
     const op = await metaMaskRecord(d, operationId);
-    if (op.terminal) return publicMetaMaskGaslessOperation(op);
+    if (op.terminal) return liveMetaMaskGaslessOperation(op);
     assertEligible(d, op.terminal, op.state, op.settlement !== null, op.intent.expiresAt);
     // The amount is the gross of the batch actually dispatched; a fixed-net request also shows the approved ceiling.
     const i = op.intent, dispatched = mmActualGross(mmDispatchIntent(op).quote);
@@ -66,7 +66,7 @@ export async function abandonMetaMaskGasless(d: Base & { readonly metaMaskGasles
     const next = advanceMetaMaskGaslessOperation(op, { state: "abandoned_unknown", failure: mmFailure("mm_gasless_owner_abandoned") },
       d.context.clock.now().toISOString());
     await d.metaMaskGasless.records.persist(next);
-    return publicMetaMaskGaslessOperation(next);
+    return liveMetaMaskGaslessOperation(next);
   });
 }
 

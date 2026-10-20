@@ -34,7 +34,7 @@ export declare class CircleFundingEvmService {
     adoptExternalMint(id: string, transactionHash: Hex): Promise<CircleFundingOperationV2>;
     prepare(input: CircleFundingPrepareInput): Promise<CircleFundingOperationV2>;
     status(id: string): Promise<{
-        next_actions: string[];
+        next_actions: readonly string[];
         external_mint?: CircleExternalMintNotice;
         external_fulfillment?: import("./funding-external-proof.js").CircleFundingExternalFulfillment;
         proof_class?: string;
@@ -51,6 +51,25 @@ export declare class CircleFundingEvmService {
         minimum_output_atomic: string;
         maximum_issuer_fee_atomic: string;
         recipient: `0x${string}`;
+        actual_economics: {
+            asset: {
+                symbol: string;
+                decimals: number;
+                source_chain: string;
+                source_token: `0x${string}`;
+                destination_chain: string;
+                destination_token: `0x${string}`;
+            };
+            actual_source_gross_atomic: string | null;
+            source_burn_transaction_hash: `0x${string}` | null;
+            source_burn_finality: "safe" | "included" | "finalized" | null;
+            actual_destination_net_atomic: string | null;
+            actual_issuer_fee_atomic: string | null;
+            destination_mint: "external" | "owned" | null;
+            destination_mint_transaction_hash: `0x${string}` | null;
+            destination_mint_finality: "safe" | "included" | "finalized" | null;
+        };
+        source_signing_expires_at: string;
         effects: {
             role: import("./operation-model.js").CircleRole;
             phase: import("./operation-model.js").CircleEffectPhase;

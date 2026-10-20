@@ -5,6 +5,11 @@ export declare const MM_OPERATION_VERSION: "apn.metamask-gasless-operation.v1";
 export declare const MM_OPERATION_KIND: "metamask_gasless_transfer";
 export declare const MM_RECEIPT_VERSION: "apn.metamask-gasless-receipt.v1";
 export declare const MM_TERMINAL: readonly MetaMaskGaslessState[];
+/**
+ * The owner's abandonment is an acknowledgement, not an outcome: a later chain proof (the redemption, or its disabled
+ * delegation never redeemed) still replaces it. No other terminal state moves.
+ */
+export declare const MM_PROVED_AFTER_ABANDON: readonly MetaMaskGaslessState[];
 export declare const MM_HISTORY_LIMIT = 96;
 /**
  * Nonterminal transitions stop one short of the limit, so the final slot is always free for the one terminal
@@ -87,7 +92,7 @@ export interface MetaMaskGaslessPublicOperation {
         readonly designation_persists: true;
         readonly delegation_hash: Hex;
         readonly signing_digest: Hex;
-        readonly one_use_status: "not_dispatched" | "possibly_live" | "consumed";
+        readonly one_use_status: "not_dispatched" | "possibly_live" | "consumed" | "disabled_unused";
         readonly onchain_expiry: false;
         readonly guard_held: boolean;
     };

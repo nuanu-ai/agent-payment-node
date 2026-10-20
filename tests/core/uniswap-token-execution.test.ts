@@ -21,12 +21,13 @@ async function fixture(root: string, allowance = "0") {
     maximumNativeDebitWei: "600000", policyDigest: domainHash("p", "p"), mechanismDigest: domainHash("m", "m"), now: NOW }));
   const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance, currentNow = NOW,
     sendResult: "accepted" | "ambiguous" = "accepted", revalidations = 0, rejectRevalidation = false, guardError: unknown = null, rejectSeal = false,
-    currentUsageState: AssetUsageState = "reserved", capacityCalls = 0, rejectCapacityAt = 0, failReleaseOnce = false;
+    currentUsageState: AssetUsageState = "reserved", capacityCalls = 0, rejectCapacityAt = 0, failReleaseOnce = false, custodySigned = false;
   const released: string[] = [], committed: string[] = [], foregroundCalls: string[] = [];
   const ports = { now: () => currentNow, foregroundApprove: async () => { foregroundCalls.push("approve"); },
     foregroundCleanup: async () => { foregroundCalls.push("cleanup"); },
     withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(), allocateNonce: async () => String(7 + sends.length),
-    releaseNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { released.push(`${kind}:${nonce}`); },
+    releaseNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { if (custodySigned) { committed.push(`${kind}:${nonce}`); return false; }
+      released.push(`${kind}:${nonce}`); return true; },
     commitNonce: async (_op: unknown, kind: TokenEffectKind, nonce: string) => { committed.push(`${kind}:${nonce}`); },
     currentAllowance: async () => currentAllowance, guard: async () => { if (guardError !== null) throw guardError; }, revalidate: async () => { revalidations += 1; if (rejectRevalidation) throw new Error("drift"); },
     reserveSendCapacity: () => { capacityCalls += 1; if (capacityCalls === rejectCapacityAt) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "Physical cap reached."); },
@@ -43,7 +44,9 @@ async function fixture(root: string, allowance = "0") {
     rejectRevalidation: () => { rejectRevalidation = true; }, rejectGuard: (error: unknown = new Error("refused")) => { guardError = error; },
     rejectSeal: () => { rejectSeal = true; }, usageState: (state: AssetUsageState) => { currentUsageState = state; }, released, committed, foregroundCalls,
     revalidations: () => revalidations, rejectCapacityOn: (call: number) => { rejectCapacityAt = call; },
-    now: (value: Date) => { currentNow = value; }, failNextRelease: () => { failReleaseOnce = true; } };
+    now: (value: Date) => { currentNow = value; }, failNextRelease: () => { failReleaseOnce = true; },
+    /** Custody holds signed bytes the record has no hash for (a crash between wallet save and the public marker). */
+    custodySigned: () => { custodySigned = true; } };
 }
 test("expired quote retires a canonical safe approval and releases principal without sending a swap", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
@@ -157,7 +160,7 @@ test("ambiguous approval and swap are never resent after restart", async (t) => 
   const restarted = new UniswapTokenExecution(new UniswapTokenJournal(temp.root), { now: () => NOW, foregroundApprove: async () => undefined,
     foregroundCleanup: async () => undefined, withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(),
     allocateNonce: async () => "99", currentAllowance: async () => "0", guard: async () => undefined, revalidate: async () => undefined,
-    releaseNonce: async () => undefined, commitNonce: async () => undefined,
+    releaseNonce: async () => true, commitNonce: async () => undefined,
     reserveUsage: async () => ({ reservationId: "d".repeat(64), state: "reserved" as const }),
     currentUsage: async (current) => ({ reservationId: current.usageReservationId!, state: current.usageState! }),
     followUsage: async (_current, target) => ({ reservationId: "d".repeat(64), state: target }),
@@ -181,7 +184,7 @@ test("restart never signs an attempt whose reusable nonce was reassigned", async
   const released: string[] = []; let allocations = 0, signs = 0, sends = 0;
   const restarted = new UniswapTokenExecution(new UniswapTokenJournal(temp.root), { now: () => NOW, foregroundApprove: async () => undefined,
     foregroundCleanup: async () => undefined, withAccountLock: async <T>(_op: unknown, work: () => Promise<T>) => await work(),
-    allocateNonce: async () => { allocations++; return "8"; }, releaseNonce: async (_op, kind, nonce) => { released.push(`${kind}:${nonce}`); }, commitNonce: async () => undefined,
+    allocateNonce: async () => { allocations++; return "8"; }, releaseNonce: async (_op, kind, nonce) => { released.push(`${kind}:${nonce}`); return true; }, commitNonce: async () => undefined,
     currentAllowance: async () => "0", guard: async () => undefined, revalidate: async () => undefined, reserveUsage: async () => usage,
     currentUsage: async () => usage, followUsage: async () => usage, seal: async () => { signs++; throw new Error("must not sign"); }, probeSealed: async () => null,
     send: async () => { sends++; throw new Error("must not send"); }, observe: async () => null });
@@ -232,7 +235,7 @@ test("post-approval revalidation drift durably requires explicit cleanup and nev
   op = await f.runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.deepEqual(f.sends, ["approval", "cleanup"]);
 });
 test("zero allowance cannot release a hashless marked attempt without public evidence", async (t) => {
-  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard();
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard(); f.custodySigned();
   const op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.approvalAttempt?.transactionHash, null);
   await assert.rejects(f.runtime.cleanup(op.operationId), (e: any) => e.details?.reason === "uniswap_token_public_effect_missing");
   const saved = await f.journal.load(op.operationId); assert.equal(saved?.integrityHash, op.integrityHash);
@@ -249,7 +252,7 @@ test("zero allowance after a landed approval closes the swap without claiming no
   assert.deepEqual(f.sends, ["approval"]);
 });
 test("legacy terminal usage cannot prove no effect for a hashless marked attempt", async (t) => {
-  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard();
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard(); f.custodySigned();
   const op = await f.runtime.approve(f.operation.operationId); assert.equal(op.phase, "cleanup_required"); f.usageState("failed_before_effect"); f.allowance("999999");
   await assert.rejects(f.runtime.status(op.operationId), (e: any) => e.details?.reason === "uniswap_token_public_effect_missing");
   const saved = await f.journal.load(op.operationId); assert.equal(saved?.phase, "cleanup_required"); assert.equal(saved?.usageState, "failed_before_effect");
