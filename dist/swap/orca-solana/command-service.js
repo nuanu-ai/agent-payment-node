@@ -7,7 +7,7 @@ import { isOrcaTokenPlan } from "./instructions.js";
 import { SavedOrcaQuoteStore } from "./material.js";
 import { ATA_PROGRAM, COMPUTE_BUDGET_PROGRAM, ORCA_PROGRAM_AUTHORITIES, ORCA_SOLANA_CHAIN, SYSTEM_PROGRAM, TOKEN_PROGRAM, WHIRLPOOL_PROGRAM, WHIRLPOOLS_CONFIG } from "./pins.js";
 import { ORCA_POOL_IDS, ORCA_POOLS, orcaPoolOfMechanism } from "./pools.js";
-import { swapActualEconomics } from "../receipt-facts.js";
+import { swapActualEconomics, swapStatusReceipt } from "../receipt-facts.js";
 /** Inventory is the owner's source for each pool's keyless pin, route and digest; nothing here admits or signs anything. */
 export function orcaInventory(runtimeInstalled) {
     return { chain: ORCA_SOLANA_CHAIN, ownerAdmission: SWAP_INVENTORY_OWNER_ADMISSION, execution: runtimeInstalled ? "foreground_cli_after_owner_admission" : "dormant",
@@ -62,12 +62,12 @@ export async function executeOrcaCommand(request, context) {
                     `apn swap solana orca ${operation.submissionMarker === null ? "stable-release" : "stable-observe"} --operation ${operation.operationId}`] } : {}) });
     }
     if (request.command === "swap.orca.status" && runtime === undefined)
-        return { proofClass: operation.state, data: null, receipt: null, nextActions: [],
-            operation: { ...operation, ...await swapActualEconomics(context.state.root, operation, undefined, context.clock.now()) } };
+        return { proofClass: operation.state, data: null, operation, nextActions: [],
+            receipt: await swapStatusReceipt(operation, async () => await swapActualEconomics(context.state.root, operation, undefined, context.clock.now())) };
     const pooled = installed(runtime)(pool);
     if (request.command === "swap.orca.status") {
         const current = await pooled.status(request.operationId, context.clock.now());
-        return operationOutcome({ ...current, ...await pooled.actualEconomics(current) });
+        return { ...operationOutcome(current), receipt: await swapStatusReceipt(current, async () => await pooled.actualEconomics(current)) };
     }
     // Foreground CLI: the typed approval code and the single send are one command, like the Uniswap path.
     if (request.command === "swap.orca.approve")

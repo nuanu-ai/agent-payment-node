@@ -6,7 +6,7 @@ import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "..
 import { SwapOperationRepository } from "../repository.js";
 import { SUNSWAP_PINNED_CONTRACTS, SUNSWAP_V2_CODE_HASHES, loadSunSwapPinCatalog } from "./catalog.js";
 import { SUNSWAP_V2_KEYLESS_MECHANISM_PIN, SUNSWAP_V2_KEYLESS_PROTOCOL_REGISTRY } from "./mechanism.js";
-import { swapActualEconomics } from "../receipt-facts.js";
+import { swapActualEconomics, swapStatusReceipt } from "../receipt-facts.js";
 
 type Request = Extract<CommandRequest, { readonly command: `swap.sunswap.${string}` }>;
 export async function executeSunSwapCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
@@ -45,12 +45,12 @@ export async function executeSunSwapCommand(request: Request, context: RuntimeCo
 async function status(operationId: string, context: RuntimeContext): Promise<CommandOutcome> {
   const operation = await new SwapOperationRepository(context.state.root).loadAny(operationId);
   if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
-  return { proofClass: operation.state, data: null, receipt: null, nextActions: [],
-    operation: { ...operation, ...await swapActualEconomics(context.state.root, operation, undefined, context.clock.now()) } };
+  return { proofClass: operation.state, data: null, operation, nextActions: [],
+    receipt: await swapStatusReceipt(operation, async () => await swapActualEconomics(context.state.root, operation, undefined, context.clock.now())) };
 }
 /** A status beside its record: the swap's actual economics, or the named refusal of the one read that would prove them. */
 async function withEconomics(value: Awaited<ReturnType<NonNullable<RuntimeContext["sunswapRuntime"]>["status"]>>, context: RuntimeContext): Promise<CommandOutcome> {
-  return operation({ ...value, ...await context.sunswapRuntime!.actualEconomics(value) });
+  return { ...operation(value), receipt: await swapStatusReceipt(value, async () => await context.sunswapRuntime!.actualEconomics(value)) };
 }
 function data(value: unknown, proofClass: string): CommandOutcome {
   return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };

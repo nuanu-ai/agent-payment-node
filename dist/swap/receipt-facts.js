@@ -58,6 +58,13 @@ function validateFacts(value, record) {
     assertSwapEconomicsOutcome(record, facts.economics);
     return facts;
 }
+/**
+ * The status envelope's receipt slot for a swap (the record itself stays exactly as sealed in the operation slot): null
+ * before an outcome, otherwise what its finalized transaction moved and paid, or why that could not be read.
+ */
+export async function swapStatusReceipt(record, view) {
+    return PROVEN.includes(record.state) ? await view() : null;
+}
 /** The record's own economics, its facts sidecar, or one read now; never a failure of the status it serves. */
 export async function swapActualEconomics(root, record, read, now) {
     if (record.receiptProof?.economics !== undefined)

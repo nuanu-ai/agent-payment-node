@@ -11,7 +11,7 @@ for (const [phase, value] of [["observed", receipt], ["swap_submitted", null]] a
   const record = { operationId: "a".repeat(64), phase, receipt: value };
   const runtime = { status: async () => record };
   const outcome = await executeUniswapCommand({ command: "swap.uniswap-token.status", operationId: record.operationId }, { uniswapTokenRuntime: runtime } as never);
-  assert.equal(outcome.receipt, value, "the lane's own receipt is returned unchanged");
-  assert.deepEqual((outcome.operation as Record<string, unknown>).actualEconomics, value === null ? null : { inputAtomic: "1000000",
-    outputAtomic: "999741", networkFeeAtomic: "6554975669880", nativeDebitAtomic: "6554975669880" });
+  assert.equal(outcome.operation, record, "the operation slot is the lane's record itself");
+  assert.deepEqual(outcome.receipt, value === null ? null : { ...value, actualEconomics: { inputAtomic: "1000000",
+    outputAtomic: "999741", networkFeeAtomic: "6554975669880", nativeDebitAtomic: "6554975669880" } });
 });
