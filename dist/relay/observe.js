@@ -1,3 +1,4 @@
+import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
@@ -7,6 +8,7 @@ import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayKeylessStatusService } from "./status.js";
 import { BNB_NATIVE, ETHEREUM_USDC } from "./quote.js";
 import { RelayNativeObserveService } from "./native-observe.js";
+import { reconcileRelayFinalizedSource } from "./source-reconcile.js";
 const OPERATION = /^[a-f0-9]{64}$/u;
 /** No signer, send, or retry surface is reachable here. */
 export class RelayObserveService {
@@ -14,14 +16,16 @@ export class RelayObserveService {
     source;
     status;
     native;
+    usage;
     usedBnbInvocations = new WeakSet();
     /** The factory must return a fresh budgeted BNB adapter for each observation. */
     bnbInvocation;
-    constructor(state, source, bnbInvocation, status = new RelayKeylessStatusService(state), native) {
+    constructor(state, source, bnbInvocation, status = new RelayKeylessStatusService(state), native, usage = new AssetUsageLedger(state.root)) {
         this.state = state;
         this.source = source;
         this.status = status;
         this.native = native;
+        this.usage = usage;
         this.bnbInvocation = bnbInvocation;
     }
     /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
@@ -78,6 +82,9 @@ export class RelayObserveService {
         catch {
             return result("source_unproven", "source_receipt_binding_failed");
         }
+        // The finalized deposit closes the source attempt (journal confirmed, hold finalized) whatever the destination shows,
+        // as an observation-only execute would; acceptance is claimed only once the saved source state says so too.
+        const sourceSettled = await reconcileRelayFinalizedSource(this.state, this.usage, op, sourceHash) || deposit.phase === "confirmed";
         if (op.statusLocator === undefined)
             return result("source_finalized", "status_locator_missing", true);
         let provider;
@@ -106,6 +113,8 @@ export class RelayObserveService {
             return result("provider_candidate_unproven", proof.reason, true, provider.status, sourceBound, proof);
         if (provider.status !== "success" || !sourceBound)
             return result("recipient_credit_observed", "provider_success_or_source_binding_unproven", true, provider.status, sourceBound, proof);
+        if (!sourceSettled)
+            return result("recipient_credit_observed", "source_journal_unreconciled", true, provider.status, true, proof);
         return result("operational_acceptance", "source_finalized_provider_success_and_safe_recipient_credit", true, provider.status, true, proof);
     }
 }
