@@ -97,13 +97,31 @@ export declare function publicCircle(op: CircleOperationV1): {
     cleanup_retirement_receipt?: CircleNonceRetirementProof;
     operation_id: string;
     kind: string;
-    state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
+    state: "completed" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "nonce_retired" | "external_fulfilled";
     terminal: boolean;
     source_profile: string;
     destination_profile: string;
     destination_chain: CircleDestinationChain;
     amount_atomic: string;
     minimum_output_atomic: string;
+    actual_economics: {
+        asset: {
+            symbol: string;
+            decimals: number;
+            source_chain: string;
+            source_token: `0x${string}`;
+            destination_chain: string;
+            destination_token: `0x${string}`;
+        };
+        actual_source_gross_atomic: string | null;
+        source_burn_transaction_hash: `0x${string}` | null;
+        source_burn_finality: "safe" | "included" | "finalized" | null;
+        actual_destination_net_atomic: string | null;
+        actual_issuer_fee_atomic: string | null;
+        destination_mint: "external" | "owned" | null;
+        destination_mint_transaction_hash: `0x${string}` | null;
+        destination_mint_finality: "safe" | "included" | "finalized" | null;
+    };
     effects: {
         role: CircleRole;
         phase: CircleEffectPhase;

@@ -1,0 +1,232 @@
+{
+ "note": "Keyless LI.FI answer to the exact request APN 0.5.51 sends for Ethereum ETH to BNB Smart Chain BNB (0.01 ETH, the QA 0.5.51 BRIDGE-LIFI-009 second sample); fromAddress/toAddress were the QA self address and are omitted here. No route; LI.FI lists what it failed.",
+ "capturedAt": "2026-10-20T01:52:00Z",
+ "endpoint": "POST https://li.quest/v1/advanced/routes",
+ "request": {
+  "fromChainId": 1,
+  "toChainId": 56,
+  "fromTokenAddress": "0x0000000000000000000000000000000000000000",
+  "toTokenAddress": "0x0000000000000000000000000000000000000000",
+  "fromAmount": "10000000000000000",
+  "options": {
+   "slippage": 0.01,
+   "allowSwitchChain": false,
+   "allowDestinationCall": true,
+   "executionType": "transaction",
+   "gasless": false,
+   "fee": 0,
+   "integrator": "lifi-api",
+   "bridges": {
+    "allow": [
+     "across"
+    ]
+   },
+   "exchanges": {
+    "allow": [
+     "fly"
+    ]
+   }
+  }
+ },
+ "responseSha256": "d610a75da6874dc053d46f25a818012c3f9b2cb143166379ece937a3ee9670e4",
+ "response": {
+  "routes": [],
+  "unavailableRoutes": {
+   "filteredOut": [],
+   "failed": [
+    {
+     "overallPath": "1:ETH~1:ETH-1:ETH~1:USDT-1:USDT-across-56:USDT-56:USDT~56:BNB",
+     "subpaths": {
+      "1:ETH~1:USDT": [
+       {
+        "errorType": "NO_QUOTE",
+        "code": "TOOL_NOT_ALLOWED",
+        "tool": "fly",
+        "message": "Tool fly not applied.",
+        "durationMs": 0,
+        "action": {
+         "fromChainId": 1,
+         "fromAmount": "9975000000000000",
+         "fromToken": {
+          "address": "0x0000000000000000000000000000000000000000",
+          "chainId": 1,
+          "symbol": "ETH",
+          "decimals": 18,
+          "name": "ETH",
+          "coinKey": "ETH",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+          "priceUSD": "2397.94",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 1,
+         "toToken": {
+          "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+          "chainId": 1,
+          "symbol": "USDT",
+          "decimals": 6,
+          "name": "USDT",
+          "coinKey": "USDT",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png",
+          "priceUSD": "0.995582649",
+          "tags": [
+           "stablecoin"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.01,
+         "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+         "toAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "overallPath": "1:ETH~1:ETH-1:ETH-across-56:WETH-56:WETH~56:BNB",
+     "subpaths": {
+      "56:WETH~56:BNB": [
+       {
+        "errorType": "NO_QUOTE",
+        "code": "TOOL_NOT_ALLOWED",
+        "tool": "fly",
+        "message": "Tool fly not applied.",
+        "durationMs": 0,
+        "action": {
+         "fromChainId": 56,
+         "fromAmount": "9955848521707203",
+         "fromToken": {
+          "address": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+          "chainId": 56,
+          "symbol": "WETH",
+          "decimals": 18,
+          "name": "WETH",
+          "coinKey": "WETH",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+          "priceUSD": "2398.95902362701",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 56,
+         "toToken": {
+          "address": "0x0000000000000000000000000000000000000000",
+          "chainId": 56,
+          "symbol": "BNB",
+          "decimals": 18,
+          "name": "BNB",
+          "coinKey": "BNB",
+          "logoURI": "https://assets.coingecko.com/coins/images/825/small/binance-coin-logo.png?1547034615",
+          "priceUSD": "728.33",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.01,
+         "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+         "toAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "overallPath": "1:ETH~1:ETH-1:ETH~1:WETH-1:WETH-across-56:WETH-56:WETH~56:BNB",
+     "subpaths": {
+      "56:WETH~56:BNB": [
+       {
+        "errorType": "NO_QUOTE",
+        "code": "TOOL_NOT_ALLOWED",
+        "tool": "fly",
+        "message": "Tool fly not applied.",
+        "durationMs": 0,
+        "action": {
+         "fromChainId": 56,
+         "fromAmount": "9955848521707203",
+         "fromToken": {
+          "address": "0x2170Ed0880ac9A755fd29B2688956BD959F933F8",
+          "chainId": 56,
+          "symbol": "WETH",
+          "decimals": 18,
+          "name": "WETH",
+          "coinKey": "WETH",
+          "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png",
+          "priceUSD": "2398.95902362701",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "toChainId": 56,
+         "toToken": {
+          "address": "0x0000000000000000000000000000000000000000",
+          "chainId": 56,
+          "symbol": "BNB",
+          "decimals": 18,
+          "name": "BNB",
+          "coinKey": "BNB",
+          "logoURI": "https://assets.coingecko.com/coins/images/825/small/binance-coin-logo.png?1547034615",
+          "priceUSD": "728.33",
+          "tags": [
+           "major_asset"
+          ],
+          "verificationStatus": "verified",
+          "verificationStatusBreakdown": [
+           {
+            "provider": "hypernative",
+            "result": "verified",
+            "providerResult": "accept"
+           }
+          ]
+         },
+         "slippage": 0.01,
+         "fromAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE",
+         "toAddress": "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

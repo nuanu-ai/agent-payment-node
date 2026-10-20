@@ -56,6 +56,14 @@ export declare class SolanaRpc implements SolanaRpcPort {
     private request;
     private post;
 }
+/**
+ * A block height checked against the latest blockhash read beside it at the same commitment. A real height never exceeds
+ * that blockhash's lastValidBlockHeight; a slot always does. Such an answer is refused with its numbers, never corrected:
+ * a slot read as a height would prove a still-valid blockhash expired.
+ */
+export declare function solanaBlockHeightValue(height: unknown, latestBlockhash: unknown): bigint;
+/** The block height at a commitment, read with that commitment's latest blockhash in one request and checked against it. */
+export declare function readSolanaBlockHeight(rpc: Pick<SolanaRpcPort, "call" | "batch">, commitment: "confirmed" | "finalized"): Promise<bigint>;
 export declare function assertSolanaNetwork(rpc: SolanaRpcPort): Promise<string>;
 export declare function solanaAddress(input: string): string;
 export declare function solanaSignature(input: unknown): string;

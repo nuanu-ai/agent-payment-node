@@ -3,7 +3,7 @@ import type { CommandRequest } from "../../commands.js";
 import { ApnError } from "../../errors.js";
 import { swapMechanismDigest } from "../pin.js";
 import type { UniswapTokenQuoteBuilder } from "./token-builder.js";
-import { UniswapTokenExecution, type UniswapTokenCommandRuntime, type UniswapTokenExecutionPorts } from "./token-execution.js";
+import { UniswapTokenExecution, type TokenCleanupFees, type UniswapTokenCommandRuntime, type UniswapTokenExecutionPorts } from "./token-execution.js";
 import type { SavedUniswapTokenMaterialStore, UniswapTokenMaterial } from "./token-material.js";
 import { newUniswapTokenOperation, UniswapTokenJournal } from "./token-operation.js";
 import { UNISWAP_TOKEN_MECHANISM_PIN } from "./token-route.js";
@@ -69,7 +69,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
       return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] as const : [0, cap, "recovery"] as const;
     }, async () => await this.execution.execute(id)); }
     async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"] as const, async () => await this.execution.status(id)); }
-    async cleanup(id: string) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"] as const, async () => await this.execution.cleanup(id)); }
+    async cleanup(id: string, fees?: TokenCleanupFees) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"] as const, async () => await this.execution.cleanup(id, fees)); }
     private async budgeted<T>(id: string, command: string,
       budget: () => Promise<readonly [number, number, NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>]>, work: () => Promise<T>) {
       return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => { const [cap, requestSessionCap, budgetClass] = await budget();

@@ -1,5 +1,5 @@
 import { hashObject, sha256 } from "../../canonical.js";
-import { mmImmutable, mmMutable, MM_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_TERMINAL, MM_TERMINAL_HISTORY_LIMIT, mmRequestHash } from "../operation-model.js";
+import { mmImmutable, mmMutable, MM_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_PROVED_AFTER_ABANDON, MM_TERMINAL, MM_TERMINAL_HISTORY_LIMIT, mmRequestHash } from "../operation-model.js";
 import { MM_ZERO_HASH } from "../model.js";
 import { mmFail } from "../reasons.js";
 import { mmExact, mmHash, mmIso, mmSame } from "../validation.js";
@@ -12,11 +12,11 @@ const OPERATION_KEYS = ["schemaVersion", "kind", "profileHash", "operationId", "
 const EDGES = {
     awaiting_approval: ["execution_pending", "failed_before_effect"],
     execution_pending: ["dispatch_pending", "failed_before_effect"],
-    dispatch_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed"],
-    submitted_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown"],
-    unknown_finality: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown"],
-    failed_effects_pending: ["failed_effects_pending", "completed", "abandoned_unknown"],
-    completed: [], failed_before_effect: [], abandoned_unknown: [],
+    dispatch_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "revoked_unused"],
+    submitted_pending: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown", "revoked_unused"],
+    unknown_finality: ["submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "abandoned_unknown", "revoked_unused"],
+    failed_effects_pending: ["failed_effects_pending", "completed", "abandoned_unknown", "revoked_unused"],
+    completed: [], failed_before_effect: [], abandoned_unknown: MM_PROVED_AFTER_ABANDON, revoked_unused: [],
 };
 function corrupt() { return mmFail("mm_gasless_state_corrupt"); }
 /**
@@ -85,7 +85,8 @@ function step(previous, next) {
         if (n < p || (n === p && !mmSame(previous.cursor.previousEndBlock, next.cursor.previousEndBlock)))
             corrupt();
     }
-    if (previous.state === "failed_effects_pending" && !["failed_effects_pending", "completed", "abandoned_unknown"].includes(next.state))
+    if (previous.state === "failed_effects_pending" && !["failed_effects_pending", "completed", "abandoned_unknown",
+        "revoked_unused"].includes(next.state))
         corrupt();
     if (previous.state !== "failed_effects_pending" && next.state === "failed_effects_pending" &&
         next.observation?.phase !== "reverted")
@@ -167,7 +168,8 @@ export function validateMetaMaskGaslessContinuity(previous, next) {
     const before = validateMetaMaskGaslessOperation(previous), after = validateMetaMaskGaslessOperation(next);
     if (mmSame(before, after))
         return;
-    if (before.terminal || before.fingerprint !== after.fingerprint ||
+    if (before.terminal && !(before.state === "abandoned_unknown" && MM_PROVED_AFTER_ABANDON.includes(after.state)) ||
+        before.fingerprint !== after.fingerprint ||
         !mmSame(mmImmutable(before), mmImmutable(after)) || after.transitions.length !== before.transitions.length + 1 ||
         !mmSame(before.transitions, after.transitions.slice(0, -1)))
         corrupt();

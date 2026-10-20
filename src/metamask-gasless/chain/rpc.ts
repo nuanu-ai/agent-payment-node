@@ -1,4 +1,5 @@
 import { canonicalJson, exactKeys, sha256 } from "../../canonical.js";
+import { ApnError } from "../../errors.js";
 import { parsePublicHttpsUrl } from "../../network-policy.js";
 import { classifyX402LogAvailabilityMessage } from "../../rpc-envelope.js";
 import type { ClockPort } from "../../ports.js";
@@ -9,7 +10,7 @@ import type { MetaMaskGaslessBalance, MetaMaskGaslessChainId, MetaMaskGaslessCha
   MetaMaskGaslessCursor, MetaMaskGaslessIntent, MetaMaskGaslessProviderObservation,
   MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot } from "../model.js";
 import type { MetaMaskGaslessObservationRpcFactory, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "../ports.js";
-import { mmRegistry, MM_RPC_ENV } from "../registry.js";
+import { mmRegistry, MM_RPC_ENV, MM_SENTINEL_SLUG } from "../registry.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
 import { mmEvidenceAt, mmEvidenceFail } from "./diagnostic.js";
 import { mmValidateUnsigned } from "../unsigned.js";
@@ -18,11 +19,15 @@ import { mmAddress, mmChain, mmHex, mmUint } from "../validation.js";
 import { observeMetaMaskGasless } from "./observe.js";
 import { recheckBlock, rpcBlock, rpcQuantity, rpcRecord, type MmRpcCall, type MmRpcMethod } from "./abi.js";
 import { readMetaMaskChainState, validateMetaMaskGaslessSnapshot } from "./snapshot.js";
+import type { MetaMaskDisableCall } from "../revocation/call.js";
+import { readMetaMaskRevocationChain, type MetaMaskRevocationChain } from "../revocation/chain.js";
 
 export { validateMetaMaskGaslessSnapshot } from "./snapshot.js";
 
 const READ_METHODS = new Set<MmRpcMethod>(["eth_chainId", "eth_getBlockByNumber", "eth_getCode",
   "eth_getStorageAt", "eth_call", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs"]);
+/** The disable pricing reads join the set only for `revocation`; observation and snapshots never use them. */
+const REVOCATION_METHODS = new Set<MmRpcMethod>(["eth_getTransactionCount", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getBalance"]);
 const MAX_RESPONSE = 4 * 1024 * 1024;
 
 export interface MetaMaskGaslessRpcOptions {
@@ -42,8 +47,7 @@ export function metaMaskGaslessRpcFactory(environment: Readonly<Record<string, s
   return (chainId) => {
     const selected = mmChain(chainId), existing = cache.get(selected);
     if (existing !== undefined) return existing;
-    const name = MM_RPC_ENV[selected], rpcUrl = environment[name];
-    if (rpcUrl === undefined || rpcUrl.length === 0) mmFail("mm_gasless_rpc_binding");
+    const name = MM_RPC_ENV[selected], rpcUrl = mmRpcSetting(environment, name, selected);
     const created = new MetaMaskGaslessRpc({ chainId: selected, rpcUrl, clock, transport: selectedTransport });
     cache.set(selected, created);
     return created;
@@ -55,10 +59,24 @@ export function metaMaskGaslessObservationRpcFactory(environment: Readonly<Recor
   clock: ClockPort, transport?: GaslessTransport): MetaMaskGaslessObservationRpcFactory {
   const selectedTransport = transport ?? new GaslessHttps();
   return (chainId, environmentName) => {
-    const rpcUrl = environment[mmObservationRpcEnv(environmentName)];
-    if (rpcUrl === undefined || rpcUrl.length === 0) mmFail("mm_gasless_rpc_binding");
-    return new MetaMaskGaslessRpc({ chainId: mmChain(chainId), rpcUrl, clock, transport: selectedTransport, observationOnly: true });
+    const selected = mmChain(chainId), rpcUrl = mmRpcSetting(environment, mmObservationRpcEnv(environmentName), selected);
+    return new MetaMaskGaslessRpc({ chainId: selected, rpcUrl, clock, transport: selectedTransport, observationOnly: true });
   };
+}
+
+/**
+ * The URL in one RPC environment variable. An unset, empty or non-public-HTTPS value is a configuration refusal that names
+ * the variable and the chain, raised before any network request; a reachable RPC of the wrong chain stays a binding refusal.
+ */
+function mmRpcSetting(environment: Readonly<Record<string, string | undefined>>, name: string,
+  chainId: MetaMaskGaslessChainId): string {
+  const value = environment[name], missing = value === undefined || value.length === 0;
+  if (!missing) {
+    try { parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "MetaMask gasless RPC endpoint", 2048); return value; } catch { /* named below */ }
+  }
+  throw new ApnError("APN_RPC_CONFIG", `MetaMask gasless on eip155:${chainId} (${MM_SENTINEL_SLUG[chainId]}) needs ${name} ` +
+    `set to a public, credential-free HTTPS RPC endpoint of that chain; ${missing ? "it is not set" : "its value is not one"}.`,
+  { reason: "mm_gasless_rpc_setting", chainId: `eip155:${chainId}`, environmentVariable: name });
 }
 
 export function mmObservationRpcEnv(value: unknown): string {
@@ -138,6 +156,14 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
       clock: this.clock }, intent, cursor, provider);
   }
 
+  /** Chain facts for the owner's disable of this exact dispatched delegation, against the deployment it froze. */
+  async revocation(intent: MetaMaskGaslessIntent, disable: MetaMaskDisableCall, operationId: string): Promise<MetaMaskRevocationChain> {
+    this.assertIntent(intent);
+    await this.assertChain();
+    const call: MmRpcCall = async (method, params) => await this.call(method, params, REVOCATION_METHODS.has(method));
+    return await readMetaMaskRevocationChain(call, mmObservedDeployment(intent, this.deployment), intent, disable, operationId);
+  }
+
   /**
    * Observation proves a saved operation against the deployment it froze (token, manager and enforcers from the
    * record, code pins from its prepare snapshot), never against today's registry: a later pin change refuses new
@@ -159,8 +185,8 @@ export class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
     if (rpcQuantity(await this.callRpc("eth_chainId", [])) !== BigInt(this.chainId)) mmFail("mm_gasless_rpc_binding");
   }
 
-  private async call(method: MmRpcMethod, params: readonly unknown[]): Promise<unknown> {
-    if (!READ_METHODS.has(method)) mmEvidenceFail("mm_gasless_evidence_invalid", "rpc_method", method);
+  private async call(method: MmRpcMethod, params: readonly unknown[], pricing = false): Promise<unknown> {
+    if (!READ_METHODS.has(method) && !pricing) mmEvidenceFail("mm_gasless_evidence_invalid", "rpc_method", method);
     const id = (++this.sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
     let response: { readonly status: number; readonly body: string };
     try { response = await this.transport.request(this.rpcUrl, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG"); }

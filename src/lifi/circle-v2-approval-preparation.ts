@@ -2,11 +2,14 @@
 import { createHash } from "node:crypto";
 import { encodeFunctionData, parseAbi } from "viem";
 import { canonicalJson } from "../canonical.js";
-import { BRIDGE_MAX_GAS, BRIDGE_MIN_REMAINING_MS, BRIDGE_TTL_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
+import { ApnError } from "../errors.js";
+import { BRIDGE_MIN_REMAINING_MS, BRIDGE_TTL_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
+import { circleV2GasWithinBudget, circleV2NativeWithinBudget, circleV2UsdcCovers } from "./circle-v2-budget.js";
 
 const TOKEN = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const SPENDER = "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408";
 const UINT256_MAX = (1n << 256n) - 1n;
+const APPROVE = "apn circle approval prepare";
 const abi = parseAbi(["function approve(address spender,uint256 value) returns (bool)"]);
 function fail(reason: string): never { return bridgeFailure("APN_PROVIDER_PROTOCOL", `circle_v2_approval_${reason}`); }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`; }
@@ -72,7 +75,8 @@ export async function prepareCircleV2BaseUsdcApprovalReadOnly(input: Readonly<{
 }>, readBase: CircleV2ApprovalStateReader, limits: CircleV2ApprovalLimits,
 now: () => number = Date.now): Promise<CircleV2ApprovalPreparation> {
   if (input.chainId !== 8453 || bridgeAddress(input.token) !== TOKEN || bridgeAddress(input.spender) !== SPENDER) fail("target");
-  const payer = bridgeAddress(input.payer), cap = bridgeUint(input.approvalCapAtomic, true);
+  // A zero cap is the revoke: approve(wrapper, 0) clears what earlier approvals left (`apn circle approval revoke`).
+  const payer = bridgeAddress(input.payer), cap = bridgeUint(input.approvalCapAtomic);
   if (cap === UINT256_MAX) fail("unbounded_cap");
   const data = encodeFunctionData({ abi, functionName: "approve", args: [SPENDER, cap] });
   let state: CircleV2ApprovalState;
@@ -82,15 +86,18 @@ now: () => number = Date.now): Promise<CircleV2ApprovalPreparation> {
     bridgeAddress(state.token) !== TOKEN || bridgeAddress(state.spender) !== SPENDER) fail("base_identity");
   const blockNumber = bridgeUint(state.blockNumber), blockHash = bridgeHex(state.blockHash, 32, 32);
   if (bridgeUint(state.latestNonceAtomic) !== bridgeUint(state.pendingNonceAtomic)) fail("pending_nonce");
-  if (bridgeUint(state.usdcBalanceAtomic) < cap || bridgeUint(state.usdcAllowanceAtomic) > cap) fail("balance_or_allowance");
+  if (cap === 0n && bridgeUint(state.usdcAllowanceAtomic) === 0n) throw new ApnError("APN_OPERATION_BLOCKED",
+    "The Circle V2 wrapper allowance of this payer is already 0 on Base; there is nothing to revoke.", { reason: "circle_v2_approval_nothing_to_revoke" });
+  if (cap > 0n && bridgeUint(state.usdcAllowanceAtomic) > cap) fail("balance_or_allowance");
+  circleV2UsdcCovers("circle_v2_approval_balance_or_allowance", APPROVE, "The approval cap", cap, bridgeUint(state.usdcBalanceAtomic));
   const gas = bridgeUint(state.gasLimitAtomic), maxFee = bridgeUint(state.maxFeePerGasWei);
   const priority = bridgeUint(state.maxPriorityFeePerGasWei);
-  if (gas === 0n || gas > BRIDGE_MAX_GAS || gas > bridgeUint(limits.maxGasLimitAtomic) || maxFee === 0n ||
-    priority > maxFee || maxFee > bridgeUint(limits.maxFeePerGasWei) || priority > bridgeUint(limits.maxPriorityFeePerGasWei)) fail("gas_or_fee_cap");
+  if (gas === 0n || maxFee === 0n || priority > maxFee) fail("gas_or_fee_cap");
+  circleV2GasWithinBudget("circle_v2_approval", APPROVE, gas, maxFee, priority, limits);
   const nativeDebit = bridgeUint(state.totalNativeDebitWei);
   if (nativeDebit < gas * maxFee) fail("total_fee_under_execution");
-  if (nativeDebit > UINT256_MAX || nativeDebit > bridgeUint(limits.maxNativeDebitWei) ||
-    bridgeUint(state.nativeBalanceWei) < nativeDebit) fail("native_balance_or_cap");
+  if (nativeDebit > UINT256_MAX) fail("native_balance_or_cap");
+  circleV2NativeWithinBudget("circle_v2_approval", APPROVE, nativeDebit, bridgeUint(state.nativeBalanceWei), limits.maxNativeDebitWei);
   const current = now();
   if (!Number.isSafeInteger(current) || current < 0 || !Number.isSafeInteger(limits.ttlMs) ||
     limits.ttlMs < BRIDGE_MIN_REMAINING_MS || limits.ttlMs > BRIDGE_TTL_MS || !Number.isSafeInteger(current + limits.ttlMs)) fail("ttl");

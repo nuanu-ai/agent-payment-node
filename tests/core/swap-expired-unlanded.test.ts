@@ -117,15 +117,17 @@ test("the terminal transition refuses a receipt-bearing operation and a lease bo
 test("Solana proof needs the finalized height past the lifetime and no status for a persisted signature", async () => {
   const reads: string[] = [];
   const rpc = (height: bigint, status: unknown) => ({ async call(method: string) { reads.push(method);
-    return method === "getBlockHeight" ? height : { context: { slot: 10n }, value: [status] }; } });
+    return method === "getBlockHeight" ? height : method === "getLatestBlockhash"
+      ? { context: { slot: 10n }, value: { blockhash: "11111111111111111111111111111111", lastValidBlockHeight: height + 150n } }
+      : { context: { slot: 10n }, value: [status] }; } });
   assert.equal(await proveSolanaUnlanded(rpc(100n, null), { lastValidBlockHeight: "100", loadSignature: async () => SIGNATURE }), null);
-  assert.deepEqual(reads.splice(0), ["getBlockHeight"]);
+  assert.deepEqual(reads.splice(0), ["getBlockHeight", "getLatestBlockhash"]);
   assert.equal(await proveSolanaUnlanded(rpc(101n, { slot: 5n }), { lastValidBlockHeight: "100", loadSignature: async () => SIGNATURE }), null);
   const proof = await proveSolanaUnlanded(rpc(101n, null), { lastValidBlockHeight: "100", loadSignature: async () => SIGNATURE });
   assert.deepEqual(proof, { network: "solana", transactionId: SIGNATURE, lastValidBlockHeight: "100", observedFinalizedBlockHeight: "101" });
   reads.splice(0);
   const unsigned = await proveSolanaUnlanded(rpc(101n, null), { lastValidBlockHeight: "100", loadSignature: async () => null });
-  assert.equal(unsigned?.transactionId, null); assert.deepEqual(reads, ["getBlockHeight"]);
+  assert.equal(unsigned?.transactionId, null); assert.deepEqual(reads, ["getBlockHeight", "getLatestBlockhash"]);
 });
 
 test("EVM proof needs chain 1, a finalized timestamp past the deadline and no receipt", async () => {

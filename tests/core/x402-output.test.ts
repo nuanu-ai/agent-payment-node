@@ -13,6 +13,7 @@ import {
   sealX402Operation,
   sealX402Receipt,
   x402OperationBindingHash,
+  X402_RESULT_HASH_RULE,
   type X402OperationRecord,
   type X402State,
 } from "../../src/x402-state-integrity.js";
@@ -210,8 +211,11 @@ test("compiled core journey returns completed seller data, safe operation, and r
     kind: "x402_result",
     media_type: "application/json",
     body: { forecast: SELLER_BODY_CANARY },
-    sha256: (completed.operation as { readonly result?: { readonly resultHash?: unknown } }).result?.resultHash,
+    // The plain SHA-256 of the exact body bytes; the operation's domain-separated link is named and its rule stated.
+    sha256: sha256(`{"forecast":"${SELLER_BODY_CANARY}"}`),
     byte_length: Buffer.byteLength(`{"forecast":"${SELLER_BODY_CANARY}"}`, "utf8").toString(),
+    result_hash: (completed.operation as { readonly result?: { readonly resultHash?: unknown } }).result?.resultHash,
+    result_hash_rule: X402_RESULT_HASH_RULE,
   });
 
   const withoutData = { ...completed, data: null };
@@ -279,7 +283,7 @@ test("completed status and receipt are body-free, while terminal approve/resume 
   assert.equal(status.data, null);
   assert.equal(status.receipt, null);
   assert.equal((status.operation as { readonly result?: { readonly resultHash?: unknown } }).result?.resultHash,
-    (fixture.completed.data as { readonly sha256?: unknown }).sha256);
+    (fixture.completed.data as { readonly result_hash?: unknown }).result_hash);
   assert.equal(JSON.stringify(status).includes(SELLER_BODY_CANARY), false);
 
   const receipt = await cold.execute({ command: "receipt.get", operationId: fixture.operationId });

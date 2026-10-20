@@ -1,5 +1,5 @@
 import type { ClockPort } from "../../ports.js";
-import { type SwapOperationRecord } from "../model.js";
+import { type SwapOperationRecord, type SwapReceiptEconomics } from "../model.js";
 import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
@@ -25,7 +25,7 @@ export interface SunSwapTronExecutionDriverDependencies {
     readonly guard: Pick<SunSwapExecutionGuard, "inspect">;
     readonly bindings: Pick<SunSwapExecutionBindingStore, "save" | "load">;
     readonly signing: SunSwapSigningPort;
-    readonly observer: Pick<SunSwapOutcomeObserver, "observeOutcome" | "proveUnlanded">;
+    readonly observer: Pick<SunSwapOutcomeObserver, "observeOutcome" | "proveUnlanded"> & Partial<Pick<SunSwapOutcomeObserver, "receiptEconomics">>;
     readonly clock: ClockPort;
 }
 /**
@@ -38,6 +38,8 @@ export declare class SunSwapTronExecutionDriver implements GuardedSwapExecutionD
     constructor(d: SunSwapTronExecutionDriverDependencies);
     execute(input: GuardedSwapExecutionInput): Promise<SwapOperationRecord>;
     observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord>;
+    /** A swap solidified before its economics were recorded: one read of its own solidified record (observe only). */
+    receiptEconomics(input: GuardedSwapObservationInput): Promise<SwapReceiptEconomics>;
     /** The transaction id and expiration are fixed in the prepared material, signed or not. */
     proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
     private observeExact;

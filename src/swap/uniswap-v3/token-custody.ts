@@ -48,11 +48,12 @@ export class UniswapTokenCustody {
       .map((operation) => BigInt(operation.economics!.nonceAtomic));
     return await this.nonces.allocate(op, kind, pending, occupied);
   }
-  async releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) {
+  /** True when custody holds no signed bytes for the effect (its reservation is free); false when a signed effect committed it. */
+  async releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean> {
     if (await this.probeSealed(op, kind, nonce) !== null || await this.effects.load(op, kind) !== null) {
-      await this.nonces.commit(op, kind, nonce); return;
+      await this.nonces.commit(op, kind, nonce); return false;
     }
-    await this.nonces.release(op, kind, nonce);
+    await this.nonces.release(op, kind, nonce); return true;
   }
   async commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) { await this.nonces.commit(op, kind, nonce); }
   private async reconcileNonceReservations(account: string) {

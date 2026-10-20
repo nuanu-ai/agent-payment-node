@@ -155,6 +155,13 @@ export class OrcaSolanaExecutionDriver {
             return operation;
         return await this.observeExact(operation, binding, material, effect.transactionId);
     }
+    /** A swap finalized before its economics were recorded: one read of its own finalized transaction (observe only). */
+    async receiptEconomics(input) {
+        const read = this.d.observer.receiptEconomics;
+        if (read === undefined)
+            blocked("This Orca observer cannot read receipt facts.", "receipt_facts_unsupported");
+        return await read.call(this.d.observer, validateSwapOperation(input.operation), validateOrcaKeylessMaterial(input.material));
+    }
     /**
      * The execution binding carries the frozen lifetime of the only bytes that can be signed. Without a binding nothing was
      * signed, but no lifetime is known either, so no chain proof exists; the operation stays observable.

@@ -12,7 +12,7 @@ import { MM_MIN_REMAINING_MS, type MetaMaskGaslessBinding, type MetaMaskGaslessD
   type MetaMaskGaslessQuote, type MetaMaskGaslessSnapshot, type MetaMaskGaslessUnsignedResult } from "./model.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { MetaMaskGaslessObservationService, metaMaskGaslessProviderObservation,
-  type MetaMaskGaslessObserver, type MetaMaskGaslessProviderRead, type MetaMaskGaslessSave, type MetaMaskGaslessStep } from "./observation.js";
+  type MetaMaskGaslessProviderRead, type MetaMaskGaslessSave, type MetaMaskGaslessStep } from "./observation.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory,
   MetaMaskGaslessRpcPort } from "./ports.js";
@@ -42,12 +42,6 @@ export class MetaMaskGaslessExecution {
     private readonly save: MetaMaskGaslessSave, private readonly wait: WaitPort) {
     this.clock = new MetaMaskGaslessClock(clock);
     this.observation = new MetaMaskGaslessObservationService(state, rpcFor, provider, this.clock, save);
-  }
-
-  /** Observation through an owner-named RPC; approval and dispatch keep the frozen endpoint. */
-  async observeWith(op: MetaMaskGaslessOperationRecord, observer: MetaMaskGaslessObserver): Promise<MetaMaskGaslessStep> {
-    return await new MetaMaskGaslessObservationService(this.state, this.rpcFor, this.provider, this.clock,
-      this.save, observer).run(op);
   }
 
   async approve(op: MetaMaskGaslessOperationRecord, approval: MetaMaskGaslessApprovalPort): Promise<MetaMaskGaslessStep> {

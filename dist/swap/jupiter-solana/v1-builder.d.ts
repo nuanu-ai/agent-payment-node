@@ -19,6 +19,8 @@ export interface JupiterV1QuoteBuilderOptions {
     readonly computeUnitPriceMicroLamports: number;
     /** Internal authoritative policy selection, never a caller-controlled pool selector. */
     readonly resolveRouteId?: (profile: string, amountAtomic: string) => Promise<JupiterV1RouteId>;
+    /** Every current route the owner's policy admits for this input; the provider's answered pool selects one of them. */
+    readonly resolveRouteIds?: (profile: string, amountAtomic: string) => Promise<readonly JupiterV1RouteId[]>;
     /** Canonical factory: the configured RPC supplies the frozen blockhash after the account reads (one official build). */
     readonly freezeRpcLifetime?: boolean;
 }
@@ -32,4 +34,6 @@ export declare class JupiterV1QuoteBuilder implements GuardedSwapReadOnlyBuilder
         readonly now: Date;
     }): Promise<unknown>;
     load(hash: string): Promise<JupiterV1PreparedMaterial | null>;
+    /** The current routes the owner's policy admits for this input, in registry order; the single-route option names one. */
+    private admittedRoutes;
 }

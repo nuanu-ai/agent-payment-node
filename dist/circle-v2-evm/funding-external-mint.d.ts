@@ -23,6 +23,8 @@ export interface CircleExternalMintNotice {
 export interface CircleFundingCommandResult {
     readonly operation: CircleFundingOperationV2;
     readonly externalMint: CircleExternalMintNotice | null;
+    /** Set only when this command sent an effect and a later read failed: the operation is its saved state. */
+    readonly observationFailure?: import("../post-effect-read-failure.js").PostEffectReadFailure;
 }
 /** The issuer message of `op` is used on the destination and no owned mint can land. Adoption proves the burn at the source
  * FINALIZED head, so nothing is scanned before that; then the burn block's own header gives the scan its start time. */

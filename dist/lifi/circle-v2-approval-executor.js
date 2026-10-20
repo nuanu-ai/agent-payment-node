@@ -12,6 +12,7 @@ import { BRIDGE_MIN_REMAINING_MS, bridgeAddress, bridgeFailure, bridgeHex, bridg
 import { admitOperation, assertClaimsAvailable } from "../operation-index/admission.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
+import { CircleResidualAllowanceStore } from "./circle-v2-residual-allowance.js";
 /**
  * Every phase of a Circle Base USDC approval, and its outcomes: a safe receipt either way, proven never sent, or proven
  * never to land (another transaction took its nonce at finality while the node knows neither it nor a receipt).
@@ -26,14 +27,19 @@ export function publicCircleApproval(record) {
 }
 /**
  * What the approval leaves on chain. A completed one leaves the Base USDC allowance it set for the Circle V2 wrapper, which
- * `apn circle source submit` spends; APN has no command that revokes it. Every other outcome changed no allowance.
+ * `apn circle source submit` spends; whatever a burn leaves is cleared by `apn circle approval revoke`, the same approval
+ * with a zero cap. Every other outcome changed no allowance.
  */
 function circleApprovalAllowance(record) {
     const p = record.preparation;
+    if (record.phase === "completed" && p.approvalCapAtomic === "0")
+        return { effect: "allowance_revoked", token: p.token,
+            owner: p.transaction.from, spender: p.spender, approvedAtomic: "0", observedAtCompletionAtomic: record.observedAllowanceAtomic };
     if (record.phase === "completed")
         return { effect: "allowance_set", token: p.token, owner: p.transaction.from, spender: p.spender,
             approvedAtomic: p.approvalCapAtomic, observedAtCompletionAtomic: record.observedAllowanceAtomic, spentBy: "apn circle source submit",
-            revoke: "none_in_apn: the allowance stays until a Circle source transfer spends it or another approve from this wallet replaces it" };
+            revoke: `apn circle approval revoke --profile ${record.profile} --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> ` +
+                "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>" };
     return { effect: record.phase === "abandoned_unknown" ? "unknown_may_still_land"
             : CIRCLE_APPROVAL_RESOLVED_PHASES.includes(record.phase) ? "allowance_unchanged" : "unknown_until_resolved" };
 }
@@ -157,7 +163,7 @@ export class LocalCircleApprovalSigner {
             bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "circle_approval_signing_gate");
         const p = record.preparation, expectedData = encodeFunctionData({
             abi: parseAbi(["function approve(address spender,uint256 value) returns (bool)"]), functionName: "approve",
-            args: ["0x71f54F818671cD0D7ea140Da213e5C8b5C92a408", bridgeUint(p.approvalCapAtomic, true)],
+            args: ["0x71f54F818671cD0D7ea140Da213e5C8b5C92a408", bridgeUint(p.approvalCapAtomic)],
         });
         if (p.transaction.chainId !== 8453 || p.token !== "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" ||
             p.spender !== "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408" || p.transaction.to !== p.token ||
@@ -319,7 +325,7 @@ export class CircleV2ApprovalExecutor {
     }
     async observe(r) {
         if (CIRCLE_APPROVAL_RESOLVED_PHASES.includes(r.phase) || r.phase === "prepared")
-            return r;
+            return await this.revoked(r);
         if (r.submissionAttempts === 0 || r.transactionHash === null || r.rawTransaction === null)
             return await this.unknown(r, "no_submission_marker");
         try {
@@ -355,13 +361,25 @@ export class CircleV2ApprovalExecutor {
                 bridgeUint(state.blockNumber) < bridgeUint(receipt.blockNumberAtomic) ||
                 bridgeUint(state.usdcAllowanceAtomic) !== bridgeUint(p.approvalCapAtomic))
                 throw new Error("fresh allowance");
-            r = update(r, { phase: "completed", observedAllowanceAtomic: state.usdcAllowanceAtomic });
+            r = update(r, { phase: "completed", observedAllowanceAtomic: state.usdcAllowanceAtomic,
+                observedAllowanceBlock: { numberAtomic: bridgeUint(state.blockNumber).toString(), hash: bridgeHex(state.blockHash, 32, 32) } });
             await this.journal.save(r);
-            return r;
         }
         catch {
             return await this.unknown(r);
         }
+        return await this.revoked(r);
+    }
+    /**
+     * A completed revoke proved the wrapper allowance 0 at its fresh read's block: every stored Circle Base to Solana residual
+     * of this payer and wrapper at an earlier block becomes 0 (no chain read). Re-applied on each status; idempotent.
+     */
+    async revoked(r) {
+        const p = r.preparation, block = r.observedAllowanceBlock;
+        if (r.phase !== "completed" || p.approvalCapAtomic !== "0" || block === undefined)
+            return r;
+        await new CircleResidualAllowanceStore(this.state.root).revoked(r.profileHash, p.transaction.from, p.spender, block, r.id, new Date(this.now()).toISOString());
+        return r;
     }
 }
 /**

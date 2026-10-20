@@ -246,8 +246,17 @@ export type CommandRequest = {
     readonly quoteHash: string;
     readonly idempotencyKey: string;
 } | {
-    readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute" | "swap.uniswap-token.cleanup";
+    readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute";
     readonly operationId: string;
+}
+/** `cleanupFees`: the owner's own new caps for this cleanup only, checked against a fresh fee quote and shown at consent. */
+ | {
+    readonly command: "swap.uniswap-token.cleanup";
+    readonly operationId: string;
+    readonly cleanupFees?: {
+        readonly maxFeePerGas: string;
+        readonly maxPriorityFeePerGas: string;
+    };
 } | {
     readonly command: "swap.sunswap.inventory";
 } | {
@@ -405,7 +414,7 @@ export type CommandRequest = {
     readonly request: GaslessCommandRequest;
     readonly idempotencyKey: string;
 } | {
-    readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed";
+    readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed" | "gasless.transfer.revoke";
     readonly operationId: string;
 } | {
     readonly command: "gasless.usdt.status" | "gasless.usdt.resume";
@@ -609,6 +618,7 @@ export type CommandRequest = {
 } | {
     readonly command: "operation.status";
     readonly operationId: string;
+    readonly refreshAllowance?: true;
 } | {
     readonly command: "receipt.get";
     readonly operationId: string;

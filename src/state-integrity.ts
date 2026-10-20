@@ -4,6 +4,7 @@ import { BASE_USDC, CHAIN_ID, STATE_VERSION, USDC_DECIMALS } from "./constants.j
 import { ApnError } from "./errors.js";
 import { validateEvmTransferEvidence } from "./direct-terminal-receipt.js";
 import { validateEvmDirectBinding, validateEvmOperation } from "./evm-direct.js";
+import { assertEvmActualFeeBinding, validateEvmActualFee } from "./evm-direct-actual-fee.js";
 import { validateEvmAllowlist } from "./evm-direct-allowlist.js";
 import { evmUint } from "./evm-asset.js";
 import { validateCoinbaseGaslessAllowlist } from "./coinbase-gasless-policy.js";
@@ -81,7 +82,7 @@ export function validateOperation(value: unknown): OperationRecord {
   const optionalKeys = [
     "transactionData", "economics", "preparedBlockNumberAtomic", "preparedBlockHash", "providerDirect", "providerEffect",
     "transactionHash", "rawTransactionHash", "lastSubmissionAt", "evm", "coinbaseGaslessLocator",
-    "coinbaseGaslessCursor", "coinbaseGaslessSettlement", "allowlist", "allowlistLease",
+    "coinbaseGaslessCursor", "coinbaseGaslessSettlement", "allowlist", "allowlistLease", "evmActualFee",
   ];
   const actualKeys = Object.keys(value);
   if (
@@ -107,6 +108,7 @@ export function validateOperation(value: unknown): OperationRecord {
     operation.chainId !== CHAIN_ID || operation.token !== BASE_USDC)) || !/^0x[0-9a-fA-F]{40}$/u.test(operation.walletAddress) ||
     !/^0x[0-9a-fA-F]{40}$/u.test(operation.recipient)
   ) stateCorrupt("Operation frozen transfer identity is invalid.");
+  assertEvmActualFeeBinding(operation);
   if (operation.evm !== undefined) validateEvmOperation(operation);
   else if (operation.providerDirect !== undefined && (operation.allowlist !== undefined || operation.allowlistLease !== undefined)) {
     stateCorrupt("Only a local direct EVM operation carries a direct allowlist binding.");
@@ -122,7 +124,7 @@ export function validateReceipt(value: unknown): ReceiptRecord {
     "schemaVersion", "operationId", "state", "terminal", "reason", "proofClass", "createdAt",
     "operationIntegrityHash", "integrityHash",
   ];
-  const optionalKeys = ["transactionHash", "blockNumberAtomic", "exactTransferLog", "evm", "amountAtomic", "evmEvidence", "coinbaseGaslessSettlement"];
+  const optionalKeys = ["transactionHash", "blockNumberAtomic", "exactTransferLog", "evm", "amountAtomic", "evmEvidence", "coinbaseGaslessSettlement", "evmActualFee"];
   const actualKeys = Object.keys(value);
   if (
     requiredKeys.some((key) => !actualKeys.includes(key)) ||
@@ -137,6 +139,8 @@ export function validateReceipt(value: unknown): ReceiptRecord {
     evmUint(receipt.amountAtomic, true);
     if (receipt.evmEvidence !== undefined) validateEvmTransferEvidence(receipt.evmEvidence);
   } else if (receipt.amountAtomic !== undefined || receipt.evmEvidence !== undefined) stateCorrupt("Receipt asset fields have no binding.");
+  if (receipt.evmActualFee !== undefined && (validateEvmActualFee(receipt.evmActualFee).transactionHash !== receipt.transactionHash?.toLowerCase() ||
+    receipt.evmActualFee.blockNumberAtomic !== receipt.blockNumberAtomic)) stateCorrupt("Receipt actual fee is not this receipt's transaction.");
   if (receipt.coinbaseGaslessSettlement !== undefined) {
     const settlement = receipt.coinbaseGaslessSettlement;
     if (!validCoinbaseSettlementKeys(settlement) || !validCoinbaseObservationSource(settlement.observationSource,

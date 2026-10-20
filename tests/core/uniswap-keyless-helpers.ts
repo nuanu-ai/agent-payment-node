@@ -73,7 +73,7 @@ export class KeylessRpc {
     if (this.receipt === "none" || raw === undefined || keccak256(raw) !== hash) return null;
     const block = { blockNumber: quantity(this.minedAt), blockHash: `0x${this.minedAt.toString(16).padStart(64, "0")}` };
     if (method === "eth_getTransactionReceipt") return { transactionHash: hash, from: ACCOUNT, to: UNISWAP_ROUTER,
-      status: this.receipt === "success" ? "0x1" : "0x0", logs: [], ...block };
+      status: this.receipt === "success" ? "0x1" : "0x0", logs: [], gasUsed: "0x5208", effectiveGasPrice: "0x3b9aca00", ...block };
     return { hash, from: ACCOUNT, to: UNISWAP_ROUTER, chainId: "0x1", nonce: quantity(this.nonce), gas: this.gas,
       type: "0x2", maxFeePerGas: this.maxFee, maxPriorityFeePerGas: this.priority, input: "0x", value: "0x0", ...block };
   }

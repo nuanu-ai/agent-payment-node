@@ -355,7 +355,7 @@ test("concurrent status cannot advance a cap-zero execute into an unreserved swa
   const entered = new Promise<void>((resolve) => { observeEntered = resolve; }), release = new Promise<void>((resolve) => { releaseObserve = resolve; });
   const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
     withAccountLock: async <T>(_op: UniswapTokenOperation, work: () => Promise<T>) => await work(), allocateNonce: async () => "8",
-    currentAllowance: async () => "1000000", releaseNonce: async () => undefined, commitNonce: async () => undefined,
+    currentAllowance: async () => "1000000", releaseNonce: async () => true, commitNonce: async () => undefined,
     guard: async () => undefined, revalidate: async () => undefined, reserveUsage: async () => usage,
     currentUsage: async (op: UniswapTokenOperation) => ({ reservationId: op.usageReservationId!, state: op.usageState! }),
     followUsage: async (_op: UniswapTokenOperation, state: any) => ({ reservationId: usage.reservationId, state }),
@@ -561,7 +561,7 @@ test("post-wallet-save failure recovery observes public journal without broadcas
   const ports = (custody: UniswapTokenCustody) => ({ now: () => now, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
     withAccountLock: async <T>(op: UniswapTokenOperation, work: () => Promise<T>) => await custody.withAccountLock(op, work),
     allocateNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind) => await custody.allocateNonce(op, kind),
-    releaseNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => { await custody.releaseNonce(op, kind, nonce); },
+    releaseNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => await custody.releaseNonce(op, kind, nonce),
     commitNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => { await custody.commitNonce(op, kind, nonce); },
     currentAllowance: async (op: UniswapTokenOperation) => await custody.currentAllowance(op), guard: async () => undefined, revalidate: async () => undefined,
     reserveUsage: async (op: UniswapTokenOperation) => await s.usage.reserve(op), currentUsage: async (op: UniswapTokenOperation) => await s.usage.current(op),

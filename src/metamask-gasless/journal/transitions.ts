@@ -2,7 +2,7 @@ import { canonicalJson, hashObject } from "../../canonical.js";
 import type { MetaMaskGaslessIntent, MetaMaskGaslessMutable } from "../model.js";
 import { MM_ZERO_HASH } from "../model.js";
 import { mmImmutable, mmMutable, MM_DISPATCH_RESERVE_BYTES, MM_DISPATCH_RESERVE_TRANSITIONS, MM_FILE_LIMIT,
-  MM_HISTORY_LIMIT, MM_NONTERMINAL_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_TERMINAL,
+  MM_HISTORY_LIMIT, MM_NONTERMINAL_HISTORY_LIMIT, MM_OPERATION_KIND, MM_OPERATION_VERSION, MM_PROVED_AFTER_ABANDON, MM_TERMINAL,
   MM_TERMINAL_HISTORY_LIMIT, type MetaMaskGaslessOperationIdentity,
   type MetaMaskGaslessOperationRecord } from "../operation-model.js";
 import { mmFail } from "../reasons.js";
@@ -46,7 +46,8 @@ export function advanceMetaMaskGaslessOperation(operation: MetaMaskGaslessOperat
   if (Object.keys(patch).some(key => !PATCH_KEYS.includes(key as typeof PATCH_KEYS[number]))) corrupt();
   const nextMutable = { ...mmMutable(current), ...patch } as MetaMaskGaslessMutable;
   if (mmSame(mmMutable(current), nextMutable)) return current;
-  if (current.terminal) corrupt();
+  // Only a chain proof may follow the owner's abandonment; every other terminal state is final.
+  if (current.terminal && !(current.state === "abandoned_unknown" && MM_PROVED_AFTER_ABANDON.includes(nextMutable.state))) corrupt();
   // The last slot is reserved: only the single terminal transition may take it, so the limit never blocks closure.
   const terminal = MM_TERMINAL.includes(nextMutable.state);
   if (current.transitions.length >= (terminal ? MM_TERMINAL_HISTORY_LIMIT : MM_NONTERMINAL_HISTORY_LIMIT)) capacity();
@@ -78,10 +79,14 @@ export function assertMetaMaskGaslessDispatchCapacity(operation: MetaMaskGasless
     Buffer.byteLength(canonicalJson(current), "utf8") + 1 + MM_DISPATCH_RESERVE_BYTES > MM_FILE_LIMIT) capacity();
 }
 
-/** A dispatched, unresolved operation is the only kind an observation may read for. */
+/**
+ * A dispatched, unresolved operation is the only kind an observation may read for, and a dispatched one the owner
+ * abandoned, whose outcome only a chain proof can still replace.
+ */
 export function assertMetaMaskGaslessObservable(operation: MetaMaskGaslessOperationRecord): void {
   const current = validateMetaMaskGaslessOperation(operation);
-  if (current.submissionAttempts !== 1 || current.dispatchStartedAt === null || current.terminal) corrupt();
+  if (current.submissionAttempts !== 1 || current.dispatchStartedAt === null ||
+    current.terminal && current.state !== "abandoned_unknown") corrupt();
 }
 
 /**
@@ -112,5 +117,5 @@ function timeless(value: MetaMaskGaslessMutable): MetaMaskGaslessMutable {
   return { ...value,
     providerObservation: provider === null ? null : { ...provider, observedAt: "" },
     observation: observation === null ? null : { ...observation, observedAt: "",
-      ...(["success", "reverted"].includes(observation.phase) ? {} : { evidenceHash: null }) } };
+      ...(["success", "reverted", "disabled"].includes(observation.phase) ? {} : { evidenceHash: null }) } };
 }

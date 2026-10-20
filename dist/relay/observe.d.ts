@@ -1,5 +1,6 @@
-/** Relay cross-chain observation; native source reconciliation may update local state. */
+/** Relay cross-chain observation; a finality-proven source effect is reconciled into local state (never signed or sent). */
 import type { Hex } from "viem";
+import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import type { StateStore } from "../state.js";
 import { type RelayDepositObservation } from "./deposit-effect.js";
 import { type RelayBnbProofPorts, type RelayBnbProofResult } from "./destination-proof.js";
@@ -29,10 +30,11 @@ export declare class RelayObserveService {
     private readonly source;
     private readonly status;
     private readonly native?;
+    private readonly usage;
     private readonly usedBnbInvocations;
     /** The factory must return a fresh budgeted BNB adapter for each observation. */
     private readonly bnbInvocation;
-    constructor(state: StateStore, source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, status?: RelayKeylessStatusService, native?: RelayNativeObserveService | undefined);
+    constructor(state: StateStore, source: RelaySourceFinalityPorts, bnbInvocation: () => RelayBnbProofPorts, status?: RelayKeylessStatusService, native?: RelayNativeObserveService | undefined, usage?: Pick<AssetUsageLedger, "load" | "transition">);
     /** The operation is found only under the caller's explicit profile (OWNR 4.1). */
     observe(profile: string, operationId: string): Promise<RelayObserveResult>;
 }

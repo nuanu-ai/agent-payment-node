@@ -1,6 +1,6 @@
 import type { CommandRequest } from "../../commands.js";
 import type { UniswapTokenQuoteBuilder } from "./token-builder.js";
-import { type UniswapTokenCommandRuntime, type UniswapTokenExecutionPorts } from "./token-execution.js";
+import { type TokenCleanupFees, type UniswapTokenCommandRuntime, type UniswapTokenExecutionPorts } from "./token-execution.js";
 import type { SavedUniswapTokenMaterialStore, UniswapTokenMaterial } from "./token-material.js";
 import { UniswapTokenJournal } from "./token-operation.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
@@ -41,7 +41,7 @@ export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommand
     approve(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     execute(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     status(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
-    cleanup(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
+    cleanup(id: string, fees?: TokenCleanupFees): Promise<import("./token-operation.js").UniswapTokenOperation>;
     private budgeted;
     private poolCap;
     private quotePrepareCap;

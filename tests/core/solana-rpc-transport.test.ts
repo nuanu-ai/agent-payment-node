@@ -131,7 +131,7 @@ test("shared Solana operation budget refuses a send before transport and paces P
   const prepare = new SolanaRpc("https://rpc.example", fetcher, budget);
   const approve = new SolanaRpc("https://rpc.example", fetcher, budget);
   await prepare.call("getGenesisHash", []);
-  await approve.call("getBlockHeight", []);
+  await approve.call("getMinimumBalanceForRentExemption", []);
   await assert.rejects(approve.call("sendTransaction", ["synthetic"]), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert.deepEqual(starts, [0, 500]); assert.deepEqual(waits, [500]);
   assert.equal(budget.logicalCalls, 3); assert.equal(budget.physicalRequests, 2);
@@ -146,8 +146,8 @@ test("a Solana timer waking one millisecond early waits for the boundary before 
     starts.push(now); const q = JSON.parse(String(init?.body)); return json({ jsonrpc: "2.0", id: q.id, result: 1 });
   }) as typeof fetch, budget);
   await rpc.call("getGenesisHash", []);
-  await rpc.call("getBlockHeight", []);
-  await rpc.call("getBlockHeight", []);
+  await rpc.call("getMinimumBalanceForRentExemption", []);
+  await rpc.call("getMinimumBalanceForRentExemption", []);
   assert.deepEqual(starts, [0,750,1500]); assert.deepEqual(waits, [750,1,750]);
   assert.equal(budget.physicalRequests, 3); assert.equal(budget.logicalCalls, 3);
 });
@@ -160,7 +160,7 @@ for (const kind of ["stuck", "backwards", "second early wake"] as const) test(`S
     posts++; const q = JSON.parse(String(init?.body)); return json({ jsonrpc: "2.0", id: q.id, result: 1 });
   }) as typeof fetch,budget);
   await rpc.call("getGenesisHash", []);
-  await assert.rejects(rpc.call("getBlockHeight", []),{code:"APN_RPC_RATE_LIMITED"});
+  await assert.rejects(rpc.call("getMinimumBalanceForRentExemption", []),{code:"APN_RPC_RATE_LIMITED"});
   assert.equal(posts,1); assert.equal(budget.physicalRequests,1); assert.equal(budget.logicalCalls,2);
   assert.deepEqual(waits,kind === "second early wake" ? [750,1] : [750]);
 });
@@ -174,12 +174,12 @@ test("default operation pacing fails fast without sleeping under a caller's stat
     return json({ jsonrpc: "2.0", id: request.id, result: 1 });
   }) as typeof fetch, budget);
   await rpc.call("getGenesisHash", []);
-  await assert.rejects(rpc.call("getBlockHeight", []), (error: unknown) =>
+  await assert.rejects(rpc.call("getMinimumBalanceForRentExemption", []), (error: unknown) =>
     typeof error === "object" && error !== null && "code" in error && error.code === "APN_RPC_RATE_LIMITED" &&
     "details" in error && (error.details as { retryAfterMs?: number })?.retryAfterMs === 500);
   assert.equal(posts, 1); assert.equal(budget.physicalRequests, 1);
   now = 500;
-  await rpc.call("getBlockHeight", []);
+  await rpc.call("getMinimumBalanceForRentExemption", []);
   assert.equal(posts, 2); assert.equal(budget.logicalCalls, 3); assert.equal(budget.physicalRequests, 2);
 });
 
@@ -256,8 +256,8 @@ test("persistent Solana pacing serializes concurrent commands and survives a fre
   const rpc = (state: StateStore) => new SolanaRpc("https://api.mainnet-beta.solana.com", fetcher,
     new SolanaRpcBudget({ maxPhysicalRequests: 24, now: () => now, wait }),
     new SolanaRpcPacer(state, () => now, wait));
-  await Promise.all([rpc(firstState).call("getGenesisHash", []), rpc(secondState).call("getBlockHeight", [])]);
-  await rpc(new StateStore(temporary.root)).call("getBlockHeight", []);
+  await Promise.all([rpc(firstState).call("getGenesisHash", []), rpc(secondState).call("getMinimumBalanceForRentExemption", [])]);
+  await rpc(new StateStore(temporary.root)).call("getMinimumBalanceForRentExemption", []);
   assert.equal(starts.length, 3);
   assert.ok(starts[1]! - starts[0]! >= 500 && starts[2]! - starts[1]! >= 500);
   const files = await readdir(join(temporary.root, "rpc-provider-pacing"));
@@ -279,9 +279,9 @@ test("Solana invocation counts batches and send as physical POSTs and denies the
       { jsonrpc: "2.0", id: request.id, result: 1 });
   }) as typeof fetch, budget, new SolanaRpcPacer(state, () => now, wait));
   await rpc.batch([{ method: "getGenesisHash", params: [] }, { method: "getBlockHeight", params: [] }]);
-  for (let index = 1; index < 23; index++) await rpc.call("getBlockHeight", []);
+  for (let index = 1; index < 23; index++) await rpc.call("getMinimumBalanceForRentExemption", []);
   await rpc.call("sendTransaction", ["synthetic"]);
-  await assert.rejects(rpc.call("getBlockHeight", []), { code: "APN_RPC_BUDGET_EXCEEDED" });
+  await assert.rejects(rpc.call("getMinimumBalanceForRentExemption", []), { code: "APN_RPC_BUDGET_EXCEEDED" });
   assert.equal(posts, 24);
   assert.equal(budget.physicalRequests, 24);
   assert.equal(budget.logicalCalls, 26);
@@ -298,7 +298,7 @@ test("Solana HTTP 429 persists cooldown and never amplifies a send", async t => 
     posts++; return json({ error: "rate limited" }, 429, { "retry-after": "3" });
   }) as typeof fetch, budget, pacer);
   await assert.rejects(rpc.call("sendTransaction", ["synthetic"]), { code: "APN_RPC_RATE_LIMITED" });
-  await assert.rejects(rpc.call("getBlockHeight", []), { code: "APN_PROVIDER_UNAVAILABLE" });
+  await assert.rejects(rpc.call("getMinimumBalanceForRentExemption", []), { code: "APN_PROVIDER_UNAVAILABLE" });
   assert.equal(posts, 1);
   assert.equal(budget.physicalRequests, 1);
 });

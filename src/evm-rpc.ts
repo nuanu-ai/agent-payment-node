@@ -9,6 +9,7 @@ import type { EvmBalanceSnapshot, EvmDirectReads, EvmFeeQuote, EvmRpcBatchCall, 
 import type { FinalizedBatchRead } from "./evm-finalized-proof.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, evmTokenBalance, recheckEvmBlock } from "./evm-rpc-codec.js";
 import { observeEvmTransfer } from "./evm-transfer-evidence.js";
+import { readEvmReceiptFeeFields } from "./evm-direct-actual-fee.js";
 
 export class EvmRpc implements EvmRpcPort {
   /** The endpoint's IP is pinned for this instance, so its chain id is proven once and cannot change afterwards. */
@@ -135,7 +136,7 @@ export class EvmRpc implements EvmRpcPort {
     return {
       transactionHash: receiptHash, status: status === 1n ? "success" : "reverted",
       blockNumberAtomic: blockNumber.toString(), blockHash,
-      logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin,
+      logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin, evmFeeFields: readEvmReceiptFeeFields(receipt),
     };
   }
 

@@ -27,6 +27,7 @@ import { verifyRelayBaseFunding } from "./base-source-guard.js";
 import { RelayNativeDepositCustody, verifySignedNativeDeposit as verifySigned } from "./native-source-custody.js";
 import { decodeRelayBaseReceiptFee, verifyRelayBaseReceiptFee } from "./source-fee-proof.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
+import { postEffectReadFailure } from "../post-effect-read-failure.js";
 const HASH = /^[a-f0-9]{64}$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
 function blocked(reason) { throw new ApnError("APN_OPERATION_BLOCKED", "Relay native source execution is blocked.", { reason }); }
@@ -39,6 +40,7 @@ export class RelayNativeSourceRuntime {
     clock;
     origin;
     #heldCustody = new WeakSet();
+    #dispatched = new WeakSet();
     wallets;
     permissions;
     journals;
@@ -74,19 +76,29 @@ export class RelayNativeSourceRuntime {
             const invocation = this.origin === undefined ? null : new RelayRpcInvocation(this.state, this.origin, transport, abort.signal, transport instanceof HttpsBaseRpc ? () => transport.primePublicAddresses() : undefined);
             const rpc = invocation?.rpc ?? transport;
             const work = () => this.state.withLocks([`profile:${op.profileHash}`, `profile:${allowlistProfileHash(profile)}`, `relay-native-source:${operationId}`, evmAddressLock(op.sourceAccount)], async () => this.run(op, profile, rpc, abort.signal));
-            const result = op.sourceChainId !== 8453 ? await work() : await this.state.withLocks([
-                walletCustodyLock(this.state, profile)
-            ], async () => {
-                this.#heldCustody.add(op);
-                try {
-                    return await work();
-                }
-                finally {
-                    this.#heldCustody.delete(op);
-                }
-            });
-            invocation?.assertAllowed();
-            return result;
+            try {
+                const result = op.sourceChainId !== 8453 ? await work() : await this.state.withLocks([
+                    walletCustodyLock(this.state, profile)
+                ], async () => {
+                    this.#heldCustody.add(op);
+                    try {
+                        return await work();
+                    }
+                    finally {
+                        this.#heldCustody.delete(op);
+                    }
+                });
+                invocation?.assertAllowed();
+                return result;
+            }
+            catch (error) {
+                // Once this call fenced and dispatched the deposit, a later failure answers with its saved journal (hash, phase,
+                // the observe step) and names the failed read, never a bare error that hides the send. Nothing is resent.
+                const saved = this.#dispatched.has(op) ? await this.journals.load(op).catch(() => null) : null;
+                if (saved === null)
+                    throw error;
+                return { ...saved, observationFailure: postEffectReadFailure(error) };
+            }
         }
         finally {
             abort.abort();
@@ -355,6 +367,7 @@ export class RelayNativeSourceRuntime {
                 await verifySigned(op, signed.raw, nonce);
                 authority.assert(await this.admission(op, profile, this.clock.now()));
                 j = await dispatchRelayNativeDepositOnce(op, j, this.journals, raw => { authority.assert(); return rpc.submitRawTransaction(raw, () => authority.assert()); }, signed.raw, this.clock.now());
+                this.#dispatched.add(op);
             }
             if (j.phase === "submitting") {
                 const outcome = await this.observe(op, rpc, j.transactionHash);

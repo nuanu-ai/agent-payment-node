@@ -6,6 +6,7 @@ import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sha256 } from "../../src/canonical.js";
 import { bindArgv } from "../../src/command-binder.js";
+import { ApnError } from "../../src/errors.js";
 import { environmentFinalizedReader, type FinalizedChainRead } from "../../src/evm-finalized-proof.js";
 import { BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES } from "../../src/lifi/circle-v2-source-receipt.js";
 import { NonEvmSourceJournalRepository, type NonEvmSourceJournal } from "../../src/lifi/non-evm-source-journal.js";
@@ -51,17 +52,25 @@ async function burned(root: string): Promise<{ journal: NonEvmSourceJournal; has
   j = await repo.observeUnknown(j.profileHash, j.operationId, j.integrityHash, "response_lost", at(4));
   return { journal: j, hash: keccak256(raw) };
 }
-/** Base at the finalized tag: chain id, one receipt (or none), the finalized head; counts calls. */
-function base(receipt: Record<string, unknown> | null, finalized: bigint, chainId = 8453) {
-  const calls: string[] = [];
+const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const word = (address: string) => address.slice(2).toLowerCase().padStart(64, "0");
+/** Base at the finalized tag: chain id, one receipt (or none), the finalized head, the payer's allowance to the wrapper; counts calls. */
+function base(receipt: Record<string, unknown> | null, finalized: bigint, chainId = 8453, allowance: bigint | null = 0n) {
+  const calls: string[] = [], chain = { allowance, finalized };
   const rpc: FinalizedChainRead = { async call(method, params) {
     calls.push(method);
     if (method === "eth_chainId") return `0x${chainId.toString(16)}`;
     if (method === "eth_getTransactionReceipt") return receipt;
-    if (method === "eth_getBlockByNumber") { assert.equal(params[0], "finalized"); return { number: `0x${finalized.toString(16)}` }; }
+    if (method === "eth_getBlockByNumber") { assert.equal(params[0], "finalized"); return { number: `0x${chain.finalized.toString(16)}`, hash: `0x${H("f")}` }; }
+    if (method === "eth_call") {
+      assert.deepEqual(params, [{ to: USDC, data: `0xdd62ed3e${word(ACCOUNT.address)}${word(BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES)}` },
+        `0x${chain.finalized.toString(16)}`], "the allowance is read at the finalized head's number, never at an older block");
+      if (chain.allowance === null) throw new ApnError("APN_RPC_AMBIGUOUS", "synthetic allowance read loss");
+      return `0x${chain.allowance.toString(16).padStart(64, "0")}`;
+    }
     throw new Error(`unexpected ${method}`);
   } };
-  return { rpc, calls };
+  return { rpc, calls, chain };
 }
 const receiptOf = (hash: string, status = "0x1", from: string = ACCOUNT.address) =>
   ({ transactionHash: hash, from: from.toLowerCase(), to: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES.toLowerCase(), blockNumber: "0x64", blockHash: `0x${H("e")}`, status });
@@ -96,17 +105,78 @@ test("a finalized receipt is recorded once and ends the payer's claim inside the
   assert.equal(await held(temporary.root), true);
   const chain = base(receiptOf(hash, "0x0"), 100n), proved = await status(temporary.root, () => chain.rpc);
   assert.equal(proved.ok, true, JSON.stringify(proved.error));
-  const view = proved.operation as { outcome: string; sourceProof: { status: string; blockNumberAtomic: string; finalizedBlockNumberAtomic: string; nonceAtomic: string } };
+  const view = proved.operation as { outcome: string; residualAllowance: { allowanceAtomic: string }; sourceProof: { status: string; blockNumberAtomic: string; finalizedBlockNumberAtomic: string; nonceAtomic: string } };
   assert.deepEqual([view.outcome, view.sourceProof.status, view.sourceProof.blockNumberAtomic, view.sourceProof.finalizedBlockNumberAtomic,
-    view.sourceProof.nonceAtomic, proved.proof_class, proved.next_actions], ["reverted", "reverted", "100", "100", "7", "chain_verified_public_read", []]);
-  assert.deepEqual(chain.calls, ["eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber"]);
+    view.sourceProof.nonceAtomic, view.residualAllowance.allowanceAtomic, proved.proof_class, proved.next_actions],
+  ["reverted", "reverted", "100", "100", "7", "0", "chain_verified_public_read", []]);
+  assert.deepEqual(chain.calls, ["eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_call"]);
   assert.equal(await exists(sidecar(temporary.root, journal)), true);
   assert.equal(await held(temporary.root), false, "the recorded proof released the payer before the signing window ended");
   assert.equal((await new OperationIndex(state).find(journal.operationId))?.state, "terminal");
   await rm(join(temporary.root, "operation-index"), { recursive: true, force: true });
   assert.equal((await new OperationIndex(state).find(journal.operationId))?.state, "terminal", "rm -r operation-index keeps the proof");
   const again = await status(temporary.root, () => chain.rpc);
-  assert.deepEqual([(again.operation as { outcome: string }).outcome, again.proof_class, chain.calls.length], ["reverted", "durable_public_state", 3]);
+  assert.deepEqual([(again.operation as { outcome: string }).outcome, again.proof_class, chain.calls.length],
+    ["reverted", "durable_public_state", 4], "a recorded proof and a stored residual are never re-read");
+});
+
+const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> " +
+  "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>";
+const refreshed = async (root: string, read: (chainId: number) => FinalizedChainRead, id = H("b")) =>
+  await createApnCore(bindArgv(["operation", "status", "--operation", id, "--refresh-allowance"]), { stateRoot: root, wrappingSecret: wrapping, finalizedRead: read })
+    .execute(bindArgv(["operation", "status", "--operation", id, "--refresh-allowance"]).request);
+
+test("the residual wrapper allowance is read once, at the finalized head that proved the burn, stored with its block and shown without reads", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { journal, hash } = await burned(temporary.root);
+  const left = base(receiptOf(hash), 100n, 8453, 18870n), shown = await status(temporary.root, () => left.rpc);
+  assert.equal(shown.ok, true, JSON.stringify(shown.error));
+  const stored = { token: USDC, owner: ACCOUNT.address, spender: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES, allowanceAtomic: "18870",
+    block: { numberAtomic: "100", hash: `0x${H("f")}` }, proof: "finalized_allowance_read", revokeOperationId: null };
+  assert.deepEqual({ ...(shown.operation as { residualAllowance: Record<string, unknown> }).residualAllowance, observedAt: undefined },
+    { ...stored, observedAt: undefined, readByThisStatus: true });
+  assert.deepEqual(shown.next_actions, [REVOKE]);
+  assert.equal(await exists(join(temporary.root, "non-evm-source-journals", journal.profileHash, `${journal.operationId}.residual-allowance.json`)), true);
+  // Later statuses show the stored value and block and read nothing, even with no RPC configured at all.
+  left.chain.allowance = 0n; left.chain.finalized = 200n;
+  for (const read of [() => left.rpc, environmentFinalizedReader({})]) {
+    const later = await status(temporary.root, read);
+    assert.deepEqual([(later.operation as { residualAllowance: { allowanceAtomic: string; readByThisStatus: boolean } }).residualAllowance.allowanceAtomic,
+      (later.operation as { residualAllowance: { readByThisStatus: boolean } }).residualAllowance.readByThisStatus, later.next_actions], ["18870", false, [REVOKE]]);
+  }
+  assert.equal(left.calls.length, 4);
+  // Only an explicit refresh reads again: one chain id, the finalized head, one eth_call; the new value replaces the stored one.
+  const fresh = await refreshed(temporary.root, () => left.rpc);
+  assert.equal(fresh.ok, true, JSON.stringify(fresh.error));
+  assert.deepEqual(left.calls.slice(4), ["eth_chainId", "eth_getBlockByNumber", "eth_call"]);
+  const residual = (fresh.operation as { residualAllowance: { allowanceAtomic: string; block: unknown; readByThisStatus: boolean } }).residualAllowance;
+  assert.deepEqual([residual.allowanceAtomic, residual.block, residual.readByThisStatus, fresh.next_actions], ["0", { numberAtomic: "200", hash: `0x${H("f")}` }, true, []]);
+  assert.equal((await status(temporary.root, () => left.rpc)).ok, true); assert.equal(left.calls.length, 7);
+});
+
+test("a residual that could not be read is reported with its reason, never guessed, and read once when a reader works", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { hash } = await burned(temporary.root);
+  const lost = base(receiptOf(hash), 100n, 8453, null), first = await status(temporary.root, () => lost.rpc);
+  assert.equal(first.ok, true, JSON.stringify(first.error));
+  assert.deepEqual((first.operation as { residualAllowance: Record<string, unknown> }).residualAllowance, { token: USDC, owner: ACCOUNT.address,
+    spender: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES, allowanceAtomic: null, block: null, proof: null, revokeOperationId: null, observedAt: null,
+    readByThisStatus: false, unreadReason: "APN_RPC_AMBIGUOUS: synthetic allowance read loss" });
+  assert.deepEqual(first.next_actions, []);
+  const unread = await status(temporary.root, environmentFinalizedReader({}));
+  assert.match((unread.operation as { residualAllowance: { unreadReason: string } }).residualAllowance.unreadReason, /^APN_RPC_CONFIG: .*APN_BASE_RPC_URL/u);
+  const works = base(receiptOf(hash), 120n, 8453, 18870n), read = await status(temporary.root, () => works.rpc);
+  assert.deepEqual([(read.operation as { residualAllowance: { allowanceAtomic: string } }).residualAllowance.allowanceAtomic, works.calls],
+    ["18870", ["eth_chainId", "eth_getBlockByNumber", "eth_call"]]);
+  await status(temporary.root, () => works.rpc); assert.equal(works.calls.length, 3, "stored now: no further reads");
+});
+
+test("a burn that can still spend its allowance shows no residual, even on refresh, and reads nothing", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const journal = await staged(temporary.root), none = base(null, 0n);
+  const open = await refreshed(temporary.root, () => none.rpc, journal.operationId);
+  assert.equal(open.ok, true, JSON.stringify(open.error));
+  assert.deepEqual([(open.operation as { residualAllowance?: unknown }).residualAllowance, none.calls], [undefined, []]);
 });
 
 test("a journal without a burn transaction reads no RPC; a missing Base RPC setting is named", async (t) => {

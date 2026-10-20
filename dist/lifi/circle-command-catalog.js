@@ -18,6 +18,13 @@ export const CIRCLE_COMMANDS = [
         effect: { class: "payment_prepare", summary: "Reads same-block Base allowance and balance, nonce, gas and fee; saves an unsigned bounded intent." },
         approval: { class: "none", when: "Unsigned; no approval needed." }, output, states,
         recovery: [{ command_path: ["circle", "approval", "execute"], when: "After reviewing this exact preparation." }], examples: ["apn circle approval prepare --profile default --cap-atomic 430000 --max-gas-limit-atomic 100000 --max-fee-per-gas-wei 2000000000 --max-priority-fee-per-gas-wei 100000000 --max-native-debit-wei 200000000000000"] },
+    { path: ["circle", "approval", "revoke"], synopsis: "apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>",
+        summary: "Save one Base USDC approve(wrapper, 0) intent that clears the allowance left on the exact Circle V2 WithFees wrapper.",
+        options: [profile, ...limits],
+        effect: { class: "payment_prepare", summary: "Reads same-block Base allowance, nonce, gas and fee; refuses when the allowance is already 0; saves an unsigned zero-cap intent." },
+        approval: { class: "none", when: "Unsigned; circle approval execute asks for foreground consent." }, output, states,
+        recovery: [{ command_path: ["circle", "approval", "execute"], when: "Confirm, sign and send the exact revoke once; circle approval status observes it." }],
+        examples: ["apn circle approval revoke --profile default --max-gas-limit-atomic 100000 --max-fee-per-gas-wei 2000000000 --max-priority-fee-per-gas-wei 100000000 --max-native-debit-wei 200000000000000"] },
     { path: ["circle", "approval", "execute"], synopsis: "apn circle approval execute --operation <approval-id>",
         summary: "Confirm one exact allowance in a foreground terminal and attempt its signed Base transaction once.",
         options: [operation], effect: { class: "payment_submit", summary: "One approval transaction may cost Base ETH. No automatic retry." },
@@ -25,7 +32,7 @@ export const CIRCLE_COMMANDS = [
         recovery: [{ command_path: ["circle", "approval", "status"], when: "Observe the exact signed transaction at safe finality." }], examples: ["apn circle approval execute --operation <approval-id>"] },
     { path: ["circle", "approval", "status"], synopsis: "apn circle approval status --operation <approval-id>",
         summary: "Observe a saved approval without any resend; one the finalized nonce proves can never land ends failed_proven_superseded.", options: [operation],
-        effect: { class: "network_read", summary: "Reads the exact saved Base transaction and fresh allowance, or the payer's finalized nonce when no receipt exists. A completed approval leaves its allowance for circle source submit; APN has no revoke." },
+        effect: { class: "network_read", summary: "Reads the exact saved Base transaction and fresh allowance, or the payer's finalized nonce when no receipt exists. A completed approval leaves its allowance for circle source submit until a source burn spends it or circle approval revoke clears it." },
         approval: { class: "none", when: "Observation only." }, output, states, recovery: [], examples: ["apn circle approval status --operation <approval-id>"] },
     { path: ["circle", "source", "submit"], synopsis: "apn circle source submit --profile <profile> --expected-payer <base-address> --recipient-owner <solana-address> --recipient-setup <existing_ata|create_ata> --amount-atomic <uint> --max-source-fee-atomic <uint> --max-allowance-atomic <uint> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>",
         summary: "Prepare, confirm and submit one bounded Circle V2 Base USDC source transfer.",
@@ -46,9 +53,10 @@ export function bindCircleCommand(path, o) {
             command: path === "circle approval execute" ? "circle.approval.execute" : "circle.approval.status",
             operationId: bridgeHash(v(o, "--operation"), "APN_INVALID_INPUT"),
         };
-    if (path === "circle approval prepare")
+    // Revoke is the same approval intent with a zero cap: same journal, foreground consent, single send and safe observation.
+    if (path === "circle approval prepare" || path === "circle approval revoke")
         return { command: "circle.approval.prepare", profile: v(o, "--profile"),
-            approvalCapAtomic: uint(o, "--cap-atomic"), maxGasLimitAtomic: uint(o, "--max-gas-limit-atomic"),
+            approvalCapAtomic: path === "circle approval revoke" ? "0" : uint(o, "--cap-atomic"), maxGasLimitAtomic: uint(o, "--max-gas-limit-atomic"),
             maxFeePerGasWei: uint(o, "--max-fee-per-gas-wei"), maxPriorityFeePerGasWei: uint(o, "--max-priority-fee-per-gas-wei"),
             maxNativeDebitWei: uint(o, "--max-native-debit-wei") };
     if (path !== "circle source submit")

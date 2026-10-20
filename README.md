@@ -327,7 +327,7 @@ apn x402 fetch prepare --profile <profile> [--chain <caip2>] --url <https-url> -
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
-apn operation status --operation <operation-id>
+apn operation status --operation <operation-id> [--refresh-allowance]
 apn operation abandon --operation <operation-id>
 apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observe-only true] [--coinbase-observation-rpc publicnode-base] [--observation-rpc-env <APN_ENV_RPC_URL>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>
@@ -350,6 +350,7 @@ apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --
 apn bridge prepare --profile <profile> --quote <snapshot-hash> --route <route-id> --idempotency-key <key>
 apn bridge approve --operation <operation-id>
 apn circle approval prepare --profile <profile> --cap-atomic <USDC atomic> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>
+apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>
 apn circle approval execute --operation <approval-id>
 apn circle approval status --operation <approval-id>
 apn circle source submit --profile <profile> --expected-payer <base-address> --recipient-owner <solana-address> --recipient-setup <existing_ata|create_ata> --amount-atomic <uint> --max-source-fee-atomic <uint> --max-allowance-atomic <uint> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>
@@ -380,6 +381,7 @@ apn gasless balance --profile <profile> --chain <chain-id>
 apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]
 apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>
 apn gasless transfer approve --operation <operation-id>
+apn gasless transfer revoke --operation <operation-id>
 apn gasless transfer approve-sealed --operation <operation-id>
 apn allowlist inventory
 apn allowlist resolve --chain <exact-network-identity> --kind <native|token> [--identifier <exact-token-identifier>]
@@ -400,7 +402,7 @@ apn swap ethereum uniswap-token prepare --profile <profile> --quote <string> --i
 apn swap ethereum uniswap-token status --operation <operation_id>
 apn swap ethereum uniswap-token approve --operation <operation_id>
 apn swap ethereum uniswap-token execute --operation <operation_id>
-apn swap ethereum uniswap-token cleanup --operation <operation_id>
+apn swap ethereum uniswap-token cleanup --operation <operation_id> [--max-fee-per-gas <wei>] [--max-priority-fee-per-gas <wei>]
 apn swap tron sunswap inventory
 apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <wei> --deadline <string>
 apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
