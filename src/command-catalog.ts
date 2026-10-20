@@ -310,7 +310,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
       { command_path: ["operation", "resume"], when: "When documented durable recovery is permitted." },
       { command_path: ["receipt", "get"], when: "After terminal completion." },
     ],
-    ["apn x402 fetch approve --operation <operation-id> --rpc-url <https-base-rpc-url>"],
+    ["apn x402 fetch approve --operation <operation-id> --rpc-url <https-rpc-url-of-the-operation-network>"],
   ),
   command(
     ["pay", "transfer", "prepare"],
@@ -346,7 +346,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
       { command_path: ["operation", "resume"], when: "When documented durable recovery is permitted." },
       { command_path: ["receipt", "get"], when: "After terminal completion." },
     ],
-    ["apn pay transfer approve --operation <operation-id> --rpc-url <https-base-rpc-url>"],
+    ["apn pay transfer approve --operation <operation-id> --rpc-url <https-rpc-url-of-the-operation-network>"],
   ),
   command(["operation", "status"], "apn operation status --operation <operation-id> [--refresh-allowance]", "Inspect one durable operation of any family through its own status, which observes the chain only where that family's status does (swaps, Uniswap token, 1Click, Circle approval, a Circle Base to Solana burn until its finalized receipt and residual wrapper allowance are stored, and the closure check of a Stargate record of an unreleased schema).", [operationRequired,
     option("--refresh-allowance", "boolean", false, { kind: "literal", value: "false" }, ["circle_base_to_solana_source_only", "one_finalized_allowance_read_replaces_the_stored_value"], "public")], "local_write", "May initialize local state, index saved operations and repair saved operation or direct receipt records; never signs, submits, or resumes a payment effect.", "none", "Never.", allOperationStates, [
@@ -377,7 +377,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
       { command_path: ["operation", "status"], when: "To inspect the resulting durable state." },
       { command_path: ["receipt", "get"], when: "After terminal completion." },
     ],
-    ["apn operation resume --operation <operation-id> --rpc-url <https-base-rpc-url> --wait-seconds 60"],
+    ["apn operation resume --operation <operation-id> --rpc-url <https-rpc-url-of-the-operation-network> --wait-seconds 60"],
   ),
   command(
     ["operation", "recover-provider-request"],

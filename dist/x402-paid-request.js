@@ -302,7 +302,7 @@ export class X402PaidRequest extends X402Lifecycle {
         if (BigInt(operation.capAtomic) > BigInt(policy.maxX402AmountAtomic)) {
             throw new ApnError("APN_X402_PROFILE_LIMIT_EXCEEDED", "The current profile maximum is below the frozen x402 cap.");
         }
-        const balance = await this.context.requireRpc().getBalances(operation.wallet);
+        const balance = await requireX402Rpc(this.context, x402AssetOf(operation)).getBalances(operation.wallet);
         if (balance.address.toLowerCase() !== operation.wallet) {
             throw new ApnError("APN_RPC_PROTOCOL", "RPC balance response does not match the frozen Smart Account owner.");
         }

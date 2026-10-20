@@ -14,6 +14,7 @@ import { stagedProviderX402Operation } from "./provider-x402-stage.js";
 import { resolveProviderPrepare } from "./provider-prepare-identity.js";
 import { evmConflictDomain } from "./operation-conflict-domain.js";
 import { isCode } from "./secure-state-store.js";
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { canonicalPrepareUrl, freshChallenge, positiveCap } from "./x402-policy.js";
@@ -66,7 +67,7 @@ export class ProviderX402Service {
         const callerCap = request.maxAmountAtomic === undefined ? undefined : positiveCap(request.maxAmountAtomic);
         const endpoint = canonicalPrepareUrl(request.url);
         const canonicalUrl = endpoint.toString();
-        const rpcUrl = canonicalProviderX402RpcUrl(this.context.requireRpcUrl());
+        const rpcUrl = canonicalProviderX402RpcUrl(this.context.requireRpcUrl(BASE_RPC_CHAIN));
         await this.context.ready();
         const state = this.context.state;
         const profileHash = state.profileHash(profile);
@@ -158,7 +159,7 @@ export class ProviderX402Service {
                     accountBindingHash: balance.account_binding_hash,
                 } });
         }
-        const rpcIdentity = await this.context.requireRpc().assertBaseChain();
+        const rpcIdentity = await this.context.requireRpc(BASE_RPC_CHAIN).assertBaseChain();
         if (rpcIdentity.chainId !== 8453)
             throw new ApnError("APN_CHAIN_MISMATCH", "Provider x402 settlement RPC is not Base.");
         return await this.transition(current, "awaiting_approval", "x402_awaiting_authorization", "x402_frozen_offer");
@@ -188,7 +189,7 @@ export class ProviderX402Service {
                 const balance = await observeProviderX402Balance(this.context, bound, adapter);
                 const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(bound)));
                 assertFrozenProviderX402Policy(operation, policy, balance);
-                const rpc = providerX402ReadPort(this.context.requireRpc());
+                const rpc = providerX402ReadPort(this.context.requireRpc(BASE_RPC_CHAIN));
                 const lower = await captureProviderEvidenceLowerBlock(rpc);
                 const challenge = await freshChallenge(this.context.requireHttp(), operation.request.canonicalUrl, operation.request.httpRequest, x402Asset(8453, BASE_USDC));
                 const selected = soleProviderOffer(challenge);
@@ -334,8 +335,8 @@ export class ProviderX402Service {
         if (remaining !== undefined && remaining < 1)
             return operation;
         const rpc = remaining === undefined
-            ? providerX402ReadPort(this.context.requireRpc())
-            : boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Asset(8453));
+            ? providerX402ReadPort(this.context.requireRpc(BASE_RPC_CHAIN))
+            : boundedX402ReadPort(this.context.requireRpc(BASE_RPC_CHAIN), Math.min(20_000, remaining), x402Asset(8453));
         const observation = await observeProviderSettlement(operation, rpc, this.context.clock.now().getTime());
         if (observation.kind === "pending")
             return operation;
