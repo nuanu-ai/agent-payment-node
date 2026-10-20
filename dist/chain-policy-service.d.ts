@@ -33,12 +33,21 @@ export declare function solanaCapabilities(): {
     network: string;
     assets: import("./direct-rail-ports.js").ChainAsset[];
     x402: {
-        available: boolean;
+        readonly available: true;
+        readonly scheme: "exact";
+        readonly network: `solana:${string}`;
+        readonly provider: "local";
+        readonly feePayer: "seller_facilitator";
+        readonly assets: "owner_admitted_classic_spl_mint";
+        readonly refused: readonly ["native_sol", "token_2022_mint"];
+        readonly requires: readonly ["local_solana_wallet", "APN_SOLANA_RPC_URL", "allowlist_x402_row_x402-exact-svm", "wallet_policy_per_mint"];
+        readonly commands: readonly ["x402 solana pay", "x402 solana observe", "x402 solana status"];
     };
     profiles: ({
         provider: string;
         execution: string;
         direct: boolean;
+        x402: boolean;
         requires: string[];
         accountAndBalance?: never;
         blocker?: never;
@@ -46,6 +55,7 @@ export declare function solanaCapabilities(): {
         provider: string;
         execution: string;
         direct: boolean;
+        x402: boolean;
         accountAndBalance: boolean;
         blocker: string;
         requires?: never;
@@ -54,6 +64,7 @@ export declare function solanaCapabilities(): {
         direct: boolean;
         blocker: string;
         execution?: never;
+        x402?: never;
         requires?: never;
         accountAndBalance?: never;
     })[];

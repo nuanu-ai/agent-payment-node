@@ -6,6 +6,7 @@ import { OperationService } from "./operation-service.js";
 import { RailOperationRepository } from "./rail-operation-repository.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
+import { X402_SOLANA_MECHANISM, X402_SOLANA_NETWORK } from "./x402-solana/constants.js";
 export class ChainPolicyService {
     context;
     policies;
@@ -111,12 +112,19 @@ export class ChainPolicyService {
         assertChainPrincipal(policy, amountAtomic, await this.records.listOperations(policy.account.profileHash), this.context.clock.now(), operationId);
     }
 }
+/** x402 `exact` on Solana (src/x402-solana): a classic SPL mint the owner admitted, paid from the local wallet, the seller's facilitator pays the fee. */
+const SOLANA_X402 = {
+    available: true, scheme: "exact", network: X402_SOLANA_NETWORK, provider: "local", feePayer: "seller_facilitator",
+    assets: "owner_admitted_classic_spl_mint", refused: ["native_sol", "token_2022_mint"],
+    requires: ["local_solana_wallet", "APN_SOLANA_RPC_URL", `allowlist_x402_row_${X402_SOLANA_MECHANISM.provider}`, "wallet_policy_per_mint"],
+    commands: ["x402 solana pay", "x402 solana observe", "x402 solana status"],
+};
 export function solanaCapabilities() {
     return {
-        rail: "solana", network: "mainnet", assets: [chainAsset("solana", "sol"), chainAsset("solana", "usdc"), chainAsset("solana", "usdt")], x402: { available: false },
+        rail: "solana", network: "mainnet", assets: [chainAsset("solana", "sol"), chainAsset("solana", "usdc"), chainAsset("solana", "usdt")], x402: SOLANA_X402,
         profiles: [
-            { provider: "local", execution: "local_signed", direct: true, requires: ["separate_encrypted_wallet", "explicit_rpc", "foreground_policy", "foreground_transfer_approval"] },
-            { provider: "coinbase-awal", execution: "provider_atomic", direct: false, accountAndBalance: true, blocker: "pinned_provider_fee_and_rent_guarantee_unavailable" },
+            { provider: "local", execution: "local_signed", direct: true, x402: true, requires: ["separate_encrypted_wallet", "explicit_rpc", "foreground_policy", "foreground_transfer_approval"] },
+            { provider: "coinbase-awal", execution: "provider_atomic", direct: false, x402: false, accountAndBalance: true, blocker: "pinned_provider_fee_and_rent_guarantee_unavailable" },
             { provider: "metamask-smart-account", direct: false, blocker: "pinned_provider_has_no_solana_rail" },
             { provider: "metamask-agent-wallet", direct: false, blocker: "pinned_provider_has_no_solana_rail" },
         ],

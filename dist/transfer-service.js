@@ -181,7 +181,10 @@ export class TransferService {
             if (operation.terminal)
                 return publicOperation(await this.followUsage(operation));
             if (operation.state !== "awaiting_approval") {
-                throw new ApnError("APN_OPERATION_BLOCKED", "Operation is already signed; use operation resume.");
+                // "started" is written before the native approve-and-sign call; whether it signed is known only after resume classifies it.
+                throw new ApnError("APN_OPERATION_BLOCKED", operation.state === "started"
+                    ? "Operation approval already started and its signature is unresolved; use operation resume."
+                    : "Operation is already signed; use operation resume.");
             }
             if (operation.evm !== undefined && operation.evm.nativeCustody === undefined) {
                 throw new ApnError("APN_REPREPARE_REQUIRED", "Prepare a new generic transfer with a frozen native custody binding.");
