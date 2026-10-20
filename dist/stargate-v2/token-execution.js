@@ -10,6 +10,7 @@ import { MAX_TTL_MS, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_
 import { seal, transition } from "./token-journal.js";
 import { assertLane, readAllowance, readExecutorCap, readPoolConfig, readPoolFunctional, readTokenBalance, requoteSend, rpcEnvelope, sourceReceipt, validateDestination, verifySignedEnvelope, } from "./token-rpc.js";
 export { LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, encodeStargateNativeDrop, } from "./token-codec.js";
+import { stargateFundsRefusal } from "./funds.js";
 export { FileStargateTokenJournal, stargateV2TokenCanonicalReceipt } from "./token-journal.js";
 export async function prepareStargateV2Token(request, ports, journal) {
     const now = ports.now ?? Date.now, profile = canonicalProfile(request.profile), owner = address(request.owner), recipient = address(request.recipient);
@@ -70,6 +71,9 @@ export async function prepareStargateV2Token(request, ports, journal) {
             fail("APN_REPREPARE_REQUIRED", "exact_send_fee_changed");
         const sendData = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken", args: [sendParam,
                 { nativeFee: BigInt(quote.quote.nativeMessageFeeAtomic), lzTokenFee: 0n }, owner] });
+        // Known before any gas read: a messaging fee the cap cannot cover with room for gas is refused here, never by the node's estimate.
+        if (BigInt(quote.quote.nativeMessageFeeAtomic) >= cap)
+            stargateFundsRefusal("max_native_debit_exceeded", { required: BigInt(quote.quote.nativeMessageFeeAtomic), limit: cap, messagingFee: BigInt(quote.quote.nativeMessageFeeAtomic) });
         const approvalRequired = allowance === 0n;
         const approvalData = encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "approve", args: [STARGATE_TOKEN_SOURCE_POOL, amount] });
         const approvalPrepared = approvalRequired ? await ports.prepareEnvelope({ chainId: 10, from: owner, to: STARGATE_TOKEN_SOURCE_TOKEN, data: approvalData, valueAtomic: "0" }) : undefined;
@@ -93,7 +97,7 @@ export async function prepareStargateV2Token(request, ports, journal) {
         const approvalDebit = approvalEnvelope === undefined ? 0n : BigInt(approvalEnvelope.gasLimitAtomic) * BigInt(approvalEnvelope.maxFeePerGasAtomic);
         const messageValue = BigInt(quote.quote.nativeMessageFeeAtomic);
         if (approvalDebit + messageValue >= cap)
-            fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
+            stargateFundsRefusal("max_native_debit_exceeded", { required: approvalDebit + messageValue, limit: cap, messagingFee: messageValue, gas: approvalDebit });
         const stagedGasCeiling = approvalRequired ? (cap - approvalDebit - messageValue) / approvedMaxFee : 0n;
         if (approvalRequired && stagedGasCeiling < 1n)
             fail("APN_OPERATION_BLOCKED", "bridge_gas_budget_empty");
@@ -108,10 +112,11 @@ export async function prepareStargateV2Token(request, ports, journal) {
         const gasDebit = [approvalEnvelope, sendEnvelope].filter((x) => x !== undefined)
             .reduce((sum, e) => sum + BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic), 0n);
         const maximumDebit = BigInt(quote.quote.nativeMessageFeeAtomic) + gasDebit;
+        const debit = { required: maximumDebit, messagingFee: messageValue, gas: gasDebit };
         if (maximumDebit > cap)
-            fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
+            stargateFundsRefusal("max_native_debit_exceeded", { ...debit, limit: cap });
         if (BigInt(sendPrepared.nativeBalanceAtomic) < maximumDebit)
-            fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
+            stargateFundsRefusal("insufficient_native_balance", { ...debit, limit: BigInt(sendPrepared.nativeBalanceAtomic) });
         const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString(), operationId });
         const preparedMs = now(), preparedAt = new Date(preparedMs).toISOString(), expiresAt = new Date(preparedMs + ttl).toISOString();
         const body = { schemaVersion: "apn.stargate-v2-token-operation.v5", operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy, finalityPolicyProvenance: "pinned_v2",

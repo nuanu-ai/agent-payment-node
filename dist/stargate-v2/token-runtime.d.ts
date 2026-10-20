@@ -109,4 +109,6 @@ export declare function confirmedStargateTokenSourceReceipt(rpc: Pick<StargateJs
 /** BRDG-30/31: the GUID- and recipient-filtered OFTReceived from the pinned pool, found by a resumable windowed scan, at
  * the destination finality head, is the delivery proof; PacketDelivered (and the native drop when the Executor applied it
  * in the same transaction) come from that transaction's receipt, so a redelivery by any caller still proves it. */
+/** The Optimism source envelope reads; the balance comes first, so an unfunded known value is refused before eth_estimateGas. */
+export declare function stargateTokenEnvelope(source: Pick<StargateJsonRpc, "call">, tx: Parameters<StargateTokenExecutionPorts["prepareEnvelope"]>[0]): Promise<Awaited<ReturnType<StargateTokenExecutionPorts["prepareEnvelope"]>>>;
 export declare function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc, "call">, input: Parameters<StargateTokenExecutionPorts["observeDestination"]>[0], tokenAt?: (rpc: StargateJsonRpc, token: Address, account: Address, tag: string) => Promise<bigint>, cursor?: StargateScanCursor): Promise<StargateTokenDestinationEvidence | null>;
