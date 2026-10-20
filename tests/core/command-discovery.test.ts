@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, readdir, stat } from "node:fs/promises";
-import { userInfo } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import {
@@ -32,6 +32,24 @@ import { inspectX402 } from "../../src/x402-http.js";
 import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
+
+/**
+ * The compiled CLI resolves its state root from the effective user's passwd home, never HOME. Tests run it with that home
+ * redirected (a preload replaces os.userInfo().homedir) so they never read or touch the real ~/.apn.
+ */
+const EFFECTIVE_HOME_PRELOAD = `data:text/javascript,${encodeURIComponent([
+  "import os from \"node:os\"; import { syncBuiltinESMExports } from \"node:module\";",
+  "const real = os.userInfo; os.userInfo = (options) => ({ ...real(options), homedir: process.env.APN_TEST_EFFECTIVE_HOME });",
+  "syncBuiltinESMExports();"].join(" "))}`;
+/** In-process calls that fail before any state access still get a state root that is never the real ~/.apn. */
+const NO_STATE_ROOT = join(tmpdir(), `apn-discovery-no-state-${process.pid}`, ".apn");
+async function effectiveHome(base: string): Promise<string> {
+  const home = join(base, "effective-home"); await mkdir(home, { recursive: true, mode: 0o700 }); return home;
+}
+function spawnApn(argv: readonly string[], options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly home: string }) {
+  return spawnSync(process.execPath, ["--import", EFFECTIVE_HOME_PRELOAD, resolve("bin/apn.js"), ...argv],
+    { encoding: "utf8", cwd: options.cwd, env: { ...options.env, APN_TEST_EFFECTIVE_HOME: options.home } });
+}
 
 const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
@@ -232,8 +250,8 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  (none)",
     "",
     "Commands:",
-    "  apn wallet policy show --profile <profile> [--chain <caip2>] — Read the encrypted owner-approved profile policy.",
-    "  apn wallet policy set --profile <profile> [--chain <caip2>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>] — Create, lower or raise owner-approved balance and x402 limits.",
+    "  apn wallet policy show --profile <profile> [--chain <caip2>] [--asset <token>] — Read the encrypted owner-approved profile policy.",
+    "  apn wallet policy set --profile <profile> [--chain <caip2>] [--asset <token>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>] — Create, lower or raise owner-approved balance and x402 limits.",
     "",
     "Machine contract: apn help --json",
     "Detailed help: apn help wallet policy <child>",
@@ -268,7 +286,7 @@ test("invalid discovery and operational usage return bounded catalog-only guidan
   }
   assert.deepEqual(catalogNextActions(["wallet", "status", "--profile"]), ["apn help wallet status", "apn help"]);
   assert.deepEqual(catalogNextActions([canary]), ["apn help"]);
-  const operational = await runCli(["wallet", "status", "--profile"], {});
+  const operational = await runCli(["wallet", "status", "--profile"], {}, { stateRoot: NO_STATE_ROOT });
   assert.equal(operational.ok, false);
   assert.deepEqual(operational.next_actions, ["apn help wallet status", "apn help"]);
 });
@@ -319,7 +337,7 @@ test("manifest v2 names every removed v1 command with a current replacement, and
     assert.equal(COMMANDS.some((command) => command.path.join(" ") === entry.path.join(" ")), false, entry.path.join(" "));
     if (entry.replacement === null) {
       // Removed without a successor: the reason, ordinary discovery guidance and no invented replacement.
-      const invoked = await runCli([...entry.path, "--profile", "x"], {});
+      const invoked = await runCli([...entry.path, "--profile", "x"], {}, { stateRoot: NO_STATE_ROOT });
       assert.equal(invoked.error?.code, "APN_UNSUPPORTED_COMMAND");
       assert.equal(invoked.error?.message.endsWith(entry.reason), true);
       assert.equal(invoked.next_actions.every((action) => action.startsWith("apn help")), true, JSON.stringify(invoked.next_actions));
@@ -331,7 +349,7 @@ test("manifest v2 names every removed v1 command with a current replacement, and
     assert.match(next[1] ?? "", /^apn help /u);
     assert.ok(COMMANDS.some((command) => next[1] === `apn help ${command.path.join(" ")}`), next[1]);
     assert.deepEqual(catalogNextActions(["help", ...entry.path]), next);
-    const invoked = await runCli([...entry.path, "--profile", "x"], {});
+    const invoked = await runCli([...entry.path, "--profile", "x"], {}, { stateRoot: NO_STATE_ROOT });
     assert.equal(invoked.error?.code, "APN_UNSUPPORTED_COMMAND");
     assert.equal(invoked.error?.message.endsWith(entry.replacement), true);
     assert.deepEqual(invoked.next_actions, next);
@@ -550,15 +568,15 @@ test("README command block and package/build identity are mechanically identical
 test("actual compiled CLI ignores caller HOME and leaves effective-user APN state unchanged for an absent profile", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const entrypoint = resolve("bin/apn.js");
   const profile = `no-effect-${randomBytes(16).toString("hex")}`;
-  const effectiveRoot = resolve(userInfo().homedir, ".apn");
+  const home = await effectiveHome(temporary.base), effectiveRoot = join(home, ".apn");
+  // The preload really redirects the effective-user home the CLI resolves its state root from.
+  const probe = spawnSync(process.execPath, ["--import", EFFECTIVE_HOME_PRELOAD, "--input-type=module", "-e",
+    "import { userInfo } from \"node:os\"; process.stdout.write(userInfo().homedir);"],
+  { encoding: "utf8", env: { ...process.env, APN_TEST_EFFECTIVE_HOME: home } });
+  assert.equal(probe.stdout, home, probe.stderr);
   const before = await treeMetadataDigest(effectiveRoot);
-  const result = spawnSync(entrypoint, ["wallet", "status", "--profile", profile], {
-    encoding: "utf8",
-    cwd: temporary.base,
-    env: { ...process.env, HOME: "" },
-  });
+  const result = spawnApn(["wallet", "status", "--profile", profile], { cwd: temporary.base, env: { ...process.env, HOME: "" }, home });
   assert.equal(result.status, 0, result.stderr ?? result.error?.message);
   assert.equal(result.stderr, "");
   const envelope = JSON.parse(result.stdout) as { readonly ok: boolean; readonly data: { readonly profile: string; readonly status: string } };
@@ -574,12 +592,11 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
 });
 
 test("actual compiled Stargate status needs no RPC environment and creates no state", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); const effectiveRoot = resolve(userInfo().homedir, ".apn");
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const home = await effectiveHome(temporary.base), effectiveRoot = join(home, ".apn");
   const before = await treeMetadataDigest(effectiveRoot), environment = { ...process.env };
   delete environment.APN_ETHEREUM_RPC_URL; delete environment.APN_UNICHAIN_RPC_URL;
-  const result = spawnSync(resolve("bin/apn.js"), ["stargate", "native", "status", "--operation", "d".repeat(64)], {
-    encoding: "utf8", cwd: temporary.base, env: environment,
-  });
+  const result = spawnApn(["stargate", "native", "status", "--operation", "d".repeat(64)], { cwd: temporary.base, env: environment, home });
   assert.equal(result.status, 1, result.stderr ?? result.error?.message); assert.equal(result.stderr, "");
   const envelope = JSON.parse(result.stdout) as { readonly ok: boolean; readonly error: { readonly code: string } };
   assert.equal(envelope.ok, false); assert.equal(envelope.error.code, "APN_OPERATION_NOT_FOUND");
@@ -589,8 +606,7 @@ test("actual compiled Stargate status needs no RPC environment and creates no st
 test("actual compiled discovery is raw and no-effect with empty or unwritable caller HOME", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const entrypoint = resolve("bin/apn.js");
-  const effectiveRoot = resolve(userInfo().homedir, ".apn");
+  const home = await effectiveHome(temporary.base), effectiveRoot = join(home, ".apn");
   const before = await treeMetadataDigest(effectiveRoot);
   const unwritableHome = join(temporary.base, "unwritable-home");
   await mkdir(unwritableHome, { mode: 0o700 });
@@ -604,22 +620,14 @@ test("actual compiled discovery is raw and no-effect with empty or unwritable ca
       [["wallet", "--help"], renderHelp(["wallet"])],
       [["help", "--json"], JSON.stringify(COMMAND_MANIFEST)],
     ] as const) {
-      const result = spawnSync(entrypoint, argv, {
-        encoding: "utf8",
-        cwd: temporary.base,
-        env: { ...process.env, HOME: callerHome },
-      });
+      const result = spawnApn(argv, { cwd: temporary.base, env: { ...process.env, HOME: callerHome }, home });
       assert.equal(result.status, 0, result.stderr ?? result.error?.message);
       assert.equal(result.stderr, "");
       assert.equal(result.stdout, `${expectedOutput}\n`);
       assert.equal(result.stdout.includes(canary), false);
     }
 
-    const invalid = spawnSync(entrypoint, ["help", "wallet", canary], {
-      encoding: "utf8",
-      cwd: temporary.base,
-      env: { ...process.env, HOME: callerHome },
-    });
+    const invalid = spawnApn(["help", "wallet", canary], { cwd: temporary.base, env: { ...process.env, HOME: callerHome }, home });
     assert.equal(invalid.status, 1, invalid.stderr ?? invalid.error?.message);
     assert.equal(invalid.stderr, "");
     assert.equal(invalid.stdout, `${invalid.stdout.trim()}\n`, "invalid discovery emits one raw JSON value and one terminator");
