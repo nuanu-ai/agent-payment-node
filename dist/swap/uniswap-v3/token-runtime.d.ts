@@ -53,6 +53,7 @@ export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommand
     approve(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     execute(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     status(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
+    /** The live allowance where one may still stand on a terminal record: an expired approval cleaned without a swap, or an owner abandon. */
     residualAllowance(op: import("./token-operation.js").UniswapTokenOperation): Promise<string | null>;
     cleanup(id: string, fees?: TokenCleanupFees): Promise<import("./token-operation.js").UniswapTokenOperation>;
     private budgeted;

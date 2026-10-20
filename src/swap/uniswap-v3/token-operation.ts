@@ -60,9 +60,11 @@ export interface UniswapTokenCleanupFeeQuote { readonly schemaVersion: "apn.unis
  * Why a cleaned swap's principal hold was released although an approval of it landed (R4 exit 2): no swap of it was ever
  * signed (no swap marker is left; a marker is dropped only when custody showed no signed bytes for it), or the hashless
  * swap marker's nonce is consumed in the finalized chain by this operation's own landed cleanup, so no swap of it can
- * ever land. Spent gas and every attempt stay in the record.
+ * ever land. Spent gas and every attempt stay in the record. An owner-abandoned swap (QA 0.5.54, 867244e9…) keeps its
+ * hashless marker and names it: custody, opened under the account lock, held no signed bytes for it and freed its nonce.
  */
-export type UniswapTokenPrincipalRelease = { readonly schemaVersion: "apn.uniswap-token-principal-release.v1"; readonly kind: "swap_never_signed"; readonly observedAt: string }
+export type UniswapTokenPrincipalRelease = { readonly schemaVersion: "apn.uniswap-token-principal-release.v1"; readonly kind: "swap_never_signed";
+        readonly swapNonce?: string; readonly swapMarkerHash?: string; readonly observedAt: string }
     | { readonly schemaVersion: "apn.uniswap-token-principal-release.v1"; readonly kind: "swap_nonce_consumed_by_cleanup"; readonly swapNonce: string;
         readonly cleanupTransactionHash: string; readonly cleanupBlockNumber: string; readonly cleanupBlockHash: string;
         readonly finalizedBlockNumber: string; readonly finalizedNonce: string; readonly observedAt: string };
@@ -278,10 +280,15 @@ export function landedTokenCleanups(op: Pick<UniswapTokenOperation, "cleanupAtte
         ...(op.retiredEffects ?? []).filter((row) => row.kind === "cleanup" && row.reason !== "never_landed").map((row) => row.attempt)];
 }
 function validatePrincipalRelease(op: UniswapTokenOperation) { const v = op.principalRelease as unknown;
-    if (op.phase !== "cleaned" || op.receipt !== null || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
+    if (op.phase !== "cleaned" && op.phase !== "abandoned_unknown" || op.receipt !== null || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
         (op.retiredEffects ?? []).some((row) => row.kind === "swap") || !isPlainRecord(v) || v.schemaVersion !== "apn.uniswap-token-principal-release.v1" ||
         typeof v.observedAt !== "string" || !canonicalInstant(v.observedAt) || v.observedAt > op.updatedAt) corrupt("Uniswap token principal release is invalid.");
-    if (v.kind === "swap_never_signed") { if (!exactKeys(v, ["schemaVersion", "kind", "observedAt"]) || op.swapAttempt !== null) corrupt("Uniswap token principal release is invalid."); return; }
+    // An owner-abandoned swap keeps its hashless marker as history; the release names the marker custody proved unsigned.
+    const marker = op.phase === "abandoned_unknown" ? op.swapAttempt : null;
+    if (v.kind === "swap_never_signed") { if (marker === null ? !exactKeys(v, ["schemaVersion", "kind", "observedAt"]) || op.swapAttempt !== null
+        : !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "swapMarkerHash", "observedAt"]) || marker.transactionHash !== null ||
+          v.swapNonce !== marker.nonce || v.swapMarkerHash !== marker.markerHash) corrupt("Uniswap token principal release is invalid."); return; }
+    if (op.phase !== "cleaned") corrupt("Uniswap token principal release is invalid.");
     const swap = op.swapAttempt, cleanup = landedTokenCleanups(op).find((row) => row.transactionHash === v.cleanupTransactionHash);
     if (v.kind !== "swap_nonce_consumed_by_cleanup" || !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "cleanupTransactionHash", "cleanupBlockNumber",
         "cleanupBlockHash", "finalizedBlockNumber", "finalizedNonce", "observedAt"]) || swap === null || swap.transactionHash !== null ||
