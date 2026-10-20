@@ -2,9 +2,14 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { ClockPort } from "../ports.js";
 import { HttpsBaseRpc } from "../rpc.js";
 import type { StateStore } from "../state.js";
+import { type PostEffectReadFailure } from "../post-effect-read-failure.js";
 type Rpc = Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
 export { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce, publicRelayNativeSourceJournal, type RelayNativeSourceJournal } from "./native-source-journal.js";
 import { type RelayNativeSourceJournal } from "./native-source-journal.js";
+/** The journal; `observationFailure` only when this call dispatched the deposit and a later read or check failed. */
+export type RelayNativeExecuteResult = RelayNativeSourceJournal & {
+    readonly observationFailure?: PostEffectReadFailure;
+};
 export interface RelayNativeSourcePorts {
     readonly confirm: (summary: {
         operationId: string;
@@ -35,7 +40,7 @@ export declare class RelayNativeSourceRuntime {
     private readonly usage;
     constructor(state: StateStore, wrapping: WrappingSecretPort, ports: RelayNativeSourcePorts, clock?: ClockPort, origin?: string | undefined);
     /** `profile` is the caller's explicit profile; the operation is found only under its hash (OWNR 4.1). */
-    execute(profile: string, operationId: string): Promise<RelayNativeSourceJournal>;
+    execute(profile: string, operationId: string): Promise<RelayNativeExecuteResult>;
     private assertLane;
     private owner;
     private usageIdentity;
