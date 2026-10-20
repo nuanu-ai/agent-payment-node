@@ -40,10 +40,11 @@ export class UniswapTokenNonceStore extends SecureStateStore {
     await this.writeJson(path, { schemaVersion: "apn.uniswap-token-nonces.v2", account, reservations } satisfies NonceRecord, raw === null);
     return nonce.toString();
   }
+  /** True when the effect's slot holds no reservation afterwards (released now, or none); false when a committed (signed) one keeps it. */
   async release(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean> {
     const account = canonical(op.account), path = this.path(account), raw = await this.readJson(path); if (raw === null) corrupt("Uniswap token nonce record is missing.");
     const current = validate(raw, account), slot = nonceSlot(op, kind), reservation = current.reservations[slot];
-    if (reservation === undefined) return false;
+    if (reservation === undefined) return true;
     exact(reservation, op, kind, nonce); if (reservation.state === "committed") return false;
     const reservations = { ...current.reservations }; delete reservations[slot]; await this.writeJson(path, { ...current, reservations }); return true;
   }

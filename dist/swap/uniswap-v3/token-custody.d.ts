@@ -29,11 +29,19 @@ export declare class UniswapTokenCustody {
     withAccountLock<T>(op: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
     private assertOwner;
     allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
-    /** True when custody holds no signed bytes for the effect (its reservation is free); false when a signed effect committed it. */
+    /**
+     * True when custody holds no signed bytes for the effect and its reservation is free; false when a signed effect committed
+     * it, found now or committed earlier (a committed reservation counts as signed even when its bytes are not here).
+     */
     releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean>;
     commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     private reconcileNonceReservations;
-    currentAllowance(op: UniswapTokenOperation): Promise<string>;
+    /**
+     * The allowance at the latest block. With `landed` (a transaction of this account that landed, e.g. the approval), one node
+     * first shows its head and that transaction at or below it, and the read is then pinned to that head by hash (EIP-1898,
+     * requireCanonical): a node behind the transaction's block would answer the allowance from before it, so it is refused.
+     */
+    currentAllowance(op: UniswapTokenOperation, landed?: string): Promise<string>;
     seal(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect>;
     private sealUnlocked;
     probeSealed(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<TokenSealedEffect | null>;

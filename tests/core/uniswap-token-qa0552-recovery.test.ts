@@ -10,6 +10,7 @@ import { canonicalJson, domainHash, hashObject } from "../../src/canonical.js";
 import { bindArgv } from "../../src/command-binder.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
+import type { ApnError } from "../../src/errors.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { createApnCore } from "../../src/runtime-factory.js";
 import { StateStore } from "../../src/state.js";
@@ -52,13 +53,15 @@ function nonceRows(root: string, account: string): string[] {
   return Object.values(raw.reservations as Record<string, { kind: string; nonce: string; state: string }>).map((row) => `${row.kind}:${row.nonce}:${row.state}`).sort();
 }
 
-test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stranded swap unsigned and, the 1 USDC approval standing, requires cleanup", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup); const op = validateUniswapTokenOperation(LIVE.stranded.operation);
+/** The stranded 867244e9… as captured: its journal and hold, the approval landed and journaled, the swap's nonce reserved (or committed). */
+async function stranded(root: string, swapNonce: "reserved" | "committed") {
+  const op = validateUniswapTokenOperation(LIVE.stranded.operation);
   const now = new Date((op.route.deadline + 3_600) * 1000), usage = seal({ schemaVersion: "apn.asset-usage-reservation.v1", ...identity(op),
     reservationId: op.usageReservationId!, idempotencyHash: idempotency(usageKey(op)), policyDigest: op.policyDigest, registryVersion: "qa.052.central.captured",
     rail: "swap", amountAtomic: op.route.amountIn, reservedAt: op.approvalAttempt!.markedAt, updatedAt: op.approvalAttempt!.markedAt, state: "reserved", effectAt: null, outcomeDigest: null });
-  const c = await captured(temporary.root, op, usage, now), nonces = new UniswapTokenNonceStore(temporary.root), effects = new UniswapTokenEffectJournal(temporary.root);
+  const c = await captured(root, op, usage, now), nonces = new UniswapTokenNonceStore(root), effects = new UniswapTokenEffectJournal(root);
   await nonces.allocate(op, "approval", 9n); await nonces.commit(op, "approval", "9"); assert.equal(await nonces.allocate(op, "swap", 10n), "10");
+  if (swapNonce === "committed") await nonces.commit(op, "swap", "10");
   const approval = op.approvalAttempt!, envelope = envelopeOf(op, "approval", approval.nonce), hex = (v: string) => `0x${BigInt(v).toString(16)}`, block = 26_232_480n;
   await effects.seal(op, "approval", approval.transactionHash as Hex, envelope, new Date(approval.markedAt));
   await effects.markStarted(op, "approval", new Date(approval.markedAt)); await effects.markOutcome(op, "approval", "send_accepted", new Date(approval.markedAt));
@@ -68,7 +71,11 @@ test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stran
   c.chain.node.receipts.set(approval.transactionHash!, { transactionHash: approval.transactionHash, from: op.account, to: envelope.to, blockNumber: hex(block.toString()),
     blockHash: blockHash(block), status: "0x1", gasUsed: "0x8356", effectiveGasPrice: "0x23024ba" });
   c.chain.node.head = block + 400n; c.chain.node.pending = 10n; c.chain.node.allowance = op.route.amountIn;
+  return { op, now, c };
+}
 
+test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stranded swap unsigned and, the 1 USDC approval standing, requires cleanup", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const { op, now, c } = await stranded(temporary.root, "reserved");
   const refused = await c.cli("status", 11);
   assert.deepEqual([refused.ok, refused.error?.details?.reason, refused.next_actions], [false, "uniswap_token_public_effect_missing",
     [`apn swap ethereum uniswap-token execute --operation ${op.operationId}`]]);
@@ -94,6 +101,15 @@ test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stran
   assert.equal(((await c.cli("execute", 15)).operation as UniswapTokenOperation).integrityHash, closed.integrityHash);
 });
 
+test("867244e9… with its swap nonce committed: execute keeps the hashless marker and the hold (a committed reservation counts as signed)", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const { op, c } = await stranded(temporary.root, "committed");
+  const executed = await c.cli("execute", 15);
+  assert.deepEqual([executed.ok, executed.error?.details?.reason], [false, "uniswap_token_public_effect_missing"], JSON.stringify(executed.error));
+  assert.equal((await new UniswapTokenJournal(temporary.root).load(op.operationId))?.integrityHash, op.integrityHash, "the swap marker stays");
+  assert.deepEqual([nonceRows(temporary.root, op.account), await c.row(), await c.used(), c.chain.node.sends],
+    [["approval:9:committed", "swap:10:committed"], "reserved", op.route.amountIn, []]);
+});
+
 test("867244e9…-shaped: a residual allowance takes one consented revoke at the freed nonce before cleaned; a zero one closes at once", async (t) => {
   for (const residual of [true, false]) {
     const temporary = await temporaryState(); t.after(temporary.cleanup); const key = `0x${"0".repeat(63)}7` as Hex, account = privateKeyToAccount(key).address;
@@ -117,7 +133,8 @@ test("867244e9…-shaped: a residual allowance takes one consented revoke at the
     op = await new UniswapTokenJournal(temporary.root).save(transitionUniswapToken(op, "submission_started", { swapAttempt: tokenAttempt(op, "swap", "10", now) }, now));
     assert.equal(await new UniswapTokenNonceStore(temporary.root).allocate(op, "swap", 10n), "10");
     now = new Date((op.route.deadline + 3_600) * 1000);
-    if (!residual) chain.node.allowanceAt = (tag) => tag === "latest" ? "0" : undefined;
+    // Zero now (at the head, read pinned after the approval's block), while the approval's own block shows its allowance.
+    if (!residual) chain.node.allowanceAt = (tag) => tag === "latest" || tag.includes("requireCanonical") ? "0" : undefined;
     op = await run(15).execute(op.operationId);
     if (!residual) {
       assert.deepEqual([op.phase, op.cleanupReason, op.usageState, op.principalRelease?.kind, chain.node.sends.length, await used()],
@@ -127,6 +144,14 @@ test("867244e9…-shaped: a residual allowance takes one consented revoke at the
     assert.deepEqual([op.phase, op.cleanupReason, op.swapAttempt, op.usageState, chain.node.sends.length, await used()],
       ["cleanup_required", "deadline_expired_after_approval", null, "reserved", 1, live.route.amountIn]);
     assert.deepEqual(nonceRows(temporary.root, account), ["approval:9:committed"]);
+    // A node behind the approval's block reads the allowance from before it (zero): cleanup refuses instead of closing the
+    // swap as cleaned (and releasing its hold) while the approval stands.
+    const approvalTx = chain.node.txs.get(op.approvalAttempt!.transactionHash!)!, head = chain.node.head;
+    chain.node.head = BigInt(String(approvalTx.blockNumber)) - 3n; chain.node.allowanceAt = () => "0";
+    await assert.rejects(run(14, "cleanup").cleanup(op.operationId), (error: ApnError) => error.details?.reason === "uniswap_token_allowance_head_behind_effect");
+    assert.deepEqual([(await new UniswapTokenJournal(temporary.root).load(op.operationId))?.integrityHash, await used(), chain.node.sends.length],
+      [op.integrityHash, live.route.amountIn, 1]);
+    chain.node.head = head; chain.node.allowanceAt = undefined;
     op = await run(14, "cleanup").cleanup(op.operationId); assert.deepEqual([op.phase, op.cleanupAttempt?.nonce, chain.node.sends.length], ["cleanup_submitted", "10", 2]);
     const revoke = parseTransaction(chain.node.sends[1]!);
     assert.deepEqual([revoke.nonce, revoke.to?.toLowerCase(), revoke.data], [10, UNISWAP_USDC.toLowerCase(), envelopeOf(op, "cleanup", "10").data]);
@@ -152,7 +177,10 @@ test("QA 0.5.52 live 262d15ed… (USDC) and fc03d78f… (USDT): status releases 
     c.chain.node.txs.set(cleanup.hash!, { ...cleanup }); out = await c.cli("status", 11);
     assert.deepEqual([(out.operation as UniswapTokenOperation).integrityHash, await c.row()], [op.integrityHash, "reserved"]);
 
-    c.chain.node.head = BigInt(live.finalizedHead.number) + 64n; out = await c.cli("status", 11); assert.equal(out.ok, true, JSON.stringify(out.error));
+    // Past the finalized head, but the node's canonical block at the cleanup's height is another one: nothing is proven.
+    c.chain.node.head = BigInt(live.finalizedHead.number) + 64n; c.chain.node.hashes.set(cleanupBlock, blockHash(cleanupBlock)); out = await c.cli("status", 11);
+    assert.deepEqual([out.ok, (out.operation as UniswapTokenOperation).integrityHash, await c.row()], [true, op.integrityHash, "reserved"]);
+    c.chain.node.hashes.set(cleanupBlock, cleanup.blockHash!); out = await c.cli("status", 11); assert.equal(out.ok, true, JSON.stringify(out.error));
     const released = out.operation as UniswapTokenOperation;
     assert.deepEqual(released.principalRelease, { schemaVersion: "apn.uniswap-token-principal-release.v1", kind: "swap_nonce_consumed_by_cleanup",
       swapNonce: op.swapAttempt!.nonce, cleanupTransactionHash: op.cleanupAttempt!.transactionHash, cleanupBlockNumber: cleanupBlock.toString(),

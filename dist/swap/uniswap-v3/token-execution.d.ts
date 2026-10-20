@@ -33,8 +33,9 @@ export interface UniswapTokenExecutionPorts {
     foregroundCleanup(operation: UniswapTokenOperation): Promise<void>;
     withAccountLock<T>(operation: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
     allocateNonce(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
-    currentAllowance(operation: UniswapTokenOperation): Promise<string>;
-    /** True when custody holds no signed bytes for the effect and its reservation is free; false when a signed effect committed it. */
+    /** The allowance at the latest block; with `landed`, read at a head one node shows including that landed transaction (refused otherwise). */
+    currentAllowance(operation: UniswapTokenOperation, landed?: string): Promise<string>;
+    /** True when custody holds no signed bytes for the effect and its reservation is free; false when a signed effect committed it (now or earlier). */
     releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean>;
     commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     /** The signing guard: every pre-sign check of the effect at one fresh block (for a swap, its full revalidation). */
@@ -119,6 +120,12 @@ export declare class UniswapTokenExecution {
     private retireExpiredPrepared;
     private syncUsage;
     private assertNoEffect;
+    /**
+     * "No residual allowance" (the cleaned decision): a zero latest read, confirmed once an approval landed at a head one node
+     * shows including it, pinned by hash, since a node behind the approval reads the zero from before it. A nonzero read needs
+     * no pin: the cleanup it leads to is re-read by the signing guard at its own block. Only a zero costs the second read.
+     */
+    private zeroAllowance;
     private feeQuote;
     private required;
     private persist;

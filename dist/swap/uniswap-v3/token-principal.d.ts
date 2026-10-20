@@ -22,8 +22,10 @@ export declare function principalReleaseCandidate(op: UniswapTokenOperation): {
 /**
  * One primary batch, so one node answers all three: the account's nonce at the finalized tag, the cleanup transaction by
  * its own hash, and the finalized head. Proven only when that node has the cleanup (signed by the account, chain 1, the
- * swap marker's nonce) in a block at or below the finalized head and the finalized nonce is past it: the finalized chain
- * then holds this cleanup at that nonce, so no transaction of the swap with it can ever be included. Anything else (an
- * unknown or pending cleanup, a head not yet past it) proves nothing and returns null; no state is read at an old block.
+ * swap marker's nonce) in a block at or below the finalized head, the finalized nonce is past it, and the canonical block
+ * at the cleanup's height is the one the transaction names (read next on the same primary: the height is known only from
+ * the transaction, and a block at or below the finalized head is final): the finalized chain then holds this cleanup at
+ * that nonce, so no transaction of the swap with it can ever be included. Anything else (an unknown or pending cleanup, a
+ * head not yet past it, another block at its height) proves nothing and returns null; no state is read at an old block.
  */
 export declare function readSwapNonceConsumption(call: TokenRpcCall, op: UniswapTokenOperation, cleanup: UniswapTokenAttempt): Promise<TokenNonceConsumption | null>;

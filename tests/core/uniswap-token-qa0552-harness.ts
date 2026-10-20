@@ -14,12 +14,15 @@ export const blockHash = (number: bigint) => `0x${"b".repeat(48)}${number.toStri
 
 /**
  * A fake Ethereum node whose head moves: every `latest` read is a new block, as on mainnet across one command. State reads
- * at any block answer the current values; transactions land where a test puts them.
+ * at any block answer the current values (`allowanceAt` sees the block parameter, an EIP-1898 object as its JSON);
+ * transactions land where a test puts them; `hashes` sets the canonical hash of a height (captured blocks).
  */
 export function movingNode(input: { readonly account: string; readonly allowance: string; readonly pending: bigint }) {
   const node = { rpcNow: Date.now(), head: 1_000n, baseFee: 1n, allowance: input.allowance, allowanceAt: undefined as ((tag: string) => string | undefined) | undefined, pending: input.pending, finalizedNonce: 0n, finalizedLag: 64n,
-    sends: [] as Hex[], txs: new Map<string, Record<string, unknown>>(), receipts: new Map<string, Record<string, unknown>>(), methods: [] as string[] };
-  const block = (number: bigint) => ({ number: hex(number), hash: blockHash(number), parentHash: blockHash(number - 1n), baseFeePerGas: hex(node.baseFee) });
+    sends: [] as Hex[], txs: new Map<string, Record<string, unknown>>(), receipts: new Map<string, Record<string, unknown>>(), methods: [] as string[],
+    hashes: new Map<bigint, string>(), calls: [] as unknown[][] };
+  const hashOf = (number: bigint) => node.hashes.get(number) ?? blockHash(number);
+  const block = (number: bigint) => ({ number: hex(number), hash: hashOf(number), parentHash: hashOf(number - 1n), baseFeePerGas: hex(node.baseFee) });
   const value = (method: string, params: readonly unknown[]): unknown => {
     node.methods.push(method);
     if (method === "eth_chainId") return "0x1";
@@ -32,9 +35,10 @@ export function movingNode(input: { readonly account: string; readonly allowance
     if (method === "eth_getCode") return "0x00"; if (method === "eth_getStorageAt") return word(0n);
     if (method === "eth_getBalance") return "0xffffffffffffffff"; if (method === "eth_estimateGas") return "0x5208";
     if (method === "eth_maxPriorityFeePerGas") return "0x1";
-    if (method === "eth_call") { const tx = params[0] as { readonly to?: string; readonly data?: string }, data = String(tx.data ?? "");
+    if (method === "eth_call") { const tx = params[0] as { readonly to?: string; readonly data?: string }, data = String(tx.data ?? ""); node.calls.push([...params]);
+      const tag = typeof params[1] === "object" ? JSON.stringify(params[1]) : String(params[1]);
       if (tx.to === UNISWAP_V3_QUOTER_V2) return `0x${[999_000n, 0n, 0n, 0n].map((v) => word(v).slice(2)).join("")}`;
-      if (data.startsWith("0xdd62ed3e")) return word(BigInt(node.allowanceAt?.(String(params[1])) ?? node.allowance)); if (data.startsWith("0x70a08231")) return word(10_000_000n);
+      if (data.startsWith("0xdd62ed3e")) return word(BigInt(node.allowanceAt?.(tag) ?? node.allowance)); if (data.startsWith("0x70a08231")) return word(10_000_000n);
       return word(1n); }
     if (method === "eth_sendRawTransaction") { const raw = params[0] as Hex; node.sends.push(raw); return keccak256(raw); }
     if (method === "eth_getTransactionByHash") return node.txs.get(String(params[0])) ?? null;

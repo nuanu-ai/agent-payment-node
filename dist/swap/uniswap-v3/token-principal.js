@@ -21,9 +21,11 @@ export function principalReleaseCandidate(op) {
 /**
  * One primary batch, so one node answers all three: the account's nonce at the finalized tag, the cleanup transaction by
  * its own hash, and the finalized head. Proven only when that node has the cleanup (signed by the account, chain 1, the
- * swap marker's nonce) in a block at or below the finalized head and the finalized nonce is past it: the finalized chain
- * then holds this cleanup at that nonce, so no transaction of the swap with it can ever be included. Anything else (an
- * unknown or pending cleanup, a head not yet past it) proves nothing and returns null; no state is read at an old block.
+ * swap marker's nonce) in a block at or below the finalized head, the finalized nonce is past it, and the canonical block
+ * at the cleanup's height is the one the transaction names (read next on the same primary: the height is known only from
+ * the transaction, and a block at or below the finalized head is final): the finalized chain then holds this cleanup at
+ * that nonce, so no transaction of the swap with it can ever be included. Anything else (an unknown or pending cleanup, a
+ * head not yet past it, another block at its height) proves nothing and returns null; no state is read at an old block.
  */
 export async function readSwapNonceConsumption(call, op, cleanup) {
     const hash = cleanup.transactionHash;
@@ -45,6 +47,11 @@ export async function readSwapNonceConsumption(call, op, cleanup) {
         return null;
     const blockNumber = evmRpcQuantity(transaction.blockNumber), blockHash = evmRpcHex(transaction.blockHash, 32), finalizedNonce = evmRpcQuantity(rawNonce), finalized = evmRpcQuantity(evmRpcRecord(rawFinalized).number);
     if (blockNumber > finalized || finalizedNonce <= BigInt(cleanup.nonce))
+        return null;
+    const [rawBlock] = await tokenBatch(call, "primary", [
+        { method: "eth_getBlockByNumber", params: [`0x${blockNumber.toString(16)}`, false], cachePolicy: "none", decoder: (value) => value === null ? value : tokenBlock(value) }
+    ]);
+    if (rawBlock === null || evmRpcHex(evmRpcRecord(rawBlock).hash, 32) !== blockHash)
         return null;
     return { finalizedNonce: finalizedNonce.toString(), blockNumber: blockNumber.toString(), blockHash, finalizedBlockNumber: finalized.toString() };
 }

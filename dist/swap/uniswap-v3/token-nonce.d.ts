@@ -8,6 +8,7 @@ export declare class UniswapTokenNonceStore extends SecureStateStore {
     occupied(accountValue: string): Promise<readonly bigint[]>;
     reconcile(accountValue: string, evidence: Evidence): Promise<void>;
     allocate(op: UniswapTokenOperation, kind: TokenEffectKind, pending: bigint, occupied?: readonly bigint[]): Promise<string>;
+    /** True when the effect's slot holds no reservation afterwards (released now, or none); false when a committed (signed) one keeps it. */
     release(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean>;
     commit(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     private path;

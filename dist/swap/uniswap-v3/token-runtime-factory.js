@@ -21,7 +21,7 @@ export function createUniswapTokenRuntime(input) {
     const approveOwner = async (op) => await assertExclusiveUniswapTokenSigner(state, op.account, state.profileHash(op.profile));
     const ports = {
         now: () => clock.now(), withAccountLock: async (op, work) => await custody.withAccountLock(op, work),
-        allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
+        allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op, landed) => await custody.currentAllowance(op, landed),
         releaseNonce: async (op, kind, nonce) => await custody.releaseNonce(op, kind, nonce),
         commitNonce: async (op, kind, nonce) => { await custody.commitNonce(op, kind, nonce); },
         guard: async (op, kind, nonce) => await guard.inspect(op, kind, nonce), reserveUsage: async (op) => await usage.reserve(op),
