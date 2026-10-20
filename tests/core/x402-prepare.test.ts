@@ -38,6 +38,7 @@ import {
   temporaryState,
   activateBaseUsdcDirectPolicy,
 } from "./helpers.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 
 const PREPARE_REQUEST = {
   command: "x402.fetch.prepare" as const,
@@ -663,11 +664,11 @@ test("same global idempotency identity serializes across profiles and kinds befo
   const sameKindHttp = new HeldHttp(challengeObservation({ header: canonicalPaymentRequiredHeader() }));
   const first = makeCore({ root: sameKindState.root, rpc: new TestRpc(), http: sameKindHttp }).execute(PREPARE_REQUEST);
   await sameKindHttp.firstStarted;
+  // The loser is seen refused by a held lock (an event, not a pause) and has not reached the seller by then.
+  const locks = lockRefusals(t), sameKindBlocked = locks.refused();
+  let sameKindSecondReachedSeller = false; void sameKindHttp.secondStarted.then(() => { sameKindSecondReachedSeller = true; });
   const second = makeCore({ root: sameKindState.root, rpc: new TestRpc(), http: sameKindHttp }).execute({ ...PREPARE_REQUEST, profile: "other" });
-  const sameKindSecondReachedSeller = await Promise.race([
-    sameKindHttp.secondStarted.then(() => true),
-    new Promise<false>((resolve) => setTimeout(() => resolve(false), 40)),
-  ]);
+  await sameKindBlocked;
   sameKindHttp.release();
   const sameKind = await Promise.all([first, second]);
   assert.equal(sameKindSecondReachedSeller, false, "the loser must remain behind the global identity lock");
@@ -681,7 +682,7 @@ test("same global idempotency identity serializes across profiles and kinds befo
   const crossKindHttp = new HeldHttp(challengeObservation({ header: canonicalPaymentRequiredHeader() }));
   const winner = makeCore({ root: crossKindState.root, rpc: new TestRpc(), http: crossKindHttp }).execute({ ...PREPARE_REQUEST, idempotencyKey: "cross-kind-global" });
   await crossKindHttp.firstStarted;
-  const loserRpc = new TestRpc();
+  const loserRpc = new TestRpc(), crossKindBlocked = locks.refused();
   const loser = makeCore({ root: crossKindState.root, rpc: loserRpc }).execute({
     command: "transfer.prepare",
     profile: "other",
@@ -689,7 +690,7 @@ test("same global idempotency identity serializes across profiles and kinds befo
     recipient: RECIPIENT,
     amount: "1",
   });
-  await new Promise<void>((resolve) => setTimeout(resolve, 40));
+  await crossKindBlocked;
   crossKindHttp.release();
   const [x402, direct] = await Promise.all([winner, loser]);
   assert.equal(x402.ok, true);

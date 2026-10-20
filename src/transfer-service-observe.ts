@@ -7,6 +7,7 @@ import { assertDirectTerminalReceiptAuthority, hasSafeEvmInclusion } from "./dir
 import { armDirectEvmStep, requireEvmRpc } from "./evm-direct.js";
 import { LOCAL_DIRECT_SENT_ABANDON } from "./state-integrity.js";
 import { directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
+import { directRpcChain } from "./rpc-requirement.js";
 import { checkNeverLands, type EraBlock, type NeverLandsCheck } from "./evm-finalized-proof.js";
 import { deriveEvmActualFee } from "./evm-direct-actual-fee.js";
 import { directActualFee } from "./direct-receipt-facts.js";
@@ -48,7 +49,7 @@ export class TransferServiceObservation {
     return await journal.withLocks([`submission:${operationInput.operationId}`], async () => {
       // A caller that proved the public signed record in this locked section passes that along instead of re-proving it.
       if (!publicEffectProven) await new DirectPublicEffectJournal(this.context.state).effect(operationInput);
-      if (await journal.exists(operationInput)) return await this.inspectReceipt(operationInput, this.context.requireRpc());
+      if (await journal.exists(operationInput)) return await this.inspectReceipt(operationInput, this.context.requireRpc(directRpcChain(operationInput.chainId)));
       await journal.fence(operationInput, rawTransaction);
       return await this.dispatchAndInspect(operationInput, rawTransaction);
     });
@@ -56,7 +57,7 @@ export class TransferServiceObservation {
 
   private async dispatchAndInspect(operationInput: LocalOperationRecord, rawTransaction: Hex): Promise<LocalOperationRecord> {
     let operation = operationInput;
-    const rpc = this.context.requireRpc();
+    const rpc = this.context.requireRpc(directRpcChain(operation.chainId));
     try {
       const returnedHash = await rpc.submitRawTransaction(rawTransaction);
       if (returnedHash.toLowerCase() !== operation.transactionHash?.toLowerCase()) {
@@ -82,8 +83,8 @@ export class TransferServiceObservation {
     const found = await this.requiredOperation(operationId);
     if (observeOnly && found.providerDirect !== undefined) throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a local direct transfer.");
     if (found.providerDirect !== undefined) return await this.providerDirect.resume(operationId, waitSeconds, coinbaseObservationRpc);
-    if (found.evm !== undefined) armDirectEvmStep(this.context.requireRpc(), found.evm.asset.chainId, "resume");
-    else if (found.chainId === 8453) this.context.requireRpc().armEvmDirectRpcGuard?.();
+    if (found.evm !== undefined) armDirectEvmStep(this.context.requireRpc(directRpcChain(found.chainId)), found.evm.asset.chainId, "resume");
+    else if (found.chainId === 8453) this.context.requireRpc(directRpcChain(found.chainId)).armEvmDirectRpcGuard?.();
     if (waitSeconds !== undefined) {
       throw new ApnError("APN_INVALID_INPUT", "--wait-seconds is unavailable for local direct transfers.");
     }
@@ -129,7 +130,7 @@ export class TransferServiceObservation {
       }
       if (operation.state === "signed_not_submitted") operation = await this.lifecycle.transition(operation, "unknown_finality", false,
         "signed_recovery_observation_only", "dispatch_history_ambiguous");
-      const rpc = this.context.requireRpc(), observed = await this.observeReceipt(operation, rpc);
+      const rpc = this.context.requireRpc(directRpcChain(operation.chainId)), observed = await this.observeReceipt(operation, rpc);
       return publicOperation(observed.receipt === "absent" ? await this.settleUnlanded(observed.operation, rpc, observeOnly === true) : observed.operation);
     });
   }

@@ -6,6 +6,7 @@ import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { providerX402TerminalReceipt, transitionProviderX402Operation } from "./provider-x402-state.js";
 import { recoveryMaterialDigest } from "./provider-x402-transaction-binding.js";
 import { BaseExactTransactionEvidence } from "./provider-x402-transaction-evidence.js";
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 export class ProviderX402TransactionRecoveryService {
     context;
@@ -20,7 +21,7 @@ export class ProviderX402TransactionRecoveryService {
         const key = canonicalIdempotencyKey(request.idempotencyKey);
         const idempotencyDigest = this.context.state.idempotencyHash(key);
         const materialDigest = recoveryMaterialDigest({ operationId, transactionHash, idempotencyDigest });
-        this.context.requireRpcUrl();
+        this.context.requireRpcUrl(BASE_RPC_CHAIN);
         await this.context.ready();
         const found = await this.repository.findOperation(operationId);
         if (found === null)
@@ -99,7 +100,7 @@ export class ProviderX402TransactionRecoveryService {
         });
     }
     evidence() {
-        return this.context.providerTransactionEvidence ?? new BaseExactTransactionEvidence(this.context.requireRpc());
+        return this.context.providerTransactionEvidence ?? new BaseExactTransactionEvidence(this.context.requireRpc(BASE_RPC_CHAIN));
     }
     /** A transaction already proving another provider payment can never prove this one. */
     async assertTransactionUnclaimed(operationId, transactionHash) {

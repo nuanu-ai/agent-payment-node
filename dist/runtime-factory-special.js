@@ -21,7 +21,8 @@ import { TtyRelayArbitrumApprovalConfirmation, TtyRelayArbitrumDepositConfirmati
 import { gaslessRpcFactory } from "./gasless/rpc.js";
 export function createSpecialApnCore(bound, options, state) {
     if (bound.request.command === "gasless.transfer.quote") {
-        if (bound.rpcUrl === undefined)
+        // The quote reads Ethereum only; another chain is refused as such by the quote itself, never sent for an Ethereum RPC.
+        if (bound.rpcUrl === undefined && bound.request.request.chainId === 1)
             throw new ApnError("APN_RPC_CONFIG", "Ethereum quote requires an explicit public RPC URL.", { nextActions: ["Provide --rpc-url with a public HTTPS Ethereum RPC endpoint."] });
         // This read path has no custody implementation, signer, journal or effect transport.
         const unavailable = async () => { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Quote is read only."); };

@@ -5,6 +5,7 @@ import type { MetaMaskGaslessBlock, MetaMaskGaslessChainId, MetaMaskGaslessChain
 import { mmProtocolPins } from "../single-protocol.js";
 import { mmRegistry } from "../registry.js";
 import { mmFail } from "../reasons.js";
+import { mmUsdcShortfall } from "../refusals.js";
 import { mmEvidenceFail, mmEvidenceStateAt } from "./diagnostic.js";
 import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmIso, mmUint } from "../validation.js";
 import { addressWord, callData, rpcAddress, rpcHex, rpcWord, type MmRpcCall } from "./abi.js";
@@ -79,8 +80,15 @@ export function validateMetaMaskGaslessSnapshot(value: unknown, expected: {
     mmEvidenceFail("mm_gasless_evidence_invalid", "snapshot_block_order");
   }
   const gross = mmUint(expected.grossAtomic, true, "mm_gasless_evidence_invalid"), row = mmRegistry(expected.chainId).row;
-  const safeState = mmEvidenceStateAt("safe", () => validateState(snapshot.safeState, row, gross, expected.feeMode));
-  const headState = mmEvidenceStateAt("latest", () => validateState(snapshot.headState, row, gross, expected.feeMode));
+  const safeState = mmEvidenceStateAt("safe", () => validateState(snapshot.safeState, row, expected.feeMode));
+  const headState = mmEvidenceStateAt("latest", () => validateState(snapshot.headState, row, expected.feeMode));
+  // Every pin and shape above passed, so a balance below the debit is the owner's USDC shortfall on APN's own reads,
+  // refused with both numbers; corrupt evidence never reaches this line and stays a protocol refusal.
+  for (const [tag, block, state] of [["safe", safeBlock, safeState], ["latest", headBlock, headState]] as const) {
+    const balance = BigInt(state.usdcBalanceAtomic);
+    if (balance < gross) throw mmUsdcShortfall(expected.chainId, balance, gross, `at its ${tag} block ${block.numberAtomic}`,
+      { usdc_block_tag: tag, usdc_block_number: block.numberAtomic });
+  }
   return { chainId: expected.chainId, endpointHash: expected.endpointHash, endpointOrigin: expected.endpointOrigin,
     observedAt: snapshot.observedAt as string, safeBlock, headBlock, safeState, headState };
 }
@@ -92,7 +100,7 @@ function validateBlock(value: unknown): MetaMaskGaslessBlock {
     timestampAtomic: mmUint(block.timestampAtomic, false, "mm_gasless_evidence_invalid").toString() };
 }
 
-function validateState(value: unknown, row: MetaMaskGaslessDeploymentRow, gross: bigint, feeMode?: "sponsored"): MetaMaskGaslessChainState {
+function validateState(value: unknown, row: MetaMaskGaslessDeploymentRow, feeMode?: "sponsored"): MetaMaskGaslessChainState {
   const state = mmExact(value, ["protocolCodeHashes", "tokenProxyCodeHash", "tokenImplementationAddress",
     "tokenImplementationCodeHash", "tokenDecimals", "ownerCodeHash", "designation", "usdcBalanceAtomic",
     "counterAtomic"], "mm_gasless_evidence_invalid");
@@ -109,7 +117,7 @@ function validateState(value: unknown, row: MetaMaskGaslessDeploymentRow, gross:
     mmHex(state.tokenImplementationCodeHash, 32, "mm_gasless_evidence_invalid") !== row.tokenImplementationCodeHash ||
     state.tokenDecimals !== 6) mmEvidenceFail("mm_gasless_evidence_invalid", "snapshot_state_binding");
   if (state.counterAtomic !== "0") mmEvidenceFail("mm_gasless_evidence_invalid", "counter", "eth_call");
-  if (mmUint(state.usdcBalanceAtomic, false, "mm_gasless_evidence_invalid") < gross) mmEvidenceFail("mm_gasless_evidence_invalid", "balance", "eth_call");
+  mmUint(state.usdcBalanceAtomic, false, "mm_gasless_evidence_invalid");
   const designation = state.designation;
   if (designation !== "empty" && designation !== "pinned") mmFail("mm_gasless_evidence_invalid");
   const expectedOwnerCode = designation === "empty" ? "0x" as Hex :

@@ -105,6 +105,7 @@ import {
   canonicalPaymentRequiredHeader,
   canonicalPaymentResponseHeader,
 } from "./x402-vectors.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 /** The Relay execution owner check as production runs it: under the EVM owner lock (the test-only wrapper is gone). */
 async function assertExclusiveRelayExecutionOwner(state: StateStore, permissions: Pick<EncryptedSmartAccountPermissionStore, "listAll">,
   address: string, ownProfileHash: string): Promise<void> {
@@ -439,8 +440,8 @@ test("Relay execution owner guard authenticates grants and distinguishes own fro
   } finally { await fixture.temporary.cleanup(); }
 });
 
-test("Relay execution owner guard waits for a concurrent encrypted grant commit", async () => {
-  const fixture = await makeFixture();
+test("Relay execution owner guard waits for a concurrent encrypted grant commit", async (t) => {
+  const fixture = await makeFixture(), locks = lockRefusals(t);
   try {
     const connected = await fixture.core.execute(connectCommand());
     assert.equal(connected.ok, true);
@@ -463,9 +464,10 @@ test("Relay execution owner guard waits for a concurrent encrypted grant commit"
     const pendingWrite = writer.save({ ...source, profile: "other", profile_hash: otherHash });
     await loading;
     let checked = false;
+    const blocked = locks.refused();
     const guard = assertExclusiveRelayExecutionOwner(fixture.state, base, OWNER, fixture.state.profileHash(PROFILE))
       .then(() => { checked = true; });
-    await new Promise(resolve => setTimeout(resolve, 30));
+    await blocked; // the guard is seen refused by the lock the gated grant commit holds
     assert.equal(checked, false);
     release();
     await pendingWrite;

@@ -34,8 +34,9 @@ test("normal pinned quote classifies raw nonarray tokenFees without exposing con
     assert.equal(error.details?.mm_read_sentinel_simulation, "absent");
     if (answered) {
       assert.equal(error.message, "MetaMask quoted no USDC relay fee for this transfer on Base (chain 8453): its fee quote answered " +
-        `HTTP 200 with result.transactions[-1].fees[0].tokenFees ${kind === "missing" ? "missing" : "set to null"}. The pinned MetaMask ` +
-        "client reads this answer as: Insufficient balance to cover the transfer and gasless relay fee.");
+        `HTTP 200 with result.transactions[-1].fees[0].tokenFees ${kind === "missing" ? "missing" : "set to null"} and named no cause ` +
+        "APN can verify. APN does not read a missing relay fee as a USDC or native gas shortfall.");
+      assert.equal(error.details?.provider_cause, "unverified");
       assert.equal(error.details?.provider_endpoint, "https://agentic-proxy.workers.cx.metamask.io/proxy/prd/tx-sentinel-base-mainnet");
       assert.equal(error.details?.provider_missing_field, "result.transactions[-1].fees[0].tokenFees");
     } else assert.equal(error.message, "MetaMask gasless operation could not advance safely.");

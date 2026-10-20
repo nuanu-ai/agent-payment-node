@@ -32,6 +32,13 @@ export function directEvmNetwork(chainId) {
         throw new ApnError("APN_INVALID_INPUT", "The EVM network is not enabled for direct transfers.");
     return selected;
 }
+/**
+ * The native currency an owner-facing line names for an EVM chain: the symbol of APN's pinned network row, or, for a chain
+ * APN has no row for, the neutral "native coin of chain <id>" (never ETH by assumption).
+ */
+export function evmNativeCurrencyLabel(chainId) {
+    return DIRECT_EVM_NETWORKS.find((entry) => entry.chainId === chainId)?.nativeSymbol ?? `native coin of chain ${chainId}`;
+}
 export function directEvmNetworkByCaip2(chain) {
     return DIRECT_EVM_NETWORKS.find((entry) => entry.caip2 === chain);
 }

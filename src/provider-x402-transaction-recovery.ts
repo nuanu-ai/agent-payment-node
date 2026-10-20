@@ -14,6 +14,7 @@ import { recoveryMaterialDigest } from "./provider-x402-transaction-binding.js";
 import { BaseExactTransactionEvidence } from "./provider-x402-transaction-evidence.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import type { RuntimeContext } from "./runtime.js";
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 
 type RecoveryRequest = Extract<CommandRequest, { readonly command: "operation.recover-transaction-settlement" }>;
@@ -54,7 +55,7 @@ export class ProviderX402TransactionRecoveryService {
     const key = canonicalIdempotencyKey(request.idempotencyKey);
     const idempotencyDigest = this.context.state.idempotencyHash(key);
     const materialDigest = recoveryMaterialDigest({ operationId, transactionHash, idempotencyDigest });
-    this.context.requireRpcUrl();
+    this.context.requireRpcUrl(BASE_RPC_CHAIN);
     await this.context.ready();
     const found = await this.repository.findOperation(operationId);
     if (found === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
@@ -145,7 +146,7 @@ export class ProviderX402TransactionRecoveryService {
   }
 
   private evidence(): ProviderX402TransactionEvidencePort {
-    return this.context.providerTransactionEvidence ?? new BaseExactTransactionEvidence(this.context.requireRpc());
+    return this.context.providerTransactionEvidence ?? new BaseExactTransactionEvidence(this.context.requireRpc(BASE_RPC_CHAIN));
   }
 
   /** A transaction already proving another provider payment can never prove this one. */

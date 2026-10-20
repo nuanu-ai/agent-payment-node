@@ -7,7 +7,9 @@ type Request = Extract<CommandRequest, {
 export declare function executeUniswapCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome>;
 /**
  * A swap that requires cleanup names its one exit, the owner's consented cleanup; when the fee cap refused it before
- * signing, the same cleanup may instead re-quote its own caps under fresh consent.
+ * signing, the same cleanup may instead re-quote its own caps under fresh consent. An owner-abandoned swap still holding a
+ * principal no proof released names execute, which opens custody to prove its swap never signed; execute itself, having
+ * found signed bytes and changed nothing, does not name itself again.
  */
-export declare function uniswapTokenNextActions(op: Pick<UniswapTokenOperation, "operationId" | "phase" | "preSignFailure">): readonly string[];
+export declare function uniswapTokenNextActions(op: UniswapTokenOperation, after?: "execute"): readonly string[];
 export {};

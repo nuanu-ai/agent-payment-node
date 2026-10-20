@@ -13,7 +13,7 @@ import type {
 
 /** The command's explicit --rpc-url; a missing one is refused naming the network it must serve, never substituted. */
 export function requireX402Rpc(context: RuntimeContext, asset: X402Asset): RpcPort {
-  try { return context.requireRpc(); }
+  try { return context.requireRpc({ chainId: asset.chainId, name: asset.network }); }
   catch (error) {
     if (!(error instanceof ApnError) || error.code !== "APN_RPC_CONFIG") throw error;
     throw new ApnError("APN_RPC_CONFIG", `This x402 operation reads ${asset.network}: pass --rpc-url with a public HTTPS RPC of chain ${asset.chainId}.`,
