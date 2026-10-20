@@ -22,7 +22,7 @@ export const CHAIN_COMMANDS: readonly CommandDefinition[] = [
     effect: { class: "network_read", summary: "Verifies mainnet, exact mint and account identities; no signing." },
     approval: { class: "none", when: "Never." }, output, states: completed, recovery: [], examples: ["apn wallet balance-solana --profile solana-local --asset usdc"] },
   { path: ["wallet", "capabilities-solana"], synopsis: "apn wallet capabilities-solana [--profile <profile>]",
-    summary: "Inspect all four provider capabilities, fee-contract gates and unavailable Solana x402.",
+    summary: "Inspect all four provider capabilities, fee-contract gates and the local Solana x402 exact (SPL) lane.",
     options: [{ ...profile, required: false }], effect: { class: "local_read", summary: "Static capability discovery is offline; an explicit profile adds its public stored binding." },
     approval: { class: "none", when: "Never." }, output, states: completed, recovery: [], examples: ["apn wallet capabilities-solana"] },
   { path: ["policy", "admit-solana"], synopsis: "apn policy admit-solana --profile <profile> --asset <sol-usdc-or-usdt> --max-per-transfer <decimal> --daily-limit <decimal> --max-fee-sol <decimal>",
