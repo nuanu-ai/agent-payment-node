@@ -363,8 +363,8 @@ export declare const observationSourceSchema: z.ZodObject<{
 export declare const observationSchema: z.ZodObject<{
     status: z.ZodEnum<{
         safe: "safe";
-        not_found: "not_found";
         pending: "pending";
+        not_found: "not_found";
         unresolved: "unresolved";
         permissions_invalidated: "permissions_invalidated";
     }>;
@@ -519,8 +519,8 @@ export declare const stateSchema: z.ZodEnum<{
     unknown_finality: "unknown_finality";
     failed_before_effect: "failed_before_effect";
     failed_confirmed_revert: "failed_confirmed_revert";
-    abandoned_unknown: "abandoned_unknown";
     awaiting_approval: "awaiting_approval";
+    abandoned_unknown: "abandoned_unknown";
     execution_pending: "execution_pending";
     submitted_pending: "submitted_pending";
     included_success: "included_success";
@@ -611,8 +611,8 @@ export declare const transitionSchema: z.ZodObject<{
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
-        abandoned_unknown: "abandoned_unknown";
         awaiting_approval: "awaiting_approval";
+        abandoned_unknown: "abandoned_unknown";
         execution_pending: "execution_pending";
         submitted_pending: "submitted_pending";
         included_success: "included_success";
@@ -718,8 +718,8 @@ export declare const transitionSchema: z.ZodObject<{
     observation: z.ZodNullable<z.ZodObject<{
         status: z.ZodEnum<{
             safe: "safe";
-            not_found: "not_found";
             pending: "pending";
+            not_found: "not_found";
             unresolved: "unresolved";
             permissions_invalidated: "permissions_invalidated";
         }>;
@@ -1072,8 +1072,8 @@ export declare const operationSchema: z.ZodObject<{
             unknown_finality: "unknown_finality";
             failed_before_effect: "failed_before_effect";
             failed_confirmed_revert: "failed_confirmed_revert";
-            abandoned_unknown: "abandoned_unknown";
             awaiting_approval: "awaiting_approval";
+            abandoned_unknown: "abandoned_unknown";
             execution_pending: "execution_pending";
             submitted_pending: "submitted_pending";
             included_success: "included_success";
@@ -1179,8 +1179,8 @@ export declare const operationSchema: z.ZodObject<{
         observation: z.ZodNullable<z.ZodObject<{
             status: z.ZodEnum<{
                 safe: "safe";
-                not_found: "not_found";
                 pending: "pending";
+                not_found: "not_found";
                 unresolved: "unresolved";
                 permissions_invalidated: "permissions_invalidated";
             }>;
@@ -1418,8 +1418,8 @@ export declare const operationSchema: z.ZodObject<{
         unknown_finality: "unknown_finality";
         failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
-        abandoned_unknown: "abandoned_unknown";
         awaiting_approval: "awaiting_approval";
+        abandoned_unknown: "abandoned_unknown";
         execution_pending: "execution_pending";
         submitted_pending: "submitted_pending";
         included_success: "included_success";
@@ -1525,8 +1525,8 @@ export declare const operationSchema: z.ZodObject<{
     observation: z.ZodNullable<z.ZodObject<{
         status: z.ZodEnum<{
             safe: "safe";
-            not_found: "not_found";
             pending: "pending";
+            not_found: "not_found";
             unresolved: "unresolved";
             permissions_invalidated: "permissions_invalidated";
         }>;

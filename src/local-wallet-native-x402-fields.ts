@@ -9,7 +9,10 @@ const HASH = /^[a-f0-9]{64}$/u;
 export interface X402Binding {
   readonly profile: string; readonly operationId: string; readonly fingerprint: string;
   readonly wallet: Address; readonly chainId: X402ChainText; readonly token: Address;
-  readonly tokenDomain: { readonly name: string; readonly version: string };
+  /** EIP-3009: the token's EIP-712 domain. Absent on a Permit2 witness transfer. */
+  readonly tokenDomain?: { readonly name: string; readonly version: string };
+  /** Permit2 witness transfer: the seller-sponsored exact-amount EIP-2612 permit to Permit2, or null. */
+  readonly permit2?: { readonly eip2612: { readonly name: string; readonly version: string; readonly nonce: string } | null };
   readonly authorization: { readonly from: Address; readonly to: Address; readonly value: string; readonly validAfter: "0"; readonly validBefore: string; readonly nonce: Hex };
   readonly intentHash: string;
 }
@@ -21,11 +24,15 @@ export interface X402Create extends X402Binding {
   readonly authorization: X402Binding["authorization"] & { readonly createdAt: string };
 }
 
-export function parseX402Create(payload: Readonly<Record<string, unknown>>): X402Create {
-  const baseKeys = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", "resource", "capAtomic", "payee", "amountAtomic", "tokenDomain", "authorization", "paymentIdentifierPosture", "offerHash", "intentHash"];
+export type X402CustodyMethod = "eip3009" | "permit2";
+const methodKey = (method: X402CustodyMethod) => method === "eip3009" ? "tokenDomain" : "permit2";
+
+export function parseX402Create(payload: Readonly<Record<string, unknown>>, method: X402CustodyMethod = "eip3009"): X402Create {
+  const baseKeys = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", "resource", "capAtomic", "payee", "amountAtomic", methodKey(method), "authorization", "paymentIdentifierPosture", "offerHash", "intentHash"];
   const posture = payload.paymentIdentifierPosture;
   exactRecord(payload, posture === "absent" ? baseKeys : [...baseKeys, "paymentIdentifierValue"]);
-  const common = parseX402Common(payload, true);
+  if (method === "permit2" && posture !== "absent") throw protocol("A Permit2 authorization carries no payment identifier.");
+  const common = parseX402Common(payload, true, method);
   const resource = exactRecord(payload.resource, ["origin", "path", "urlHash"]);
   if (typeof resource.origin !== "string" || typeof resource.path !== "string" || typeof resource.urlHash !== "string" || !HASH.test(resource.urlHash)) throw protocol("x402 resource binding is invalid.");
   if (!HASH.test(String(payload.offerHash)) || !["absent", "optional", "required"].includes(String(posture))) throw protocol("x402 offer binding is invalid.");
@@ -45,23 +52,22 @@ export function parseX402Create(payload: Readonly<Record<string, unknown>>): X40
   return { ...common, payee, amountAtomic, capAtomic, authorization };
 }
 
-export function parseX402Recovery(payload: Readonly<Record<string, unknown>>): X402Binding & { readonly expectedSignatureHash?: string } {
-  const allowed = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", "tokenDomain", "authorization", "intentHash"];
+export function parseX402Recovery(payload: Readonly<Record<string, unknown>>, method: X402CustodyMethod = "eip3009"): X402Binding & { readonly expectedSignatureHash?: string } {
+  const allowed = ["profile", "operationId", "fingerprint", "wallet", "chainId", "token", methodKey(method), "authorization", "intentHash"];
   exactRecord(payload, payload.expectedSignatureHash === undefined ? allowed : [...allowed, "expectedSignatureHash"]);
-  const common = parseX402Common(payload, false);
+  const common = parseX402Common(payload, false, method);
   if (payload.expectedSignatureHash !== undefined && (typeof payload.expectedSignatureHash !== "string" || !HASH.test(payload.expectedSignatureHash))) throw protocol("x402 expected signature hash is invalid.");
   return { ...common, ...(payload.expectedSignatureHash === undefined ? {} : { expectedSignatureHash: payload.expectedSignatureHash as string }) };
 }
 
-function parseX402Common(payload: Readonly<Record<string, unknown>>, create: boolean): X402Binding {
+function parseX402Common(payload: Readonly<Record<string, unknown>>, create: boolean, method: X402CustodyMethod): X402Binding {
   const profile = canonicalProfile(payload.profile);
   const operationId = hash(payload.operationId, "operation ID");
   const fingerprint = hash(payload.fingerprint, "fingerprint");
   const wallet = x402Address(payload.wallet, "wallet");
   const token = x402Address(payload.token, "token");
   if (!validX402Tuple(payload.chainId, `eip155:${String(payload.chainId)}`, token)) throw protocol("x402 network or token is unsupported.");
-  const tokenDomain = exactRecord(payload.tokenDomain, ["name", "version"]);
-  if (typeof tokenDomain.name !== "string" || tokenDomain.name.length === 0 || typeof tokenDomain.version !== "string" || tokenDomain.version.length === 0) throw protocol("x402 token domain is invalid.");
+  const domain = method === "eip3009" ? { tokenDomain: parseTokenDomain(payload.tokenDomain) } : { permit2: parsePermit2(payload.permit2) };
   const authKeys = create ? ["from", "to", "value", "validAfter", "validBefore", "nonce", "createdAt"] : ["from", "to", "value", "validAfter", "validBefore", "nonce"];
   const authorization = exactRecord(payload.authorization, authKeys);
   const from = x402Address(authorization.from, "authorization sender");
@@ -72,8 +78,7 @@ function parseX402Common(payload: Readonly<Record<string, unknown>>, create: boo
   if (!addressEqual(wallet, from) || authorization.validAfter !== "0") throw protocol("x402 authorization binding is invalid.");
   const intentHash = hash(payload.intentHash, "x402 intent hash");
   return {
-    profile, operationId, fingerprint, wallet, chainId: payload.chainId as X402ChainText, token,
-    tokenDomain: { name: tokenDomain.name, version: tokenDomain.version },
+    profile, operationId, fingerprint, wallet, chainId: payload.chainId as X402ChainText, token, ...domain,
     authorization: { from, to, value, validAfter: "0", validBefore, nonce },
     intentHash,
   };
@@ -82,9 +87,24 @@ function parseX402Common(payload: Readonly<Record<string, unknown>>, create: boo
 export function x402RecoveryBinding(value: X402Binding): X402Binding {
   return {
     profile: value.profile, operationId: value.operationId, fingerprint: value.fingerprint,
-    wallet: value.wallet, chainId: value.chainId, token: value.token, tokenDomain: value.tokenDomain,
+    wallet: value.wallet, chainId: value.chainId, token: value.token,
+    ...(value.permit2 !== undefined ? { permit2: value.permit2 } : value.tokenDomain !== undefined ? { tokenDomain: value.tokenDomain } : {}),
     authorization: publicAuthorization(value.authorization), intentHash: value.intentHash,
   };
+}
+
+function parseTokenDomain(value: unknown): { readonly name: string; readonly version: string } {
+  const tokenDomain = exactRecord(value, ["name", "version"]);
+  if (typeof tokenDomain.name !== "string" || tokenDomain.name.length === 0 || typeof tokenDomain.version !== "string" || tokenDomain.version.length === 0) throw protocol("x402 token domain is invalid.");
+  return { name: tokenDomain.name, version: tokenDomain.version };
+}
+
+function parsePermit2(value: unknown): NonNullable<X402Binding["permit2"]> {
+  const permit2 = exactRecord(value, ["eip2612"]);
+  if (permit2.eip2612 === null) return { eip2612: null };
+  const permit = exactRecord(permit2.eip2612, ["name", "version", "nonce"]);
+  const { name, version } = parseTokenDomain({ name: permit.name, version: permit.version });
+  return { eip2612: { name, version, nonce: decimal(permit.nonce, "x402 permit nonce") } };
 }
 
 export function publicAuthorization(value: X402Binding["authorization"]): X402Binding["authorization"] {

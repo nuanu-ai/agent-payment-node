@@ -8,7 +8,8 @@ import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy
 import { canonicalProfile } from "./wallet-policy.js";
 import { evmConflictDomain, sharedEvmConflictDomain } from "./operation-conflict-domain.js";
 import { assertUnattendedX402Balance, effectiveX402Cap, requireProfilePolicy, x402PayeeAdmittedOffers, } from "./profile-policy.js";
-import { candidatesWithinCap, canonicalPrepareUrl, freshChallenge, paymentIdentifierState, positiveCap, selectPrepareOffer, } from "./x402-policy.js";
+import { candidatesWithinCap, canonicalPrepareUrl, freshChallenge, positiveCap } from "./x402-policy.js";
+import { readAndSelectX402Offer, x402PaymentIdentifier } from "./x402-prepare-select.js";
 import { appendX402Transition, publicX402Operation, sealX402Operation, x402AuthorizationIntentHash, x402Fingerprint, x402RequestHash, } from "./x402-state-integrity.js";
 import { X402PaidRequest } from "./x402-paid-request.js";
 import { assertWaitRpcProvenance, remainingWaitMs, waitOutcome, waitTimeout, boundedX402ReadPort, isPostExposureWaitState, isRecoverableX402RpcObservationFailure, x402ReadPort, } from "./x402-service-rpc.js";
@@ -79,17 +80,13 @@ export class X402Service extends X402PaidRequest {
                 const createdAtUnix = Math.floor(createdAtDate.getTime() / 1000).toString();
                 const invocationStartedAtMs = this.context.clock.now().getTime();
                 const chain = await assertX402RpcChain(rpc, network.chainId);
-                // The authorization nonce is drawn first: off the released USDC pairs prepare proves it reads unused on the token.
+                // The authorization nonce is drawn first: prepare proves it reads unused (EIP-3009 state or Permit2 nonce bit).
                 const nonce = `0x${randomBytes(32).toString("hex")}`;
-                const evidence = await rpc.getX402PrepareEvidence(wallet, nonce);
-                const invocationCompletedAtMs = this.context.clock.now().getTime();
-                const selected = selectPrepareOffer(discovered, underCap, evidence, wallet, {
-                    asset: network,
-                    rpcOriginHash: sha256(chain.rpcOrigin),
-                    invocationStartedAtMs,
-                    invocationCompletedAtMs,
-                }, payer.transferMethod);
-                assertUnattendedX402Balance(profilePolicy, evidence.usdcAtomic);
+                const evidence = await readAndSelectX402Offer({ rpc, rpcOrigin: chain.rpcOrigin, discovered, underCap, wallet, asset: network,
+                    transferMethod: payer.transferMethod, permit2Signer: payer.providerSigner === undefined && payer.delegated === undefined, nonce,
+                    startedAtMs: invocationStartedAtMs, nowMs: () => this.context.clock.now().getTime() });
+                const selected = evidence.selected;
+                assertUnattendedX402Balance(profilePolicy, evidence.balanceAtomic);
                 const delegatedMaterial = payer.delegated === undefined ? undefined : await payer.delegated.port.prepare({
                     profile,
                     profileHash,
@@ -110,7 +107,7 @@ export class X402Service extends X402PaidRequest {
                     maxTimeoutSeconds: selected.maxTimeoutSeconds,
                     rpcOriginHash: sha256(chain.rpcOrigin),
                 });
-                const paymentIdentifier = paymentIdentifierState(discovered.paymentRequired, operationId);
+                const paymentIdentifier = x402PaymentIdentifier(discovered.paymentRequired, operationId, selected.selectedOffer.resolved.assetTransferMethod);
                 const resourceCanonicalJson = canonicalJson(discovered.paymentRequired.resource);
                 const authorizationBase = {
                     from: wallet,
@@ -173,8 +170,8 @@ export class X402Service extends X402PaidRequest {
                     amountAtomic: selected.amountAtomic,
                     capAtomic,
                     selectedOffer: selected.selectedOffer,
-                    ...(releasedX402Pair(network.chainId, network.token) || evidence.tokenFacts === undefined ? {}
-                        : { tokenFacts: { decimals: evidence.tokenFacts.decimals, proofTag: network.proofTag } }),
+                    ...(releasedX402Pair(network.chainId, network.token) || evidence.decimals === undefined ? {}
+                        : { tokenFacts: { decimals: evidence.decimals, proofTag: network.proofTag } }),
                     ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
                     ...(delegatedMaterial === undefined ? {} : { delegatedMaterial }),
                     preparedBlock: {
@@ -383,7 +380,7 @@ export class X402Service extends X402PaidRequest {
             }
             // One resend of the byte-identical header after an ambiguous attempt, only while the nonce reads unused at safe.
             const paymentAttemptCount = operation.attempts.filter((attempt) => attempt.purpose === "payment").length;
-            if (operation.selectedOffer.resolved.assetTransferMethod === "eip3009" &&
+            if (operation.selectedOffer.resolved.assetTransferMethod !== "erc7710" &&
                 operation.transactionHint === undefined && operation.settlementResponseObservation === undefined &&
                 operation.settlementEvidence === undefined && operation.unusedExpiryEvidence === undefined && operation.resultLink === undefined &&
                 unusedAtSafe && paymentAttemptCount === 1 && operation.attempts.length === 1 &&

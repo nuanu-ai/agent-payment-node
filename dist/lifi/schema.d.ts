@@ -376,8 +376,8 @@ export declare const scanSchema: z.ZodObject<{
 export declare const providerObservationSchema: z.ZodObject<{
     status: z.ZodEnum<{
         unknown: "unknown";
-        not_found: "not_found";
         pending: "pending";
+        not_found: "not_found";
         completed_observed: "completed_observed";
         partial_observed: "partial_observed";
         refund_observed: "refund_observed";
@@ -399,8 +399,8 @@ export declare const failureSchema: z.ZodObject<{
         rpcOrigin: z.ZodString;
     }, z.core.$strict>>;
     residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
-        unavailable: "unavailable";
         observed: "observed";
+        unavailable: "unavailable";
     }>>;
     preSignRpc: z.ZodOptional<z.ZodObject<{
         schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
@@ -995,8 +995,8 @@ export declare const transitionSchema: z.ZodObject<{
     providerObservation: z.ZodNullable<z.ZodObject<{
         status: z.ZodEnum<{
             unknown: "unknown";
-            not_found: "not_found";
             pending: "pending";
+            not_found: "not_found";
             completed_observed: "completed_observed";
             partial_observed: "partial_observed";
             refund_observed: "refund_observed";
@@ -1031,8 +1031,8 @@ export declare const transitionSchema: z.ZodObject<{
             rpcOrigin: z.ZodString;
         }, z.core.$strict>>;
         residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
-            unavailable: "unavailable";
             observed: "observed";
+            unavailable: "unavailable";
         }>>;
         preSignRpc: z.ZodOptional<z.ZodObject<{
             schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
@@ -1776,8 +1776,8 @@ export declare const operationSchema: z.ZodObject<{
         providerObservation: z.ZodNullable<z.ZodObject<{
             status: z.ZodEnum<{
                 unknown: "unknown";
-                not_found: "not_found";
                 pending: "pending";
+                not_found: "not_found";
                 completed_observed: "completed_observed";
                 partial_observed: "partial_observed";
                 refund_observed: "refund_observed";
@@ -1812,8 +1812,8 @@ export declare const operationSchema: z.ZodObject<{
                 rpcOrigin: z.ZodString;
             }, z.core.$strict>>;
             residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
-                unavailable: "unavailable";
                 observed: "observed";
+                unavailable: "unavailable";
             }>>;
             preSignRpc: z.ZodOptional<z.ZodObject<{
                 schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;
@@ -2124,8 +2124,8 @@ export declare const operationSchema: z.ZodObject<{
     providerObservation: z.ZodNullable<z.ZodObject<{
         status: z.ZodEnum<{
             unknown: "unknown";
-            not_found: "not_found";
             pending: "pending";
+            not_found: "not_found";
             completed_observed: "completed_observed";
             partial_observed: "partial_observed";
             refund_observed: "refund_observed";
@@ -2160,8 +2160,8 @@ export declare const operationSchema: z.ZodObject<{
             rpcOrigin: z.ZodString;
         }, z.core.$strict>>;
         residualAllowanceStatus: z.ZodOptional<z.ZodEnum<{
-            unavailable: "unavailable";
             observed: "observed";
+            unavailable: "unavailable";
         }>>;
         preSignRpc: z.ZodOptional<z.ZodObject<{
             schemaVersion: z.ZodLiteral<"apn.bridge-presign-rpc-failure.v1">;

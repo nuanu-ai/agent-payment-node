@@ -5,6 +5,7 @@ import { ApnError } from "./errors.js";
 import type { NativePort, NativeRequest } from "./ports.js";
 import { encodePaymentSignatureHeader } from "./x402-codec.js";
 import { materializePaymentIdentifier } from "./x402-policy.js";
+import { verifyX402Permit2Material, x402Permit2NativeRequest } from "./x402-permit2-native.js";
 import type { X402OperationRecord } from "./x402-state-integrity.js";
 
 const SIGNATURE = /^0x[0-9a-f]{130}$/u;
@@ -68,6 +69,7 @@ export function x402NativeRequest(
   operation: X402OperationRecord,
   kind: "create" | "get",
 ): NativeRequest {
+  if (operation.selectedOffer.resolved.assetTransferMethod === "permit2") return x402Permit2NativeRequest(requestId, operation, kind);
   const payload = kind === "create"
     ? x402NativeCreatePayload(operation)
     : x402NativeRecoveryPayload(operation, operation.signatureHash);
@@ -145,6 +147,7 @@ export async function verifyAndConstructX402PaymentMaterial(
   value: unknown,
   operation: X402OperationRecord,
 ): Promise<VerifiedX402PaymentMaterial> {
+  if (operation.selectedOffer.resolved.assetTransferMethod === "permit2") return await verifyX402Permit2Material(value, operation);
   const resolved = eip3009Resolved(operation);
   const native = parseNativeMaterial(value);
   if (canonicalJson(native.authorization) !== canonicalJson(publicAuthorization(operation))) {

@@ -2,9 +2,9 @@ import { x402AssetOf } from "./x402-network.js";
 import { assertX402RpcChain } from "./x402-service-rpc.js";
 import type { ClockPort, X402RpcPort } from "./ports.js";
 import { appendX402Transition, sealX402Operation, type X402OperationRecord, type X402State } from "./x402-state-integrity.js";
-import { matchingAuthorizationUsed, matchingTransfer } from "./x402-rpc-scan.js";
+import { matchingAuthorizationUsed, matchingPermit2Settled, matchingTransfer } from "./x402-rpc-scan.js";
 import { stateSettlementEvidence } from "./x402-state-evidence.js";
-import { readX402UnusedExpiryEvidence } from "./x402-expiry-proof.js";
+import { readX402UnusedExpiryEvidence, x402NonceState } from "./x402-expiry-proof.js";
 import { STATE_SHAPE } from "./x402-state-shape.js";
 
 export interface X402ReconciliationStore {
@@ -36,7 +36,7 @@ export class X402RpcReconciler {
     const chain = await assertX402RpcChain(this.rpc, x402AssetOf(input).chainId);
     // The record's frozen proof tag: `safe` on the released chains, `finalized` (the stronger tag) on every other chain.
     const tag = input.tokenFacts?.proofTag ?? "safe";
-    const state = await this.rpc.getX402AuthorizationState(input.wallet, input.authorization.nonce, { tag });
+    const state = await x402NonceState(this.rpc, input, { tag });
     // A lagging endpoint whose proof head is behind the prepared block proves nothing about this authorization.
     if (state.blockTag !== tag ||
       BigInt(state.blockNumber) < BigInt(input.preparedBlock.number)) return { operation: input, unusedAtSafe: false };
@@ -62,7 +62,9 @@ export class X402RpcReconciler {
     if (
       receipt === null || receipt.status !== "success" || receipt.transactionHash !== hint.transactionHash ||
       BigInt(receipt.blockNumber) > BigInt(safeNumber) ||
-      receipt.logs.filter((log) => matchingAuthorizationUsed(log, operation)).length !== 1 ||
+      (operation.selectedOffer.resolved.assetTransferMethod === "permit2"
+        ? receipt.logs.filter((log) => matchingPermit2Settled(log)).length !== 1
+        : receipt.logs.filter((log) => matchingAuthorizationUsed(log, operation)).length !== 1) ||
       receipt.logs.filter((log) => matchingTransfer(log, operation)).length !== 1
     ) return undefined;
     return { transactionHash: hint.transactionHash, blockNumber: receipt.blockNumber, blockHash: receipt.blockHash };

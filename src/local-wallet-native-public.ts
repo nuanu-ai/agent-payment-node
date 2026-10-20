@@ -8,5 +8,6 @@ export function publicDirectEffect(effect: DirectEffectMaterial): unknown {
   return { transactionHash: effect.transactionHash, rawTransaction: effect.rawTransaction, rawTransactionHash: effect.rawTransactionHash };
 }
 export function publicX402Effect(effect: X402EffectMaterial): unknown {
-  return { authorization: effect.authorization, signature: effect.signature, signatureHash: effect.signatureHash };
+  return { authorization: effect.authorization, signature: effect.signature, signatureHash: effect.signatureHash,
+    ...(effect.eip2612Signature === undefined ? {} : { eip2612Signature: effect.eip2612Signature }) };
 }

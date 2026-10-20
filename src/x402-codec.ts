@@ -238,6 +238,15 @@ function inspectCandidate(requirements: PaymentRequirements, index: number, sele
     offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson),
     readiness: READINESS,
   };
+  if (extra.assetTransferMethod === "permit2") {
+    // Exactly the foreground Permit2 lane's offer shape: the method alone, or with the token's EIP-712 name and version.
+    const hinted = exactKeys(extra, ["assetTransferMethod", "name", "version"]);
+    if (!exactKeys(extra, ["assetTransferMethod"]) && !(hinted && typeof extra.name === "string" && extra.name.length > 0 &&
+      Buffer.byteLength(extra.name, "utf8") <= 128 && typeof extra.version === "string" && extra.version.length > 0 &&
+      Buffer.byteLength(extra.version, "utf8") <= 128)) return null;
+    return { ...base, assetTransferMethod: "permit2", paymentFlow: "permit2WitnessTransfer",
+      ...(hinted ? { tokenName: extra.name as string, tokenVersion: extra.version as string } : {}) };
+  }
   if (extra.assetTransferMethod === "erc7710") {
     if (!isBaseUsdc(selected)) return null;
     const facilitatorAddresses = canonicalErc7710Facilitators(extra);
@@ -296,6 +305,7 @@ function validatePaymentPayload(value: unknown): asserts value is PaymentPayload
   catch { throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported."); }
   const candidate = inspectCandidate(accepted, 0, acceptedAsset);
   if (candidate === null) throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
+  if (candidate.assetTransferMethod === "permit2") return validatePermit2PaymentPayload(value);
   const payload = record(paymentPayload.payload, "exact-EVM payload");
   if (candidate.assetTransferMethod === "erc7710") {
     if (!isStrictErc7710Payload(payload)) throw protocol("PAYMENT-SIGNATURE ERC-7710 payload shape is invalid.");

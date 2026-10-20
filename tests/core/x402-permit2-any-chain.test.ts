@@ -22,7 +22,7 @@ test("Permit2 runtime is recognised on any chain by its template and own immutab
   assert.equal(canonicalPermit2Code(`${permit2RuntimeFor(8453)}00`, 8453), false);
 });
 
-test("Base USDC offered only through Permit2 pays end to end: owner row, chain-verified contracts, one signature bundle, one paid GET, finalized nonce proof", async (t) => {
+test("Base USDC offered only through Permit2 pays end to end: owner row, chain-verified contracts, one signature bundle, one paid GET, safe nonce proof", async (t) => {
   const f = await baseFixture(t); const displays: Permit2ApprovalDisplay[] = [];
   // Trusted synthetic consent fixture only; it does not establish actual human approval.
   t.mock.method(TtyPermit2ForegroundApproval.prototype, "approve", async (display: Permit2ApprovalDisplay) => { displays.push(display); });
@@ -43,9 +43,9 @@ test("Base USDC offered only through Permit2 pays end to end: owner row, chain-v
   assert.equal(saved.material.owner.chain, "eip155:8453");
   assert.deepEqual({ ...saved.material.asset, networkName: undefined }, { chain: "eip155:8453", chainId: 8453, networkName: undefined, token: BASE_USDC,
     symbol: "USDC", decimals: 6, tokenDomain: { name: "USD Coin", version: "2" }, tokenDomainSeparator: null, proxyCodeHash: X402_EXACT_PERMIT2_PROXY_CODE_HASH });
-  // Pre-sign facts are read at the newest block; settlement is proven at the finalized one; every read named chain 8453.
+  // Pre-sign facts are read at the newest block; settlement on Base (OP Stack) is proven at safe, never finalized.
   const tags = f.calls.filter((call) => call.method === "eth_getBlockByNumber").map((call) => call.params[0]);
-  assert.ok(tags.includes("latest")); assert.ok(tags.includes("finalized"));
+  assert.ok(tags.includes("latest")); assert.ok(tags.includes("safe")); assert.equal(tags.includes("finalized"), false);
   assert.equal(f.calls.filter((call) => call.method === "eth_getCode").length >= 2, true);
   assert.equal(f.calls.some((call) => /send|sign/iu.test(call.method)), false);
 });

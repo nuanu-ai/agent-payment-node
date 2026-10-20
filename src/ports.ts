@@ -1,5 +1,6 @@
 import type { Address, Hex } from "./model.js";
 import type { EvmRpcPort, EvmTransferEvidence } from "./evm-ports.js";
+import type { X402Permit2PrepareEvidence } from "./x402-permit2-rpc.js";
 
 export type { HttpGetRequest, HttpObservation, HttpPort } from "./x402-model.js";
 
@@ -27,7 +28,9 @@ export interface NativeRequest {
     | "effectMaterial.get"
     | "directTransfer.signedMaterial.get"
     | "x402Exact.approveAndAuthorize"
-    | "x402Exact.authorizationMaterial.get";
+    | "x402Exact.authorizationMaterial.get"
+    | "x402Permit2.approveAndAuthorize"
+    | "x402Permit2.authorizationMaterial.get";
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
@@ -169,6 +172,8 @@ export interface X402RpcPort {
     nonce: Hex,
     block: X402BlockReference,
   ): Promise<X402AuthorizationState>;
+  /** Permit2's unordered nonce bit of `owner` (the proof of a Permit2-method operation); optional for EIP-3009-only adapters. */
+  getX402Permit2NonceState?(owner: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState>;
   getX402AuthorizationUsedLogs(input: {
     readonly authorizer: Address;
     readonly nonce: Hex;
@@ -195,6 +200,8 @@ export interface RpcPort {
   getBalances(address: Address): Promise<BalanceSnapshot>;
   /** `nonce` is the fresh authorization nonce; it is probed only for tokens outside the released USDC pairs. */
   getX402PrepareEvidence(address: Address, nonce?: Hex): Promise<X402PrepareEvidence>;
+  /** Prepare evidence of a Permit2 offer (src/x402-permit2-rpc.ts); absent on adapters without Permit2 support. */
+  getX402Permit2PrepareEvidence?(address: Address, nonce: Hex, permitNeeded: (allowanceAtomic: string) => boolean): Promise<X402Permit2PrepareEvidence>;
   getPendingNonce(address: Address): Promise<string>;
   estimateDirectTransfer(input: {
     readonly from: Address;

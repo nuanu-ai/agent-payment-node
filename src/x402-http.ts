@@ -103,13 +103,10 @@ export async function inspectX402(
   const permit2 = payer === undefined ? undefined : inspectPermit2Offer({ accepts: paymentRequired.accepts, payer });
   const candidates = inspectCandidates(paymentRequired, canonicalUrl, asset);
   if (candidates.length === 0 && permit2 === undefined) {
-    // Name what the seller does offer, so the caller can select an admitted network and token, or the Permit2 command.
+    // Name what the seller does offer, so the caller can select another admitted network and token.
     const offered = offeredX402Assets(paymentRequired.accepts);
-    const permit2Only = offered.some((offer) => offer.network === asset.network && offer.asset === asset.token.toLowerCase() && offer.method === "permit2");
-    throw new ApnError("APN_X402_UNSUPPORTED_OFFER", permit2Only
-      ? `The seller offers ${asset.token} on ${asset.network} only through Permit2; pay it with the foreground command apn x402 permit2 approve.`
-      : `Seller challenge has no supported x402 offer for ${asset.token} on ${asset.network}.`,
-    { reason: permit2Only ? "x402_offer_permit2_only" : "x402_offer_asset_not_offered", chain: asset.network, asset: asset.token,
+    throw new ApnError("APN_X402_UNSUPPORTED_OFFER", `Seller challenge has no supported x402 offer for ${asset.token} on ${asset.network}.`,
+    { reason: "x402_offer_asset_not_offered", chain: asset.network, asset: asset.token,
       offered: offered.map((offer) => `${offer.network} ${offer.asset} ${offer.method}`) });
   }
   return {

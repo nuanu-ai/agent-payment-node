@@ -1,6 +1,7 @@
 import { type X402ChainText, type X402Network } from "./x402-network.js";
 import type { X402DelegatedMaterialBinding } from "./provider-ports.js";
 import { type X402HttpRequestV1 } from "./x402-http-request.js";
+export { x402Fingerprint, x402RequestHash } from "./x402-request-identity.js";
 export declare const ZERO_HASH: string;
 export declare const X402_STATE_VERSION: "apn.x402.state.v1";
 export declare const TRANSITION_VERSION: "apn.x402.transition.v1";
@@ -29,7 +30,19 @@ export interface X402SelectedErc7710Offer extends X402SelectedOfferBase {
         readonly facilitatorAddresses: readonly `0x${string}`[];
     };
 }
-export type X402SelectedOffer = X402SelectedEip3009Offer | X402SelectedErc7710Offer;
+/** Permit2 witness transfer; `eip2612` is the seller-sponsored exact-amount permit when the allowance was short at prepare. */
+export interface X402SelectedPermit2Offer extends X402SelectedOfferBase {
+    readonly resolved: {
+        readonly assetTransferMethod: "permit2";
+        readonly paymentFlow: "permit2WitnessTransfer";
+        readonly eip2612: {
+            readonly tokenName: string;
+            readonly tokenVersion: string;
+            readonly nonce: string;
+        } | null;
+    };
+}
+export type X402SelectedOffer = X402SelectedEip3009Offer | X402SelectedErc7710Offer | X402SelectedPermit2Offer;
 export interface X402HttpObservation {
     readonly attemptNumber: string;
     readonly purpose: "payment" | "result_recovery";
@@ -337,7 +350,7 @@ export interface X402ReceiptRecord {
     readonly amountAtomic: string;
     readonly network: X402Network;
     readonly token: `0x${string}`;
-    readonly transferMethod?: "eip3009" | "erc7710";
+    readonly transferMethod?: "eip3009" | "erc7710" | "permit2";
     readonly paymentIdentifier?: string;
     readonly settlementResponseHash?: string;
     readonly settlementEvidence?: SettlementEvidence;
@@ -455,18 +468,8 @@ export interface X402OperationRecord {
     readonly transitions: readonly X402Transition[];
     readonly integrityHash: string;
 }
-export declare function x402RequestHash(input: {
-    readonly profile: string;
-    readonly canonicalUrl: string;
-    readonly capAtomic: string;
-    readonly chainId?: number;
-    readonly token?: string;
-    readonly httpRequest?: X402HttpRequestV1;
-}): string;
-export declare function x402Fingerprint(input: Pick<X402OperationRecord, "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier" | "providerSigner" | "delegatedMaterial">): string;
 export declare function x402AuthorizationIntentHash(value: Omit<X402OperationRecord["authorization"], "intentHash">): string;
 export declare function x402OperationBindingHash(operation: X402OperationRecord): string;
 export declare function x402TransactionHintSourceBindingHash(source: TransactionHint["source"], sourceHash: string): string;
 export declare function appendX402Transition(previous: readonly X402Transition[], input: Omit<X402Transition, "sequence" | "previousHash" | "hash">): readonly X402Transition[];
 export declare function sealX402Operation(value: Omit<X402OperationRecord, "integrityHash">): X402OperationRecord;
-export {};

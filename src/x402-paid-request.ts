@@ -82,7 +82,7 @@ export class X402PaidRequest extends X402Lifecycle {
    */
   protected async closeExpiredUnexposed(operation: X402OperationRecord): Promise<X402OperationRecord | null> {
     if (
-      operation.attempts.length !== 0 || operation.selectedOffer.resolved.assetTransferMethod !== "eip3009" ||
+      operation.attempts.length !== 0 || operation.selectedOffer.resolved.assetTransferMethod === "erc7710" ||
       !["authorization_material_pending", "authorized_not_sent"].includes(operation.state) || !this.authorizationExpired(operation)
     ) return null;
     if (operation.unusedExpiryEvidence !== undefined) return await this.finishReconciledEvidence(operation);

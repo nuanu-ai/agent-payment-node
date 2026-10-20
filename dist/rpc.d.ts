@@ -1,6 +1,7 @@
 export { parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, classifyX402LogAvailabilityMessage, acceptRpcHttpBody } from "./rpc-envelope.js";
 export { isPublicIp } from "./network-policy.js";
 import { type X402Asset } from "./x402-network.js";
+import { type X402Permit2PrepareEvidence } from "./x402-permit2-rpc.js";
 import { EvmRpc } from "./evm-rpc.js";
 import type { StateStore } from "./state.js";
 import type { Address, Hex } from "./model.js";
@@ -60,6 +61,10 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     getX402Block(number: string): Promise<X402RpcBlock>;
     getX402Receipt(transactionHash: Hex): Promise<X402RpcReceipt | null>;
     getX402AuthorizationState(authorizer: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState>;
+    /** Prepare evidence of a Permit2 offer for this instance's asset (src/x402-permit2-rpc.ts). */
+    getX402Permit2PrepareEvidence(address: Address, nonce: Hex, permitNeeded: (allowanceAtomic: string) => boolean): Promise<X402Permit2PrepareEvidence>;
+    /** Permit2's nonce bit, read like `getX402AuthorizationState` at a tag's or a number's block. */
+    getX402Permit2NonceState(owner: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState>;
     getX402AuthorizationUsedLogs(input: {
         readonly authorizer: Address;
         readonly nonce: Hex;

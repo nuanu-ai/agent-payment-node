@@ -169,7 +169,8 @@ Creating a policy or raising a limit needs the foreground terminal; a pure decre
 pins which sellers may be paid. `wallet policy show/set`, `x402 inspect` and `x402 fetch prepare` take
 `--chain <caip2>` (any `eip155:<id>`) and `--asset <token>` to select the local-wallet x402 network and token; omitting
 `--chain` means Base, omitting `--asset` means USDC on Base, Ethereum or Arbitrum and is refused elsewhere, and no
-network or token inherits another's limits. Prepare proves the token's EIP-3009 identity on that chain
+network or token inherits another's limits. Prepare proves the token's EIP-3009 identity on that chain, or, for a
+seller that offers the token only through Permit2, the canonical Permit2 contracts and the wallet's allowance
 ([any seller](docs/x402-any-seller.md)). `x402 fetch prepare`
 uses the owner's maximum, and `--max-amount-atomic` can only lower it for one call. Approval creates exactly one frozen
 authorization; `operation resume` owns the paid request, settlement observation and seller-result recovery. `--method`,
