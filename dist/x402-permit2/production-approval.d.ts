@@ -7,10 +7,12 @@ export interface Permit2ApprovalDisplay {
     readonly operationId: string;
     readonly profile: string;
     readonly payer: string;
-    readonly chain: "eip155:43114";
+    readonly chain: `eip155:${number}`;
     readonly token: string;
     readonly payTo: string;
     readonly amountAtomic: string;
+    /** Symbol and decimals of the owner's token row; absent on records prepared before generic admission (Avalanche USDT). */
+    readonly tokenUnit?: string;
     readonly spender: string;
     readonly proxy: string;
     readonly tokenPermit: "requested" | "not_requested";

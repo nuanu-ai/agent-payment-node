@@ -3,7 +3,8 @@ import { type Permit2ProductionRecord } from "./production-repository.js";
 import { type Permit2ProductionSigned } from "./production-signed.js";
 /** Strict projection from a future trusted read adapter; no RPC or finality claim at this boundary. */
 export interface Permit2DirectTransactionInput {
-    readonly chainId: "0xa86a";
+    /** The operation's own chain id as an RPC quantity. */
+    readonly chainId: `0x${string}`;
     readonly to: Address;
     readonly value: "0x0";
     readonly input: Hex;
@@ -33,8 +34,10 @@ export interface Permit2DirectAttribution {
     readonly tokenPermitOutcome: "not_requested" | "not_proven";
 }
 export declare function encodePermit2ProductionProxyCall(record: Permit2ProductionRecord, value: unknown): Promise<Hex>;
+/** The operation's chain id as the RPC quantity a transaction carries. */
+export declare function permit2ChainQuantity(record: Permit2ProductionRecord): `0x${string}`;
 /** Own the complete flat projection before any asynchronous signature recovery. */
-export declare function snapshotPermit2DirectTransaction(value: unknown): Permit2DirectTransactionInput;
+export declare function snapshotPermit2DirectTransaction(value: unknown, chainQuantity: `0x${string}`): Permit2DirectTransactionInput;
 /** Binds all calldata bytes to the saved signatures/plan. Unknown batchers and builder suffixes refuse. */
 export declare function attributePermit2DirectTransaction(record: Permit2ProductionRecord, signed: Permit2ProductionSigned, value: unknown): Promise<Permit2DirectAttribution>;
 export declare function permit2FactHash(value: unknown): value is Hex;

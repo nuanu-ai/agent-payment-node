@@ -2,19 +2,24 @@ import { randomBytes } from "node:crypto";
 import { canonicalJson, domainHash, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { planPermit2Authorization } from "./authorization.js";
+import { tokenDomainSeparator } from "../x402-policy.js";
 import { isEip2612GasSponsoringDeclaration } from "./extension.js";
 import { selectPermit2Offer } from "./offer.js";
-import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "./registry.js";
+import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_EXACT_PERMIT2_PROXY_CODE_HASH, X402_PERMIT2_MECHANISM } from "./registry.js";
 const PREPARE_DOMAIN = "apn.x402-permit2.prepare.v1";
 const UINT256 = (1n << 256n) - 1n;
-const asset = X402_PERMIT2_ASSETS[0];
+/** The resolver that admits exactly one asset: the operation's own. */
+export function onlyPermit2Asset(asset) {
+    return (network, token) => network === asset.chain && token.toLowerCase() === asset.token.toLowerCase() ? asset : undefined;
+}
 /** Pure prepare domain. The caller supplies trusted policy/RPC/facilitator reads; no effect port is accepted. */
 export function preparePermit2Payment(input) {
     if (input.localWallet !== true)
         blocked("A local EVM wallet is required.", "x402_permit2_local_wallet_required");
     const sellerSponsorsEip2612 = validateChallenge(input.challenge);
     const challengeHash = hashChallenge(input.challenge);
-    const selection = selectPermit2Offer(input.challenge.accepts, input.payer);
+    const asset = input.asset;
+    const selection = selectPermit2Offer(input.challenge.accepts, input.payer, onlyPermit2Asset(asset));
     if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
         canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) {
         blocked("The merchant challenge or selected terms changed.", "x402_permit2_merchant_terms_mismatch");
@@ -36,8 +41,9 @@ export function preparePermit2Payment(input) {
     if (evidence.chainId !== asset.chainId || !same(evidence.account, input.payer) ||
         !Number.isSafeInteger(evidence.observedAtSeconds) || evidence.observedAtSeconds > input.nowSeconds ||
         input.nowSeconds - evidence.observedAtSeconds > 30 ||
-        evidence.tokenDomainSeparator?.toLowerCase() !== asset.tokenDomainSeparator.toLowerCase() ||
-        evidence.proxyCodeHash?.toLowerCase() !== asset.proxyCodeHash.toLowerCase() || evidence.permit2Deployed !== true) {
+        (evidence.tokenDomainSeparator?.toLowerCase() ?? null) !== (asset.tokenDomainSeparator?.toLowerCase() ?? null) ||
+        evidence.proxyCodeHash?.toLowerCase() !== X402_EXACT_PERMIT2_PROXY_CODE_HASH || asset.proxyCodeHash !== X402_EXACT_PERMIT2_PROXY_CODE_HASH ||
+        evidence.permit2Deployed !== true) {
         blocked("Pinned chain, token domain or contract evidence is missing.", "x402_permit2_chain_evidence_required");
     }
     const facilitator = evidence.facilitator;
@@ -66,8 +72,13 @@ export function preparePermit2Payment(input) {
     const plan = planPermit2Authorization(selection, { payer: input.payer, nowSeconds: input.nowSeconds,
         nonce: input.nonce, permit2AllowanceAtomic: allowance.toString(), eip2612Nonce,
         sellerSponsorsEip2612: sellerSponsorsEip2612 && facilitator.eip2612GasSponsoring });
+    // A sponsored permit signs the token's own EIP-712 domain: its name/version must recompute the on-chain separator.
+    if (plan.eip2612 !== null && (asset.tokenDomain === null || asset.tokenDomainSeparator === null ||
+        tokenDomainSeparator(asset.tokenDomain.name, asset.tokenDomain.version, asset) !== asset.tokenDomainSeparator.toLowerCase())) {
+        blocked("The token's EIP-712 name and version do not recompute its on-chain DOMAIN_SEPARATOR.", "x402_permit2_token_domain_mismatch");
+    }
     const body = { challengeHash, offerHash: selection.offerHash, policyDigest: owner.policyDigest, payer: input.payer,
-        chain: "eip155:43114", token: asset.token, payTo: selection.payTo, amountAtomic: selection.amountAtomic,
+        chain: asset.chain, token: asset.token, payTo: selection.payTo, amountAtomic: selection.amountAtomic,
         expiresAtUnix: plan.authorization.deadline, planHash: plan.planHash };
     return deepFreeze({ ...body, plan, prepareHash: domainHash(PREPARE_DOMAIN, canonicalJson(body)) });
 }
@@ -75,6 +86,8 @@ export function hashChallenge(challenge) {
     validateChallenge(challenge);
     return domainHash("apn.x402-permit2.challenge.v1", canonicalJson(challenge));
 }
+/** True when the checked 402 declares a valid EIP-2612 gas-sponsoring extension. */
+export function permit2SellerSponsorsEip2612(challenge) { return validateChallenge(challenge); }
 function validateChallenge(challenge) {
     if (!isPlainRecord(challenge) || challenge.x402Version !== 2 || !isPlainRecord(challenge.resource) ||
         typeof challenge.resource.url !== "string" || !Array.isArray(challenge.accepts) || challenge.accepts.length === 0 ||
@@ -91,18 +104,21 @@ function validateChallenge(challenge) {
     }
     return true;
 }
+/** `assets` admits the offers the owner's active policy admits; the lowest-index admitted Permit2 offer is prepared. */
 export async function preparePermit2WithPort(port, input) {
     const challengeHash = hashChallenge(input.challenge);
-    const selection = selectPermit2Offer(input.challenge.accepts, input.payer);
+    const sellerSponsorsEip2612 = validateChallenge(input.challenge);
+    const selection = selectPermit2Offer(input.challenge.accepts, input.payer, input.assets);
     if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
         canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) {
         blocked("The merchant challenge or selected terms changed.", "x402_permit2_merchant_terms_mismatch");
     }
     const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
-    const read = await port.read({ payer: input.payer, chainId: 43114, token: asset.token, challengeHash,
+    const read = await port.read({ payer: input.payer, asset: selection.listAsset, challengeHash,
         offerHash: selection.offerHash, amountAtomic: selection.amountAtomic, nowSeconds: input.nowSeconds,
-        nonceBitmapWordIndex: (nonce >> 8n).toString(), payTo: selection.payTo });
-    return preparePermit2Payment({ ...input, owner: read.owner, evidence: read.evidence, nonce });
+        nonceBitmapWordIndex: (nonce >> 8n).toString(), sellerSponsorsEip2612, payTo: selection.payTo });
+    const { assets: _assets, ...rest } = input;
+    return preparePermit2Payment({ ...rest, owner: read.owner, evidence: read.evidence, asset: read.asset, nonce });
 }
 function quantity(value) {
     if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,77})$/u.test(value) || BigInt(value) > UINT256) {

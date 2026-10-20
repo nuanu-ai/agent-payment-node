@@ -175,8 +175,9 @@ uses the owner's maximum, and `--max-amount-atomic` can only lower it for one ca
 authorization; `operation resume` owns the paid request, settlement observation and seller-result recovery. `--method`,
 `--headers-json` and `--body-base64` send POST and other requests with opaque body bytes bound into the operation.
 
-Avalanche USDT [Permit2 requests](docs/x402-non-usdc.md) (`x402 permit2 *`) and [ERC-20 transfer-proof
-merchants](docs/x402-merchant-usdm.md) (`x402 merchant *`, MegaETH USDm first) are CLI commands with foreground approval.
+[Permit2 requests](docs/x402-non-usdc.md) (`x402 permit2 *`, any chain and token the owner's allowlist policy admits
+for Permit2, USDC included) and [ERC-20 transfer-proof merchants](docs/x402-merchant-usdm.md) (`x402 merchant *`,
+MegaETH USDm first) are CLI commands with foreground approval.
 [Offer selection](docs/x402-offer-selection.md) and [settlement fields](docs/x402-settlement-compatibility.md) are
 documented separately.
 
@@ -282,7 +283,7 @@ Generated from the catalog; `apn help <command>` and `apn help --json` give opti
 ```text
 apn x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <profile>] --idempotency-key <key>
 apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> [--profile <profile>] [--transaction <hash> | --expired-unused]
-apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <avalanche-rpc>
+apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <https-rpc>
 apn x402 permit2 status --profile <profile> --operation <operation-id>
 apn x402 merchant prepare --profile <profile> --url <https-url> [--asset <token>] --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>

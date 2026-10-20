@@ -9,6 +9,8 @@ import { walletEnvelopeIdentity } from "../encrypted-wallet-store.js";
 import { decodeCanonicalBase64Json, decodePaymentRequiredHeader } from "../x402-codec.js";
 import { createPermit2ProductionReadPort } from "./read-port.js";
 import { preparePermit2WithPort } from "./prepare.js";
+import { admittedPermit2Assets } from "./admission.js";
+import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 /** An unsigned CLI read with no payment-state persistence; only RPC pacing metadata may be written. */
 export async function permit2CurrentOwnerPreflight(root, request, ports) {
     const profile = canonicalProfile(request.profile);
@@ -44,7 +46,11 @@ export async function permit2CurrentOwnerPreflight(root, request, ports) {
     const read = createPermit2ProductionReadPort({ profile, stateRoot: root, localAccount,
         usage: ports.usage ?? { usage: (identity, when) => new AssetUsageLedger(root).usageReadOnly(identity, when) },
         rpc: ports.rpc, now });
-    const prepared = await preparePermit2WithPort(read, { payer, localWallet: true, challenge,
+    const active = await loadActiveAssetPolicyRegistry(root, profile, at);
+    if (active === null) {
+        throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No active owner allowlist policy admits a Permit2 token for this profile.", { reason: "x402_permit2_owner_admission_required", rail: "x402" });
+    }
+    const prepared = await preparePermit2WithPort(read, { payer, localWallet: true, challenge, assets: admittedPermit2Assets(active),
         expected: { challengeHash: request.expectedChallengeHash, index: Number(request.expectedIndex),
             requirement: expected }, nowSeconds: Math.floor(at.getTime() / 1000) });
     return { profile, state: "admissible_unsigned", capability: "execution_blocked", chain: prepared.chain,

@@ -2,8 +2,15 @@ import { evmConflictDomain } from "../../operation-conflict-domain.js";
 import { PERMIT2_PRODUCTION_TERMINAL_STATES, Permit2ProductionRepository, publicPermit2Production } from "../../x402-permit2/production-repository.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity } from "../adapter.js";
 const STORE = { directory: "permit2-production", perProfile: false };
+/** The account on the owner admission's own chain (immutable in the record); released records name eip155:43114. */
 export function permit2Domains(record) {
-    return [evmConflictDomain(43114, record.material.wallet.account)];
+    return [evmConflictDomain(permit2ChainId(record.material.owner.chain), record.material.wallet.account)];
+}
+function permit2ChainId(chain) {
+    const match = typeof chain === "string" ? /^eip155:([1-9][0-9]{0,15})$/u.exec(chain) : null;
+    if (match === null)
+        throw new Error("Invalid Permit2 chain.");
+    return Number(match[1]);
 }
 /**
  * The family's own outcomes end the claim. An authorization never exposed is ended by the family itself past its
@@ -19,7 +26,7 @@ export const permit2Adapter = {
     claims: record => readableClaims(() => domainClaims(permit2Domains(record))),
     terminal: record => PERMIT2_PRODUCTION_TERMINAL_STATES.includes(record.state),
     state: record => record.state,
-    salvage: raw => salvageRecord(raw, value => [salvageEvm(43114, field(value, "material", "wallet", "account"))]),
+    salvage: raw => salvageRecord(raw, value => [salvageEvm(permit2ChainId(field(value, "material", "owner", "chain")), field(value, "material", "wallet", "account"))]),
     view: async (record) => publicPermit2Production(record),
     // Observation, including the proof that an expired authorization was never used, runs on Permit2's own CLI path.
     commands: { status: "apn x402 permit2 status --profile <profile> --operation <operation-id>",

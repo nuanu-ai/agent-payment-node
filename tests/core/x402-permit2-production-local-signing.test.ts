@@ -147,7 +147,7 @@ test("fresh fence failure after key load ends the attempt without a signature or
   const f = await setup(t, true), originalSign = secp256k1.sign; let fences = 0, signatures = 0;
   t.mock.method(secp256k1, "sign", (...args: Parameters<typeof originalSign>) => { signatures++; return originalSign(...args); });
   f.wire.beforeBatch = async calls => {
-    if (calls.some(c => c.method === "eth_chainId") && calls.some(c => c.method === "eth_getBlockByNumber" && c.params[0] === "finalized"))
+    if (calls.some(c => c.method === "eth_chainId") && calls.some(c => c.method === "eth_getBlockByNumber" && c.params[0] === "latest"))
       if (++fences === 2) f.wire.chain = "0x1";
   };
   await assert.rejects(f.sign()); assert.equal(fences, 2); assert.equal(f.decrypts(), 1); assert.equal(signatures, 0);

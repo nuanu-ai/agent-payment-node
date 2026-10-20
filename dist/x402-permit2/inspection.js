@@ -1,10 +1,12 @@
 import { selectPermit2Offer } from "./offer.js";
+import { wirePermit2Asset } from "./registry.js";
 /**
- * Inspect the first listed exact Permit2 offer without reading state or preparing authorization.
+ * Inspect the first exact Permit2 offer without reading state or preparing authorization.
  * Unsupported offers and invalid payer input retain the canonical ApnError emitted by the selector.
  */
 export function inspectPermit2Offer(input) {
-    const selection = selectPermit2Offer(input.accepts, input.payer);
+    // Inspect has no profile: it shows the lowest-index well-formed Permit2 offer on any EVM network; approve admits it.
+    const selection = selectPermit2Offer(input.accepts, input.payer, wirePermit2Asset);
     return Object.freeze({
         index: selection.index,
         requirement: freezeRequirement(selection.requirement),

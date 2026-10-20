@@ -9,7 +9,8 @@ export declare function observerBlock(value: unknown, tag: string): Readonly<{
     hash: `0x${string}`;
     timestamp: bigint;
 }>;
-export declare function assertObserverChain(value: unknown): void;
+/** The RPC must serve the operation's own chain (the owner admission's network). */
+export declare function assertObserverChain(value: unknown, material: Permit2ProductionMaterial): void;
 export declare function observerNonceCalls(material: Permit2ProductionMaterial, block: Permit2ObservedBlock): readonly ReadOnlyRpcBatchCall[];
 /** Permit2 unordered nonces are single-use and APN signed one witness transfer with this nonce: a set bit is settlement. */
 export declare function nonceConsumed(material: Permit2ProductionMaterial, value: unknown): boolean;

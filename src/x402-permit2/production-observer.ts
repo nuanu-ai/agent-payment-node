@@ -62,7 +62,7 @@ export async function observePermit2Production(input: Permit2ProductionObservati
     const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["finalized", false] },
       ...(mode === "settlement" && locator !== null ? [{ method: "eth_getTransactionByHash", params: [locator] },
         { method: "eth_getTransactionReceipt", params: [locator] }] : [])]);
-    assertObserverChain(first[0]);
+    assertObserverChain(first[0], record.material);
     const head = observerBlock(first[1], "finalized");
     if (mode === "settlement" && locator !== null) {
       // A transaction hash only names the settlement; the consumed nonce bit below decides it, whatever the facilitator's call shape.

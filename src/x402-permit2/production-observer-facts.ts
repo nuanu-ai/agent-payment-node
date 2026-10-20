@@ -14,7 +14,10 @@ export function observerBlock(value: unknown, tag: string) {
   const block = evmRpcBlockResult(value, tag), timestamp = evmRpcQuantity(block.raw.timestamp);
   return Object.freeze({ tag: block.tag, number: block.number, hash: block.hash, timestamp });
 }
-export function assertObserverChain(value: unknown): void { if (evmRpcQuantity(value) !== 43114n) mismatch(); }
+/** The RPC must serve the operation's own chain (the owner admission's network). */
+export function assertObserverChain(value: unknown, material: Permit2ProductionMaterial): void {
+  if (evmRpcQuantity(value) !== BigInt(reconstructPermit2ProductionMaterial(material).chain.slice(7))) mismatch();
+}
 export function observerNonceCalls(material: Permit2ProductionMaterial, block: Permit2ObservedBlock): readonly ReadOnlyRpcBatchCall[] {
   const p = reconstructPermit2ProductionMaterial(material), pinned = { blockHash: block.hash, requireCanonical: true };
   return [{ method: "eth_call", params: [{ to: PERMIT2_ADDRESS, data: encodeFunctionData({ abi: PERMIT2,
@@ -37,7 +40,7 @@ export function observerTransaction(value: unknown, locator: string): Permit2Dir
   const tx = evmRpcRecord(value);
   if (tx.hash !== locator || !/^0x[0-9a-fA-F]{40}$/u.test(String(tx.from)) || /^0x0{40}$/u.test(String(tx.from))) mismatch();
   evmRpcQuantity(tx.transactionIndex);
-  return { chainId: tx.chainId as "0xa86a", to: tx.to as Permit2DirectTransactionInput["to"], value: tx.value as "0x0",
+  return { chainId: tx.chainId as `0x${string}`, to: tx.to as Permit2DirectTransactionInput["to"], value: tx.value as "0x0",
     input: tx.input as Permit2DirectTransactionInput["input"], hash: tx.hash as Permit2DirectTransactionInput["hash"],
     blockHash: tx.blockHash as Permit2DirectTransactionInput["blockHash"], blockNumber: tx.blockNumber as string };
 }

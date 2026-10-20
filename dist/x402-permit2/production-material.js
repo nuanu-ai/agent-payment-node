@@ -1,13 +1,13 @@
 import { selectPermit2Offer } from "./offer.js";
+import { onlyPermit2Asset } from "./prepare.js";
 import { getAddress, hashTypedData } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { validatePermit2CheckedChallenge } from "./checked-challenge.js";
 import { preparePermit2Payment } from "./prepare.js";
-import { X402_PERMIT2_ASSETS } from "./registry.js";
+import { legacyPermit2Asset } from "./registry.js";
 export const PERMIT2_PRODUCTION_SCHEMA = "apn.x402-permit2-production.v2";
-const asset = X402_PERMIT2_ASSETS[0];
 const HASH = /^[a-f0-9]{64}$/u;
 export function preparedCanonicalJson(value) {
     return canonicalJson(JSON.parse(JSON.stringify(value, (_key, item) => typeof item === "bigint" ? item.toString() : item)));
@@ -25,22 +25,21 @@ export function reconstructPermit2ProductionMaterial(value) {
 }
 function reconstruct(value) {
     const checked = validatePermit2CheckedChallenge(value.checked);
-    // Selection is independently reconstructed; no stored seller selection object becomes authority.
+    // Selection is independently reconstructed; no stored seller selection object becomes authority. The asset must be the
+    // owner admission's own chain and token (prepare re-proves both against the record's evidence).
     const challenge = checked.challenge;
-    const selection = selectPermit2Offer(challenge.accepts, value.wallet.account);
-    const prepared = preparePermit2Payment({ payer: value.wallet.account, localWallet: true, challenge,
+    const asset = value.asset ?? legacyPermit2Asset(value.owner?.chain, value.owner?.token ?? "");
+    if (asset === undefined || asset.chain !== value.owner.chain || asset.token.toLowerCase() !== String(value.owner.token).toLowerCase())
+        corrupt();
+    const selection = selectPermit2Offer(challenge.accepts, value.wallet.account, onlyPermit2Asset(asset));
+    return preparePermit2Payment({ payer: value.wallet.account, localWallet: true, challenge,
         expected: { index: selection.index, requirement: selection.requirement, challengeHash: checked.challengeHash },
-        owner: value.owner, evidence: value.evidence, nowSeconds: value.signingSecond, nonce: BigInt(value.nonce) });
-    if (prepared.plan.eip2612 !== null && (selection.requirement.extra.name !== asset.tokenDomain.name ||
-        selection.requirement.extra.version !== asset.tokenDomain.version)) {
-        throw new ApnError("APN_OPERATION_BLOCKED", "Sponsored production Permit2 requires matching merchant token domain hints.");
-    }
-    return prepared;
+        owner: value.owner, evidence: value.evidence, asset, nowSeconds: value.signingSecond, nonce: BigInt(value.nonce) });
 }
 export function validatePermit2ProductionMaterial(value) {
     try {
         if (!isPlainRecord(value) || !exactKeys(value, ["checked", "wallet", "checkpoint", "owner", "evidence", "signingSecond", "nonce",
-            "preparedCanonicalJson", "typedDataDigest", "eip2612Digest", "materialHash"]))
+            ...(value.asset === undefined ? [] : ["asset"]), "preparedCanonicalJson", "typedDataDigest", "eip2612Digest", "materialHash"]))
             corrupt();
         const v = value;
         const { materialHash, ...body } = v;

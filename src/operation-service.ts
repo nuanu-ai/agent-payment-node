@@ -26,6 +26,7 @@ import { RelayUnsignedOperationRepository, validateRelayUnsignedOperation, type 
 import { assertExclusiveEvmOwner, evmAddressLock } from "./evm-address-ownership.js";
 import { OperationIndex } from "./operation-index/index.js";
 import { relayStatus } from "./operation-index/adapters/relay.js";
+import { permit2Domains } from "./operation-index/adapters/permit2.js";
 import { x402StoredOutcome, x402StoredReceiptOutcome, type X402StoredOperation } from "./operation-index/adapters/x402.js";
 import { profileClaim, providerClaims, UNREADABLE_PROVIDER_CLAIM, unreadableProfileClaim, type OperationClaim, type OperationIndexEntry,
   type WantedTag } from "./operation-index/types.js";
@@ -182,7 +183,7 @@ export class OperationService {
     const saved = await new Permit2ProductionRepository(this.state.root).findOperation(record.operationId);
     if (saved === null || saved.integrityHash !== record.integrityHash) throw new ApnError("APN_OPERATION_BLOCKED", "Permit2 conflict exclusion requires the exact saved operation.");
     await this.assertConflictDomainsAvailable(record.profileHash,
-      () => [evmConflictDomain(43114, record.material.wallet.account)], record.operationId);
+      () => permit2Domains(record), record.operationId);
   }
 
   /** A new Solana or TRON money operation waits only for unresolved operations of the same rail account. */

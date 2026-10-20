@@ -12,9 +12,11 @@ import { temporaryState } from "./helpers.js";
 const asset = X402_PERMIT2_ASSETS[0]!;
 const payer = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4" as const;
 const instant = new Date("2026-09-23T04:00:00.000Z");
-const request = { payer, chainId: 43114 as const, token: asset.token,
+// The asset as selection admits it: the owner row's identity, chain facts not read yet.
+const selected = { ...asset, networkName: "Avalanche C-Chain", tokenDomainSeparator: null };
+const request = { payer, asset: selected,
   challengeHash: "a".repeat(64), offerHash: "b".repeat(64), amountAtomic: "10000",
-  nonceBitmapWordIndex: "0", nowSeconds: Math.floor(instant.getTime() / 1000),
+  nonceBitmapWordIndex: "0", nowSeconds: Math.floor(instant.getTime() / 1000), sellerSponsorsEip2612: true,
   payTo: "0x2222222222222222222222222222222222222222" as const };
 const word = (value: bigint) => `0x${value.toString(16).padStart(64, "0")}`;
 const tokenAbi = parseAbi(["function balanceOf(address) view returns (uint256)",
@@ -60,7 +62,7 @@ test("active rail pin, account, amount cap and revocation are enforced before RP
   await assert.rejects(port.read(request), refusal("x402_permit2_owner_admission_required"));
 });
 
-test("finalized chain identity and freshness fail closed after one POST", async (t) => {
+test("latest-block chain identity and freshness fail closed after one POST", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup);
   await activateDirectPolicy(temp.root, "owner", { accounts: { evm: payer }, now: instant,
     admissions: [{ chain: asset.chain, kind: "token", identifier: asset.token, rail: "x402",
@@ -71,7 +73,7 @@ test("finalized chain identity and freshness fail closed after one POST", async 
     rpc: { batch: async (calls) => { posts.push(calls.map(call => call.method));
       return calls.map(({ method, params }) => {
         if (method === "eth_chainId") return "0xa86a";
-        assert.equal(method, "eth_getBlockByNumber"); assert.equal(params[0], "finalized");
+        assert.equal(method, "eth_getBlockByNumber"); assert.equal(params[0], "latest");
         return { number: "0x1", hash: `0x${"1".repeat(64)}`, timestamp: "0x1" };
       });
     } } });
@@ -81,7 +83,8 @@ test("finalized chain identity and freshness fail closed after one POST", async 
 
 async function scripted(t: test.TestContext, options: {
   readonly endOffsetSeconds?: number; readonly finalOffsetSeconds?: number; readonly blockAgeSeconds?: number;
-  readonly badProxyCode?: boolean; readonly notCanonical?: boolean;
+  readonly badProxyCode?: boolean; readonly notCanonical?: boolean; readonly allowance?: bigint; readonly chain?: string;
+  readonly permit2Code?: `0x${string}`; readonly domain?: string;
   readonly localAccount?: () => Promise<`0x${string}`>;
   readonly usage?: Permit2UsageReader;
 } = {}) {
@@ -96,11 +99,13 @@ async function scripted(t: test.TestContext, options: {
   const expected = [
     { to: asset.token, data: encodeFunctionData({ abi: tokenAbi, functionName: "balanceOf", args: [payer] }) },
     { to: asset.token, data: encodeFunctionData({ abi: tokenAbi, functionName: "allowance", args: [payer, PERMIT2_ADDRESS] }) },
-    { to: asset.token, data: encodeFunctionData({ abi: tokenAbi, functionName: "DOMAIN_SEPARATOR" }) },
-    { to: asset.token, data: encodeFunctionData({ abi: tokenAbi, functionName: "nonces", args: [payer] }) },
     { to: PERMIT2_ADDRESS, data: encodeFunctionData({ abi: permitAbi, functionName: "nonceBitmap", args: [payer, 0n] }) },
   ];
-  const results = [word(20000n), word(10000n), asset.tokenDomainSeparator, word(9n), word(0n)];
+  const sponsored = [
+    { to: asset.token, data: encodeFunctionData({ abi: tokenAbi, functionName: "DOMAIN_SEPARATOR" }) },
+    { to: asset.token, data: encodeFunctionData({ abi: tokenAbi, functionName: "nonces", args: [payer] }) },
+  ];
+  const results = [word(20000n), word(options.allowance ?? 10000n), word(0n)];
   const port = createPermit2ProductionReadPort({ profile: "owner", stateRoot: temp.root,
     localAccount: async () => { activeCalls++; return options.localAccount ? await options.localAccount() : payer; },
     usage: options.usage ?? new AssetUsageLedger(temp.root),
@@ -111,17 +116,19 @@ async function scripted(t: test.TestContext, options: {
       assert.equal(signal.aborted, false); posts.push([...calls]);
       if (posts.length === 2 && options.notCanonical) throw new ApnError("APN_RPC_PROTOCOL", "header not found or not canonical");
       return calls.map(({ method, params }, index) => {
-        if (method === "eth_chainId") return "0xa86a";
+        if (method === "eth_chainId") return options.chain ?? "0xa86a";
         if (method === "eth_getBlockByNumber") {
-          assert.equal(params[0], "finalized");
+          assert.equal(params[0], "latest");
           return { number: "0x12", hash, timestamp: `0x${(startSeconds - (options.blockAgeSeconds ?? 5)).toString(16)}` };
         }
-        assert.deepEqual(params[1], pinned, "every state read is pinned to the finalized block hash");
+        assert.deepEqual(params[1], pinned, "every state read is pinned to the latest block's hash");
         if (method === "eth_getCode") {
-          assert.equal(params[0], index === 5 ? X402_EXACT_PERMIT2_PROXY : PERMIT2_ADDRESS);
-          return index === 5 ? (options.badProxyCode ? "0x6000" : proxyCode) : permit2Code;
+          assert.equal(params[0], index === 3 ? X402_EXACT_PERMIT2_PROXY : PERMIT2_ADDRESS);
+          return index === 3 ? (options.badProxyCode ? "0x6000" : proxyCode) : options.permit2Code ?? permit2Code;
         }
-        assert.equal(method, "eth_call"); assert.deepEqual(params[0], expected[index]);
+        assert.equal(method, "eth_call");
+        if (posts.length === 3) { assert.deepEqual(params[0], sponsored[index]); return index === 0 ? options.domain ?? asset.tokenDomainSeparator : word(9n); }
+        assert.deepEqual(params[0], expected[index]);
         return results[index];
       });
     } },
@@ -136,13 +143,15 @@ test("full adapter read: two POSTs bind the pinned block, all call data, immutab
   assert.equal(read.owner.maximumPerTransferAtomic, "20000");
   assert.equal(read.evidence.balanceAtomic, "20000");
   assert.equal(read.evidence.allowanceAtomic, "10000");
-  assert.equal(read.evidence.eip2612Nonce, "9");
+  assert.equal(read.evidence.eip2612Nonce, null, "an allowance that covers the price needs no token permit read");
+  assert.equal(read.evidence.tokenDomainSeparator, null);
   assert.equal(read.evidence.nonceBitmapWord, word(0n));
   assert.equal(read.evidence.proxyCodeHash, asset.proxyCodeHash);
+  assert.deepEqual(read.asset, { ...selected, symbol: "USDT", decimals: 6 }, "token identity is the owner's row");
   assert.equal(read.evidence.facilitator.eip2612GasSponsoring, true, "sponsorship follows the seller's own 402 declaration");
   assert.equal(read.checkpoint.facilitatorSupportedDigest, request.challengeHash, "no PayAI /supported read; the seller challenge is the source");
   assert.deepEqual(fixture.posts.map(post => post.map(call => call.method)), [["eth_chainId", "eth_getBlockByNumber"],
-    ["eth_call", "eth_call", "eth_call", "eth_call", "eth_call", "eth_getCode", "eth_getCode"]], "2 POSTs (was 10 paced POSTs and a facilitator GET)");
+    ["eth_call", "eth_call", "eth_call", "eth_getCode", "eth_getCode"]], "2 POSTs (was 10 paced POSTs and a facilitator GET)");
   assert.deepEqual(fixture.stats(), { activeCalls: 2 });
   assert.equal(fixture.posts.flat().some(call => /send|sign|estimate|getProof/iu.test(call.method)), false);
 });
@@ -195,4 +204,23 @@ test("hung RPC is aborted once and does not fan out", async (t) => {
   await assert.rejects(port.read(request), refusal("x402_permit2_read_busy"));
   await assert.rejects(first);
   assert.equal(calls, 1); assert.equal(aborted, true);
+});
+
+test("a short allowance under seller sponsorship reads the token domain in a third pinned POST and proves it", async (t) => {
+  const sponsored = await scripted(t, { allowance: 0n });
+  const read = await sponsored.port.readChecked(request);
+  assert.equal(read.evidence.eip2612Nonce, "9"); assert.equal(read.evidence.tokenDomainSeparator, asset.tokenDomainSeparator);
+  assert.equal(read.asset.tokenDomainSeparator, asset.tokenDomainSeparator);
+  assert.deepEqual(sponsored.posts.map(post => post.length), [2, 5, 2]);
+  const wrong = await scripted(t, { allowance: 0n, domain: word(1n) });
+  await assert.rejects(wrong.port.read(request), refusal("x402_permit2_token_domain_mismatch"));
+});
+
+test("Permit2 runtime must be the canonical template with this chain's own immutables; the RPC must serve the admitted chain", async (t) => {
+  // The Avalanche runtime presented to Base keeps Avalanche's cached chain id and domain separator.
+  const foreign = await scripted(t, { permit2Code: permit2Code.replace("a86a03611b69577f", "a86b03611b69577f") as `0x${string}` });
+  await assert.rejects(foreign.port.read(request), refusal("x402_permit2_chain_evidence_required"));
+  const other = await scripted(t, { chain: "0x2105" });
+  await assert.rejects(other.port.read(request), (error: unknown) => error instanceof ApnError && error.code === "APN_CHAIN_MISMATCH" &&
+    error.details?.chain === "eip155:43114");
 });

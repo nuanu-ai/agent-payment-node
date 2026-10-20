@@ -20,11 +20,11 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
 | `x402-network.ts` table Base/Ethereum/Arbitrum -> USDC (gate of inspect, prepare, policy, RPC reads, every stored-record validator, custody signer) | Owner policy for the exact chain+token; at prepare one batch pinned to one block: `DOMAIN_SEPARATOR` equals keccak(EIP-712 domain of the offer's `name`/`version`, chain, token), `authorizationState(payer, fresh nonce)` answers a canonical `false`, `decimals()` answers (and equals the offer's `extra.decimals` if declared), `balanceOf`. Stored records are checked against their own chain/network/token fields. |
 | `EVM_NETWORKS` enum on `--chain` for x402 and wallet policy | Any `eip155:<positive id>`; the RPC's `eth_chainId` must equal it. |
 | `extra.decimals` must be 6 | On-chain `decimals()`; stored in the record (`tokenFacts.decimals`) for the abandon prompt. |
-| Permit2 `X402_PERMIT2_ASSETS` (Avalanche USDT row) | Allowlist row (chain, token, symbol, decimals, caps, mechanism pin). The row stays only to reconstruct records prepared before. |
+| Permit2 `X402_PERMIT2_ASSETS` (Avalanche USDT row) and `X402_PERMIT2_BLOCKED` (Ethereum USDT) | Allowlist row (chain, token, symbol, decimals, caps, mechanism pin), stored in the record (`material.asset`). The Avalanche row stays only to reconstruct records prepared before. |
 | `PERMIT2_CODE_HASH` (Avalanche runtime) | Permit2 runtime code at `0x0000…8BA3` with its two immutables (cached chain id, cached EIP-712 domain separator) zeroed hashes to the one template hash seen on 10 chains, and the immutables equal this chain id and the recomputed Permit2 domain separator. |
 | Per-asset proxy code hash | The x402 exact proxy at `0x4020…0001` has one runtime hash on every chain checked (CREATE2, no chain immutables). |
-| Permit2 token domain pin (`TetherToken`/`1`) | Needed only for EIP-2612 sponsorship: the offer's `name`/`version` must recompute the token's on-chain `DOMAIN_SEPARATOR`; otherwise the existing allowance must cover the amount. |
-| Chain id `43114`/`0xa86a` in Permit2 prepare, proxy-call and observer checks | The admitted chain id, checked against `eth_chainId`. |
+| Permit2 token domain pin (`TetherToken`/`1`) | Needed only for a sponsored EIP-2612 permit: the seller's `name`/`version` hint must recompute the token's on-chain `DOMAIN_SEPARATOR` (a third pinned POST, only then); otherwise the existing allowance must cover the amount. |
+| Chain `43114`/`0xa86a` in Permit2 prepare, proxy-call, observer, conflict claim and the ledger's unsigned-cancel guard | The record's own admitted chain, checked against `eth_chainId`. |
 
 ## Finality and read tags
 

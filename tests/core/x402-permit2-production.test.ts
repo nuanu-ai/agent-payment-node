@@ -12,6 +12,7 @@ import { OperationService } from "../../src/operation-service.js";
 import { checkPermit2Challenge } from "../../src/x402-permit2/checked-challenge.js";
 import { hashChallenge } from "../../src/x402-permit2/prepare.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
+import { onlyPermit2Asset } from "../../src/x402-permit2/prepare.js";
 import { Permit2ProductionPreparation } from "../../src/x402-permit2/production-prepare.js";
 import { PERMIT2_PRODUCTION_SCHEMA, validatePermit2ProductionMaterial, reconstructPermit2ProductionMaterial } from "../../src/x402-permit2/production-material.js";
 import { Permit2ProductionRepository, permit2ProductionId, publicPermit2Production, productionUsageIdentity,
@@ -36,7 +37,7 @@ function challenge(sponsor = false, hints = sponsor, maxTimeoutSeconds = 60): X4
     ...(sponsor ? { extensions: { eip2612GasSponsoring: declaration } } : {}) };
 }
 function input(key = "production-test-key-001", ch = challenge()) {
-  const selection = selectPermit2Offer(ch.accepts, payer);
+  const selection = selectPermit2Offer(ch.accepts, payer, onlyPermit2Asset(asset));
   return { profile: "owner", idempotencyKey: key,
     checked: checkPermit2Challenge(ch, { schemaVersion: "apn.http-request.v1", url: ch.resource.url,
       method: "POST", headers: { "content-type": "application/json", "x-private-header": "private-header-value" },
@@ -69,8 +70,11 @@ async function setup(t: test.TestContext, options: { allowance?: bigint; badDoma
         calls.push(method);
         if (method === "eth_chainId") return "0xa86a";
         if (method === "eth_getBlockByNumber") return { number: "0x12", hash: `0x${"1".repeat(64)}`, timestamp: `0x${Math.floor(clock.getTime() / 1000).toString(16)}` };
-        if (method === "eth_call") return [word(20000n), word(options.allowance ?? 10000n), options.badDomain ? word(0n) : asset.tokenDomainSeparator,
-          word(9n), word(0n)][ethCalls++ % 5];
+        if (method === "eth_call") {
+          ethCalls++; const data = String((params[0] as { data: string }).data);
+          return data.startsWith("0x70a08231") ? word(20000n) : data.startsWith("0xdd62ed3e") ? word(options.allowance ?? 10000n)
+            : data.startsWith("0x3644e515") ? (options.badDomain ? word(0n) : asset.tokenDomainSeparator) : data.startsWith("0x7ecebe00") ? word(9n) : word(0n);
+        }
         if (method === "eth_getCode") return params[0] === PERMIT2_ADDRESS ? permit2Code : options.badProxy ? "0x6000" : proxyCode;
         throw new Error(`Unexpected ${method}`);
       });
@@ -81,7 +85,7 @@ async function setup(t: test.TestContext, options: { allowance?: bigint; badDoma
 test("durable exact private preparation replays immutable nonce before reads; changed request/challenge conflicts", async t => {
   const f = await setup(t), request = input();
   const [a, b] = await Promise.all([f.service.prepare(request), f.service.prepare(request)]);
-  assert.deepEqual(a, b); assert.equal(f.calls.length, 9); assert.equal(f.postCount(), 2, "chain+header, one pinned batch; no facilitator GET");
+  assert.deepEqual(a, b); assert.equal(f.calls.length, 7); assert.equal(f.postCount(), 2, "chain+header, one pinned batch; no facilitator GET");
   assert.equal(a.operationId, permit2ProductionId("owner", request.idempotencyKey));
   assert.notEqual(a.operationId, f.state.operationId("owner", request.idempotencyKey));
   assert.equal(a.material.checked.request.method, "POST"); assert.equal(a.material.checked.request.bodyBase64, request.checked.request.bodyBase64);
@@ -95,7 +99,7 @@ test("durable exact private preparation replays immutable nonce before reads; ch
   });
   assert.deepEqual(Object.keys(publicPermit2Production(a).resource).sort(), ["origin", "urlHash"]);
   assert.equal(publicPermit2Production(a).capability, "execution_blocked");
-  f.advance(120); assert.deepEqual(await f.service.prepare(request), a); assert.equal(f.calls.length, 9);
+  f.advance(120); assert.deepEqual(await f.service.prepare(request), a); assert.equal(f.calls.length, 7);
   for (const change of [{ method: "GET" }, { headers: { accept: "application/json" } }, { bodyBase64: null }]) {
     const changed = { ...request, checked: checkPermit2Challenge(request.checked.challenge, { ...request.checked.request, ...change }) };
     await assert.rejects(f.service.prepare(changed), { code: "APN_IDEMPOTENCY_CONFLICT" });
@@ -151,7 +155,9 @@ test("sponsored branch accepts zero-native route only with matching merchant dom
   const bad = await setup(t, { allowance: 0n });
   await assert.rejects(bad.service.prepare(input("sponsored-missing-hints", challenge(true, false))));
   const noSponsor = await setup(t, { allowance: 0n }); await assert.rejects(noSponsor.service.prepare(input()));
-  const badDomain = await setup(t, { badDomain: true }); await assert.rejects(badDomain.service.prepare(input()));
+  // The token domain matters only to a sponsored permit, so only that branch reads and proves it.
+  const badDomain = await setup(t, { badDomain: true, allowance: 0n });
+  await assert.rejects(badDomain.service.prepare(input("sponsored-bad-domain", challenge(true))), { details: { reason: "x402_permit2_token_domain_mismatch", rail: "x402" } });
   const badProxy = await setup(t, { badProxy: true }); await assert.rejects(badProxy.service.prepare(input()));
 });
 
@@ -303,7 +309,8 @@ test("rehashed frozen registry version cannot substitute the active owner or com
   const { createPermit2ProductionMaterial } = await import("../../src/x402-permit2/production-material.js");
   const m = record.material;
   const material = createPermit2ProductionMaterial({ checked: m.checked, wallet: m.wallet, owner: m.owner, evidence: m.evidence,
-    signingSecond: m.signingSecond, nonce: m.nonce, checkpoint: { ...m.checkpoint, registryVersion: "forged-version" } });
+    signingSecond: m.signingSecond, nonce: m.nonce, ...(m.asset === undefined ? {} : { asset: m.asset }),
+    checkpoint: { ...m.checkpoint, registryVersion: "forged-version" } });
   const changed = sealPermit2ProductionRecord({ ...productionRecordBody(record), material });
   await writeFile(join(f.root, "permit2-production", `${record.operationId}.json`), canonicalJson(changed), { mode: 0o600 });
   await assert.rejects(f.service.reserve(record.operationId), { code: "APN_OPERATION_BLOCKED" });

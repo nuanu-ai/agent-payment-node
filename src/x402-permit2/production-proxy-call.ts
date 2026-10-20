@@ -10,7 +10,8 @@ import { PROXY_SETTLED_TOPIC, PROXY_SETTLED_WITH_PERMIT_TOPIC, X402_EXACT_PERMIT
 
 /** Strict projection from a future trusted read adapter; no RPC or finality claim at this boundary. */
 export interface Permit2DirectTransactionInput {
-  readonly chainId: "0xa86a";
+  /** The operation's own chain id as an RPC quantity. */
+  readonly chainId: `0x${string}`;
   readonly to: Address;
   readonly value: "0x0";
   readonly input: Hex;
@@ -49,12 +50,16 @@ export async function encodePermit2ProductionProxyCall(record: Permit2Production
     s: `0x${signature.slice(66, 130)}`, v: Number.parseInt(signature.slice(130), 16),
   }, permit, a.from, witness, signed.permit2Signature] });
 }
+/** The operation's chain id as the RPC quantity a transaction carries. */
+export function permit2ChainQuantity(record: Permit2ProductionRecord): `0x${string}` {
+  return `0x${BigInt(reconstructPermit2ProductionMaterial(record.material).chain.slice(7)).toString(16)}`;
+}
 /** Own the complete flat projection before any asynchronous signature recovery. */
-export function snapshotPermit2DirectTransaction(value: unknown): Permit2DirectTransactionInput {
+export function snapshotPermit2DirectTransaction(value: unknown, chainQuantity: `0x${string}`): Permit2DirectTransactionInput {
   if (!isPlainRecord(value) || !exactKeys(value, ["chainId", "to", "value", "input", "hash", "blockHash", "blockNumber"])) fail();
   const snapshot = { chainId: value.chainId, to: value.to, value: value.value, input: value.input,
     hash: value.hash, blockHash: value.blockHash, blockNumber: value.blockNumber };
-  if (snapshot.chainId !== "0xa86a" || typeof snapshot.to !== "string" ||
+  if (snapshot.chainId !== chainQuantity || typeof snapshot.to !== "string" ||
       snapshot.to.toLowerCase() !== X402_EXACT_PERMIT2_PROXY.toLowerCase() || snapshot.value !== "0x0" ||
       typeof snapshot.input !== "string" || !hash(snapshot.hash) || !hash(snapshot.blockHash) || !quantity(snapshot.blockNumber)) fail();
   return Object.freeze(snapshot) as Permit2DirectTransactionInput;
@@ -63,11 +68,12 @@ export function snapshotPermit2DirectTransaction(value: unknown): Permit2DirectT
 export async function attributePermit2DirectTransaction(record: Permit2ProductionRecord, signed: Permit2ProductionSigned,
   value: unknown): Promise<Permit2DirectAttribution> {
   record = validatePermit2ProductionRecord(JSON.parse(canonicalJson(record)));
-  value = snapshotPermit2DirectTransaction(value);
+  const chainQuantity = permit2ChainQuantity(record);
+  value = snapshotPermit2DirectTransaction(value, chainQuantity);
   signed = await validatePermit2ProductionSigned(signed, record);
   const expected = await encodePermit2ProductionProxyCall(record, signed);
   if (!isPlainRecord(value) || !exactKeys(value, ["chainId", "to", "value", "input", "hash", "blockHash", "blockNumber"]) ||
-      value.chainId !== "0xa86a" || typeof value.to !== "string" || value.to.toLowerCase() !== X402_EXACT_PERMIT2_PROXY.toLowerCase() ||
+      value.chainId !== chainQuantity || typeof value.to !== "string" || value.to.toLowerCase() !== X402_EXACT_PERMIT2_PROXY.toLowerCase() ||
       value.value !== "0x0" || value.input !== expected || !hash(value.hash) || !hash(value.blockHash) || !quantity(value.blockNumber)) fail();
   try {
     const decoded = decodeFunctionData({ abi: PERMIT2_DIRECT_PROXY_ABI, data: value.input as Hex });
