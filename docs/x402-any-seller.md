@@ -108,7 +108,12 @@ substituted.
   but the wSOL mint is not in the frozen allowlist inventory, so no owner can admit it yet.
 - Execution: a fresh blockhash is bound (its height checked against it), the bytes simulated, the owner cap reserved,
   the payer signs (fee-payer slot empty) and the exposure is recorded before the single paid request. A replay never
-  sends again.
+  sends again. A failure once the payment has a record (a seller HTTP error, a transport error, a malformed response
+  after exposure, or a refusal before it) keeps its own error and answers with the operation itself in `operation`
+  (its id, state and `exposed_at`, no signed bytes) and its next actions, the first being the no-send
+  `apn x402 solana observe --operation <id>`; after exposure the payment may have landed, and observe proves it.
+  EVM x402 answers the same way after its header is sent: the operation in `effect_unknown` with `operation.resume`
+  and `operation.status`; a resume re-presents only the same signed authorization, once, while its nonce reads unused.
 - Settlement: the fee payer's signature is the transaction id, unknown to APN in advance. The seller's
   PAYMENT-RESPONSE `transaction` is only a hint; otherwise the payer token account's finalized `getSignaturesForAddress`
   page is opened above the binding's floor slot. A candidate counts when `getSignatureStatuses` says `finalized` and
