@@ -14,6 +14,7 @@ import type { ApnError } from "../../src/errors.js";
 import { createMcpServer } from "../../src/mcp-server.js";
 import { createApnCore } from "../../src/runtime-factory.js";
 import { StateStore } from "../../src/state.js";
+import { uniswapTokenNextActions } from "../../src/swap/uniswap-command-service.js";
 import { ETHEREUM_USDT } from "../../src/swap/uniswap-v3/pins.js";
 import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { envelopeOf } from "../../src/swap/uniswap-v3/token-custody.js";
@@ -243,7 +244,9 @@ test("a new swap refused before signing, cleaned by one consented revoke, releas
   chain.land(chain.node.sends[1]!, chain.node.head - 5n); chain.node.allowance = "0"; op = await run(11).status(op.operationId);
   // The refused swap's marker was freed at nonce 10, which the revoke took: the hold is released once that revoke is final.
   assert.deepEqual([op.phase, op.usageState, op.principalRelease, op.freedSwapMarkers?.map((row) => row.nonce)], ["cleaned", "reserved", undefined, ["10"]]);
+  assert.deepEqual(uniswapTokenNextActions(op), [`apn swap ethereum uniswap-token status --operation ${op.operationId}`], "status reads the proof later");
   chain.node.finalizedNonce = 11n; chain.node.finalizedLag = 1n; op = await run(11).status(op.operationId);
+  assert.deepEqual(uniswapTokenNextActions(op), []);
   assert.deepEqual([op.phase, op.usageState, op.principalRelease?.kind, op.swapAttempt], ["cleaned", "failed_before_effect", "swap_never_signed", null]);
   assert.deepEqual(op.principalRelease?.chainProof?.cleanups.map((row) => row.swapNonce), ["10"]);
   assert.equal(op.accumulatedNativeDebitWei, (BigInt(approvalGas) + 21_000n * 2n).toString(), "approval and cleanup gas stay charged");
