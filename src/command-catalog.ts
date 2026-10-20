@@ -264,7 +264,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
       "apn wallet policy set --profile default --chain eip155:1 --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>",
       "apn wallet policy set --profile default --chain eip155:137 --asset <token-contract> --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>"],
   ),
-  command(["x402", "inspect"], "apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; a seller may still process its application payload.", [
+  command(["x402", "inspect"], "apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; an offer APN cannot sign is refused by its deciding field (payment window above 3600 s, an understood extra key such as spenderAddress or chainId); a seller may still process its application payload.", [
     chainOptional,
     assetOptional,
     ...httpOptions,
@@ -274,7 +274,7 @@ const BASE_COMMANDS: readonly CommandDefinition[] = [
   command(
     ["x402", "fetch", "prepare"],
     "apn x402 fetch prepare --profile <profile> [--chain <caip2>] [--asset <token>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]" + httpSynopsis,
-    "Freeze a policy-bounded standard x402 purchase.",
+    "Freeze a policy-bounded standard x402 purchase (seller payment window at most 3600 s; unknown offer extra keys are echoed unchanged).",
     [
       profileRequired,
       chainOptional,

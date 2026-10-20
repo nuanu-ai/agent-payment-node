@@ -1,4 +1,4 @@
-import type { PaymentRequired, PaymentRequirements } from "@x402/core/types";
+import type { X402PaymentRequired as PaymentRequired, X402PaymentRequirements as PaymentRequirements } from "./x402-codec.js";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { canonicalErc7710Facilitators } from "./x402-erc7710-codec.js";
