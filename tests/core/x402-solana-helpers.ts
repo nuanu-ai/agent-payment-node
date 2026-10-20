@@ -3,6 +3,7 @@ import { address, createKeyPairSignerFromPrivateKeyBytes, getBase58Decoder, getB
 import { getMintEncoder, getTokenEncoder, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import type { TestContext } from "node:test";
 import { sha256 } from "../../src/canonical.js";
+import { ApnError } from "../../src/errors.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { temporaryState } from "./helpers.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
@@ -37,6 +38,9 @@ export class X402SolanaTestRpc implements SolanaRpcPort {
   mintOwner: string = TOKEN_PROGRAM_ADDRESS; decimals = 6; balance = 50_000_000n; destinationExists = true;
   heights: Record<"confirmed" | "finalized", bigint> = { confirmed: 900n, finalized: 880n };
   contextSlot = 5_000n; blockhash = base58(Buffer.alloc(32, 5)); simulateError: unknown = null;
+  /** The finalized context slot this node reports, and the slot its signature index has reached (lower: a lagging node). */
+  finalizedSlot = 6_000n; indexSlot = 6_000n;
+  readonly scanContexts: unknown[] = [];
   index: { signature: string; slot: bigint }[] = [{ signature: OLD_SIGNATURE, slot: 4_000n }];
   landed: { readonly signature: string; readonly slot: bigint; readonly wire: string; readonly success: boolean } | null = null;
   async bind(payer: string): Promise<void> {
@@ -61,16 +65,22 @@ export class X402SolanaTestRpc implements SolanaRpcPort {
     switch (method) {
       case "getGenesisHash": return SOLANA_GENESIS;
       case "getBlockHeight": return this.heights[commitment];
-      case "getLatestBlockhash": return { context: { slot: this.contextSlot },
+      case "getLatestBlockhash": return { context: { slot: commitment === "finalized" ? this.finalizedSlot : this.contextSlot },
         value: { blockhash: this.blockhash, lastValidBlockHeight: this.heights[commitment] + 150n } };
       case "getMultipleAccounts": return { context: { slot: this.contextSlot }, value: (params[0] as string[]).map((key) => this.account(key)) };
       case "simulateTransaction": return { context: { slot: this.contextSlot }, value: { err: this.simulateError, unitsConsumed: 6_000n, logs: [] } };
-      case "getSignaturesForAddress": return this.index.map((entry) => ({ signature: entry.signature, slot: entry.slot, err: null, memo: null,
-        blockTime: 1_760_000_000n, confirmationStatus: "finalized" }));
+      case "getSignaturesForAddress": {
+        const minContextSlot = (params[1] as { minContextSlot?: number }).minContextSlot;
+        this.scanContexts.push(minContextSlot);
+        // A real node answers JSON-RPC error -32016 below minContextSlot, which the transport refuses as a protocol failure.
+        if (minContextSlot === undefined || BigInt(minContextSlot) > this.indexSlot) throw new ApnError("APN_RPC_PROTOCOL", "Minimum context slot has not been reached.");
+        return this.index.map((entry) => ({ signature: entry.signature, slot: entry.slot, err: null, memo: null,
+          blockTime: 1_760_000_000n, confirmationStatus: "finalized" }));
+      }
       case "getSignatureStatuses": {
         const [signature] = params[0] as string[];
         const found = this.landed?.signature === signature ? this.landed : null;
-        return { context: { slot: 6_000n }, value: [found === null ? null : { slot: found.slot, confirmations: null, err: this.error(found.success),
+        return { context: { slot: this.indexSlot }, value: [found === null ? null : { slot: found.slot, confirmations: null, err: this.error(found.success),
           confirmationStatus: "finalized" }] };
       }
       case "getTransaction": { const landed = this.landed; return landed !== null && landed.signature === params[0] ? this.transaction(landed) : null; }

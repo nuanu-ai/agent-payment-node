@@ -18,6 +18,7 @@ import { selectPermit2Offer } from "./offer.js";
 import { permit2SellerSponsorsEip2612 } from "./prepare.js";
 import { admittedPermit2Assets } from "./admission.js";
 import { X402_PERMIT2_MECHANISM } from "./registry.js";
+import { x402ProofTag } from "../x402-network.js";
 import { Permit2ProductionRepository, permit2ProductionId, productionRecordBody, productionUsageIdentity, productionUsageKey, sealPermit2ProductionRecord } from "./production-repository.js";
 /** Durable unsigned production preparation. No custody, send, merchant HTTP or settlement port exists. */
 export class Permit2ProductionPreparation {
@@ -86,7 +87,8 @@ export class Permit2ProductionPreparation {
                 if (canonicalJson(wallet) !== canonicalJson(await permit2WalletBinding(this.state, profile)))
                     blocked("Wallet binding changed during preparation.");
                 const material = createPermit2ProductionMaterial({ checked, wallet, checkpoint: observed.checkpoint,
-                    owner: observed.owner, evidence: observed.evidence, signingSecond, nonce: nonce.toString(), asset: observed.asset });
+                    owner: observed.owner, evidence: observed.evidence, signingSecond, nonce: nonce.toString(), asset: observed.asset,
+                    proofTag: x402ProofTag(asset.chainId) });
                 const identity = { account: wallet.account, chain: asset.chain, asset: { kind: "token", identifier: asset.token } };
                 const record = sealPermit2ProductionRecord({ schemaVersion: PERMIT2_PRODUCTION_SCHEMA, operationId, profileHash,
                     idempotencyHash, requestHash, material,

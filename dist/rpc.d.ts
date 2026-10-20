@@ -17,7 +17,7 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private sequence;
     private readonly observationCounters;
     get observationMetrics(): Readonly<import("./rpc-observation-metrics.js").RpcObservationCounters>;
-    /** The x402 network and token every x402 read of this instance binds; Base USDC unless selected. */
+    /** The x402 network and token every x402 read of this instance binds; none unless the caller selected one. */
     private readonly x402;
     private pinnedAddresses;
     /** One eth_chainId per command invocation and endpoint, shared by every bounded or network-selected copy. */
@@ -32,6 +32,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly abortSignal?: AbortSignal;
         readonly directGuardState?: StateStore;
     });
+    /** The selected x402 asset; an instance built without one (direct transfers, relays, Permit2 reads) answers no x402 read. */
+    private bound;
     /** The first arm of an invocation sets its cap; direct EVM steps pass the cap derived from their read plan. */
     armEvmDirectRpcGuard(maxPhysicalRequests?: number): void;
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */

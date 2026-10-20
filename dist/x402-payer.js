@@ -1,5 +1,5 @@
 import { ApnError } from "./errors.js";
-import { isBaseUsdc, networkPolicyBinding, x402Asset } from "./x402-network.js";
+import { isBaseUsdc, networkPolicyBinding } from "./x402-network.js";
 import { policyBinding } from "./profile-policy.js";
 import { LOCAL_PROVIDER_ID } from "./provider-profile.js";
 import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
@@ -13,7 +13,7 @@ export async function x402PolicyBinding(context, profileHash, asset) {
         throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
     return networkPolicyBinding(policyBinding(wallet), asset);
 }
-export async function resolveX402Payer(context, profileHash, asset = x402Asset(8453)) {
+export async function resolveX402Payer(context, profileHash, asset) {
     let provider = context.profileRepository === undefined
         ? null
         : await context.requireProfileRepository().load(profileHash);

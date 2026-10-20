@@ -1,5 +1,5 @@
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
-import { isBaseUsdc, releasedX402Pair, validX402Tuple } from "./x402-network.js";
+import { isBaseUsdc, releasedX402Pair, validX402Tuple, x402ProofTag } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
 import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenOfferTimeout } from "./x402-frozen-offer.js";
@@ -79,7 +79,8 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (!isBaseUsdc({ chainId: Number(operation.chainId), token: String(operation.token) }) &&
     (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined))) stateCorrupt("x402 chain or token binding is invalid.");
   // Released USDC records carry no token facts; every other token carries its on-chain decimals and the frozen proof tag.
-  if (releasedX402Pair(operation.chainId as string, operation.token as string) ? operation.tokenFacts !== undefined : !validTokenFacts(operation.tokenFacts)) {
+  if (releasedX402Pair(operation.chainId as string, operation.token as string) ? operation.tokenFacts !== undefined
+    : !validTokenFacts(operation.tokenFacts, Number(operation.chainId))) {
     stateCorrupt("x402 token facts are invalid.");
   }
   address(operation.wallet);
@@ -467,11 +468,12 @@ export function validateStateSummary(
   }
 }
 
-function validTokenFacts(value: unknown): boolean {
+/** The proof tag must be the one the chain's stack prescribes (a record can never weaken its own proof). */
+function validTokenFacts(value: unknown, chainId: number): boolean {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const facts = value as Record<string, unknown>;
   return Object.keys(facts).length === 2 && Number.isSafeInteger(facts.decimals) && (facts.decimals as number) >= 0 &&
-    (facts.decimals as number) <= 255 && (facts.proofTag === "safe" || facts.proofTag === "finalized");
+    (facts.decimals as number) <= 255 && facts.proofTag === x402ProofTag(chainId);
 }
 
 /** A Permit2 operation's sponsored permit: null, or the token's non-empty EIP-712 name/version and a canonical permit nonce. */

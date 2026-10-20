@@ -1,4 +1,4 @@
-import { x402Asset, type X402Asset } from "./x402-network.js";
+import type { X402Asset } from "./x402-network.js";
 import { request as httpsRequest } from "node:https";
 import type { ClientRequest, IncomingMessage } from "node:http";
 import { isIP } from "node:net";
@@ -88,15 +88,18 @@ export class HttpsX402Http implements HttpPort {
 export async function inspectX402(
   http: HttpPort,
   value: string,
-  request?: X402HttpRequestV1,
-  selection: X402Asset | number = 8453,
+  request: X402HttpRequestV1 | undefined,
+  /** The network and token whose EIP-3009/Permit2 offers become candidates; null inspects only the Permit2 offer for `payer`. */
+  asset: X402Asset | null,
   payer?: Address,
 ): Promise<InspectResult> {
-  const asset = typeof selection === "number" ? x402Asset(selection) : selection;
   const { endpoint, canonicalUrl, paymentRequired } = await readX402Challenge(http, value, request);
   const permit2 = payer === undefined ? undefined : inspectPermit2Offer({ accepts: paymentRequired.accepts, payer });
-  const candidates = inspectCandidates(paymentRequired, canonicalUrl, asset);
-  if (candidates.length === 0 && permit2 === undefined) {
+  const candidates = asset === null ? [] : inspectCandidates(paymentRequired, canonicalUrl, asset);
+  if (asset === null && permit2 === undefined) {
+    throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no Permit2 offer this payer can inspect.", { reason: "x402_offer_asset_not_offered" });
+  }
+  if (asset !== null && candidates.length === 0 && permit2 === undefined) {
     // Name what the seller does offer, so the caller can select another admitted network and token.
     const offered = offeredX402Assets(paymentRequired.accepts);
     throw new ApnError("APN_X402_UNSUPPORTED_OFFER", `Seller challenge has no supported x402 offer for ${asset.token} on ${asset.network}.`,

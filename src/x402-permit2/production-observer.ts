@@ -4,7 +4,6 @@ import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { permit2FactHash } from "./production-proxy-call.js";
 import { reconstructPermit2ProductionMaterial } from "./production-material.js";
-import { x402ProofTag } from "../x402-network.js";
 import { inspectPermit2ProductionReceipt } from "./production-receipt-facts.js";
 import { validatePermit2ProductionRecord, type Permit2ProductionRecord } from "./production-repository.js";
 import { permit2ProductionOperationDigest, validatePermit2ProductionSigned, type Permit2ProductionSigned } from "./production-signed.js";
@@ -61,9 +60,9 @@ export async function observePermit2Production(input: Permit2ProductionObservati
   try {
     if (supplied !== null) signed = await validatePermit2ProductionSigned(supplied, record);
     rpc = new Permit2ObserverRpc(endpoint, new StateStore(stateRoot));
-    // Settlement is proven at the chain's stack tag (safe on Ethereum, Arbitrum and OP Stack, as for EIP-3009 x402;
-    // finalized elsewhere); expiry is always a finalized proof.
-    const tag = mode === "settlement" ? x402ProofTag(Number(reconstructPermit2ProductionMaterial(record.material).chain.slice(7))) : "finalized";
+    // Settlement is proven at the tag frozen in the record from the chain's stack (safe on Ethereum, Arbitrum and OP Stack,
+    // as for EIP-3009 x402; finalized elsewhere); records from before 0.5.53 keep finalized. Expiry is always finalized.
+    const tag = mode === "settlement" ? record.material.proofTag ?? "finalized" : "finalized";
     const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: [tag, false] },
       ...(mode === "settlement" && locator !== null ? [{ method: "eth_getTransactionByHash", params: [locator] },
         { method: "eth_getTransactionReceipt", params: [locator] }] : [])]);

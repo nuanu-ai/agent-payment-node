@@ -1,4 +1,4 @@
-import { releasedX402Pair, x402Asset } from "./x402-network.js";
+import { releasedX402Pair } from "./x402-network.js";
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -19,7 +19,7 @@ export function canonicalPrepareUrl(value) {
 export function positiveCap(value) {
     return parseAtomic(value, { positive: true }).toString();
 }
-export async function freshChallenge(http, canonicalUrl, httpRequest, asset = x402Asset(8453)) {
+export async function freshChallenge(http, canonicalUrl, httpRequest, asset) {
     let captured;
     const inspection = await inspectX402({
         async get(request) {
@@ -107,9 +107,9 @@ export function selectPrepareOffer(challenge, underCap, evidence, wallet, contex
     }
     throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer's token name and version recompute the token's on-chain DOMAIN_SEPARATOR.", { reason: "x402_token_domain_mismatch", chain: context.asset.network, asset: context.asset.token });
 }
-/** EIP-712 domain separator of an EIP-3009 token; a bare chain id means that chain's released USDC. */
-export function tokenDomainSeparator(name, version, asset = 8453) {
-    const selected = typeof asset === "number" ? x402Asset(asset) : asset;
+/** EIP-712 domain separator of an EIP-3009 token on its chain; the caller always names both. */
+export function tokenDomainSeparator(name, version, asset) {
+    const selected = asset;
     return keccak256(encodeAbiParameters([{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }, { type: "address" }], [DOMAIN_TYPE_HASH, keccak256(stringToHex(name)), keccak256(stringToHex(version)), BigInt(selected.chainId), selected.token]));
 }
 export function paymentIdentifierState(paymentRequired, operationId) {

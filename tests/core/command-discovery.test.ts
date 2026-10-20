@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { x402Asset } from "../../src/x402-network.js";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { chmod, lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -429,9 +430,9 @@ test("HTTPS parser constraints preserve RPC compatibility and match canonical bo
   await assert.doesNotReject(inspectX402(new TestHttp(challengeObservation({
     finalUrl: canonicalSeller,
     header: canonicalPaymentRequiredHeader(paymentRequired),
-  })), canonicalSeller));
+  })), canonicalSeller, undefined, x402Asset(8453)));
   for (const sellerUrl of [overlongSeller, noncanonicalSeller]) {
-    await assert.rejects(inspectX402(new TestHttp(), sellerUrl), ApnError);
+    await assert.rejects(inspectX402(new TestHttp(), sellerUrl, undefined, x402Asset(8453)), ApnError);
   }
 });
 

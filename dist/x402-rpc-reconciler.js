@@ -37,10 +37,13 @@ export class X402RpcReconciler {
             // A used nonce with no attempt means the signed header reached the chain without APN sending it.
             return { operation: await this.persist(input, { settlementEvidence: evidence }, input.state === "authorized_not_sent" ? "effect_unknown" : undefined), unusedAtSafe: false };
         }
-        const validBefore = BigInt(input.authorization.validBefore);
-        if (BigInt(state.blockTimestamp) < validBefore && BigInt(Math.floor(this.clock.now().getTime() / 1000)) < validBefore) {
+        const validBefore = BigInt(input.authorization.validBefore), nowSeconds = BigInt(Math.floor(this.clock.now().getTime() / 1000));
+        // Permit2 still executes in a block stamped exactly at its deadline: it waits until both the proof block and the clock are past it.
+        const open = input.selectedOffer.resolved.assetTransferMethod === "permit2"
+            ? BigInt(state.blockTimestamp) <= validBefore || nowSeconds <= validBefore
+            : BigInt(state.blockTimestamp) < validBefore && nowSeconds < validBefore;
+        if (open)
             return { operation: input, unusedAtSafe: true };
-        }
         const unused = await readX402UnusedExpiryEvidence(this.rpc, input);
         return { operation: unused === null ? input : await this.persist(input, { unusedExpiryEvidence: unused }), unusedAtSafe: true };
     }

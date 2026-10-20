@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodePaymentSignatureHeader, inspectCandidates } from "../../src/x402-codec.js";
 import { normalizeX402HttpRequest } from "../../src/x402-http-request.js";
-import { x402Network } from "../../src/x402-network.js";
+import { x402Network, x402Asset } from "../../src/x402-network.js";
 import { validateX402Operation } from "../../src/x402-state-integrity.js";
 import { temporaryState } from "./helpers.js";
 import { initializeNetworkFixture, networkChallenge, networkFixture, networkPaid, networkSettlement, NETWORK_LIMITS } from "./evm-x402-helpers.js";
@@ -89,12 +89,12 @@ test(`${networkName} never inherits Base policy; lowering current cap blocks new
 
 test(`${networkName} offer selection refuses other networks, assets, mechanisms and another named network`, () => {
   const required = { ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, network: network, asset: x402Network(chainId).token }] };
-  assert.equal(inspectCandidates(required, X402_URL, chainId).length, 1);
-  assert.equal(inspectCandidates(required, X402_URL).length, 0);
+  assert.equal(inspectCandidates(required, X402_URL, x402Asset(chainId)).length, 1);
+  assert.equal(inspectCandidates(required, X402_URL, x402Asset(8453)).length, 0);
   // A Permit2 offer of this network's token is now a candidate of its own method (paid only when no EIP-3009 offer exists).
-  assert.equal(inspectCandidates({ ...required, accepts: [{ ...required.accepts[0]!, extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "permit2" } }] }, X402_URL, chainId)[0]?.assetTransferMethod, "permit2");
+  assert.equal(inspectCandidates({ ...required, accepts: [{ ...required.accepts[0]!, extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "permit2" } }] }, X402_URL, x402Asset(chainId))[0]?.assetTransferMethod, "permit2");
   for (const override of [{ network: chainId === 1 ? "eip155:42161" as const : "eip155:1" as const }, { asset: x402Network(8453).token }, { extra: { assetTransferMethod: "erc7710", facilitatorAddresses: ["0x2222222222222222222222222222222222222222"] } }]) {
-    assert.equal(inspectCandidates({ ...required, accepts: [{ ...required.accepts[0]!, ...override }] }, X402_URL, chainId).length, 0);
+    assert.equal(inspectCandidates({ ...required, accepts: [{ ...required.accepts[0]!, ...override }] }, X402_URL, x402Asset(chainId)).length, 0);
   }
 });
 

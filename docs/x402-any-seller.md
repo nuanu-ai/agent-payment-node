@@ -39,9 +39,13 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
   finality), and chains whose stack is not confirmed from the registry (BOB, Cyber, Orderly, MegaETH, Swellchain,
   Mint, Superseed: OP-style predeploys but registry membership unconfirmed here). Adding a chain is one list entry.
 - EIP-3009: the prepare read and the settlement proof use that tag; expiry is always a `finalized` proof.
-- Permit2: settlement uses the same tag, expiry `finalized`. Pre-sign facts (balance, allowance, nonce word, payer
-  code) are read at `latest`, pinned by block hash, so the 30 s block-age bound holds on every chain; they predict
-  settlement and cannot move money (the signature binds token, amount, payee, nonce and a deadline of at most 300 s).
+- Permit2: settlement uses the same tag, expiry `finalized` and a block strictly after the deadline (Permit2 reverts
+  only when `block.timestamp > deadline`, so a block stamped at the deadline can still settle; EIP-3009 expires at
+  `>= validBefore`). Pre-sign facts (balance, allowance, decimals, nonce word, Permit2 and proxy code) are read at the
+  record's proof tag in unattended `x402 fetch`, like the EIP-3009 prepare read; the foreground `x402 permit2 approve`
+  lane reads them at `latest`, pinned by block hash, under its 30 s block-age bound, and freezes its proof tag in the
+  record (records from before 0.5.53 keep `finalized`). Either way they predict settlement and cannot move money (the
+  signature binds token, amount, payee, nonce and a deadline of at most 300 s).
 
 ## Method choice (deterministic)
 

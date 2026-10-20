@@ -1,5 +1,6 @@
 import { address, getBase58Decoder, getCompiledTransactionMessageDecoder, getPublicKeyFromAddress, getTransactionDecoder, verifySignature } from "@solana/kit";
-import { protocolFailure, readSolanaBlockHeight, rpcArray, rpcAtomic, rpcRecord, solanaSignature, type SolanaRpcPort } from "../solana/rpc.js";
+import { ApnError } from "../errors.js";
+import { protocolFailure, rpcArray, rpcAtomic, rpcRecord, solanaBlockHeightValue, solanaReadBatch, solanaSignature, type SolanaRpcPort } from "../solana/rpc.js";
 import { X402_SOLANA_SCAN_LIMIT, X402_SOLANA_SCAN_OPEN_LIMIT } from "./constants.js";
 
 export interface X402SolanaObservationInput {
@@ -41,20 +42,26 @@ type Check = { readonly kind: "ours"; readonly slot: bigint; readonly success: b
  * lastValidBlockHeight and the same signature page reaches back to the floor slot, so the index covers the whole window.
  */
 export async function observeX402SolanaPayment(rpc: SolanaRpcPort, input: X402SolanaObservationInput): Promise<X402SolanaObservation> {
-  const height = await readSolanaBlockHeight(rpc, "finalized");
+  // One request fixes this node's finalized view: the height (checked against its own latest blockhash) and the context
+  // slot every later read must have reached, so a lagging node behind a load balancer cannot answer with a shorter index.
+  const [heightValue, latest] = await solanaReadBatch(rpc, [{ method: "getBlockHeight", params: [{ commitment: "finalized" }] },
+    { method: "getLatestBlockhash", params: [{ commitment: "finalized" }] }]);
+  const height = solanaBlockHeightValue(heightValue, latest), view = rpcAtomic(rpcRecord(rpcRecord(latest).context).slot);
   const evidence = (signature: string, check: Extract<Check, { kind: "ours" }>, source: X402SolanaSettlementEvidence["source"]) =>
     ({ outcome: "landed" as const, settlement: { signature, slot: check.slot.toString(), success: check.success, errorCanonicalJson: check.error, source,
       observedAt: input.now.toISOString(), rpcOriginHash: rpc.originHash } });
   // Only a hint the chain shows to be other bytes is skipped below; an unknown one is opened again from the index.
   let disproven: string | undefined;
   if (input.hint !== undefined) {
-    const check = await checkSignature(rpc, input.hint, input);
+    const check = await checkSignature(rpc, input.hint, input, view);
     if (check.kind === "ours") return evidence(input.hint, check, "payment_response");
     if (check.kind === "not_final") return { outcome: "pending", reason: "settlement_not_finalized" };
     if (check.kind === "other") disproven = input.hint;
   }
   const floor = BigInt(input.floorSlot);
-  const entries = rpcArray(await rpc.call("getSignaturesForAddress", [input.sourceTokenAccount, { commitment: "finalized", limit: X402_SOLANA_SCAN_LIMIT }]),
+  // minContextSlot: a node that has not reached the view's finalized slot refuses (the proof is then not made).
+  const entries = rpcArray(await rpc.call("getSignaturesForAddress", [input.sourceTokenAccount,
+    { commitment: "finalized", limit: X402_SOLANA_SCAN_LIMIT, minContextSlot: safeSlot(view) }]),
     X402_SOLANA_SCAN_LIMIT).map((value) => {
     const entry = rpcRecord(value);
     return { signature: solanaSignature(entry.signature), slot: rpcAtomic(entry.slot) };
@@ -63,7 +70,7 @@ export async function observeX402SolanaPayment(rpc: SolanaRpcPort, input: X402So
   const newer = entries.filter((entry) => entry.slot > floor && entry.signature !== disproven);
   if (newer.length > X402_SOLANA_SCAN_OPEN_LIMIT) return { outcome: "pending", reason: "signature_index_crowded" };
   for (const entry of newer) {
-    const check = await checkSignature(rpc, entry.signature, input);
+    const check = await checkSignature(rpc, entry.signature, input, view);
     if (check.kind === "ours") return evidence(entry.signature, check, "signature_index");
     if (check.kind === "not_final" || check.kind === "unknown") return { outcome: "pending", reason: "signature_index_inconsistent" };
   }
@@ -75,8 +82,14 @@ export async function observeX402SolanaPayment(rpc: SolanaRpcPort, input: X402So
     rpcOriginHash: rpc.originHash } };
 }
 
-async function checkSignature(rpc: SolanaRpcPort, signature: string, input: X402SolanaObservationInput): Promise<Check> {
-  const statuses = rpcArray(rpcRecord(await rpc.call("getSignatureStatuses", [[signature], { searchTransactionHistory: true }])).value, 1);
+/**
+ * getSignatureStatuses defines no minContextSlot, so its answer's own context slot must have reached the view. getTransaction
+ * defines none and answers no context; from a lagging node it can only be null, which proves nothing (the payment waits).
+ */
+async function checkSignature(rpc: SolanaRpcPort, signature: string, input: X402SolanaObservationInput, view: bigint): Promise<Check> {
+  const answer = rpcRecord(await rpc.call("getSignatureStatuses", [[signature], { searchTransactionHistory: true }]));
+  if (rpcAtomic(rpcRecord(answer.context).slot) < view) lagging(view);
+  const statuses = rpcArray(answer.value, 1);
   if (statuses.length !== 1) protocolFailure();
   if (statuses[0] === null) return { kind: "unknown" };
   const status = rpcRecord(statuses[0]);
@@ -134,6 +147,14 @@ function verifyTokenDeltas(meta: Record<string, unknown>, input: X402SolanaObser
 /** The message's static account keys in order, decoded from the frozen message bytes themselves. */
 function staticKeys(input: X402SolanaObservationInput): readonly string[] {
   return getCompiledTransactionMessageDecoder().decode(Buffer.from(input.messageBase64, "base64")).staticAccounts.map(String);
+}
+function lagging(view: bigint): never {
+  throw new ApnError("APN_RPC_PROTOCOL", `The Solana RPC answered from behind the finalized slot ${view} it reported; nothing is proven.`,
+    { reason: "solana_rpc_behind_finalized_view", minContextSlot: view.toString() });
+}
+function safeSlot(value: bigint): number {
+  if (value > BigInt(Number.MAX_SAFE_INTEGER)) protocolFailure();
+  return Number(value);
 }
 function stringify(value: unknown): string {
   return JSON.stringify(value ?? null, (_key, item: unknown) => typeof item === "bigint" ? item.toString() : item);

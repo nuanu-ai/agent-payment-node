@@ -39,7 +39,9 @@ function reconstruct(value) {
 export function validatePermit2ProductionMaterial(value) {
     try {
         if (!isPlainRecord(value) || !exactKeys(value, ["checked", "wallet", "checkpoint", "owner", "evidence", "signingSecond", "nonce",
-            ...(value.asset === undefined ? [] : ["asset"]), "preparedCanonicalJson", "typedDataDigest", "eip2612Digest", "materialHash"]))
+            ...(value.asset === undefined ? [] : ["asset"]), ...(value.proofTag === undefined ? [] : ["proofTag"]),
+            "preparedCanonicalJson", "typedDataDigest", "eip2612Digest", "materialHash"]) ||
+            (value.proofTag !== undefined && value.proofTag !== "safe" && value.proofTag !== "finalized"))
             corrupt();
         const v = value;
         const { materialHash, ...body } = v;

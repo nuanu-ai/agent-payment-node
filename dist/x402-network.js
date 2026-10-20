@@ -51,6 +51,13 @@ export function x402Chain(value) {
     }
     return chainId;
 }
+/**
+ * Whether a block at `blockTimestamp` is past an authorization's last executable second: EIP-3009 executes only while
+ * block.timestamp < validBefore, Permit2 until block.timestamp == deadline (it reverts only when timestamp > deadline).
+ */
+export function x402ExpiredAt(method, blockTimestamp, validBefore) {
+    return method === "permit2" ? blockTimestamp > validBefore : blockTimestamp >= validBefore;
+}
 export function x402ProofTag(chainId) {
     return SAFE_PROOF_CHAINS.includes(chainId) ? "safe" : "finalized";
 }

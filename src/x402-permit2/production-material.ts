@@ -25,6 +25,11 @@ export interface Permit2ProductionMaterial {
    * admission, which reconstruct with the released Avalanche USDT row.
    */
   readonly asset?: Permit2Asset;
+  /**
+   * The tag settlement is proven at, frozen from the chain's stack at prepare. Absent only on records prepared before
+   * 0.5.53 (Avalanche USDT), which were proven at `finalized` and keep it.
+   */
+  readonly proofTag?: "safe" | "finalized";
   /** Canonical decimal encoding of every bigint; reconstruction never revives arbitrary fields. */
   readonly preparedCanonicalJson: string;
   readonly typedDataDigest: string;
@@ -61,7 +66,9 @@ function reconstruct(value: Omit<Permit2ProductionMaterial, "preparedCanonicalJs
 export function validatePermit2ProductionMaterial(value: unknown): Permit2ProductionMaterial {
   try {
     if (!isPlainRecord(value) || !exactKeys(value, ["checked", "wallet", "checkpoint", "owner", "evidence", "signingSecond", "nonce",
-      ...(value.asset === undefined ? [] : ["asset"]), "preparedCanonicalJson", "typedDataDigest", "eip2612Digest", "materialHash"])) corrupt();
+      ...(value.asset === undefined ? [] : ["asset"]), ...(value.proofTag === undefined ? [] : ["proofTag"]),
+      "preparedCanonicalJson", "typedDataDigest", "eip2612Digest", "materialHash"]) ||
+      (value.proofTag !== undefined && value.proofTag !== "safe" && value.proofTag !== "finalized")) corrupt();
     const v = value as unknown as Permit2ProductionMaterial;
     const { materialHash, ...body } = v;
     if (!HASH.test(materialHash) || materialHash !== domainHash(`${PERMIT2_PRODUCTION_SCHEMA}.material`, canonicalJson(body)) ||

@@ -4,8 +4,9 @@ import type { RuntimeContext } from "./runtime.js";
 import type { SettlementResponseObservation, X402OperationRecord, X402ProofClass, X402Reason, X402TerminalState, X402SettlementWaitProjection } from "./x402-state-integrity.js";
 /** The command's explicit --rpc-url; a missing one is refused naming the network it must serve, never substituted. */
 export declare function requireX402Rpc(context: RuntimeContext, asset: X402Asset): RpcPort;
+/** The RPC bound to exactly this network and token (Base USDC included); no instance carries an implied asset. */
 export declare function selectX402Rpc(rpc: RpcPort, asset: X402Asset): RpcPort;
-export declare function assertX402RpcChain(rpc: Partial<X402RpcPort>, chainId?: number): Promise<{
+export declare function assertX402RpcChain(rpc: Partial<X402RpcPort>, chainId: number): Promise<{
     readonly chainId: number;
     readonly rpcOrigin: string;
 }>;

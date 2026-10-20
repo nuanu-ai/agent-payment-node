@@ -87,6 +87,13 @@ test("a refused payment ends as never landed only once the lifetime passed at fi
   const saved = f.rpc.index; f.rpc.index = [];
   assert.equal(data(await runCli(["x402", "solana", "observe", "--operation", id], {}, f.options)).pending_reason, "signature_index_not_covering");
   f.rpc.index = saved;
+  // A node whose signature index lags behind the finalized slot it reported answers nothing that could prove never-lands.
+  f.rpc.indexSlot = 5_999n;
+  const lagging = await runCli(["x402", "solana", "observe", "--operation", id], {}, f.options);
+  assert.equal(lagging.ok, false); assert.equal(lagging.error?.code, "APN_RPC_PROTOCOL");
+  assert.equal(data(await runCli(["x402", "solana", "status", "--operation", id], {}, f.options)).state, "exposed");
+  assert.equal(f.rpc.scanContexts.at(-1), 6_000, "the scan asks for the finalized slot of the same view");
+  f.rpc.indexSlot = 6_000n;
   const ended = await runCli(["x402", "solana", "observe", "--operation", id], {}, f.options);
   assert.equal(data(ended).state, "expired_unlanded", JSON.stringify(ended));
   assert.equal(await usageState(f.root, f.payer, id), "released_unsubmitted");

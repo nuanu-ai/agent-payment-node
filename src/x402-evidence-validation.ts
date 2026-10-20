@@ -1,4 +1,4 @@
-import { validX402Tuple } from "./x402-network.js";
+import { validX402Tuple, x402ExpiredAt } from "./x402-network.js";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import type {
@@ -340,7 +340,8 @@ function validateErc7710SettlementEvidence(
   return evidence as unknown as Erc7710SettlementEvidence;
 }
 
-export function validateUnusedExpiryEvidence(value: unknown, operation?: Record<string, unknown>): UnusedExpiryEvidence {
+/** `transferMethod` names the method when no operation is at hand (a receipt); an operation's own resolved method wins. */
+export function validateUnusedExpiryEvidence(value: unknown, operation?: Record<string, unknown>, transferMethod?: unknown): UnusedExpiryEvidence {
   if (record(value).schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1") {
     return validateErc7710UnusedExpiryEvidence(value, operation);
   }
@@ -351,7 +352,10 @@ export function validateUnusedExpiryEvidence(value: unknown, operation?: Record<
   uint(evidence.validBefore);
   const finalizedHead = exactRecord(evidence.finalizedHead, ["number", "hash", "timestamp", "observedAt"]);
   positive(finalizedHead.number); bytes32(finalizedHead.hash); uint(finalizedHead.timestamp); timestamp(finalizedHead.observedAt);
-  if (BigInt(finalizedHead.timestamp as string) < BigInt(evidence.validBefore as string)) stateCorrupt("x402 unused-expiry head precedes authorization expiry.");
+  const method = operation === undefined ? transferMethod : record(record(record(operation.selectedOffer).resolved)).assetTransferMethod;
+  if (!x402ExpiredAt(method, BigInt(finalizedHead.timestamp as string), BigInt(evidence.validBefore as string))) {
+    stateCorrupt("x402 unused-expiry head is not past the authorization's last executable second.");
+  }
   const authorizationState = exactRecord(evidence.authorizationState, ["value", "blockNumber", "blockHash", "blockTag", "observedAt"]);
   if (authorizationState.value !== false || authorizationState.blockTag !== "finalized") stateCorrupt("x402 unused-expiry authorization state is invalid.");
   positive(authorizationState.blockNumber); bytes32(authorizationState.blockHash); timestamp(authorizationState.observedAt);
