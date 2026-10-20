@@ -101,14 +101,16 @@ async function pipelineFixture(t:test.TestContext){
  await store.ensureLocal({profile:"jupiter-test",rail:"solana",create:async()=>({address:owner,seed:Buffer.from(seed)})});
  const start=new Date(),policy=new AllowlistPolicyStore(temp.root),staged=await policy.stage({profile:"jupiter-test",now:start,policy:{schemaVersion:"apn.allowlist-policy-file.v1",overlayVersion:"jupiter-runtime.1",accounts:{solana:owner},effectiveAt:new Date(start.getTime()-1000).toISOString(),expiresAt:new Date(start.getTime()+86400000).toISOString(),admissions:[{chain:PIN.chain,kind:"native",rail:"swap",maximumPerTransferAtomic:"1000000",dailyLimitAtomic:"2000000",mechanism:PIN},{chain:PIN.chain,kind:"token",identifier:SOLANA_USDC_MINT,rail:"swap",maximumPerTransferAtomic:"1000000",dailyLimitAtomic:"2000000",mechanism:PIN}]}});
  const activation=await policy.appendDecision("jupiter-test",null,{status:"active",revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,registry:staged.registry,approvalFingerprint:allowlistDecisionFingerprint({action:"activate",profileHash:allowlistProfileHash("jupiter-test"),revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,headEntryDigest:null}),decidedAt:start.toISOString()});
- let clockMs=Date.now(),rpcReads=0,providerReads=0,sends=0,rawSigned:string|null=null,signature:string|null=null,finalized=false,height=1000,heightBatches=0,scalarHeight=455290249,senderHeight:number|null=null,secretReads=0,ambiguous=false,rejected=false,revokeWrapping=false,revokeAfterSign=false,lastWrappingKey:Buffer|null=null;
+ const transactions=new Set([m.transactionBase64]);
+ let clockMs=Date.now(),rpcReads=0,providerReads=0,sends=0,rawSigned:string|null=null,signature:string|null=null,finalized=false,height=1000,heightBatches=0,scalarHeight=455290249,senderHeight:number|null=null,driverHeight:number|null=null,finalizedHeight:number|null=null,latest={blockhash:m.lifetime.blockhash,lastValidBlockHeight:1100},secretReads=0,ambiguous=false,rejected=false,revokeWrapping=false,revokeAfterSign=false,lastWrappingKey:Buffer|null=null;
  async function revokePolicy(){await policy.appendDecision("jupiter-test",activation.entryDigest,{status:"revoked",revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,approvalFingerprint:allowlistDecisionFingerprint({action:"revoke",profileHash:allowlistProfileHash("jupiter-test"),revision:staged.revision,stagedRecordDigest:staged.recordDigest,policyDigest:staged.registry.policyDigest,headEntryDigest:activation.entryDigest}),decidedAt:new Date().toISOString()});}
  const rpcFetch:typeof fetch=async(_url,init)=>{rpcReads++;const body=JSON.parse(String(init?.body));const handle=async(request:any)=>{const keys=request.params?.[0];let result:unknown;
   switch(request.method){case"getGenesisHash":result=m.genesis;break;case"getMultipleAccounts":result={context:{slot:454241651},value:keys.map((key:string)=>accountWire(key,request.params[1]?.dataSlice))};break;
   case"getAccountInfo":result={context:{slot:454241651},value:accountWire(keys,request.params[1]?.dataSlice)};break;
-  case"getLatestBlockhash":result={context:{slot:454241651},value:{blockhash:m.lifetime.blockhash,lastValidBlockHeight:1100}};break;
-  case"getFeeForMessage":result={context:{slot:454241651},value:6400};break;case"getBlockHeight":if(revokeAfterSign&&secretReads>0){revokeAfterSign=false;await revokePolicy();}assert.deepEqual(request.params,[{commitment:"confirmed"}]);if(Array.isArray(body)&&body.length===1)heightBatches++;result=!Array.isArray(body)?scalarHeight:secretReads>0&&senderHeight!==null?senderHeight:height;break;case"getMinimumBalanceForRentExemption":result=1488440;break;
-  case"simulateTransaction":assert.equal(keys,m.transactionBase64);result=sim;break;
+  case"getLatestBlockhash":result={context:{slot:454241651},value:latest};break;
+  case"getFeeForMessage":result={context:{slot:454241651},value:6400};break;case"getBlockHeight":if(revokeAfterSign&&secretReads>0){revokeAfterSign=false;await revokePolicy();}if(finalizedHeight!==null&&request.params?.[0]?.commitment==="finalized"){result=finalizedHeight;break;}
+   assert.deepEqual(request.params,[{commitment:"confirmed"}]);if(Array.isArray(body)&&body.length===1)heightBatches++;result=!Array.isArray(body)?scalarHeight:secretReads>0&&senderHeight!==null?senderHeight:body.length===1&&driverHeight!==null?driverHeight:height;break;case"getMinimumBalanceForRentExemption":result=1488440;break;
+  case"simulateTransaction":assert.ok(transactions.has(keys));result=sim;break;
   case"sendTransaction":sends++;assert.equal(request.params[1].maxRetries,0);rawSigned=keys;signature=getSignatureFromTransaction(getTransactionDecoder().decode(Buffer.from(keys,"base64")));if(ambiguous)throw new Error("transport lost after dispatch");if(rejected)return {jsonrpc:"2.0",id:request.id,error:{code:-32002,message:"SECRET provider echo",data:{err:"BlockhashNotFound",logs:[keys]}}};result=signature;break;
   case"getSignatureStatuses":assert.equal(keys[0],signature);result=finalized?final.status:{context:{slot:454241800},value:[null]};break;
   case"getTransaction":result={...final.response,transaction:[rawSigned,"base64"]};break;
@@ -124,7 +126,9 @@ async function pipelineFixture(t:test.TestContext){
  // product path that reads the clock twice for one event is exercised deterministically, not by scheduler chance.
  const state=new StateStore(temp.root),clock={now:()=>dateOverride??new Date(Date.now()+(++clockReads))};
  function runtime(stage:"quote"|"prepare"|"execute"|"observe",op?:string,foreground=true,endpoint="https://example.com"){const base=new SolanaRpc(endpoint,rpcFetch,new SolanaRpcBudget({maxPhysicalRequests:64,minimumIntervalMs:750,now:()=>clockMs,wait:async ms=>{clockMs+=ms;}}),new SolanaRpcPacer(state,()=>clockMs,async ms=>{clockMs+=ms;}));return createJupiterV1Runtime({state,clock,rpc:base,wrappingSecret:{async load(){secretReads++;const key=Buffer.alloc(32,77);lastWrappingKey=key;if(revokeWrapping){revokeWrapping=false;await revokePolicy();}return key;},async create(){return Buffer.alloc(32,77);}},foreground,providerFetch});}
- return{temp,owner,m,runtime,get rpcReads(){return rpcReads;},get providerReads(){return providerReads;},setNow(v:Date){dateOverride=v;},get heightBatches(){return heightBatches;},get sends(){return sends;},get secretReads(){return secretReads;},setFinal(){finalized=true;},setHeight(v:number){height=v;},setSenderHeight(v:number){senderHeight=v;},ambiguousSend(){ambiguous=true;},rejectSend(){rejected=true;},revokeWhileWrapping(){revokeWrapping=true;},revokeAtSenderHeight(){revokeAfterSign=true;},get lastWrappingKey(){return lastWrappingKey;}};
+ return{temp,owner,m,runtime,get rpcReads(){return rpcReads;},get providerReads(){return providerReads;},setNow(v:Date){dateOverride=v;},get heightBatches(){return heightBatches;},get sends(){return sends;},get secretReads(){return secretReads;},setFinal(){finalized=true;},setHeight(v:number){height=v;},setSenderHeight(v:number){senderHeight=v;},setDriverHeight(v:number){driverHeight=v;},setFinalizedHeight(v:number){finalizedHeight=v;},
+  /** The configured RPC's latest blockhash from now on, as an approval re-freeze reads it; returns the message it yields. */
+  setLatest(blockhash:string,lastValid:number){latest={blockhash,lastValidBlockHeight:lastValid};const tx=assembleJupiterV1(m.payer,m.rawBuildResponse,m.addressTables,{...quoteRpcLifetime,blockhash,lastValidBlockHeight:String(lastValid)});transactions.add(tx.transactionBase64);return tx;},ambiguousSend(){ambiguous=true;},rejectSend(){rejected=true;},revokeWhileWrapping(){revokeWrapping=true;},revokeAtSenderHeight(){revokeAfterSign=true;},get lastWrappingKey(){return lastWrappingKey;}};
 }
 test("known frozen origin mismatch rejects prepare, owner approval and status without reads, custody or lease changes", async t => {
  const f=await pipelineFixture(t),q=await f.runtime("quote").quote({command:"swap.jupiter.quote",profile:"jupiter-test",account:f.owner,recipient:f.owner,amountAtomic:"1000000",slippageBps:50,ownerSlippageCapBps:50},new Date()) as {quoteHash:string};
@@ -210,12 +214,15 @@ test("V1 dispatch diagnosis drops untrusted details and bounds every numeric fie
  assert.deepEqual(result,{outcome:"error",errorCode:"APN_RPC_PROTOCOL",rpcErrorCode:null,rpcErrorReason:null,httpStatus:null,retryAfterMs:null});
  assert.equal(jupiterV1DispatchResult("error",new Error("SECRET")).errorCode,"APN_INTERNAL");
 });
-test("V1 frozen expired blockhash refuses before the effect marker, decryption or send",async t=>{
- if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest("V1 frozen expired blockhash refuses before the effect marker, decryption or send");return;}
- assert.equal(process.stdin.isTTY,true);assert.equal(process.stderr.isTTY,true);
- process.stdout.write("PTY_CASE_ENTERED:V1 frozen expired blockhash refuses before the effect marker, decryption or send\n");
+test("V1 an approval blockhash outside the lifetime window refuses before the prompt, marker, decryption or send",async t=>{
+ const title="V1 an approval blockhash outside the lifetime window refuses before the prompt, marker, decryption or send";
+ if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest(title);return;}
+ assert.equal(process.stdin.isTTY,true);assert.equal(process.stderr.isTTY,true);process.stdout.write(`PTY_CASE_ENTERED:${title}\n`);
  const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-expired");f.setHeight(1101);
- await assert.rejects(f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date()),/expired/);assert.equal(f.heightBatches,0);assert.equal(f.sends,0);assert.equal(f.secretReads,0);
+ // The RPC still answers the quote's blockhash as its latest one: the approval's own lifetime is spent, so it approves again.
+ await assert.rejects(f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date()),(error:any)=>error.code==="APN_OPERATION_BLOCKED"&&
+  error.details.reason==="jupiter_v1_approval_lifetime_window"&&error.details.remainingBlocks==="-1"&&/approve again/.test(error.message));
+ assert.equal(f.heightBatches,0);assert.equal(f.sends,0);assert.equal(f.secretReads,0);
  const saved=await new (await import("../../src/swap/repository.js")).SwapOperationRepository(f.temp.root).loadAny(op.operationId);assert.equal(saved?.submissionMarker,null);
  // SWAP-03: the lifetime is part of the pre-consent proof, so an expired frozen blockhash refuses before the prompt and the reservation.
  assert.equal(saved?.state,"awaiting_approval");assert.equal(saved?.usageLease,null);
@@ -229,7 +236,7 @@ for(const remaining of [23,24])test(`V1 signing reserve ${remaining} blocks keep
  const title=`V1 signing reserve ${remaining} blocks keeps the exact marker and custody boundary`;
  if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest(title);return;}
  process.stdout.write(`PTY_CASE_ENTERED:${title}\n`);
- const f=await pipelineFixture(t),op=await preparedPipeline(f,`jupiter-v1-reserve-${remaining}`);f.setHeight(1100-remaining);
+ const f=await pipelineFixture(t),op=await preparedPipeline(f,`jupiter-v1-reserve-${remaining}`);f.setDriverHeight(1100-remaining);
  if(remaining===23){
   await assert.rejects(f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date()),{code:"APN_REPREPARE_REQUIRED"});
   const saved=await new (await import("../../src/swap/repository.js")).SwapOperationRepository(f.temp.root).loadAny(op.operationId);
@@ -240,6 +247,36 @@ for(const remaining of [23,24])test(`V1 signing reserve ${remaining} blocks keep
   const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());
   assert.ok(result.submissionMarker);assert.equal(f.sends,1);assert.ok(f.secretReads>0);
  }
+});
+// QA 0.5.51 route 83: quote, prepare and the approval prompt spent the quote's one blockhash lifetime before signing. The
+// approval now freezes its own lifetime: the quoted message with only its recent blockhash replaced, checked before the prompt.
+test("V1 approval re-freezes a spent quote lifetime and signs exactly the fresh message the owner saw",async t=>{
+ const title="V1 approval re-freezes a spent quote lifetime and signs exactly the fresh message the owner saw";
+ if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest(title);return;}
+ process.stdout.write(`PTY_CASE_ENTERED:${title}\n`);
+ const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-refrozen"),{getBase58Decoder,getCompiledTransactionMessageDecoder}=await import("@solana/kit");
+ const blockhash=getBase58Decoder().decode(Buffer.alloc(32,61)),fresh=f.setLatest(blockhash,1340);f.setHeight(1200);
+ const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());
+ assert.ok(["submitted","unknown_finality"].includes(result.state));assert.equal(f.sends,1);assert.equal(f.heightBatches,2);
+ const material=await new (await import("../../src/swap/jupiter-solana/v1-material.js")).SavedJupiterV1MaterialStore(f.temp.root).load(op.quote.quoteHash);assert.ok(material);
+ const bindings=new JupiterV1ExecutionBindingStore(f.temp.root),binding=await bindings.load(result,material);assert.ok(binding);
+ assert.equal(binding.unsignedPayload,fresh.transactionBase64);assert.equal(binding.messageHash,fresh.messageHash);assert.notEqual(binding.messageHash,material.execution.messageHash);
+ const signature=await bindings.loadSignature(result,binding),claim=await bindings.loadClaim(result);assert.equal(claim?.signature,signature);
+ const {fresh:bound}=await bindings.loadFresh(result,binding);assert.deepEqual(bound.lifetime,{blockhash,lastValidBlockHeight:"1340"});
+ assert.equal(getCompiledTransactionMessageDecoder().decode(Buffer.from(fresh.messageBase64,"base64")).lifetimeToken,blockhash);
+ f.setFinal();assert.equal((await f.runtime("observe",op.operationId,false).status(op.operationId,new Date())).state,"finalized");assert.equal(f.sends,1);
+});
+test("V1 never-lands waits for the signed message's own lifetime, not the quote's",async t=>{
+ const title="V1 never-lands waits for the signed message's own lifetime, not the quote's";
+ if(process.env.APN_JUPITER_V1_TEST_PTY_CHILD!=="1"){await runPtyTest(title);return;}
+ process.stdout.write(`PTY_CASE_ENTERED:${title}\n`);
+ const f=await pipelineFixture(t),op=await preparedPipeline(f,"jupiter-v1-refrozen-unlanded"),{getBase58Decoder}=await import("@solana/kit");
+ f.setLatest(getBase58Decoder().decode(Buffer.alloc(32,62)),1340);f.setHeight(1200);f.ambiguousSend();
+ const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());assert.equal(result.state,"unknown_finality");assert.equal(f.sends,1);
+ // Finalized past the quote's 1100 but not the signed 1340: the signed transaction can still land.
+ f.setFinalizedHeight(1101);assert.equal((await f.runtime("observe",op.operationId,false).status(op.operationId,new Date())).state,"unknown_finality");
+ f.setFinalizedHeight(1341);const expired=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());
+ assert.equal(expired.state,"expired_unlanded");assert.equal(f.sends,1);assert.equal(expired.usageLease?.state,"released_unsubmitted");
 });
 test("V1 expiry after signing retains public failure and never retries without a send claim",async t=>{
  const title="V1 expiry after signing retains public failure and never retries without a send claim";

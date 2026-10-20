@@ -1,3 +1,4 @@
+import { ApnError } from "../../errors.js";
 import { routeConfigForQuote } from "./v1-route-config.js";
 import { getBase58Decoder } from "@solana/kit";
 import { canonicalJson, isPlainRecord, exactKeys, sha256 } from "../../canonical.js";
@@ -26,7 +27,15 @@ export function decodeJupiterV1Quote(value) {
     canonicalAddress(swap.ammKey);
     if (typeof value.priceImpactPct !== "string" || !/^(0|[1-9][0-9]*)(\.[0-9]+)?$/u.test(value.priceImpactPct))
         invalid("Jupiter V1 price impact is invalid.");
-    routeConfigForQuote(value);
+    // Only the four reviewed pools decode; the refusal names the pool the provider answered (an address checked above).
+    try {
+        routeConfigForQuote(value);
+    }
+    catch (error) {
+        if (error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED")
+            throw new ApnError("APN_OPERATION_BLOCKED", error.message, { reason: "jupiter_v1_pool_not_reviewed", pool: swap.ammKey });
+        throw error;
+    }
     return freezeJson(value);
 }
 export function decodeJupiterV1Instruction(value) {
