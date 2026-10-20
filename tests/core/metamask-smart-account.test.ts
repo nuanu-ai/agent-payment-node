@@ -2036,21 +2036,29 @@ test("ambiguous Smart Account paid HTTP finalizes unused only after expiry and a
 });
 
 test("Smart Account expired-unused recovery remains unknown without complete negative evidence", async (t) => {
-  for (const posture of ["not-finalized", "range-unavailable", "matching-transfer"] as const) await t.test(posture, async () => {
+  // The child caps a cumulative "up to" amount: a redemption of amount-1, or of two halves, moved money as well.
+  const postures = ["not-finalized", "range-unavailable", "matching-transfer", "partial-transfer", "split-transfer",
+    "kept-body-partial-transfer"] as const;
+  for (const posture of postures) await t.test(posture, async () => {
     const fixture = await makeFixture();
     try {
       assert.equal((await fixture.core.execute(connectCommand())).ok, true);
       const rpc = new SmartAccountX402Rpc();
       const clock = new MutableSmartAccountClock();
-      const http = new QueuedHttp([smartAccountX402Challenge(), new Error("injected lost paid response")]);
+      const paid = posture === "kept-body-partial-transfer"
+        ? paidObservation({ finalUrl: X402_URL, bodyText: '{"forecast":"sunny"}', startedAt: new Date(NOW * 1_000).toISOString(),
+          observedAt: new Date(NOW * 1_000).toISOString() })
+        : new Error("injected lost paid response");
+      const http = new QueuedHttp([smartAccountX402Challenge(), paid]);
       const engine = new RecordingSmartAccountX402Engine();
       const runtime = smartAccountX402Runtime(fixture, rpc, http, clock, engine);
       const prepared = await runtime.core.execute(smartAccountX402Prepare(`smart-account-expiry-negative-${posture}`));
       const operationId = publicOperationId(prepared.operation);
       assert.equal((await runtime.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
-      assert.equal((await runtime.core.execute({ command: "operation.resume", operationId }).then((item) => item.operation as any)).state,
-        "effect_unknown");
+      const first = await runtime.core.execute({ command: "operation.resume", operationId });
+      assert.equal((first.operation as any)?.state, "effect_unknown", JSON.stringify(first));
       const operation = await runtime.state.findX402Operation(operationId) as X402OperationRecord;
+      assert.equal(operation.resultLink !== undefined, posture === "kept-body-partial-transfer", "only the kept-body posture holds the seller's body");
       clock.advance(61);
       rpc.observedUnix = clock.unix;
       armSmartAccountExpiredRange(rpc, operation);
@@ -2060,15 +2068,18 @@ test("Smart Account expired-unused recovery remains unknown without complete neg
       } else if (posture === "range-unavailable") {
         rpc.transferOutcomes = Array.from({ length: 12 }, () => ({ kind: "range_unavailable" as const }));
       } else {
-        const expiryBlock = rpc.finalizedHead.number;
-        rpc.transferOutcomes = [{ kind: "complete", logs: [transferLog({
+        const amount = BigInt(operation.amountAtomic), half = amount / 2n;
+        const values = posture === "matching-transfer" ? [amount]
+          : posture === "split-transfer" ? [half, amount - half] : [amount - 1n];
+        rpc.transferOutcomes = [{ kind: "complete", logs: values.map((value, index) => transferLog({
           from: operation.wallet,
           to: operation.payee,
-          value: operation.amountAtomic,
+          value: value.toString(),
           transactionHash: X402_TRANSACTION as Hex,
-          blockNumber: expiryBlock,
+          blockNumber: rpc.finalizedHead.number,
           blockHash: rpc.finalizedHead.hash,
-        })] }];
+          logIndex: (index + 1).toString(),
+        })) }];
       }
       const recovered = await runtime.core.execute({ command: "operation.resume", operationId });
       assert.equal((recovered.operation as any).state, "effect_unknown", JSON.stringify(recovered));
