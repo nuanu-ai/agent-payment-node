@@ -1,4 +1,5 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
+import type { X402SolanaPorts } from "./x402-solana/service.js";
 import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayRetireService } from "./relay/retire.js";
@@ -95,6 +96,8 @@ export interface CoreDependencies {
   readonly orcaRuntime?: OrcaRuntimeSelector;
   /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
   readonly orcaStableLegacy?: OrcaStableLegacyFinisher;
+  /** Solana x402 ports for the generic operation commands that delegate to `x402.solana.observe`. */
+  readonly x402Solana?: X402SolanaPorts;
   readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
@@ -162,6 +165,8 @@ export class RuntimeContext {
   readonly orcaRuntime?: OrcaRuntimeSelector;
   /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
   readonly orcaStableLegacy?: OrcaStableLegacyFinisher;
+  /** Solana x402 ports for the generic operation commands that delegate to `x402.solana.observe`. */
+  readonly x402Solana?: X402SolanaPorts;
   readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, { readonly command: "swap.jupiter.quote" }>>;
   readonly facilitatorGasless?: FacilitatorGaslessDependencies;
   readonly smartAccountGasless?: SmartAccountGaslessDependencies;
@@ -228,6 +233,7 @@ export class RuntimeContext {
     if (dependencies.sunswapRuntime !== undefined) this.sunswapRuntime = dependencies.sunswapRuntime;
     if (dependencies.orcaRuntime !== undefined) this.orcaRuntime = dependencies.orcaRuntime;
     if (dependencies.orcaStableLegacy !== undefined) this.orcaStableLegacy = dependencies.orcaStableLegacy;
+    if (dependencies.x402Solana !== undefined) this.x402Solana = dependencies.x402Solana;
     if (dependencies.jupiterV1Runtime !== undefined) this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
     if (dependencies.facilitatorGasless !== undefined) this.facilitatorGasless = dependencies.facilitatorGasless;
     if (dependencies.smartAccountGasless !== undefined) this.smartAccountGasless = dependencies.smartAccountGasless;

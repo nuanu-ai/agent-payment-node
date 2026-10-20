@@ -178,7 +178,10 @@ authorization; `operation resume` owns the paid request, settlement observation 
 
 [Permit2 requests](docs/x402-non-usdc.md) (`x402 permit2 *`, any chain and token the owner's allowlist policy admits
 for Permit2, USDC included) and [ERC-20 transfer-proof merchants](docs/x402-merchant-usdm.md) (`x402 merchant *`,
-MegaETH USDm first) are CLI commands with foreground approval.
+MegaETH USDm first) are CLI commands with foreground approval. `x402 solana pay` pays a Solana `exact` offer for a mint
+the owner's allowlist policy admits for Solana x402 (the seller's facilitator pays the fee; foreground approval; explicit
+`APN_SOLANA_RPC_URL`), and `x402 solana observe` proves settlement or that the payment can no longer land
+([any seller](docs/x402-any-seller.md)).
 [Offer selection](docs/x402-offer-selection.md) and [settlement fields](docs/x402-settlement-compatibility.md) are
 documented separately.
 
@@ -222,7 +225,7 @@ Provider balance is never spending authority; the owner allowlist and profile po
 | Circle CCTP V2 | `circle evm *`, `circle approval *`, `circle source submit` | [Circle V2 EVM](docs/circle-v2-evm-fast.md) |
 | Stargate V2 direct | `stargate native *`, `stargate token *` | [quote](docs/stargate-v2-direct-quote.md), [native](docs/stargate-v2-native-execution.md), [token](docs/stargate-v2-token-native-drop.md) |
 | Swaps | `swap ethereum uniswap[-token] *`, `swap tron sunswap *`, `swap solana jupiter/orca *` | [Uniswap](docs/uniswap.md), [SunSwap](docs/sunswap.md), [Jupiter](docs/jupiter.md), [Orca](docs/orca.md) |
-| x402 | `x402 inspect`, `x402 fetch *`, `x402 permit2 *`, `x402 merchant *` | [above](#x402-purchases) |
+| x402 | `x402 inspect`, `x402 fetch *`, `x402 permit2 *`, `x402 solana *`, `x402 merchant *` | [above](#x402-purchases) |
 
 Each guide states its commands, recovery rules and which mainnet acceptance rows are proven or still open. Source tests
 are not live payment proof.
@@ -286,6 +289,9 @@ apn x402 permit2 approve --url <https-url> --rpc-url <https-rpc> [--profile <pro
 apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> [--profile <profile>] [--transaction <hash> | --expired-unused]
 apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <hash> --expected-index <index> --expected-terms <base64-json> --rpc-url <https-rpc>
 apn x402 permit2 status --profile <profile> --operation <operation-id>
+apn x402 solana pay --profile <profile> --url <https-url> --asset <mint> --max-amount <atomic> --idempotency-key <key>
+apn x402 solana observe --operation <operation-id>
+apn x402 solana status --operation <operation-id>
 apn x402 merchant prepare --profile <profile> --url <https-url> [--asset <token>] --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]

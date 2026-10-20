@@ -16,6 +16,7 @@ import { oneClickSourceAdapter } from "./adapters/oneclick.js";
 import { stargateNativeAdapter, stargateTokenAdapter } from "./adapters/stargate.js";
 import { swapAdapter } from "./adapters/swap.js";
 import { uniswapTokenAdapter } from "./adapters/uniswap-token.js";
+import { x402SolanaAdapter } from "./adapters/x402-solana.js";
 /** Built on first use, never at module evaluation: the adapters import the conflict-domain module, which imports them. */
 let registry;
 /**
@@ -29,6 +30,7 @@ export function operationRegistry() {
         // Phase 4b WP2: every other money family.
         gaslessUsdtAdapter, metaMaskNativeAdapter, swapAdapter, uniswapTokenAdapter, stargateNativeAdapter, stargateTokenAdapter,
         oneClickSourceAdapter, circleSourceAdapter, circleApprovalAdapter,
+        x402SolanaAdapter,
     ].map(adapter => [adapter.family, adapter]));
     return registry;
 }

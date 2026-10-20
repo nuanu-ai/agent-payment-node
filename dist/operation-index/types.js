@@ -9,6 +9,8 @@ export const OPERATION_FAMILIES = [
     // Families whose adapters join in phase 4b WP2.
     "swap", "uniswap_token", "stargate_native", "stargate_token", "gasless_usdt", "oneclick_source", "circle_source",
     "circle_approval", "metamask_native",
+    // x402 exact on Solana mainnet (0.5.53).
+    "x402_solana",
 ];
 export const OPERATION_INDEX_ENTRY_SCHEMA = "apn.operation-index-entry.v1";
 export const profileClaim = (profileHash) => ({ key: `profile:${profileHash}` });

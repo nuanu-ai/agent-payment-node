@@ -48,14 +48,7 @@ export class HttpsX402Http {
 }
 export async function inspectX402(http, value, request, selection = 8453, payer) {
     const asset = typeof selection === "number" ? x402Asset(selection) : selection;
-    const endpoint = parsePublicHttpsUrl(value, "APN_HTTP_CONFIG", "Seller URL", 2048);
-    const canonicalUrl = endpoint.toString();
-    if (canonicalUrl !== value)
-        throw httpError("APN_HTTP_CONFIG", "Seller URL must use its canonical WHATWG serialization.");
-    const httpRequest = optionalX402HttpRequest(canonicalUrl, request);
-    const observation = await http.get({ url: canonicalUrl, ...(httpRequest === undefined ? {} : { httpRequest }) });
-    validateInspectObservation(observation, endpoint);
-    const paymentRequired = decodePaymentRequiredHeader(singleControlHeader(observation.rawHeaderPairs, "payment-required"));
+    const { endpoint, canonicalUrl, paymentRequired } = await readX402Challenge(http, value, request);
     const permit2 = payer === undefined ? undefined : inspectPermit2Offer({ accepts: paymentRequired.accepts, payer });
     const candidates = inspectCandidates(paymentRequired, canonicalUrl, asset);
     if (candidates.length === 0 && permit2 === undefined) {
@@ -75,6 +68,18 @@ export async function inspectX402(http, value, request, selection = 8453, payer)
         candidates,
         ...(permit2 === undefined ? {} : { permit2 }),
     };
+}
+/** One unpaid request to a canonical public HTTPS URL that must answer 402 with exactly one strict PAYMENT-REQUIRED header. */
+export async function readX402Challenge(http, value, request) {
+    const endpoint = parsePublicHttpsUrl(value, "APN_HTTP_CONFIG", "Seller URL", 2048);
+    const canonicalUrl = endpoint.toString();
+    if (canonicalUrl !== value)
+        throw httpError("APN_HTTP_CONFIG", "Seller URL must use its canonical WHATWG serialization.");
+    const httpRequest = optionalX402HttpRequest(canonicalUrl, request);
+    const observation = await http.get({ url: canonicalUrl, ...(httpRequest === undefined ? {} : { httpRequest }) });
+    validateInspectObservation(observation, endpoint);
+    const header = singleControlHeader(observation.rawHeaderPairs, "payment-required");
+    return { endpoint, canonicalUrl, header, paymentRequired: decodePaymentRequiredHeader(header) };
 }
 /** The seller's EVM `exact` offers as (network, lowercase asset, method), at most 16, for a refusal's details. */
 function offeredX402Assets(accepts) {

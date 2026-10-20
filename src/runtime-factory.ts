@@ -86,6 +86,8 @@ import { createJupiterV1Runtime } from "./swap/jupiter-solana/v1-runtime-factory
 import { createOrcaKeylessRuntime, orcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js";
 import { verifyOrcaProgramPins } from "./swap/orca-solana/pins.js";
 import { orcaStableLegacyFinisher } from "./legacy/orca-stable/finisher.js";
+import { executeX402SolanaCli } from "./x402-solana/cli.js";
+import { x402SolanaPorts } from "./x402-solana/runtime.js";
 import { TtyOrcaStableConsent } from "./legacy/orca-stable/recovery-consent.js";
 import { permit2CurrentOwnerPreflight, permit2PublicRpc } from "./x402-permit2/preflight.js";
 import { executePermit2ProductionCli } from "./x402-permit2/production-cli.js";
@@ -281,6 +283,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(sunswapRuntime === undefined ? {} : { sunswapRuntime }),
     ...(orcaRuntime === undefined ? {} : { orcaRuntime }),
     // Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10).
+    ...(runtimeCommand.startsWith("x402.solana.") ? { x402Solana: x402SolanaPorts(state.root, options, false) } : {}),
     ...(runtimeCommand.startsWith("swap.orca.stable-") ? { orcaStableLegacy: orcaStableLegacyFinisher({ root: state.root, clock,
       accounts: chainAccounts, rpc: solanaRpc, consent: options.orcaStableRecoveryConsent ?? new TtyOrcaStableConsent() }) } : {}),
     ...(runtimeCommand.startsWith("circle.approval.") || options.circleApproval !== undefined ? {
@@ -391,6 +394,7 @@ export async function executeBoundCommand(
 
 async function executeBound(bound: BoundCommand, options: RuntimeFactoryOptions, root: string): Promise<OutputEnvelope> {
   if (bound.request.command.startsWith("x402.merchant.")) return executeMerchantCli(bound, options, root);
+  if (bound.request.command.startsWith("x402.solana.")) return executeX402SolanaCli(bound, options, root);
   if (bound.request.command === "relay.route") return executeRelayRoute(bound, root, (internal) => executeBoundCommand(internal, options));
   if (bound.request.command === "x402.permit2.approve" || bound.request.command === "x402.permit2.observe") return executePermit2ProductionCli(bound, options, root);
   if (bound.request.command === "x402.permit2.preflight") {

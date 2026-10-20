@@ -13,6 +13,13 @@ export declare class HttpsX402Http implements HttpPort {
     get(request: HttpGetRequest): Promise<HttpObservation>;
 }
 export declare function inspectX402(http: HttpPort, value: string, request?: X402HttpRequestV1, selection?: X402Asset | number, payer?: Address): Promise<InspectResult>;
+/** One unpaid request to a canonical public HTTPS URL that must answer 402 with exactly one strict PAYMENT-REQUIRED header. */
+export declare function readX402Challenge(http: HttpPort, value: string, request?: X402HttpRequestV1): Promise<{
+    endpoint: URL;
+    canonicalUrl: string;
+    header: string;
+    paymentRequired: import("@x402/core/types").PaymentRequired;
+}>;
 export interface PaidHttpResult {
     readonly observation: X402HttpObservation;
     readonly paymentResponseHeader?: string;

@@ -7,6 +7,7 @@ import { canonicalErc7710Facilitators, isStrictErc7710Payload } from "./x402-erc
 import { MAX_DECODED_X402_BYTES, decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
 import { isEip2612GasSponsoringDeclaration } from "./x402-permit2/extension.js";
 import { validatePermit2PaymentPayload } from "./x402-permit2/codec-shape.js";
+import { isSolanaAccepted, validateSolanaPaymentPayload } from "./x402-solana/codec.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const LOWER_ADDRESS = /^0x[0-9a-f]{40}$/u;
 const BYTES32 = /^0x[0-9a-f]{64}$/u;
@@ -298,6 +299,8 @@ function validatePaymentPayload(value) {
         throw protocol("Only x402Version 2 PaymentPayload is supported.");
     validateResource(paymentPayload.resource);
     validateRequirements(paymentPayload.accepted);
+    if (isSolanaAccepted(paymentPayload.accepted))
+        return validateSolanaPaymentPayload(paymentPayload);
     const accepted = paymentPayload.accepted;
     let acceptedAsset;
     try {

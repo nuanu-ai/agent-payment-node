@@ -1,4 +1,4 @@
-# x402 to any seller (EVM)
+# x402 to any seller (EVM and Solana)
 
 APN pays a seller's `exact` offer on any EVM network and token the owner admitted. The seller still supplies only
 `payTo`, amount and resource; the network and token must be admitted by the owner, and the token's identity is read
@@ -63,10 +63,35 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
 (`x402_rpc_required`), a wrong one by `eth_chainId` (`APN_CHAIN_MISMATCH` naming the chain). No endpoint is
 substituted.
 
-## Solana `exact` (not built here)
+## Solana `exact` (SPL)
 
-Needs: a Solana x402 operation family (index adapter, journal, terminal lists); custody signing of a v0 transaction
-with the seller's facilitator as fee payer (`extra.feePayer`), exactly ComputeBudget + `TransferChecked` of the admitted
-mint to the payee's ATA (no create-ATA by the payer); owner admission per mint from the allowlist; settlement by
-`getSignatureStatuses` at `finalized`; never-lands by the frozen `lastValidBlockHeight` passed at `finalized` with the
-signature unknown (R4 exit 2); explicit `APN_SOLANA_RPC_URL`.
+- Commands: `x402 solana pay` (foreground TTY, like the other allowlist-admitted x402 lanes; MCP returns the CLI
+  handoff), `x402 solana observe` and `status` (CLI and MCP), and the generic `operation status|resume|abandon`. Family
+  `x402_solana`, store `x402-solana/`, states `prepared → reserving → signed → exposed → settled | failed_onchain |
+  expired_unlanded | abandoned_unknown`, with `failed_before_effect` from every state before `exposed`.
+- Admission per mint: the active allowlist row `solana:<genesis>` + mint with the x402 rail, its caps and exactly the
+  mechanism pin `x402-exact-svm` / SPL Token program; the policy's Solana account must be the profile's local Solana
+  wallet; the optional x402 recipient pin applies. Mint decimals must equal the row's, read on chain; a Token-2022
+  mint, a payee without its associated token account and a seller `extra.memo` are refused by name.
+- Offer rule: the lowest-index `exact` offer on `solana:5eykt4Us…` for the mint, within `--max-amount` and the owner's
+  per-payment cap, payee admitted, with a third-party `extra.feePayer`.
+- Transaction, checked before signing (decompiled, and byte-equal to a rebuild from the frozen terms): v0, no lookup
+  tables, signers exactly [fee payer, payer], instructions exactly SetComputeUnitLimit 20000, SetComputeUnitPrice 1
+  micro-lamport (the x402 reference client's values; the facilitator pays) and one classic `TransferChecked` of the
+  frozen amount and decimals to the payee's ATA; the fee payer is in no instruction. After consent a fresh blockhash
+  is bound (its height checked against it), the bytes are simulated, the owner cap reserved, the payer signs
+  (fee-payer slot empty) and the exposure is recorded before the single paid request. A replay never sends again.
+- Settlement: the fee payer's signature is the transaction id, unknown to APN in advance. The seller's
+  PAYMENT-RESPONSE `transaction` is only a hint; otherwise the payer token account's finalized `getSignaturesForAddress`
+  page is opened above the binding's floor slot. A candidate counts when `getSignatureStatuses` says `finalized` and
+  `getTransaction` at `finalized` shows exactly the frozen message, APN's payer signature, a verifying fee-payer
+  signature and the exact token deltas (none on failure).
+- Never lands: the finalized height (read first) is above the blockhash's `lastValidBlockHeight`, and the same index
+  page reaches a signature at or below the floor slot (the context slot of the blockhash read; the transaction can only
+  land later), so the index covers the whole window and no entry in it is this payment. Otherwise the payment waits;
+  the owner's TTY abandon is the last exit and leaves the price charged.
+- RPC: `APN_SOLANA_RPC_URL` only (never the public default); missing, the refusal names it (`x402_rpc_required`).
+- Not done: the x402 SVM spec now asks clients to add a Memo with a random nonce; APN signs exactly compute budget +
+  transfer (owner decision) and refuses memo-bound offers. Unattended Solana payments would need an owner balance cap
+  for the Solana wallet, which does not exist yet. Admission is limited to mints in the frozen allowlist inventory
+  (USDC, USDT).

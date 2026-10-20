@@ -37,11 +37,12 @@ import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-ve
 const isolated = await temporaryState(), temporaryRoot = isolated.base;
 after(isolated.cleanup);
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 solana", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "x402 permit2 approve", "x402 permit2 observe",
   "x402 permit2 preflight",
   "x402 permit2 status",
+  "x402 solana pay", "x402 solana observe", "x402 solana status",
   "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant retire-unsent", "x402 merchant status",
   "relay prepare", "relay execute", "relay observe", "relay retire", "relay status",
   "stargate native prepare", "stargate native execute", "stargate native observe", "stargate native status", "stargate native receipt",
