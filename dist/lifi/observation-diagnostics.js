@@ -12,6 +12,7 @@ const REASONS = new Set([
     "destination_log_hash", "destination_scan_cursor_reorg", "destination_scan_membership",
     "destination_scan_reorg", "destination_candidate_unresolved", "duplicate_destination_delivery",
     "destination_not_safe_success", "destination_transaction_reverted", "destination_trace_rebind", "request_deadline", "DNS_deadline",
+    "destination_fill_unmatched", "destination_fill_ambiguous",
     "bridge_deployment_code_changed", "bridge_deployment_configuration_changed",
     "historical_deployment_contract_hash", "historical_deployment_code_hash",
     "historical_deployment_configuration_hash", "historical_deployment_block",
@@ -60,7 +61,7 @@ function boundedInteger(value, minimum, maximum) {
 }
 function stage(chainRole, reason, method) {
     const boundary = reason === "canonical_transaction_membership" ? "included_block"
-        : reason === "source_proof" ? "protocol_evidence"
+        : reason === "source_proof" || reason?.startsWith("destination_fill_") ? "protocol_evidence"
             : reason?.startsWith("historical_deployment_") || reason?.startsWith("bridge_deployment_") ||
                 reason === "bridge_prepared_block_reorg" ? "deployment"
                 : reason === "bridge_multicall_response" || reason?.startsWith("Base_fee_") ||

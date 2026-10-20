@@ -120,7 +120,7 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
             hex32(checkedSource.hash) !== quote.block.hash)
             fail("APN_RPC_PROTOCOL", "source_block_changed_after_prepare_reads");
         const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString() });
-        const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
+        const preparedMs = now(), preparedAt = new Date(preparedMs).toISOString(), expiresAt = new Date(preparedMs + ttl).toISOString();
         const body = {
             schemaVersion: "apn.stargate-v2-native-operation.v3", operationId, profile, profileHash, idempotencyHash, policy,
             owner, recipient, amountAtomic: amount.toString(), maxNativeDebitAtomic: cap.toString(), finalityPolicy,

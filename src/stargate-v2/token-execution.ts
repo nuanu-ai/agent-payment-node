@@ -113,7 +113,7 @@ export async function prepareStargateV2Token(request: StargateTokenPreparationRe
   if (maximumDebit > cap) fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
   if (BigInt(sendPrepared.nativeBalanceAtomic) < maximumDebit) fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
   const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString(), operationId });
-  const preparedAt = new Date(now()).toISOString(), expiresAt = new Date(now() + ttl).toISOString();
+  const preparedMs = now(), preparedAt = new Date(preparedMs).toISOString(), expiresAt = new Date(preparedMs + ttl).toISOString();
   const body = { schemaVersion: "apn.stargate-v2-token-operation.v5" as const, operationId, profile, profileHash, idempotencyHash, owner, recipient, finalityPolicy, finalityPolicyProvenance: "pinned_v2" as const,
     amountAtomic: amount.toString(), nativeDropAtomic: drop.toString(), maxNativeDebitAtomic: cap.toString(), minOutputAtomic: minOut.toString(),
     sourceToken: STARGATE_TOKEN_SOURCE_TOKEN, destinationToken: STARGATE_TOKEN_DESTINATION_TOKEN, sourcePool: STARGATE_TOKEN_SOURCE_POOL,

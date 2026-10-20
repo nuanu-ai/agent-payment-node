@@ -29,7 +29,8 @@ export declare class UniswapTokenCustody {
     withAccountLock<T>(op: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
     private assertOwner;
     allocateNonce(op: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
-    releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+    /** True when custody holds no signed bytes for the effect (its reservation is free); false when a signed effect committed it. */
+    releaseNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean>;
     commitNonce(op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     private reconcileNonceReservations;
     currentAllowance(op: UniswapTokenOperation): Promise<string>;

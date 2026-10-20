@@ -15,6 +15,8 @@ const refund = "0x000000000000000000000000000000000000dEaD";
 const payer = "0x000000000000000000000000000000000000bEEF";
 const quote = "0x01020304";
 const hash = `0x${"a".repeat(64)}`;
+/** One injected clock: the Base block timestamps below and the freshness check read the same instant. */
+const NOW = Date.parse("2026-10-20T00:00:00.000Z"), clock = () => NOW;
 const hook = "0x636374702d666f72776172640000000000000000000000000000000000000000";
 async function fixture(): Promise<CircleV2DraftInput> {
   const recipient = `0x${Buffer.from(getBase58Encoder().encode(await associatedUsdc(wallet))).toString("hex")}` as `0x${string}`;
@@ -40,14 +42,14 @@ function harness(change?: (response: any) => void, options?: { reorg?: boolean; 
     if (request.method === "eth_getBlockByNumber") {
       const after = reads++ > 0;
       return { number: "0x63", hash: after && options?.reorg ? `0x${"b".repeat(64)}` : hash,
-        timestamp: options?.stale ? "0x1" : `0x${Math.floor(Date.now() / 1000).toString(16)}` };
+        timestamp: options?.stale ? "0x1" : `0x${Math.floor(NOW / 1000).toString(16)}` };
     }
     if (options?.revert) throw Error("revert");
     return "0x";
   };
 }
 
-const fixedNow = Date.now();
+const fixedNow = NOW;
 const limits: CircleV2SourcePreparationLimits = { maxAllowanceAtomic: "1020000", maxGasLimitAtomic: "100000", maxFeePerGasWei: "2000000000",
   maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "200000000000000", ttlMs: 60000 };
 function state(change?: (value: CircleV2BaseState) => void): (query: any) => Promise<CircleV2BaseState> {
@@ -61,7 +63,7 @@ function state(change?: (value: CircleV2BaseState) => void): (query: any) => Pro
   };
 }
 async function prepared(change?: (value: CircleV2BaseState) => void) {
-  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness(), clock);
   return prepareCircleV2BaseSourceReadOnly(draft, harness(), state(change), limits, () => fixedNow);
 }
 test("freezes deterministic read-only EIP-1559 envelope and quote binding", async () => {
@@ -81,28 +83,34 @@ test("freezes deterministic read-only EIP-1559 envelope and quote binding", asyn
   assert.ok(Object.isFrozen(a.blockers));
 });
 test("rejects endpoint outage, payer, nonce, allowance, balance, fee and gas drift", async () => {
-  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
-  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, async () => { throw Error("offline"); }, state(), limits));
-  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), async () => { throw Error("offline"); }, limits));
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness(), clock);
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, async () => { throw Error("offline"); }, state(), limits, clock));
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), async () => { throw Error("offline"); }, limits, clock));
   for (const change of [
     (v: any) => { v.payer = refund; }, (v: any) => { v.pendingNonceAtomic = "8"; },
-    (v: any) => { v.usdcAllowanceAtomic = "1000000"; }, (v: any) => { v.usdcBalanceAtomic = "1019999"; },
-    (v: any) => { v.nativeBalanceWei = "199999999999999"; }, (v: any) => { v.gasLimitAtomic = "100001"; },
-    (v: any) => { v.maxFeePerGasWei = "2000000001"; }, (v: any) => { v.blockHash = `0x${"b".repeat(64)}`; },
-    (v: any) => { v.draftBlockHash = `0x${"b".repeat(64)}`; },
+    (v: any) => { v.usdcAllowanceAtomic = "1000000"; }, (v: any) => { v.blockHash = `0x${"b".repeat(64)}`; },
+    (v: any) => { v.draftBlockHash = `0x${"b".repeat(64)}`; }, (v: any) => { v.gasLimitAtomic = "0"; },
+    (v: any) => { v.maxPriorityFeePerGasWei = "2000000001"; v.maxFeePerGasWei = "2000000000"; },
   ]) await assert.rejects(prepared(change), { code: "APN_PROVIDER_PROTOCOL" });
+  // A well-formed read that does not fit the caller's limits or balances is an economic refusal (circle-v2-budget-refusals).
+  for (const [change, code] of [
+    [(v: any) => { v.usdcBalanceAtomic = "1019999"; }, "APN_INSUFFICIENT_USDC"],
+    [(v: any) => { v.nativeBalanceWei = "199999999999999"; }, "APN_INSUFFICIENT_GAS"],
+    [(v: any) => { v.gasLimitAtomic = "100001"; }, "APN_FEE_BUDGET_EXCEEDED"],
+    [(v: any) => { v.maxFeePerGasWei = "2000000001"; }, "APN_FEE_BUDGET_EXCEEDED"],
+  ] as const) await assert.rejects(prepared(change), { code });
 });
 test("accepts a bounded approval above debit, but rejects allowance beyond the frozen cap", async () => {
-  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness(), clock);
   const bounded = state(v => { (v as any).usdcBalanceAtomic = "1030000"; (v as any).usdcAllowanceAtomic = "1025000"; });
   const approved = await prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,
     { ...limits, maxAllowanceAtomic: "1025000" }, () => fixedNow);
   assert.equal(approved.requiredUsdcDebitAtomic, "1020000");
   assert.equal(approved.maxAllowanceAtomic, "1025000");
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,
-    { ...limits, maxAllowanceAtomic: "1024999" }), { code: "APN_PROVIDER_PROTOCOL" });
+    { ...limits, maxAllowanceAtomic: "1024999" }, clock), { code: "APN_PROVIDER_PROTOCOL" });
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), bounded,
-    { ...limits, maxAllowanceAtomic: ((1n << 256n) - 1n).toString() }), { code: "APN_PROVIDER_PROTOCOL" });
+    { ...limits, maxAllowanceAtomic: ((1n << 256n) - 1n).toString() }, clock), { code: "APN_PROVIDER_PROTOCOL" });
 });
 test("rejects changed signed quote, expiry, fee, recipient setup and calldata in draft", async () => {
   for (const change of [
@@ -112,30 +120,30 @@ test("rejects changed signed quote, expiry, fee, recipient setup and calldata in
     (v: any) => { v.recipientSetup = "create_ata"; },
     (v: any) => { v.sourceTransaction.data = "0x"; },
   ]) {
-    const draft: any = await inspectCircleV2PreflightedDraft(await fixture(), harness()); change(draft);
-    await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(), limits), { code: "APN_PROVIDER_PROTOCOL" });
+    const draft: any = await inspectCircleV2PreflightedDraft(await fixture(), harness(), clock); change(draft);
+    await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(), limits, clock), { code: "APN_PROVIDER_PROTOCOL" });
   }
-  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
-  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(undefined, { reorg: true }), state(), limits));
-  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(), { ...limits, ttlMs: 1000 }));
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness(), clock);
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(undefined, { reorg: true }), state(), limits, clock));
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(), { ...limits, ttlMs: 1000 }, clock));
 });
 test("rejects stale quote and gas prices in wrong units or beyond uint256 native debit", async () => {
-  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
-  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(v => { v.expiry.expiresAtBlock = 99; }), state(), limits),
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness(), clock);
+  await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(v => { v.expiry.expiresAtBlock = 99; }), state(), limits, clock),
     { code: "APN_PROVIDER_PROTOCOL" });
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(),
-    { ...limits, maxFeePerGasWei: "2" }), { code: "APN_PROVIDER_PROTOCOL" });
+    { ...limits, maxFeePerGasWei: "2" }, clock), { code: "APN_FEE_BUDGET_EXCEEDED" });
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(v => { (v as any).maxFeePerGasWei = ((1n << 256n) - 1n).toString(); }),
-    { ...limits, maxFeePerGasWei: ((1n << 256n) - 1n).toString(), maxNativeDebitWei: ((1n << 256n) - 1n).toString() }),
+    { ...limits, maxFeePerGasWei: ((1n << 256n) - 1n).toString(), maxNativeDebitWei: ((1n << 256n) - 1n).toString() }, clock),
     { code: "APN_PROVIDER_PROTOCOL" });
 });
 
 test("includes Base L1 and operator fee upper bounds in native debit", async () => {
-  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
+  const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness(), clock);
   const p = await prepareCircleV2BaseSourceReadOnly(draft, harness(), state(v => {
     (v as any).l1DataFeeUpperWei = "1000"; (v as any).operatorFeeUpperWei = "2000";
     (v as any).nativeBalanceWei = "200000000003000";
-  }), { ...limits, maxNativeDebitWei: "200000000003000" });
+  }), { ...limits, maxNativeDebitWei: "200000000003000" }, clock);
   assert.equal(p.maximumNativeDebitWei, "200000000003000");
   assert.equal(p.l1DataFeeUpperWei, "1000"); assert.equal(p.operatorFeeUpperWei, "2000");
 });

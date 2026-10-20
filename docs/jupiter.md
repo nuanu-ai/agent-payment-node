@@ -72,7 +72,7 @@ Two real unmarked attempts exposed the short lifetime remaining after the offici
 
 The complete original official build response and its hash remain unchanged. A separate hash-bound `quoteRpcLifetime` records the configured RPC origin, confirmed context, minimum context, blockhash and last valid height. Assembly uses that lifetime before quote freeze, and the genuine TTY identifies its source. Every official instruction, privilege, lookup, economic field and runtime pin remains subject to the existing checks.
 
-After quote freeze, execution reuses that exact lifetime. It does not call `getLatestBlockhash` or replace the approved message. Full executable rereads, simulation, fee, expiry, active owner policy, Native approval, the permanent first-send claim and observation-only recovery remain mandatory. The 90-second TTL, 64/64/64 logical-read caps, 192 cumulative cap and 6,000,000-lamport native-expense cap are unchanged. Existing materials without `quoteRpcLifetime` retain their original official lifetime and validation.
+After quote freeze, execution reused that exact lifetime until QA 0.5.51; the approval now freezes its own (see [Approval lifetime, provider pool and tick arrays](#approval-lifetime-provider-pool-and-tick-arrays-qa-0551)). Full executable rereads, simulation, fee, expiry, active owner policy, Native approval, the permanent first-send claim and observation-only recovery remain mandatory. The 90-second TTL, 64/64/64 logical-read caps, 192 cumulative cap and 6,000,000-lamport native-expense cap are unchanged. Existing materials without `quoteRpcLifetime` retain their original official lifetime and validation.
 
 The pre-dispatch local Solana/Jupiter producer passed 663 tests with zero failures or skips; the targeted quote/Native pipeline producer passed 38. A real 1,000,000-lamport attempt reached the Native signature and permanent first-send claim, then returned `unknown_finality`. Its saved signature is `5CpyBQgZbRtVrMAMnAKf8H8xM1ChNMzbHELfQA14U33pQDNfwZ3g6k94NRrCBSMXsL2shfn3L9kWyPbvy73x6HkQ`; operation `67cec83fd91f78acb9decf9ef89dcf1f95c9551dcdf996d0a840db4c48cd8457`. Public readback at 20:44 UTC had no signature status or transaction and unchanged payer SOL/recipient USDC balances. The frozen blockhash is expired. The journal and usage lease remain unknown; no resigning, resending or manual release is permitted. Paid acceptance remains open.
 
@@ -338,3 +338,61 @@ eight keys (PublicNode's limit), each request pinned to the quote's context
 slot. Per quote: 2 official API calls (was 3) and 8 Solana POSTs including the
 simulation (was 17), about 0.1 MB received instead of 18.4 MB. The approval's pre-consent re-resolve shrinks the
 same way. Pool fee rates and adaptive-fee constants are read, not pinned.
+
+## Approval lifetime, provider pool and tick arrays (QA 0.5.51)
+
+QA 0.5.51 reached quote and prepare on route 83 through CLI and MCP, then every
+approval refused before signing: the quote's frozen blockhash had expired, its
+reserve was short, the simulation answered `BlockhashNotFound`, or the guard
+reported "tick array seed or order changed". FP, Esv and 4H refused at quote.
+Three causes were APN's:
+
+- **Lifetime.** A Solana blockhash lives about 150 blocks (about 60 s). The
+  quote froze it; the quote command itself, `prepare`, the approval's
+  pre-consent reads and the human at the prompt all spent that one lifetime
+  (CLI start-up alone took 7–13 s per command in the QA captures). The approval
+  now freezes its own: after its fresh account reads it takes the configured
+  RPC's latest blockhash (minimum context slot = the newest account read) and
+  rebuilds the quoted message with it. Only the 32-byte recent blockhash
+  differs: header, static accounts, instructions, data, lookup-table indexes
+  and lookup-table contents must be byte-identical to the quote's, and the
+  program authorities unchanged. Guard, fee, exact-message simulation and the
+  100–151 block window run on that message before the prompt; the screen shows
+  its hash, blockhash and last valid height next to the quoted message hash;
+  the grant, binding, signature, send claim and receipt bind it. An approval
+  whose RPC answers a blockhash outside the window refuses with
+  `APN_OPERATION_BLOCKED` / `jupiter_v1_approval_lifetime_window`: nothing is
+  marked, so the same operation approves again. The 90-second quote deadline,
+  the 24-block signing reserve, caps and the single-send fence are unchanged.
+  Never-lands and the sender use the lifetime of the message actually signed
+  (the bound fresh material); a binding written before this change holds the
+  quoted message, whose lifetime is the same. The approval read plan has one
+  more request (the blockhash): 20 plus 2 headroom.
+- **Tick arrays.** Jupiter's build names three consecutive tick arrays from its
+  view of the pool. Pool 83 has tick spacing 1, so one array spans 88 ticks,
+  about 0.88% of price; the guard demanded those arrays be exactly the
+  program's preferred run for the pool's tick at re-read, so any downward move
+  across an array edge refused. The Whirlpool program starts its A-to-B swap at
+  whichever named array holds the current tick and walks down through the rest,
+  so the guard now admits the current tick in any of the three named arrays
+  (one aligned descending run of the pool's PDAs); the exact-message simulation,
+  the encoded minimum and the receipt bound the result. A pool that left the
+  named arrays refuses with `APN_REPREPARE_REQUIRED` /
+  `jupiter_v1_pool_left_quoted_tick_arrays`. Esv and 4H (SwapV2) follow the
+  same rule.
+- **Pool selection.** Jupiter's quote API takes no pool selector; with
+  `dexes=Whirlpool&onlyDirectRoutes=true` it answers its best-priced pool. APN
+  asked for the first admitted pool's route and refused any other answer, even
+  a pool the owner's policy admits. The builder now takes the answered pool when
+  any admitted current route names it (unfiltered first when a SwapV2 pool is
+  admitted, one bounded `maxAccounts=12` read for the legacy-ABI pools). A pool
+  outside the policy refuses with `jupiter_v1_provider_pool_not_admitted`,
+  naming the endpoint, network, amount, the pools Jupiter answered and the
+  admitted pools. On 2026-10-20 about 01:50 UTC the keyless quote answered Esv
+  for 20,000, 50,000 and 1,000,000 lamports; QA's 19 October discovery got 83
+  at 50,000 (with the hint) and refusals at 10,000 and 20,000. A policy that admits one pool therefore
+  quotes only while Jupiter's best pool is that pool: a provider condition.
+
+Pins (program authorities, pool identities, roles, minima, caps) are unchanged.
+The `5,000,000`-lamport native headroom still applies to the payer balance.
+

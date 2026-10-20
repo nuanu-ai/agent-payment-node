@@ -11,7 +11,8 @@ const BATCH_PROTOCOL = ["manager", "delegate", "limitedCalls", "exactBatch"];
 const SPONSORED_PROTOCOL = ["manager", "delegate", "limitedCalls", "exactSingle"];
 /** Every state a MetaMask gasless journal may hold (its validator refuses any other). */
 export const MM_STATES = ["awaiting_approval", "execution_pending", "dispatch_pending",
-    "submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "failed_before_effect", "abandoned_unknown"];
+    "submitted_pending", "unknown_finality", "failed_effects_pending", "completed", "failed_before_effect", "abandoned_unknown",
+    "revoked_unused"];
 const MUTABLE_KEYS = ["state", "approval", "submissionAttempts", "dispatchStartedAt", "dispatch",
     "providerObservation", "cursor", "observation", "settlement", "failure"];
 function corrupt() { return mmFail("mm_gasless_state_corrupt"); }
@@ -180,11 +181,12 @@ function observation(value, at) {
         ...(sourced ? ["source"] : [])]);
     if (sourced)
         observationSource(o.source);
-    if (time(mmIso(o.observedAt)) > time(at) || !["pending", "unavailable", "invalid", "reorg", "reverted", "success"].includes(o.phase) ||
+    if (time(mmIso(o.observedAt)) > time(at) || !["pending", "unavailable", "invalid", "reorg", "reverted", "success", "disabled"].includes(o.phase) ||
         typeof o.reason !== "string" || !Object.hasOwn(MM_REASON_CODES, o.reason))
         corrupt();
     const exactReason = { pending: "mm_gasless_pending",
-        reorg: "mm_gasless_scan_reorg", reverted: "mm_gasless_transaction_reverted", success: "mm_gasless_success" };
+        reorg: "mm_gasless_scan_reorg", reverted: "mm_gasless_transaction_reverted", success: "mm_gasless_success",
+        disabled: "mm_gasless_delegation_disabled" };
     if (o.phase === "unavailable" && !["mm_gasless_rpc_unavailable", "mm_gasless_rpc_log_range",
         "mm_gasless_rpc_rate_limited"].includes(o.reason))
         corrupt();
@@ -202,6 +204,9 @@ function observation(value, at) {
         mmHash(o.evidenceHash);
     if (["success", "reverted"].includes(o.phase) &&
         (o.candidateTxHash === null || transaction === null || finality === null || o.evidenceHash === null))
+        corrupt();
+    // A disabled delegation is proved at one finality block, by the manager's flag and the count, without a transaction.
+    if (o.phase === "disabled" && (o.candidateTxHash !== null || transaction !== null || finality === null || o.evidenceHash === null))
         corrupt();
     return o;
 }
@@ -289,6 +294,9 @@ export function mmJournalMutable(value, intent, fingerprint, atInput) {
         corrupt();
     if (state === "failed_effects_pending" && (before || a === null || settled !== null ||
         failed?.reason !== "mm_gasless_transaction_reverted" || o === null || o.phase === "success"))
+        corrupt();
+    if ((state === "revoked_unused") !== (o?.phase === "disabled") || state === "revoked_unused" && (before || a === null ||
+        settled !== null || failed?.reason !== "mm_gasless_delegation_disabled"))
         corrupt();
     if (state === "completed" && (before || a === null || failed !== null || settled === null || o?.phase !== "success" ||
         o.candidateTxHash !== settled.txHash || !mmSame(o.transactionBlock, settled.transactionBlock) ||

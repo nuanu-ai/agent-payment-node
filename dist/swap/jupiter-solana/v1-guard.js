@@ -9,6 +9,7 @@ import { routeConfigForMaterial, jupiterV1RegisteredProgramPins, jupiterV1RouteP
 import { UPGRADEABLE_LOADER, verifyProgramAuthority } from "../solana-program-authority.js";
 import { validateWhirlpoolV2AccountSnapshot } from "./v1-whirlpool-v2-accounts.js";
 import { REVIEWED_WHIRLPOOL_FP, validateReviewedWhirlpoolFpPool } from "./v1-whirlpool-fp.js";
+import { assertWhirlpoolTickArraySequence } from "./v1-tick-sequence.js";
 export function reject(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
 /** Lamports beyond the exact input that one swap may spend or temporarily need: network fee (at most 20,000) and the
  * temporary wSOL account rent, with margin. It is the same overhead the original 1,000,000 / 6,000,000 lane used. */
@@ -67,12 +68,14 @@ async function evaluate(material, options, requireFresh) {
         tokenState(semanticAccount(material, state.vaultA), SOL, pool);
         tokenState(semanticAccount(material, state.vaultB), USDC, pool);
         tokenState(semanticAccount(material, destination), USDC, p);
-        for (const [i, key] of ticks.entries()) {
+        const starts = [];
+        for (const key of ticks) {
             const t = decodeTickArray(key, raw(semanticAccount(material, key)), ORCA, "4561bdbe6e0742bb");
-            const width = state.tickSpacing * 88;
-            if (t.whirlpool !== pool || t.startTickIndex % width !== 0 || key !== await whirlpoolTickArrayAddress(ORCA, pool, t.startTickIndex) || t.startTickIndex !== Math.floor(state.tickCurrentIndex / width) * width - i * width)
+            if (t.whirlpool !== pool || key !== await whirlpoolTickArrayAddress(ORCA, pool, t.startTickIndex))
                 reject("Jupiter V1 tick array seed or order changed.");
+            starts.push(t.startTickIndex);
         }
+        assertWhirlpoolTickArraySequence(starts, state.tickCurrentIndex, state.tickSpacing, () => reject("Jupiter V1 tick array seed or order changed."));
         const o = semanticAccount(material, oracle);
         if (o.executable || (o.existence === "present" && (o.owner !== SYS || o.dataBase64 !== "")))
             reject("Jupiter V1 adaptive oracle state is unsupported.");

@@ -20,6 +20,7 @@ import type { StateStore } from "../state.js";
 import { exactChainConsent } from "../tty-approval.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { ApnError } from "../errors.js";
+import { postEffectReadFailure, type PostEffectReadFailure } from "../post-effect-read-failure.js";
 import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, isCircleDestinationChain, type CircleDestinationChain } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, bindCircleAttestation, decodeCircleSource, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint,
   verifyCircleApproval, verifyCircleAttestationSigners, circleAttesterConfigurationHash, type CircleAttestation } from "./protocol.js";
@@ -92,7 +93,7 @@ export class CircleFundingEvmService {
       const burnEnvelope = await source.envelope(sourceCustody.walletAddress, CIRCLE_MESSENGER, encodeCircleBurn(route.chainId, funding), (BigInt(src.nonceAtomic) + 1n).toString(), "600000");
       verifyCircleGasEnvelope(approvalEnvelope, 42161); verifyCircleGasEnvelope(burnEnvelope, 42161);
       if (BigInt(sourceAccount.nativeBalanceAtomic) < 75_000_000_000_000n) circleBlocked("source_native_total_balance");
-      const preparedAt = new Date(this.now()).toISOString(), expiresAt = new Date(this.now() + 15 * 60_000).toISOString(), fingerprint = "0".repeat(64);
+      const preparedMs = this.now(), preparedAt = new Date(preparedMs).toISOString(), expiresAt = new Date(preparedMs + 15 * 60_000).toISOString(), fingerprint = "0".repeat(64);
       let op = sealCircle({ schemaVersion: "apn.circle-v2-evm-operation.v2", funding, feeQuote: fee, operationId, profile, profileHash: sourceCustody.profileHash, destinationProfile, destinationProfileHash: destinationCustody.profileHash,
         idempotencyHash, requestHash, fingerprint, destinationChain: route.chainId, sourceCustody, destinationCustody, policies: [], preparedAt, expiresAt, deploymentDigest: deployments.digest, feeQuoteAtomic: fee.quotedFeeAtomic,
         state: "awaiting_source", terminal: false, effects: [{ role: "approval", phase: "prepared", envelope: approvalEnvelope, transactionHash: null, materialHash: null, proof: null },
@@ -114,14 +115,24 @@ export class CircleFundingEvmService {
   /** A mint someone else relayed, found during the command, is adopted after its locks are released (adoption takes its own). */
   private async run(id: string, action: (op: CircleFundingOperationV2, ports: CircleFundingLifecyclePorts) => Promise<CircleFundingOperationV2>): Promise<CircleFundingCommandResult> {
     const initial = await this.required(id); await this.state.initialize(); const found: { notice: CircleExternalMintNotice | null } = { notice: null };
+    const afterEffect: { failure: PostEffectReadFailure | null } = { failure: null };
     const result = await this.state.withLocks([`profile:${initial.profileHash}`, `profile:${initial.destinationProfileHash}`, `operation:${initial.operationId}`, `operation:idempotency:${initial.idempotencyHash}`,
       evmAddressLock(initial.sourceCustody.walletAddress), evmAddressLock(initial.destinationCustody.walletAddress)], async () => this.usage.withPolicyLocks([initial.profile, initial.destinationProfile], async () => {
       let op = await this.required(id);
       if (action === approveCircleFundingMint || action === cleanupCircleFunding || action === refreshCircleFundingAttestation) await new CircleFundingExternalStore(this.state.root).assertOwnedMintAvailable(op);
       if (action !== cleanupCircleFunding && op.usage.length === 0 && op.effects.every(e => e.phase === "prepared")) { op = advanceCircle(op, { usage: await this.usage.reserve(op) }, "interrupted_prepare_reserves_repaired", this.now()); await this.repo.saveFunding(op); }
       const scope: FundingRuntimeScope = { state: this.state, fingerprint: op.fingerprint, now: this.now, grants: new Map(), active: true };
-      return fundingRuntimeScope.run(scope, async () => { try { return await action(op, this.ports(op, found)); } finally { scope.active = false; scope.grants.clear(); } });
+      const before = op;
+      return fundingRuntimeScope.run(scope, async () => { try { return await action(op, this.ports(op, found)); }
+        catch (error) {
+          // A command that sent an effect answers with that operation's saved state (its hashes, phase and observe step) and
+          // names the failed later read, never a bare error that hides the effect. Nothing is resent; observe decides it.
+          const saved = await this.repo.loadAny(id).catch(() => null);
+          if (saved === null || saved.schemaVersion !== "apn.circle-v2-evm-operation.v2" || !sentDuring(before, saved)) throw error;
+          afterEffect.failure = postEffectReadFailure(error); return snapshotCircleFundingOperation(saved);
+        } finally { scope.active = false; scope.grants.clear(); } });
     }));
+    if (afterEffect.failure !== null) return { operation: result, externalMint: null, observationFailure: afterEffect.failure };
     return settleCircleFundingExternalMint(result, found.notice, hash => this.adoptExternalMint(id, hash));
   }
   private preflightDeployments(source: CircleRpc, destination: CircleRpc, chain: CircleDestinationChain) { return currentCircleDeployments(source, destination, chain); }
@@ -134,7 +145,10 @@ export class CircleFundingEvmService {
   }
   private async api(path: string) {
     const response = await this.https.request(`https://iris-api.circle.com${path}`, "GET", null, 1024 * 1024, "APN_HTTP_CONFIG");
-    if (response.status !== 200) throw new ApnError("APN_HTTP_CONFIG", "Circle issuer API response is unavailable."); return JSON.parse(response.body) as unknown;
+    // The issuer answering anything but 200 is the provider's state, not local configuration (no next step is guessed here).
+    if (response.status !== 200) throw new ApnError("APN_PROVIDER_UNAVAILABLE", "Circle issuer API response is unavailable.",
+      { reason: "issuer_http_status", httpStatus: response.status, nextActions: [] });
+    return JSON.parse(response.body) as unknown;
   }
   private async fee(funding: CircleFundingOperationV2["funding"]) { const value = await this.api(`/v2/burn/USDC/fees/3/${funding.destinationDomain}`); return quoteCircleFundingFee(funding, value, this.now(), this.now()); }
   private sourceAccount(a: import("./preflight.js").CircleAccountPreflight, owner: string, amount: string) { if (a.chainId !== 42161 || a.address !== owner || circleUint(a.usdcBalanceAtomic) < BigInt(amount) || circleUint(a.nativeBalanceAtomic) < 75_000_000_000_000n || circleUint(a.allowanceAtomic) !== 0n || circleUint(a.latestNonceAtomic) !== circleUint(a.pendingNonceAtomic)) circleBlocked("funding_source_account"); return { approvalRequired: true, nonceAtomic: circleUint(a.latestNonceAtomic).toString() }; }
@@ -248,6 +262,11 @@ export class CircleFundingEvmService {
       usage: (op, target) => this.usage.follow(op, target),
     };
   }
+}
+const SENT: readonly CircleEffect["phase"][] = ["submission_started", "submitted", "unknown", "confirmed", "reverted"];
+/** An effect crossed its submission fence during this command (it may have been broadcast by it). */
+function sentDuring(before: CircleFundingOperationV2, after: CircleFundingOperationV2): boolean {
+  return after.effects.some(e => SENT.includes(e.phase) && !SENT.includes(before.effects.find(b => b.role === e.role)?.phase ?? "prepared"));
 }
 function assertObservedEnvelope(effect: CircleEffect, input: unknown): void {
   const t = circleRecord(input), e = effect.envelope;

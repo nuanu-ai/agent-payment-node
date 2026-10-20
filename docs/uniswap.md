@@ -91,6 +91,20 @@ that exact pin.
   that sees the receipt reads those balances and keeps them in the state root,
   bound to the block hash. A later `status` reuses them and needs no historical
   state. After a reorg they are read again.
+- A finalized operation's `receiptProof.economics` holds what the receipt
+  itself proved: `inputAtomic` (the mined value), `outputAtomic` (the
+  recipient's Transfer credit), `networkFeeAtomic` (gasUsed x effective gas
+  price) and `nativeDebitAtomic`; a revert has input "0" and output null. The
+  quote keeps its expected and minimum output. SunSwap, Orca and Jupiter fill the
+  same fields from their own finalized records (fee in SUN or lamports; Orca adds
+  the rent of a token account it created). Status also returns them in its
+  receipt slot as `actualEconomics` (the operation slot stays the sealed record).
+  For a swap finalized before APN recorded them, status reads
+  its own finalized transaction once through the lane's RPC (bound to the hash
+  its record proved), keeps the facts in `receipt-facts/<operation>.swap.json`
+  bound to the record's integrity hash and never reads them again; a refused read
+  leaves `actualEconomics` null with `actualFactsRefusal` naming why. The
+  token-input lane adds the same `actualEconomics` to its observed receipt.
 - Run `status` within about 25 minutes of sending. If the first observation
   comes later, `status` fails with `APN_PROVIDER_UNAVAILABLE` /
   `uniswap_pre_state_unavailable`. Re-run it with a distinct archive reader in
@@ -121,6 +135,13 @@ amount. Successful execution proves the exact input debit, minimum output, and
 zero residual allowance. A reverted or drifted post-approval operation enters
 `cleanup_required`; only the explicit foreground `cleanup` command can send the
 zero allowance cleanup. `status` observes and may reconcile durable local state.
+A cleanup whose fee caps (frozen at quote time) are below the current Ethereum fees is
+refused before signing and stays `cleanup_required`; its `next_actions` offer the same
+cleanup again and `cleanup --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`.
+Those are the owner's own caps for this cleanup only: they must cover a fresh fee quote
+(twice the latest base fee plus the node's priority fee, the signing guard's rule; a
+refusal names the quote), and the foreground consent shows them, the frozen caps and the
+new native debit cap before anything is signed. APN never raises a cap by itself.
 The Ethereum raw signer may coexist with same-address MetaMask Smart Account
 profiles and their Base delegation grants. Approval and token effects still
 reject a second local signing profile or wallet for that address under the

@@ -4,6 +4,7 @@ import { ApnError } from "../errors.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { RelayNativeSourceJournalRepository } from "./native-source.js";
 import { ArbitrumSourceEffectJournalRepository } from "./arbitrum-source-effect-journal.js";
+import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RELAY_MEGA_USDM } from "./native-routes.js";
 import { ETHEREUM_USDC } from "./quote.js";
 const hash = /^0x[0-9a-fA-F]{64}$/u;
@@ -38,6 +39,20 @@ export class RelayDestinationClaimRepository extends SecureStateStore {
             unconfirmed();
         await this.persist(op, sourceHash, draft.orderId, { transactionHash: proof.destinationTransactionHash, recipient: proof.recipient,
             token: proof.token, amountAtomic: proof.creditedAtomic, blockNumber: proof.destinationBlockNumber, blockHash: proof.destinationBlockHash });
+    }
+    /** The BNB or Base native payout of an Ethereum USDC operation whose deposit the saved effect journal records as final. */
+    async claimEthereumSource(op, sourceHash, proof) {
+        const quote = op.quote;
+        if (quote === undefined || op.sourceChainId !== 1 || ![56, 8453].includes(op.destinationChainId) || !op.statusLocator || !hash.test(sourceHash) ||
+            !hash.test(proof.destinationTransactionHash) || proof.operationId !== op.operationId || proof.operationIntegrityHash !== op.integrityHash ||
+            proof.quoteDigest !== op.quoteDigest || proof.orderId !== quote.orderId || proof.recipient !== op.recipient.toLowerCase() ||
+            proof.minimumOutputWei !== op.minOutputAtomic || BigInt(proof.creditedWei) < BigInt(op.minOutputAtomic))
+            invalid();
+        const deposit = (await new RelayEffectJournalRepository(this.root).load(op.profileHash, op.operationId))?.effects[1];
+        if (deposit?.phase !== "confirmed" || deposit.attempt?.transactionHash?.toLowerCase() !== sourceHash.toLowerCase())
+            unconfirmed();
+        await this.persist(op, sourceHash, quote.orderId, { transactionHash: proof.destinationTransactionHash, recipient: proof.recipient,
+            token: "native", amountAtomic: proof.creditedWei, blockNumber: proof.destinationBlockNumber, blockHash: proof.destinationBlockHash });
     }
     async persist(op, sourceHash, orderId, payout) {
         const key = domainHash("apn.relay-destination-payout-key.v1", canonicalJson({ chainId: op.destinationChainId, transactionHash: payout.transactionHash.toLowerCase() }));

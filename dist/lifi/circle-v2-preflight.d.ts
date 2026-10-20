@@ -25,5 +25,5 @@ export interface CircleV2PreflightSnapshot {
     readonly abiSignature: typeof ABI_SIGNATURE;
 }
 /** Circle checks its own current tip; Base simulation is pinned to a separate canonical block observation. Neither authorizes execution. */
-export declare function inspectCircleV2Preflight(input: CircleV2PreflightInput, transport: CircleV2PreflightTransport): Promise<CircleV2PreflightSnapshot>;
+export declare function inspectCircleV2Preflight(input: CircleV2PreflightInput, transport: CircleV2PreflightTransport, now: () => number): Promise<CircleV2PreflightSnapshot>;
 export {};

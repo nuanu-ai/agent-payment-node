@@ -23,9 +23,13 @@ export class OperationCommands {
   private readonly index: OperationIndex;
   constructor(private readonly context: RuntimeContext) { this.index = new OperationIndex(context.state); }
 
-  async status(operationId: string): Promise<CommandOutcome> {
-    const { adapter, record } = await this.found(operationId);
-    return adapter.status !== undefined ? await adapter.status(this.context, record)
+  async status(operationId: string, refreshAllowance = false): Promise<CommandOutcome> {
+    const { entry, adapter, record } = await this.found(operationId);
+    if (refreshAllowance && adapter.refreshesAllowance !== true) {
+      throw new ApnError("APN_INVALID_INPUT", `A ${entry.family} operation stores no residual allowance; --refresh-allowance does not apply.`,
+        { family: entry.family, nextActions: [`apn operation status --operation ${entry.operationId}`] });
+    }
+    return adapter.status !== undefined ? await adapter.status(this.context, record, { refreshAllowance })
       : operationOutcome(await adapter.view(record, this.context.state.root));
   }
 

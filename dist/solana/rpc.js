@@ -106,6 +106,10 @@ export class SolanaRpc {
     async call(method, params) {
         if (method === "getGenesisHash" && this.genesis !== undefined)
             return this.genesis;
+        // PublicNode answers a scalar getBlockHeight with the slot and the same call inside a JSON-RPC array with the height,
+        // so the height is always asked as a one-element array: one POST, one logical call, as before.
+        if (method === "getBlockHeight")
+            return (await this.batch([{ method, params }]))[0];
         const id = randomUUID();
         const value = await this.request({ jsonrpc: "2.0", id, method, params }, 1, method === "sendTransaction");
         const record = rpcRecord(value);
@@ -265,6 +269,27 @@ function retryAfterDetails(value) {
         return undefined;
     const milliseconds = /^\d+$/u.test(value.trim()) ? Number(value.trim()) * 1_000 : Date.parse(value) - Date.now();
     return Number.isFinite(milliseconds) && milliseconds >= 0 ? { retryAfterMs: Math.min(milliseconds, 86_400_000) } : undefined;
+}
+/**
+ * A block height checked against the latest blockhash read beside it at the same commitment. A real height never exceeds
+ * that blockhash's lastValidBlockHeight; a slot always does. Such an answer is refused with its numbers, never corrected:
+ * a slot read as a height would prove a still-valid blockhash expired.
+ */
+export function solanaBlockHeightValue(height, latestBlockhash) {
+    const value = rpcAtomic(height), lastValid = rpcAtomic(rpcRecord(rpcRecord(latestBlockhash).value).lastValidBlockHeight);
+    if (value > lastValid)
+        throw new ApnError("APN_RPC_PROTOCOL", `The Solana RPC answered getBlockHeight with ${value}, above the ` +
+            `lastValidBlockHeight ${lastValid} of its own latest blockhash, so it is not a block height (some endpoints answer the slot).`, {
+            reason: "solana_block_height_inconsistent", observedBlockHeight: value.toString(), lastValidBlockHeight: lastValid.toString(),
+            nextActions: ["Use a Solana mainnet RPC endpoint whose getBlockHeight answers the block height, then rerun the same command."]
+        });
+    return value;
+}
+/** The block height at a commitment, read with that commitment's latest blockhash in one request and checked against it. */
+export async function readSolanaBlockHeight(rpc, commitment) {
+    const [height, latest] = await solanaReadBatch(rpc, [{ method: "getBlockHeight", params: [{ commitment }] },
+        { method: "getLatestBlockhash", params: [{ commitment }] }]);
+    return solanaBlockHeightValue(height, latest);
 }
 export async function assertSolanaNetwork(rpc) {
     return assertSolanaNetworkValue(await rpc.call("getGenesisHash", []));

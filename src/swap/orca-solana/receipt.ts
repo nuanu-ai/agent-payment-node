@@ -2,7 +2,8 @@ import { address, getCompiledTransactionMessageDecoder, getSignatureFromTransact
 import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { rpcArray, rpcAtomic, rpcRecord, solanaSignature, type SolanaRpcPort } from "../../solana/rpc.js";
-import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
+import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptEconomics, type SwapReceiptProof } from "../model.js";
+import { orcaEconomicsFromTransaction, orcaFactsAccounts } from "./receipt-facts.js";
 import { proveSolanaUnlanded, type SwapUnlandedProof } from "../unlanded.js";
 import type { OrcaExecutionBinding } from "./effects.js";
 import { isOrcaTokenPlan, orcaPlanSides } from "./instructions.js";
@@ -23,6 +24,16 @@ export class OrcaReceiptObserver {
   /** Finalized height past the bound lifetime and no status for the persisted signature: it can never land. */
   async proveUnlanded(lastValidBlockHeight: string, loadSignature: () => Promise<string | null>): Promise<SwapUnlandedProof | null> {
     return await proveSolanaUnlanded(this.rpc, { lastValidBlockHeight, loadSignature });
+  }
+
+  /** One read of a swap its record proved finalized: its own finalized transaction, for the economics (observe only). */
+  async receiptEconomics(operationValue: SwapOperationRecord, material: OrcaKeylessMaterial): Promise<SwapReceiptEconomics> {
+    const operation = validateSwapOperation(operationValue), signature = operation.receiptProof?.transactionHash;
+    if (signature === undefined) blocked("Orca receipt facts need the record's proven signature.", "receipt_facts_binding");
+    solanaSignature(signature);
+    const raw = await this.rpc.call("getTransaction", [signature, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+    if (raw === null) blocked("The node has no finalized transaction for this swap.", "receipt_facts_receipt_absent");
+    return orcaEconomicsFromTransaction(operation, orcaFactsAccounts(operation, material), raw);
   }
 
   async observeOutcome(operationValue: SwapOperationRecord, binding: OrcaExecutionBinding, material: OrcaKeylessMaterial,
@@ -56,7 +67,9 @@ export class OrcaReceiptObserver {
     if (metaErr !== null) {
       const receiptHash = domainHash("apn.orca-revert-proof.v1", canonicalJson({ signature, slot: slot.toString(), fee: fee.toString(),
         error: canonical(metaErr), messageHash: binding.messageHash, bindingHash: binding.bindingHash, observedAt }));
-      return { outcome: "reverted", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true } };
+      // A failed Solana transaction keeps no state change: the fee is its whole cost.
+      return { outcome: "reverted", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true,
+        economics: { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: fee.toString(), nativeDebitAtomic: fee.toString() } } };
     }
     const loaded = isPlainRecord(meta.loadedAddresses) ? meta.loadedAddresses : { writable: [], readonly: [] };
     if (rpcArray(loaded.writable ?? [], 0).length !== 0 || rpcArray(loaded.readonly ?? [], 0).length !== 0) conflict();
@@ -78,9 +91,17 @@ export class OrcaReceiptObserver {
     }
     const amounts = debited === undefined ? { usdcReceivedAtomic: received.toString() }
       : { sourceDebitedAtomic: debited.toString(), outputReceivedAtomic: received.toString() };
+    // The input is what left the owner's source account, or for SOL what the pool's wSOL vault received; the rent is what
+    // the owner's destination account gained (a new token account; token transfers move no lamports there).
+    const lamports = (index: number) => (post[index] ?? conflict()) - (pre[index] ?? conflict());
+    const input = debited ?? lamports(accountIndex(messageBytes, sides.pool.vaultA)), rent = lamports(outputIndex);
+    if (input <= 0n || rent < 0n) conflict();
     const receiptHash = domainHash("apn.orca-finalized-receipt.v1", canonicalJson({ signature, slot: slot.toString(), fee: fee.toString(),
-      solSpentLamports: spent.toString(), ...amounts, messageHash: binding.messageHash, bindingHash: binding.bindingHash, observedAt }));
-    return { outcome: "succeeded", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true } };
+      solSpentLamports: spent.toString(), ...amounts, inputAtomic: input.toString(), accountRentLamports: rent.toString(),
+      messageHash: binding.messageHash, bindingHash: binding.bindingHash, observedAt }));
+    return { outcome: "succeeded", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true,
+      economics: { inputAtomic: input.toString(), outputAtomic: received.toString(), networkFeeAtomic: fee.toString(),
+        nativeDebitAtomic: spent.toString(), accountRentAtomic: rent.toString() } } };
   }
 }
 
@@ -91,6 +112,7 @@ function accountIndex(messageBytes: Uint8Array, key: string): number {
   if (index < 0) conflict();
   return index;
 }
+export { tokenBalance as orcaTokenBalance };
 function tokenBalance(value: unknown, index: number, mint: string, decimals: number, owner: string, allowMissing: boolean): bigint {
   let found: bigint | undefined;
   for (const item of rpcArray(value ?? [], 64)) {

@@ -170,14 +170,14 @@ test("observer requires marker and proves exact finalized receipt, reorg, finali
     nonce: 7, gas: 150000n, maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 100000000n, accessList: [] });
   const hash = await verifySignedUniswapTransaction(raw, m.binding, m.operation), blockHash = `0x${H("e")}` as const;
   const recipientTopic = `0x${RECIPIENT.slice(2).toLowerCase().padStart(64, "0")}`, transfer = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
-  const options = { finalized: 110, blockHash, output: BigInt(minimumOutput), nonce: "0x7", removed: false };
+  const options = { finalized: 110, blockHash, output: BigInt(minimumOutput), nonce: "0x7", removed: false, fee: true };
   const rpc = (override: Partial<typeof options> = {}) => { const o = { ...options, ...override }; return async (method: string, params: readonly unknown[]) => {
     if (method === "eth_chainId") return "0x1";
     if (method === "eth_getTransactionByHash") return { hash, from: ACCOUNT, to: UNISWAP_ROUTER, input: f.e.data,
       value: `0x${BigInt(inputAmount).toString(16)}`, chainId: "0x1", nonce: o.nonce, gas: "0x249f0", type: "0x2",
       maxFeePerGas: "0x77359400", maxPriorityFeePerGas: "0x5f5e100", blockNumber: "0x64", blockHash };
     if (method === "eth_getTransactionReceipt") return { transactionHash: hash, from: ACCOUNT, to: UNISWAP_ROUTER,
-      status: "0x1", blockNumber: "0x64", blockHash,
+      status: "0x1", blockNumber: "0x64", blockHash, ...(o.fee ? { gasUsed: "0x1d4c0", effectiveGasPrice: "0x3b9aca00" } : {}),
       logs: [{ address: UNISWAP_USDC, transactionHash: hash, blockNumber: "0x64", blockHash, removed: o.removed,
         topics: [transfer, `0x${H("0")}`, recipientTopic], data: `0x${o.output.toString(16).padStart(64, "0")}` }] };
     if (method === "eth_getBlockByNumber") { const tag = params[0]; if (tag === "safe") return { number: "0x6f", hash: `0x${H("f")}` };
@@ -191,6 +191,12 @@ test("observer requires marker and proves exact finalized receipt, reorg, finali
   }; };
   const observer = new UniswapEthereumReceiptObserver(rpc(), () => new Date((deadline - 200) * 1000));
   assert.equal((await observer.observe(m.operation, m.binding, hash))?.finalized, true);
+  // QA 0.5.51 UNISWAP-RESULT-ECONOMICS-001: the receipt's own credit (here 30 above the minimum), the mined value and gasUsed x price.
+  const above = await new UniswapEthereumReceiptObserver(rpc({ output: BigInt(minimumOutput) + 30n }), () => new Date((deadline - 200) * 1000)).observe(m.operation, m.binding, hash);
+  assert.deepEqual(above?.economics, { inputAtomic: inputAmount, outputAtomic: (BigInt(minimumOutput) + 30n).toString(), networkFeeAtomic: "120000000000000",
+    nativeDebitAtomic: (BigInt(inputAmount) + 120_000_000_000_000n).toString() });
+  const noFee = await new UniswapEthereumReceiptObserver(rpc({ fee: false }), () => new Date((deadline - 200) * 1000)).observe(m.operation, m.binding, hash);
+  assert.deepEqual(noFee?.economics, { inputAtomic: inputAmount, outputAtomic: minimumOutput, networkFeeAtomic: null, nativeDebitAtomic: null });
   assert.equal(await new UniswapEthereumReceiptObserver(rpc({ finalized: 99 })).observe(m.operation, m.binding, hash), null);
   await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ blockHash: `0x${H("9")}` })).observe(m.operation, m.binding, hash), { code: "APN_OPERATION_BLOCKED" });
   await assert.rejects(new UniswapEthereumReceiptObserver(rpc({ output: 1n })).observe(m.operation, m.binding, hash), { code: "APN_OPERATION_BLOCKED" });

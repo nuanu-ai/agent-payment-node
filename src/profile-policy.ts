@@ -196,7 +196,9 @@ export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord
       updated_at: null,
       integrity_status: "not_present",
       proof_class: "encrypted_profile_policy_status",
-      next_actions: [chainId === undefined ? "apn wallet policy set" : `apn wallet policy set-network --chain eip155:${chainId}`],
+      // The one manifest v2 command that sets this policy, for the profile and network just shown; the owner picks the limits.
+      next_actions: [`apn wallet policy set --profile ${profile}${chainId === undefined ? "" : ` --chain eip155:${chainId}`} ` +
+        "--max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>"],
     };
   }
   return {

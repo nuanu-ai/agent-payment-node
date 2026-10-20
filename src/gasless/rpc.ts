@@ -248,7 +248,7 @@ export class GaslessRpc implements GaslessRpcPort {
         !exactKeys(row, result ? ["jsonrpc", "id", "result"] : ["jsonrpc", "id", "error"])) {
         gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
       }
-      if (error) gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_provider_response");
+      if (error) endpointRefused(this.deployment.network, "bundler", this.deployment.bundlerEnv);
       results.set(id, row.result);
     }
     return requests.map(request => results.get(request.id));
@@ -400,7 +400,7 @@ export class GaslessRpc implements GaslessRpcPort {
     if (record.jsonrpc !== "2.0" || record.id !== id || result === error || !exactKeys(record, keys)) {
       gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
     }
-    if (error) gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_provider_response");
+    if (error) endpointRefused(this.deployment.network, "bundler", this.deployment.bundlerEnv);
     return record.result;
   }
 
@@ -432,7 +432,7 @@ export class GaslessRpc implements GaslessRpcPort {
           () => session.assertActive());
         assertHttpStatus(response.status, session);
         if (chunk.length === 1) {
-          results.set(chunk[0]!.id, parseRpcResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), chunk[0]!.id));
+          results.set(chunk[0]!.id, parseRpcResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), chunk[0]!.id, this.deployment));
           continue;
         }
         const rows = rpcJson(response.body, MAX_RESPONSE);
@@ -443,7 +443,7 @@ export class GaslessRpc implements GaslessRpcPort {
           if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
             gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
           }
-          results.set(id, parseRpcResult(record, id));
+          results.set(id, parseRpcResult(record, id, this.deployment));
         }
       }
       for (const read of reads) read.resolve(results.get(read.id));
@@ -454,14 +454,21 @@ export class GaslessRpc implements GaslessRpcPort {
   }
 }
 
-function parseRpcResult(record: Record<string, unknown>, id: string): unknown {
+function parseRpcResult(record: Record<string, unknown>, id: string, deployment: { readonly network: string; readonly rpcEnv: string }): unknown {
   const result = Object.hasOwn(record, "result"), error = Object.hasOwn(record, "error");
   const keys = result ? ["jsonrpc", "id", "result"] : ["jsonrpc", "id", "error"];
   if (record.jsonrpc !== "2.0" || record.id !== id || result === error || !exactKeys(record, keys)) {
     gaslessFailure("APN_RPC_PROTOCOL", "gasless_RPC_response");
   }
-  if (error) gaslessFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "gasless_provider_response");
+  if (error) endpointRefused(deployment.network, "RPC", deployment.rpcEnv);
   return record.result;
+}
+
+/** An endpoint's JSON-RPC error answer: the refusal and its retry rule stay; the guidance names that endpoint's setting. */
+function endpointRefused(network: string, which: "RPC" | "bundler", setting: string): never {
+  throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Gasless validation failed: gasless_provider_response.", { endpoint: which.toLowerCase(),
+    nextActions: [`The ${network} ${which} endpoint answered a read this route needs with a JSON-RPC error, and APN never switches ` +
+      `endpoints on its own. Set ${setting} to a public HTTPS ${network} ${which} endpoint that serves it, then rerun the same command.`] });
 }
 
 function assertHttpStatus(status: number, session: GaslessRpcRequestSession): void {

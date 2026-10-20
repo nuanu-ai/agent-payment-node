@@ -1,7 +1,7 @@
 import { CHAIN_CAIP2 } from "./constants.js";
 import type { ProviderX402SellerResult } from "./provider-ports.js";
 import type { ProviderX402OperationRecord, ProviderX402ReceiptRecord } from "./provider-x402-model.js";
-import { type X402ReceiptRecord, type X402ResultRecord } from "./x402-state-integrity.js";
+import { X402_RESULT_HASH_RULE, type X402ReceiptRecord, type X402ResultRecord } from "./x402-state-integrity.js";
 interface NormalizedProviderReceipt {
     readonly schemaVersion: "apn.x402.public-receipt.v1";
     readonly variant: "normalized_provider_json";
@@ -88,8 +88,12 @@ interface LocalPublicResult {
     readonly body_encoding?: "base64";
     readonly media_type: string;
     readonly body: unknown;
+    /** Plain SHA-256 of the exact body bytes. */
     readonly sha256: string;
     readonly byte_length: string;
+    /** The domain-separated hash the operation and receipt link to (`resultHash`), computed by `result_hash_rule`. */
+    readonly result_hash: string;
+    readonly result_hash_rule: typeof X402_RESULT_HASH_RULE;
 }
 interface NormalizedProviderResult {
     readonly kind: "x402_result";

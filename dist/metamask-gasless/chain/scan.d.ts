@@ -10,16 +10,25 @@ export declare const MM_MIN_SCAN_WINDOW = 50n;
 export declare const MM_MAX_LOG_QUERIES = 8;
 /** Transport and log-limit reasons that keep the progress already proved in this resume. */
 export declare const MM_SCAN_STOP_REASONS: readonly MetaMaskGaslessFailureReason[];
+/** The pinned manager's own record that this delegation can no longer be redeemed, read at one finality block. */
+export interface MetaMaskDelegationDisabled {
+    readonly finality: MetaMaskGaslessBlock;
+    readonly evidenceHash: string;
+}
 export interface MetaMaskScanContext {
     readonly row: MetaMaskGaslessDeploymentRow;
     readonly call: MmRpcCall;
 }
 export type MetaMaskScanResult = 
-/** No redemption is possible up to `cursor`; the scan may still have unscanned blocks before finality. */
+/**
+ * No redemption is possible up to `cursor`; the scan may still have unscanned blocks before finality. `disabled` is
+ * the proof that none is possible after it either: at that finality block the count is 0 and the delegation disabled.
+ */
 {
     readonly kind: "progress";
     readonly cursor: MetaMaskGaslessCursor;
     readonly evidenceHash: string;
+    readonly disabled?: MetaMaskDelegationDisabled;
 }
 /** The RPC stopped answering after `cursor`, which only covers fully verified blocks. */
  | {
@@ -54,3 +63,10 @@ export type MetaMaskScanResult =
 export declare function scanMetaMaskRedemption(context: MetaMaskScanContext, intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor): Promise<MetaMaskScanResult>;
 /** `callCounts(manager, delegationHash)` at one canonical block pinned by hash, against the pinned enforcer code. */
 export declare function mmRedemptionCount(context: MetaMaskScanContext, delegationHash: Hex, at: MetaMaskGaslessBlock): Promise<bigint>;
+/**
+ * `disabledDelegations(delegationHash)` on the pinned DelegationManager at one canonical block pinned by hash, against
+ * the manager's pinned code. Only the delegator itself can set it (`disableDelegation`, `onlyDeleGator`), and every
+ * `redeemDelegations` refuses a disabled hash (`CannotUseADisabledDelegation`). With the count read 0 at the same block,
+ * the delegation was never redeemed and cannot be from then on unless that same wallet calls `enableDelegation`.
+ */
+export declare function mmDelegationDisabled(context: MetaMaskScanContext, delegationHash: Hex, at: MetaMaskGaslessBlock): Promise<boolean>;
