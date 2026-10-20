@@ -68,7 +68,9 @@ export class OrcaReceiptObserver {
         if (metaErr !== null) {
             const receiptHash = domainHash("apn.orca-revert-proof.v1", canonicalJson({ signature, slot: slot.toString(), fee: fee.toString(),
                 error: canonical(metaErr), messageHash: binding.messageHash, bindingHash: binding.bindingHash, observedAt }));
-            return { outcome: "reverted", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true } };
+            // A failed Solana transaction keeps no state change: the fee is its whole cost.
+            return { outcome: "reverted", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true,
+                    economics: { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: fee.toString(), nativeDebitAtomic: fee.toString() } } };
         }
         const loaded = isPlainRecord(meta.loadedAddresses) ? meta.loadedAddresses : { writable: [], readonly: [] };
         if (rpcArray(loaded.writable ?? [], 0).length !== 0 || rpcArray(loaded.readonly ?? [], 0).length !== 0)
@@ -95,9 +97,18 @@ export class OrcaReceiptObserver {
         }
         const amounts = debited === undefined ? { usdcReceivedAtomic: received.toString() }
             : { sourceDebitedAtomic: debited.toString(), outputReceivedAtomic: received.toString() };
+        // The input is what left the owner's source account, or for SOL what the pool's wSOL vault received; the rent is what
+        // the owner's destination account gained (a new token account; token transfers move no lamports there).
+        const lamports = (index) => (post[index] ?? conflict()) - (pre[index] ?? conflict());
+        const input = debited ?? lamports(accountIndex(messageBytes, sides.pool.vaultA)), rent = lamports(outputIndex);
+        if (input <= 0n || rent < 0n)
+            conflict();
         const receiptHash = domainHash("apn.orca-finalized-receipt.v1", canonicalJson({ signature, slot: slot.toString(), fee: fee.toString(),
-            solSpentLamports: spent.toString(), ...amounts, messageHash: binding.messageHash, bindingHash: binding.bindingHash, observedAt }));
-        return { outcome: "succeeded", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true } };
+            solSpentLamports: spent.toString(), ...amounts, inputAtomic: input.toString(), accountRentLamports: rent.toString(),
+            messageHash: binding.messageHash, bindingHash: binding.bindingHash, observedAt }));
+        return { outcome: "succeeded", proof: { receiptHash, transactionHash: signature, observedAt, finalized: true,
+                economics: { inputAtomic: input.toString(), outputAtomic: received.toString(), networkFeeAtomic: fee.toString(),
+                    nativeDebitAtomic: spent.toString(), accountRentAtomic: rent.toString() } } };
     }
 }
 /** Static key index in the exact bound v0 message, which has no lookup tables. */

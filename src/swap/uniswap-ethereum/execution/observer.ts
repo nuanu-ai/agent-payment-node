@@ -5,7 +5,7 @@ import type { EvmRpcCall } from "../../../evm-ports.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmTokenBalance, recheckEvmBlock } from "../../../evm-rpc-codec.js";
 import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../../model.js";
 import { proveEvmUnlanded, type SwapUnlandedProof } from "../../unlanded.js";
-import { validateUniswapReceipt, type UniswapReceiptEvidence } from "../../uniswap-receipt.js";
+import { uniswapFeeAtomic, uniswapReceiptFee, validateUniswapReceipt, type UniswapReceiptEvidence } from "../../uniswap-receipt.js";
 import { UNISWAP_ROUTER } from "../../uniswap-pin.js";
 import { validateUniswapExecutionBinding } from "./binding.js";
 import { sealUniswapBalanceEvidence, type UniswapBalanceEvidence, type UniswapBalanceEvidencePort } from "./evidence-store.js";
@@ -77,7 +77,7 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
     return { outcome: "succeeded", proof: validateUniswapReceipt({ transactionHash, transaction: { hash: txHash, from: evmRpcAddress(tx.from),
       to: evmRpcAddress(tx.to), input: evmRpcHex(tx.input), value: evmRpcQuantity(tx.value).toString(),
       blockNumber: txBlock.toString(), blockHash: txBlockHash }, receipt: { transactionHash: receiptHash, status: "0x1",
-      blockNumber: receiptBlock.toString(), blockHash: receiptBlockHash, logs }, beforeNative: balances.beforeNative,
+      blockNumber: receiptBlock.toString(), blockHash: receiptBlockHash, logs, ...uniswapReceiptFee(receipt) }, beforeNative: balances.beforeNative,
       afterNative: balances.afterNative, beforeOutput: balances.beforeOutput, afterOutput: balances.afterOutput,
       finalizedHead: { number: finalizedHead.number, hash: finalizedHead.hash }, observedAt }, binding.envelope,
     { transactionHash, account: operation.quote.account, recipient: operation.quote.recipient,
@@ -97,11 +97,14 @@ export class UniswapEthereumReceiptObserver implements UniswapReceiptObserverPor
     if (!Array.isArray(input.receipt.logs) || input.receipt.logs.length !== 0) blocked("A reverted Uniswap receipt must carry no logs.", "uniswap_receipt_conflict");
     await recheckEvmBlock(this.call, input.block); await recheckEvmBlock(this.call, input.safeHead);
     await recheckEvmBlock(this.call, input.finalizedHead); await this.assertChain();
-    const observedAt = instant(this.now());
+    const observedAt = instant(this.now()), receiptFee = uniswapReceiptFee(input.receipt), fee = uniswapFeeAtomic(receiptFee);
     const receiptHash = domainHash("apn.uniswap-revert-proof.v1", canonicalJson({ transactionHash: input.transactionHash,
       status: "0x0", blockNumber: input.txBlock.toString(), blockHash: input.block.hash, bindingHash: input.binding.bindingHash,
-      envelopeHash: input.binding.envelopeHash, finalizedHead: { number: input.finalizedHead.number, hash: input.finalizedHead.hash }, observedAt }));
-    return { outcome: "reverted", proof: { receiptHash, transactionHash: input.transactionHash, observedAt, finalized: true } };
+      envelopeHash: input.binding.envelopeHash, finalizedHead: { number: input.finalizedHead.number, hash: input.finalizedHead.hash }, observedAt,
+      ...(fee === null ? {} : { receiptFee }) }));
+    // A revert moved no input and credited nothing; the gas it burned is its whole cost.
+    return { outcome: "reverted", proof: { receiptHash, transactionHash: input.transactionHash, observedAt, finalized: true,
+      economics: { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: fee?.toString() ?? null, nativeDebitAtomic: fee?.toString() ?? null } } };
   }
 
   /** Balance evidence for this exact canonical block: kept from first sight, or read now and kept. */

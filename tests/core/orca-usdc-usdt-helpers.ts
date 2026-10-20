@@ -115,6 +115,7 @@ export class FakeOrcaTokenRpc implements SolanaRpcPort {
     const keys = getCompiledTransactionMessageDecoder().decode(getTransactionDecoder().decode(Buffer.from(raw, "base64")).messageBytes).staticAccounts;
     const failed = this.status === "finalized_error", { input, output, rent } = this.outcome(raw);
     const pre = keys.map(() => 1_000n), post = [...pre]; pre[0] = this.ownerLamports; post[0] = this.ownerLamports - this.fee - (failed ? 0n : rent);
+    if (!failed) post[keys.indexOf(this.destination as never)]! += rent; // a new destination account holds the rent the owner paid
     const balance = (key: string, mint: string, amount: bigint) => ({ accountIndex: keys.indexOf(key as never), mint, owner: this.owner,
       programId: TOKEN_PROGRAM, uiTokenAmount: { amount: amount.toString(), decimals: 6, uiAmount: null, uiAmountString: "0" } });
     const source = this.sourceBefore ?? 0n, destination = this.destinationBefore ?? 0n;

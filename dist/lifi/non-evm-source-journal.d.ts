@@ -8,11 +8,11 @@ declare const schemaV3: z.ZodObject<{
         previousHash: z.ZodString;
         transitionHash: z.ZodString;
         phase: z.ZodEnum<{
+            submitted_pending: "submitted_pending";
+            unknown_finality: "unknown_finality";
             signing_started: "signing_started";
             sealed: "sealed";
-            unknown_finality: "unknown_finality";
             submitting: "submitting";
-            submitted_pending: "submitted_pending";
             staged_untrusted: "staged_untrusted";
         }>;
         signedTransaction: z.ZodNullable<z.ZodString>;
@@ -24,11 +24,11 @@ declare const schemaV3: z.ZodObject<{
     }, z.core.$strict>>;
     integrityHash: z.ZodString;
     phase: z.ZodEnum<{
+        submitted_pending: "submitted_pending";
+        unknown_finality: "unknown_finality";
         signing_started: "signing_started";
         sealed: "sealed";
-        unknown_finality: "unknown_finality";
         submitting: "submitting";
-        submitted_pending: "submitted_pending";
         staged_untrusted: "staged_untrusted";
     }>;
     signedTransaction: z.ZodNullable<z.ZodString>;

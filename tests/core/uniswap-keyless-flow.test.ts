@@ -69,6 +69,8 @@ test("a finalized status-0 receipt becomes failed_confirmed_revert and releases 
   const reverted: SwapOperationRecord = await f.runtime.status(sent.operationId, f.clock.now());
   assert.equal(reverted.state, "failed_confirmed_revert"); assert.equal(reverted.usageLease?.state, "failed_confirmed_revert");
   assert.equal(reverted.failureProofHash, reverted.receiptProof?.receiptHash); assert.equal(f.rpc.sends.length, 1);
+  // A revert moved no input and credited nothing; its gas (21000 x 1 gwei) is the whole cost.
+  assert.deepEqual(reverted.receiptProof?.economics, { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: "21000000000000", nativeDebitAtomic: "21000000000000" });
   assert.equal((await f.usage()).amountAtomic, "0");
   assert.equal((await f.runtime.status(sent.operationId, f.clock.now())).integrityHash, reverted.integrityHash);
 });

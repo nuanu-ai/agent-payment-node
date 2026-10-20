@@ -62,6 +62,8 @@ test("USDC to USDT runs through the generic keyless route: quote, prepare, one c
   const statusCalls = [...f.rpc.calls];
   assert.equal(finalized.state, "finalized"); assert.equal(finalized.receiptProof?.transactionHash, signatureOf(f.rpc.sends[0]!));
   assert.equal(finalized.usageLease?.state, "finalized"); assert.equal(f.rpc.sends.length, 1);
+  assert.deepEqual(finalized.receiptProof?.economics, { inputAtomic: USDC_IN.toString(), outputAtomic: quoted.quote.minimumOutputAtomic,
+    networkFeeAtomic: "5000", nativeDebitAtomic: "5000", accountRentAtomic: "0" });
   // RPC per step through the fake port (program pins stubbed; the ten-key market read already goes out as two pages).
   assert.deepEqual({ quote: quoteCalls.length, approve: approveCalls.length, status: statusCalls.length }, { quote: 8, approve: 11, status: 2 });
   assert.equal(approveCalls.filter((method) => method === "sendTransaction").length, 1);
@@ -80,9 +82,13 @@ test("USDC to USDT creates a missing USDT account inside the swap and bounds SOL
   assert.equal(quoted.fees.maximumSolSpendLamports, (f.rpc.fee + f.rpc.rent).toString());
   const prepared = await f.runtime.prepare({ profile: PROFILE, quoteHash: quoted.quoteHash, idempotencyKey: "orca-usdc-usdt-0002" }, f.clock.now());
   const sent = await f.runtime.approveAndExecute(prepared.operationId, f.clock.now());
-  f.rpc.status = "finalized"; f.advance(20_000);
-  assert.equal((await f.runtime.status(sent.operationId, f.clock.now())).state, "finalized");
+  f.rpc.status = "finalized"; f.advance(20_000); f.rpc.outputAboveMinimum = 4n;
+  const finalized = await f.runtime.status(sent.operationId, f.clock.now());
+  assert.equal(finalized.state, "finalized");
   assert.ok(f.printed().includes("created in this transaction"));
+  // The new account's rent is reported apart from the fee, and an output above the minimum is the receipt's, not the quote's.
+  assert.deepEqual(finalized.receiptProof?.economics, { inputAtomic: USDC_IN.toString(), outputAtomic: (BigInt(prepared.quote.minimumOutputAtomic) + 4n).toString(),
+    networkFeeAtomic: f.rpc.fee.toString(), nativeDebitAtomic: (f.rpc.fee + f.rpc.rent).toString(), accountRentAtomic: f.rpc.rent.toString() });
 });
 
 test("USDC to USDT refuses short balances, shortfalls and a wrong debit before anything is signed", async (t) => {

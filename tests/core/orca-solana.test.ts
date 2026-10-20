@@ -146,6 +146,9 @@ test("one foreground approval takes a fresh blockhash, re-simulates the exact by
   f.rpc.status = "finalized"; f.advance(20_000);
   const finalized = await f.runtime.status(sent.operationId, f.clock.now());
   assert.equal(finalized.state, "finalized"); assert.equal(finalized.receiptProof?.transactionHash, signatureOf(f.rpc.sends[0]!));
+  // QA 0.5.51 UNISWAP-RESULT-ECONOMICS-001 (Orca native): the finalized receipt's own input, output and fee, beside the quote.
+  assert.deepEqual(finalized.receiptProof?.economics, { inputAtomic: AMOUNT_IN.toString(), outputAtomic: f.rpc.simulatedOut.toString(),
+    networkFeeAtomic: "5200", nativeDebitAtomic: (AMOUNT_IN + 5_200n).toString(), accountRentAtomic: "0" });
   assert.equal((await f.runtime.status(sent.operationId, f.clock.now())).integrityHash, finalized.integrityHash); assert.equal(f.rpc.sends.length, 1);
 });
 
@@ -157,6 +160,7 @@ test("a finalized failed swap becomes failed_confirmed_revert, and a pre-sign re
   f.rpc.status = "finalized_error"; f.advance(20_000);
   const reverted = await f.runtime.status(sent.operationId, f.clock.now());
   assert.equal(reverted.state, "failed_confirmed_revert"); assert.equal(reverted.usageLease?.state, "failed_confirmed_revert"); assert.equal(f.rpc.sends.length, 1);
+  assert.deepEqual(reverted.receiptProof?.economics, { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: "5200", nativeDebitAtomic: "5200" });
   const other = await temporaryState(); t.after(other.cleanup);
   const g = await flow(other.root), again = await g.quote();
   const ready = await g.runtime.prepare({ profile: PROFILE, quoteHash: again.quoteHash, idempotencyKey: "orca-flow-0005" }, g.clock.now());

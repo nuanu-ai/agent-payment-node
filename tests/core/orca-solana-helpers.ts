@@ -115,6 +115,8 @@ export class FakeOrcaRpc implements SolanaRpcPort {
     const keys = message.staticAccounts.length, usdcIndex = message.staticAccounts.indexOf(this.usdc as never), failed = this.status === "finalized_error";
     const pre = Array.from({ length: keys }, () => 1_000n), post = [...pre]; pre[0] = this.ownerLamports;
     post[0] = this.ownerLamports - this.fee - (failed ? 0n : AMOUNT_IN + (this.usdcBefore === null ? this.rent : 0n));
+    // As on chain: the pool's wSOL vault gains the input; a new USDC account holds the rent the owner paid.
+    if (!failed) { post[message.staticAccounts.indexOf(ORCA_SOL_VAULT as never)]! += AMOUNT_IN; if (this.usdcBefore === null) post[usdcIndex]! += this.rent; }
     const balance = (amount: bigint) => ({ accountIndex: usdcIndex, mint: USDC_MINT, owner: this.owner, programId: TOKEN_PROGRAM,
       uiTokenAmount: { amount: amount.toString(), decimals: 6, uiAmount: null, uiAmountString: "0" } });
     return { slot: this.slot + 5n, version: 0n, blockTime: 1n, transaction: [raw, "base64"], meta: { err: failed ? { InstructionError: [6, { Custom: 6036 }] } : null,

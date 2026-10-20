@@ -91,6 +91,13 @@ that exact pin.
   that sees the receipt reads those balances and keeps them in the state root,
   bound to the block hash. A later `status` reuses them and needs no historical
   state. After a reorg they are read again.
+- A finalized operation's `receiptProof.economics` holds what the receipt
+  itself proved: `inputAtomic` (the mined value), `outputAtomic` (the
+  recipient's Transfer credit), `networkFeeAtomic` (gasUsed x effective gas
+  price) and `nativeDebitAtomic`; a revert has input "0" and output null. The
+  quote keeps its expected and minimum output. SunSwap, Orca and Jupiter fill the
+  same fields from their own finalized records (fee in SUN or lamports; Orca adds
+  the rent of a token account it created). Proofs written before APN recorded them have none.
 - Run `status` within about 25 minutes of sending. If the first observation
   comes later, `status` fails with `APN_PROVIDER_UNAVAILABLE` /
   `uniswap_pre_state_unavailable`. Re-run it with a distinct archive reader in

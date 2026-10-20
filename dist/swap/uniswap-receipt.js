@@ -4,12 +4,21 @@ import { ApnError } from "../errors.js";
 import { UNISWAP_ROUTER } from "./uniswap-pin.js";
 const TRANSFER = parseAbi(["event Transfer(address indexed from, address indexed to, uint256 value)"]);
 const TRANSFER_TOPIC = encodeEventTopics({ abi: TRANSFER, eventName: "Transfer" })[0];
+export function uniswapReceiptFee(receipt) {
+    const read = (value) => typeof value === "string" && /^0x[0-9a-fA-F]{1,64}$/u.test(value) ? BigInt(value).toString() : undefined;
+    const gasUsed = read(receipt.gasUsed), effectiveGasPrice = read(receipt.effectiveGasPrice);
+    return gasUsed === undefined || effectiveGasPrice === undefined ? {} : { gasUsed, effectiveGasPrice };
+}
+export function uniswapFeeAtomic(fee) {
+    return fee.gasUsed === undefined || fee.effectiveGasPrice === undefined ? null : quantity(fee.gasUsed) * quantity(fee.effectiveGasPrice);
+}
 export function validateUniswapReceipt(evidence, envelope, expected) {
     if (!isPlainRecord(evidence) || !exactKeys(evidence, ["transactionHash", "transaction", "receipt", "beforeNative", "afterNative",
         "beforeOutput", "afterOutput", "finalizedHead", "observedAt"]))
         fail();
     if (!isPlainRecord(evidence.transaction) || !exactKeys(evidence.transaction, ["hash", "from", "to", "input", "value", "blockNumber", "blockHash"]) ||
-        !isPlainRecord(evidence.receipt) || !exactKeys(evidence.receipt, ["transactionHash", "status", "blockNumber", "blockHash", "logs"]) ||
+        !isPlainRecord(evidence.receipt) || !exactKeys(evidence.receipt, ["transactionHash", "status", "blockNumber", "blockHash", "logs",
+        ...(evidence.receipt.gasUsed === undefined ? [] : ["gasUsed", "effectiveGasPrice"])]) ||
         !Array.isArray(evidence.receipt.logs) || evidence.receipt.logs.length > 4096 ||
         evidence.receipt.logs.some((log) => !isPlainRecord(log) || !exactKeys(log, ["address", "topics", "data"]) ||
             !Array.isArray(log.topics) || log.topics.length > 4 || log.topics.some((topic) => !hexWord(topic)) || !hexData(log.data)) ||
@@ -36,7 +45,11 @@ export function validateUniswapReceipt(evidence, envelope, expected) {
     if (credited < minimumOutput)
         fail();
     const receiptHash = domainHash("apn.uniswap-receipt-proof.v1", canonicalJson({ evidence, envelope, expected }));
-    return { receiptHash, transactionHash: expected.transactionHash, observedAt: evidence.observedAt, finalized: true };
+    // The exact input is the mined value (the router wraps and swaps exactly it); the output is this receipt's credit.
+    const fee = uniswapFeeAtomic(receipt);
+    return { receiptHash, transactionHash: expected.transactionHash, observedAt: evidence.observedAt, finalized: true,
+        economics: { inputAtomic: transactionValue.toString(), outputAtomic: credited.toString(), networkFeeAtomic: fee?.toString() ?? null,
+            nativeDebitAtomic: fee === null ? null : (transactionValue + fee).toString() } };
 }
 function quantity(value) {
     if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,77})$/u.test(value))
