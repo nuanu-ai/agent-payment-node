@@ -6,7 +6,7 @@ import { ApnError } from "./errors.js";
 import type { Hex } from "./model.js";
 import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, takeMetaMaskNativeProcessFailureDiagnostic, type MetaMaskProcessResult } from "./metamask-process-runner.js";
 import { resolveMetaMaskBin } from "./metamask-package.js";
-import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices } from "./metamask-process-output.js";
+import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice, type MetaMaskMfaNotice } from "./metamask-process-output.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote, type MetaMaskNativeFeeChainId } from "./metamask-native-fee-evidence.js";
 import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent,
@@ -25,10 +25,13 @@ export interface MetaMaskNativeVendorPolicy {
   readonly outflowLimitsUsd: Readonly<Record<string, string>>;
   readonly observedAt: string;
 }
+/** A verified AWAITING_MFA notice (or request status) for the very request stored, with the SHA-256 of the vendor output. */
+export interface MetaMaskNativeMfaEvidence extends MetaMaskMfaNotice { readonly evidenceHash: string }
 export type MetaMaskNativeSubmission = (
   | { readonly disposition: "acknowledged"; readonly transactionHash: Hex; readonly requestId?: never }
-  | { readonly disposition: "pending"; readonly requestId: string; readonly transactionHash?: never }
-  | { readonly disposition: "unknown"; readonly reason: string; readonly transactionHash?: Hex; readonly requestId?: string }) & {readonly diagnostic?: MetaMaskNativeDiagnostic};
+  | { readonly disposition: "pending"; readonly requestId: string; readonly transactionHash?: never; readonly mfa?: MetaMaskNativeMfaEvidence }
+  | { readonly disposition: "unknown"; readonly reason: string; readonly transactionHash?: Hex; readonly requestId?: string; readonly mfa?: MetaMaskNativeMfaEvidence })
+  & {readonly diagnostic?: MetaMaskNativeDiagnostic};
 
 class NativeReadRefusal extends ApnError {
   constructor(readonly nativeDiagnostic:MetaMaskNativeDiagnostic) {super("APN_OPERATION_BLOCKED","The MetaMask Agent Wallet did not confirm the paying wallet, Guard mode or policy.");}
@@ -118,7 +121,7 @@ export async function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope,
     // Rejection remains UNKNOWN even when the real failed child emitted a recoverable identifier.
     return {disposition: "unknown", reason: "provider_private_handoff_outcome_unknown", ...(diagnostic === undefined ? {} : {diagnostic}),
       ...(bound && observed.transactionHash !== undefined ? {transactionHash: observed.transactionHash} : {}),
-      ...(bound && observed.requestId !== undefined ? {requestId: observed.requestId} : {})};
+      ...(bound && observed.requestId !== undefined ? {requestId: observed.requestId, ...(observed.mfa === undefined ? {} : {mfa: observed.mfa})} : {})};
   }
   // The effect has happened: no guard runs after it. The pre-send guard required the quote nonce to be the pending
   // nonce, so re-running it after a broadcast (nonce + 1) turned every successful send into an unknown outcome. The
@@ -178,7 +181,7 @@ function readDiagnostic(value: unknown): MetaMaskNativeDiagnostic | null {
 type MutableReadObservation = {-readonly [K in keyof MetaMaskNativeReadObservation]: MetaMaskNativeReadObservation[K]};
 type RequestHint =
   | {readonly disposition: "acknowledged"; readonly requestId: string; readonly transactionHash: Hex; readonly chainId?: MetaMaskNativeFeeChainId}
-  | {readonly disposition: "pending"; readonly requestId: string; readonly chainId?: MetaMaskNativeFeeChainId; readonly transactionHash?: never}
+  | {readonly disposition: "pending"; readonly requestId: string; readonly chainId?: MetaMaskNativeFeeChainId; readonly transactionHash?: never; readonly mfa?: MetaMaskNativeMfaEvidence}
   | {readonly disposition: "unknown"; readonly reason: string; readonly requestId?: string; readonly transactionHash?: Hex; readonly chainId?: MetaMaskNativeFeeChainId};
 export type MetaMaskNativeRequestObservation = RequestHint & {readonly readObservation?: MetaMaskNativeReadObservation};
 
@@ -236,8 +239,15 @@ function requestHint(result: MetaMaskProcessResult, requestId: string, observati
   if (parsed === null) return unknown("provider_response_malformed");
   const notice = classifyMetaMaskPendingNotices(parsed.notices, requestId);
   if (notice.disposition === "invalid") return unknown("provider_request_identity_conflict");
-  const data = parsed.envelope?.data;
-  if (parsed.envelope === null) return unknown("provider_request_evidence_missing");
+  const data = parsed.envelope?.data, mfa = (): MetaMaskNativeMfaEvidence => ({...(notice.disposition === "pending" ? metaMaskMfaNotice(parsed.notices)
+    : {expiresAt: null, authMethod: null}), evidenceHash: observation.response_hash!});
+  // Notice only: the watch ended (6.1.5 writes its `_error` to stderr) while the provider still waits for the owner's
+  // approval of this very request (the notice names it). That is the whole answer: an MFA task, no outcome, no hash.
+  if (parsed.envelope === null) {
+    if (notice.disposition !== "pending") return unknown("provider_request_evidence_missing");
+    observation.provider_status = "AWAITING_MFA";
+    return {disposition: "pending", requestId, mfa: mfa()};
+  }
   if (!isPlainRecord(data) || !isPlainRecord(data.request) || !isPlainRecord(data.status)) return unknown("provider_request_evidence_missing");
   const request = data.request, status = data.status;
   if (request.pollingId !== requestId || request.kind !== "transaction" || !isMetaMaskEvmNamespace(request.namespace))
@@ -260,7 +270,8 @@ function requestHint(result: MetaMaskProcessResult, requestId: string, observati
     return {disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint,
       ...(transactionHash === undefined ? {} : {transactionHash})};
   if (transactionHash !== undefined) return {disposition: "acknowledged", transactionHash, requestId, ...chainHint};
-  if (typeof status.status === "string" && EFFECT_STATES.has(status.status)) return {disposition: "pending", requestId, ...chainHint};
+  if (typeof status.status === "string" && EFFECT_STATES.has(status.status))
+    return {disposition: "pending", requestId, ...chainHint, ...(status.status === "AWAITING_MFA" ? {mfa: mfa()} : {})};
   return {disposition: "unknown", reason: "provider_request_outcome_unknown", requestId, ...chainHint};
 }
 
@@ -273,19 +284,25 @@ function submissionHint(result: MetaMaskProcessResult, expectedPayer: string): M
     ? data.hash.toLowerCase() as Hex : undefined;
   const requestId = isPlainRecord(data) && typeof data.pollingId === "string" && /^[A-Za-z0-9._:-]{1,256}$/u.test(data.pollingId)
     ? data.pollingId : notice.disposition === "pending" ? notice.recoveryToken : undefined;
-  const unknown = (reason: string): MetaMaskNativeSubmission => ({disposition: "unknown", reason,
-    ...(transactionHash === undefined ? {} : {transactionHash}), ...(requestId === undefined ? {} : {requestId})});
+  // The owner's approval the provider waits on, for this very request only: a notice naming it or its AWAITING_MFA status,
+  // with no hash and no other sender. It is kept beside an UNKNOWN or pending outcome, never in place of one.
+  const sender = !isPlainRecord(data) || data.mode === "server" && typeof data.address === "string" && data.address.toLowerCase() === expectedPayer.toLowerCase();
+  const latest = isPlainRecord(data) && typeof data.status === "string" ? data.status : undefined;
+  const awaiting = latest === undefined ? notice.disposition === "pending" && notice.recoveryToken === requestId : latest === "AWAITING_MFA";
+  const task = requestId !== undefined && transactionHash === undefined && sender && awaiting ? {mfa: {...(notice.disposition === "pending"
+    ? metaMaskMfaNotice(parsed.notices) : {expiresAt: null, authMethod: null}), evidenceHash: sha256(result.stdout)}} : {};
+  const unknown = (reason: string, withTask = false): MetaMaskNativeSubmission => ({disposition: "unknown", reason,
+    ...(transactionHash === undefined ? {} : {transactionHash}), ...(requestId === undefined ? {} : {requestId}), ...(withTask ? task : {})});
   if (notice.disposition === "invalid" || (notice.disposition === "pending" && requestId !== notice.recoveryToken))
     return unknown("provider_identity_conflict");
-  if (result.exitCode !== 0) return unknown("provider_private_handoff_outcome_unknown");
+  if (result.exitCode !== 0) return unknown("provider_private_handoff_outcome_unknown", true);
   if (parsed.envelope?.ok === true && isPlainRecord(data)) {
-    if (data.mode !== "server" || typeof data.address !== "string" || data.address.toLowerCase() !== expectedPayer.toLowerCase())
-      return unknown("provider_sender_mismatch");
+    if (!sender) return unknown("provider_sender_mismatch");
     if (transactionHash !== undefined) return {disposition: "acknowledged", transactionHash};
     if (requestId !== undefined && typeof data.status === "string" && EFFECT_STATES.has(data.status))
-      return {disposition: "pending", requestId};
+      return {disposition: "pending", requestId, ...task};
   }
   if (notice.disposition === "pending" && parsed.envelope === null)
-    return {disposition: "pending", requestId: notice.recoveryToken};
-  return unknown("provider_private_handoff_outcome_unknown");
+    return {disposition: "pending", requestId: notice.recoveryToken, ...task};
+  return unknown("provider_private_handoff_outcome_unknown", true);
 }

@@ -1,4 +1,5 @@
 import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { type MetaMaskMfaNotice } from "./metamask-process-output.js";
 import type { Hex } from "./model.js";
 interface NativeFailureIdentifiers {
     readonly requestId?: string;
@@ -6,6 +7,10 @@ interface NativeFailureIdentifiers {
     readonly sender?: string;
     readonly chainId?: number;
     readonly vendorProjectHash?: string;
+    /** The owner's approval the provider waits on for this very request (no hash, no other status), with the output's SHA-256. */
+    readonly mfa?: MetaMaskMfaNotice & {
+        readonly evidenceHash: string;
+    };
 }
 export declare function takeMetaMaskNativeProcessFailureDiagnostic(error: unknown): MetaMaskNativeDiagnostic | undefined;
 /** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */

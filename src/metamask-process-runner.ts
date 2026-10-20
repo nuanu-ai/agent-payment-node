@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
-import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, parseMetaMaskProcessOutput, type MetaMaskMfaNotice } from "./metamask-process-output.js";
 import type { Hex } from "./model.js";
 import {
   METAMASK_FOREGROUND_TIMEOUT_MS,
@@ -19,6 +19,8 @@ interface NativeFailureIdentifiers {
   readonly sender?: string;
   readonly chainId?: number;
   readonly vendorProjectHash?: string;
+  /** The owner's approval the provider waits on for this very request (no hash, no other status), with the output's SHA-256. */
+  readonly mfa?: MetaMaskMfaNotice & { readonly evidenceHash: string };
 }
 const nativeFailureDiagnostics = new WeakMap<ApnError,MetaMaskNativeDiagnostic>();
 export function takeMetaMaskNativeProcessFailureDiagnostic(error:unknown):MetaMaskNativeDiagnostic|undefined {
@@ -67,7 +69,12 @@ function observeNativeFailure(bytes: Buffer): NativeFailureIdentifiers | undefin
   const requestId = isPlainRecord(data) && typeof data.pollingId === "string" ? data.pollingId : notice.disposition === "pending" ? notice.recoveryToken : undefined;
   const transactionHash = isPlainRecord(data) && typeof data.hash === "string" ? data.hash.toLowerCase() as Hex : undefined;
   if (requestId === undefined && transactionHash === undefined) return undefined;
+  const latest = isPlainRecord(data) && typeof data.status === "string" ? data.status : undefined;
+  const awaiting = requestId !== undefined && transactionHash === undefined && (latest === undefined
+    ? notice.disposition === "pending" && notice.recoveryToken === requestId : latest === "AWAITING_MFA");
   return Object.freeze({...(requestId === undefined ? {} : {requestId}), ...(transactionHash === undefined ? {} : {transactionHash}),
+    ...(awaiting ? {mfa: {...(notice.disposition === "pending" ? metaMaskMfaNotice(parsed.notices) : {expiresAt: null, authMethod: null}),
+      evidenceHash: sha256(bytes)}} : {}),
     ...(isPlainRecord(data) ? {sender: (data.address as string).toLowerCase(),
       ...(typeof data.chainId === "number" ? {chainId: data.chainId} : {}),
       ...(typeof data.projectId === "string" ? {vendorProjectHash: sha256(data.projectId)} : {})} : {})});

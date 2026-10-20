@@ -6,9 +6,10 @@ import { fileURLToPath } from "node:url";
 /**
  * MM-NATIVE-001..005 for any profile (OWNR-23): a profile that is not the owner's, with its own MetaMask Agent Wallet,
  * recipient and amount, through the real `runCli` path in a pseudo-terminal. The driver fakes only the vendor child
- * process and the JSON-RPC chain; consent is typed at the real foreground prompt.
+ * process and the JSON-RPC chain; consent is typed at the real foreground prompt. `mfa`: QA 0.5.52
+ * METAMASK-NATIVE-MFA-GUIDANCE-001, a Guard that waits for the owner's approval (the driver documents the vendor bytes).
  */
-const SCENARIOS: Readonly<Record<string, number>> = { positive: 2, pinned: 1, "guard-refused": 0, refusals: 0 };
+const SCENARIOS: Readonly<Record<string, number>> = { positive: 2, pinned: 1, "guard-refused": 0, refusals: 0, mfa: 2 };
 const PTY = `import os, pty, select, signal, sys
 pid, master = pty.fork()
 if pid == 0:
