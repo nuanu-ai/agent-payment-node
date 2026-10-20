@@ -72,29 +72,39 @@ for (const [label, offer, extra, reason, field, value, expected] of [
     method: extra.assetTransferMethod ?? "permit2", reason, field, ...(value === undefined ? {} : { value }), expected }]);
 });
 
-test("the captured challenge pays through unattended x402 fetch: one witness signature, accepted and resource echoed unchanged, the nonce bit settles it", async (context) => {
+/** v1-style top-level fields a catalog seller sends beside the v2 ones (the shape of hypernatt.com's liq-radar offer, 2026-10-20). */
+const V1_FIELDS = { description: "Pay $0.011 USDC to access: volatility regime.", maxAmountRequired: "11000", mimeType: "application/json", resource: URL_ };
+const V1_STYLE = { ...CAPTURED.paymentRequired, accepts: [{ ...OFFER, ...V1_FIELDS }] };
+
+for (const [label, requested, challenge] of [
+  ["the captured challenge", URL_, CAPTURED.paymentRequired],
+  ["the captured challenge requested with a query its resource omits", `${URL_}?instrument=ES`, CAPTURED.paymentRequired],
+  ["a v1-style offer shape (maxAmountRequired, resource, description, mimeType beside the v2 fields)", URL_, V1_STYLE],
+] as const) test(`${label} pays through unattended x402 fetch: one witness signature, accepted and resource echoed unchanged, the nonce bit settles it`, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const fixture = assetFixture(temporary.root, BASE_USDC); await admitAsset(fixture, BASE_USDC);
-  fixture.http.outcomes[0] = challengeObservation({ header: canonicalPaymentRequiredHeader(CAPTURED.paymentRequired), finalUrl: URL_ });
-  const prepared = await fixture.core.execute(prepare("edified-permit2-0001"));
+  const offer = challenge.accepts[0]!;
+  fixture.http.outcomes[0] = challengeObservation({ header: canonicalPaymentRequiredHeader(challenge), finalUrl: requested });
+  const prepared = await fixture.core.execute({ ...prepare("edified-permit2-0001"), url: requested });
   assert.equal(prepared.ok, true, JSON.stringify(prepared));
   const operationId = (prepared.operation as { operationId: string }).operationId;
   const frozen = validateX402Operation((await fixture.state.findX402Operation(operationId))!);
   assert.deepEqual(frozen.selectedOffer.resolved, { assetTransferMethod: "permit2", paymentFlow: "permit2WitnessTransfer", eip2612: null });
-  assert.equal(frozen.selectedOffer.declaredCanonicalJson, canonicalJson(OFFER));
+  assert.equal(frozen.selectedOffer.declaredCanonicalJson, canonicalJson(offer));
   assert.equal(BigInt(frozen.authorization.validBefore) - BigInt(frozen.authorization.createdAt), 600n);
   assert.equal((await fixture.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
   assert.deepEqual(fixture.nativeCalls.map((call) => call.operation).filter((operation) => operation.startsWith("x402")), ["x402Permit2.approveAndAuthorize"]);
   const now = new Date().toISOString();
-  fixture.http.outcomes.push(paidObservation({ finalUrl: URL_, startedAt: now, observedAt: now, bodyText: '{"regime":"calm"}',
+  fixture.http.outcomes.push(paidObservation({ finalUrl: requested, startedAt: now, observedAt: now, bodyText: '{"regime":"calm"}',
     paymentResponseHeader: canonicalPaymentResponseHeader({ success: true, transaction: X402_TRANSACTION, network: "eip155:8453", payer: frozen.wallet, amount: "11000" }) }));
   const paid = await fixture.core.execute({ command: "operation.resume", operationId });
   assert.equal(paid.ok, true, JSON.stringify(paid));
   const sent = fixture.http.calls.filter((call) => call.paymentSignature !== undefined);
   assert.equal(sent.length, 1);
+  assert.equal(sent[0]!.url, requested, "the paid request goes to the URL the caller asked for");
   const payload = decodePaymentSignatureHeader(sent[0]!.paymentSignature!);
-  assert.equal(canonicalJson(payload.accepted), canonicalJson(OFFER), "challengeId, chainId and spenderAddress go back exactly as offered");
-  assert.equal(canonicalJson(payload.resource), canonicalJson(CAPTURED.paymentRequired.resource), "serviceName and tags go back exactly as offered");
+  assert.equal(canonicalJson(payload.accepted), canonicalJson(offer), "challengeId, chainId, spenderAddress and v1 fields go back exactly as offered");
+  assert.equal(canonicalJson(payload.resource), canonicalJson(challenge.resource), "the seller's resource (serviceName, tags, its own URL) goes back exactly");
   const authorization = (payload.payload as { permit2Authorization: { spender: string; deadline: string } }).permit2Authorization;
   assert.equal(authorization.spender, X402_EXACT_PERMIT2_PROXY); assert.equal(authorization.deadline, frozen.authorization.validBefore);
   fixture.rpc.permit2.used = true;
@@ -125,10 +135,27 @@ test("CLI and MCP refuse a 7,200-second counterfactual with the same named reaso
   assert.match(cli.error?.message ?? "", /offer 0 .* was refused: x402_offer_timeout_exceeds_bound maxTimeoutSeconds=7200/u);
 });
 
-test("a challenge whose resource is another URL is refused as such, not as an offer the seller lacks", () => {
-  const inspected = inspectOffers(decodePaymentRequiredHeader(canonicalPaymentRequiredHeader(CAPTURED.paymentRequired)), `${URL_}?instrument=ES`, x402Asset(8453));
-  assert.deepEqual(inspected.candidates, []);
-  assert.equal(inspected.resourceMismatch, URL_);
+test("the resource must name the requested origin and path; query and fragment may differ, another host, port or path refuses", () => {
+  const judged = (requested: string, resourceUrl = URL_) => inspectOffers(decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
+    ...CAPTURED.paymentRequired, resource: { ...CAPTURED.paymentRequired.resource, url: resourceUrl } })), requested, x402Asset(8453));
+  for (const requested of [`${URL_}?instrument=ES`, URL_]) assert.equal(judged(requested).candidates.length, 1, requested);
+  assert.equal(judged(URL_, `${URL_}?instrument=NQ#top`).candidates.length, 1, "the seller's own query and fragment do not matter");
+  assert.equal(judged(URL_, "https://API.edifiedlab.com:443/v1/market/vol-regime").candidates.length, 1, "compared after WHATWG normalisation");
+  for (const [requested, resourceUrl] of [[URL_, "https://api.edifiedlab.com/v1/market/other"], [`${URL_}?instrument=ES`, "https://other.example/v1/market/vol-regime"],
+    [URL_, "https://api.edifiedlab.com:8443/v1/market/vol-regime"], [URL_, "http://api.edifiedlab.com/v1/market/vol-regime"]] as const) {
+    const inspected = judged(requested, resourceUrl);
+    assert.deepEqual(inspected.candidates, [], resourceUrl); assert.equal(inspected.resourceMismatch, resourceUrl);
+  }
+});
+
+test("a Permit2 offer's fields outside extra that APN does not understand are carried; those it understands stay strict", () => {
+  const selection = selectPermit2Offer(V1_STYLE.accepts, PAYER, wirePermit2Asset);
+  assert.equal(canonicalJson(selection.requirement), canonicalJson(V1_STYLE.accepts[0]), "maxAmountRequired, resource, description and mimeType kept");
+  assert.equal(inspect(V1_STYLE).candidates.length, 1);
+  assert.throws(() => selectPermit2Offer([{ ...V1_STYLE.accepts[0], amount: "0" }], PAYER, wirePermit2Asset), (error: unknown) =>
+    (error as { details?: Record<string, unknown> }).details?.reason === "x402_offer_amount_invalid");
+  assert.throws(() => selectPermit2Offer([{ ...V1_STYLE.accepts[0], payTo: X402_EXACT_PERMIT2_PROXY }], PAYER, wirePermit2Asset), (error: unknown) =>
+    (error as { details?: Record<string, unknown> }).details?.reason === "x402_offer_payee_invalid");
 });
 
 test("the Permit2 selector names the deciding field of an admitted offer it cannot sign", () => {

@@ -15,7 +15,6 @@ import {
 const OFFER_DOMAIN = "apn.x402-permit2.offer.v1";
 const MAX_UINT256 = (1n << 256n) - 1n;
 const ZERO = "0x0000000000000000000000000000000000000000";
-const OFFER_KEYS = ["scheme", "network", "asset", "amount", "payTo", "maxTimeoutSeconds", "extra"];
 
 /** One x402 v2 PaymentRequirements object exactly as the seller sent it; never rewritten. */
 export interface Permit2Requirement {
@@ -46,8 +45,9 @@ export type Permit2OfferRefusal =
 /**
  * Select the lowest-index seller offer whose (network, token) `resolve` admits, paid through the exact Permit2 flow.
  * Unsupported offers may coexist; they are skipped, never repaired. An admitted offer that APN cannot sign (another
- * scheme or transfer method, an unknown top-level field, a timeout outside the bound, an `extra` key APN understands
- * with a wrong value) is refused by the field that decided it.
+ * scheme or transfer method, a timeout outside the bound, a field or `extra` key APN understands with a wrong value) is
+ * refused by the field that decided it. Fields APN does not understand (v1-style `maxAmountRequired`, `resource`,
+ * `description`, …) are the seller's own and stay in the requirement unchanged.
  */
 export function selectPermit2Offer(accepts: readonly unknown[], payer: Address, resolve: Permit2AssetResolver): Permit2OfferSelection {
   if (!Array.isArray(accepts) || accepts.length === 0) refuse("x402_permit2_no_listed_offer", "The seller offered no payment requirements.");
@@ -90,8 +90,6 @@ function validateOffer(index: number, offer: Record<string, unknown>, listAsset:
   if (isOfferRefusal(method) || method !== "permit2") {
     return offerRefusal("x402_offer_method_unsupported", "extra.assetTransferMethod", extra.assetTransferMethod ?? "eip3009", "permit2");
   }
-  const unknown = Object.keys(offer).find((key) => !OFFER_KEYS.includes(key));
-  if (unknown !== undefined) return offerRefusal("x402_offer_field_unsupported", unknown, undefined, OFFER_KEYS.join(", "));
   if (typeof offer.amount !== "string" || !/^[1-9][0-9]{0,77}$/u.test(offer.amount) || BigInt(offer.amount) > MAX_UINT256) {
     return offerRefusal("x402_offer_amount_invalid", "amount", offer.amount);
   }

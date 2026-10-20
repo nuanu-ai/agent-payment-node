@@ -15,7 +15,7 @@ export interface X402OfferInspection {
   readonly candidates: readonly InspectCandidate[];
   /** Offers of exactly the selected network and token that APN refused, each with its deciding field. */
   readonly refused: readonly X402RefusedOffer[];
-  /** The challenge's own resource URL when it is not the requested URL (then no offer is a candidate); else null. */
+  /** The challenge's own resource URL when its origin or path is not the requested one (then no offer is a candidate); else null. */
   readonly resourceMismatch: string | null;
 }
 
@@ -85,13 +85,13 @@ export function inspectOffer(requirements: PaymentRequirements, index: number, s
 }
 
 /**
- * The refusal when no offer of the selected network and token can be signed: the resource the seller names is not the
- * requested one, every such offer was refused (each with its reason), or the seller offers this network and token not at all.
+ * The refusal when no offer of the selected network and token can be signed: the resource the seller names is another
+ * origin or path, every such offer was refused (each with its reason), or the seller offers this network and token not at all.
  */
 export function unsupportedOfferError(asset: X402Asset, paymentRequired: PaymentRequired, inspection: X402OfferInspection): ApnError {
   const pair = { chain: asset.network, asset: asset.token };
   if (inspection.resourceMismatch !== null) {
-    return new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's challenge names another resource URL than the one requested; APN pays only for the exact URL it asked for.",
+    return new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's challenge names a resource on another origin or path than the one requested; APN pays only for the endpoint it asked for.",
       { reason: "x402_resource_url_mismatch", ...pair, resourceUrl: inspection.resourceMismatch });
   }
   const offered = offeredX402Assets(paymentRequired.accepts).map((offer) => `${offer.network} ${offer.asset} ${offer.method}`);
@@ -118,9 +118,14 @@ function offeredX402Assets(accepts: readonly unknown[]): readonly { readonly net
   return out;
 }
 
+/**
+ * The seller's resource names the requested endpoint: the same scheme, host, port and path after WHATWG normalisation.
+ * Query and fragment may differ (most sellers name the resource without the caller's query); the seller's resource is
+ * still echoed unchanged in the payment payload, and the paid request goes to the requested URL.
+ */
 function resourceMatches(value: string, requested: string): boolean {
   try {
-    const resource = new URL(value);
-    return resource.protocol === "https:" && resource.username === "" && resource.password === "" && resource.hash === "" && resource.toString() === requested;
+    const resource = new URL(value), target = new URL(requested);
+    return resource.origin === target.origin && resource.pathname === target.pathname;
   } catch { return false; }
 }
