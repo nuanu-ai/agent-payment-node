@@ -32,10 +32,16 @@ export function failureEnvelope(command, requestId, error) {
             message: safe.message,
             ...(safe.details === undefined ? {} : { details: safe.details }),
         },
-        next_actions: nextActions(safe),
+        next_actions: nextActions(safe, command),
     };
 }
-function nextActions(error) {
+/**
+ * The wallet-provider advice (pinned client, foreground connect, local profile) fits only commands an external wallet
+ * profile can run. Bridges, swaps, Circle, Relay, GasZip and the rest raise the same codes for public services and local
+ * checks, where a wallet step would mislead; there only an error's own next actions are shown.
+ */
+const WALLET_PROVIDER_COMMAND = /^(?:wallet|transfer|x402\.(?:fetch|inspect)|gasless\.(?:transfer|balance|capabilities)|operation|receipt)(?:\.|$)/u;
+function nextActions(error, command) {
     const explicit = error.details?.nextActions;
     if (Array.isArray(explicit) && explicit.every((value) => typeof value === "string"))
         return explicit;
@@ -51,9 +57,9 @@ function nextActions(error) {
                 : ["Run the foreground wallet connect handoff with --expected-revision set to the current revision."];
         }
         case "APN_PROVIDER_SESSION_REQUIRED": return ["Run the foreground wallet connect handoff again."];
-        case "APN_PROVIDER_UNAVAILABLE": return ["Verify the exact pinned provider client, then retry foreground wallet connect."];
-        case "APN_PROVIDER_PROTOCOL": return ["Stop and verify the pinned provider client before retrying."];
-        case "APN_PROVIDER_EFFECT_UNAVAILABLE": return ["Use a local profile for payment effects in this APN version."];
+        case "APN_PROVIDER_UNAVAILABLE": return WALLET_PROVIDER_COMMAND.test(command) ? ["Verify the exact pinned provider client, then retry foreground wallet connect."] : [];
+        case "APN_PROVIDER_PROTOCOL": return WALLET_PROVIDER_COMMAND.test(command) ? ["Stop and verify the pinned provider client before retrying."] : [];
+        case "APN_PROVIDER_EFFECT_UNAVAILABLE": return WALLET_PROVIDER_COMMAND.test(command) ? ["Use a local profile for payment effects in this APN version."] : [];
         case "APN_PROFILE_REVISION_CONFLICT": return ["Read current wallet status, then retry foreground connect with the exact current revision."];
         case "APN_FOREGROUND_APPROVAL_REQUIRED": {
             const handoff = error.details?.cli_handoff;

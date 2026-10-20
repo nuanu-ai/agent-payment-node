@@ -23,7 +23,7 @@ export class ProviderPermissionService {
             if (bound === null || bound.provider_id === "local") {
                 const pending = await findPendingProviderPermission(this.context.requireProviderRegistry(), profileHash);
                 if (pending === null) {
-                    throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The profile has no provider permission lifecycle.");
+                    throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The profile has no provider permission lifecycle.", { nextActions: permissionLifecycleActions(profile) });
                 }
                 if (request.command === "wallet.permission.list") {
                     return publicPendingPermissionProfile(profile, pending.adapter, pending.permission);
@@ -33,11 +33,12 @@ export class ProviderPermissionService {
                     const forgotten = await pending.lifecycle.forget(profileHash, request.expectedRevision);
                     return forgottenOutput(profile, pending.adapter.provider_id, forgotten.warning);
                 }
-                throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The provider permission is pending consent; retry the exact connect intent or forget the current revision first.");
+                throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The provider permission is pending consent; retry the exact connect intent or forget the current revision first.", { nextActions: ["Retry the exact wallet connect intent that started this permission, or forget its current revision:",
+                        `apn wallet permission forget --profile ${profile} --expected-revision ${pending.permission.revision}`] });
             }
             const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
             bound = mutable ? await upgradeProviderProfile(adapter, bound, repository) : await previewProviderProfile(adapter, bound);
-            const permissions = requirePermissions(adapter.permissions);
+            const permissions = requirePermissions(adapter.permissions, profile);
             if (request.command === "wallet.permission.forget") {
                 assertExpectedRevision(bound, request.expectedRevision);
                 const current = await permissions.read(profileHash);
@@ -64,11 +65,16 @@ export class ProviderPermissionService {
         });
     }
 }
-function requirePermissions(value) {
+function requirePermissions(value, profile) {
     if (value === undefined) {
-        throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This provider profile has no permission lifecycle.");
+        throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This provider profile has no permission lifecycle.", { nextActions: permissionLifecycleActions(profile) });
     }
     return value;
+}
+/** Permission commands manage a MetaMask Smart Account grant; for any other profile the useful step is its own status. */
+function permissionLifecycleActions(profile) {
+    return ["Permission commands apply only to a MetaMask Smart Account profile (provider metamask-smart-account) and its ERC-7715 grant; this profile has none to list or change.",
+        `apn wallet status --profile ${profile}`];
 }
 function alignRevision(profile, permission) {
     if (permission.revision < profile.revision)
