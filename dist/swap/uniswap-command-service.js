@@ -1,6 +1,6 @@
 import { ApnError } from "../errors.js";
 import { SwapOperationRepository } from "./repository.js";
-import { abandonedPrincipalCandidate } from "./uniswap-v3/token-principal.js";
+import { abandonedPrincipalCandidate, principalReleaseCandidate } from "./uniswap-v3/token-principal.js";
 import { swapMechanismDigest } from "./pin.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "./route-admission.js";
 import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS, USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
@@ -93,11 +93,15 @@ function tokenOutcome(value, residual = null, after) {
  * A swap that requires cleanup names its one exit, the owner's consented cleanup; when the fee cap refused it before
  * signing, the same cleanup may instead re-quote its own caps under fresh consent. An owner-abandoned swap still holding a
  * principal no proof released names execute, which opens custody to prove its swap never signed; execute itself, having
- * found signed bytes and changed nothing, does not name itself again.
+ * found signed bytes and changed nothing, does not name itself again. A cleaned swap still holding a principal that the
+ * finalized chain can release (its swap nonces held by a final cleanup, or unused past the deadline) names status, which
+ * reads that proof once finality reaches it.
  */
 export function uniswapTokenNextActions(op, after) {
     if (abandonedPrincipalCandidate(op) !== null)
         return after === "execute" ? [] : [`apn swap ethereum uniswap-token execute --operation ${op.operationId}`];
+    if (principalReleaseCandidate(op) !== null)
+        return [`apn swap ethereum uniswap-token status --operation ${op.operationId}`];
     if (op.phase !== "cleanup_required")
         return [];
     const cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;

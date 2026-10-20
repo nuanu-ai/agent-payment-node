@@ -137,7 +137,7 @@ export class X402Erc7710RpcReconciler {
     const expiryBlock = await this.expiryBound(startBlock, finalized, binding.effectiveExpiryUnix, rpcOrigin);
     if (expiryBlock === null) return operation;
     // Finalized blocks do not reorg and every read above is from this pass's endpoint, so no recheck follows the scan.
-    if (!await this.scanExactTransfers(operation, startBlock.number, expiryBlock.number)) return operation;
+    if (!await this.scanNoPayeeTransfer(operation, startBlock.number, expiryBlock.number)) return operation;
 
     const completedAt = this.clock.now().toISOString();
     const body = {
@@ -231,7 +231,13 @@ export class X402Erc7710RpcReconciler {
     return finalized;
   }
 
-  private async scanExactTransfers(
+  /**
+   * True only when the window holds no Transfer of this token from the wallet to the payee, of ANY value. The child
+   * delegation caps a cumulative amount ("up to"), so a redemption of less than the amount, or of two parts, is still
+   * a redemption: any such Transfer (or a same-payee payment outside this operation) leaves the operation unresolved,
+   * with owner abandon as its exit. Every log the port returns already is such a Transfer (its adapter refuses others).
+   */
+  private async scanNoPayeeTransfer(
     operation: X402OperationRecord,
     startNumber: string,
     endNumber: string,
@@ -255,7 +261,7 @@ export class X402Erc7710RpcReconciler {
         continue;
       }
       if (result.kind !== "complete") return false;
-      if (result.logs.some((log) => matchingTransfer(log, operation))) return false;
+      if (result.logs.length > 0) return false;
       from = to + 1n;
     }
     return true;

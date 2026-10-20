@@ -1,6 +1,6 @@
 import type { NeverLandsCheck } from "../../evm-finalized-proof.js";
 import type { UniswapTokenAttempt, UniswapTokenOperation } from "./token-operation.js";
-import { type TokenNonceConsumption } from "./token-principal.js";
+import { type TokenNonceConsumption, type TokenNonceUnused } from "./token-principal.js";
 import type { TokenUsageBinding } from "./token-usage.js";
 import { UniswapTokenJournal } from "./token-operation.js";
 export type TokenEffectKind = "approval" | "swap" | "cleanup";
@@ -56,6 +56,8 @@ export interface UniswapTokenExecutionPorts {
     cleanupFeeQuote?(operation: UniswapTokenOperation): Promise<TokenFeeQuote>;
     /** The finalized chain's proof that a landed cleanup of this operation took the hashless swap marker's nonce; null: not proven. */
     swapNonceConsumed?(operation: UniswapTokenOperation, cleanup: UniswapTokenAttempt): Promise<TokenNonceConsumption | null>;
+    /** One finalized batch: past the route's deadline the account's nonce is at or below `fromNonce`; null: not proven. */
+    swapNonceUnused?(operation: UniswapTokenOperation, fromNonce: string): Promise<TokenNonceUnused | null>;
 }
 export interface UniswapTokenCommandRuntime {
     inventory(): unknown;
@@ -104,8 +106,9 @@ export declare class UniswapTokenExecution {
     private cleaned;
     /**
      * A cleaned swap still holding its principal although no swap of it can land (R4 exit 2): no swap marker is left (never
-     * signed), or its hashless marker's nonce is consumed in the finalized chain by its own landed cleanup. The proof is saved
-     * first, then the hold is released; gas, attempts and history stay. Without such proof the hold stays (owner abandon).
+     * signed), or its hashless marker's nonce is consumed in the finalized chain by its own landed cleanup. A marker custody
+     * freed (no signed bytes, a local answer) is also proven on chain: its nonce held by a landed cleanup, or unused past the
+     * deadline. The proof is saved first, then the hold is released; gas, attempts and history stay. Without it the hold stays.
      */
     private settlePrincipal;
     /**
@@ -119,8 +122,10 @@ export declare class UniswapTokenExecution {
     /**
      * The owner's abandon keeps the principal held only while an effect of the swap could still land. With no swap marker, or
      * a hashless one whose custody (opened under the account lock) holds no signed bytes and so frees its nonce, nothing of
-     * the principal can move: that proof is saved first, then the hold released. Gas, attempts, the marker and the terminal
-     * phase stay; signed bytes (found now or committed earlier) change nothing. Nothing is signed or sent here.
+     * the principal can move. Custody's answer is local, so every swap marker's nonce (this one and any custody freed) is
+     * also proven on the finalized chain first, as for a cleaned swap; without that the hold stays. The proof is saved, then
+     * the hold released. Gas, attempts, the marker and the terminal phase stay; signed bytes (found now or committed earlier)
+     * change nothing. Nothing is signed or sent here.
      */
     private releaseAbandoned;
     private cleanupRequired;

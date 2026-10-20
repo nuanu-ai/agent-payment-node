@@ -165,12 +165,22 @@ by its own landed cleanup (`swap_nonce_consumed_by_cleanup`: one primary batch r
 the finalized nonce, the cleanup by hash and the finalized head, then the canonical
 block at the cleanup's height must be the one the cleanup names). Gas, attempts and
 history stay; a bound or unproven swap keeps its hold.
+Custody's "no signed bytes" is local state, so a swap marker it freed (a refusal before
+signing, a failed signature, a restart that found nothing signed) is kept in
+`freedSwapMarkers`, and every release also proves each such marker's nonce on the
+finalized chain (`principalRelease.chainProof`): held by a landed cleanup of the swap in
+a finalized block, or unused, one primary batch reading the finalized block and then
+`eth_getTransactionCount(account, "finalized")` at or below the nonce at a block whose
+timestamp is past the route deadline (a swap included later reverts on it). Until then
+the hold stays and a `cleaned` swap's `next_actions` name `status`, which reads the proof
+once finality reaches it. A swap that never marked a swap needs no such read.
 An owner-abandoned swap (`abandoned_unknown`) keeps its principal hold only while a swap
 of it could still land. Its `status` names `execute`, which opens custody under the
 account lock: with no swap marker, or a hashless one for which custody holds no signed
-bytes (its nonce is then freed), it records `principalRelease` (`swap_never_signed`,
-naming that marker's nonce and hash) and releases the hold; gas, attempts and the
-terminal phase stay, and signed bytes change nothing. Its own `cleanup` cannot reopen a
+bytes (its nonce is then freed) and whose nonce (and any freed marker's) the finalized
+chain proves as above, it records `principalRelease` (`swap_never_signed`, naming that
+marker's nonce and hash, with its `chainProof`) and releases the hold; gas, attempts and
+the terminal phase stay, and signed bytes change nothing. Its own `cleanup` cannot reopen a
 terminal record, so `status` and `execute` show any standing allowance
 (`data.residualAllowance`) and name the generic `apn wallet allowance revoke` for it.
 A cleanup whose fee caps (frozen at quote time) are below the current Ethereum fees is
