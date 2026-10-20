@@ -63,11 +63,12 @@ export async function bindX402SolanaLifetime(rpc, terms) {
         protocolFailure();
     solanaAddress(block.blockhash);
     const lastValidBlockHeight = rpcAtomic(block.lastValidBlockHeight), floorSlot = rpcAtomic(rpcRecord(response.context).slot);
-    checkAccounts(multipleAccounts(value, 3).accounts, { ...terms, payer: terms.payer }, { sourceTokenAccount: terms.sourceTokenAccount, destinationTokenAccount: terms.destinationTokenAccount });
+    const accounts = checkAccounts(multipleAccounts(value, 3).accounts, terms, { sourceTokenAccount: terms.sourceTokenAccount, destinationTokenAccount: terms.destinationTokenAccount });
     const message = x402SolanaMessage(terms, { blockhash: block.blockhash, lastValidBlockHeight: lastValidBlockHeight.toString() });
     const simulation = await simulateSolanaSend(rpc, message.unsignedPayload);
     return { blockhash: block.blockhash, lastValidBlockHeight: lastValidBlockHeight.toString(), floorSlot: floorSlot.toString(),
         observedBlockHeight: observed.toString(), messageBase64: message.messageBase64, messageHash: message.messageHash,
-        unsignedPayload: message.unsignedPayload, simulationSlot: simulation.slotAtomic, unitsConsumed: simulation.unitsConsumedAtomic };
+        unsignedPayload: message.unsignedPayload, simulationSlot: simulation.slotAtomic, unitsConsumed: simulation.unitsConsumedAtomic,
+        balanceAtomic: accounts.balanceAtomic };
 }
 //# sourceMappingURL=chain.js.map

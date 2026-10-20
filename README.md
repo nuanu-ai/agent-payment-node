@@ -178,10 +178,12 @@ authorization; `operation resume` owns the paid request, settlement observation 
 
 [Permit2 requests](docs/x402-non-usdc.md) (`x402 permit2 *`, any chain and token the owner's allowlist policy admits
 for Permit2, USDC included) and [ERC-20 transfer-proof merchants](docs/x402-merchant-usdm.md) (`x402 merchant *`,
-MegaETH USDm first) are CLI commands with foreground approval. `x402 solana pay` pays a Solana `exact` offer for a mint
-the owner's allowlist policy admits for Solana x402 (the seller's facilitator pays the fee; foreground approval; explicit
-`APN_SOLANA_RPC_URL`), and `x402 solana observe` proves settlement or that the payment can no longer land
-([any seller](docs/x402-any-seller.md)).
+MegaETH USDm first) are CLI commands with foreground approval. `x402 permit2 allowance set|revoke` sets the wallet's
+bounded allowance to Permit2 for an owner-admitted chain and token (foreground, one send, observed to proof).
+`x402 solana pay` pays a Solana `exact` offer unattended (CLI or MCP) for a mint the owner's allowlist row admits, under
+the owner's Solana x402 policy (`wallet policy set --chain solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp --asset <mint>`); the
+seller's facilitator pays the fee and `APN_SOLANA_RPC_URL` must be set. `x402 solana observe` proves settlement or that
+the payment can no longer land ([any seller](docs/x402-any-seller.md)).
 [Offer selection](docs/x402-offer-selection.md) and [settlement fields](docs/x402-settlement-compatibility.md) are
 documented separately.
 
@@ -292,6 +294,10 @@ apn x402 permit2 status --profile <profile> --operation <operation-id>
 apn x402 solana pay --profile <profile> --url <https-url> --asset <mint> --max-amount <atomic> --idempotency-key <key>
 apn x402 solana observe --operation <operation-id>
 apn x402 solana status --operation <operation-id>
+apn x402 permit2 allowance set --profile <profile> --chain <caip2> --asset <token> --amount <atomic> --rpc-url <https-rpc> --max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --idempotency-key <key>
+apn x402 permit2 allowance revoke --profile <profile> --chain <caip2> --asset <token> --rpc-url <https-rpc> --max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --idempotency-key <key>
+apn x402 permit2 allowance observe --operation <operation-id> --rpc-url <https-rpc>
+apn x402 permit2 allowance status --operation <operation-id>
 apn x402 merchant prepare --profile <profile> --url <https-url> [--asset <token>] --max-native-fee-wei <wei> [--native-fee-reserve-wei <wei>] --idempotency-key <key>
 apn x402 merchant approve --operation <operation-id>
 apn x402 merchant observe --operation <operation-id> [--deliver]

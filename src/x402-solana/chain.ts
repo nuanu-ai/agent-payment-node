@@ -66,6 +66,8 @@ export interface X402SolanaBinding {
   readonly unsignedPayload: string;
   readonly simulationSlot: string;
   readonly unitsConsumed: string;
+  /** The payer's token balance on the same read (for the unattended balance cap). */
+  readonly balanceAtomic: string;
 }
 
 /**
@@ -82,11 +84,12 @@ export async function bindX402SolanaLifetime(rpc: SolanaRpcPort, terms: X402Sola
   if (typeof block.blockhash !== "string") protocolFailure();
   solanaAddress(block.blockhash);
   const lastValidBlockHeight = rpcAtomic(block.lastValidBlockHeight), floorSlot = rpcAtomic(rpcRecord(response.context).slot);
-  checkAccounts(multipleAccounts(value, 3).accounts, { ...terms, payer: terms.payer },
+  const accounts = checkAccounts(multipleAccounts(value, 3).accounts, terms,
     { sourceTokenAccount: terms.sourceTokenAccount, destinationTokenAccount: terms.destinationTokenAccount });
   const message = x402SolanaMessage(terms, { blockhash: block.blockhash, lastValidBlockHeight: lastValidBlockHeight.toString() });
   const simulation = await simulateSolanaSend(rpc, message.unsignedPayload);
   return { blockhash: block.blockhash, lastValidBlockHeight: lastValidBlockHeight.toString(), floorSlot: floorSlot.toString(),
     observedBlockHeight: observed.toString(), messageBase64: message.messageBase64, messageHash: message.messageHash,
-    unsignedPayload: message.unsignedPayload, simulationSlot: simulation.slotAtomic, unitsConsumed: simulation.unitsConsumedAtomic };
+    unsignedPayload: message.unsignedPayload, simulationSlot: simulation.slotAtomic, unitsConsumed: simulation.unitsConsumedAtomic,
+    balanceAtomic: accounts.balanceAtomic };
 }

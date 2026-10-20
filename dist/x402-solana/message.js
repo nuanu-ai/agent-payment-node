@@ -2,7 +2,7 @@ import { address, appendTransactionMessageInstructions, blockhash, compileTransa
 import { getTransferCheckedInstruction, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { COMPUTE_BUDGET_PROGRAM } from "./constants.js";
+import { COMPUTE_BUDGET_PROGRAM, MEMO_PROGRAM } from "./constants.js";
 function u32(value) { const bytes = Buffer.alloc(4); bytes.writeUInt32LE(value); return bytes; }
 function u64(value) { const bytes = Buffer.alloc(8); bytes.writeBigUInt64LE(value); return bytes; }
 function instructions(terms) {
@@ -13,6 +13,7 @@ function instructions(terms) {
         getTransferCheckedInstruction({ source: address(terms.sourceTokenAccount), mint: address(terms.mint),
             destination: address(terms.destinationTokenAccount), authority: createNoopSigner(address(terms.payer)),
             amount: BigInt(terms.amountAtomic), decimals: terms.decimals }),
+        { programAddress: address(MEMO_PROGRAM), data: Uint8Array.from(Buffer.from(terms.memo, "utf8")) },
     ];
 }
 /** The one v0 message this payment may sign: the facilitator pays the fee, the payer only authorizes the transfer. */
@@ -25,9 +26,9 @@ export function x402SolanaMessage(terms, lifetime) {
 }
 /**
  * Checked before anything is signed, independently of how the bytes were built: a v0 message without lookup tables, the
- * fee payer first and the payer second as the only signers, exactly SetComputeUnitLimit, SetComputeUnitPrice and one
- * classic SPL TransferChecked of the frozen amount and decimals from the payer's account to the payee's, and the fee
- * payer in no instruction at all.
+ * fee payer first and the payer second as the only signers, exactly SetComputeUnitLimit, SetComputeUnitPrice, one
+ * classic SPL TransferChecked of the frozen amount and decimals from the payer's account to the payee's and one Memo of
+ * the frozen text without accounts, and the fee payer in no instruction at all.
  */
 export function assertExactMessage(messageBytes, terms, lifetime) {
     let compiled;
@@ -40,8 +41,9 @@ export function assertExactMessage(messageBytes, terms, lifetime) {
     const keys = compiled.staticAccounts.map(String), header = compiled.header;
     if (compiled.version !== 0 || (compiled.addressTableLookups?.length ?? 0) !== 0 || compiled.lifetimeToken !== lifetime.blockhash ||
         header.numSignerAccounts !== 2 || header.numReadonlySignerAccounts !== 1 || keys[0] !== terms.feePayer || keys[1] !== terms.payer ||
-        new Set(keys).size !== keys.length || keys.length !== 7 ||
-        [terms.sourceTokenAccount, terms.destinationTokenAccount, terms.mint, TOKEN_PROGRAM_ADDRESS, COMPUTE_BUDGET_PROGRAM].some((key) => !keys.includes(key)))
+        new Set(keys).size !== keys.length || keys.length !== 8 ||
+        [terms.sourceTokenAccount, terms.destinationTokenAccount, terms.mint, TOKEN_PROGRAM_ADDRESS, COMPUTE_BUDGET_PROGRAM, MEMO_PROGRAM]
+            .some((key) => !keys.includes(key)))
         invalid();
     const expected = instructions(terms);
     if (compiled.instructions.length !== expected.length)

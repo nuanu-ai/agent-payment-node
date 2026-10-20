@@ -6,7 +6,7 @@ import {
 import { getTransferCheckedInstruction, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import { sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { COMPUTE_BUDGET_PROGRAM } from "./constants.js";
+import { COMPUTE_BUDGET_PROGRAM, MEMO_PROGRAM } from "./constants.js";
 
 /** Everything the signed message binds besides its lifetime; frozen at prepare. */
 export interface X402SolanaMessageTerms {
@@ -19,6 +19,8 @@ export interface X402SolanaMessageTerms {
   readonly amountAtomic: string;
   readonly computeUnitLimit: number;
   readonly computeUnitPriceMicroLamports: string;
+  /** The Memo instruction's UTF-8 text: the seller's `extra.memo`, else the payment's random hex nonce. */
+  readonly memo: string;
 }
 export interface X402SolanaLifetime { readonly blockhash: string; readonly lastValidBlockHeight: string }
 
@@ -33,6 +35,7 @@ function instructions(terms: X402SolanaMessageTerms): readonly Instruction[] {
     getTransferCheckedInstruction({ source: address(terms.sourceTokenAccount), mint: address(terms.mint),
       destination: address(terms.destinationTokenAccount), authority: createNoopSigner(address(terms.payer)),
       amount: BigInt(terms.amountAtomic), decimals: terms.decimals }),
+    { programAddress: address(MEMO_PROGRAM), data: Uint8Array.from(Buffer.from(terms.memo, "utf8")) },
   ];
 }
 
@@ -49,9 +52,9 @@ export function x402SolanaMessage(terms: X402SolanaMessageTerms, lifetime: X402S
 
 /**
  * Checked before anything is signed, independently of how the bytes were built: a v0 message without lookup tables, the
- * fee payer first and the payer second as the only signers, exactly SetComputeUnitLimit, SetComputeUnitPrice and one
- * classic SPL TransferChecked of the frozen amount and decimals from the payer's account to the payee's, and the fee
- * payer in no instruction at all.
+ * fee payer first and the payer second as the only signers, exactly SetComputeUnitLimit, SetComputeUnitPrice, one
+ * classic SPL TransferChecked of the frozen amount and decimals from the payer's account to the payee's and one Memo of
+ * the frozen text without accounts, and the fee payer in no instruction at all.
  */
 export function assertExactMessage(messageBytes: Parameters<ReturnType<typeof getCompiledTransactionMessageDecoder>["decode"]>[0], terms: X402SolanaMessageTerms, lifetime: X402SolanaLifetime): void {
   let compiled: ReturnType<ReturnType<typeof getCompiledTransactionMessageDecoder>["decode"]>;
@@ -59,8 +62,9 @@ export function assertExactMessage(messageBytes: Parameters<ReturnType<typeof ge
   const keys = compiled.staticAccounts.map(String), header = compiled.header;
   if (compiled.version !== 0 || (compiled.addressTableLookups?.length ?? 0) !== 0 || compiled.lifetimeToken !== lifetime.blockhash ||
       header.numSignerAccounts !== 2 || header.numReadonlySignerAccounts !== 1 || keys[0] !== terms.feePayer || keys[1] !== terms.payer ||
-      new Set(keys).size !== keys.length || keys.length !== 7 ||
-      [terms.sourceTokenAccount, terms.destinationTokenAccount, terms.mint, TOKEN_PROGRAM_ADDRESS, COMPUTE_BUDGET_PROGRAM].some((key) => !keys.includes(key))) invalid();
+      new Set(keys).size !== keys.length || keys.length !== 8 ||
+      [terms.sourceTokenAccount, terms.destinationTokenAccount, terms.mint, TOKEN_PROGRAM_ADDRESS, COMPUTE_BUDGET_PROGRAM, MEMO_PROGRAM]
+        .some((key) => !keys.includes(key))) invalid();
   const expected = instructions(terms);
   if (compiled.instructions.length !== expected.length) invalid();
   compiled.instructions.forEach((instruction, position) => {

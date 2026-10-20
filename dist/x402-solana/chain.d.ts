@@ -33,6 +33,8 @@ export interface X402SolanaBinding {
     readonly unsignedPayload: string;
     readonly simulationSlot: string;
     readonly unitsConsumed: string;
+    /** The payer's token balance on the same read (for the unattended balance cap). */
+    readonly balanceAtomic: string;
 }
 /**
  * The send guard, after the owner's decision and before anything is signed: a fresh blockhash with its height (checked

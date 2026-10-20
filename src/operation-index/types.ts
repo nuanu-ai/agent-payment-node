@@ -9,8 +9,8 @@ export const OPERATION_FAMILIES = [
   // Families whose adapters join in phase 4b WP2.
   "swap", "uniswap_token", "stargate_native", "stargate_token", "gasless_usdt", "oneclick_source", "circle_source",
   "circle_approval", "metamask_native",
-  // x402 exact on Solana mainnet (0.5.53).
-  "x402_solana",
+  // x402 exact on Solana mainnet and the owner's bounded Permit2 allowance (0.5.53).
+  "x402_solana", "permit2_allowance",
 ] as const;
 export type OperationFamily = typeof OPERATION_FAMILIES[number];
 

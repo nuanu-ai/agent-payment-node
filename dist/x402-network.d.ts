@@ -7,6 +7,14 @@ export interface X402PolicyNetwork {
     readonly chainId: number;
     readonly token: Address;
 }
+/** The profile x402 policy of Solana x402 for one SPL mint (`wallet policy set --chain solana:5eykt4… --asset <mint>`). */
+export interface X402SolanaPolicyNetwork {
+    readonly mint: string;
+}
+/** x402's CAIP-2 name of Solana mainnet (equal to X402_SOLANA_NETWORK of the Solana x402 family; kept here without its imports). */
+export declare const X402_SOLANA_POLICY_NETWORK: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+export declare function solanaAccount(value: unknown): boolean;
+export declare function validSolanaPolicyNetwork(value: unknown): value is X402SolanaPolicyNetwork;
 /** The block tag every x402 EIP-3009 proof of an operation reads; frozen in the record at prepare. */
 export type X402ProofTag = "safe" | "finalized";
 /**

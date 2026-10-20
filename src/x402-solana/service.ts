@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { canonicalJson, domainHash, sha256 } from "../canonical.js";
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import type { ChainWalletStoragePort } from "../direct-rail-ports.js";
@@ -11,13 +12,15 @@ import { canonicalProfile } from "../wallet-policy.js";
 import { evaluateX402Solana, followX402SolanaUsage, payeeAdmitted, x402SolanaOwnerRow, x402SolanaUsageIdentity, x402SolanaUsageKey } from "./admission.js";
 import { bindX402SolanaLifetime, readX402SolanaAccounts } from "./chain.js";
 import { X402_SOLANA_APPROVAL_WINDOW_MS, X402_SOLANA_COMPUTE_UNIT_LIMIT, X402_SOLANA_COMPUTE_UNIT_PRICE_MICROLAMPORTS, X402_SOLANA_FAMILY,
-  X402_SOLANA_MECHANISM, X402_SOLANA_ALLOWLIST_CHAIN, X402_SOLANA_NETWORK } from "./constants.js";
+  X402_SOLANA_MECHANISM, X402_SOLANA_ALLOWLIST_CHAIN, X402_SOLANA_NETWORK, X402_SOLANA_NONCE_BYTES } from "./constants.js";
 import { readSolanaChallenge, requireSolanaRpcUrl, sendSolanaPayment, solanaPaymentHeader } from "./http.js";
 import { newX402SolanaRecord, transitionX402Solana, type X402SolanaRecord } from "./model.js";
 import { observeX402SolanaPayment } from "./observe.js";
-import { selectSolanaOffer } from "./offer.js";
+import { refuseNativeSol, selectSolanaOffer } from "./offer.js";
 import { X402SolanaRepository } from "./repository.js";
 import { signX402Solana, x402SolanaAccount, x402SolanaMessageTerms } from "./signing.js";
+import { assertSolanaUnattendedBalance, requireSolanaPolicy, solanaPolicyBinding } from "./policy.js";
+import type { ProfilePolicyPort, ProfilePolicyRecord } from "../profile-policy.js";
 
 export interface X402SolanaPorts {
   readonly accounts: ChainWalletStoragePort;
@@ -25,8 +28,8 @@ export interface X402SolanaPorts {
   /** Built only from an explicit APN_SOLANA_RPC_URL; absent for commands that read nothing from the chain. */
   readonly rpc?: SolanaRpcPort;
   readonly now: () => Date;
-  /** The owner's foreground decision on the exact frozen payment; throws when refused. */
-  readonly consent?: (record: X402SolanaRecord) => Promise<void>;
+  /** The owner's encrypted profile x402 policy store (Solana binding per mint); only read here, never changed. */
+  readonly policy?: ProfilePolicyPort;
 }
 export interface X402SolanaPayRequest { readonly profile: string; readonly url: string; readonly mint: string; readonly maxAmountAtomic: string; readonly idempotencyKey: string }
 
@@ -38,6 +41,19 @@ export class X402SolanaService {
   private rpc(): SolanaRpcPort {
     if (this.ports.rpc === undefined) requireSolanaRpcUrl(undefined);
     return this.ports.rpc!;
+  }
+  private policyPort(): ProfilePolicyPort {
+    if (this.ports.policy === undefined) throw new ApnError("APN_INTERNAL", "The profile policy store is not installed.");
+    return this.ports.policy;
+  }
+  /** The owner's policy of this payment's mint, unchanged since prepare (a lowered or replaced policy refuses here). */
+  private async currentPolicy(record: X402SolanaRecord): Promise<ProfilePolicyRecord> {
+    const policy = await requireSolanaPolicy(this.policyPort(), await solanaPolicyBinding(this.ports.accounts, record.profile, record.terms.mint));
+    if (policy.integrityHash !== record.terms.policy.integrityHash) {
+      throw new ApnError("APN_PROFILE_DRIFT", "The owner's Solana x402 policy changed after preparation; prepare a new payment.",
+        { reason: "x402_solana_policy_changed" });
+    }
+    return policy;
   }
   private async locked<T>(id: string, action: (current: X402SolanaRecord) => Promise<T>): Promise<T> {
     return await this.records.withLocks([`operation:${id}`], async () => await action(await this.records.required(id)));
@@ -57,9 +73,14 @@ export class X402SolanaService {
     if (saved !== null) return replay(saved, requestHash);
     const account = await x402SolanaAccount(this.ports.accounts, profile);
     const rpc = this.rpc(), now = this.now();
-    const owner = await x402SolanaOwnerRow(this.root, profile, account.address, input.mint, now);
+    // The unpaid challenge first: a native SOL offer is outside the scheme whatever the owner admitted.
     const challenge = await readSolanaChallenge(this.ports.http, input.url);
-    const cap = BigInt(input.maxAmountAtomic) < BigInt(owner.caps.maximumPerTransferAtomic) ? BigInt(input.maxAmountAtomic) : BigInt(owner.caps.maximumPerTransferAtomic);
+    refuseNativeSol(challenge.accepts, input.mint);
+    const policy = await requireSolanaPolicy(this.policyPort(), await solanaPolicyBinding(this.ports.accounts, profile, input.mint));
+    const owner = await x402SolanaOwnerRow(this.root, profile, account.address, input.mint, now);
+    // The explicit maximum, the owner's unattended per-payment cap and the allowlist per-payment cap: the smallest binds.
+    const cap = [BigInt(input.maxAmountAtomic), BigInt(policy.maxX402AmountAtomic), BigInt(owner.caps.maximumPerTransferAtomic)]
+      .reduce((low, value) => value < low ? value : low);
     const offer = selectSolanaOffer({ accepts: challenge.accepts, mint: input.mint, payer: account.address, capAtomic: cap,
       payeeAdmitted: (payee) => payeeAdmitted(owner, payee, now) });
     const idempotencyHash = sha256(`idempotency\0x402-solana.v1\0${profileHash}\0${key}`);
@@ -73,6 +94,7 @@ export class X402SolanaService {
           evaluateX402Solana(owner, offer.amountAtomic, usage.amountAtomic, now);
           const read = await readX402SolanaAccounts(rpc, { payer: account.address, payee: offer.payee, mint: input.mint,
             decimals: owner.row.decimals, amountAtomic: offer.amountAtomic });
+          assertSolanaUnattendedBalance(policy, read.balanceAtomic);
           return await this.records.persistLocked(newX402SolanaRecord({ operationId, profile, profileHash, idempotencyHash, requestHash, terms: {
             url: challenge.url, origin: challenge.origin, urlHash: challenge.urlHash, challengeHash: challenge.challengeHash,
             resourceCanonicalJson: challenge.resourceCanonicalJson, offerIndex: offer.index, offerCanonicalJson: offer.declaredCanonicalJson,
@@ -81,8 +103,11 @@ export class X402SolanaService {
             destinationTokenAccount: read.destinationTokenAccount, feePayer: offer.feePayer, amountAtomic: offer.amountAtomic,
             maxAmountAtomic: input.maxAmountAtomic, computeUnitLimit: X402_SOLANA_COMPUTE_UNIT_LIMIT,
             computeUnitPriceMicroLamports: X402_SOLANA_COMPUTE_UNIT_PRICE_MICROLAMPORTS,
+            // The spec's Memo: exactly the seller's declared memo, else a random nonce that keeps equal payments distinct.
+            memo: offer.memo ?? randomBytes(X402_SOLANA_NONCE_BYTES).toString("hex"), memoSource: offer.memo === null ? "nonce" : "seller",
             admission: { policyDigest: owner.active.digest, policyRevision: owner.active.revision, registryVersion: owner.active.registry.registryVersion,
               activationDigest: owner.active.activationDigest, maximumPerTransferAtomic: owner.caps.maximumPerTransferAtomic, dailyLimitAtomic: owner.caps.dailyLimitAtomic },
+            policy: { integrityHash: policy.integrityHash, maxBalanceAtomic: policy.maxBalanceUsdcAtomic, maxX402AmountAtomic: policy.maxX402AmountAtomic },
             preparedAt: now.toISOString(), expiresAt: new Date(now.getTime() + X402_SOLANA_APPROVAL_WINDOW_MS).toISOString(),
           } }));
         });
@@ -99,19 +124,21 @@ export class X402SolanaService {
     if (record.terminal || record.state === "exposed") return record;
     if (record.state === "prepared") {
       if (this.now().getTime() >= Date.parse(record.terms.expiresAt)) return (await this.observe(operationId)).record;
-      if (this.ports.consent === undefined) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Solana x402 payment needs the owner's foreground approval.");
-      await this.ports.consent(record);
       record = await this.locked(operationId, async (current) => {
-        if (current.state !== "prepared" || this.now().getTime() >= Date.parse(current.terms.expiresAt)) blocked("The prepared Solana payment changed or expired during approval.");
+        if (current.state !== "prepared" || this.now().getTime() >= Date.parse(current.terms.expiresAt)) blocked("The prepared Solana payment changed or expired.");
         await this.assertOwnerUnchanged(current);
+        const policy = await this.currentPolicy(current);
         const bound = await bindX402SolanaLifetime(this.rpc(), { ...x402SolanaMessageTerms(current.terms), payee: current.terms.payee });
-        const { unsignedPayload: _unsigned, ...lifetime } = bound;
+        // The overfunded-wallet guard of unattended x402 holds again on the fresh read, before anything is reserved or signed.
+        assertSolanaUnattendedBalance(policy, bound.balanceAtomic);
+        const { unsignedPayload: _unsigned, balanceAtomic: _balance, ...lifetime } = bound;
         return await this.write(current, { state: "reserving", at: this.now().toISOString(), reason: "lifetime_bound_and_simulated",
           lifetime: { ...lifetime, boundAt: this.now().toISOString() } });
       });
     }
     if (record.state === "reserving") {
       await this.assertOwnerUnchanged(record);
+      await this.currentPolicy(record);
       const active = (await x402SolanaOwnerRow(this.root, record.profile, record.terms.payer, record.terms.mint, this.now())).active;
       const lease = await new AssetUsageLedger(this.root).reserve({ ...x402SolanaUsageIdentity(record.terms), registry: active.registry, rail: "x402",
         mechanism: X402_SOLANA_MECHANISM, amountAtomic: record.terms.amountAtomic, idempotencyKey: x402SolanaUsageKey(operationId), now: this.now() })

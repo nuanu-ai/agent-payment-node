@@ -52,10 +52,20 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
   (32-byte random nonce = Permit2 unordered nonce, `validBefore` = deadline). The wallet's existing allowance to Permit2
   must cover the price, or the seller's declared EIP-2612 sponsorship pays it with an exact-amount permit whose
   name/version hint must recompute the token's on-chain `DOMAIN_SEPARATOR`. APN never sends an on-chain approval to
-  Permit2 unattended (the refusal `x402_permit2_allowance_required` names the spender). Settlement is Permit2's nonce bit
+  Permit2 unattended: the refusal `x402_permit2_allowance_required` names the owner's command for that exact chain and
+  token (below). Settlement is Permit2's nonce bit
   at the stack's tag; expiry is the bit unused at `finalized` past the deadline. A seller-required payment identifier is
   refused (the Permit2 wire carries none); every wire check runs before signing.
 - `x402 permit2 approve` stays the foreground TTY lane under allowlist admission (lowest-index admitted Permit2 offer).
+- `x402 permit2 allowance set|revoke` (foreground TTY only; MCP returns the handoff): one owned operation (family
+  `permit2_allowance`) that sends ERC-20 `approve(Permit2, amount)` from the local wallet, never unlimited. The chain and
+  token must be admitted by the owner's profile x402 policy (the amount is at most its wallet balance cap) or else by the
+  allowlist Permit2 row (at most its x402 daily cap); revoke (amount zero) needs no admission. Gas caps are the owner's
+  flags (`--max-gas-limit`, `--max-fee-per-gas-wei`, `--max-priority-fee-per-gas-wei`). Prepare reads one block (nonce
+  equal to the pending one, allowance, balance, estimate) and freezes it; after consent the transaction is sealed, the
+  send is marked, then sent once. `observe` completes on a receipt at or below the chain's proof tag (canonical block,
+  the token's Approval log or the allowance read at the tag), or ends it `superseded` on the shared finalized
+  never-lands rule with its era proof; an unsigned preparation expires; the owner's abandon is the last exit.
 
 ## RPC
 
@@ -65,22 +75,36 @@ substituted.
 
 ## Solana `exact` (SPL)
 
-- Commands: `x402 solana pay` (foreground TTY, like the other allowlist-admitted x402 lanes; MCP returns the CLI
-  handoff), `x402 solana observe` and `status` (CLI and MCP), and the generic `operation status|resume|abandon`. Family
-  `x402_solana`, store `x402-solana/`, states `prepared → reserving → signed → exposed → settled | failed_onchain |
-  expired_unlanded | abandoned_unknown`, with `failed_before_effect` from every state before `exposed`.
-- Admission per mint: the active allowlist row `solana:<genesis>` + mint with the x402 rail, its caps and exactly the
-  mechanism pin `x402-exact-svm` / SPL Token program; the policy's Solana account must be the profile's local Solana
-  wallet; the optional x402 recipient pin applies. Mint decimals must equal the row's, read on chain; a Token-2022
-  mint, a payee without its associated token account and a seller `extra.memo` are refused by name.
-- Offer rule: the lowest-index `exact` offer on `solana:5eykt4Us…` for the mint, within `--max-amount` and the owner's
-  per-payment cap, payee admitted, with a third-party `extra.feePayer`.
-- Transaction, checked before signing (decompiled, and byte-equal to a rebuild from the frozen terms): v0, no lookup
-  tables, signers exactly [fee payer, payer], instructions exactly SetComputeUnitLimit 20000, SetComputeUnitPrice 1
-  micro-lamport (the x402 reference client's values; the facilitator pays) and one classic `TransferChecked` of the
-  frozen amount and decimals to the payee's ATA; the fee payer is in no instruction. After consent a fresh blockhash
-  is bound (its height checked against it), the bytes are simulated, the owner cap reserved, the payer signs
-  (fee-payer slot empty) and the exposure is recorded before the single paid request. A replay never sends again.
+- Commands: `x402 solana pay` (unattended, CLI and MCP, like `x402 fetch`), `x402 solana observe` and `status`, and the
+  generic `operation status|resume|abandon`. Family `x402_solana`, store `x402-solana/`, states `prepared → reserving →
+  signed → exposed → settled | failed_onchain | expired_unlanded | abandoned_unknown`, with `failed_before_effect` from
+  every state before `exposed`.
+- Owner rules, the same as EVM unattended x402: the owner's profile x402 policy for the mint, set by the same command
+  and options (`wallet policy set --chain solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp --asset <mint>
+  --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>`, foreground TTY to create or raise; bound to the
+  profile's local Solana wallet; no ETH cap and no EVM payee pin). Its per-payment cap bounds the price, and the
+  wallet's balance of the mint must not exceed its balance cap at prepare and again on the fresh read before signing
+  (`APN_WALLET_OVERFUNDED_FOR_UNATTENDED_X402`); a policy changed after prepare refuses. Per-mint admission stays the
+  active allowlist row `solana:<genesis>` + mint with the x402 rail, its caps and the mechanism pin `x402-exact-svm` /
+  SPL Token program (and its optional recipient pin); the usage ledger reserves before signing.
+- Offer rule: the lowest-index `exact` offer on `solana:5eykt4Us…` for the mint, within `--max-amount`, the policy and the
+  allowlist per-payment caps, payee admitted, with a third-party `extra.feePayer`. Mint decimals must equal the row's,
+  read on chain; a Token-2022 mint and a payee without its associated token account are refused by name.
+- Transaction (x402 SVM spec, Path 1), checked before signing (decompiled, and byte-equal to a rebuild from the frozen
+  terms): v0, no lookup tables, signers exactly [fee payer, payer], instructions SetComputeUnitLimit 20000,
+  SetComputeUnitPrice 1 micro-lamport (the reference client's values; the facilitator pays), one classic
+  `TransferChecked` of the frozen amount and decimals to the payee's ATA, and one Memo (`MemoSq4gqAB…`, no accounts)
+  holding the seller's `extra.memo` verbatim (1-256 UTF-8 bytes) or, when none is declared, a 16-byte random nonce in
+  hex, as the spec requires; the fee payer is in no instruction. The memo is frozen in the record, so settlement (which
+  compares the whole message) checks it too. Extras the spec does not define (`reference`, `session`, `name`, …) put
+  nothing into the transaction; they reach the seller unchanged inside `accepted`.
+- Native SOL is not this scheme: wrapped-SOL offers with `extra.native` (a system-program lamport transfer, no
+  facilitator fee payer, payer pays the fee) are refused by name (`x402_solana_native_sol_unsupported`); the spec pays
+  only an SPL or Token-2022 `TransferChecked` sponsored by the facilitator. A wSOL SPL offer with a fee payer would fit,
+  but the wSOL mint is not in the frozen allowlist inventory, so no owner can admit it yet.
+- Execution: a fresh blockhash is bound (its height checked against it), the bytes simulated, the owner cap reserved,
+  the payer signs (fee-payer slot empty) and the exposure is recorded before the single paid request. A replay never
+  sends again.
 - Settlement: the fee payer's signature is the transaction id, unknown to APN in advance. The seller's
   PAYMENT-RESPONSE `transaction` is only a hint; otherwise the payer token account's finalized `getSignaturesForAddress`
   page is opened above the binding's floor slot. A candidate counts when `getSignatureStatuses` says `finalized` and
@@ -91,7 +115,4 @@ substituted.
   land later), so the index covers the whole window and no entry in it is this payment. Otherwise the payment waits;
   the owner's TTY abandon is the last exit and leaves the price charged.
 - RPC: `APN_SOLANA_RPC_URL` only (never the public default); missing, the refusal names it (`x402_rpc_required`).
-- Not done: the x402 SVM spec now asks clients to add a Memo with a random nonce; APN signs exactly compute budget +
-  transfer (owner decision) and refuses memo-bound offers. Unattended Solana payments would need an owner balance cap
-  for the Solana wallet, which does not exist yet. Admission is limited to mints in the frozen allowlist inventory
-  (USDC, USDT).
+- Open: admission is limited to mints in the frozen allowlist inventory (USDC, USDT).

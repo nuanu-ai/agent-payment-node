@@ -5,7 +5,7 @@ import { assertPayerSigned, x402SolanaMessage } from "./message.js";
 export function x402SolanaMessageTerms(terms) {
     return { payer: terms.payer, feePayer: terms.feePayer, mint: terms.mint, decimals: terms.decimals, sourceTokenAccount: terms.sourceTokenAccount,
         destinationTokenAccount: terms.destinationTokenAccount, amountAtomic: terms.amountAtomic, computeUnitLimit: terms.computeUnitLimit,
-        computeUnitPriceMicroLamports: terms.computeUnitPriceMicroLamports };
+        computeUnitPriceMicroLamports: terms.computeUnitPriceMicroLamports, memo: terms.memo };
 }
 /** The profile's own local Solana account, which must still be the frozen payer. */
 export async function x402SolanaAccount(accounts, profile, payer) {

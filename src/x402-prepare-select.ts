@@ -24,6 +24,8 @@ export interface X402PrepareRead {
 }
 
 export interface X402PrepareReadInput {
+  /** Named in the refusal that asks the owner for an allowance to Permit2. */
+  readonly profile: string;
   readonly rpc: RpcPort;
   readonly rpcOrigin: string;
   readonly discovered: FreshChallenge;
@@ -108,8 +110,10 @@ async function readPermit2(input: X402PrepareReadInput, candidates: readonly Per
   }
   if (allowanceShort) {
     throw new ApnError("APN_X402_UNSUPPORTED_OFFER", `The wallet's allowance to Permit2 (${PERMIT2_ADDRESS}) for ${input.asset.token} is below the price and the ` +
-      "seller sponsors no permit APN can verify. Grant that allowance from a foreground wallet; APN never approves unattended.",
-    { reason: "x402_permit2_allowance_required", chain: input.asset.network, asset: input.asset.token, spender: PERMIT2_ADDRESS });
+      "seller sponsors no permit APN can verify. The owner sets a bounded allowance in the foreground; APN never approves unattended.",
+    { reason: "x402_permit2_allowance_required", chain: input.asset.network, asset: input.asset.token, spender: PERMIT2_ADDRESS,
+      nextActions: [`apn x402 permit2 allowance set --profile ${input.profile} --chain ${input.asset.network} --asset ${input.asset.token} ` +
+        "--amount <atomic> --rpc-url <https-rpc> --max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --idempotency-key <key>"] });
   }
   throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh Permit2 offer can be paid by this wallet.", { reason: "x402_permit2_no_payable_offer" });
 }

@@ -5,7 +5,7 @@ import { failureEnvelope, successEnvelope } from "../output.js";
 import { x402SolanaPorts } from "./runtime.js";
 import { X402SolanaService } from "./service.js";
 import { publicX402Solana } from "./view.js";
-/** `apn x402 solana pay|observe|status`, CLI and MCP alike (MCP reaches `pay` only as a foreground handoff). */
+/** `apn x402 solana pay|observe|status`, CLI and MCP alike: `pay` runs unattended under the owner's Solana x402 policy. */
 export async function executeX402SolanaCli(bound, options, root) {
     const request = bound.request, requestId = randomUUID();
     let operationId;
@@ -13,7 +13,7 @@ export async function executeX402SolanaCli(bound, options, root) {
         if (request.command !== "x402.solana.pay" && request.command !== "x402.solana.observe" && request.command !== "x402.solana.status") {
             throw new ApnError("APN_UNSUPPORTED_COMMAND", "Solana x402 command is unavailable.");
         }
-        const service = new X402SolanaService(root, x402SolanaPorts(root, options, request.command === "x402.solana.pay"));
+        const service = new X402SolanaService(root, x402SolanaPorts(root, options));
         let record, pending = null;
         if (request.command === "x402.solana.status")
             record = await service.records.required(request.operationId);
@@ -32,7 +32,7 @@ export async function executeX402SolanaCli(bound, options, root) {
         // A payment that already has a record answers with it, so a refusal after preparation still shows where it stands.
         if (operationId !== undefined) {
             try {
-                const saved = await new X402SolanaService(root, x402SolanaPorts(root, options, false)).records.find(operationId);
+                const saved = await new X402SolanaService(root, x402SolanaPorts(root, options)).records.find(operationId);
                 if (saved !== null && saved.state !== "prepared") {
                     return failureEnvelope(request.command, requestId, error instanceof ApnError ? new ApnError(error.code, error.message, { ...error.details, operation_id: saved.operationId, state: saved.state }) : error);
                 }

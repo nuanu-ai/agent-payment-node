@@ -10,12 +10,12 @@ export function isSolanaAccepted(accepted: unknown): boolean {
 }
 
 /**
- * The x402 v2 SVM `exact` PaymentPayload APN sends: no extensions, `accepted` one memo-free Solana offer, and a payload
+ * The x402 v2 SVM `exact` PaymentPayload APN sends: no extensions, `accepted` one Solana exact offer, and a payload
  * that is exactly one base64 partially signed transaction of at most one packet with two signature slots.
  */
 export function validateSolanaPaymentPayload(value: Record<string, unknown>): void {
   const offers = solanaExactOffers([value.accepted]);
-  if (!exactKeys(value, ["x402Version", "resource", "accepted", "payload"]) || offers.length !== 1 || offers[0]!.memo ||
+  if (!exactKeys(value, ["x402Version", "resource", "accepted", "payload"]) || offers.length !== 1 ||
       !isPlainRecord(value.payload) || !exactKeys(value.payload, ["transaction"]) || typeof value.payload.transaction !== "string") invalid();
   const encoded = value.payload.transaction as string, bytes = Buffer.from(encoded, "base64");
   if (bytes.length === 0 || bytes.length > 1232 || bytes.toString("base64") !== encoded) invalid();

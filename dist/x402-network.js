@@ -1,8 +1,24 @@
 import { getAddress } from "viem";
-import { exactKeys, isPlainRecord } from "./canonical.js";
+import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { address as solanaAddress } from "@solana/kit";
+/** x402's CAIP-2 name of Solana mainnet (equal to X402_SOLANA_NETWORK of the Solana x402 family; kept here without its imports). */
+export const X402_SOLANA_POLICY_NETWORK = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
+export function solanaAccount(value) {
+    if (typeof value !== "string")
+        return false;
+    try {
+        return solanaAddress(value) === value;
+    }
+    catch {
+        return false;
+    }
+}
+export function validSolanaPolicyNetwork(value) {
+    return isPlainRecord(value) && exactKeys(value, ["mint"]) && solanaAccount(value.mint);
+}
 /**
  * The released spelling of `--chain` without `--asset`: USDC on the three networks APN shipped x402 on. It never admits
  * anything by itself, and on any other chain the token must be named.
@@ -102,6 +118,12 @@ export function networkPolicyBinding(binding, selection = 8453) {
 }
 export function policyStorageIdentity(binding) {
     canonicalProfile(binding.profile);
+    if (binding.x402Solana !== undefined) {
+        // Base58 mints differ by case alone, so the file name carries their hash (state files may sit on a case-folding volume).
+        if (binding.x402Network !== undefined || !validSolanaPolicyNetwork(binding.x402Solana))
+            throw new ApnError("APN_STATE_CORRUPT", "Policy network binding is invalid.");
+        return `~solana~${sha256(`${X402_SOLANA_POLICY_NETWORK}\0${binding.x402Solana.mint}`)}~${binding.profile}`;
+    }
     if (!validPolicyNetwork(binding.x402Network))
         throw new ApnError("APN_STATE_CORRUPT", "Policy network binding is invalid.");
     return binding.x402Network === undefined ? binding.profile : `~network~${binding.x402Network.chainId}~${binding.x402Network.token.toLowerCase()}~${binding.profile}`;
