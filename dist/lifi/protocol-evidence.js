@@ -216,10 +216,12 @@ function acrossDestination(source, decoded, receipt) {
             fail("native_destination_balance");
         return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, balance, transfer);
     }
+    // A batched fill moves other recipients' tokens in the same receipt: exactly one movement may carry this fill's credit
+    // (recipient, exact output, and the SpokePool as payer for a slow fill); two identical ones stay unproven.
     const transfers = events(receipt, decoded.destinationToken, EVENT_TOPICS.transfer, "Transfer");
-    const delivered = transfers.filter((x) => x.to === decoded.recipient);
-    if (delivered.length !== 1 || bridgeAddress(delivered[0].from) !== delivered[0].from || delivered[0].from === BRIDGE_ZERO_ADDRESS ||
-        delivered[0].value.toString() !== c.outputAmountAtomic || (info.fillType === 2 && delivered[0].from !== emitter))
+    const delivered = transfers.filter((x) => x.to === decoded.recipient && x.value.toString() === c.outputAmountAtomic &&
+        (info.fillType !== 2 || x.from === emitter));
+    if (delivered.length !== 1 || bridgeAddress(delivered[0].from) !== delivered[0].from || delivered[0].from === BRIDGE_ZERO_ADDRESS)
         fail("destination_token_movement");
     return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, null);
 }
@@ -228,8 +230,14 @@ function acrossFilledRelay(source, decoded, receipt) {
         return fail("across_correlation");
     const c = source.correlation;
     const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across", decoded.destinationToken);
-    const e = oneEvent(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay");
-    const info = e.relayExecutionInfo;
+    // A relayer may batch fills of other deposits into one transaction. Every FilledRelay of the pinned SpokePool is decoded
+    // strictly; exactly one may carry this deposit's identity (origin chain and deposit id, unique per origin SpokePool), and
+    // that one must match the whole stored tuple. None, or two, leave the delivery unproven.
+    const fills = events(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay");
+    const ours = fills.filter((x) => x.originChainId === BigInt(c.originChainId) && x.depositId.toString() === c.depositId);
+    if (ours.length !== 1)
+        fail(ours.length === 0 ? "destination_fill_unmatched" : "destination_fill_ambiguous");
+    const e = ours[0], info = e.relayExecutionInfo;
     const messageHash = decoded.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(decoded.protocol.kind === "across" ? decoded.protocol.message : "0x");
     if (e.originChainId !== BigInt(c.originChainId) || e.depositId.toString() !== c.depositId || e.inputToken.toLowerCase() !== c.inputToken ||
         e.outputToken.toLowerCase() !== c.outputToken || e.inputAmount.toString() !== c.inputAmountAtomic || e.outputAmount.toString() !== c.outputAmountAtomic ||
