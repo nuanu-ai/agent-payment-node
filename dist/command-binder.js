@@ -4,7 +4,8 @@ import { bindCircleEvmCommand } from "./circle-v2-evm/command-catalog.js";
 import { isPlainRecord } from "./canonical.js";
 import { parseCatalogArgv, parseCatalogInput, } from "./command-catalog.js";
 import { ApnError } from "./errors.js";
-import { evmChain, evmDecimals, evmToken } from "./evm-asset.js";
+import { evmDecimals, evmToken } from "./evm-asset.js";
+import { x402Chain } from "./x402-network.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { directEvmChain } from "./evm-direct-networks.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
@@ -384,8 +385,12 @@ function tronAsset(options) {
         throw new ApnError("APN_INVALID_INPUT", "Select the explicit trx or usdt asset alias.");
     return asset;
 }
+/** The x402 network and token a command names: `--chain` is any eip155 chain, `--asset` an exact ERC-20 contract. */
 function bindNetwork(options) {
-    return options["--chain"] === undefined ? {} : { chainId: evmChain(options["--chain"]) };
+    return {
+        ...(options["--chain"] === undefined ? {} : { chainId: x402Chain(options["--chain"]) }),
+        ...(options["--asset"] === undefined ? {} : { asset: evmToken(options["--asset"]) }),
+    };
 }
 function bindAsset(options) {
     const decimals = bindDecimals(options);

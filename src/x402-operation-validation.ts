@@ -1,5 +1,5 @@
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
-import { validX402Tuple, x402Network } from "./x402-network.js";
+import { isBaseUsdc, releasedX402Pair, validX402Tuple } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
 import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenOfferTimeout } from "./x402-frozen-offer.js";
@@ -60,7 +60,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
     "proofClass", "nextActions", "createdAt", "updatedAt", "transitions", "integrityHash",
   ];
   const optional = [
-    "paymentIdentifier", "providerSigner", "delegatedMaterial", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "paymentContextHash", "settlementResponseObservation",
+    "paymentIdentifier", "tokenFacts", "providerSigner", "delegatedMaterial", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "paymentContextHash", "settlementResponseObservation",
     "transactionHint", "authorizationUsedScan", "settlementEvidence", "unusedExpiryEvidence", "resultLink", "receiptLink",
   ];
   allowedKeys(operation, required, optional);
@@ -76,7 +76,12 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   hash(sellerWire.resourceHash);
   if (sellerWire.resourceHash !== domainHash("apn.x402.resource.v1", sellerWire.resourceCanonicalJson as string)) stateCorrupt("x402 seller resource hash is invalid.");
 
-  if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (operation.chainId !== "8453" && (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined))) stateCorrupt("x402 chain or token binding is invalid.");
+  if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (!isBaseUsdc({ chainId: Number(operation.chainId), token: String(operation.token) }) &&
+    (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined))) stateCorrupt("x402 chain or token binding is invalid.");
+  // Released USDC records carry no token facts; every other token carries its on-chain decimals and the frozen proof tag.
+  if (releasedX402Pair(operation.chainId as string, operation.token as string) ? operation.tokenFacts !== undefined : !validTokenFacts(operation.tokenFacts)) {
+    stateCorrupt("x402 token facts are invalid.");
+  }
   address(operation.wallet);
   address(operation.payee);
   const amount = parseAtomic(operation.amountAtomic, { positive: true });
@@ -234,7 +239,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   }
 
   const typed = operation as unknown as X402OperationRecord;
-  if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic, chainId: x402Network(typed.network).chainId,
+  if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic, chainId: Number(typed.chainId), token: typed.token,
     ...(resource.httpRequest === undefined ? {} : { httpRequest: resource.httpRequest }) })) stateCorrupt("x402 request hash is invalid.");
   if (typed.fingerprint !== x402Fingerprint(typed)) stateCorrupt("x402 request fingerprint is invalid.");
   const { integrityHash: _ignored, ...withoutIntegrity } = typed;
@@ -456,4 +461,11 @@ export function validateStateSummary(
       evidence.transactionHint.transactionHash !== candidate.transactionHash
     ) stateCorrupt("x402 authorization-used transaction hint is not a completed full-range unique scan proof.");
   }
+}
+
+function validTokenFacts(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const facts = value as Record<string, unknown>;
+  return Object.keys(facts).length === 2 && Number.isSafeInteger(facts.decimals) && (facts.decimals as number) >= 0 &&
+    (facts.decimals as number) <= 255 && (facts.proofTag === "safe" || facts.proofTag === "finalized");
 }

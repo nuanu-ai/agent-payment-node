@@ -1,3 +1,4 @@
+import { x402Asset } from "./x402-network.js";
 import { canonicalJson } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
 import { ApnError } from "./errors.js";
@@ -349,7 +350,7 @@ export class ProviderX402Service {
     if (remaining !== undefined && remaining < 1) return operation;
     const rpc = remaining === undefined
       ? providerX402ReadPort(this.context.requireRpc())
-      : boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining));
+      : boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Asset(8453));
     const observation = await observeProviderSettlement(operation, rpc, this.context.clock.now().getTime());
     if (observation.kind === "pending") return operation;
     if (observation.kind === "ambiguous") {

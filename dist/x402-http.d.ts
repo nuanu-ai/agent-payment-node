@@ -1,4 +1,4 @@
-import type { EvmChainId } from "./evm-asset.js";
+import { type X402Asset } from "./x402-network.js";
 import type { HttpGetRequest, HttpObservation, HttpPort, InspectResult } from "./x402-model.js";
 import type { X402HttpObservation } from "./x402-state-integrity.js";
 import { type X402HttpRequestV1 } from "./x402-http-request.js";
@@ -12,7 +12,7 @@ export declare class HttpsX402Http implements HttpPort {
     private readonly request;
     get(request: HttpGetRequest): Promise<HttpObservation>;
 }
-export declare function inspectX402(http: HttpPort, value: string, request?: X402HttpRequestV1, chainId?: EvmChainId, payer?: Address): Promise<InspectResult>;
+export declare function inspectX402(http: HttpPort, value: string, request?: X402HttpRequestV1, selection?: X402Asset | number, payer?: Address): Promise<InspectResult>;
 export interface PaidHttpResult {
     readonly observation: X402HttpObservation;
     readonly paymentResponseHeader?: string;

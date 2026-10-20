@@ -1,5 +1,5 @@
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
-import { validX402Tuple, x402Network } from "./x402-network.js";
+import { isBaseUsdc, releasedX402Pair, validX402Tuple } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
 import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenOfferTimeout } from "./x402-frozen-offer.js";
@@ -18,7 +18,7 @@ export function validateX402OperationUnsafe(value) {
         "proofClass", "nextActions", "createdAt", "updatedAt", "transitions", "integrityHash",
     ];
     const optional = [
-        "paymentIdentifier", "providerSigner", "delegatedMaterial", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "paymentContextHash", "settlementResponseObservation",
+        "paymentIdentifier", "tokenFacts", "providerSigner", "delegatedMaterial", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "paymentContextHash", "settlementResponseObservation",
         "transactionHint", "authorizationUsedScan", "settlementEvidence", "unusedExpiryEvidence", "resultLink", "receiptLink",
     ];
     allowedKeys(operation, required, optional);
@@ -36,8 +36,13 @@ export function validateX402OperationUnsafe(value) {
     hash(sellerWire.resourceHash);
     if (sellerWire.resourceHash !== domainHash("apn.x402.resource.v1", sellerWire.resourceCanonicalJson))
         stateCorrupt("x402 seller resource hash is invalid.");
-    if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (operation.chainId !== "8453" && (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined)))
+    if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (!isBaseUsdc({ chainId: Number(operation.chainId), token: String(operation.token) }) &&
+        (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined)))
         stateCorrupt("x402 chain or token binding is invalid.");
+    // Released USDC records carry no token facts; every other token carries its on-chain decimals and the frozen proof tag.
+    if (releasedX402Pair(operation.chainId, operation.token) ? operation.tokenFacts !== undefined : !validTokenFacts(operation.tokenFacts)) {
+        stateCorrupt("x402 token facts are invalid.");
+    }
     address(operation.wallet);
     address(operation.payee);
     const amount = parseAtomic(operation.amountAtomic, { positive: true });
@@ -195,7 +200,7 @@ export function validateX402OperationUnsafe(value) {
         stateCorrupt("x402 transition timestamps do not bind the operation summary.");
     }
     const typed = operation;
-    if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic, chainId: x402Network(typed.network).chainId,
+    if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic, chainId: Number(typed.chainId), token: typed.token,
         ...(resource.httpRequest === undefined ? {} : { httpRequest: resource.httpRequest }) }))
         stateCorrupt("x402 request hash is invalid.");
     if (typed.fingerprint !== x402Fingerprint(typed))
@@ -394,5 +399,12 @@ export function validateStateSummary(operation, evidence) {
             evidence.transactionHint.transactionHash !== candidate.transactionHash)
             stateCorrupt("x402 authorization-used transaction hint is not a completed full-range unique scan proof.");
     }
+}
+function validTokenFacts(value) {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return false;
+    const facts = value;
+    return Object.keys(facts).length === 2 && Number.isSafeInteger(facts.decimals) && facts.decimals >= 0 &&
+        facts.decimals <= 255 && (facts.proofTag === "safe" || facts.proofTag === "finalized");
 }
 //# sourceMappingURL=x402-operation-validation.js.map

@@ -1,6 +1,6 @@
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import type { X402RpcPort } from "./ports.js";
-import { x402Network } from "./x402-network.js";
+import { x402AssetOf } from "./x402-network.js";
 import { assertX402RpcChain } from "./x402-service-rpc.js";
 import type { Eip3009StateUnusedExpiryEvidence, X402OperationRecord } from "./x402-state-model.js";
 
@@ -17,7 +17,7 @@ export async function readX402UnusedExpiryEvidence(
   operation: X402OperationRecord,
 ): Promise<Eip3009StateUnusedExpiryEvidence | null> {
   if (operation.selectedOffer.resolved.assetTransferMethod !== "eip3009") return null;
-  const chain = await assertX402RpcChain(rpc, x402Network(operation.network).chainId);
+  const chain = await assertX402RpcChain(rpc, x402AssetOf(operation).chainId);
   const state = await rpc.getX402AuthorizationState(operation.wallet, operation.authorization.nonce, { tag: "finalized" });
   if (
     state.value || state.blockTag !== "finalized" || state.rpcOrigin !== chain.rpcOrigin ||

@@ -7,7 +7,7 @@ import { assertWalletMatches, canonicalProfile, parseWalletDescribe, parseWallet
 import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-policy.js";
 import { walletFundingGuidance } from "./funding-guidance.js";
 import { projectLegacyLocalProfile } from "./provider-profile.js";
-import { assertLocalNetworkProfile, networkPolicyBinding } from "./x402-network.js";
+import { assertLocalNetworkProfile, networkPolicyBinding, x402Asset } from "./x402-network.js";
 import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
 import { evmAddressLock } from "./evm-address-ownership.js";
 export class WalletService {
@@ -179,30 +179,32 @@ export class WalletService {
             };
         });
     }
-    async policyShow(profileInput, chainId) {
+    async policyShow(profileInput, chainId, asset) {
         const profile = canonicalProfile(profileInput);
+        const selected = selectedPolicyAsset(chainId, asset);
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-            await assertLocalNetworkProfile(this.context, profile, chainId);
-            const binding = networkPolicyBinding(await this.policyBindingForProfile(profileHash), chainId);
-            return publicProfilePolicy(profile, await this.context.requirePolicy().load(binding), chainId);
+            await assertLocalNetworkProfile(this.context, profile, selected ?? 8453);
+            const binding = networkPolicyBinding(await this.policyBindingForProfile(profileHash), selected);
+            return publicProfilePolicy(profile, await this.context.requirePolicy().load(binding), selected);
         });
     }
     async policySet(request) {
         const profile = canonicalProfile(request.profile);
+        const selected = selectedPolicyAsset(request.chainId, request.asset);
         await this.context.ready();
         const profileHash = this.context.state.profileHash(profile);
         return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-            await assertLocalNetworkProfile(this.context, profile, request.chainId);
-            const binding = networkPolicyBinding(await this.policyBindingForProfile(profileHash), request.chainId);
+            await assertLocalNetworkProfile(this.context, profile, selected ?? 8453);
+            const binding = networkPolicyBinding(await this.policyBindingForProfile(profileHash), selected);
             const policy = await this.context.requirePolicy().set(binding, {
                 maxBalanceUsdcAtomic: request.maxBalanceUsdcAtomic,
                 maxX402AmountAtomic: request.maxX402AmountAtomic,
                 ...(request.maxBalanceEthWei === undefined ? {} : { maxBalanceEthWei: request.maxBalanceEthWei }),
                 ...(request.x402Payees === undefined ? {} : { x402Payees: request.x402Payees }),
             });
-            return publicProfilePolicy(profile, policy, request.chainId);
+            return publicProfilePolicy(profile, policy, selected);
         });
     }
     async policyBindingForProfile(profileHash) {
@@ -214,5 +216,9 @@ export class WalletService {
             throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
         return policyBinding(wallet);
     }
+}
+/** The network and token a policy command named; undefined keeps the original Base USDC spelling. */
+function selectedPolicyAsset(chainId, asset) {
+    return chainId === undefined && asset === undefined ? undefined : x402Asset(chainId ?? 8453, asset);
 }
 //# sourceMappingURL=wallet-service.js.map

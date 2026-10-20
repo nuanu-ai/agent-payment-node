@@ -11,7 +11,8 @@ import {
 import type { CommandRequest } from "./commands.js";
 import type { Address } from "./model.js";
 import { ApnError } from "./errors.js";
-import { evmChain, evmDecimals, evmToken, type EvmAssetSelection } from "./evm-asset.js";
+import { evmDecimals, evmToken, type EvmAssetSelection } from "./evm-asset.js";
+import { x402Chain } from "./x402-network.js";
 import { listedEvmAsset } from "./evm-direct-allowlist.js";
 import { directEvmChain } from "./evm-direct-networks.js";
 import { bindX402HttpRequest } from "./x402-http-request.js";
@@ -366,8 +367,12 @@ function tronAsset(options: Readonly<Record<string, string>>): "trx" | "usdt" {
   return asset;
 }
 
+/** The x402 network and token a command names: `--chain` is any eip155 chain, `--asset` an exact ERC-20 contract. */
 function bindNetwork(options: Readonly<Record<string, string>>) {
-  return options["--chain"] === undefined ? {} : { chainId: evmChain(options["--chain"]) };
+  return {
+    ...(options["--chain"] === undefined ? {} : { chainId: x402Chain(options["--chain"]) }),
+    ...(options["--asset"] === undefined ? {} : { asset: evmToken(options["--asset"]) as Address }),
+  };
 }
 
 function bindAsset(options: Readonly<Record<string, string>>): EvmAssetSelection {

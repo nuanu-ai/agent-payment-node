@@ -1,5 +1,4 @@
-import { x402Network, type X402ChainText, type X402Network } from "./x402-network.js";
-import type { EvmChainId } from "./evm-asset.js";
+import { isBaseUsdc, releasedX402Pair, type X402ChainText, type X402Network } from "./x402-network.js";
 import { canonicalJson, domainHash, hashObject } from "./canonical.js";
 import type { X402DelegatedMaterialBinding } from "./provider-ports.js";
 import { x402HttpRequestBinding, type X402HttpRequestV1 } from "./x402-http-request.js";
@@ -203,7 +202,7 @@ export interface Eip3009StateSettlementEvidence {
   readonly safeHead: { readonly number: string; readonly hash: `0x${string}`; readonly observedAt: string };
   readonly authorizationState: {
     readonly value: true; readonly blockNumber: string; readonly blockHash: `0x${string}`;
-    readonly blockTag: "safe"; readonly observedAt: string;
+    readonly blockTag: "safe" | "finalized"; readonly observedAt: string;
   };
   readonly transactionHash?: `0x${string}`;
   readonly transactionBlock?: { readonly number: string; readonly hash: `0x${string}` };
@@ -361,6 +360,8 @@ export interface X402OperationRecord {
   readonly amountAtomic: string;
   readonly capAtomic: string;
   readonly selectedOffer: X402SelectedOffer;
+  /** Off the released USDC pairs: the token's on-chain decimals() and the proof tag frozen at prepare (absent = USDC, safe). */
+  readonly tokenFacts?: { readonly decimals: number; readonly proofTag: "safe" | "finalized" };
   readonly providerSigner?: {
     readonly schemaVersion: "apn.x402.provider-signer.v1";
     readonly providerId: string;
@@ -408,11 +409,14 @@ export interface X402OperationRecord {
   readonly integrityHash: string;
 }
 
-export function x402RequestHash(input: { readonly profile: string; readonly canonicalUrl: string; readonly capAtomic: string; readonly chainId?: EvmChainId; readonly httpRequest?: X402HttpRequestV1 }): string {
+export function x402RequestHash(input: { readonly profile: string; readonly canonicalUrl: string; readonly capAtomic: string; readonly chainId?: number; readonly token?: string; readonly httpRequest?: X402HttpRequestV1 }): string {
+  const chainId = input.chainId ?? 8453;
   return hashObject({
     ...x402HttpRequestBinding(input.httpRequest),
     method: "x402.fetch.prepare",
-    ...((input.chainId ?? 8453) === 8453 ? {} : { network: x402Network(input.chainId).network }),
+    ...(chainId === 8453 ? {} : { network: `eip155:${chainId}` }),
+    // Released USDC requests keep their original hash; any other token is part of the request identity.
+    ...(input.token === undefined || releasedX402Pair(chainId, input.token) ? {} : { token: input.token.toLowerCase() }),
     profile: input.profile,
     canonicalUrl: input.canonicalUrl,
     capAtomic: input.capAtomic,
@@ -451,7 +455,7 @@ export function x402AuthorizationIntentHash(value: Omit<X402OperationRecord["aut
 export function x402OperationBindingHash(operation: X402OperationRecord): string {
   return domainHash("apn.x402.binding.v1", canonicalJson({
     version: 1,
-    ...(operation.chainId === "8453" ? {} : { network: operation.network, chainId: operation.chainId, token: operation.token }),
+    ...(isBaseUsdc({ chainId: Number(operation.chainId), token: operation.token }) ? {} : { network: operation.network, chainId: operation.chainId, token: operation.token }),
     x402Version: 2,
     method: operation.resource.httpRequest?.method ?? "GET",
     ...x402HttpRequestBinding(operation.resource.httpRequest),

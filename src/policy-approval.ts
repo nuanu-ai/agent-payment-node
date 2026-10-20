@@ -3,7 +3,8 @@ import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import type { Address } from "./model.js";
-import { x402Network, type X402PolicyNetwork } from "./x402-network.js";
+import { loadAllowlistInventory } from "./allowlist-inventory.js";
+import { releasedX402Pair, type X402PolicyNetwork } from "./x402-network.js";
 
 const POLICY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
@@ -68,14 +69,15 @@ export class TtyProfilePolicyApproval implements ProfilePolicyApprovalPort {
         throw approvalFailure("APN_TTY_UNAVAILABLE", "Profile-policy approval is not attached to a terminal.");
       }
       const phrase = profilePolicyApprovalPhrase(intent.fingerprint);
+      const unit = x402Unit(intent.x402Network);
       await tty.write([
         "\nAgent Payment Node policy approval",
         `Change: ${intent.change}`,
         `Profile: ${intent.profile}`,
-        intent.x402Network === undefined ? `Chain: Base (${CHAIN_ID})` : `Chain: ${x402Network(intent.x402Network.chainId).network}`,
-        `Token: ${intent.x402Network?.token ?? BASE_USDC}`,
+        intent.x402Network === undefined ? `Chain: Base (${CHAIN_ID})` : `Chain: eip155:${intent.x402Network.chainId}`,
+        `Token: ${intent.x402Network?.token ?? BASE_USDC}${unit.note}`,
         `Wallet: ${intent.walletAddress}`,
-        `Maximum wallet USDC: ${intent.maxBalanceUsdcAtomic} atomic`,
+        `Maximum wallet ${unit.symbol}: ${intent.maxBalanceUsdcAtomic} atomic`,
         `Maximum unattended x402: ${intent.maxX402AmountAtomic} atomic`,
         `Maximum wallet ETH: ${intent.maxBalanceEthWei ?? "not configured"} wei`,
         intent.x402Payees === undefined ? "x402 payees: not restricted" : `x402 payees pinned (${intent.x402Payees.length}): ${intent.x402Payees.join(", ")}`,
@@ -92,6 +94,15 @@ export class TtyProfilePolicyApproval implements ProfilePolicyApprovalPort {
       await tty.close();
     }
   }
+}
+
+/** What the owner reads beside the token address: its symbol and decimals from APN's frozen token list, if listed. */
+function x402Unit(network: X402PolicyNetwork | undefined): { readonly symbol: string; readonly note: string } {
+  if (network === undefined || releasedX402Pair(network.chainId, network.token)) return { symbol: "USDC", note: "" };
+  const listed = loadAllowlistInventory().assets.find((row) => row.chain === `eip155:${network.chainId}` &&
+    row.identifier?.toLowerCase() === network.token.toLowerCase());
+  return listed === undefined ? { symbol: "token", note: " (not in APN's token list: verify this contract yourself)" }
+    : { symbol: listed.symbol, note: ` (${listed.symbol}, ${listed.decimals} decimals, APN token list)` };
 }
 
 export function profilePolicyApprovalPhrase(fingerprint: string): string {

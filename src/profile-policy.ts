@@ -1,7 +1,6 @@
 import { getAddress } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "./canonical.js";
-import { validPolicyNetwork, x402Network, type X402PolicyNetwork } from "./x402-network.js";
-import type { EvmChainId } from "./evm-asset.js";
+import { releasedX402Pair, validPolicyNetwork, type X402Asset, type X402PolicyNetwork } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import type { Address, WalletRecord } from "./model.js";
@@ -178,8 +177,9 @@ export function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBin
   return policy;
 }
 
-export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, chainId?: EvmChainId): unknown {
-  const selected = chainId === undefined ? {} : { chain: x402Network(chainId).network, token: x402Network(chainId).token };
+/** `asset` is the network and token the caller named; omitted for the original Base USDC spelling. */
+export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, asset?: X402Asset): unknown {
+  const selected = asset === undefined ? {} : { chain: asset.network, token: asset.token };
   if (policy === null) {
     return {
       configured: false,
@@ -196,7 +196,8 @@ export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord
       updated_at: null,
       integrity_status: "not_present",
       proof_class: "encrypted_profile_policy_status",
-      next_actions: [chainId === undefined ? "apn wallet policy set" : `apn wallet policy set-network --chain eip155:${chainId}`],
+      next_actions: [asset === undefined ? "apn wallet policy set" : `apn wallet policy set-network --chain ${asset.network}${
+        releasedX402Pair(asset.chainId, asset.token) ? "" : ` --asset ${asset.token}`}`],
     };
   }
   return {

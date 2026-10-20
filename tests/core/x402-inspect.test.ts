@@ -275,7 +275,9 @@ test("PAYMENT-SIGNATURE is canonical strict exact-EVM PaymentPayload before tran
     { ...X402_PAYMENT_PAYLOAD, x402Version: 1 },
     { ...X402_PAYMENT_PAYLOAD, resource: null },
     { ...X402_PAYMENT_PAYLOAD, accepted: { ...X402_REQUIREMENTS, scheme: "upto" } },
-    { ...X402_PAYMENT_PAYLOAD, accepted: { ...X402_REQUIREMENTS, network: "eip155:1" } },
+    // Any EVM chain+token is a valid shape now (the operation's frozen offer binds the pair); a non-EVM or zero chain is not.
+    { ...X402_PAYMENT_PAYLOAD, accepted: { ...X402_REQUIREMENTS, network: "eip155:0" } },
+    { ...X402_PAYMENT_PAYLOAD, accepted: { ...X402_REQUIREMENTS, network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" } },
     { ...X402_PAYMENT_PAYLOAD, payload: { ...X402_PAYMENT_PAYLOAD.payload, unexpected: true } },
     { ...X402_PAYMENT_PAYLOAD, payload: { ...X402_PAYMENT_PAYLOAD.payload, signature: "arbitrary" } },
     { ...X402_PAYMENT_PAYLOAD, payload: { ...X402_PAYMENT_PAYLOAD.payload, signature: highSignature } },
