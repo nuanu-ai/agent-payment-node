@@ -45,7 +45,7 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
   record's proof tag in unattended `x402 fetch`, like the EIP-3009 prepare read; the foreground `x402 permit2 approve`
   lane reads them at `latest`, pinned by block hash, under its 30 s block-age bound, and freezes its proof tag in the
   record (records from before 0.5.53 keep `finalized`). Either way they predict settlement and cannot move money (the
-  signature binds token, amount, payee, nonce and a deadline of at most 300 s).
+  signature binds token, amount, payee, nonce and a deadline of at most 3,600 s, the seller-window bound below).
 
 ## Method choice (deterministic)
 

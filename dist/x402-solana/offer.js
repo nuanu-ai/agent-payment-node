@@ -1,33 +1,51 @@
 import { canonicalJson, domainHash, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { solanaAddress } from "../solana/rpc.js";
+import { isOfferRefusal, offerRefusal, refusedOffersDetails } from "../x402-offer-terms.js";
 import { WRAPPED_SOL_MINT, X402_SOLANA_MAX_MEMO_BYTES, X402_SOLANA_NETWORK } from "./constants.js";
 const U64_MAX = (1n << 64n) - 1n;
 /** Every structurally valid Solana `exact` offer in seller order; anything else is skipped, never repaired. */
 export function solanaExactOffers(accepts) {
-    const offers = [];
-    accepts.forEach((value, index) => {
-        const offer = parseOffer(value, index);
-        if (offer !== null)
-            offers.push(offer);
-    });
-    return offers;
+    return judgedSolanaOffers(accepts).flatMap((judged) => "offer" in judged ? [judged.offer] : []);
 }
-function parseOffer(value, index) {
-    if (!isPlainRecord(value) || value.scheme !== "exact" || value.network !== X402_SOLANA_NETWORK)
-        return null;
-    const extra = value.extra;
-    if (!isPlainRecord(extra) || typeof value.amount !== "string" || !/^[1-9][0-9]{0,19}$/u.test(value.amount) ||
-        BigInt(value.amount) > U64_MAX || typeof value.maxTimeoutSeconds !== "number" || !Number.isSafeInteger(value.maxTimeoutSeconds) ||
-        value.maxTimeoutSeconds < 1)
-        return null;
-    const mint = canonical(value.asset), payee = canonical(value.payTo), feePayer = canonical(extra.feePayer);
+/** Each Solana `exact` offer with a valid mint: parsed, or refused with the field that decided it. */
+function judgedSolanaOffers(accepts) {
+    const judged = [];
+    accepts.forEach((value, index) => {
+        if (!isPlainRecord(value) || value.scheme !== "exact" || value.network !== X402_SOLANA_NETWORK)
+            return;
+        const mint = canonical(value.asset);
+        if (mint === null)
+            return;
+        const verdict = parseOffer(value, index, mint);
+        judged.push(isOfferRefusal(verdict) ? { mint, refused: { index: index.toString(), network: X402_SOLANA_NETWORK, asset: mint, method: "spl", ...verdict } }
+            : { offer: verdict });
+    });
+    return judged;
+}
+/**
+ * The keys APN understands are checked strictly (`feePayer` a third-party address, `memo` 1 to 256 bytes of UTF-8);
+ * every other `extra` key is the seller's own, never a reason to refuse, and reaches the seller unchanged in `accepted`.
+ */
+function parseOffer(value, index, mint) {
+    const extra = isPlainRecord(value.extra) ? value.extra : {};
+    if (typeof value.amount !== "string" || !/^[1-9][0-9]{0,19}$/u.test(value.amount) || BigInt(value.amount) > U64_MAX) {
+        return offerRefusal("x402_offer_amount_invalid", "amount", value.amount, "1..2^64-1 atomic units");
+    }
+    if (typeof value.maxTimeoutSeconds !== "number" || !Number.isSafeInteger(value.maxTimeoutSeconds) || value.maxTimeoutSeconds < 1) {
+        return offerRefusal("x402_offer_timeout_below_bound", "maxTimeoutSeconds", value.maxTimeoutSeconds, "a positive whole number of seconds");
+    }
+    const payee = canonical(value.payTo), feePayer = canonical(extra.feePayer);
+    if (payee === null)
+        return offerRefusal("x402_offer_payee_invalid", "payTo", value.payTo);
+    if (feePayer === null)
+        return offerRefusal("x402_solana_fee_payer_invalid", "extra.feePayer", extra.feePayer, "the facilitator's Solana address");
     // A declared memo must be 1 to 256 bytes of well-formed UTF-8 (it is put into the transaction byte for byte).
     const memo = extra.memo === undefined ? null : typeof extra.memo === "string" && extra.memo.length > 0 &&
         Buffer.byteLength(extra.memo, "utf8") <= X402_SOLANA_MAX_MEMO_BYTES && Buffer.from(extra.memo, "utf8").toString("utf8") === extra.memo
         ? extra.memo : undefined;
-    if (mint === null || payee === null || feePayer === null || memo === undefined)
-        return null;
+    if (memo === undefined)
+        return offerRefusal("x402_offer_extra_invalid", "extra.memo", extra.memo, `1..${X402_SOLANA_MAX_MEMO_BYTES} UTF-8 bytes`);
     const declaredCanonicalJson = canonicalJson(value);
     return { index, mint, amountAtomic: value.amount, payee, feePayer, maxTimeoutSeconds: value.maxTimeoutSeconds, declaredCanonicalJson,
         offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson), memo };
@@ -67,6 +85,12 @@ export function selectSolanaOffer(input) {
     const offers = solanaExactOffers(input.accepts), forMint = offers.filter((offer) => offer.mint === input.mint);
     if (forMint.length === 0) {
         refuseNativeSol(input.accepts, input.mint);
+        // Offers of this mint APN cannot sign are named with the field that decided each one.
+        const refused = judgedSolanaOffers(input.accepts).flatMap((judged) => "refused" in judged && judged.mint === input.mint ? [judged.refused] : []);
+        if (refused.length > 0) {
+            const named = refusedOffersDetails(refused);
+            throw new ApnError("APN_X402_UNSUPPORTED_OFFER", named.message, { ...named.details, chain: X402_SOLANA_NETWORK, asset: input.mint });
+        }
         throw new ApnError("APN_X402_UNSUPPORTED_OFFER", `Seller challenge has no Solana x402 exact offer for the mint ${input.mint}.`, { reason: "x402_offer_asset_not_offered", chain: X402_SOLANA_NETWORK, asset: input.mint,
             offered: [...new Set(offers.map((offer) => `${X402_SOLANA_NETWORK} ${offer.mint}`))].slice(0, 16) });
     }

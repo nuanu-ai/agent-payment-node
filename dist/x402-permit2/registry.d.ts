@@ -14,8 +14,6 @@ export declare const X402_PERMIT2_MECHANISM: {
     readonly provider: "x402-exact-permit2";
     readonly reference: `0x${string}`;
 };
-/** Upper bound for the seller's timeout, which becomes the Permit2 deadline; a longer-lived signature is refused. */
-export declare const X402_PERMIT2_MAX_TIMEOUT_SECONDS = 300;
 export declare const ERC20_TRANSFER_TOPIC: `0x${string}`;
 export declare const PROXY_SETTLED_TOPIC: `0x${string}`;
 export declare const PROXY_SETTLED_WITH_PERMIT_TOPIC: `0x${string}`;

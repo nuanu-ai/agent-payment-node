@@ -1,9 +1,10 @@
-import { canonicalJson, domainHash, sha256 } from "./canonical.js";
+import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { Address, Hex } from "./model.js";
 import { parseAtomic } from "./money.js";
 import type { RpcPort } from "./ports.js";
 import type { InspectCandidate, Permit2InspectCandidate } from "./x402-model.js";
+import { decimalsRefusal } from "./x402-offer-terms.js";
 import type { X402Asset } from "./x402-network.js";
 import { paymentIdentifierState, selectPrepareOffer, tokenDomainSeparator, validatePrepareEvidence, type FreshChallenge,
   type SelectedPrepareOffer } from "./x402-policy.js";
@@ -69,7 +70,7 @@ async function readPermit2(input: X402PrepareReadInput, candidates: readonly Per
   validatePrepareEvidence(evidence, input.wallet, { asset: input.asset, rpcOriginHash: sha256(input.rpcOrigin),
     invocationStartedAtMs: input.startedAtMs, invocationCompletedAtMs: input.nowMs() }, "permit2");
   const balance = parseAtomic(evidence.usdcAtomic), allowance = parseAtomic(evidence.allowanceAtomic);
-  let funded = false, allowanceShort = false;
+  let funded = false, allowanceShort = false, decimalsMismatch = false;
   for (const candidate of candidates) {
     const amount = parseAtomic(candidate.amountAtomic, { positive: true });
     // As in the foreground Permit2 lane, the payee is never the payer, the token or a Permit2 contract.
@@ -90,6 +91,8 @@ async function readPermit2(input: X402PrepareReadInput, candidates: readonly Per
     }
     const requirements = input.discovered.paymentRequired.accepts[Number(candidate.index)];
     if (requirements === undefined) throw new ApnError("APN_HTTP_PROTOCOL", "Selected seller index is missing from the fresh challenge.");
+    // A declared decimals hint must equal the token's own decimals(), read in the same batch; the seller's word never sets them.
+    if (decimalsRefusal(isPlainRecord(requirements.extra) ? requirements.extra : {}, evidence.tokenFacts.decimals) !== null) { decimalsMismatch = true; continue; }
     // Every check the paid request's wire codec makes runs now, before anything is signed (R3): a well-formed placeholder
     // signature stands in for the real ones, which the codec checks only for shape.
     if (!permit2WireAccepts(input, requirements, candidate, eip2612)) continue;
@@ -107,6 +110,10 @@ async function readPermit2(input: X402PrepareReadInput, candidates: readonly Per
   if (!funded && candidates.some((candidate) => ![input.wallet, input.asset.token, PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY]
     .some((address) => address.toLowerCase() === candidate.payTo.toLowerCase()))) {
     throw new ApnError("APN_INSUFFICIENT_USDC", "The token balance is insufficient for every Permit2 offer within the explicit cap.");
+  }
+  if (decimalsMismatch) {
+    throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's declared decimals differ from the token's on-chain decimals().",
+      { reason: "x402_token_decimals_mismatch", chain: input.asset.network, asset: input.asset.token, decimals: evidence.tokenFacts.decimals });
   }
   if (allowanceShort) {
     throw new ApnError("APN_X402_UNSUPPORTED_OFFER", `The wallet's allowance to Permit2 (${PERMIT2_ADDRESS}) for ${input.asset.token} is below the price and the ` +

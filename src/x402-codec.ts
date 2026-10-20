@@ -1,4 +1,4 @@
-import { isBaseUsdc, releasedX402Pair, x402Asset, type X402Asset, type X402Network } from "./x402-network.js";
+import { x402Asset, type X402Asset, type X402Network } from "./x402-network.js";
 import {
   decodePaymentRequiredHeader as decodeOfficialPaymentRequiredHeader,
   decodePaymentResponseHeader as decodeOfficialPaymentResponseHeader,
@@ -9,8 +9,9 @@ import type { PaymentPayload, PaymentRequired, PaymentRequirements, SettleRespon
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { CHAIN_CAIP2 } from "./constants.js";
 import { ApnError } from "./errors.js";
-import { canonicalErc7710Facilitators, isStrictErc7710Payload } from "./x402-erc7710-codec.js";
-import type { InspectCandidate } from "./x402-model.js";
+import { isStrictErc7710Payload } from "./x402-erc7710-codec.js";
+import { inspectOffer } from "./x402-offer-inspect.js";
+import { isOfferRefusal } from "./x402-offer-terms.js";
 import { MAX_DECODED_X402_BYTES, decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
 import { isEip2612GasSponsoringDeclaration } from "./x402-permit2/extension.js";
 import { validatePermit2PaymentPayload } from "./x402-permit2/codec-shape.js";
@@ -19,6 +20,7 @@ import { isSolanaAccepted, validateSolanaPaymentPayload } from "./x402-solana/co
 export type X402PaymentPayload = PaymentPayload;
 export type X402PaymentRequired = PaymentRequired;
 export type X402PaymentRequirements = PaymentRequirements;
+export { inspectCandidates } from "./x402-offer-inspect.js";
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const LOWER_ADDRESS = /^0x[0-9a-f]{40}$/u;
@@ -27,12 +29,6 @@ const TRANSACTION_HASH = /^0x[0-9a-f]{64}$/u;
 const POSITIVE_UINT = /^[1-9][0-9]*$/u;
 const SECP256K1_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const SECP256K1_HALF_ORDER = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n;
-const READINESS = {
-  cap: "unverified",
-  walletBalance: "unverified",
-  tokenDomain: "unverified",
-  payment: "unverified",
-} as const;
 
 export function encodeCanonicalBase64Json(value: unknown): string {
   const json = JSON.stringify(value);
@@ -206,78 +202,6 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
   };
 }
 
-/** Offers of exactly the selected network and token (a bare chain id: its released USDC); others are skipped, never repaired. */
-export function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, asset: X402Asset): readonly InspectCandidate[] {
-  if (paymentRequired.x402Version !== 2 || !resourceMatches(paymentRequired.resource.url, requestedUrl)) return [];
-  const output: InspectCandidate[] = [];
-  paymentRequired.accepts.forEach((requirements, index) => {
-    const candidate = inspectCandidate(requirements, index, asset);
-    if (candidate !== null) output.push(candidate);
-  });
-  return output;
-}
-
-function inspectCandidate(requirements: PaymentRequirements, index: number, selected: X402Asset): InspectCandidate | null {
-  const extra = requirements.extra;
-  if (
-    requirements.scheme !== "exact" || requirements.network !== selected.network ||
-    !ADDRESS.test(requirements.asset) || requirements.asset.toLowerCase() !== selected.token.toLowerCase() ||
-    !POSITIVE_UINT.test(requirements.amount) || !ADDRESS.test(requirements.payTo) || /^0x0{40}$/iu.test(requirements.payTo) ||
-    !Number.isInteger(requirements.maxTimeoutSeconds) || requirements.maxTimeoutSeconds < 30 || requirements.maxTimeoutSeconds > 300 ||
-    !isPlainRecord(extra)
-  ) return null;
-  const declaredCanonicalJson = canonicalJson(requirements);
-  const base = {
-    index: index.toString(),
-    scheme: "exact" as const,
-    network: selected.network,
-    asset: requirements.asset.toLowerCase(),
-    amountAtomic: requirements.amount,
-    payTo: requirements.payTo.toLowerCase(),
-    maxTimeoutSeconds: requirements.maxTimeoutSeconds.toString(),
-    offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson),
-    readiness: READINESS,
-  };
-  if (extra.assetTransferMethod === "permit2") {
-    // Exactly the foreground Permit2 lane's offer shape: the method alone, or with the token's EIP-712 name and version.
-    const hinted = exactKeys(extra, ["assetTransferMethod", "name", "version"]);
-    if (!exactKeys(extra, ["assetTransferMethod"]) && !(hinted && typeof extra.name === "string" && extra.name.length > 0 &&
-      Buffer.byteLength(extra.name, "utf8") <= 128 && typeof extra.version === "string" && extra.version.length > 0 &&
-      Buffer.byteLength(extra.version, "utf8") <= 128)) return null;
-    return { ...base, assetTransferMethod: "permit2", paymentFlow: "permit2WitnessTransfer",
-      ...(hinted ? { tokenName: extra.name as string, tokenVersion: extra.version as string } : {}) };
-  }
-  if (extra.assetTransferMethod === "erc7710") {
-    if (!isBaseUsdc(selected)) return null;
-    const facilitatorAddresses = canonicalErc7710Facilitators(extra);
-    if (facilitatorAddresses === null) return null;
-    return {
-      ...base,
-      assetTransferMethod: "erc7710",
-      paymentFlow: "delegatedErc20Transfer",
-      facilitatorAddresses,
-    };
-  }
-  if (
-    typeof extra.name !== "string" || extra.name.length === 0 ||
-    Buffer.byteLength(extra.name, "utf8") > 128 ||
-    typeof extra.version !== "string" || extra.version.length === 0 ||
-    Buffer.byteLength(extra.version, "utf8") > 128 ||
-    // A declared decimals hint must be USDC's 6 on the released pairs; elsewhere prepare compares it with the token's own.
-    (extra.decimals !== undefined && (releasedX402Pair(selected.chainId, selected.token) ? extra.decimals !== 6
-      : typeof extra.decimals !== "number" || !Number.isSafeInteger(extra.decimals) || extra.decimals < 0 || extra.decimals > 255)) ||
-    (extra.assetTransferMethod !== undefined && extra.assetTransferMethod !== "eip3009") ||
-    (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization")
-  ) return null;
-  return {
-    ...base,
-    tokenName: extra.name,
-    tokenVersion: extra.version,
-    assetTransferMethod: "eip3009",
-    paymentFlow: "transferWithAuthorization",
-  };
-}
-
 function validatePaymentRequired(value: unknown): asserts value is PaymentRequired {
   const paymentRequired = record(value, "PAYMENT-REQUIRED");
   requiredKeys(paymentRequired, ["x402Version", "resource", "accepts"]);
@@ -304,8 +228,8 @@ function validatePaymentPayload(value: unknown): asserts value is PaymentPayload
   let acceptedAsset: X402Asset;
   try { acceptedAsset = x402Asset(accepted.network, accepted.asset); }
   catch { throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported."); }
-  const candidate = inspectCandidate(accepted, 0, acceptedAsset);
-  if (candidate === null) throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
+  const candidate = inspectOffer(accepted, 0, acceptedAsset);
+  if (candidate === null || isOfferRefusal(candidate)) throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
   if (candidate.assetTransferMethod === "permit2") return validatePermit2PaymentPayload(value);
   const payload = record(paymentPayload.payload, "exact-EVM payload");
   if (candidate.assetTransferMethod === "erc7710") {
@@ -441,13 +365,6 @@ function validatePaymentIdentifierSchema(value: unknown): void {
   if (!Array.isArray(schema.required) || schema.required.length !== 1 || schema.required[0] !== "required") {
     throw protocol("payment-identifier required-member schema is invalid.");
   }
-}
-
-function resourceMatches(value: string, requested: string): boolean {
-  try {
-    const resource = new URL(value);
-    return resource.protocol === "https:" && resource.username === "" && resource.password === "" && resource.hash === "" && resource.toString() === requested;
-  } catch { return false; }
 }
 
 function allowedKeys(value: Record<string, unknown>, required: readonly string[], optional: readonly string[]): void {
