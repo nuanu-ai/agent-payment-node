@@ -90,6 +90,7 @@ export type UniswapTokenPrincipalRelease = {
     readonly kind: "swap_never_signed";
     readonly swapNonce?: string;
     readonly swapMarkerHash?: string;
+    readonly chainProof?: UniswapTokenSwapNonceProof;
     readonly observedAt: string;
 } | {
     readonly schemaVersion: "apn.uniswap-token-principal-release.v1";
@@ -100,8 +101,33 @@ export type UniswapTokenPrincipalRelease = {
     readonly cleanupBlockHash: string;
     readonly finalizedBlockNumber: string;
     readonly finalizedNonce: string;
+    readonly chainProof?: UniswapTokenSwapNonceProof;
     readonly observedAt: string;
 };
+/**
+ * Custody's "no signed bytes" is local state; this is the finalized chain's word that no swap with a marker's nonce can land
+ * (0.5.56 on): each nonce is held by a landed cleanup of this operation at a finalized block, or the account's nonce at a
+ * finalized block past the route's deadline is at or below it (a swap included later reverts on that deadline). A release
+ * recorded before the proof existed carries none.
+ */
+export interface UniswapTokenSwapNonceProof {
+    readonly swapNonces: readonly string[];
+    readonly cleanups: readonly {
+        readonly swapNonce: string;
+        readonly cleanupTransactionHash: string;
+        readonly cleanupBlockNumber: string;
+        readonly cleanupBlockHash: string;
+        readonly finalizedBlockNumber: string;
+        readonly finalizedNonce: string;
+    }[];
+    readonly unused: {
+        readonly fromNonce: string;
+        readonly finalizedNonce: string;
+        readonly finalizedBlockNumber: string;
+        readonly finalizedBlockHash: string;
+        readonly finalizedBlockTimestamp: string;
+    } | null;
+}
 export interface UniswapTokenFailureDiagnostic {
     readonly code: string | null;
     readonly reason: string | null;
@@ -148,6 +174,8 @@ export interface UniswapTokenOperation {
     readonly retiredEffects?: readonly UniswapTokenRetiredEffect[];
     /** Present only once a cleaned swap's principal hold was released on proof that no swap of it can land. */
     readonly principalRelease?: UniswapTokenPrincipalRelease;
+    /** Swap markers dropped because custody showed no signed bytes for them (0.5.56 on): their nonces a release must prove on chain. */
+    readonly freedSwapMarkers?: readonly UniswapTokenAttempt[];
     readonly receipt: UniswapTokenReceipt | null;
     readonly previousIntegrityHash: string | null;
     readonly integrityHash: string;
@@ -170,6 +198,8 @@ export declare class UniswapTokenJournal extends SecureStateStore {
 }
 export declare function transitionUniswapToken(opValue: UniswapTokenOperation, phase: UniswapTokenPhase, patch: Partial<UniswapTokenOperation>, now: Date): UniswapTokenOperation;
 export declare function tokenAttempt(op: UniswapTokenOperation, kind: "approval" | "swap" | "cleanup", nonce: string, now: Date): UniswapTokenAttempt;
+/** The nonces of the swap markers custody freed and of `kept` (a hashless marker the record still holds), ascending and distinct. */
+export declare function swapMarkerNonces(op: Pick<UniswapTokenOperation, "freedSwapMarkers">, kept: UniswapTokenAttempt | null): readonly string[];
 /** A cleanup of this operation that landed (current, or retired after landing) and so consumed its nonce. */
 export declare function landedTokenCleanups(op: Pick<UniswapTokenOperation, "cleanupAttempt" | "retiredEffects">): readonly UniswapTokenAttempt[];
 export {};

@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
-import { abandonedPrincipalCandidate, principalReleaseCandidate } from "./token-principal.js";
-import { sanitizeUniswapTokenFailureField, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
+import { abandonedPrincipalCandidate, principalReleaseCandidate, proveSwapNoncesUnusable } from "./token-principal.js";
+import { sanitizeUniswapTokenFailureField, swapMarkerNonces, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
 export class UniswapTokenExecution {
     journal;
     ports;
@@ -150,7 +150,7 @@ export class UniswapTokenExecution {
         }
         catch (error) {
             const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce);
-            return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase), unmarked(kind, unsigned));
+            return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase), unmarked(op, kind, unsigned));
         }
         let sealed;
         try {
@@ -163,7 +163,7 @@ export class UniswapTokenExecution {
                 throw error;
             }
             const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce);
-            return await this.cleanupRequired(op, `${kind}_sign_failed`, op.accumulatedNativeDebitWei, undefined, undefined, unmarked(kind, unsigned));
+            return await this.cleanupRequired(op, `${kind}_sign_failed`, op.accumulatedNativeDebitWei, undefined, undefined, unmarked(op, kind, unsigned));
         }
         await this.ports.commitNonce(op, kind, attempt.nonce);
         op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
@@ -300,25 +300,31 @@ export class UniswapTokenExecution {
         const noEffect = !effectHash(op);
         if (noEffect && (op.cleanupEvidence ?? null) === null)
             corrupt("No-effect cleanup evidence is missing.");
-        const usage = noEffect ? await this.ports.followUsage(op, "failed_before_effect") : await this.ports.currentUsage(op);
+        // A swap marker custody freed is proven on chain before its hold is released (settlePrincipal), even with no effect.
+        const usage = noEffect && op.freedSwapMarkers === undefined ? await this.ports.followUsage(op, "failed_before_effect") : await this.ports.currentUsage(op);
         return await this.settlePrincipal(await this.persist(transitionUniswapToken(op, "cleaned", { accumulatedNativeDebitWei: native,
             ...(noEffect ? { cleanupReason: "zero_allowance_no_effect" } : {}), ...usagePatch(usage) }, this.ports.now())));
     }
     /**
      * A cleaned swap still holding its principal although no swap of it can land (R4 exit 2): no swap marker is left (never
-     * signed), or its hashless marker's nonce is consumed in the finalized chain by its own landed cleanup. The proof is saved
-     * first, then the hold is released; gas, attempts and history stay. Without such proof the hold stays (owner abandon).
+     * signed), or its hashless marker's nonce is consumed in the finalized chain by its own landed cleanup. A marker custody
+     * freed (no signed bytes, a local answer) is also proven on chain: its nonce held by a landed cleanup, or unused past the
+     * deadline. The proof is saved first, then the hold is released; gas, attempts and history stay. Without it the hold stays.
      */
     async settlePrincipal(op) {
         if (op.phase !== "cleaned" || op.usageState !== "reserved")
             return op;
         if (op.principalRelease === undefined) {
-            const candidate = principalReleaseCandidate(op), now = this.ports.now();
+            const candidate = principalReleaseCandidate(op);
             if (candidate === null)
                 return op;
+            const freed = swapMarkerNonces(op, null), chainProof = freed.length === 0 ? undefined : await proveSwapNoncesUnusable(op, freed, this.ports);
+            if (chainProof === null)
+                return op;
+            const proven = chainProof === undefined ? {} : { chainProof }, now = this.ports.now();
             if (candidate.kind === "swap_never_signed")
                 op = await this.persist(transitionUniswapToken(op, "cleaned", { principalRelease: {
-                        schemaVersion: "apn.uniswap-token-principal-release.v1", kind: "swap_never_signed", observedAt: now.toISOString()
+                        schemaVersion: "apn.uniswap-token-principal-release.v1", kind: "swap_never_signed", ...proven, observedAt: now.toISOString()
                     } }, now));
             else {
                 const proof = await this.ports.swapNonceConsumed?.(op, candidate.cleanup) ?? null;
@@ -327,7 +333,7 @@ export class UniswapTokenExecution {
                 op = await this.persist(transitionUniswapToken(op, "cleaned", { principalRelease: { schemaVersion: "apn.uniswap-token-principal-release.v1",
                         kind: "swap_nonce_consumed_by_cleanup", swapNonce: candidate.swap.nonce, cleanupTransactionHash: candidate.cleanup.transactionHash,
                         cleanupBlockNumber: proof.blockNumber, cleanupBlockHash: proof.blockHash, finalizedBlockNumber: proof.finalizedBlockNumber,
-                        finalizedNonce: proof.finalizedNonce, observedAt: now.toISOString() } }, now));
+                        finalizedNonce: proof.finalizedNonce, ...proven, observedAt: now.toISOString() } }, now));
             }
         }
         return await this.persist(transitionUniswapToken(op, "cleaned", usagePatch(await this.ports.followUsage(op, "failed_before_effect")), this.ports.now()));
@@ -350,14 +356,16 @@ export class UniswapTokenExecution {
             const current = await this.required(op.operationId);
             if (current.integrityHash !== op.integrityHash || !await this.ports.releaseNonce(current, kind, attempt.nonce))
                 return current;
-            return await this.persist(transitionUniswapToken(current, kind === "approval" ? "approved" : kind === "swap" ? "approval_observed" : "cleanup_required", { [`${kind}Attempt`]: null }, this.ports.now()));
+            return await this.persist(transitionUniswapToken(current, kind === "approval" ? "approved" : kind === "swap" ? "approval_observed" : "cleanup_required", unmarked(current, kind, true), this.ports.now()));
         });
     }
     /**
      * The owner's abandon keeps the principal held only while an effect of the swap could still land. With no swap marker, or
      * a hashless one whose custody (opened under the account lock) holds no signed bytes and so frees its nonce, nothing of
-     * the principal can move: that proof is saved first, then the hold released. Gas, attempts, the marker and the terminal
-     * phase stay; signed bytes (found now or committed earlier) change nothing. Nothing is signed or sent here.
+     * the principal can move. Custody's answer is local, so every swap marker's nonce (this one and any custody freed) is
+     * also proven on the finalized chain first, as for a cleaned swap; without that the hold stays. The proof is saved, then
+     * the hold released. Gas, attempts, the marker and the terminal phase stay; signed bytes (found now or committed earlier)
+     * change nothing. Nothing is signed or sent here.
      */
     async releaseAbandoned(op) {
         const candidate = abandonedPrincipalCandidate(op);
@@ -366,13 +374,17 @@ export class UniswapTokenExecution {
         const swap = candidate.swap;
         if (swap !== null && await this.ports.recoverSealed?.(op, "swap", swap.nonce) != null)
             return op;
+        const nonces = swapMarkerNonces(op, swap), chainProof = nonces.length === 0 ? undefined : await proveSwapNoncesUnusable(op, nonces, this.ports);
+        if (chainProof === null)
+            return op;
         op = await this.ports.withAccountLock(op, async () => {
             const current = await this.required(op.operationId);
             if (current.integrityHash !== op.integrityHash || swap !== null && !await this.ports.releaseNonce(current, "swap", swap.nonce))
                 return current;
             const now = this.ports.now();
             return await this.persist(transitionUniswapToken(current, "abandoned_unknown", { principalRelease: { schemaVersion: "apn.uniswap-token-principal-release.v1",
-                    kind: "swap_never_signed", ...(swap === null ? {} : { swapNonce: swap.nonce, swapMarkerHash: swap.markerHash }), observedAt: now.toISOString() } }, now));
+                    kind: "swap_never_signed", ...(swap === null ? {} : { swapNonce: swap.nonce, swapMarkerHash: swap.markerHash }),
+                    ...(chainProof === undefined ? {} : { chainProof }), observedAt: now.toISOString() } }, now));
         });
         if (op.principalRelease === undefined || op.usageState !== "reserved")
             return op;
@@ -474,9 +486,14 @@ function diagnostic(error, phase) {
 /**
  * R4 exit 2 "never signed": the refusal came before signing, inside the account lock, and custody then showed no signed bytes
  * while it freed the nonce. The marker of that attempt is dropped so the zero-allowance cleanup can prove no effect; an attempt
- * custody may hold signed bytes for keeps its marker (its exit stays proof or the owner's abandon).
+ * custody may hold signed bytes for keeps its marker (its exit stays proof or the owner's abandon). A dropped swap marker is
+ * kept in `freedSwapMarkers`: custody's answer is local, so a principal release also proves its nonce on chain.
  */
-function unmarked(kind, unsigned) { return unsigned ? { [`${kind}Attempt`]: null } : {}; }
+function unmarked(op, kind, unsigned) {
+    if (!unsigned)
+        return {};
+    return kind === "swap" ? { swapAttempt: null, freedSwapMarkers: [...op.freedSwapMarkers ?? [], attemptOf(op, "swap")] } : { [`${kind}Attempt`]: null };
+}
 /** The record for one consented cleanup re-quote; refused when the caps miss the quote or a cleanup marker holds the slot. */
 export function requotedCleanup(op, fees, quote, now) {
     if (op.phase !== "cleanup_required" || op.cleanupAttempt !== null)

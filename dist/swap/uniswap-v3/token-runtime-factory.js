@@ -8,7 +8,7 @@ import { UniswapTokenCustody } from "./token-custody.js";
 import { SavedUniswapTokenMaterialStore } from "./token-material.js";
 import { UniswapTokenJournal } from "./token-operation.js";
 import { UniswapTokenObserver } from "./token-observer.js";
-import { readSwapNonceConsumption } from "./token-principal.js";
+import { readSwapNonceConsumption, readSwapNonceUnused } from "./token-principal.js";
 import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
@@ -55,6 +55,7 @@ export function createUniswapTokenRuntime(input) {
         foregroundApprove: async (op) => { await approveOwner(op); await foreground(input.foreground === "approve", op, false, clock.now(), input.tty); await approveOwner(op); },
         foregroundCleanup: async (op) => { await approveOwner(op); await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty); await approveOwner(op); },
         swapNonceConsumed: async (op, cleanup) => await readSwapNonceConsumption(call, op, cleanup),
+        swapNonceUnused: async (op, fromNonce) => await readSwapNonceUnused(call, op, fromNonce),
         confirm: async (material) => await guard.confirm(material),
     };
     const admit = async (request, now) => await usage.admitQuote(request, now);

@@ -36,7 +36,8 @@ export function validateUniswapTokenOperation(value) {
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
             ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : []),
-            ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : []), ...(Object.hasOwn(value, "principalRelease") ? ["principalRelease"] : [])] : common))
+            ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : []), ...(Object.hasOwn(value, "principalRelease") ? ["principalRelease"] : []),
+            ...(Object.hasOwn(value, "freedSwapMarkers") ? ["freedSwapMarkers"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -61,6 +62,9 @@ export function validateUniswapTokenOperation(value) {
         validateFailureDiagnostic(op.preSignFailure);
         if (op.retiredEffects !== undefined)
             validateRetired(op.retiredEffects, op.updatedAt);
+        if (op.freedSwapMarkers !== undefined && (!Array.isArray(op.freedSwapMarkers) || op.freedSwapMarkers.length < 1 || op.freedSwapMarkers.length > 8 ||
+            op.freedSwapMarkers.some((row) => { attempt(row); return row.transactionHash !== null || row.markedAt > op.updatedAt; })))
+            corrupt("Uniswap token freed swap markers are invalid.");
         if (op.quoteBlock !== undefined && (!isPlainRecord(op.quoteBlock) || !exactKeys(op.quoteBlock, ["number", "hash"]) ||
             uint(op.quoteBlock.number) < 0n || !/^0x[a-f0-9]{64}$/u.test(op.quoteBlock.hash)))
             corrupt("Uniswap token quote block is invalid.");
@@ -72,6 +76,8 @@ export function validateUniswapTokenOperation(value) {
     const hashes = [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].some((row) => row?.transactionHash !== null && row?.transactionHash !== undefined);
     if (evidence?.kind === "zero_allowance_no_effect" && (op.phase !== "cleanup_required" && op.phase !== "cleaned" || op.cleanupReason !== "zero_allowance_no_effect" ||
         op.accumulatedNativeDebitWei !== "0" || hashes || op.phase === "cleaned" && op.usageState !== "failed_before_effect" &&
+        // A freed swap marker keeps the hold until the chain proves its nonce (the principal release).
+        !(op.usageState === "reserved" && op.freedSwapMarkers !== undefined) &&
         !(op.usageState === null && op.usageReservationId === null && op.approvalAttempt === null && op.swapAttempt === null && op.cleanupAttempt === null &&
             evidence.source === "current_allowance" && Date.parse(evidence.observedAt) >= route.deadline * 1000 && evidence.observedAt <= op.updatedAt)))
         corrupt("Uniswap token no-effect cleanup evidence is invalid.");
@@ -192,6 +198,11 @@ function validateCleanupEvidence(v) {
         !canonicalInstant(v.observedAt))
         corrupt("Uniswap token cleanup evidence is invalid.");
 }
+/** The nonces of the swap markers custody freed and of `kept` (a hashless marker the record still holds), ascending and distinct. */
+export function swapMarkerNonces(op, kept) {
+    const nonces = [...(op.freedSwapMarkers ?? []), ...(kept === null ? [] : [kept])].map((row) => BigInt(row.nonce));
+    return [...new Set(nonces)].sort((a, b) => a < b ? -1 : a > b ? 1 : 0).map(String);
+}
 /** A cleanup of this operation that landed (current, or retired after landing) and so consumed its nonce. */
 export function landedTokenCleanups(op) {
     return [...(op.cleanupAttempt?.transactionHash != null ? [op.cleanupAttempt] : []),
@@ -204,22 +215,49 @@ function validatePrincipalRelease(op) {
         typeof v.observedAt !== "string" || !canonicalInstant(v.observedAt) || v.observedAt > op.updatedAt)
         corrupt("Uniswap token principal release is invalid.");
     // An owner-abandoned swap keeps its hashless marker as history; the release names the marker custody proved unsigned.
-    const marker = op.phase === "abandoned_unknown" ? op.swapAttempt : null;
+    const marker = op.phase === "abandoned_unknown" ? op.swapAttempt : null, proof = Object.hasOwn(v, "chainProof") ? ["chainProof"] : [];
     if (v.kind === "swap_never_signed") {
-        if (marker === null ? !exactKeys(v, ["schemaVersion", "kind", "observedAt"]) || op.swapAttempt !== null
-            : !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "swapMarkerHash", "observedAt"]) || marker.transactionHash !== null ||
+        if (marker === null ? !exactKeys(v, ["schemaVersion", "kind", ...proof, "observedAt"]) || op.swapAttempt !== null
+            : !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "swapMarkerHash", ...proof, "observedAt"]) || marker.transactionHash !== null ||
                 v.swapNonce !== marker.nonce || v.swapMarkerHash !== marker.markerHash)
             corrupt("Uniswap token principal release is invalid.");
+        validateSwapNonceProof(op, v.chainProof, swapMarkerNonces(op, marker));
         return;
     }
     if (op.phase !== "cleaned")
         corrupt("Uniswap token principal release is invalid.");
+    validateSwapNonceProof(op, v.chainProof, swapMarkerNonces(op, null));
     const swap = op.swapAttempt, cleanup = landedTokenCleanups(op).find((row) => row.transactionHash === v.cleanupTransactionHash);
     if (v.kind !== "swap_nonce_consumed_by_cleanup" || !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "cleanupTransactionHash", "cleanupBlockNumber",
-        "cleanupBlockHash", "finalizedBlockNumber", "finalizedNonce", "observedAt"]) || swap === null || swap.transactionHash !== null ||
+        "cleanupBlockHash", "finalizedBlockNumber", "finalizedNonce", ...proof, "observedAt"]) || swap === null || swap.transactionHash !== null ||
         cleanup === undefined || cleanup.nonce !== swap.nonce || v.swapNonce !== swap.nonce || typeof v.cleanupBlockHash !== "string" ||
         !/^0x[a-f0-9]{64}$/u.test(v.cleanupBlockHash) || uint(v.finalizedBlockNumber) < uint(v.cleanupBlockNumber) || uint(v.finalizedNonce) <= uint(v.swapNonce))
         corrupt("Uniswap token principal release is invalid.");
+}
+/** The chain proof over `nonces` (required once custody freed a swap marker); each nonce held by a landed cleanup or unused past the deadline. */
+function validateSwapNonceProof(op, value, nonces) {
+    if (value === undefined) {
+        if (op.freedSwapMarkers !== undefined)
+            corrupt("Uniswap token swap nonce proof is missing.");
+        return;
+    }
+    const hash = (v) => typeof v === "string" && /^0x[a-f0-9]{64}$/u.test(v), landed = landedTokenCleanups(op), held = new Set();
+    if (nonces.length === 0 || !isPlainRecord(value) || !exactKeys(value, ["swapNonces", "cleanups", "unused"]) ||
+        canonicalJson(value.swapNonces) !== canonicalJson(nonces) || !Array.isArray(value.cleanups))
+        corrupt("Uniswap token swap nonce proof is invalid.");
+    for (const row of value.cleanups) {
+        if (!isPlainRecord(row) || !exactKeys(row, ["swapNonce", "cleanupTransactionHash", "cleanupBlockNumber", "cleanupBlockHash", "finalizedBlockNumber",
+            "finalizedNonce"]) || !nonces.includes(row.swapNonce) || held.has(row.swapNonce) || !hash(row.cleanupBlockHash) ||
+            !landed.some((cleanup) => cleanup.transactionHash === row.cleanupTransactionHash && cleanup.nonce === row.swapNonce) ||
+            uint(row.finalizedBlockNumber) < uint(row.cleanupBlockNumber) || uint(row.finalizedNonce) <= uint(row.swapNonce))
+            corrupt("Uniswap token swap nonce proof is invalid.");
+        held.add(row.swapNonce);
+    }
+    const open = nonces.filter((nonce) => !held.has(nonce)), unused = value.unused;
+    if (open.length === 0 ? unused !== null : !isPlainRecord(unused) || !exactKeys(unused, ["fromNonce", "finalizedNonce", "finalizedBlockNumber",
+        "finalizedBlockHash", "finalizedBlockTimestamp"]) || unused.fromNonce !== open[0] || uint(unused.finalizedNonce) > uint(open[0]) ||
+        uint(unused.finalizedBlockNumber) < 0n || !hash(unused.finalizedBlockHash) || uint(unused.finalizedBlockTimestamp) <= BigInt(op.route.deadline))
+        corrupt("Uniswap token swap nonce proof is invalid.");
 }
 function validateCleanupFeeQuote(op) {
     const q = op.cleanupFeeQuote;
