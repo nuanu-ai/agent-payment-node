@@ -44,7 +44,8 @@ test("normal quote first-refusal predicates identify each Sentinel field without
     assert.deepEqual(result.failure, { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" });
     assert.deepEqual(result.diagnostic, { mode: "quote", stage: "fee_quote", invariant: "network_validation",
       network: "sentinel-quote", httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: predicate,
-      ...(predicate === "sentinel_token_fees" ? { tokenFeesKind: "object" } : {}) });
+      ...(predicate === "sentinel_token_fees" ? { tokenFeesKind: "object", sentinelSimulation: "absent", sentinelFeeError: "absent",
+        sentinelSponsorship: "absent" } : {}) });
     assert.equal(exchange.requests.length, 5); assert.equal(JSON.stringify(result).includes(SECRET), false);
     const error = readFailureError(result.failure.reason, result.diagnostic!);
     assert.equal(error.details?.mm_read_validation_predicate, predicate);

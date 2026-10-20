@@ -2,6 +2,13 @@ import { types } from "node:util";
 import { ApnError } from "../../errors.js";
 import { mmError, mmFail } from "../reasons.js";
 export const readValidationPredicates = ["response_json", "response_root", "sentinel_mode", "sentinel_keys", "sentinel_jsonrpc", "sentinel_id", "sentinel_result", "sentinel_transactions", "sentinel_transactions_length", "sentinel_last_transaction", "sentinel_fees", "sentinel_fees_length", "sentinel_low_tier", "sentinel_token_fees", "sentinel_token_fees_length", "sentinel_entry", "sentinel_token", "sentinel_token_address", "sentinel_token_match", "sentinel_entry_error", "sentinel_symbol", "sentinel_decimals", "sentinel_fee_quantity", "sentinel_fee_recipient"];
+const FACT_VALUES = {
+    sentinelSimulation: ["succeeded", "reverted", "absent", "other"], sentinelFeeError: ["present", "absent", "other"],
+    sentinelSponsorship: ["sponsored", "not_sponsored", "absent", "other"],
+    relayServerWalletNetwork: ["listed", "unlisted"], relaySentinelFlag: ["enabled", "disabled", "absent"],
+};
+const FEE_FACTS = ["sentinelSimulation", "sentinelFeeError", "sentinelSponsorship"];
+const RELAY_FACTS = ["relayServerWalletNetwork", "relaySentinelFlag"];
 const keys = ["mode", "stage", "invariant", "network", "httpStatus", "exitCode", "signal", "timedOut"];
 const stages = ["launch", "private_state", "sdk_load", "hydrate", "inspect", "inventory",
     "chain_override", "relay_support", "fee_quote", "quote_output", "helper_response"];
@@ -37,7 +44,9 @@ export function validateReadDiagnostic(value, mode) {
     const bounded = (v, low, high) => v === null ||
         typeof v === "number" && Number.isSafeInteger(v) && v >= low && v <= high;
     const hasShape = Object.hasOwn(d, "tokenFeesKind");
-    if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) + (hasShape ? 1 : 0) || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
+    const feeFacts = FEE_FACTS.filter(key => Object.hasOwn(d, key)), relayFacts = RELAY_FACTS.filter(key => Object.hasOwn(d, key));
+    if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) + (hasShape ? 1 : 0) +
+        feeFacts.length + relayFacts.length || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
         typeof d.stage !== "string" || !stages.includes(d.stage) || typeof d.invariant !== "string" || !invariants.includes(d.invariant) ||
         typeof d.network !== "string" || !networks.includes(d.network) ||
         !bounded(d.httpStatus, 100, 599) || !bounded(d.exitCode, 0, 255) ||
@@ -59,16 +68,27 @@ export function validateReadDiagnostic(value, mode) {
         !["missing", "null", "object", "string", "number", "boolean"].includes(d.tokenFeesKind) ||
         d.validationPredicate !== "sentinel_token_fees" || d.stage !== "fee_quote"))
         mmFail("mm_gasless_provider_unavailable");
+    // Fee facts come only with a classified missing token-fee list; relay facts only with the closed relay refusal.
+    if (feeFacts.length !== 0 && (feeFacts.length !== FEE_FACTS.length || !hasShape) ||
+        relayFacts.length !== 0 && (relayFacts.length !== RELAY_FACTS.length || mode !== "quote" || d.stage !== "relay_support" ||
+            d.invariant !== "closed_failure" || d.network !== "none") ||
+        [...feeFacts, ...relayFacts].some(key => typeof d[key] !== "string" || !FACT_VALUES[key].includes(d[key]))) {
+        mmFail("mm_gasless_provider_unavailable");
+    }
     // Construct a new closed object; never retain caller-owned properties.
     return Object.freeze(Object.fromEntries([...keys.map(key => [key, d[key]]),
         ...(Object.hasOwn(d, "validationPredicate") ? [["validationPredicate", d.validationPredicate]] : []),
-        ...(hasShape ? [["tokenFeesKind", d.tokenFeesKind]] : [])]));
+        ...(hasShape ? [["tokenFeesKind", d.tokenFeesKind]] : []),
+        ...[...feeFacts, ...relayFacts].map(key => [key, d[key]])]));
 }
-export function readDiagnostic(mode, stage, invariant, network = "none", httpStatus = null, exitCode = null, signal = "none", timedOut = false, validationPredicate, shape) {
+export function readDiagnostic(mode, stage, invariant, network = "none", httpStatus = null, exitCode = null, signal = "none", timedOut = false, validationPredicate, shape, facts = {}) {
     return validateReadDiagnostic({ mode, stage, invariant, network, httpStatus, exitCode, signal, timedOut,
         ...(validationPredicate === undefined ? {} : { validationPredicate }),
-        ...(shape === undefined ? {} : { tokenFeesKind: shape }) }, mode);
+        ...(shape === undefined ? {} : { tokenFeesKind: shape }), ...facts }, mode);
 }
+const FACT_DETAILS = { sentinelSimulation: "mm_read_sentinel_simulation",
+    sentinelFeeError: "mm_read_sentinel_fee_error", sentinelSponsorship: "mm_read_sentinel_sponsorship",
+    relayServerWalletNetwork: "mm_read_relay_server_wallet_network", relaySentinelFlag: "mm_read_relay_sentinel_flag" };
 export function readFailureError(reason, d) {
     const plain = readDataRecord(d);
     if (plain.mode !== "inspect" && plain.mode !== "quote")
@@ -78,6 +98,8 @@ export function readFailureError(reason, d) {
         mm_read_mode: diagnostic.mode, mm_read_stage: diagnostic.stage, mm_read_invariant: diagnostic.invariant,
         ...(diagnostic.validationPredicate === undefined ? {} : { mm_read_validation_predicate: diagnostic.validationPredicate }),
         ...(diagnostic.tokenFeesKind === undefined ? {} : { mm_read_token_fees_kind: diagnostic.tokenFeesKind }),
+        ...Object.fromEntries([...FEE_FACTS, ...RELAY_FACTS].filter(key => diagnostic[key] !== undefined)
+            .map(key => [FACT_DETAILS[key], diagnostic[key]])),
         mm_read_network: diagnostic.network, mm_read_signal: diagnostic.signal, mm_read_timed_out: diagnostic.timedOut,
         ...(diagnostic.httpStatus === null ? {} : { mm_read_http_status: diagnostic.httpStatus }),
         ...(diagnostic.exitCode === null ? {} : { mm_read_exit_code: diagnostic.exitCode }) });

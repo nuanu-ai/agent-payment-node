@@ -188,9 +188,11 @@ test("observed valid LOW tier with an unused fourth tier lacking tokenFees passe
 test("earlier transaction and higher fee tiers cannot replace the exact last LOW selection", async (t) => {
   const cases: [string, SentinelMutation, MetaMaskReadDiagnostic][] = [
     ["earlier valid last missing", v => { const good = v.result.transactions[0]; v.result.transactions = [good, { fees: [{}] }]; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
-      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_fees", tokenFeesKind: "missing" }],
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_fees", tokenFeesKind: "missing",
+      sentinelSimulation: "absent", sentinelFeeError: "absent", sentinelSponsorship: "absent" }],
     ["LOW missing HIGH valid", v => { const good = v.result.transactions[0].fees[0]; v.result.transactions[0].fees = [{}, good]; }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
-      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_fees", tokenFeesKind: "missing" }],
+      httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_fees", tokenFeesKind: "missing",
+      sentinelSimulation: "absent", sentinelFeeError: "absent", sentinelSponsorship: "absent" }],
     ["LOW token absent HIGH matching", v => { const good = structuredClone(v.result.transactions[0].fees[0]); v.result.transactions[0].fees[0].tokenFees[0].token.address = OWNER; v.result.transactions[0].fees.push(good); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
       httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: "sentinel_token_match" }],
     ["last transaction missing", v => { v.result.transactions.push(null); }, { mode: "quote", stage: "fee_quote", invariant: "network_validation", network: "sentinel-quote",
@@ -198,8 +200,10 @@ test("earlier transaction and higher fee tiers cannot replace the exact last LOW
   ];
   for (const [name, mutate, diagnostic] of cases) await t.test(name, async sub => {
     const { response, exchange } = await syntheticSelectedQuote(sub, mutate);
-    assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic });
+    // A last LOW tier without a fee list is MetaMask's own unpriced answer; every other gap stays a protocol failure.
+    assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false, failure: diagnostic.tokenFeesKind === "missing"
+      ? { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "mm_gasless_fee_unquoted" }
+      : { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic });
     assert.equal(exchange.requests.length, 5);
   });
   const good = await syntheticSelectedQuote(t, v => { observedShape(v); v.result.transactions.unshift({ fees: [{}], unused: SECRET }); });
