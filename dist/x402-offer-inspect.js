@@ -2,7 +2,7 @@ import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { canonicalErc7710Facilitators } from "./x402-erc7710-codec.js";
 import { isBaseUsdc, releasedX402Pair } from "./x402-network.js";
-import { declaredMethod, decimalsRefusal, evmExtraRefusal, evmOfferMethod, isOfferRefusal, offerRefusal, refusedOffersDetails, timeoutRefusal, X402_OFFER_MIN_TIMEOUT_SECONDS } from "./x402-offer-terms.js";
+import { declaredMethod, decimalsRefusal, evmExtraRefusal, evmOfferMethod, isOfferRefusal, offerRefusal, refusedOffersDetails, sellerValue, timeoutRefusal, X402_OFFER_MIN_TIMEOUT_SECONDS } from "./x402-offer-terms.js";
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const POSITIVE_UINT = /^[1-9][0-9]*$/u;
 const READINESS = { cap: "unverified", walletBalance: "unverified", tokenDomain: "unverified", payment: "unverified" };
@@ -14,7 +14,7 @@ export function inspectCandidates(paymentRequired, requestedUrl, asset) {
 export function inspectOffers(paymentRequired, requestedUrl, asset) {
     if (paymentRequired.x402Version !== 2)
         return { candidates: [], refused: [], resourceMismatch: null };
-    if (!resourceMatches(paymentRequired.resource.url, requestedUrl)) {
+    if (!x402ResourceNamesRequest(paymentRequired.resource.url, requestedUrl)) {
         return { candidates: [], refused: [], resourceMismatch: paymentRequired.resource.url.slice(0, 2048) };
     }
     const candidates = [], refused = [];
@@ -86,7 +86,7 @@ export function inspectOffer(requirements, index, selected) {
 export function unsupportedOfferError(asset, paymentRequired, inspection) {
     const pair = { chain: asset.network, asset: asset.token };
     if (inspection.resourceMismatch !== null) {
-        return new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's challenge names a resource on another origin or path than the one requested; APN pays only for the endpoint it asked for.", { reason: "x402_resource_url_mismatch", ...pair, resourceUrl: inspection.resourceMismatch });
+        return new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's challenge names a resource on another origin or path than the one requested; APN pays only for the endpoint it asked for.", { reason: "x402_resource_url_mismatch", ...pair, resourceUrl: sellerValue(inspection.resourceMismatch) });
     }
     const offered = offeredX402Assets(paymentRequired.accepts).map((offer) => `${offer.network} ${offer.asset} ${offer.method}`);
     if (inspection.refused.length > 0) {
@@ -117,7 +117,7 @@ function offeredX402Assets(accepts) {
  * Query and fragment may differ (most sellers name the resource without the caller's query); the seller's resource is
  * still echoed unchanged in the payment payload, and the paid request goes to the requested URL.
  */
-function resourceMatches(value, requested) {
+export function x402ResourceNamesRequest(value, requested) {
     try {
         const resource = new URL(value), target = new URL(requested);
         return resource.origin === target.origin && resource.pathname === target.pathname;

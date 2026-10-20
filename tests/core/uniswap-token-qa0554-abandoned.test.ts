@@ -47,6 +47,8 @@ async function abandoned(root: string, swapNonce: "reserved" | "committed") {
   await effects.markStarted(op, "approval", new Date(approval.markedAt)); await effects.markOutcome(op, "approval", "send_accepted", new Date(approval.markedAt));
   // The before-read: nonce 10 at latest, pending and finalized; 1 USDC allowance standing on the SwapRouter.
   const chain = movingNode({ account: op.account, allowance: op.route.amountIn, pending: 10n }); chain.node.finalizedNonce = 10n;
+  // The finalized block is ten minutes past the route's deadline: a swap included from then on reverts.
+  chain.node.blockTime = BigInt(op.route.deadline) + 600n;
   const ledger = new AssetUsageLedger(root), clock = { now: () => now };
   const runtime = (cap: number) => createUniswapTokenRuntime({ state, wrapping: WRAPPING, clock, call: tokenSession(state, chain, cap), foreground: "refuse",
     verifyPins: pinsLikeProduction });
@@ -80,9 +82,13 @@ test("QA 0.5.54 867244e9…: execute proves the abandoned swap never signed, rel
 
   const released = await cli("execute", 15), record = released.operation as UniswapTokenOperation;
   assert.equal(released.ok, true, JSON.stringify(released.error));
-  assert.deepEqual([record.phase, record.cleanupReason, record.usageState, record.principalRelease], ["abandoned_unknown", "owner_abandoned_unknown",
+  const { chainProof, ...release } = record.principalRelease as Extract<UniswapTokenOperation["principalRelease"], { kind: "swap_never_signed" }>;
+  assert.deepEqual([record.phase, record.cleanupReason, record.usageState, release], ["abandoned_unknown", "owner_abandoned_unknown",
     "failed_before_effect", { schemaVersion: "apn.uniswap-token-principal-release.v1", kind: "swap_never_signed", swapNonce: "10",
       swapMarkerHash: op.swapAttempt!.markerHash, observedAt: now.toISOString() }]);
+  // Custody's answer is local; the finalized chain also shows nonce 10 unused at a block past the deadline.
+  assert.deepEqual([chainProof?.swapNonces, chainProof?.cleanups, chainProof?.unused?.fromNonce, chainProof?.unused?.finalizedNonce,
+    chainProof?.unused?.finalizedBlockTimestamp], [["10"], [], "10", "10", (BigInt(op.route.deadline) + 600n).toString()]);
   assert.deepEqual([record.swapAttempt, record.approvalAttempt, record.cleanupAttempt, record.accumulatedNativeDebitWei, record.usageReservationId],
     [op.swapAttempt, op.approvalAttempt, null, op.accumulatedNativeDebitWei, op.usageReservationId], "gas, attempts and the marker stay");
   assert.deepEqual([released.data, released.next_actions], [residual(op), [revoke(op)]]);
@@ -97,6 +103,21 @@ test("QA 0.5.54 867244e9…: execute proves the abandoned swap never signed, rel
   const cleanup = await cli("cleanup", 14);
   assert.deepEqual([cleanup.ok, cleanup.error?.details?.reason], [false, "uniswap_cleanup_phase"], "the terminal record's own cleanup stays closed");
   assert.equal((await new UniswapTokenJournal(temporary.root).load(op.operationId))?.integrityHash, record.integrityHash);
+});
+
+for (const [label, arrange] of [
+  ["its nonce taken at the finalized tag by a transaction the record does not know", (node: { finalizedNonce: bigint }) => { node.finalizedNonce = 11n; }],
+  ["the finalized block not yet past the route's deadline", (node: { blockTime: bigint }, deadline: number) => { node.blockTime = BigInt(deadline); }],
+] as const) test(`867244e9… with ${label}: execute keeps the hold and the marker's reservation, then releases once the chain proves it`, async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const { op, chain, cli, nonceRows, hold } = await abandoned(temporary.root, "reserved");
+  arrange(chain.node as never, op.route.deadline);
+  const kept = await cli("execute", 15);
+  assert.deepEqual([kept.ok, (kept.operation as UniswapTokenOperation).integrityHash, (kept.operation as UniswapTokenOperation).principalRelease],
+    [true, op.integrityHash, undefined], JSON.stringify(kept.error));
+  assert.deepEqual([await hold(), nonceRows(), chain.node.sends], [["reserved", op.route.amountIn], ["approval:9:committed", "swap:10:reserved"], []]);
+  chain.node.finalizedNonce = 10n; chain.node.blockTime = BigInt(op.route.deadline) + 600n;
+  const released = await cli("execute", 15);
+  assert.deepEqual([(released.operation as UniswapTokenOperation).usageState, await hold()], ["failed_before_effect", ["failed_before_effect", "0"]]);
 });
 
 test("867244e9… with its swap nonce committed to signed bytes: execute changes nothing and does not name itself again", async (t) => {

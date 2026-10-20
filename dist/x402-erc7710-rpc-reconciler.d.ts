@@ -19,5 +19,11 @@ export declare class X402Erc7710RpcReconciler {
      * the lower end and tries again, and the finalized head itself is the bound when the reads run out.
      */
     private expiryBound;
-    private scanExactTransfers;
+    /**
+     * True only when the window holds no Transfer of this token from the wallet to the payee, of ANY value. The child
+     * delegation caps a cumulative amount ("up to"), so a redemption of less than the amount, or of two parts, is still
+     * a redemption: any such Transfer (or a same-payee payment outside this operation) leaves the operation unresolved,
+     * with owner abandon as its exit. Every log the port returns already is such a Transfer (its adapter refuses others).
+     */
+    private scanNoPayeeTransfer;
 }

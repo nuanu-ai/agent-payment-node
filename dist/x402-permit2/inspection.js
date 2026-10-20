@@ -1,4 +1,4 @@
-import { selectPermit2Offer } from "./offer.js";
+import { selectPermit2OfferToSign } from "./offer.js";
 import { wirePermit2Asset } from "./registry.js";
 /**
  * Inspect the first exact Permit2 offer without reading state or preparing authorization.
@@ -6,7 +6,8 @@ import { wirePermit2Asset } from "./registry.js";
  */
 export function inspectPermit2Offer(input) {
     // Inspect has no profile: it shows the lowest-index well-formed Permit2 offer on any EVM network; approve admits it.
-    const selection = selectPermit2Offer(input.accepts, input.payer, wirePermit2Asset);
+    // A window shorter than signing through custody allows is refused here as at prepare, before any consent.
+    const selection = selectPermit2OfferToSign(input.accepts, input.payer, wirePermit2Asset);
     return Object.freeze({
         index: selection.index,
         requirement: freezeRequirement(selection.requirement),

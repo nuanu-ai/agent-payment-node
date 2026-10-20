@@ -4,7 +4,7 @@ import { ApnError } from "../errors.js";
 import { planPermit2Authorization } from "./authorization.js";
 import { tokenDomainSeparator } from "../x402-policy.js";
 import { isEip2612GasSponsoringDeclaration } from "./extension.js";
-import { selectPermit2Offer } from "./offer.js";
+import { selectPermit2Offer, selectPermit2OfferToSign } from "./offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_EXACT_PERMIT2_PROXY_CODE_HASH, X402_PERMIT2_MECHANISM } from "./registry.js";
 const PREPARE_DOMAIN = "apn.x402-permit2.prepare.v1";
 const UINT256 = (1n << 256n) - 1n;
@@ -108,7 +108,7 @@ function validateChallenge(challenge) {
 export async function preparePermit2WithPort(port, input) {
     const challengeHash = hashChallenge(input.challenge);
     const sellerSponsorsEip2612 = validateChallenge(input.challenge);
-    const selection = selectPermit2Offer(input.challenge.accepts, input.payer, input.assets);
+    const selection = selectPermit2OfferToSign(input.challenge.accepts, input.payer, input.assets);
     if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
         canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) {
         blocked("The merchant challenge or selected terms changed.", "x402_permit2_merchant_terms_mismatch");

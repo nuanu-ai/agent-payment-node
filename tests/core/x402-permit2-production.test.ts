@@ -64,12 +64,14 @@ async function setup(t: test.TestContext, options: { allowance?: bigint; badDoma
   let clock = new Date(at), calls: string[] = [], ethCalls = 0, posts = 0;
   const service = new Permit2ProductionPreparation(temp.root, { now: () => clock,
     rpc: { batch: async (batch) => {
-      // The clock moves while the pinned state batch is in flight, as a slow public RPC would.
+      // The clock moves while the pinned state batch is in flight, as a slow public RPC would: the node answers at the
+      // read's start and the answer arrives late.
+      const answeredAt = clock;
       if (++posts % 2 === 0 && options.advanceDuringReadMs !== undefined) clock = new Date(at.getTime() + options.advanceDuringReadMs);
       return batch.map(({ method, params }) => {
         calls.push(method);
         if (method === "eth_chainId") return "0xa86a";
-        if (method === "eth_getBlockByNumber") return { number: "0x12", hash: `0x${"1".repeat(64)}`, timestamp: `0x${Math.floor(clock.getTime() / 1000).toString(16)}` };
+        if (method === "eth_getBlockByNumber") return { number: "0x12", hash: `0x${"1".repeat(64)}`, timestamp: `0x${Math.floor(answeredAt.getTime() / 1000).toString(16)}` };
         if (method === "eth_call") {
           ethCalls++; const data = String((params[0] as { data: string }).data);
           return data.startsWith("0x70a08231") ? word(20000n) : data.startsWith("0xdd62ed3e") ? word(options.allowance ?? 10000n)
@@ -110,27 +112,41 @@ test("durable exact private preparation replays immutable nonce before reads; ch
   await assert.rejects(f.service.prepare(input(request.idempotencyKey, changedPath)), { code: "APN_IDEMPOTENCY_CONFLICT" });
 });
 
+test("an offer window under 30 s is refused by name before any read, record or consent", async t => {
+  const f = await setup(t), request = input("permit2-short-window-001", challenge(false, false, 29));
+  await assert.rejects(f.service.prepare(request), (error: unknown) => {
+    const details = (error as { code?: string; details?: Record<string, unknown> }).details;
+    return (error as { code?: string }).code === "APN_X402_UNSUPPORTED_OFFER" && details?.reason === "x402_offer_timeout_below_bound" &&
+      details.sellerValue === "29" && details.accepted === "30..3600";
+  });
+  assert.deepEqual([f.postCount(), f.calls.length], [0, 0]);
+  assert.equal(await f.service.records.findOperation(permit2ProductionId("owner", request.idempotencyKey)), null);
+});
+
 test("slow read cannot persist an expired Permit2 challenge; a saved near-deadline record still replays", async t => {
-  const near = await setup(t, { advanceDuringReadMs: 999 });
-  const nearRequest = input("permit2-near-deadline-001", challenge(false, false, 1));
+  // The shortest window custody signs (30 s) outlives the 15 s read deadline: a read just inside it saves its record, and
+  // a read slow enough to reach the window's end is refused before any record or reservation.
+  const near = await setup(t, { advanceDuringReadMs: 14_999 });
+  const nearRequest = input("permit2-near-deadline-001", challenge(false, false, 30));
   const saved = await near.service.prepare(nearRequest);
   assert.equal(saved.state, "prepared"); assert.equal(near.postCount(), 2);
   const readCount = near.calls.length;
-  near.advance(1);
+  near.advance(30);
   await assert.rejects(near.service.records.persistLocked(saved), { code: "APN_OPERATION_BLOCKED" });
   assert.deepEqual(await near.service.records.findOperation(saved.operationId), saved);
   assert.deepEqual(await near.service.prepare(nearRequest), saved);
   assert.equal(near.calls.length, readCount); assert.equal(near.postCount(), 2);
 
-  const expired = await setup(t, { advanceDuringReadMs: 1000 });
-  const expiredRequest = input("permit2-expired-read-001", challenge(false, false, 1));
-  await assert.rejects(expired.service.prepare(expiredRequest), { code: "APN_OPERATION_BLOCKED" });
+  const expired = await setup(t, { advanceDuringReadMs: 30_000 });
+  const expiredRequest = input("permit2-expired-read-001", challenge(false, false, 30));
+  await assert.rejects(expired.service.prepare(expiredRequest), { code: "APN_X402_UNSUPPORTED_OFFER",
+    message: "Owner policy, usage or observation window changed during prepare." });
   const operationId = permit2ProductionId("owner", expiredRequest.idempotencyKey);
   assert.equal(await expired.service.records.findOperation(operationId), null);
   const identity = { account: payer, chain: asset.chain, asset: { kind: "token" as const, identifier: asset.token } };
   const ledger = new AssetUsageLedger(expired.root);
   assert.equal(await ledger.load(identity, assetUsageReservationId(identity, productionUsageKey(operationId))), null);
-  assert.equal((await ledger.usageReadOnly(identity, new Date(at.getTime() + 1000))).amountAtomic, "0");
+  assert.equal((await ledger.usageReadOnly(identity, new Date(at.getTime() + 30_000))).amountAtomic, "0");
 });
 
 test("reconstructed frozen material rejects rehashed plan, nonce, domain, checkpoint and unknown fields", async t => {
@@ -145,6 +161,9 @@ test("reconstructed frozen material rejects rehashed plan, nonce, domain, checkp
   }
   await assert.rejects(async () => checkPermit2Challenge(challenge(), { ...input().checked.request, headers: { authorization: "Bearer secret" } }), { code: "APN_INVALID_INPUT" });
   await assert.rejects(async () => checkPermit2Challenge(challenge(), { ...input().checked.request, url: "https://seller.example/other" }));
+  // Origin and path bind the challenge; the caller's own query may differ from the one the seller names.
+  assert.equal(checkPermit2Challenge(challenge(), { ...input().checked.request, url: "https://seller.example/private-path-token/data" }).request.url,
+    "https://seller.example/private-path-token/data");
 });
 
 test("sponsored branch accepts zero-native route only with matching merchant domain and exact checked contracts", async t => {
