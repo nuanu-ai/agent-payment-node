@@ -4,6 +4,7 @@ import { MM_ZERO_ADDRESS } from "./model.js";
 import { mmRegistry } from "./registry.js";
 import { mmRecordedDeployment } from "./recorded.js";
 import { mmFail } from "./reasons.js";
+import { mmFeeCapRefusal } from "./refusals.js";
 import { mmCanonicalAddress, mmExact, mmHash, mmHex, mmRequest, mmUint } from "./validation.js";
 const transferAbi = parseAbi(["function transfer(address,uint256) returns (bool)"]);
 export function mmEconomics(request) {
@@ -33,8 +34,11 @@ export function mmQuote(value, request, binding, requestedNet, reason = "mm_gasl
     const net = mmUint(q.netAtomic, true, reason), fee = mmUint(q.feeAtomic, false, reason);
     if ((request.fixedNet && q.netAtomic !== request.fixedNet.netAtomic) || q.netAtomic !== requestedNet || net > economics.gross || net < mmUint(request.minReceivedAtomic))
         mmFail(reason);
-    if (fee > economics.cap)
-        mmFail(reason === "mm_gasless_state_corrupt" ? reason : "mm_gasless_fee_cap");
+    if (fee > economics.cap) {
+        if (reason === "mm_gasless_state_corrupt")
+            mmFail(reason);
+        throw mmFeeCapRefusal(request, fee, economics.cap);
+    }
     if (sponsored && (q.feeMode !== "sponsored" || q.feeAtomic !== "0" || q.feeRecipient !== null))
         mmFail(reason);
     if (sponsored)
