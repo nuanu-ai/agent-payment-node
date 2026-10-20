@@ -31,7 +31,9 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
 - EIP-3009: proofs and the prepare read use `safe` on Base, Ethereum and Arbitrum (where released APN already proves
   at `safe`) and `finalized` on every other chain. The choice is frozen in the record (`tokenFacts.proofTag`); no tag
   is ever retried with another. Polygon PoS clients do not serve `safe` (answer: "safe block not found"), so the
-  strongest tag is the only one that works there. Expiry stays a `finalized` proof everywhere.
+  strongest tag is the only one that works there. Expiry stays a `finalized` proof everywhere. On slow-finality chains
+  (OP Stack, other L2s) a `finalized` balance lags funding by up to ~20 min; proving at `safe` there is an owner
+  decision (one entry in the safe-chain list), never a fallback.
 - Permit2: pre-sign facts (balance, allowance, nonce word, payer code) are read at `latest`, pinned by block hash, so the
   existing 30 s block-age bound holds on every chain; they predict settlement and cannot move money (the signature
   binds token, amount, payee, nonce and a deadline of at most 300 s). Settlement and expiry stay `finalized` proofs.
@@ -39,8 +41,9 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
 ## Method choice (deterministic)
 
 The command is the method: `x402 fetch` pays only EIP-3009 offers (no `assetTransferMethod`, or `eip3009`), and
-`x402 permit2 approve` pays only `permit2` offers, even for USDC. Inside a command the lowest-index offer that matches
-the admitted chain+token, the cap and the balance wins. An operation never changes method. When the chosen asset is
+`x402 permit2 approve` pays only `permit2` offers, even for USDC. `x402 fetch` takes the lowest-index offer of the
+selected chain+token within cap, balance and token domain; `x402 permit2 approve` takes the lowest-index Permit2 offer
+on any owner-admitted chain+token (cap or balance then refuse, never skip). An operation never changes method. When the chosen asset is
 offered only through Permit2, `x402 fetch` refuses with `x402_offer_permit2_only` and names the Permit2 command;
 consent stays where it is (Permit2 is foreground TTY).
 
