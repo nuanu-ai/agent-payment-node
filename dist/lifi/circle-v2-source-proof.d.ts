@@ -43,6 +43,17 @@ export interface CircleSourceStatus {
     readonly journal: NonEvmSourceJournal;
     readonly proofClass: string;
     readonly nextActions: readonly string[];
+    /** Once nothing of the operation can still spend it: the payer's allowance left on the wrapper (see residualAllowance). */
+    readonly residualAllowance?: CircleResidualAllowance;
+}
+/** The Base USDC allowance the payer still grants the Circle wrapper, read at the finalized tag; null when it could not be read. */
+export interface CircleResidualAllowance {
+    readonly token: string;
+    readonly owner: string;
+    readonly spender: string;
+    readonly blockTag: "finalized";
+    readonly allowanceAtomic: string | null;
+    readonly unreadReason?: string;
 }
 /**
  * `operation status` of a Circle CCTP V2 Base source burn: the saved journal and, when its burn transaction is known,

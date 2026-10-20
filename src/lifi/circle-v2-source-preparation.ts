@@ -3,9 +3,11 @@ import { createHash } from "node:crypto";
 import { canonicalJson } from "../canonical.js";
 import { inspectCircleV2Preflight, type CircleV2PreflightTransport } from "./circle-v2-preflight.js";
 import type { CircleV2PreflightedDraft } from "./circle-v2-draft.js";
-import { BRIDGE_MAX_GAS, BRIDGE_MIN_REMAINING_MS, BRIDGE_TTL_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint } from "./validation.js";
+import { BRIDGE_MIN_REMAINING_MS, BRIDGE_TTL_MS, bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint } from "./validation.js";
+import { circleV2FeeWithinBudget, circleV2GasWithinBudget, circleV2NativeWithinBudget, circleV2UsdcCovers } from "./circle-v2-budget.js";
 
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const SUBMIT = "apn circle source submit";
 function fail(reason: string): never { return bridgeFailure("APN_PROVIDER_PROTOCOL", `circle_v2_source_preparation_${reason}`); }
 function digest(value: unknown): string { return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`; }
 function freeze<T>(value: T): T {
@@ -78,7 +80,8 @@ export async function prepareCircleV2BaseSourceReadOnly(draft: CircleV2Preflight
   const payer = bridgeAddress(copy.sourcePayer), tx = copy.sourceTransaction, response = bridgeRecord(copy.quoteResponse);
   const principal = quantity(copy.amountAtomic), fee = quantity(copy.quotedFeeAtomic);
   const requiredDebit = principal + fee;
-  if (principal === 0n || fee >= principal || fee > quantity(copy.maxSourceFeeAtomic) || requiredDebit > (1n << 256n) - 1n) fail("quote_fee");
+  if (principal === 0n || requiredDebit > (1n << 256n) - 1n) fail("quote_fee");
+  circleV2FeeWithinBudget("circle_v2_source_preparation_quote_fee", fee, principal, quantity(copy.maxSourceFeeAtomic));
   const preflight = await inspectCircleV2Preflight({ payer, quoteEndpoint: copy.quoteEndpoint,
     quoteRequest: copy.quoteRequest, quoteResponse: copy.quoteResponse, transaction: { from: payer, to: tx.to, chainId: 8453,
       data: tx.data, valueAtomic: tx.valueAtomic, refundAddress: tx.refundAddress }, recipientWallet: copy.recipientWallet,
@@ -97,16 +100,16 @@ export async function prepareCircleV2BaseSourceReadOnly(draft: CircleV2Preflight
   if (latest !== pending) fail("pending_nonce");
   const balance = quantity(state.usdcBalanceAtomic), allowance = quantity(state.usdcAllowanceAtomic);
   const maxAllowance = quantity(limits.maxAllowanceAtomic);
-  if (balance < requiredDebit) fail("usdc_balance");
+  circleV2UsdcCovers("circle_v2_source_preparation_usdc_balance", SUBMIT, "The source debit (principal plus Circle fee)", requiredDebit, balance);
   if (maxAllowance < requiredDebit || maxAllowance > balance || maxAllowance === (1n << 256n) - 1n ||
     allowance < requiredDebit || allowance > maxAllowance || allowance === (1n << 256n) - 1n) fail("bounded_allowance");
   const gas = quantity(state.gasLimitAtomic), maxFee = quantity(state.maxFeePerGasWei), priority = quantity(state.maxPriorityFeePerGasWei);
-  if (gas === 0n || gas > BRIDGE_MAX_GAS || gas > quantity(limits.maxGasLimitAtomic) || maxFee === 0n || priority > maxFee ||
-    maxFee > quantity(limits.maxFeePerGasWei) || priority > quantity(limits.maxPriorityFeePerGasWei)) fail("gas_or_fee_cap");
+  if (gas === 0n || maxFee === 0n || priority > maxFee) fail("gas_or_fee_cap");
+  circleV2GasWithinBudget("circle_v2_source_preparation", SUBMIT, gas, maxFee, priority, limits);
   const l1 = quantity(state.l1DataFeeUpperWei), operator = quantity(state.operatorFeeUpperWei);
   const nativeDebit = gas * maxFee + l1 + operator + quantity(tx.valueAtomic);
   if (nativeDebit > (1n << 256n) - 1n) fail("native_debit_overflow");
-  if (nativeDebit > quantity(limits.maxNativeDebitWei) || quantity(state.nativeBalanceWei) < nativeDebit) fail("native_balance_or_cap");
+  circleV2NativeWithinBudget("circle_v2_source_preparation", SUBMIT, nativeDebit, quantity(state.nativeBalanceWei), limits.maxNativeDebitWei);
   const current = now();
   if (!Number.isSafeInteger(current) || current < 0 || !Number.isSafeInteger(limits.ttlMs) ||
     limits.ttlMs < BRIDGE_MIN_REMAINING_MS || limits.ttlMs > BRIDGE_TTL_MS) fail("ttl");
