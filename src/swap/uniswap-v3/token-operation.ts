@@ -56,6 +56,16 @@ export interface UniswapTokenRetiredEffect { readonly kind: "approval" | "swap" 
 export interface UniswapTokenCleanupFeeQuote { readonly schemaVersion: "apn.uniswap-token-cleanup-fee-quote.v1"; readonly blockNumber: string;
     readonly blockHash: string; readonly baseFeePerGasWei: string; readonly priorityFeePerGasWei: string; readonly previousCleanupGas: TokenGasEnvelope;
     readonly previousMaximumNativeDebitWei: string; readonly quotedAt: string; }
+/**
+ * Why a cleaned swap's principal hold was released although an approval of it landed (R4 exit 2): no swap of it was ever
+ * signed (no swap marker is left; a marker is dropped only when custody showed no signed bytes for it), or the hashless
+ * swap marker's nonce is consumed in the finalized chain by this operation's own landed cleanup, so no swap of it can
+ * ever land. Spent gas and every attempt stay in the record.
+ */
+export type UniswapTokenPrincipalRelease = { readonly schemaVersion: "apn.uniswap-token-principal-release.v1"; readonly kind: "swap_never_signed"; readonly observedAt: string }
+    | { readonly schemaVersion: "apn.uniswap-token-principal-release.v1"; readonly kind: "swap_nonce_consumed_by_cleanup"; readonly swapNonce: string;
+        readonly cleanupTransactionHash: string; readonly cleanupBlockNumber: string; readonly cleanupBlockHash: string;
+        readonly finalizedBlockNumber: string; readonly finalizedNonce: string; readonly observedAt: string };
 export interface UniswapTokenFailureDiagnostic { readonly code: string | null; readonly reason: string | null;
     readonly rpcMethod: string | null; readonly endpointRole: string | null; readonly phase: UniswapTokenPhase; }
 type FailureDiagnosticField = "code" | "reason" | "rpcMethod" | "endpointRole";
@@ -104,6 +114,8 @@ export interface UniswapTokenOperation {
     readonly cleanupFeeQuote?: UniswapTokenCleanupFeeQuote;
     /** Present only once an attempt was retired (v2 records without it read as before). */
     readonly retiredEffects?: readonly UniswapTokenRetiredEffect[];
+    /** Present only once a cleaned swap's principal hold was released on proof that no swap of it can land. */
+    readonly principalRelease?: UniswapTokenPrincipalRelease;
     readonly receipt: UniswapTokenReceipt | null;
     readonly previousIntegrityHash: string | null;
     readonly integrityHash: string;
@@ -126,7 +138,7 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
           ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : []),
-          ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : [])] : common))
+          ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : []), ...(Object.hasOwn(value, "principalRelease") ? ["principalRelease"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value as unknown as UniswapTokenOperation, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -173,6 +185,7 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
     // The diagnostic is the history of why cleanup became required: it stays through the owner's cleanup and its outcome.
     if (failure !== null && !PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase)) corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
     if (op.cleanupFeeQuote !== undefined) validateCleanupFeeQuote(op);
+    if (op.principalRelease !== undefined) validatePrincipalRelease(op);
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
     if (op.receipt !== null)
@@ -259,6 +272,22 @@ function validateCleanupEvidence(v: UniswapTokenCleanupEvidence | UniswapTokenEx
         v.schemaVersion !== "apn.uniswap-token-cleanup-evidence.v1" || v.kind !== "zero_allowance_no_effect" ||
         !["current_allowance", "legacy_usage_reconciliation"].includes(v.source as string) || v.observedAllowanceAtomic !== "0" ||
         !canonicalInstant(v.observedAt as string)) corrupt("Uniswap token cleanup evidence is invalid."); }
+/** A cleanup of this operation that landed (current, or retired after landing) and so consumed its nonce. */
+export function landedTokenCleanups(op: Pick<UniswapTokenOperation, "cleanupAttempt" | "retiredEffects">): readonly UniswapTokenAttempt[] {
+    return [...(op.cleanupAttempt?.transactionHash != null ? [op.cleanupAttempt] : []),
+        ...(op.retiredEffects ?? []).filter((row) => row.kind === "cleanup" && row.reason !== "never_landed").map((row) => row.attempt)];
+}
+function validatePrincipalRelease(op: UniswapTokenOperation) { const v = op.principalRelease as unknown;
+    if (op.phase !== "cleaned" || op.receipt !== null || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
+        (op.retiredEffects ?? []).some((row) => row.kind === "swap") || !isPlainRecord(v) || v.schemaVersion !== "apn.uniswap-token-principal-release.v1" ||
+        typeof v.observedAt !== "string" || !canonicalInstant(v.observedAt) || v.observedAt > op.updatedAt) corrupt("Uniswap token principal release is invalid.");
+    if (v.kind === "swap_never_signed") { if (!exactKeys(v, ["schemaVersion", "kind", "observedAt"]) || op.swapAttempt !== null) corrupt("Uniswap token principal release is invalid."); return; }
+    const swap = op.swapAttempt, cleanup = landedTokenCleanups(op).find((row) => row.transactionHash === v.cleanupTransactionHash);
+    if (v.kind !== "swap_nonce_consumed_by_cleanup" || !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "cleanupTransactionHash", "cleanupBlockNumber",
+        "cleanupBlockHash", "finalizedBlockNumber", "finalizedNonce", "observedAt"]) || swap === null || swap.transactionHash !== null ||
+        cleanup === undefined || cleanup.nonce !== swap.nonce || v.swapNonce !== swap.nonce || typeof v.cleanupBlockHash !== "string" ||
+        !/^0x[a-f0-9]{64}$/u.test(v.cleanupBlockHash) || uint(v.finalizedBlockNumber) < uint(v.cleanupBlockNumber) || uint(v.finalizedNonce) <= uint(v.swapNonce))
+        corrupt("Uniswap token principal release is invalid."); }
 function validateCleanupFeeQuote(op: UniswapTokenOperation) { const q = op.cleanupFeeQuote as unknown;
     if (!PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase) || !isPlainRecord(q) || !exactKeys(q, ["schemaVersion", "blockNumber", "blockHash", "baseFeePerGasWei",
         "priorityFeePerGasWei", "previousCleanupGas", "previousMaximumNativeDebitWei", "quotedAt"]) || q.schemaVersion !== "apn.uniswap-token-cleanup-fee-quote.v1" ||

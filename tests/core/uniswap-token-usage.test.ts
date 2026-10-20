@@ -225,7 +225,7 @@ test("ledger-terminal hashless marked recovery refuses unproven no-effect cleanu
   assert.equal((await s.usage.follow(split, "failed_before_effect")).state, "failed_before_effect");
   const never = async () => { throw new Error("no network or effect expected"); }, runtime = new UniswapTokenExecution(journal, {
     now: () => NOW, foregroundApprove: never, foregroundCleanup: never, withAccountLock: async <T>(_op: UniswapTokenOperation, work: () => Promise<T>) => await work(),
-    allocateNonce: never, currentAllowance: never, releaseNonce: never, commitNonce: never, guard: never, revalidate: never,
+    allocateNonce: never, currentAllowance: never, releaseNonce: never, commitNonce: never, guard: never,
     reserveUsage: async () => usage, currentUsage: async (op: UniswapTokenOperation) => await s.usage.current(op),
     followUsage: async (op: UniswapTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") => await s.usage.follow(op, target),
     seal: never, probeSealed: async () => null, send: never, observe: never,
@@ -329,7 +329,7 @@ test("production execute durably routes non-exact live allowance drift into expl
   let op = await runtime.execute(approved.operationId); assert.equal(op.phase, "cleanup_required"); assert.equal(op.cleanupReason, "approval_allowance_drift");
   assert.equal(op.usageState, "reserved"); assert.equal(p.sends.length, 0);
   let budget = (await new UniswapTokenRpcBudgetJournal(temporary.root).load(op.operationId))!.rows.at(-1)!;
-  assert.deepEqual([budget.cap, budget.requestSessionCap, budget.budgetClass], [24, 24, "swap_effect"]);
+  assert.deepEqual([budget.cap, budget.requestSessionCap, budget.budgetClass], [15, 15, "swap_effect"]);
   op = await runtime.cleanup(op.operationId); assert.equal(op.phase, "cleanup_submitted"); assert.equal(op.usageState, "reserved"); assert.equal(p.sends.length, 1);
   budget = (await new UniswapTokenRpcBudgetJournal(temporary.root).load(op.operationId))!.rows.at(-1)!;
   assert.deepEqual([budget.cap, budget.requestSessionCap, budget.budgetClass], [0, 14, "recovery"]);
@@ -338,11 +338,11 @@ test("execute from approved reserves the swap cap when exact allowance can skip 
   const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
     account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "1000000"),
     journal = new UniswapTokenJournal(temporary.root), base = await journal.save(operation(s.policy.policyDigest, "e", account)), usage = await s.usage.reserve(base),
-    approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)), call = p.sessionCall(24),
+    approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)), call = p.sessionCall(15),
     runtime = createUniswapTokenRuntime({ ...p, call, clock: { now: () => now }, foreground: "refuse", verifyPins: async () => undefined });
   const op = await runtime.execute(approved.operationId), row = (await new UniswapTokenRpcBudgetJournal(temporary.root).load(op.operationId))!.rows.at(-1)!;
   assert.equal(op.phase, "submitted"); assert.equal(op.approvalAttempt, null); assert.equal(op.swapAttempt?.transactionHash !== null, true); assert.equal(p.sends.length, 1);
-  assert.deepEqual([row.cap, row.requestSessionCap, row.budgetClass], [24, 24, "swap_effect"]);
+  assert.deepEqual([row.cap, row.requestSessionCap, row.budgetClass], [15, 15, "swap_effect"]);
   assert.equal(row.physicalRequests, call.telemetry!()!.httpAttempts + call.effectAttempts!()); assert.ok(row.physicalRequests! <= row.cap);
 });
 test("concurrent status cannot advance a cap-zero execute into an unreserved swap effect", async (t) => {
@@ -356,11 +356,11 @@ test("concurrent status cannot advance a cap-zero execute into an unreserved swa
   const ports = { now: () => NOW, foregroundApprove: async () => undefined, foregroundCleanup: async () => undefined,
     withAccountLock: async <T>(_op: UniswapTokenOperation, work: () => Promise<T>) => await work(), allocateNonce: async () => "8",
     currentAllowance: async () => "1000000", releaseNonce: async () => true, commitNonce: async () => undefined,
-    guard: async () => undefined, revalidate: async () => undefined, reserveUsage: async () => usage,
+    guard: async () => undefined, reserveUsage: async () => usage,
     currentUsage: async (op: UniswapTokenOperation) => ({ reservationId: op.usageReservationId!, state: op.usageState! }),
     followUsage: async (_op: UniswapTokenOperation, state: any) => ({ reservationId: usage.reservationId, state }),
     seal: async (op: UniswapTokenOperation) => { const row = (await budget.load(op.operationId))!.rows.at(-1)!;
-      assert.deepEqual([row.cap, row.budgetClass, row.physicalRequests], [24, "swap_effect", null]); seals += 1;
+      assert.deepEqual([row.cap, row.budgetClass, row.physicalRequests], [15, "swap_effect", null]); seals += 1;
       return { transactionHash: `0x${"2".repeat(64)}`, envelopeHash: "e".repeat(64) }; }, probeSealed: async () => null,
     send: async () => { sends += 1; return "accepted" as const; },
     observe: async (_op: UniswapTokenOperation, kind: TokenEffectKind) => { if (kind !== "approval") return null;
@@ -404,14 +404,14 @@ test("production token RPC phases stay within exact physical budgets through fin
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
   assert.equal(op.phase, "approval_observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [7, 10]);
 
-  p.clearObservation(); call = p.sessionCall(24); op = await runtime(call, "refuse").execute(op.operationId); telemetry = call.telemetry!()!;
-  assert.equal(op.phase, "submitted", op.cleanupReason ?? undefined); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [19, 32]);
+  p.clearObservation(); call = p.sessionCall(15); op = await runtime(call, "refuse").execute(op.operationId); telemetry = call.telemetry!()!;
+  assert.equal(op.phase, "submitted", op.cleanupReason ?? undefined); assert.deepEqual([telemetry.httpAttempts + call.effectAttempts!(), telemetry.logicalItems], [13, 26]);
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
   assert.equal(op.phase, "submitted"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [4, 8]);
   p.setAllowance("0"); p.observe(op, "swap", 1);
   call = p.sessionCall(8); op = await runtime(call, "refuse").status(op.operationId); telemetry = call.telemetry!()!;
   assert.equal(op.phase, "observed"); assert.deepEqual([telemetry.httpAttempts, telemetry.logicalItems], [8, 14]);
-  assert.equal(8 + 9 + 14 + 7 + 19 + 8, 65); assert.equal(65 + 4 + 4, 73); assert.equal(op.receipt?.inputDebitAtomic, "1000000");
+  assert.equal(8 + 9 + 14 + 7 + 13 + 8, 59); assert.equal(59 + 4 + 4, 67); assert.equal(op.receipt?.inputDebitAtomic, "1000000");
 
   const journal = new UniswapTokenJournal(temporary.root), cleanupBase = await journal.save(operation(s.policy.policyDigest, "a", account)),
     cleanupUsage = new UniswapTokenUsage(new StateStore(temporary.root), { now: () => at }, new AssetUsageLedger(temporary.root)),
@@ -563,7 +563,7 @@ test("post-wallet-save failure recovery observes public journal without broadcas
     allocateNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind) => await custody.allocateNonce(op, kind),
     releaseNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => await custody.releaseNonce(op, kind, nonce),
     commitNonce: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => { await custody.commitNonce(op, kind, nonce); },
-    currentAllowance: async (op: UniswapTokenOperation) => await custody.currentAllowance(op), guard: async () => undefined, revalidate: async () => undefined,
+    currentAllowance: async (op: UniswapTokenOperation) => await custody.currentAllowance(op), guard: async () => undefined,
     reserveUsage: async (op: UniswapTokenOperation) => await s.usage.reserve(op), currentUsage: async (op: UniswapTokenOperation) => await s.usage.current(op),
     followUsage: async (op: UniswapTokenOperation, target: "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert") => await s.usage.follow(op, target),
     seal: async (op: UniswapTokenOperation, kind: TokenEffectKind, nonce: string) => await custody.seal(op, kind, nonce),
