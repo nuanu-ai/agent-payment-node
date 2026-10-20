@@ -175,9 +175,9 @@ test("a fee above the owner cap and a relay MetaMask withholds never point at US
   const withheld = await f10.core.execute({ command: "gasless.transfer.prepare", profile: f10.profile, request: f10.request, idempotencyKey: "mm-relay-01" });
   for (const result of [capped, withheld]) {
     assert.equal(result.ok, false); assert.equal(result.operation, null);
-    assert.equal(JSON.stringify(result.next_actions).includes("USDC"), false);
-    assert.equal(result.next_actions.some(action => action.includes("gasless balance")), false);
+    assert.equal(result.next_actions.some(action => action.includes("gasless balance") || action.includes("short")), false);
   }
+  assert.equal(JSON.stringify(withheld.next_actions).includes("USDC"), false);
 });
 
 test("native and USDC facts are closed: proven numbers only, on their own refusal only", () => {

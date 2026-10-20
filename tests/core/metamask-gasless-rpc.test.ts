@@ -304,13 +304,23 @@ const readMethods = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getCode
 const protocolError = { code: "APN_RPC_PROTOCOL" };
 
 
-test("closed snapshot diagnostics identify public counter and balance failures without downgrading refusal", () => {
+test("closed snapshot diagnostics keep corrupt evidence a protocol refusal and a low balance a USDC refusal", () => {
   const original = intent(block(8453, 100n)).initialSnapshot;
   const expected = { chainId: 8453 as const, endpointHash: sha256(RPC_URL), endpointOrigin: "https://rpc.example", grossAtomic: "1000000" };
-  for (const [predicate, state] of [["counter", { ...original.safeState, counterAtomic: "1" }],
-    ["balance", { ...original.safeState, usdcBalanceAtomic: "999999" }]] as const) {
-    assert.throws(() => validateMetaMaskGaslessSnapshot({ ...original, safeState: state }, expected),
-      { code: "APN_RPC_PROTOCOL", details: { reason: "mm_gasless_evidence_invalid", evidenceStage: "safe", evidencePredicate: predicate, evidenceMethod: "eth_call" } });
+  const corrupt = { code: "APN_RPC_PROTOCOL", details: { reason: "mm_gasless_evidence_invalid", evidenceStage: "safe", evidencePredicate: "counter", evidenceMethod: "eth_call" } };
+  assert.throws(() => validateMetaMaskGaslessSnapshot({ ...original, safeState: { ...original.safeState, counterAtomic: "1" } }, expected), corrupt);
+  // Corruption is refused first, even beside a low balance.
+  assert.throws(() => validateMetaMaskGaslessSnapshot({ ...original, safeState: { ...original.safeState, counterAtomic: "1", usdcBalanceAtomic: "999999" } }, expected), corrupt);
+  for (const [stage, key] of [["safe", "safeState"], ["latest", "headState"]] as const) {
+    const low = { ...original, [key]: { ...original[key], usdcBalanceAtomic: "999999" } };
+    assert.throws(() => validateMetaMaskGaslessSnapshot(low, expected), (error: any) => {
+      assert.equal(error.code, "APN_INSUFFICIENT_USDC");
+      assert.equal(error.message, "The MetaMask server wallet on Base (chain 8453) holds 999999 USDC atoms (0.999999 USDC), below the 1000000 " +
+        `USDC atoms (1 USDC) this transfer plus MetaMask's quoted USDC relay fee needs (APN's own balanceOf read at its ${stage} block ${original[stage === "safe" ? "safeBlock" : "headBlock"].numberAtomic}).`);
+      assert.deepEqual(error.details, { reason: "mm_gasless_balance", chain_id: 8453, network: "Base", usdc_current_atomic: "999999",
+        usdc_required_atomic: "1000000", usdc_block_tag: stage, usdc_block_number: original[stage === "safe" ? "safeBlock" : "headBlock"].numberAtomic });
+      return true;
+    });
   }
 });
 

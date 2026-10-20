@@ -650,9 +650,11 @@ and so does one USDC balance refusal:
 - `APN_INSUFFICIENT_USDC / mm_gasless_balance`: the fee quote priced the relay,
   but APN's own validated `balanceOf` read of the server wallet is below the net
   amount plus the quoted fee (raised 5% on Ethereum, as the pinned client signs
-  it). The refusal carries both numbers (`mm_read_usdc_current_atomic`,
-  `mm_read_usdc_required_atomic`) and its next action is `apn gasless balance`
-  for the same profile and chain.
+  it), either at the fee quote or at APN's chain snapshot right after it (named
+  with its safe or latest block). The refusal carries both numbers
+  (`usdc_current_atomic`, `usdc_required_atomic`) and its next action is
+  `apn gasless balance` for the same profile and chain. A snapshot whose pins or
+  shape do not hold stays `APN_RPC_PROTOCOL / mm_gasless_evidence_invalid`.
 
 Any other malformed quote stays `APN_PROVIDER_UNAVAILABLE / mm_gasless_provider_unavailable`.
 
@@ -664,9 +666,12 @@ one exact price: the quote is taken again after your approval, and a fee that ha
 moved is accepted while it still stays inside `--max-fee` and still leaves the
 recipient at or above `--min-received`. A repriced batch has its delegation
 re-derived, and that repriced batch and delegation are what the durable dispatch
-marker records and the single provider POST carries. A fee above `--max-fee`
-refuses with `APN_FEE_BUDGET_EXCEEDED / mm_gasless_fee_cap` and dispatches
-nothing. There is no unused amount or refund for a successful exact-gross MetaMask batch. The
+marker records and the single provider POST carries. A fee above the owner's
+cap (the lower of `--max-fee` and `--amount` minus `--min-received`; in fixed-net
+mode `--max-fee-atomic` and `--max-gross-atomic` minus `--net-amount-atomic`)
+refuses with `APN_FEE_BUDGET_EXCEEDED / mm_gasless_fee_cap`, naming the quoted fee,
+the cap, the network and the option that set it, and dispatches nothing. At
+prepare its next action offers a higher cap only if the owner accepts that fee. There is no unused amount or refund for a successful exact-gross MetaMask batch. The
 recipient and fee recipient must both differ from the sender and each other.
 
 ```sh

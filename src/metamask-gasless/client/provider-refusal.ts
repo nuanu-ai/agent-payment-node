@@ -3,6 +3,7 @@ import { directEvmNetwork } from "../../evm-direct-networks.js";
 import { formatAtomic } from "../../money.js";
 import type { MetaMaskGaslessChainId } from "../model.js";
 import type { MetaMaskGaslessFailureReason } from "../reasons.js";
+import { mmUsdcShortfallMessage } from "../refusals.js";
 import { mmSentinelQuoteEndpoint, MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT } from "./provider-endpoints.js";
 import type { MetaMaskReadDiagnostic } from "./read-diagnostic.js";
 
@@ -43,10 +44,8 @@ export function metaMaskProviderRefusal(reason: MetaMaskGaslessFailureReason, d:
     details: { ...read, provider_cause: "native_gas_below_required", native_symbol: symbol } };
   }
   if (reason === "mm_gasless_balance" && d.usdcCurrentAtomic !== undefined && d.usdcRequiredAtomic !== undefined) {
-    const usdc = (atoms: string) => `${atoms} USDC atoms (${formatAtomic(atoms, 6)} USDC)`;
-    return { message: `The MetaMask server wallet ${where} holds ${usdc(d.usdcCurrentAtomic)}, below the ${usdc(d.usdcRequiredAtomic)} ` +
-      "this transfer plus MetaMask's quoted USDC relay fee needs (APN's own balanceOf read at the fee quote).",
-    details: { chain_id: chainId, network } };
+    return { message: mmUsdcShortfallMessage(chainId, d.usdcCurrentAtomic, d.usdcRequiredAtomic, "at the fee quote"),
+      details: { chain_id: chainId, network, usdc_current_atomic: d.usdcCurrentAtomic, usdc_required_atomic: d.usdcRequiredAtomic } };
   }
   if (reason === "mm_gasless_relay_unsupported" && d.relayServerWalletNetwork !== undefined && d.relaySentinelFlag !== undefined) {
     const missing = [
