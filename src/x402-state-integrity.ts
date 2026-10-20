@@ -1,4 +1,4 @@
-import { canonicalJson, domainHash } from "./canonical.js";
+import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { validateX402ResultUnsafe, validateX402ReceiptUnsafe } from "./x402-artifact-validation.js";
 import { validateX402OperationUnsafe } from "./x402-operation-validation.js";
@@ -92,7 +92,11 @@ function publicSettlement(evidence: X402OperationRecord["settlementEvidence"]): 
   } };
 }
 
+/** The stored `resultHash` is domain separated; the public result names it as such beside the plain body SHA-256. */
+export const X402_RESULT_HASH_RULE = "sha256(utf8(\"apn.x402.result-body.v1\") || 0x00 || body_bytes)";
+
 export function publicX402ResultData(result: X402ResultRecord): unknown {
+  const bytes = Buffer.from(result.bodyText, result.bodyEncoding === "base64" ? "base64" : "utf8");
   return {
     kind: "x402_result",
     media_type: result.mediaType,
@@ -100,8 +104,10 @@ export function publicX402ResultData(result: X402ResultRecord): unknown {
     body: result.bodyEncoding === "base64" ? result.bodyText : result.mediaType === "application/json"
       ? JSON.parse(result.bodyText) as unknown
       : result.bodyText,
-    sha256: result.resultHash,
+    sha256: sha256(bytes),
     byte_length: result.byteLength,
+    result_hash: result.resultHash,
+    result_hash_rule: X402_RESULT_HASH_RULE,
   };
 }
 
