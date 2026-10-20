@@ -2,7 +2,6 @@ import { generateKeyPairSync } from "node:crypto";
 import { DirectPublicEffectJournal } from "../../src/direct-public-effect.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +15,7 @@ import { projectLegacyLocalProfile } from "../../src/provider-profile.js";
 import { appendTransition, sealOperation, sealWallet, validateOperation } from "../../src/state-integrity.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
+import { FRESH_PROCESS_TEST_TIMEOUT_MS, freshProcess } from "./fresh-process.js";
 
 async function prepared(t: test.TestContext) {
   const temp = await temporaryState(); t.after(temp.cleanup);
@@ -85,9 +85,9 @@ test("legacy unsigned operation without native binding refuses without rewriting
   assert.equal(s.wrapping.loads, before); assert.equal(s.rpc.broadcastCount, 0);
 });
 
-for (const [phase, exit, sends] of [["dispatch-before-crash", 75, 0], ["dispatch-after-crash", 76, 1]] as const) test(`${phase}: real process loss leaves a durable fence and restart never dispatches`, async t => {
+for (const [phase, exit, sends] of [["dispatch-before-crash", 75, 0], ["dispatch-after-crash", 76, 1]] as const) test(`${phase}: real process loss leaves a durable fence and restart never dispatches`, { timeout: FRESH_PROCESS_TEST_TIMEOUT_MS }, async t => {
   const s = await prepared(t), worker = fileURLToPath(new URL("./evm-crash-worker.js", import.meta.url));
-  const crashed = spawnSync(process.execPath, [worker, phase, s.temp.root, s.operation.operationId], { encoding: "utf8", timeout: 15000 });
+  const crashed = await freshProcess(t, [worker, phase, s.temp.root, s.operation.operationId]);
   assert.equal(crashed.status, exit, crashed.stderr);
   const stored = (await s.state.findOperation(s.operation.operationId))!;
   assert.equal(stored.state, "signed_not_submitted");
@@ -95,7 +95,7 @@ for (const [phase, exit, sends] of [["dispatch-before-crash", 75, 0], ["dispatch
   assert.equal(marker.binding.transactionHash, stored.transactionHash); assert.equal(marker.binding.signedPayloadHash, hashObject(evmCustodyPayload(stored)));
   const witness = await readFile(join(s.temp.root, "fake-dispatch-witness.json"), "utf8").then(JSON.parse).catch(() => null);
   assert.equal(witness?.sends ?? 0, sends);
-  const recovered = spawnSync(process.execPath, [worker, "resume", s.temp.root, stored.operationId], { encoding: "utf8", timeout: 15000 });
+  const recovered = await freshProcess(t, [worker, "resume", s.temp.root, stored.operationId]);
   assert.equal(recovered.status, 0, recovered.stderr);
   const result = JSON.parse(recovered.stdout);
   assert.equal(result.result.state, "unknown_finality"); assert.equal(result.submissions, 0); assert.equal(result.approvals, 0);
@@ -166,9 +166,9 @@ test("provider drift while wrapping secret loads refuses before decrypt and sign
   assert.equal(s.rpc.broadcastCount, 0); assert.equal(s.approval.intents.length, 1);
 });
 
-test("old markerless signed window without matching public proof refuses and retains hashes without decrypt or send", async t => {
+test("old markerless signed window without matching public proof refuses and retains hashes without decrypt or send", { timeout: FRESH_PROCESS_TEST_TIMEOUT_MS }, async t => {
   const s = await prepared(t), worker = fileURLToPath(new URL("./evm-crash-worker.js", import.meta.url));
-  const crashed = spawnSync(process.execPath, [worker, "sign-crash", s.temp.root, s.operation.operationId], { encoding: "utf8", timeout: 15000 });
+  const crashed = await freshProcess(t, [worker, "sign-crash", s.temp.root, s.operation.operationId]);
   assert.equal(crashed.status, 74, crashed.stderr);
   const started = (await s.state.findOperation(s.operation.operationId))!;
   s.clock.value = new Date(Date.now() + 1000);

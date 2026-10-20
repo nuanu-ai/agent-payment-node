@@ -90,6 +90,22 @@ export function classifyMetaMaskPendingNotices(
     : { disposition: "pending", recoveryToken, providerState: "AWAITING_MFA" };
 }
 
+/** What a verified AWAITING_MFA notice tells about the owner's approval: when it lapses and how the owner confirms it. */
+export interface MetaMaskMfaNotice { readonly expiresAt: string | null; readonly authMethod: string | null }
+
+/**
+ * The owner-facing fields of the last notice of a stream `classifyMetaMaskPendingNotices` found pending. 6.1.5 writes
+ * `{kind, pollingId, expiresAt?, authMethod, message}`; a field that is absent or not in its exact form is null, never
+ * guessed. The provider's free-text message (which may carry a link) is not kept.
+ */
+export function metaMaskMfaNotice(notices: readonly Record<string, unknown>[]): MetaMaskMfaNotice {
+  const last = notices.at(-1) ?? {}, expiresAt = last.expiresAt, authMethod = last.authMethod;
+  return {
+    expiresAt: typeof expiresAt === "string" && Number.isFinite(Date.parse(expiresAt)) && new Date(expiresAt).toISOString() === expiresAt ? expiresAt : null,
+    authMethod: typeof authMethod === "string" && /^[a-z][a-z0-9_-]{0,31}$/u.test(authMethod) ? authMethod : null,
+  };
+}
+
 function parseRecord(text: string): Record<string, unknown> | null {
   try {
     const value = JSON.parse(text) as unknown;
