@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
-import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 import { METAMASK_FOREGROUND_TIMEOUT_MS, METAMASK_PROCESS_TIMEOUT_MS, resolveMetaMaskBin, } from "./metamask-package.js";
 const MAX_JSON_BYTES = 1024 * 1024;
 const nativeFailureDiagnostics = new WeakMap();
@@ -82,7 +82,12 @@ function observeNativeFailure(bytes) {
     const transactionHash = isPlainRecord(data) && typeof data.hash === "string" ? data.hash.toLowerCase() : undefined;
     if (requestId === undefined && transactionHash === undefined)
         return undefined;
+    const latest = isPlainRecord(data) && typeof data.status === "string" ? data.status : undefined;
+    const awaiting = requestId !== undefined && transactionHash === undefined && (latest === undefined
+        ? notice.disposition === "pending" && notice.recoveryToken === requestId : latest === "AWAITING_MFA");
     return Object.freeze({ ...(requestId === undefined ? {} : { requestId }), ...(transactionHash === undefined ? {} : { transactionHash }),
+        ...(awaiting ? { mfa: { ...(notice.disposition === "pending" ? metaMaskMfaNotice(parsed.notices) : { expiresAt: null, authMethod: null }),
+                evidenceHash: sha256(bytes) } } : {}),
         ...(isPlainRecord(data) ? { sender: data.address.toLowerCase(),
             ...(typeof data.chainId === "number" ? { chainId: data.chainId } : {}),
             ...(typeof data.projectId === "string" ? { vendorProjectHash: sha256(data.projectId) } : {}) } : {}) });

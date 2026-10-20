@@ -32,12 +32,18 @@ export interface EvmActualFee {
 export type EvmActualFeeInput = Pick<EvmActualFee, "chainId" | "transactionHash" | "blockNumberAtomic" | "gasLimitAtomic" | "maxFeePerGasAtomic" | "receiptFields">;
 /** A new observation names the network's current charge rule; a stored one is re-derived by the rule it names (R2). */
 export declare function deriveEvmActualFee(input: EvmActualFeeInput, feeModel: DirectEvmFeeModel): EvmActualFee;
-/** A stored fee observation must be exactly what its own receipt fields derive (R2: no current constant is consulted). */
+/**
+ * A stored fee observation must be exactly what its own receipt fields derive (R2: no current constant is consulted), by
+ * the rule now or by the 0.5.52 blob reading; either way the answer is the current rule's reading of those same fields.
+ */
 export declare function validateEvmActualFee(value: unknown): EvmActualFee;
 /** Only a local transfer's proven outcomes carry it, and only for this operation's own signed transaction. */
 export declare function assertEvmActualFeeBinding(operation: OperationRecord): void;
-/** Public form: the fact when complete, its known parts and reason when not, null when nothing was observed. */
-export declare function publicEvmActualFee(fee: EvmActualFee | undefined, asset: {
+/**
+ * Public form: the fact when complete, its known parts and reason when not, null when nothing was observed. A stored
+ * observation is shown as the current rule reads its own receipt fields (a 0.5.52 blob reading is not frozen in).
+ */
+export declare function publicEvmActualFee(stored: EvmActualFee | undefined, asset: {
     readonly kind: string;
 } | undefined, amountAtomic: string, state: string): {
     actual_network_fee: null;

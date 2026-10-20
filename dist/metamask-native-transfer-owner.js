@@ -25,7 +25,7 @@ import { formatAtomic } from "./money.js";
 import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, metaMaskNativeUsdc, validateMetaMaskNativeFeeQuote, validateMetaMaskNativeFeeReceipt } from "./metamask-native-fee-evidence.js";
 import { MetaMaskNativeHandoffNotStarted, readMetaMaskNativeVendorPolicy, readMetaMaskNativeRequest, submitOwnedMetaMaskNative } from "./metamask-native-transfer-adapter.js";
 import { prepareMetaMaskNativeQuote, readMetaMaskNativeFunding, observeMetaMaskNativeTransfer } from "./metamask-native-transfer-rpc.js";
-import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeExpiredBeforeEffect, metaMaskNativeRequestHash, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation } from "./metamask-native-journal.js";
+import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeExpiredBeforeEffect, metaMaskNativeMfaTask, metaMaskNativeRequestHash, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation } from "./metamask-native-journal.js";
 import { assetUsageReservationId } from "./asset-usage-ledger.js";
 import { refreshOperationIndex } from "./operation-index/refresh.js";
 /** Journal readers, also reachable here for callers that name the command module. */
@@ -239,7 +239,10 @@ export async function runMetaMaskNativeTransfer(stateRoot, input) {
                 scope = Object.freeze({});
                 scopes.set(scope, { root: stateRoot, context, journal, reservations, state: "issued", lockActive: true, monotonicDeadline: performance.now() + Math.min(60000, Date.parse(expires) - Date.now()), lastNow: Date.now(), guardStage: "sdk_resolver", startedAt: performance.now() });
                 const result = await submitOwnedMetaMaskNative(scope, context);
-                op = await journal.persist(patch(op, { ...(result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic }), ...(result.disposition === "acknowledged" ? { state: "acknowledged", transactionHash: result.transactionHash } : { state: "unknown", transactionHash: "transactionHash" in result ? result.transactionHash ?? null : null, providerRequestId: result.requestId ?? null }) }));
+                // A pending or unknown hand-off stays financially UNKNOWN; an owner approval the provider waits on is kept beside it.
+                const mfa = result.disposition !== "acknowledged" && result.mfa !== undefined && result.requestId !== undefined && result.transactionHash === undefined
+                    ? { mfaTask: metaMaskNativeMfaTask(result.requestId, result.mfa, "send") } : {};
+                op = await journal.persist(patch(op, { ...(result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic }), ...(result.disposition === "acknowledged" ? { state: "acknowledged", transactionHash: result.transactionHash } : { state: "unknown", transactionHash: "transactionHash" in result ? result.transactionHash ?? null : null, providerRequestId: result.requestId ?? null, ...mfa }) }));
                 for (const r of reservations)
                     await ledger.transition({ ...transitionIdentity(r), state: result.disposition === "acknowledged" ? "submitted" : "unknown_finality", now: new Date() });
                 return publicOperation(op);
@@ -340,9 +343,15 @@ export async function readMetaMaskNativeTransfer(stateRoot, idInput, observe = f
             readObservation = hint.readObservation;
             if (hint.requestId !== undefined && hint.requestId !== op.providerRequestId || hint.chainId !== undefined && hint.chainId !== op.context.quote.chainId)
                 blocked("Native transfer stored provider request identity or chain changed.");
-            const hash = "transactionHash" in hint ? hint.transactionHash : undefined;
+            const hash = "transactionHash" in hint ? hint.transactionHash : undefined, mfa = hint.disposition === "pending" ? hint.mfa : undefined;
             if (hash !== undefined)
-                op = await journal.persist(patch(op, { state: "unknown", transactionHash: hash }));
+                op = await journal.persist(patch(op, { state: "unknown", transactionHash: hash, mfaTask: undefined }));
+            // A verified notice or AWAITING_MFA status for this very request: the owner's task, kept beside the UNKNOWN outcome.
+            else if (mfa !== undefined && op.state === "unknown")
+                op = await journal.persist(patch(op, { mfaTask: metaMaskNativeMfaTask(op.providerRequestId, mfa, "watch") }));
+            // The provider's own record of this request shows it past the approval (signing, denied, expired...): no task is left.
+            else if (op.mfaTask !== undefined && op.state === "unknown" && hint.readObservation?.request_identity_verified === true)
+                op = await journal.persist(patch(op, { mfaTask: undefined }));
         }
         if (observe && op.transactionHash !== null && op.state !== "confirmed") {
             const result = await observeMetaMaskNativeTransfer(op.context.quote, op.transactionHash);

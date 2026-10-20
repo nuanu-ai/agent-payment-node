@@ -3,7 +3,6 @@ import * as cliRuntime from "../../src/cli.js";
 import { testRuntime } from "./installed-runtime.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import * as mcpRuntime from "../../src/mcp-server.js";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -12,6 +11,7 @@ import { normalizeX402HttpRequest } from "../../src/x402-http-request.js";
 import { x402Network, x402Asset } from "../../src/x402-network.js";
 import { validateX402Operation } from "../../src/x402-state-integrity.js";
 import { temporaryState } from "./helpers.js";
+import { FRESH_PROCESS_TEST_TIMEOUT_MS, freshProcess } from "./fresh-process.js";
 import { initializeNetworkFixture, networkChallenge, networkFixture, networkPaid, networkSettlement, NETWORK_LIMITS } from "./evm-x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_REQUIREMENTS, X402_URL } from "./x402-vectors.js";
 
@@ -99,7 +99,7 @@ test(`${networkName} offer selection refuses other networks, assets, mechanisms 
 });
 
 for (const bodyBase64 of [undefined, null, "", Buffer.from('{"planId":"synthetic"}').toString("base64")]) {
-  test(`${networkName} fresh processes recover encrypted authorization and ambiguous POST ${JSON.stringify(bodyBase64)} without replacement`, async (context) => {
+  test(`${networkName} fresh processes recover encrypted authorization and ambiguous POST ${JSON.stringify(bodyBase64)} without replacement`, { timeout: FRESH_PROCESS_TEST_TIMEOUT_MS }, async (context) => {
     const temporary = await temporaryState(); context.after(temporary.cleanup);
     const fixture = networkFixture(temporary.root, chainId); await initializeNetworkFixture(fixture, chainId);
     fixture.http.outcomes[0] = networkChallenge(chainId, true);
@@ -107,18 +107,18 @@ for (const bodyBase64 of [undefined, null, "", Buffer.from('{"planId":"synthetic
     const prepared = await fixture.core.execute({ ...REQUEST, ...httpRequest }); assert.equal(prepared.ok, true, JSON.stringify(prepared));
     const operationId = (prepared.operation as { operationId: string }).operationId;
     const worker = fileURLToPath(new URL("./evm-x402-crash-worker.js", import.meta.url));
-    const run = (phase: string) => spawnSync(process.execPath, [worker, phase, temporary.root, operationId], { encoding: "utf8", timeout: 15000 });
-    const crashed = run("sign-crash"); assert.equal(crashed.status, 75, crashed.stderr + crashed.stdout);
+    const run = async (phase: string) => await freshProcess(context, [worker, phase, temporary.root, operationId]);
+    const crashed = await run("sign-crash"); assert.equal(crashed.status, 75, crashed.stderr + crashed.stdout);
     assert.equal((await fixture.state.findX402Operation(operationId))!.state, "authorization_material_pending");
-    const recovered = run("recover"); assert.equal(recovered.status, 0, recovered.stderr);
+    const recovered = await run("recover"); assert.equal(recovered.status, 0, recovered.stderr);
     const recoveredData = JSON.parse(recovered.stdout);
     assert.equal(recoveredData.result.operation.state, "authorized_not_sent", recovered.stdout); assert.equal(recoveredData.signatures, 0);
-    const sendCrash = run("send-crash"); assert.equal(sendCrash.status, 76, sendCrash.stderr + sendCrash.stdout);
+    const sendCrash = await run("send-crash"); assert.equal(sendCrash.status, 76, sendCrash.stderr + sendCrash.stdout);
     assert.equal((await fixture.state.findX402Operation(operationId))!.state, "paid_request_pending");
-    const settled = run("settle"); assert.equal(settled.status, 0, settled.stderr);
+    const settled = await run("settle"); assert.equal(settled.status, 0, settled.stderr);
     const settledData = JSON.parse(settled.stdout);
     assert.equal(settledData.result.operation.state, "completed", settled.stdout); assert.equal(settledData.signatures, 0); assert.equal(settledData.httpCalls, 1);
-    const replay = run("replay"); assert.equal(replay.status, 0, replay.stderr); assert.equal(JSON.parse(replay.stdout).httpCalls, 0);
+    const replay = await run("replay"); assert.equal(replay.status, 0, replay.stderr); assert.equal(JSON.parse(replay.stdout).httpCalls, 0);
   });
 }
 

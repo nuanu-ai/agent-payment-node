@@ -21,6 +21,8 @@ const PROFILE = "qa-mm-wallet", AMOUNT = "2500", USDC = getAddress("0xA0b86991c6
 const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const temp = await realpath(await mkdtemp(join(tmpdir(), "apn-mm-any-TEST-")));
 const script = join(temp, "mm.cjs"), log = join(temp, "children.jsonl");
+// Scenario "mfa": the next send and watch answers, written by the driver before each command (exact 6.1.5 output bytes).
+const sendAnswer = join(temp, "send.json"), watchAnswer = join(temp, "watch.json");
 let root = join(temp, "home");
 
 // The vendor's Guard policy for this user: their own wallet, their own recipients, other sections the reader ignores.
@@ -36,9 +38,12 @@ const payer=${JSON.stringify(PAYER.toLowerCase())},project="TEST-any-profile-pro
 if(a[0]==="auth")data={authenticated:true,summary:{mode:"session",projectId:project}};
 else if(a[1]==="trading-mode")data={mode:"guard",address:payer};
 else if(a[1]==="policy")data={address:payer,policy:${JSON.stringify(vendorPolicy)}};
+else if(a[1]==="send-transaction"&&fs.existsSync(${JSON.stringify(sendAnswer)}))data=JSON.parse(fs.readFileSync(${JSON.stringify(sendAnswer)},"utf8"));
 else if(a[1]==="send-transaction"){const payload=a[a.indexOf("--payload")+1];data={mode:"server",address:payer,hash:"0x"+crypto.createHash("sha256").update(payload).digest("hex"),chainId:1,projectId:project};}
+else if(a[1]==="requests"&&a[2]==="watch")data=JSON.parse(fs.readFileSync(${JSON.stringify(watchAnswer)},"utf8"));
 else throw new Error("TEST unexpected vendor argv");
-process.stdout.write(JSON.stringify({ok:true,data}));`, { mode: 0o600 });
+if(typeof data.stdout==="string"){process.stdout.write(data.stdout);process.exitCode=data.exit;}
+else process.stdout.write(JSON.stringify({ok:true,data}));`, { mode: 0o600 });
 const originalPackage = await import(moduleUrl("metamask-package.js"));
 await mock.module(moduleUrl("metamask-package.js"), { namedExports: { ...originalPackage, resolveMetaMaskBin: async () => script } });
 
@@ -98,6 +103,78 @@ const transfer = (recipient, amount, key) => cli(["wallet", "metamask", "native-
 const usage = async (asset) => (await new AssetUsageLedger(root).usage({ account: PAYER, chain: "eip155:1", asset }, new Date())).amountAtomic;
 const NATIVE = { kind: "native", identifier: null }, TOKEN = { kind: "token", identifier: USDC };
 
+/**
+ * QA 0.5.52 METAMASK-NATIVE-MFA-GUIDANCE-001 (live 189186…, request 8cc50f3c…): a Guard that needs the owner's approval.
+ * The vendor bytes are 6.1.5's own: `send-transaction` without --wait writes the AWAITING_MFA `_notice` and the pending
+ * `_summary` (exit 0); `requests watch` before approval writes the notice alone (its `_error` goes to stderr, exit 1).
+ */
+async function mfaScenario() {
+  const { canonicalJson, hashObject } = await import(moduleUrl("canonical.js"));
+  const { createMcpServer } = await import(moduleUrl("mcp-server.js"));
+  const { Client, InMemoryTransport } = await import("@modelcontextprotocol/client");
+  const RID = "8cc50f3c-ca4e-41d1-98bb-b30f7bcaa3aa", RID2 = "TEST-denied-request-0002", sha = (text) => createHash("sha256").update(text).digest("hex");
+  const notice = (pollingId, expiresAt, source) => JSON.stringify({ _notice: { kind: "AWAITING_MFA", ...(source === undefined ? {} : { source }), pollingId, expiresAt,
+    authMethod: "social", message: `Approval required: check the email registered to your dashboard and confirm to proceed.\nRequest ID: ${pollingId}` } });
+  const sent = (pollingId, expiresAt) => ({ exit: 0, stdout: `${notice(pollingId, expiresAt, "wallet:send-transaction")}\n${JSON.stringify({ _summary: {
+    mode: "server", address: PAYER.toLowerCase(), status: "AWAITING_MFA", pollingId } })}\n` });
+  const answer = async (path, value) => await writeFile(path, JSON.stringify(value));
+  const observeCli = (id) => cli(["wallet", "metamask", "native-transfer-observe", "--operation", id]);
+  const later = new Date(Date.now() + 600_000).toISOString();
+  await answer(sendAnswer, sent(RID, later));
+  const first = await transfer(RECIPIENT, AMOUNT, "qa-native-mfa-0001");
+  assert.equal(first.ok, true, JSON.stringify(first.error));
+  const id = first.data.operation_id, observe = `apn wallet metamask native-transfer-observe --operation ${id}`, task = first.data.mfa_task;
+  assert.equal(first.data.state, "unknown"); assert.equal(first.data.transaction_hash, null); assert.equal(first.data.effect_attempts, 1);
+  assert.deepEqual([task.status, task.request_id, task.auth_method, task.expires_at, task.source, task.observe_command], ["awaiting_owner", RID, "social", later, "send", observe]);
+  assert.match(task.owner_action, /email registered to your MetaMask dashboard/u); assert.deepEqual(first.next_actions, [observe]);
+  // The record 0.5.52 wrote for 189186…: UNKNOWN with its request id and no task. It recovers through the normal observer.
+  const journalPath = join(root, "metamask-native-operations", `${id}.json`);
+  const { recordHash: _hash, mfaTask: _task, ...body } = JSON.parse(await readFile(journalPath, "utf8"));
+  await writeFile(journalPath, `${canonicalJson({ ...body, recordHash: hashObject(body) })}\n`);
+  const old = await cli(["wallet", "metamask", "native-transfer-status", "--operation", id]);
+  assert.equal(old.ok, true, JSON.stringify(old.error)); assert.equal(old.data.mfa_task, undefined); assert.deepEqual(old.next_actions, [observe]);
+  const watched = `${notice(RID, later)}\n`;
+  await answer(watchAnswer, { stdout: watched, exit: 1 });
+  const pending = await observeCli(id);
+  assert.equal(pending.ok, true, JSON.stringify(pending.error)); assert.equal(pending.data.state, "unknown"); assert.equal(pending.data.transaction_hash, null);
+  const read = pending.data.read_observation;
+  assert.deepEqual([read.stage, read.provider_status, read.reason, read.response_hash], ["complete", "AWAITING_MFA", null, sha(watched)]);
+  assert.deepEqual([pending.data.mfa_task.source, pending.data.mfa_task.evidence_hash, pending.data.mfa_task.status], ["watch", sha(watched), "awaiting_owner"]);
+  assert.deepEqual(pending.next_actions, [observe]);
+  // CLI and MCP name the same task and the same no-send observer.
+  const server = createMcpServer({ stateRoot: root, wrappingSecret: noKeychain }), [x, y] = InMemoryTransport.createLinkedPair();
+  await server.connect(y); const client = new Client({ name: "qa0552-mm-mfa", version: "1" }); await client.connect(x);
+  try {
+    const viaMcp = (await client.callTool({ name: "apn_operation_status", arguments: { operation: id } })).structuredContent, viaCli = await cli(["operation", "status", "--operation", id]);
+    assert.equal(viaCli.ok, true, JSON.stringify(viaCli.error)); assert.deepEqual(viaMcp.data, viaCli.data); assert.deepEqual(viaMcp.next_actions, [observe]);
+    assert.equal(viaCli.data.mfa_task.request_id, RID);
+  } finally { await client.close(); await server.close(); }
+  // A notice naming another request proves nothing about this one: the stored task stays as it was.
+  await answer(watchAnswer, { stdout: `${notice("TEST-other-request", later)}\n`, exit: 1 });
+  const conflict = await observeCli(id);
+  assert.equal(conflict.data.read_observation.reason, "provider_request_identity_conflict"); assert.equal(conflict.data.mfa_task.evidence_hash, sha(watched));
+  // The owner approved: the watch names the transaction, its receipt settles the transfer. One hand-off in all.
+  const hash = `0x${sha((await sends())[0])}`;
+  await answer(watchAnswer, { exit: 0, stdout: JSON.stringify({ ok: true, data: { request: { pollingId: RID, kind: "transaction", namespace: "evm", chainId: 1, txHash: hash },
+    status: { status: "CONFIRMED", txHash: hash } } }) });
+  const settled = await observeCli(id);
+  assert.equal(settled.ok, true, JSON.stringify(settled.error)); assert.equal(settled.data.state, "confirmed"); assert.equal(settled.data.transaction_hash, hash);
+  assert.equal(settled.data.mfa_task, undefined); assert.deepEqual(settled.next_actions, []); assert.equal((await sends()).length, 1);
+  assert.equal(await usage(TOKEN), AMOUNT);
+  // A window that has already closed shows as expired; the provider's DENIED drops the task but never the UNKNOWN or its hold.
+  await answer(sendAnswer, sent(RID2, new Date(Date.now() - 1000).toISOString()));
+  const second = await transfer(RECIPIENT, "1000", "qa-native-mfa-0002");
+  assert.equal(second.ok, true, JSON.stringify(second.error)); assert.equal(second.data.mfa_task.status, "expired");
+  assert.match(second.data.mfa_task.owner_action, /never sends it again/u);
+  await answer(watchAnswer, { exit: 0, stdout: JSON.stringify({ ok: true, data: { request: { pollingId: RID2, kind: "transaction", namespace: "evm", chainId: 1 },
+    status: { status: "DENIED" } } }) });
+  const denied = await observeCli(second.data.operation_id);
+  assert.equal(denied.ok, true, JSON.stringify(denied.error)); assert.equal(denied.data.state, "unknown"); assert.equal(denied.data.mfa_task, undefined);
+  assert.equal(denied.data.read_observation.provider_status, "DENIED");
+  assert.deepEqual(denied.next_actions, [`apn wallet metamask native-transfer-observe --operation ${second.data.operation_id}`]);
+  assert.equal((await sends()).length, 2); assert.equal(await usage(TOKEN), "3500");
+}
+
 try {
   const state = new StateStore(root), caps = metamaskDirectCapabilitySnapshot();
   await state.initialize();
@@ -135,6 +212,8 @@ try {
     assert.equal((await children()).length, 0);
     const admitted = await transfer(PINNED, AMOUNT, "qa-native-pin-0002");
     assert.equal(admitted.ok, true, JSON.stringify(admitted.error)); assert.equal(admitted.data.state, "acknowledged"); assert.equal(admitted.data.recipient, PINNED);
+  } else if (scenario === "mfa") {
+    await mfaScenario();
   } else {
     const result = await transfer(RECIPIENT, AMOUNT, "qa-native-0001");
     assert.equal(result.ok, true, JSON.stringify(result.error));
