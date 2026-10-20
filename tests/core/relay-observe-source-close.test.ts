@@ -23,10 +23,11 @@ import { temporaryState } from "./helpers.js";
  */
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14".toLowerCase(), recipient = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7".toLowerCase();
 const hash = (digit: string) => `0x${digit.repeat(64)}`;
-const sourceHash = hash("a"), sourceBlock = hash("b"), bnbHash = hash("c"), bnbBlock = hash("d"), safeHash = hash("e"), at = "2026-09-30T00:00:01.000Z";
+const SOURCE_HASH = hash("a"), sourceBlock = hash("b"), bnbHash = hash("c"), bnbBlock = hash("d"), safeHash = hash("e"), at = "2026-09-30T00:00:01.000Z";
 
-async function fixture(t: { after(fn: () => Promise<void>): void }) {
-  const temp = await temporaryState(); t.after(temp.cleanup);
+async function fixture(t: { after(fn: () => Promise<void>): void }, shared?: { temp: Awaited<ReturnType<typeof temporaryState>>; id: string; sourceHash: string }) {
+  const temp = shared?.temp ?? await temporaryState(); if (shared === undefined) t.after(temp.cleanup);
+  const sourceHash = shared?.sourceHash ?? SOURCE_HASH, id = shared?.id ?? "2";
   const raw = JSON.parse(await readFile("tests/core/relay-fixtures/ethereum-usdc-bnb-quote-20260925.json", "utf8"));
   const base = await validateRelayQuote(raw, { payer, recipient, amountAtomic: "2500000", minimumOutputWei: "3000000000000000", nowSeconds: 1790800000 });
   const { quoteDigest: _, statusLocator: _old, ...projection } = base, statusLocator = relayStatusLocator(hash("f"));
@@ -39,7 +40,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
       mechanismPins: { bridge: { provider: "relay", reference: RELAY_ROUTE_REFERENCE } } }] }] });
   const state = new StateStore(temp.root);
   const op = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1", kind: "relay_unsigned", state: "prepared", terminal: false,
-    profileHash: state.profileHash("default"), operationId: "2".repeat(64), idempotencyHash: "3".repeat(64), requestHash: "4".repeat(64),
+    profileHash: state.profileHash("default"), operationId: id.repeat(64), idempotencyHash: hashObject({ idempotency: id }), requestHash: hashObject({ request: id }),
     sourceChainId: 1, destinationChainId: 56, sourceAccount: payer, recipient, quoteDigest: quote.quoteDigest, quote, statusLocator,
     policyDigest: registry.policyDigest, policyRevision: 1, approvalNetworkFeeCeilingWei: quote.approval.maximumNetworkFeeWei,
     depositNetworkFeeCeilingWei: quote.deposit.maximumNetworkFeeWei, amountAtomic: "2500000", minOutputAtomic: quote.minimumOutputWei,
@@ -74,7 +75,7 @@ async function fixture(t: { after(fn: () => Promise<void>): void }) {
   };
   const status = async () => (await runCli(["operation", "status", "--operation", op.operationId], {}, { stateRoot: temp.root })).operation as { state: string; terminal: boolean };
   const accountFree = async () => await new OperationService(state).assertEvmAccountAvailable(state.profileHash("other"), 1, payer);
-  return { temp, op, effects, ledger, identity, reservationId, finalized, payload, observe, status, accountFree };
+  return { temp, op, effects, ledger, identity, reservationId, finalized, payload, observe, status, accountFree, sourceHash };
 }
 
 test("observe that proves the deposit final closes the source: terminal status, finalized hold, the account admits the next operation", async (t) => {
@@ -85,7 +86,7 @@ test("observe that proves the deposit final closes the source: terminal status, 
   assert.deepEqual([result.state, result.sourceFinalized, result.operationalAcceptance, result.paidAcceptance, result.causalLinkCryptographicallyProven],
     ["operational_acceptance", true, true, false, false]);
   const journal = (await f.effects.load(f.op.profileHash, f.op.operationId))!, deposit = journal.effects[1];
-  assert.deepEqual([deposit.phase, deposit.attempt?.attemptNumber, deposit.attempt?.transactionHash], ["confirmed", 1, sourceHash]);
+  assert.deepEqual([deposit.phase, deposit.attempt?.attemptNumber, deposit.attempt?.transactionHash], ["confirmed", 1, f.sourceHash]);
   const hold = await f.ledger.load(f.identity, f.reservationId);
   assert.deepEqual([hold?.state, hold?.outcomeDigest], ["finalized", journal.integrityHash]);
   const after = await f.status(); assert.deepEqual([after.state, after.terminal], ["source_confirmed", true]);
@@ -118,4 +119,13 @@ test("acceptance is not claimed while the saved hold cannot be bound to the prov
   assert.deepEqual([result.state, result.reason, result.operationalAcceptance], ["recipient_credit_observed", "source_journal_unreconciled", false]);
   assert.equal((await f.effects.load(f.op.profileHash, f.op.operationId))?.effects[1].phase, "submitting");
   assert.equal((await f.status()).terminal, false);
+});
+
+test("one BNB payout accepts one operation: a second operation naming the same payout is refused", async (t) => {
+  const first = await fixture(t);
+  assert.equal((await first.observe()).state, "operational_acceptance");
+  const second = await fixture(t, { temp: first.temp, id: "9", sourceHash: hash("8") });
+  const refused = await second.observe();
+  assert.deepEqual([refused.state, refused.reason, refused.operationalAcceptance], ["provider_candidate_unproven", "destination_payout_claim_conflict", false]);
+  assert.equal((await first.observe()).state, "operational_acceptance", "the payout stays the first operation's");
 });

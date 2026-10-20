@@ -3,6 +3,7 @@ import { ApnError } from "../errors.js";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository } from "../relay-unsigned-operation.js";
 import { verifyDepositObservation } from "./deposit-effect.js";
+import { RelayDestinationClaimRepository } from "./destination-claim.js";
 import { proveRelayBnbDestination } from "./destination-proof.js";
 import { RelayEffectJournalRepository } from "./effect-journal.js";
 import { RelayKeylessStatusService } from "./status.js";
@@ -115,6 +116,13 @@ export class RelayObserveService {
             return result("recipient_credit_observed", "provider_success_or_source_binding_unproven", true, provider.status, sourceBound, proof);
         if (!sourceSettled)
             return result("recipient_credit_observed", "source_journal_unreconciled", true, provider.status, true, proof);
+        // One payout accepts one operation (create-only claim), as on every other Relay lane.
+        try {
+            await new RelayDestinationClaimRepository(this.state.root).claimEthereumSource(op, sourceHash, proof.proof);
+        }
+        catch {
+            return result("provider_candidate_unproven", "destination_payout_claim_conflict", true, provider.status, true, proof);
+        }
         return result("operational_acceptance", "source_finalized_provider_success_and_safe_recipient_credit", true, provider.status, true, proof);
     }
 }
