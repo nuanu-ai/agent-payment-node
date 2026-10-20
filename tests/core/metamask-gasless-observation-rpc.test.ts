@@ -110,7 +110,7 @@ test("MetaMask observation environment names are validated and never resolved to
   }
   assert.equal(mmObservationRpcEnv(ENV), ENV);
   const factory = metaMaskGaslessObservationRpcFactory({}, { now: () => new Date() });
-  assert.throws(() => factory(8453, ENV), { details: { reason: "mm_gasless_rpc_binding" } });
+  assert.throws(() => factory(8453, ENV), { code: "APN_RPC_CONFIG", details: { reason: "mm_gasless_rpc_setting", chainId: "eip155:8453", environmentVariable: ENV } });
   const rpc = metaMaskGaslessObservationRpcFactory({ [ENV]: ARCHIVE_URL }, { now: () => new Date() })(8453, ENV);
   assert.equal(rpc.endpointOrigin, "https://archive.example"); assert.equal(rpc.endpointHash, sha256(ARCHIVE_URL));
 });
