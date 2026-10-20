@@ -85,14 +85,23 @@ export class UniswapTokenExecution {
                 cleanupEvidence: cleanupEvidence("current_allowance", this.ports.now()) }, this.ports.now()));
             return await this.cleaned(op);
         }
+        // A cleanup refused before signing is back in cleanup_required with its diagnostic: nothing to observe.
         op = await this.start(op, "cleanup");
-        return await this.observeCleanup(await this.continueStart(op, "cleanup"));
+        return cleanupActive(op.phase) ? await this.observeCleanup(await this.continueStart(op, "cleanup")) : op;
     }
     async start(op, kind) {
         return await this.ports.withAccountLock(op, async () => {
             const nonce = await this.ports.allocateNonce(op, kind), attempt = tokenAttempt(op, kind, nonce, this.ports.now());
-            op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now()));
-            return await this.finishStart(op, kind);
+            // Nothing signs before the marker is durable: a refused or raced marker hands the reservation back (or keeps a signed one).
+            let marked;
+            try {
+                marked = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now()));
+            }
+            catch (error) {
+                await this.ports.releaseNonce(op, kind, nonce);
+                throw error;
+            }
+            return await this.finishStart(marked, kind);
         });
     }
     async continueStart(op, kind) {
@@ -126,8 +135,8 @@ export class UniswapTokenExecution {
             await this.ports.guard(op, kind, attempt.nonce);
         }
         catch (error) {
-            await this.ports.releaseNonce(op, kind, attempt.nonce);
-            return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase));
+            const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce);
+            return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase), unmarked(kind, unsigned));
         }
         this.ports.reserveSendCapacity?.();
         let sealed;
@@ -140,8 +149,8 @@ export class UniswapTokenExecution {
                 await this.ports.commitNonce(op, kind, attempt.nonce);
                 throw error;
             }
-            await this.ports.releaseNonce(op, kind, attempt.nonce);
-            return await this.cleanupRequired(op, `${kind}_sign_failed`);
+            const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce);
+            return await this.cleanupRequired(op, `${kind}_sign_failed`, op.accumulatedNativeDebitWei, undefined, undefined, unmarked(kind, unsigned));
         }
         await this.ports.commitNonce(op, kind, attempt.nonce);
         op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
@@ -279,9 +288,9 @@ export class UniswapTokenExecution {
         return await this.persist(transitionUniswapToken(op, "cleaned", { accumulatedNativeDebitWei: native,
             ...(noEffect ? { cleanupReason: "zero_allowance_no_effect" } : {}), ...usagePatch(usage) }, this.ports.now()));
     }
-    async cleanupRequired(op, reason, native = op.accumulatedNativeDebitWei, usage, preSignFailure) {
+    async cleanupRequired(op, reason, native = op.accumulatedNativeDebitWei, usage, preSignFailure, unmarkedAttempt = {}) {
         return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: reason, accumulatedNativeDebitWei: native,
-            ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }) }, this.ports.now()));
+            ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }), ...unmarkedAttempt }, this.ports.now()));
     }
     async retireExpiredPrepared(op) {
         if (op.phase !== "prepared" || !expired(op, this.ports.now()))
@@ -354,6 +363,12 @@ function diagnostic(error, phase) {
         rpcMethod: sanitizeUniswapTokenFailureField("rpcMethod", e?.details?.rpcMethod),
         endpointRole: sanitizeUniswapTokenFailureField("endpointRole", e?.details?.endpointRole), phase };
 }
+/**
+ * R4 exit 2 "never signed": the refusal came before signing, inside the account lock, and custody then showed no signed bytes
+ * while it freed the nonce. The marker of that attempt is dropped so the zero-allowance cleanup can prove no effect; an attempt
+ * custody may hold signed bytes for keeps its marker (its exit stays proof or the owner's abandon).
+ */
+function unmarked(kind, unsigned) { return unsigned ? { [`${kind}Attempt`]: null } : {}; }
 function corrupt(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
 //# sourceMappingURL=token-execution.js.map

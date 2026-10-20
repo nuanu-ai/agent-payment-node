@@ -22,7 +22,8 @@ export interface UniswapTokenExecutionPorts {
     withAccountLock<T>(operation: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
     allocateNonce(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>;
     currentAllowance(operation: UniswapTokenOperation): Promise<string>;
-    releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+    /** True when custody holds no signed bytes for the effect and its reservation is free; false when a signed effect committed it. */
+    releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean>;
     commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     guard(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
     reserveSendCapacity?(): void;

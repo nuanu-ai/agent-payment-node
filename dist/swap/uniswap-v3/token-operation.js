@@ -84,7 +84,8 @@ export function validateUniswapTokenOperation(value) {
         corrupt("Uniswap token zero allowance evidence is invalid.");
     if (op.usageState === "released_unsubmitted" && !(op.retiredEffects ?? []).some((row) => row.kind === "swap" && row.reason === "never_landed"))
         corrupt("Uniswap token usage release has no never-landed swap.");
-    if (failure !== null && op.phase !== "cleanup_required" && op.phase !== "cleaned" && op.phase !== "abandoned_unknown")
+    // The diagnostic is the history of why cleanup became required: it stays through the owner's cleanup and its outcome.
+    if (failure !== null && !PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase))
         corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
@@ -97,6 +98,8 @@ export const UNISWAP_TOKEN_TERMINAL_PHASES = ["observed", "cleaned", "abandoned_
 export const UNISWAP_TOKEN_PHASES = ["prepared", "approved", "approval_submission_started", "approval_submitted", "approval_unknown_finality",
     "approval_observed", "submission_started", "submitted", "unknown_finality", "observed", "cleanup_required", "cleanup_submission_started",
     "cleanup_submitted", "cleanup_unknown_finality", "cleaned", "abandoned_unknown"];
+const PRE_SIGN_DIAGNOSTIC_PHASES = ["cleanup_required", "cleanup_submission_started", "cleanup_submitted",
+    "cleanup_unknown_finality", "cleaned", "abandoned_unknown"];
 /** The round of an effect slot: how many attempts of that kind were retired before it. Round 0 keeps the original keys. */
 export function tokenEffectRound(op, kind) {
     return (op.retiredEffects ?? []).filter((row) => row.kind === kind).length;
