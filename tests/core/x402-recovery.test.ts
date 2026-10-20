@@ -369,7 +369,7 @@ test("one bounded resume waits outside locks and completes through RPC-only sett
   assert.equal(fixture.native.calls.length, nativeCalls);
 });
 
-test("bounded wait discovers a no-hint settlement from the nonce state without another effect", async (t) => {
+test("bounded wait discovers a no-hint settlement from the nonce state and completes with the kept body, without another effect", async (t) => {
   const wait = new ControlledWait();
   const fixture = await authorizedFixture(t, {
     idempotencyKey: "bounded-no-hint-multichunk",
@@ -397,7 +397,8 @@ test("bounded wait discovers a no-hint settlement from the nonce state without a
     waitSeconds: 20,
   });
   assert.equal(completed.ok, true, JSON.stringify(completed));
-  assert.equal((completed.operation as { state: string }).state, "failed_settled_without_result");
+  // The paid 200 came without a PAYMENT-RESPONSE: its body was kept, so the nonce-state proof completes the purchase.
+  assert.equal((completed.operation as { state: string }).state, "completed");
   assert.equal((completed.operation as { terminal: boolean }).terminal, true);
   assert.notEqual(completed.receipt, null);
   assert.equal(fixture.rpc.x402Calls.some((call) => call.startsWith("logs:")), false, "no log scan on any poll");
@@ -1042,7 +1043,7 @@ test("a crash after cached-result HTTP exposure never sends the recovery request
   assert.equal(terminal.attempts.find((attempt) => attempt.purpose === "result_recovery")?.phase, "ambiguous");
 });
 
-test("cached-result non-success, malformed, and transport outcomes persist one attempt then close spent", async (t) => {
+test("cached-result non-success and transport outcomes persist one attempt then close spent; a malformed header keeps the body", async (t) => {
   const pending = paidObservation({
     status: 402,
     bodyText: "pending",
@@ -1069,7 +1070,9 @@ test("cached-result non-success, malformed, and transport outcomes persist one a
       const exposed = await operation(fixture);
       const settlement = configureSettlement(fixture.rpc, exposed);
       const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
-      assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "failed_settled_without_result");
+      // A recovered 200 body beside a malformed PAYMENT-RESPONSE is the purchase: kept, and the chain proof completes it.
+      const expected = item.label === "malformed" ? "completed" : "failed_settled_without_result";
+      assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, expected, JSON.stringify(resumed));
       const terminal = await operation(fixture);
       assert.equal(terminal.attempts.filter((attempt) => attempt.purpose === "result_recovery").length, 1);
       assert.equal(terminal.attempts.at(-1)?.phase, item.label === "transport" ? "ambiguous" : "observed");
@@ -1078,7 +1081,8 @@ test("cached-result non-success, malformed, and transport outcomes persist one a
         assert.equal(terminal.transactionHint?.source, "payment_response");
       }
       const receipt = await fixture.core.context.state.loadX402Receipt(terminal.profileHash, terminal.operationId);
-      assert.equal(receipt?.terminalState, "failed_settled_without_result");
+      assert.equal(receipt?.terminalState, expected);
+      assert.equal(receipt?.result !== undefined, item.label === "malformed");
     });
   }
 });

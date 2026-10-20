@@ -9,6 +9,20 @@ export const TRANSITION_VERSION = "apn.x402.transition.v1";
 export function deliversX402Result(classification) {
     return classification === "success" || classification === "settlement_pending";
 }
+/**
+ * The paid attempt whose body is the operation's result: the attempt the seller's settlement answer came with (only a
+ * success or pending answer delivers), or, when the seller gave no usable answer, the last attempt. The caller still
+ * checks that attempt was observed with a result status and this exact body.
+ */
+export function x402ResultAttempt(operation) {
+    const response = operation.settlementResponseObservation;
+    if (response === undefined)
+        return operation.attempts.at(-1);
+    if (!deliversX402Result(response.classification))
+        return undefined;
+    const index = Number(response.httpAttemptNumber) - 1;
+    return Number.isSafeInteger(index) && index >= 0 ? operation.attempts[index] : undefined;
+}
 export function x402AuthorizationIntentHash(value) {
     return domainHash("apn.x402.authorization-intent.v1", canonicalJson(value));
 }

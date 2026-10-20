@@ -5,7 +5,7 @@ import type { RuntimeContext } from "./runtime.js";
 import type { PaidHttpResult } from "./x402-http.js";
 import {
   appendX402Transition,
-  deliversX402Result,
+  x402ResultAttempt,
   sealX402Operation,
   sealX402Receipt,
   sealX402Result,
@@ -108,13 +108,9 @@ export class X402Lifecycle {
     if (operation.resultLink !== undefined) return operation;
     const result = await this.context.state.loadX402RecoveryResult(operation.profileHash, operation.operationId);
     if (result === null) return operation;
-    const response = operation.settlementResponseObservation;
-    const attemptIndex = Number(response?.httpAttemptNumber ?? "0") - 1;
-    const attempt = Number.isSafeInteger(attemptIndex) && attemptIndex >= 0
-      ? operation.attempts[attemptIndex]
-      : undefined;
+    const attempt = x402ResultAttempt(operation);
     if (
-      !deliversX402Result(response?.classification) || attempt?.phase !== "observed" ||
+      attempt?.phase !== "observed" ||
       attempt.observation?.status !== result.responseStatus || attempt.observation.bodyHash !== result.resultHash ||
       attempt.observation.bodyByteLength !== result.byteLength || attempt.observation.mediaType !== result.mediaType
     ) throw new ApnError("APN_STATE_CORRUPT", "Recovered x402 result lacks its designated successful response.");

@@ -8,7 +8,8 @@ export interface Permit2Requirement {
     readonly amount: string;
     readonly payTo: string;
     readonly maxTimeoutSeconds: number;
-    readonly extra: Readonly<Record<string, string>>;
+    /** The seller's `extra`: the keys APN understands are checked; every other key is carried unchanged. */
+    readonly extra: Readonly<Record<string, unknown>>;
 }
 export interface Permit2OfferSelection {
     /** Original index in the seller's `accepts` list. */
@@ -23,8 +24,10 @@ export interface Permit2OfferSelection {
 export type Permit2OfferRefusal = "x402_permit2_no_listed_offer" | "x402_permit2_offer_invalid" | "x402_permit2_facilitator_unavailable";
 /**
  * Select the lowest-index seller offer whose (network, token) `resolve` admits, paid through the exact Permit2 flow.
- * Unsupported offers may coexist; they are skipped, never repaired. An admitted offer with any deviation (unknown
- * field, another transfer method, a token domain hint other than the asset's, unbounded timeout) is not selectable.
+ * Unsupported offers may coexist; they are skipped, never repaired. An admitted offer that APN cannot sign (another
+ * scheme or transfer method, a timeout outside the bound, a field or `extra` key APN understands with a wrong value) is
+ * refused by the field that decided it. Fields APN does not understand (v1-style `maxAmountRequired`, `resource`,
+ * `description`, …) are the seller's own and stay in the requirement unchanged.
  */
 export declare function selectPermit2Offer(accepts: readonly unknown[], payer: Address, resolve: Permit2AssetResolver): Permit2OfferSelection;
 /** Revalidate a frozen selection against the asset it carries; any drift is state corruption. */

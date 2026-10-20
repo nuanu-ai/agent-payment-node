@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { stateCorrupt } from "./secure-state-store.js";
 import { sameOptionalCanonical } from "./x402-state-continuity.js";
-import { deliversX402Result, x402OperationBindingHash, validateX402Receipt, validateX402Result, } from "./x402-state-integrity.js";
+import { x402OperationBindingHash, x402ResultAttempt, validateX402Receipt, validateX402Result, } from "./x402-state-integrity.js";
 export async function validateX402TerminalGraph(readJson, operation) {
     let linkedResult;
     if (operation.resultLink !== undefined) {
@@ -10,13 +10,9 @@ export async function validateX402TerminalGraph(readJson, operation) {
             stateCorrupt("x402 operation has a dangling result link.");
         const result = validateX402Result(resultValue);
         linkedResult = result;
-        const response = operation.settlementResponseObservation;
-        const attemptIndex = Number(response?.httpAttemptNumber ?? "0") - 1;
-        const attempt = Number.isSafeInteger(attemptIndex) && attemptIndex >= 0
-            ? operation.attempts[attemptIndex]
-            : undefined;
+        const attempt = x402ResultAttempt(operation);
         if (linkedResult.operationId !== operation.operationId || linkedResult.integrityHash !== operation.resultLink.resultIntegrityHash ||
-            linkedResult.resultHash !== operation.resultLink.resultHash || !deliversX402Result(response?.classification) ||
+            linkedResult.resultHash !== operation.resultLink.resultHash ||
             attempt?.phase !== "observed" || attempt.observation?.status !== result.responseStatus ||
             attempt.observation.bodyHash !== result.resultHash || attempt.observation.bodyByteLength !== result.byteLength ||
             attempt.observation.mediaType !== result.mediaType)
@@ -49,8 +45,7 @@ export async function validateX402TerminalGraph(readJson, operation) {
     const result = linkedResult;
     if (result === undefined)
         stateCorrupt("Terminal x402 operation has a dangling result link.");
-    const responseAttemptNumber = Number(operation.settlementResponseObservation?.httpAttemptNumber ?? "0");
-    const responseObservation = operation.attempts[responseAttemptNumber - 1]?.observation;
+    const responseObservation = x402ResultAttempt(operation)?.observation;
     if (result.operationId !== operation.operationId || result.integrityHash !== operation.resultLink.resultIntegrityHash ||
         result.resultHash !== operation.resultLink.resultHash || receipt.result === undefined ||
         receipt.result.resultHash !== result.resultHash || receipt.result.resultIntegrityHash !== result.integrityHash ||

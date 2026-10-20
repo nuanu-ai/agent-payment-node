@@ -4,6 +4,7 @@ import { decimal, hash, hex32 } from "./local-wallet-native-fields.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { x402AuthorizationIntentHash } from "./x402-state-integrity.js";
 import { ApnError } from "./errors.js";
+import { X402_OFFER_MAX_TIMEOUT_SECONDS, X402_OFFER_MIN_TIMEOUT_SECONDS } from "./x402-offer-terms.js";
 const HASH = /^[a-f0-9]{64}$/u;
 const methodKey = (method) => method === "eip3009" ? "tokenDomain" : "permit2";
 export function parseX402Create(payload, method = "eip3009") {
@@ -31,7 +32,9 @@ export function parseX402Create(payload, method = "eip3009") {
     const created = BigInt(createdAt);
     const validBefore = BigInt(authorization.validBefore);
     const now = BigInt(Math.floor(Date.now() / 1000));
-    if (created > now || validBefore <= now || validBefore - created < 30n || validBefore - created > 300n)
+    // The window is the seller's maxTimeoutSeconds, within the bound every x402 offer is admitted under.
+    if (created > now || validBefore <= now || validBefore - created < BigInt(X402_OFFER_MIN_TIMEOUT_SECONDS) ||
+        validBefore - created > BigInt(X402_OFFER_MAX_TIMEOUT_SECONDS))
         throw rejected("APN_APPROVAL_EXPIRED", "x402 authorization window is invalid or expired.");
     if (common.intentHash !== x402AuthorizationIntentHash(authorization))
         throw protocol("x402 authorization intent hash is invalid.");

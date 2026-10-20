@@ -13,8 +13,6 @@ export const X402_EXACT_PERMIT2_PROXY = "0x402085c248EeA27D92E8b30b2C58ed07f9E20
 export const X402_EXACT_PERMIT2_PROXY_CODE_HASH = "0xce6429c0bb49284660683287c0a8fe548a88379072327d026626909d202048b9" as Hex;
 /** The owner's x402 admission must carry exactly this mechanism pin; any other pin refuses. */
 export const X402_PERMIT2_MECHANISM = { provider: "x402-exact-permit2", reference: X402_EXACT_PERMIT2_PROXY } as const;
-/** Upper bound for the seller's timeout, which becomes the Permit2 deadline; a longer-lived signature is refused. */
-export const X402_PERMIT2_MAX_TIMEOUT_SECONDS = 300;
 export const ERC20_TRANSFER_TOPIC = keccak256(toHex("Transfer(address,address,uint256)"));
 export const PROXY_SETTLED_TOPIC = keccak256(toHex("Settled()"));
 export const PROXY_SETTLED_WITH_PERMIT_TOPIC = keccak256(toHex("SettledWithPermit()"));
@@ -89,7 +87,9 @@ export const wirePermit2Asset: Permit2AssetResolver = (network, token, extra) =>
   const match = /^eip155:([1-9][0-9]{0,15})$/u.exec(network);
   if (match === null || !Number.isSafeInteger(Number(match[1])) || extra.assetTransferMethod !== "permit2") return undefined;
   const hints = typeof extra.name === "string" && typeof extra.version === "string" ? { name: extra.name, version: extra.version } : null;
+  // No token facts are known here: the seller's own decimals hint (when well formed) stands in, so this shape check never decides it.
+  const decimals = typeof extra.decimals === "number" && Number.isSafeInteger(extra.decimals) && extra.decimals >= 0 && extra.decimals <= 255 ? extra.decimals : 0;
   return { chain: network as `eip155:${number}`, chainId: Number(match[1]), networkName: network, token: getAddress(token) as Address,
-    symbol: "", decimals: 0, tokenDomain: hints,
+    symbol: "", decimals, tokenDomain: hints,
     tokenDomainSeparator: null, proxyCodeHash: X402_EXACT_PERMIT2_PROXY_CODE_HASH };
 };
