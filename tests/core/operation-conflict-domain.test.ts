@@ -137,7 +137,10 @@ test("every stored money family maps to its network and sending account", () => 
   assert.deepEqual(domains({ kind: "sei_gaszip", record: open({ owner: { address: A } }) }), [...evm("8453", A), ...evm("1329", A)]);
   assert.deepEqual(domains({ kind: "mega_gaszip", record: open({ owner: { address: A } }) }), evm("8453", A));
   assert.deepEqual(domains({ kind: "merchant_x402", record: open({ custody: { walletAddress: A } }) }), evm("4326", A));
-  assert.deepEqual(domains({ kind: "permit2_production", record: open({ material: { wallet: { account: A } } }) }), evm("43114", A));
+  // The account claim is on the owner admission's own chain (released records name eip155:43114).
+  assert.deepEqual(domains({ kind: "permit2_production", record: open({ material: { wallet: { account: A }, owner: { chain: "eip155:43114" } } }) }), evm("43114", A));
+  assert.deepEqual(domains({ kind: "permit2_production", record: open({ material: { wallet: { account: A }, owner: { chain: "eip155:8453" } } }) }), evm("8453", A));
+  assert.equal(domains({ kind: "permit2_production", record: open({ material: { wallet: { account: A } } }) }), null);
   assert.deepEqual(domains({ kind: "circle_route", record: open({ sourceCustody: { walletAddress: A }, destinationChain: 1329,
     destinationCustody: { walletAddress: B } }) }), [...evm("42161", A), ...evm("1329", B)]);
   assert.equal(domains({ kind: "gasless_transfer", record: open({ intent: { request: {}, owner: { address: A } } }) }), null);
