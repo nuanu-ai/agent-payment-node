@@ -36,7 +36,7 @@ export function validateUniswapTokenOperation(value) {
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
             ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : []),
-            ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : [])] : common))
+            ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : []), ...(Object.hasOwn(value, "principalRelease") ? ["principalRelease"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -90,6 +90,8 @@ export function validateUniswapTokenOperation(value) {
         corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
     if (op.cleanupFeeQuote !== undefined)
         validateCleanupFeeQuote(op);
+    if (op.principalRelease !== undefined)
+        validatePrincipalRelease(op);
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
     if (op.receipt !== null)
@@ -189,6 +191,29 @@ function validateCleanupEvidence(v) {
         !["current_allowance", "legacy_usage_reconciliation"].includes(v.source) || v.observedAllowanceAtomic !== "0" ||
         !canonicalInstant(v.observedAt))
         corrupt("Uniswap token cleanup evidence is invalid.");
+}
+/** A cleanup of this operation that landed (current, or retired after landing) and so consumed its nonce. */
+export function landedTokenCleanups(op) {
+    return [...(op.cleanupAttempt?.transactionHash != null ? [op.cleanupAttempt] : []),
+        ...(op.retiredEffects ?? []).filter((row) => row.kind === "cleanup" && row.reason !== "never_landed").map((row) => row.attempt)];
+}
+function validatePrincipalRelease(op) {
+    const v = op.principalRelease;
+    if (op.phase !== "cleaned" || op.receipt !== null || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
+        (op.retiredEffects ?? []).some((row) => row.kind === "swap") || !isPlainRecord(v) || v.schemaVersion !== "apn.uniswap-token-principal-release.v1" ||
+        typeof v.observedAt !== "string" || !canonicalInstant(v.observedAt) || v.observedAt > op.updatedAt)
+        corrupt("Uniswap token principal release is invalid.");
+    if (v.kind === "swap_never_signed") {
+        if (!exactKeys(v, ["schemaVersion", "kind", "observedAt"]) || op.swapAttempt !== null)
+            corrupt("Uniswap token principal release is invalid.");
+        return;
+    }
+    const swap = op.swapAttempt, cleanup = landedTokenCleanups(op).find((row) => row.transactionHash === v.cleanupTransactionHash);
+    if (v.kind !== "swap_nonce_consumed_by_cleanup" || !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "cleanupTransactionHash", "cleanupBlockNumber",
+        "cleanupBlockHash", "finalizedBlockNumber", "finalizedNonce", "observedAt"]) || swap === null || swap.transactionHash !== null ||
+        cleanup === undefined || cleanup.nonce !== swap.nonce || v.swapNonce !== swap.nonce || typeof v.cleanupBlockHash !== "string" ||
+        !/^0x[a-f0-9]{64}$/u.test(v.cleanupBlockHash) || uint(v.finalizedBlockNumber) < uint(v.cleanupBlockNumber) || uint(v.finalizedNonce) <= uint(v.swapNonce))
+        corrupt("Uniswap token principal release is invalid.");
 }
 function validateCleanupFeeQuote(op) {
     const q = op.cleanupFeeQuote;

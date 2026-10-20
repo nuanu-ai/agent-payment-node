@@ -103,6 +103,8 @@ export class ApnCore {
             case "x402.permit2.allowance.revoke":
             case "x402.permit2.allowance.observe":
             case "x402.permit2.allowance.status":
+            case "wallet.allowance.revoke":
+            case "wallet.allowance.status":
                 throw new ApnError("APN_UNSUPPORTED_COMMAND", "This provider command requires its dedicated bounded CLI path.");
             case "x402.permit2.status":
                 return dataOutcome(await readPermit2ProductionStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_operation_status");

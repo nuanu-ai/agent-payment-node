@@ -50,6 +50,7 @@ const SELECTED_PATHS = [
   "pay transfer prepare-tron",
   "wallet policy show",
   "wallet policy set",
+  "wallet allowance status", "wallet allowance revoke",
   "x402 permit2 status",
   "x402 solana pay", "x402 solana observe", "x402 solana status",
   "x402 permit2 allowance set", "x402 permit2 allowance revoke", "x402 permit2 allowance observe", "x402 permit2 allowance status",

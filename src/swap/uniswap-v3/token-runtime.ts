@@ -12,6 +12,18 @@ import type { TokenRpcCall } from "./token-rpc.js";
 import { admitOperation } from "../../operation-index/admission.js";
 import { evmClaim, namedProfileHash } from "../../operation-index/adapters/family-claims.js";
 import { UNISWAP_TOKEN_CHAIN_ID } from "../../operation-index/adapters/uniswap-token.js";
+/**
+ * Execute's request plan in HTTP POSTs, counted from its code path (up to three reads per batch, one POST each, no retries).
+ * An effect reads the pending nonce (1), the signing block (1), the code pins at it (4: four batches with the archive chain id
+ * in the first, or the pooled archive's anchor and three), the state at it (1: allowance and balance, plus a swap's fresh
+ * quote), the simulation (1) and gas estimate (1; a swap's carries the block recheck), the fees and native balance with
+ * the block recheck (1); then the send (1; its slot is held before the attempt marker, so no read can take it) and the
+ * first observation (at most 3: transaction, receipt, then block and safe head). A swap is 14; an approval execute
+ * resumes reads the allowance first, 15. Each further candidate of a pooled primary may cost one more probe.
+ */
+export const UNISWAP_TOKEN_EXECUTE_PLAN = 15;
+/** The plan's cap for a command whose first primary batch may probe each candidate of a pooled primary once. */
+export function uniswapTokenProbedCap(plan: number, poolCandidates: number): number { return plan + Math.max(0, poolCandidates - 1); }
 type Prepare = Extract<CommandRequest, {
     readonly command: "swap.uniswap-token.prepare";
 }>;
@@ -26,7 +38,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
     async quote(request: Extract<CommandRequest, {
         readonly command: "swap.uniswap-token.quote";
     }>) { const binding = domainHash("apn.uniswap-token-quote-attempt.v1", canonicalJson(request));
-      const cap = this.quotePrepareCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote"); let result: { readonly quoteHash: string } | undefined;
+      const cap = this.probedCap(8), reservation = await this.rpcBudget?.reserve(binding, request.command, cap, cap, "quote"); let result: { readonly quoteHash: string } | undefined;
       try { result = await this.builder.quote(request) as { readonly quoteHash: string }; return result; }
       finally { if (reservation !== undefined) { await this.rpcBudget!.settle(binding, reservation, this.rpc?.telemetry?.() ?? null,
           this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.()); if (result !== undefined) await this.rpcBudget!.linkQuote(binding, result.quoteHash); } } }
@@ -47,7 +59,7 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
             async () => await this.prepareBody(request, material, operationId));
     }
     private async prepareBody(request: Prepare, material: UniswapTokenMaterial, operationId: string) {
-        const cap = this.quotePrepareCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
+        const cap = this.probedCap(9), reservation = await this.rpcBudget?.reserve(request.quoteHash, request.command, cap, cap, "prepare");
         try { await this.ports.confirm(material); }
         finally { if (reservation !== undefined) await this.rpcBudget!.settle(request.quoteHash, reservation, this.rpc?.telemetry?.() ?? null,
           this.rpc?.effectAttempts?.() ?? 0, this.rpc?.primaryPoolTelemetry?.()); }
@@ -65,10 +77,15 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
       return [cap, cap, "approval_effect"] as const; }, async () => await this.execution.approve(id)); }
     async execute(id: string) { return await this.budgeted(id, "swap.uniswap-token.execute", async () => {
       const phase = (await this.journal.load(id))?.phase;
-      const cap = 24;
+      const cap = this.probedCap(UNISWAP_TOKEN_EXECUTE_PLAN);
       return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] as const : [0, cap, "recovery"] as const;
     }, async () => await this.execution.execute(id)); }
     async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"] as const, async () => await this.execution.status(id)); }
+    async residualAllowance(op: import("./token-operation.js").UniswapTokenOperation) {
+      if (op.phase !== "cleaned" || op.cleanupEvidence?.kind !== "expired_approval_no_swap") return null;
+      return await this.budgeted(op.operationId, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"] as const,
+        async () => await this.ports.currentAllowance(op));
+    }
     async cleanup(id: string, fees?: TokenCleanupFees) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"] as const, async () => await this.execution.cleanup(id, fees)); }
     private async budgeted<T>(id: string, command: string,
       budget: () => Promise<readonly [number, number, NonNullable<import("./token-rpc-budget.js").TokenRpcBudgetRow["budgetClass"]>]>, work: () => Promise<T>) {
@@ -78,6 +95,6 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
         finally { await this.rpcBudget.settle(id, reservation, this.rpc?.telemetry?.() ?? null, this.rpc?.effectAttempts?.() ?? 0,
           this.rpc?.primaryPoolTelemetry?.()); } }); }
     private poolCap(base: number) { return base + (this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
-    private quotePrepareCap(base: number) { return this.rpc?.primaryPoolEnabled?.() === true ? this.poolCap(base) - 1 : base; }
+    private probedCap(plan: number) { return uniswapTokenProbedCap(plan, this.rpc?.primaryPoolEnabled?.() === true ? this.rpc.primaryPoolSize?.() ?? 3 : 0); }
 }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

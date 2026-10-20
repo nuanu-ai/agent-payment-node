@@ -5,6 +5,18 @@ import type { SavedUniswapTokenMaterialStore, UniswapTokenMaterial } from "./tok
 import { UniswapTokenJournal } from "./token-operation.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
 import type { TokenRpcCall } from "./token-rpc.js";
+/**
+ * Execute's request plan in HTTP POSTs, counted from its code path (up to three reads per batch, one POST each, no retries).
+ * An effect reads the pending nonce (1), the signing block (1), the code pins at it (4: four batches with the archive chain id
+ * in the first, or the pooled archive's anchor and three), the state at it (1: allowance and balance, plus a swap's fresh
+ * quote), the simulation (1) and gas estimate (1; a swap's carries the block recheck), the fees and native balance with
+ * the block recheck (1); then the send (1; its slot is held before the attempt marker, so no read can take it) and the
+ * first observation (at most 3: transaction, receipt, then block and safe head). A swap is 14; an approval execute
+ * resumes reads the allowance first, 15. Each further candidate of a pooled primary may cost one more probe.
+ */
+export declare const UNISWAP_TOKEN_EXECUTE_PLAN = 15;
+/** The plan's cap for a command whose first primary batch may probe each candidate of a pooled primary once. */
+export declare function uniswapTokenProbedCap(plan: number, poolCandidates: number): number;
 type Prepare = Extract<CommandRequest, {
     readonly command: "swap.uniswap-token.prepare";
 }>;
@@ -41,9 +53,10 @@ export declare class InstalledUniswapTokenRuntime implements UniswapTokenCommand
     approve(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     execute(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
     status(id: string): Promise<import("./token-operation.js").UniswapTokenOperation>;
+    residualAllowance(op: import("./token-operation.js").UniswapTokenOperation): Promise<string | null>;
     cleanup(id: string, fees?: TokenCleanupFees): Promise<import("./token-operation.js").UniswapTokenOperation>;
     private budgeted;
     private poolCap;
-    private quotePrepareCap;
+    private probedCap;
 }
 export {};

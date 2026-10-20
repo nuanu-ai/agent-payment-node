@@ -14,7 +14,7 @@ import type { UniswapTokenCommandRuntime, UniswapTokenExecutionPorts } from "./t
 import { SavedUniswapTokenMaterialStore } from "./token-material.js";
 import { UniswapTokenJournal, type UniswapTokenOperation } from "./token-operation.js";
 import { UniswapTokenObserver } from "./token-observer.js";
-import { UniswapTokenRevalidator } from "./token-revalidation.js";
+import { readSwapNonceConsumption } from "./token-principal.js";
 import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
@@ -27,7 +27,7 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
   readonly clock: ClockPort; readonly call: EvmRpcCall; readonly foreground: "approve" | "cleanup" | "refuse";
   readonly tty?: TtyTransferApprovalOptions; readonly verifyPins?: (call: EvmRpcCall, tag: import("viem").Hex) => Promise<void> }): UniswapTokenCommandRuntime {
   const { state, wrapping, clock, call } = input, materials = new SavedUniswapTokenMaterialStore(state.root), custody = new UniswapTokenCustody(state, wrapping, call, () => clock.now()),
-    observer = new UniswapTokenObserver(call), revalidator = new UniswapTokenRevalidator(call, input.verifyPins), ledger = new AssetUsageLedger(state.root),
+    observer = new UniswapTokenObserver(call), ledger = new AssetUsageLedger(state.root),
     usage = new UniswapTokenUsage(state, clock, ledger), guard = new UniswapTokenSigningGuard(state, wrapping, call, usage, () => clock.now(), input.verifyPins);
   const approveOwner = async (op: UniswapTokenOperation) =>
     await assertExclusiveUniswapTokenSigner(state, op.account, state.profileHash(op.profile));
@@ -39,7 +39,7 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
     guard: async (op, kind, nonce) => await guard.inspect(op, kind, nonce), reserveUsage: async (op) => await usage.reserve(op),
     reserveSendCapacity: () => (call as TokenRpcCall).reserveEffectSlot?.(),
     currentUsage: async (op) => await usage.current(op), followUsage: async (op, target) => await usage.follow(op, target),
-    revalidate: async (op) => await revalidator.revalidate(op), seal: async (op, kind, nonce) => await custody.seal(op, kind, nonce),
+    seal: async (op, kind, nonce) => await custody.seal(op, kind, nonce),
     probeSealed: async (op, kind, nonce) => await custody.probeSealed(op, kind, nonce),
     recoverSealed: async (op, kind, nonce) => await custody.probeJournaled(op, kind, nonce),
     send: async (op, kind) => await custody.send(op, kind), observe: async (op, kind, hash) => {
@@ -61,6 +61,7 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
     },
     foregroundApprove: async (op) => { await approveOwner(op); await foreground(input.foreground === "approve", op, false, clock.now(), input.tty); await approveOwner(op); },
     foregroundCleanup: async (op) => { await approveOwner(op); await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty); await approveOwner(op); },
+    swapNonceConsumed: async (op, cleanup) => await readSwapNonceConsumption(call as TokenRpcCall, op, cleanup),
     confirm: async (material) => await guard.confirm(material),
   };
   const admit = async (request: Parameters<UniswapTokenQuoteBuilder["quote"]>[0], now: Date) => await usage.admitQuote(request, now);

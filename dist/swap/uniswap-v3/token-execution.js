@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
+import { principalReleaseCandidate } from "./token-principal.js";
 import { sanitizeUniswapTokenFailureField, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation } from "./token-operation.js";
 export class UniswapTokenExecution {
     journal;
@@ -24,6 +25,12 @@ export class UniswapTokenExecution {
         let op = await this.retireExpiredPrepared(await this.syncUsage(await this.required(id)));
         if (["observed", "cleaned", "cleanup_required", "abandoned_unknown"].includes(op.phase))
             return op;
+        // A dropped marker leaves this command on the recovery budget it reserved: it may close an expired route (no effect),
+        // otherwise it stops, and the next execute starts the effect afresh under an effect budget.
+        const marked = op.phase;
+        op = await this.resumeUnsigned(op, ["approval", "swap"]);
+        if (op.phase !== marked && !expired(op, this.ports.now()))
+            return op;
         if (expired(op, this.ports.now()) && !approvalActive(op.phase) && !swapActive(op.phase) && !cleanupActive(op.phase)) {
             if (op.phase === "approval_observed" && op.approvalAttempt?.transactionHash != null)
                 return await this.retireExpiredApproval(op);
@@ -33,15 +40,10 @@ export class UniswapTokenExecution {
             op = await this.advanceApproval(op);
         if (approvalActive(op.phase))
             return await this.observeApproval(await this.continueStart(op, "approval"));
-        if (op.phase === "approval_observed") {
-            try {
-                await this.ports.revalidate(op);
-            }
-            catch {
-                return await this.cleanupRequired(op, "post_approval_revalidation_failed");
-            }
+        // The signing guard revalidates the swap (allowance, balance, quote floor, simulation, gas, fees) at its own block; a
+        // refusal frees the nonce and records why before cleanup becomes required.
+        if (op.phase === "approval_observed")
             op = await this.start(op, "swap");
-        }
         if (swapActive(op.phase))
             return await this.observeSwap(await this.continueStart(op, "swap"));
         return op;
@@ -62,12 +64,13 @@ export class UniswapTokenExecution {
             return await this.observeSwap(await this.continueStart(op, "swap"));
         if (cleanupActive(op.phase))
             return await this.observeCleanup(await this.continueStart(op, "cleanup"));
-        return op;
+        return op.phase === "cleaned" ? await this.settlePrincipal(op) : op;
     }
     async cleanup(id, fees) {
         let op = await this.syncUsage(await this.required(id));
         if (op.phase === "cleaned")
             return op;
+        op = await this.resumeUnsigned(op, ["cleanup"]);
         if (op.phase !== "cleanup_required")
             blocked("Token swap cleanup is not required.", "uniswap_cleanup_phase");
         // The owner's own caps replace the frozen ones for this cleanup only: checked against a fresh fee quote, shown at the
@@ -80,10 +83,10 @@ export class UniswapTokenExecution {
             // Every attempt is a bound transaction that landed or was retired: the residual allowance is already gone.
             const attempts = [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].filter((row) => row !== null);
             if ((attempts.length > 0 || (op.retiredEffects ?? []).length > 0) && attempts.every((row) => row.transactionHash !== null)) {
-                return await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "zero_allowance_after_effect", cleanupEvidence: {
+                return await this.settlePrincipal(await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "zero_allowance_after_effect", cleanupEvidence: {
                         schemaVersion: "apn.uniswap-token-zero-allowance-evidence.v1", kind: "zero_allowance_after_effect", observedAllowanceAtomic: "0",
                         observedAt: this.ports.now().toISOString()
-                    }, ...usagePatch(await this.ports.currentUsage(op)) }, this.ports.now()));
+                    }, ...usagePatch(await this.ports.currentUsage(op)) }, this.ports.now())));
             }
             await this.assertNoEffect(op);
             op = await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: "zero_allowance_no_effect",
@@ -96,6 +99,8 @@ export class UniswapTokenExecution {
     }
     async start(op, kind) {
         return await this.ports.withAccountLock(op, async () => {
+            // The send's slot first: a command without room for it stops here, before a nonce or a marker exists.
+            this.ports.reserveSendCapacity?.();
             const nonce = await this.ports.allocateNonce(op, kind), attempt = tokenAttempt(op, kind, nonce, this.ports.now());
             // Nothing signs before the marker is durable: a refused or raced marker hands the reservation back (or keeps a signed one).
             let marked;
@@ -114,11 +119,13 @@ export class UniswapTokenExecution {
         if (attempt.transactionHash !== null)
             return op;
         const recovered = await this.ports.recoverSealed?.(op, kind, attempt.nonce) ?? null;
-        // Not provably never signed, so no R4 exit 2: custody saves the signed bytes in the encrypted wallet before it writes the
-        // public sealed effect, and recovery never opens custody, so this record cannot show that no signed bytes exist (none
-        // was sent: a send needs the public effect). The exit is the owner's abandon past the route deadline (R4 exit 3).
+        // Status cannot show that no signed bytes exist: custody saves them in the encrypted wallet before it writes the public
+        // sealed effect, and recovery never opens custody (none was sent: a send needs the public effect). The forward command
+        // (execute; cleanup for a cleanup) opens custody under the account lock and settles the marker (resumeUnsigned).
         if (recovered === null)
-            blocked("Started token effect has no public transaction evidence.", "uniswap_token_public_effect_missing");
+            throw new ApnError("APN_OPERATION_BLOCKED", "Started token effect has no public transaction evidence.", {
+                reason: "uniswap_token_public_effect_missing", nextActions: [`apn swap ethereum uniswap-token ${kind === "cleanup" ? "cleanup" : "execute"} --operation ${op.operationId}`]
+            });
         // A sealed transaction may or may not have reached the provider. Recovery observes it only.
         const usage = kind === "swap" ? await this.ports.followUsage(op, "unknown_finality") : null;
         return await this.persist(transitionUniswapToken(op, unknown(kind), {
@@ -143,7 +150,6 @@ export class UniswapTokenExecution {
             const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce);
             return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase), unmarked(kind, unsigned));
         }
-        this.ports.reserveSendCapacity?.();
         let sealed;
         try {
             sealed = await this.ports.seal(op, kind, attempt.nonce);
@@ -200,12 +206,15 @@ export class UniswapTokenExecution {
             return op;
         if (result.status !== "success" || result.transactionHash !== hash || result.allowanceAtomic !== op.route.amountIn)
             return await this.cleanupRequired(op, "approval_failed_or_mismatch");
-        const evidence = { schemaVersion: "apn.uniswap-token-expired-approval-evidence.v1",
-            kind: "expired_approval_no_swap", approvalTransactionHash: hash,
-            observedAllowanceAtomic: result.allowanceAtomic, observedAt: this.ports.now().toISOString() };
-        op = await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "deadline_expired_after_approval", cleanupEvidence: evidence }, this.ports.now()));
-        const usage = await this.ports.followUsage(op, "failed_before_effect");
-        return await this.persist(transitionUniswapToken(op, "cleaned", usagePatch(usage), this.ports.now()));
+        // The approval landed exactly and no swap was ever started. `cleaned` means no residual allowance: one still standing
+        // needs the owner's consented revoke (the cleanup command), and the hold is released once that cleanup is observed; an
+        // allowance already zero closes now, the hold released with it. Approval gas stays charged either way.
+        const now = this.ports.now();
+        if (await this.ports.currentAllowance(op) !== "0")
+            return await this.cleanupRequired(op, "deadline_expired_after_approval");
+        return await this.settlePrincipal(await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "zero_allowance_after_effect",
+            cleanupEvidence: { schemaVersion: "apn.uniswap-token-zero-allowance-evidence.v1", kind: "zero_allowance_after_effect", observedAllowanceAtomic: "0",
+                observedAt: now.toISOString() } }, now)));
     }
     async observeSwap(op) {
         const hash = op.swapAttempt?.transactionHash;
@@ -290,8 +299,57 @@ export class UniswapTokenExecution {
         if (noEffect && (op.cleanupEvidence ?? null) === null)
             corrupt("No-effect cleanup evidence is missing.");
         const usage = noEffect ? await this.ports.followUsage(op, "failed_before_effect") : await this.ports.currentUsage(op);
-        return await this.persist(transitionUniswapToken(op, "cleaned", { accumulatedNativeDebitWei: native,
-            ...(noEffect ? { cleanupReason: "zero_allowance_no_effect" } : {}), ...usagePatch(usage) }, this.ports.now()));
+        return await this.settlePrincipal(await this.persist(transitionUniswapToken(op, "cleaned", { accumulatedNativeDebitWei: native,
+            ...(noEffect ? { cleanupReason: "zero_allowance_no_effect" } : {}), ...usagePatch(usage) }, this.ports.now())));
+    }
+    /**
+     * A cleaned swap still holding its principal although no swap of it can land (R4 exit 2): no swap marker is left (never
+     * signed), or its hashless marker's nonce is consumed in the finalized chain by its own landed cleanup. The proof is saved
+     * first, then the hold is released; gas, attempts and history stay. Without such proof the hold stays (owner abandon).
+     */
+    async settlePrincipal(op) {
+        if (op.phase !== "cleaned" || op.usageState !== "reserved")
+            return op;
+        if (op.principalRelease === undefined) {
+            const candidate = principalReleaseCandidate(op), now = this.ports.now();
+            if (candidate === null)
+                return op;
+            if (candidate.kind === "swap_never_signed")
+                op = await this.persist(transitionUniswapToken(op, "cleaned", { principalRelease: {
+                        schemaVersion: "apn.uniswap-token-principal-release.v1", kind: "swap_never_signed", observedAt: now.toISOString()
+                    } }, now));
+            else {
+                const proof = await this.ports.swapNonceConsumed?.(op, candidate.cleanup) ?? null;
+                if (proof === null)
+                    return op;
+                op = await this.persist(transitionUniswapToken(op, "cleaned", { principalRelease: { schemaVersion: "apn.uniswap-token-principal-release.v1",
+                        kind: "swap_nonce_consumed_by_cleanup", swapNonce: candidate.swap.nonce, cleanupTransactionHash: candidate.cleanup.transactionHash,
+                        cleanupBlockNumber: proof.blockNumber, cleanupBlockHash: proof.blockHash, finalizedBlockNumber: proof.finalizedBlockNumber,
+                        finalizedNonce: proof.finalizedNonce, observedAt: now.toISOString() } }, now));
+            }
+        }
+        return await this.persist(transitionUniswapToken(op, "cleaned", usagePatch(await this.ports.followUsage(op, "failed_before_effect")), this.ports.now()));
+    }
+    /**
+     * A started attempt with no hash and no public sealed effect (a refusal or crash between its marker and signing): the
+     * forward command opens custody under the account lock. Custody holding no signed bytes frees the nonce and proves the
+     * attempt never signed (R4 exit 2), so its marker is dropped and the operation is where it was before the attempt (execute
+     * then only closes an expired route; cleanup goes on to its consented cleanup). Signed bytes found are journaled with their
+     * nonce committed, and recovery only observes them. Nothing is signed or sent here.
+     */
+    async resumeUnsigned(op, kinds) {
+        const kind = kinds.find((candidate) => op.phase === started(candidate));
+        if (kind === undefined)
+            return op;
+        const attempt = attemptOf(op, kind);
+        if (attempt.transactionHash !== null || await this.ports.recoverSealed?.(op, kind, attempt.nonce) != null)
+            return op;
+        return await this.ports.withAccountLock(op, async () => {
+            const current = await this.required(op.operationId);
+            if (current.integrityHash !== op.integrityHash || !await this.ports.releaseNonce(current, kind, attempt.nonce))
+                return current;
+            return await this.persist(transitionUniswapToken(current, kind === "approval" ? "approved" : kind === "swap" ? "approval_observed" : "cleanup_required", { [`${kind}Attempt`]: null }, this.ports.now()));
+        });
     }
     async cleanupRequired(op, reason, native = op.accumulatedNativeDebitWei, usage, preSignFailure, unmarkedAttempt = {}) {
         return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: reason, accumulatedNativeDebitWei: native,
@@ -312,7 +370,8 @@ export class UniswapTokenExecution {
     async syncUsage(op) {
         if (op.usageReservationId === null)
             return op;
-        if (op.phase === "cleaned" && op.cleanupEvidence?.kind === "expired_approval_no_swap") {
+        // A recorded release whose ledger step did not complete (records of the earlier expired-approval exit, or principalRelease).
+        if (op.phase === "cleaned" && (op.cleanupEvidence?.kind === "expired_approval_no_swap" || op.principalRelease !== undefined)) {
             const current = await this.ports.currentUsage(op);
             if (current.state === "reserved") {
                 const released = await this.ports.followUsage(op, "failed_before_effect");
