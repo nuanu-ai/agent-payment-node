@@ -9,12 +9,13 @@ import { BridgeHttps } from "../lifi/https.js";
 import { parseRpcBatchResultEnvelope } from "../rpc.js";
 import { STARGATE_SEND_ABI } from "./abi.js";
 import { executeStargateV2NativeEth, FileStargateNativeJournal, LocalStargateNativeSigner, prepareStargateV2NativeEth,
-  stargateV2NativeCanonicalReceipt, type StargateConfirmedReceipt, type StargateNativeExecutionPorts,
+  stargateV2NativeCanonicalReceipt, type StargateConfirmedReceipt, type StargateNativeExecutionPorts, type StargatePreparedEnvelopeEvidence,
   type StargateNativeOperation } from "./native-execution.js";
 import { TtyStargateNativeApproval } from "./native-tty.js";
 import { StargateNativeUsage } from "./native-usage.js";
 import { scanStargateLogs, StargateDestinationScanStore, STARGATE_UNICHAIN_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
 import { legacyStargateStatusAfter, type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
+import { stargateFundsRefusal } from "./funds.js";
 
 const DESTINATION_POOL = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
 function blocked(reason: string): never { throw new ApnError("APN_RPC_CONFIG", `Stargate native runtime unavailable: ${reason}.`, { reason }); }
@@ -89,6 +90,29 @@ export class StargateJsonRpc {
   }
 }
 
+
+/** The source envelope reads: chain, head and balance first, so an unfunded known value is refused before eth_estimateGas. */
+export async function stargateNativeEnvelope(source: Pick<StargateJsonRpc, "call" | "batchCall">,
+  sourceCall: (method: string, params: readonly unknown[]) => Promise<unknown>, prepareBatch: boolean,
+  tx: Parameters<StargateNativeExecutionPorts["prepareEnvelope"]>[0]): Promise<StargatePreparedEnvelopeEvidence> {
+  const [chain, head, balance] = prepareBatch ? await source.batchCall([{ method: "eth_chainId", params: [] },
+    { method: "eth_getBlockByNumber", params: ["latest", false] }, { method: "eth_getBalance", params: [tx.from, "pending"] }]) :
+    [await sourceCall("eth_chainId", []), await source.call("eth_getBlockByNumber", ["latest", false]), await source.call("eth_getBalance", [tx.from, "pending"])];
+  if (quantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Ethereum RPC identity changed.");
+  const block = record(head);
+  // The balance is read before the estimate: an unfunded value is the owner's shortfall, not a node failure.
+  if (quantity(balance) < BigInt(tx.valueAtomic)) stargateFundsRefusal("insufficient_native_balance", { required: BigInt(tx.valueAtomic), limit: quantity(balance) });
+  const rpcTx = { from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.valueAtomic).toString(16)}` };
+  const [nonce, gas, tip] = prepareBatch ? await source.batchCall([
+    { method: "eth_getTransactionCount", params: [tx.from, "pending"] },
+    { method: "eth_estimateGas", params: [rpcTx] }, { method: "eth_maxPriorityFeePerGas", params: [] }]) :
+    await Promise.all([source.call("eth_getTransactionCount", [tx.from, "pending"]),
+      source.call("eth_estimateGas", [rpcTx]), source.call("eth_maxPriorityFeePerGas", [])]);
+  const gasLimit = quantity(gas) * 12n / 10n + 1n, priority = quantity(tip), maxFee = 2n * quantity(block.baseFeePerGas) + priority;
+  return { nonceAtomic: quantity(nonce).toString(), gasLimitAtomic: gasLimit.toString(), maxFeePerGasAtomic: maxFee.toString(),
+    maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
+}
+
 export class StargateNativeService {
   private source?: StargateJsonRpc; private destination?: StargateJsonRpc;
   private readonly journal: FileStargateNativeJournal; private readonly local: LocalStargateNativeSigner; private readonly usage: StargateNativeUsage;
@@ -138,23 +162,8 @@ export class StargateNativeService {
         destinationPrepareBatch: (calls: readonly { method: string; params: readonly unknown[] }[]) => destination.batchCall(calls) } : {}),
       sourceCall, destinationCall,
       destinationBalance: async (recipient, finalityTag) => await stargateDestinationBalance(destination, recipient, finalityTag),
-      prepareEnvelope: async tx => {
-        const [chain, head] = prepareBatch ? await source.batchCall([{ method: "eth_chainId", params: [] },
-          { method: "eth_getBlockByNumber", params: ["latest", false] }]) :
-          [await sourceCall("eth_chainId", []), await source.call("eth_getBlockByNumber", ["latest", false])];
-        if (quantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Ethereum RPC identity changed.");
-        const block = record(head);
-        const rpcTx = { from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.valueAtomic).toString(16)}` };
-        const [nonce, balance, gas, tip] = prepareBatch ? await source.batchCall([
-          { method: "eth_getTransactionCount", params: [tx.from, "pending"] },
-          { method: "eth_getBalance", params: [tx.from, "pending"] },
-          { method: "eth_estimateGas", params: [rpcTx] }, { method: "eth_maxPriorityFeePerGas", params: [] }]) :
-          await Promise.all([source.call("eth_getTransactionCount", [tx.from, "pending"]),
-            source.call("eth_getBalance", [tx.from, "pending"]), source.call("eth_estimateGas", [rpcTx]), source.call("eth_maxPriorityFeePerGas", [])]);
-        const gasLimit = quantity(gas) * 12n / 10n + 1n, priority = quantity(tip), maxFee = 2n * quantity(block.baseFeePerGas) + priority;
-        return { nonceAtomic: quantity(nonce).toString(), gasLimitAtomic: gasLimit.toString(), maxFeePerGasAtomic: maxFee.toString(),
-          maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
-      }, signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async operation => await new TtyStargateNativeApproval().approve(operation),
+      prepareEnvelope: async tx => await stargateNativeEnvelope(source, sourceCall, prepareBatch, tx),
+      signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async operation => await new TtyStargateNativeApproval().approve(operation),
       admitPolicy: async input => await this.usage.admitPolicy(input), reserveUsage: async operation => await this.usage.reserve(operation),
       followUsage: async (operation, target) => await this.usage.follow(operation, target),
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; },
