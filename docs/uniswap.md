@@ -148,7 +148,8 @@ otherwise stops; the next `execute` starts the effect afresh. Signed bytes found
 journaled and only observed.
 `cleaned` means no residual allowance. When the route deadline passed after an
 approval landed and no swap was ever started, `status`/`execute` prove the approval
-and read the current allowance: if it is still above zero the swap becomes
+and read the current allowance (a zero is confirmed at a head that includes the
+approval, pinned by hash; a node behind the approval is refused): if it is still above zero the swap becomes
 `cleanup_required` (`deadline_expired_after_approval`, `next_actions` naming
 `cleanup`), whose consented revoke sends once and is observed to proof; if it is
 already zero the swap is `cleaned` at once. Either way the principal hold is released
@@ -161,7 +162,8 @@ A `cleaned` swap whose approval landed releases its principal hold only on proof
 that no swap of it can land, recorded as `principalRelease`: no swap marker is left
 (`swap_never_signed`), or its hashless marker's nonce is held, at the finalized tag,
 by its own landed cleanup (`swap_nonce_consumed_by_cleanup`: one primary batch reads
-the finalized nonce, the cleanup by hash and the finalized head). Gas, attempts and
+the finalized nonce, the cleanup by hash and the finalized head, then the canonical
+block at the cleanup's height must be the one the cleanup names). Gas, attempts and
 history stay; a bound or unproven swap keeps its hold.
 A cleanup whose fee caps (frozen at quote time) are below the current Ethereum fees is
 refused before signing and stays `cleanup_required`; its `next_actions` offer the same

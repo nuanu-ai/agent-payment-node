@@ -9,7 +9,7 @@ const states = { terminal: [...WALLET_ALLOWANCE_REVOKE_TERMINAL_STATES],
 const target = [
     option("--profile", "profile", true, none, ["matches_[a-z0-9][a-z0-9._-]{0,63}", "has_a_local_evm_wallet"], "public"),
     option("--chain", "string", true, none, ["eip155_caip2", "the_chain_has_an_APN_<CHAIN>_RPC_URL_setting_and_it_is_set"], "operator_input"),
-    option("--token", "address", true, none, ["exact_erc20_contract_address"], "operator_input"),
+    option("--asset", "address", true, none, ["exact_erc20_contract_address"], "operator_input"),
     option("--spender", "address", true, none, ["exact_spender_address"], "operator_input"),
 ];
 const caps = [
@@ -17,8 +17,8 @@ const caps = [
     option("--max-fee-per-gas-wei", "wei", true, none, ["owner_cap_at_least_base_fee_plus_priority"], "operator_input"),
     option("--max-priority-fee-per-gas-wei", "wei", true, none, ["not_greater_than_max_fee_per_gas"], "operator_input"),
 ];
-const targetSynopsis = "--profile <profile> --chain eip155:<id> --token <token-address> --spender <address>";
-const example = "--profile default --chain eip155:1 --token <token-address> --spender <spender-address>";
+const targetSynopsis = "--profile <profile> --chain eip155:<id> --asset <token-address> --spender <address>";
+const example = "--profile default --chain eip155:1 --asset <token-address> --spender <spender-address>";
 export const WALLET_ALLOWANCE_GROUPS = [
     { path: ["wallet", "allowance"], summary: "Read or revoke an ERC-20 allowance the local wallet granted.", kind: "group" },
 ];
@@ -33,10 +33,10 @@ export function bindWalletAllowanceCommand(path, options) {
             throw new ApnError("APN_INVALID_INPUT", `${name} is required.`);
         return found;
     };
-    const target = { profile: value("--profile"), chainId: x402Chain(value("--chain")), token: address(value("--token"), "--token"),
+    const target = { profile: value("--profile"), chainId: x402Chain(value("--chain")), token: address(value("--asset"), "--asset"),
         spender: address(value("--spender"), "--spender") };
     if (target.token === target.spender)
-        throw new ApnError("APN_INVALID_INPUT", "--spender must differ from --token.");
+        throw new ApnError("APN_INVALID_INPUT", "--spender must differ from --asset.");
     if (path === "wallet allowance status")
         return { request: { command: "wallet.allowance.status", ...target } };
     if (path !== "wallet allowance revoke")

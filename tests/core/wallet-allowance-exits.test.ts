@@ -25,7 +25,7 @@ import { allowanceRpc } from "./wallet-allowance-helpers.js";
 
 const KEY = `0x${"0".repeat(63)}9` as Hex, ACCOUNT = privateKeyToAccount(KEY).address, PROFILE = "qa0554-revoke";
 const OTHER_SPENDER = "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45";
-const revokeArgv = (spender: string) => ["wallet", "allowance", "revoke", "--profile", PROFILE, "--chain", "eip155:1", "--token", ETHEREUM_USDT, "--spender", spender,
+const revokeArgv = (spender: string) => ["wallet", "allowance", "revoke", "--profile", PROFILE, "--chain", "eip155:1", "--asset", ETHEREUM_USDT, "--spender", spender,
   "--max-gas-limit", "60000", "--max-fee-per-gas-wei", "2000000000", "--max-priority-fee-per-gas-wei", "1000000"];
 const NO_TERMINAL: TtyTransferApprovalOptions = { openTerminal: async () => { throw new Error("no terminal"); } };
 type Rpc = ReturnType<typeof allowanceRpc>;

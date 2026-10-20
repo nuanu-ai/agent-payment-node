@@ -195,7 +195,7 @@ test("official MCP client proves production stdio descriptor, the exact tool set
         required: ["profile", "max_balance_usdc_atomic", "max_x402_amount_atomic"],
         defaults: {},
       },
-      { name: "apn_wallet_allowance_status", properties: ["profile", "chain", "token", "spender"], required: ["profile", "chain", "token", "spender"], defaults: {} },
+      { name: "apn_wallet_allowance_status", properties: ["profile", "chain", "asset", "spender"], required: ["profile", "chain", "asset", "spender"], defaults: {} },
       { name: "apn_x402_permit2_status", properties: ["profile", "operation"], required: ["profile", "operation"], defaults: {} },
       { name: "apn_x402_solana_pay", properties: ["profile", "url", "asset", "max_amount", "idempotency_key"], required: ["profile", "url", "asset", "max_amount", "idempotency_key"], defaults: {} },
       { name: "apn_x402_solana_observe", properties: ["operation"], required: ["operation"], defaults: {} },
