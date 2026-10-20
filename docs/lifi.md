@@ -1219,3 +1219,31 @@ per prepare and approve), counts a nonzero Base operator fee instead of refusing
 it, and no longer applies lane constants (30k gas, 0.1 gwei, global fee, floor and,
 for Sei, amount caps) on top of the owner's ceiling, floor and asset policy.
 Provider responses must carry their required fields; fields GasZip adds later are ignored.
+
+## Empty route lists name the provider's answer (QA 0.5.51)
+
+APN drops no route LI.FI returns: every route in the `POST /v1/advanced/routes`
+answer is listed, preparable or with its gate. An empty `routes` list is
+therefore LI.FI's own answer to the exact request APN sent, and `bridge routes`
+(CLI and MCP alike) now adds `no_route`: the provider, endpoint, CAIP-2 chains,
+tokens, atomic amount, the tools APN allowed (`across` and `stargateV2` with no
+exchange and no destination call; for the reviewed Ethereum ETH to BNB composite
+`across`, `fly` and a destination call), whether LI.FI sent `unavailableRoutes`,
+and its `filteredOut` and `failed` rows (path, step, tool, error type, code,
+message), at most eight of each, control characters stripped, each field at most
+240 characters. A response with routes is unchanged.
+
+QA rows BRIDGE-LIFI-008/009 (0.001 and 0.01 ETH): for Ethereum ETH to Monad MON
+both captures have `response_hash`
+`fadee8ede726896cd8294347660b236e767470485f59a014fff4447794395635`, the sha256 of
+`{"routes":[],"unavailableRoutes":{"filteredOut":[],"failed":[]}}`, and a keyless
+replay on 2026-10-20 returned the same bytes: LI.FI offers no direct Across or
+Stargate fill of native MON from ETH and reports nothing it filtered or failed.
+With exchanges open it routes ETH through a swap on Ethereum, Across and a
+KyberSwap swap on Monad, a graph APN has not reviewed. For BNB the two QA
+responses differ (`92d92a74…`, `2c250823…`) and were not captured; on
+2026-10-20 the same request returned the reviewed across+fly composite at
+0.001 ETH (APN's parser admits it as preparable) and no route at 0.01 ETH, where
+LI.FI reported three failed paths, each "Tool fly not applied."
+(`TOOL_NOT_ALLOWED`) on its fly step. Both are provider conditions.
+

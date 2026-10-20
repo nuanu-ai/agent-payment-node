@@ -31,8 +31,11 @@ const ORCA_APPROVE = GENESIS + ORCA_MARKET + BLOCKHASH + FEE + SIMULATION + HEIG
  */
 const JUPITER_RESOLVE = GENESIS + accountReads(64 + 8) + accountReads(10) + FEE;
 const JUPITER_QUOTE = JUPITER_RESOLVE + BLOCKHASH + SIMULATION;
-/** Pre-consent re-resolve and simulation, the lifetime height before signing and before the send, the send, its observation. */
-const JUPITER_APPROVE = JUPITER_RESOLVE + SIMULATION + HEIGHT + HEIGHT + SEND + OBSERVE;
+/**
+ * Pre-consent re-resolve with the approval's own blockhash and the simulation, the lifetime height before signing and
+ * before the send, the send, its observation.
+ */
+const JUPITER_APPROVE = JUPITER_RESOLVE + BLOCKHASH + SIMULATION + HEIGHT + HEIGHT + SEND + OBSERVE;
 
 const PLANS: Readonly<Record<string, number>> = Object.freeze({
   "swap.orca.quote": ORCA_QUOTE, "swap.orca.prepare": 0, "swap.orca.approve": ORCA_APPROVE,

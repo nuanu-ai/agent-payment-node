@@ -28,9 +28,12 @@ export interface JupiterV1PreconsentProof {
     readonly simulation: JupiterV1SimulationProof;
 }
 /**
- * Every program-byte, account and simulation check that can fail runs before consent, against the same frozen message.
- * After the prompt only the lifetime reserve, the local owner re-check, the marker, the signature and the one send remain,
- * so the frozen blockhash is not spent on bulky public reads after the human typed the code.
+ * Every program-byte, account and simulation check that can fail runs before consent, against the exact message signed
+ * after it. The approval freezes its own lifetime: the configured RPC's latest blockhash, read after this command's fresh
+ * account reads, so the human gets a whole blockhash lifetime instead of what the quote and prepare commands left of the
+ * quote's. Only those 32 bytes are new; every instruction, account, privilege, lookup table and program authority must
+ * be the quoted one. After the prompt only the lifetime reserve, the local owner re-check, the marker, the signature and
+ * the one send remain.
  */
 export declare function proveJupiterV1Preconsent(rpc: SolanaRpc, clock: ClockPort, op: SwapOperationRecord, materialValue: unknown): Promise<JupiterV1PreconsentProof>;
 export interface JupiterV1ExecutionDependencies {

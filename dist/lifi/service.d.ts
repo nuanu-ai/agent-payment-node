@@ -149,6 +149,7 @@ export declare class BridgeService {
         mainnet_acceptance: string;
     }>;
     routes(profile: string, request: BridgeIntent["materialization"]["request"]): Promise<{
+        no_route?: import("./no-route.js").BridgeNoRouteEvidence;
         quote_hash: string;
         profile: string;
         request: import("./model.js").BridgeRouteRequest;
