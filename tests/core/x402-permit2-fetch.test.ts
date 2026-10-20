@@ -116,6 +116,10 @@ for (const [label, change, reason] of [
   change(fixture);
   const refused = await fixture.core.execute(request(BASE_USDC));
   assert.equal(refused.error?.details?.reason, reason, JSON.stringify(refused));
+  // A short allowance names the owner's foreground command for exactly this chain and token.
+  if (reason === "x402_permit2_allowance_required") {
+    assert.match(refused.next_actions[0] ?? "", new RegExp(`^apn x402 permit2 allowance set --profile default --chain eip155:8453 --asset ${BASE_USDC.token} `, "u"));
+  }
   assert.equal(fixture.nativeCalls.some((call) => call.operation.startsWith("x402")), false);
 });
 

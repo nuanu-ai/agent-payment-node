@@ -33,6 +33,11 @@ declare const recordSchema: z.ZodObject<{
         maxAmountAtomic: z.ZodString;
         computeUnitLimit: z.ZodNumber;
         computeUnitPriceMicroLamports: z.ZodString;
+        memo: z.ZodString;
+        memoSource: z.ZodEnum<{
+            nonce: "nonce";
+            seller: "seller";
+        }>;
         admission: z.ZodObject<{
             policyDigest: z.ZodString;
             policyRevision: z.ZodNumber;
@@ -40,6 +45,11 @@ declare const recordSchema: z.ZodObject<{
             activationDigest: z.ZodString;
             maximumPerTransferAtomic: z.ZodString;
             dailyLimitAtomic: z.ZodString;
+        }, z.core.$strict>;
+        policy: z.ZodObject<{
+            integrityHash: z.ZodString;
+            maxBalanceAtomic: z.ZodString;
+            maxX402AmountAtomic: z.ZodString;
         }, z.core.$strict>;
         preparedAt: z.ZodString;
         expiresAt: z.ZodString;

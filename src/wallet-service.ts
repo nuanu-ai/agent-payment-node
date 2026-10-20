@@ -21,6 +21,7 @@ import type { WalletRecord } from "./model.js";
 import type { Address } from "./model.js";
 import { assertLocalNetworkProfile, networkPolicyBinding, x402Asset, type X402Asset } from "./x402-network.js";
 import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
+import { solanaPolicyBinding } from "./x402-solana/policy.js";
 import { evmAddressLock } from "./evm-address-ownership.js";
 
 export class WalletService {
@@ -198,12 +199,16 @@ export class WalletService {
     });
   }
 
-  async policyShow(profileInput: string, chainId?: number, asset?: Address): Promise<unknown> {
+  async policyShow(profileInput: string, chainId?: number, asset?: Address, solanaMint?: string): Promise<unknown> {
     const profile = canonicalProfile(profileInput);
     const selected = selectedPolicyAsset(chainId, asset);
     await this.context.ready();
     const profileHash = this.context.state.profileHash(profile);
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
+      if (solanaMint !== undefined) {
+        const binding = await solanaPolicyBinding(this.context.chainAccounts, profile, solanaMint);
+        return publicProfilePolicy(profile, await this.context.requirePolicy().load(binding), { mint: solanaMint });
+      }
       await assertLocalNetworkProfile(this.context, profile, selected ?? 8453);
       const binding = networkPolicyBinding(await this.policyBindingForProfile(profileHash), selected);
       return publicProfilePolicy(profile, await this.context.requirePolicy().load(binding), selected);
@@ -218,15 +223,16 @@ export class WalletService {
     await this.context.ready();
     const profileHash = this.context.state.profileHash(profile);
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
-      await assertLocalNetworkProfile(this.context, profile, selected ?? 8453);
-      const binding = networkPolicyBinding(await this.policyBindingForProfile(profileHash), selected);
+      if (request.solanaMint === undefined) await assertLocalNetworkProfile(this.context, profile, selected ?? 8453);
+      const binding = request.solanaMint !== undefined ? await solanaPolicyBinding(this.context.chainAccounts, profile, request.solanaMint)
+        : networkPolicyBinding(await this.policyBindingForProfile(profileHash), selected);
       const policy = await this.context.requirePolicy().set(binding, {
         maxBalanceUsdcAtomic: request.maxBalanceUsdcAtomic,
         maxX402AmountAtomic: request.maxX402AmountAtomic,
         ...(request.maxBalanceEthWei === undefined ? {} : { maxBalanceEthWei: request.maxBalanceEthWei }),
         ...(request.x402Payees === undefined ? {} : { x402Payees: request.x402Payees }),
       });
-      return publicProfilePolicy(profile, policy, selected);
+      return publicProfilePolicy(profile, policy, request.solanaMint !== undefined ? { mint: request.solanaMint } : selected);
     });
   }
 

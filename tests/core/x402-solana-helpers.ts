@@ -1,7 +1,10 @@
 import { address, createKeyPairSignerFromPrivateKeyBytes, getBase58Decoder, getBase64EncodedWireTransaction, getCompiledTransactionMessageDecoder,
   getTransactionDecoder, partiallySignTransaction } from "@solana/kit";
 import { getMintEncoder, getTokenEncoder, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
+import type { TestContext } from "node:test";
 import { sha256 } from "../../src/canonical.js";
+import type { OutputEnvelope } from "../../src/commands.js";
+import { temporaryState } from "./helpers.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
 import { SOLANA_GENESIS, SOLANA_USDC } from "../../src/chain-policy.js";
 import { associatedToken } from "../../src/solana/accounts.js";
@@ -33,7 +36,7 @@ export class X402SolanaTestRpc implements SolanaRpcPort {
   payer = ""; source = ""; destination = "";
   mintOwner: string = TOKEN_PROGRAM_ADDRESS; decimals = 6; balance = 50_000_000n; destinationExists = true;
   heights: Record<"confirmed" | "finalized", bigint> = { confirmed: 900n, finalized: 880n };
-  contextSlot = 5_000n; blockhash = base58(Buffer.alloc(32, 5));
+  contextSlot = 5_000n; blockhash = base58(Buffer.alloc(32, 5)); simulateError: unknown = null;
   index: { signature: string; slot: bigint }[] = [{ signature: OLD_SIGNATURE, slot: 4_000n }];
   landed: { readonly signature: string; readonly slot: bigint; readonly wire: string; readonly success: boolean } | null = null;
   async bind(payer: string): Promise<void> {
@@ -61,7 +64,7 @@ export class X402SolanaTestRpc implements SolanaRpcPort {
       case "getLatestBlockhash": return { context: { slot: this.contextSlot },
         value: { blockhash: this.blockhash, lastValidBlockHeight: this.heights[commitment] + 150n } };
       case "getMultipleAccounts": return { context: { slot: this.contextSlot }, value: (params[0] as string[]).map((key) => this.account(key)) };
-      case "simulateTransaction": return { context: { slot: this.contextSlot }, value: { err: null, unitsConsumed: 6_000n, logs: [] } };
+      case "simulateTransaction": return { context: { slot: this.contextSlot }, value: { err: this.simulateError, unitsConsumed: 6_000n, logs: [] } };
       case "getSignaturesForAddress": return this.index.map((entry) => ({ signature: entry.signature, slot: entry.slot, err: null, memo: null,
         blockTime: 1_760_000_000n, confirmationStatus: "finalized" }));
       case "getSignatureStatuses": {
@@ -122,17 +125,16 @@ export async function solanaX402Fixture(root: string) {
   } });
   const rpc = new X402SolanaTestRpc(); await rpc.bind(account.address);
   const seller = new SolanaSeller(rpc); seller.offers = [solanaOffer(await feePayerAddress())];
-  const screens: string[] = [];
-  let refuse = false;
-  const tty = { isTerminal: () => true, openTerminal: async () => {
-    let phrase = "";
-    return { fd: 1, write: async (text: string) => { screens.push(text); phrase = /Type ([a-f0-9]{6})/u.exec(text)?.[1] ?? phrase; },
-      read: async function* () { yield Buffer.from(`${refuse ? "000000" : phrase}\n`); }, close: async () => {} };
-  } };
+  const policyApprovals: unknown[] = [];
   const options = { stateRoot: root, chainAccounts: accounts, http: seller, solanaRpcUrl: "https://solana.example", x402SolanaRpc: rpc,
-    x402SolanaTtyOptions: tty, clock: { now: () => new Date() } };
-  return { accounts, payer: account.address, rpc, seller, options, screens, refuseConsent: () => { refuse = true; } };
+    wrappingSecret: new SolanaWrapping(), policyApproval: { approve: async (intent: unknown) => { policyApprovals.push(intent); } },
+    clock: { now: () => new Date() } };
+  return { accounts, payer: account.address, rpc, seller, options, policyApprovals };
 }
+
+/** The owner's Solana x402 policy for the USDC mint, through the same `wallet policy set` command as EVM. */
+export const solanaPolicyArgs = (balance = "60000000", perPayment = "50000") => ["wallet", "policy", "set", "--profile", "default",
+  "--chain", X402_SOLANA_NETWORK, "--asset", SOLANA_USDC, "--max-balance-usdc-atomic", balance, "--max-x402-amount-atomic", perPayment];
 
 export async function admitSolanaX402(root: string, payer: string, input: { readonly maximumPerTransferAtomic?: string; readonly dailyLimitAtomic?: string;
   readonly mechanism?: { readonly provider: string; readonly reference: string }; readonly recipients?: readonly string[] } = {}): Promise<void> {
@@ -140,6 +142,17 @@ export async function admitSolanaX402(root: string, payer: string, input: { read
     rail: "x402", maximumPerTransferAtomic: input.maximumPerTransferAtomic ?? "1000000", dailyLimitAtomic: input.dailyLimitAtomic ?? "5000000",
     mechanism: input.mechanism ?? X402_SOLANA_MECHANISM,
     ...(input.recipients === undefined ? {} : { recipients: input.recipients }) } as never] });
+}
+
+/** A local Solana wallet, its owner's allowlist x402 row for USDC and its Solana x402 policy (balance and per-payment caps). */
+export async function readySolanaFixture(context: TestContext, runCli: (argv: readonly string[], env: NodeJS.ProcessEnv, options: never) => Promise<OutputEnvelope>,
+  policy: readonly string[] = solanaPolicyArgs()) {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const fixture = await solanaX402Fixture(temporary.root);
+  await admitSolanaX402(temporary.root, fixture.payer);
+  const set = await runCli(policy, {}, fixture.options as never);
+  if (!set.ok) throw new Error(`Solana policy set failed: ${JSON.stringify(set)}`);
+  return { ...fixture, root: temporary.root };
 }
 
 export const PAY_ARGS = ["x402", "solana", "pay", "--profile", "default", "--url", X402_URL, "--asset", SOLANA_USDC, "--max-amount", "20000"];
@@ -162,9 +175,29 @@ export async function preparedSolanaRecord(root: string): Promise<string> {
       offerHash: domainHash("apn.x402.offer.v1", canonicalJson(offer)), network: X402_SOLANA_NETWORK, chain: X402_SOLANA_ALLOWLIST_CHAIN,
       payer, mint: SOLANA_USDC, symbol: "USDC", decimals: 6, sourceTokenAccount: await associatedToken(payer, SOLANA_USDC), payee: SOL_PAYEE,
       destinationTokenAccount: await associatedToken(SOL_PAYEE, SOLANA_USDC), feePayer: await feePayerAddress(), amountAtomic: "10000",
-      maxAmountAtomic: "20000", computeUnitLimit: 20_000, computeUnitPriceMicroLamports: "1",
+      maxAmountAtomic: "20000", computeUnitLimit: 20_000, computeUnitPriceMicroLamports: "1", memo: "a".repeat(32), memoSource: "nonce",
+      policy: { integrityHash: sha256("solana-policy"), maxBalanceAtomic: "60000000", maxX402AmountAtomic: "50000" },
       admission: { policyDigest: sha256("policy"), policyRevision: 1, registryVersion: "test.1", activationDigest: sha256("activation"),
         maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "5000000" },
       preparedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 240_000).toISOString() } })));
+  return operationId;
+}
+
+/** A prepared Permit2 allowance written straight to its store, for the generic operation commands. */
+export async function preparedAllowanceRecord(root: string): Promise<string> {
+  const { canonicalJson, domainHash } = await import("../../src/canonical.js");
+  const { newPermit2Allowance } = await import("../../src/x402-permit2/allowance/model.js");
+  const { Permit2AllowanceRepository } = await import("../../src/x402-permit2/allowance/repository.js");
+  const { PERMIT2_ADDRESS } = await import("../../src/x402-permit2/registry.js");
+  const records = new Permit2AllowanceRepository(root), profileHash = records.profileHash("default"), now = new Date(Math.floor(Date.now() / 1000) * 1000);
+  const operationId = domainHash("apn.x402-permit2-allowance.operation-id.v1", canonicalJson({ profileHash, key: "generic-0001" }));
+  await records.ready();
+  await records.withLocks([`operation:${operationId}`], async () => await records.persistLocked(newPermit2Allowance({ operationId, profile: "default", profileHash,
+    idempotencyHash: sha256("allowance-idempotency"), requestHash: sha256("allowance-request"), terms: { action: "set", chainId: 8453, proofTag: "safe",
+      token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", owner: "0x1111111111111111111111111111111111111111", spender: PERMIT2_ADDRESS,
+      amountAtomic: "5000000", priorAllowanceAtomic: "0", admission: { source: "profile_x402_policy", boundAtomic: "100000000", digest: sha256("policy") },
+      nonce: "7", gasLimit: "80000", maxFeePerGasWei: "2000000000", maxPriorityFeePerGasWei: "1000000", maxNativeDebitWei: "160000000000000",
+      era: { number: "1000", hash: `0x${"a".repeat(64)}` }, rpcOrigin: "https://rpc.example", preparedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 240_000).toISOString() } })));
   return operationId;
 }

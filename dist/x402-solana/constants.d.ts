@@ -1,7 +1,8 @@
 /**
  * x402 `exact` on Solana mainnet (SPL). The seller's facilitator is the fee payer; APN signs only as the token owner of
- * one classic SPL `TransferChecked` to the payee's associated token account, preceded by the two compute budget
- * instructions and nothing else. Token-2022 mints, memo-bound offers and create-account instructions are refused.
+ * the two compute budget instructions, one classic SPL `TransferChecked` to the payee's associated token account and
+ * one Memo (the seller's `extra.memo`, else a random nonce), as the x402 SVM spec requires. Token-2022 mints, native SOL
+ * offers and create-account instructions are refused.
  */
 export declare const X402_SOLANA_SCHEMA: "apn.x402-solana-operation.v1";
 /** The CAIP-2 identity x402 uses for Solana mainnet: the first 32 characters of the genesis hash. */
@@ -14,6 +15,12 @@ export declare const X402_SOLANA_MECHANISM: {
     readonly reference: import("@solana/addresses").Address<"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA">;
 };
 export declare const COMPUTE_BUDGET_PROGRAM = "ComputeBudget111111111111111111111111111111";
+/** SPL Memo v2, the program the x402 reference client uses (no accounts, the memo's UTF-8 bytes as data). */
+export declare const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+export declare const X402_SOLANA_MAX_MEMO_BYTES = 256;
+/** The spec's nonce when the seller declares no memo: 16 random bytes, hex-encoded (as the reference client does). */
+export declare const X402_SOLANA_NONCE_BYTES = 16;
+export declare const WRAPPED_SOL_MINT = "So11111111111111111111111111111111111111112";
 /**
  * The x402 reference client's compute budget (`@x402/svm` DEFAULT_COMPUTE_UNIT_LIMIT and
  * DEFAULT_COMPUTE_UNIT_PRICE_MICROLAMPORTS). The facilitator pays the fee; each record freezes the values it signed.

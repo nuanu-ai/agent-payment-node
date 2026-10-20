@@ -10,6 +10,7 @@ export function publicX402Solana(record, pending = null) {
         payee: t.payee, payee_token_account: t.destinationTokenAccount, fee_payer: t.feePayer,
         amount_atomic: t.amountAtomic, amount_decimal: chainDecimal(t.amountAtomic, t.decimals), max_amount_atomic: t.maxAmountAtomic,
         compute_unit_limit: t.computeUnitLimit, compute_unit_price_micro_lamports: t.computeUnitPriceMicroLamports,
+        memo: t.memo, memo_source: t.memoSource,
         resource: { origin: t.origin, url_hash: t.urlHash, challenge_hash: t.challengeHash, offer_index: t.offerIndex, offer_hash: t.offerHash },
         owner_admission: { policy_digest: t.admission.policyDigest, policy_revision: t.admission.policyRevision, mechanism: X402_SOLANA_MECHANISM,
             maximum_per_transfer_atomic: t.admission.maximumPerTransferAtomic, daily_limit_atomic: t.admission.dailyLimitAtomic },

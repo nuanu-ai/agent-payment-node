@@ -27,6 +27,9 @@ export type CommandRequest =
   | { readonly command: "x402.permit2.status"; readonly profile: string; readonly operationId: string }
   | { readonly command: "x402.solana.pay"; readonly profile: string; readonly url: string; readonly mint: string; readonly maxAmountAtomic: string; readonly idempotencyKey: string }
   | { readonly command: "x402.solana.observe" | "x402.solana.status"; readonly operationId: string }
+  | { readonly command: "x402.permit2.allowance.set" | "x402.permit2.allowance.revoke"; readonly profile: string; readonly chainId: number; readonly token: Address;
+      readonly amountAtomic: string; readonly maxGasLimit: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string; readonly idempotencyKey: string }
+  | { readonly command: "x402.permit2.allowance.observe" | "x402.permit2.allowance.status"; readonly operationId: string }
   | { readonly command: "relay.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.base.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.arbitrum.prepare"; readonly profile: string; readonly owner: string; readonly recipient: string; readonly amountAtomic: string;
@@ -152,7 +155,7 @@ export type CommandRequest =
   | { readonly command: "wallet.status"; readonly profile: string }
   | { readonly command: "wallet.balance"; readonly profile: string; readonly asset?: EvmAssetSelection }
   | { readonly command: "wallet.portfolio"; readonly profile: string; readonly refresh?: boolean }
-  | { readonly command: "wallet.policy.show"; readonly profile: string; readonly chainId?: number; readonly asset?: Address }
+  | { readonly command: "wallet.policy.show"; readonly profile: string; readonly chainId?: number; readonly asset?: Address; readonly solanaMint?: string }
   | {
     readonly command: "wallet.policy.set";
     /** Omitted keeps the current x402 payee pin; null removes it; a list sets it. */
@@ -160,6 +163,8 @@ export type CommandRequest =
     readonly chainId?: number;
     /** The x402 token the policy admits; omitted means the released USDC of the chain (Base, Ethereum, Arbitrum). */
     readonly asset?: Address;
+    /** Solana x402 (`--chain solana:5eykt4…`): the SPL mint whose balance and per-request caps this policy sets. */
+    readonly solanaMint?: string;
     readonly profile: string;
     readonly maxBalanceUsdcAtomic: string;
     readonly maxX402AmountAtomic: string;

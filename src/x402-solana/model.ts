@@ -39,8 +39,11 @@ const termsSchema = z.strictObject({
   payer: solana, mint: solana, symbol: z.string().max(16), decimals: z.number().int().min(0).max(255), sourceTokenAccount: solana,
   payee: solana, destinationTokenAccount: solana, feePayer: solana, amountAtomic: positive, maxAmountAtomic: positive,
   computeUnitLimit: z.number().int().min(1).max(1_400_000), computeUnitPriceMicroLamports: atomic,
+  memo: z.string().min(1).refine((value) => Buffer.byteLength(value, "utf8") <= 256 && Buffer.from(value, "utf8").toString("utf8") === value),
+  memoSource: z.enum(["seller", "nonce"]),
   admission: z.strictObject({ policyDigest: hash, policyRevision: z.number().int().positive(), registryVersion: z.string().max(64),
     activationDigest: hash, maximumPerTransferAtomic: positive, dailyLimitAtomic: positive }),
+  policy: z.strictObject({ integrityHash: hash, maxBalanceAtomic: positive, maxX402AmountAtomic: positive }),
   preparedAt: iso, expiresAt: iso,
 });
 const lifetimeSchema = z.strictObject({ blockhash: solana, lastValidBlockHeight: atomic, floorSlot: atomic, observedBlockHeight: atomic,

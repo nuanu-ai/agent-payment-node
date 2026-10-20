@@ -10,6 +10,8 @@ export interface X402SolanaMessageTerms {
     readonly amountAtomic: string;
     readonly computeUnitLimit: number;
     readonly computeUnitPriceMicroLamports: string;
+    /** The Memo instruction's UTF-8 text: the seller's `extra.memo`, else the payment's random hex nonce. */
+    readonly memo: string;
 }
 export interface X402SolanaLifetime {
     readonly blockhash: string;
@@ -27,9 +29,9 @@ export declare function x402SolanaMessage(terms: X402SolanaMessageTerms, lifetim
 };
 /**
  * Checked before anything is signed, independently of how the bytes were built: a v0 message without lookup tables, the
- * fee payer first and the payer second as the only signers, exactly SetComputeUnitLimit, SetComputeUnitPrice and one
- * classic SPL TransferChecked of the frozen amount and decimals from the payer's account to the payee's, and the fee
- * payer in no instruction at all.
+ * fee payer first and the payer second as the only signers, exactly SetComputeUnitLimit, SetComputeUnitPrice, one
+ * classic SPL TransferChecked of the frozen amount and decimals from the payer's account to the payee's and one Memo of
+ * the frozen text without accounts, and the fee payer in no instruction at all.
  */
 export declare function assertExactMessage(messageBytes: Parameters<ReturnType<typeof getCompiledTransactionMessageDecoder>["decode"]>[0], terms: X402SolanaMessageTerms, lifetime: X402SolanaLifetime): void;
 /** The partially signed wire bytes: this message, the payer's verified signature, and an empty fee payer slot. */

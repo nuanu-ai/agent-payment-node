@@ -1,6 +1,7 @@
 import { getAddress } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "./canonical.js";
-import { releasedX402Pair, validPolicyNetwork, type X402Asset, type X402PolicyNetwork } from "./x402-network.js";
+import { releasedX402Pair, solanaAccount, validPolicyNetwork, validSolanaPolicyNetwork, X402_SOLANA_POLICY_NETWORK, type X402Asset, type X402PolicyNetwork,
+  type X402SolanaPolicyNetwork } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 import type { Address, WalletRecord } from "./model.js";
@@ -12,6 +13,11 @@ const HASH = /^[a-f0-9]{64}$/u;
 
 export interface ProfilePolicyBinding {
   readonly x402Network?: X402PolicyNetwork;
+  /**
+   * Solana x402 for one SPL mint (never beside `x402Network`). `walletAddress` and `walletBindingHash` are then the
+   * profile's local Solana account and its identity hash; the payee pin lives in the owner's allowlist row instead.
+   */
+  readonly x402Solana?: X402SolanaPolicyNetwork;
   readonly profile: string;
   readonly profileHash: string;
   readonly walletAddress: Address;
@@ -141,13 +147,13 @@ export function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBin
     "schemaVersion", "profile", "profileHash", "walletAddress", "walletBindingHash",
     "maxBalanceUsdcAtomic", "maxX402AmountAtomic", "approvedAt", "updatedAt", "integrityHash",
   ];
-  const allowed = [...required, "maxBalanceEthWei", "x402Network", "x402Payees"];
+  const allowed = [...required, "maxBalanceEthWei", "x402Network", "x402Payees", "x402Solana"];
   if (required.some((key) => !(key in value)) || Object.keys(value).some((key) => !allowed.includes(key))) {
     corrupt("Profile policy has an unexpected schema.");
   }
   const policy = value as unknown as ProfilePolicyRecord;
   if (
-    policy.schemaVersion !== PROFILE_POLICY_VERSION || !validPolicyNetwork(policy.x402Network) ||
+    policy.schemaVersion !== PROFILE_POLICY_VERSION || !validPolicyNetwork(policy.x402Network) || !validSolanaPolicyBinding(policy) ||
     typeof policy.profile !== "string" || typeof policy.profileHash !== "string" || !HASH.test(policy.profileHash) ||
     typeof policy.walletAddress !== "string" || typeof policy.walletBindingHash !== "string" || !HASH.test(policy.walletBindingHash) ||
     typeof policy.approvedAt !== "string" || !canonicalTimestamp(policy.approvedAt) ||
@@ -172,14 +178,23 @@ export function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBin
   if (binding !== undefined && (
     policy.profile !== binding.profile || policy.profileHash !== binding.profileHash ||
     policy.walletAddress !== binding.walletAddress || policy.walletBindingHash !== binding.walletBindingHash ||
-    canonicalJson(policy.x402Network ?? null) !== canonicalJson(binding.x402Network ?? null)
+    canonicalJson(policy.x402Network ?? null) !== canonicalJson(binding.x402Network ?? null) ||
+    canonicalJson(policy.x402Solana ?? null) !== canonicalJson(binding.x402Solana ?? null)
   )) corrupt("Profile policy does not bind the current wallet identity.");
   return policy;
 }
 
 /** `asset` is the network and token the caller named; omitted for the original Base USDC spelling. */
-export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, asset?: X402Asset): unknown {
-  const selected = asset === undefined ? {} : { chain: asset.network, token: asset.token };
+/** A Solana binding names one canonical mint and a Solana wallet, and carries neither an ETH cap nor an EVM payee pin. */
+function validSolanaPolicyBinding(policy: ProfilePolicyRecord): boolean {
+  if (policy.x402Solana === undefined) return true;
+  return policy.x402Network === undefined && validSolanaPolicyNetwork(policy.x402Solana) && solanaAccount(policy.walletAddress) &&
+    policy.maxBalanceEthWei === undefined && policy.x402Payees === undefined;
+}
+
+export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, asset?: X402Asset | X402SolanaPolicyNetwork): unknown {
+  const solana = asset !== undefined && "mint" in asset;
+  const selected = asset === undefined ? {} : "mint" in asset ? { chain: X402_SOLANA_POLICY_NETWORK, token: asset.mint } : { chain: asset.network, token: asset.token };
   if (policy === null) {
     return {
       configured: false,
@@ -197,7 +212,8 @@ export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord
       integrity_status: "not_present",
       proof_class: "encrypted_profile_policy_status",
       // The one manifest v2 command that sets this policy, for the profile, network and token just shown; the owner picks the limits.
-      next_actions: [`apn wallet policy set --profile ${profile}${asset === undefined ? "" : ` --chain ${asset.network}${
+      next_actions: [`apn wallet policy set --profile ${profile}${asset === undefined ? "" : "mint" in asset
+        ? ` --chain ${X402_SOLANA_POLICY_NETWORK} --asset ${asset.mint}` : ` --chain ${asset.network}${
         releasedX402Pair(asset.chainId, asset.token) ? "" : ` --asset ${asset.token}`}`} ` +
         "--max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>"],
     };
@@ -212,7 +228,7 @@ export function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord
       max_x402_amount_atomic: policy.maxX402AmountAtomic,
       max_balance_eth_wei: policy.maxBalanceEthWei ?? null,
     },
-    x402_payees: policy.x402Payees ?? null,
+    x402_payees: solana ? "allowlist_x402_recipients" : policy.x402Payees ?? null,
     approved_at: policy.approvedAt,
     updated_at: policy.updatedAt,
     integrity_status: "authenticated",

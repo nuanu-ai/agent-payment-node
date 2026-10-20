@@ -115,7 +115,7 @@ export class X402Service extends X402PaidRequest {
       const chain = await assertX402RpcChain(rpc, network.chainId);
       // The authorization nonce is drawn first: prepare proves it reads unused (EIP-3009 state or Permit2 nonce bit).
       const nonce = `0x${randomBytes(32).toString("hex")}` as `0x${string}`;
-      const evidence = await readAndSelectX402Offer({ rpc, rpcOrigin: chain.rpcOrigin, discovered, underCap, wallet, asset: network,
+      const evidence = await readAndSelectX402Offer({ profile, rpc, rpcOrigin: chain.rpcOrigin, discovered, underCap, wallet, asset: network,
         transferMethod: payer.transferMethod, permit2Signer: payer.providerSigner === undefined && payer.delegated === undefined, nonce,
         startedAtMs: invocationStartedAtMs, nowMs: () => this.context.clock.now().getTime() });
       const selected = evidence.selected;

@@ -11,7 +11,7 @@ export declare class WalletService {
     status(profileInput: string): Promise<unknown>;
     private initializedStatus;
     balance(profileInput: string): Promise<unknown>;
-    policyShow(profileInput: string, chainId?: number, asset?: Address): Promise<unknown>;
+    policyShow(profileInput: string, chainId?: number, asset?: Address, solanaMint?: string): Promise<unknown>;
     policySet(request: Extract<CommandRequest, {
         readonly command: "wallet.policy.set";
     }>): Promise<unknown>;

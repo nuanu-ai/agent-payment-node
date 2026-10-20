@@ -99,6 +99,10 @@ export class ApnCore {
             case "x402.solana.pay":
             case "x402.solana.observe":
             case "x402.solana.status":
+            case "x402.permit2.allowance.set":
+            case "x402.permit2.allowance.revoke":
+            case "x402.permit2.allowance.observe":
+            case "x402.permit2.allowance.status":
                 throw new ApnError("APN_UNSUPPORTED_COMMAND", "This provider command requires its dedicated bounded CLI path.");
             case "x402.permit2.status":
                 return dataOutcome(await readPermit2ProductionStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_operation_status");
@@ -423,7 +427,7 @@ export class ApnCore {
             case "wallet.balance": return dataOutcome(request.asset === undefined ? await this.providerWallet.balance(request.profile) ?? await this.wallet.balance(request.profile) :
                 await evmWalletBalance(this.context, request.profile, request.asset), "chain_verified_public_read");
             case "wallet.portfolio": return dataOutcome(await readProfilePortfolio(this.context, request.profile, request.refresh), "chain_verified_public_read");
-            case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId, request.asset), "encrypted_profile_policy_status");
+            case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId, request.asset, request.solanaMint), "encrypted_profile_policy_status");
             case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
             case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, x402Asset(request.chainId ?? 8453, request.asset), request.payer), "seller_challenge_static");
             case "x402.fetch.prepare": {

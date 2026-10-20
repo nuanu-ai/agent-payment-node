@@ -3,6 +3,7 @@ import { CIRCLE_EVM_COMMANDS, CIRCLE_EVM_GROUPS } from "./circle-v2-evm/command-
 import { MERCHANT_COMMANDS } from "./x402-merchant/command-catalog.js";
 import { PERMIT2_COMMANDS } from "./x402-permit2/command-catalog.js";
 import { X402_SOLANA_COMMAND_GROUPS, X402_SOLANA_COMMANDS } from "./x402-solana/command-catalog.js";
+import { PERMIT2_ALLOWANCE_COMMANDS, PERMIT2_ALLOWANCE_GROUPS } from "./x402-permit2/allowance/catalog.js";
 import { RELAY_COMMANDS, RELAY_COMMAND_GROUPS } from "./relay/command-catalog.js";
 import { command, option } from "./command-catalog-builders.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
@@ -70,6 +71,11 @@ const chainOptional = option("--chain", "string", false, noDefault, ["eip155_cai
 /** The x402 token; the owner admits each chain+token pair in its own policy, and prepare proves its EIP-3009 identity on chain. */
 const assetOptional = option("--asset", "address", false, noDefault, ["exact_erc20_contract_address", "admitted_by_owner_x402_policy_for_this_chain",
     "omitted_means_usdc_on_eip155:8453_eip155:1_eip155:42161_only"], "operator_input");
+/** Wallet policy also names Solana x402 for one SPL mint (`--chain solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp --asset <mint>`). */
+const policyChainOptional = option("--chain", "string", false, noDefault, ["eip155_caip2_of_any_evm_chain_or_solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+    "rpc_chain_id_must_match", "omitted_means_eip155:8453"], "operator_input");
+const policyAssetOptional = option("--asset", "string", false, noDefault, ["exact_erc20_contract_address_or_solana_spl_mint",
+    "admitted_by_owner_x402_policy_for_this_chain", "omitted_means_usdc_on_eip155:8453_eip155:1_eip155:42161_only", "required_for_solana"], "operator_input");
 const httpOptions = [
     option("--method", "string", false, noDefault, ["http_token_except_connect_and_trace", "default_GET"], "operator_input"),
     option("--headers-json", "string", false, noDefault, ["bounded_safe_header_object", "no_credentials_or_payment_headers"], "operator_input"),
@@ -106,6 +112,7 @@ export const COMMAND_GROUPS = [
     { path: ["x402", "merchant"], summary: "x402 ERC-20 transfer-proof merchant payment and delivery.", kind: "group" },
     { path: ["x402", "permit2"], summary: "Read owner admission and intents, approve one foreground Permit2 GET and observe chain evidence.", kind: "group" },
     ...X402_SOLANA_COMMAND_GROUPS,
+    ...PERMIT2_ALLOWANCE_GROUPS,
     { path: ["x402", "fetch"], summary: "Prepare and authorize a durable x402 fetch.", kind: "group" },
     { path: ["pay"], summary: "Prepare and submit direct payments.", kind: "group" },
     { path: ["pay", "transfer"], summary: "Prepare and submit Base-USDC transfers.", kind: "group" },
@@ -115,6 +122,7 @@ export const COMMAND_GROUPS = [
 const BASE_COMMANDS = [
     ...PERMIT2_COMMANDS,
     ...X402_SOLANA_COMMANDS,
+    ...PERMIT2_ALLOWANCE_COMMANDS,
     ...MERCHANT_COMMANDS,
     ...RELAY_COMMANDS,
     command(["stargate", "native", "prepare"], "apn stargate native prepare --profile <profile> --amount-atomic <wei> --max-native-debit-atomic <wei> --idempotency-key <key>", "Freeze a fresh quote and exact Ethereum Stargate sendToken envelope.", [profileRequired, option("--amount-atomic", "wei", true, noDefault, ["positive_integer", "dust_free_quote_amount"], "operator_input"), option("--max-native-debit-atomic", "wei", true, noDefault, ["positive_integer"], "operator_input"), option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_128_safe_ascii_characters"], "operator_input")], "payment_prepare", "Reads both chains and writes a crash-durable unsigned operation.", "none", "Never.", { terminal: [], non_terminal: ["prepared"] }, [{ command_path: ["stargate", "native", "execute"], when: "After reviewing the frozen operation." }], ["apn stargate native prepare --profile owner --amount-atomic 10000000000000000 --max-native-debit-atomic 12000000000000000 --idempotency-key eth-unichain-0001"]),
@@ -179,11 +187,11 @@ const BASE_COMMANDS = [
     command(["wallet", "metamask", "native-transfer-status"], "apn wallet metamask native-transfer-status --operation <id>", "Read the durable native transfer journal.", [operationRequired], "local_read", "Reads public journal without private wallet action.", "none", "Never.", completedStates, [], ["apn wallet metamask native-transfer-status --operation <operation-id>"]),
     command(["wallet", "metamask", "native-transfer-observe"], "apn wallet metamask native-transfer-observe --operation <id>", "Observe stored exact transaction and settle actual full native fees.", [operationRequired], "network_read", "Public canonical RPC observation of the saved quote; never sends again.", "none", "Never.", completedStates, [], ["apn wallet metamask native-transfer-observe --operation <operation-id>"]),
     command(["wallet", "status"], "apn wallet status [--profile <profile>]", "Read wallet presence and public identity.", [profileOptional], "local_read", "Returns absent without creating state or accessing Keychain material.", "none", "Never.", completedStates, [], ["apn wallet status --profile default"]),
-    command(["wallet", "policy", "show"], "apn wallet policy show --profile <profile> [--chain <caip2>] [--asset <token>]", "Read the encrypted owner-approved profile policy.", [profileRequired, chainOptional, assetOptional], "local_read", "Reads wallet-bound policy state.", "none", "Never.", completedStates, [], ["apn wallet policy show --profile default", "apn wallet policy show --profile default --chain eip155:1"]),
+    command(["wallet", "policy", "show"], "apn wallet policy show --profile <profile> [--chain <caip2>] [--asset <token>]", "Read the encrypted owner-approved profile policy.", [profileRequired, policyChainOptional, policyAssetOptional], "local_read", "Reads wallet-bound policy state.", "none", "Never.", completedStates, [], ["apn wallet policy show --profile default", "apn wallet policy show --profile default --chain eip155:1"]),
     command(["wallet", "policy", "set"], "apn wallet policy set --profile <profile> [--chain <caip2>] [--asset <token>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]", "Create, lower or raise owner-approved balance and x402 limits.", [
         profileRequired,
-        chainOptional,
-        assetOptional,
+        policyChainOptional,
+        policyAssetOptional,
         option("--max-balance-usdc-atomic", "atomic_usdc", true, noDefault, ["positive_canonical_integer"], "operator_input"),
         option("--max-x402-amount-atomic", "atomic_usdc", true, noDefault, ["positive_canonical_integer", "not_greater_than_max_balance_usdc_atomic"], "operator_input"),
         option("--max-balance-eth-wei", "wei", false, noDefault, ["positive_canonical_integer", "omission_preserves_existing_value"], "operator_input"),

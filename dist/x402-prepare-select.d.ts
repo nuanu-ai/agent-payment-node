@@ -17,6 +17,8 @@ export interface X402PrepareRead {
     readonly decimals?: number;
 }
 export interface X402PrepareReadInput {
+    /** Named in the refusal that asks the owner for an allowance to Permit2. */
+    readonly profile: string;
     readonly rpc: RpcPort;
     readonly rpcOrigin: string;
     readonly discovered: FreshChallenge;

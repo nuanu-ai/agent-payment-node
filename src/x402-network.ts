@@ -1,15 +1,27 @@
 import { getAddress } from "viem";
-import { exactKeys, isPlainRecord } from "./canonical.js";
+import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC } from "./constants.js";
 import { ApnError } from "./errors.js";
 import type { Address } from "./model.js";
 import type { ProfilePolicyBinding } from "./profile-policy.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { address as solanaAddress } from "@solana/kit";
 
 export type X402ChainText = `${number}`;
 export type X402Network = `eip155:${number}`;
 export interface X402PolicyNetwork { readonly chainId: number; readonly token: Address }
+/** The profile x402 policy of Solana x402 for one SPL mint (`wallet policy set --chain solana:5eykt4… --asset <mint>`). */
+export interface X402SolanaPolicyNetwork { readonly mint: string }
+/** x402's CAIP-2 name of Solana mainnet (equal to X402_SOLANA_NETWORK of the Solana x402 family; kept here without its imports). */
+export const X402_SOLANA_POLICY_NETWORK = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" as const;
+export function solanaAccount(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  try { return solanaAddress(value) === value; } catch { return false; }
+}
+export function validSolanaPolicyNetwork(value: unknown): value is X402SolanaPolicyNetwork {
+  return isPlainRecord(value) && exactKeys(value, ["mint"]) && solanaAccount(value.mint);
+}
 /** The block tag every x402 EIP-3009 proof of an operation reads; frozen in the record at prepare. */
 export type X402ProofTag = "safe" | "finalized";
 
@@ -124,6 +136,11 @@ export function networkPolicyBinding(binding: ProfilePolicyBinding, selection: X
 
 export function policyStorageIdentity(binding: ProfilePolicyBinding): string {
   canonicalProfile(binding.profile);
+  if (binding.x402Solana !== undefined) {
+    // Base58 mints differ by case alone, so the file name carries their hash (state files may sit on a case-folding volume).
+    if (binding.x402Network !== undefined || !validSolanaPolicyNetwork(binding.x402Solana)) throw new ApnError("APN_STATE_CORRUPT", "Policy network binding is invalid.");
+    return `~solana~${sha256(`${X402_SOLANA_POLICY_NETWORK}\0${binding.x402Solana.mint}`)}~${binding.profile}`;
+  }
   if (!validPolicyNetwork(binding.x402Network)) throw new ApnError("APN_STATE_CORRUPT", "Policy network binding is invalid.");
   return binding.x402Network === undefined ? binding.profile : `~network~${binding.x402Network.chainId}~${binding.x402Network.token.toLowerCase()}~${binding.profile}`;
 }

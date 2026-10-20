@@ -3,7 +3,7 @@ import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { loadAllowlistInventory } from "./allowlist-inventory.js";
-import { releasedX402Pair } from "./x402-network.js";
+import { releasedX402Pair, X402_SOLANA_POLICY_NETWORK } from "./x402-network.js";
 const POLICY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
 export class TtyProfilePolicyApproval {
@@ -34,13 +34,14 @@ export class TtyProfilePolicyApproval {
                 throw approvalFailure("APN_TTY_UNAVAILABLE", "Profile-policy approval is not attached to a terminal.");
             }
             const phrase = profilePolicyApprovalPhrase(intent.fingerprint);
-            const unit = x402Unit(intent.x402Network);
+            const unit = intent.x402Solana === undefined ? x402Unit(intent.x402Network) : solanaUnit(intent.x402Solana);
             await tty.write([
                 "\nAgent Payment Node policy approval",
                 `Change: ${intent.change}`,
                 `Profile: ${intent.profile}`,
-                intent.x402Network === undefined ? `Chain: Base (${CHAIN_ID})` : `Chain: eip155:${intent.x402Network.chainId}`,
-                `Token: ${intent.x402Network?.token ?? BASE_USDC}${unit.note}`,
+                intent.x402Solana !== undefined ? `Chain: Solana mainnet (${X402_SOLANA_POLICY_NETWORK})`
+                    : intent.x402Network === undefined ? `Chain: Base (${CHAIN_ID})` : `Chain: eip155:${intent.x402Network.chainId}`,
+                intent.x402Solana !== undefined ? `Mint: ${intent.x402Solana.mint}${unit.note}` : `Token: ${intent.x402Network?.token ?? BASE_USDC}${unit.note}`,
                 `Wallet: ${intent.walletAddress}`,
                 `Maximum wallet ${unit.symbol}: ${intent.maxBalanceUsdcAtomic} atomic`,
                 `Maximum unattended x402: ${intent.maxX402AmountAtomic} atomic`,
@@ -68,6 +69,11 @@ function x402Unit(network) {
     const listed = loadAllowlistInventory().assets.find((row) => row.chain === `eip155:${network.chainId}` &&
         row.identifier?.toLowerCase() === network.token.toLowerCase());
     return listed === undefined ? { symbol: "token", note: " (not in APN's token list: verify this contract yourself)" }
+        : { symbol: listed.symbol, note: ` (${listed.symbol}, ${listed.decimals} decimals, APN token list)` };
+}
+function solanaUnit(network) {
+    const listed = loadAllowlistInventory().assets.find((row) => row.chain.startsWith("solana:") && row.identifier === network.mint);
+    return listed === undefined ? { symbol: "token", note: " (not in APN's token list: verify this mint yourself)" }
         : { symbol: listed.symbol, note: ` (${listed.symbol}, ${listed.decimals} decimals, APN token list)` };
 }
 export function profilePolicyApprovalPhrase(fingerprint) {

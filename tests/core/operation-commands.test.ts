@@ -16,7 +16,7 @@ import { installLegacyCase } from "./legacy-corpus-readers.js";
 import { metaMaskNative, NoSecret, unexecutedUsdt, WP2_FAMILY_RECORDS } from "./operation-commands-families.js";
 import { ExactX402Native, QueuedHttp, RecoveryRpc, X402_TEST_ACCOUNT, challengeObservation } from "./x402-helpers.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
-import { preparedSolanaRecord } from "./x402-solana-helpers.js";
+import { preparedAllowanceRecord, preparedSolanaRecord } from "./x402-solana-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_URL, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
 /**
@@ -135,6 +135,9 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
   // Prepared and never exposed: resume observes its open approval window; only an exposed payment can be abandoned.
   x402_solana: async t => { const state = await root(t); return { root: state, id: await preparedSolanaRecord(state), cli: true, status: "ok", resume: "ok",
     abandon: { code: "APN_OPERATION_BLOCKED", reason: "x402_solana_not_exposed", family: true }, receipt: NO_RECEIPT }; },
+  // Prepared and unsigned: observation runs on the family's own command (it needs --rpc-url); the unsigned approve has no abandon.
+  permit2_allowance: async t => { const state = await root(t); return { root: state, id: await preparedAllowanceRecord(state), cli: true, status: "ok",
+    resume: RESUME_BY_FAMILY, abandon: { code: "APN_OPERATION_BLOCKED", reason: "x402_permit2_allowance_unsigned", family: true }, receipt: NO_RECEIPT }; },
 };
 
 function check(result: OutputEnvelope, expected: Answer, id: string, label: string): void {

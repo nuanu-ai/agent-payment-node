@@ -151,7 +151,7 @@ test("the registry covers every money family, each in its own store, and names e
   // The families with an owner exit (R4, last resort) keep it behind the generic abandon (phase 4c added Uniswap token,
   // Stargate token and Circle approval).
   assert.deepEqual(OPERATION_FAMILIES.filter(family => registry.get(family)?.abandon !== undefined && OPERATION_FAMILIES.indexOf(family) >= OPERATION_FAMILIES.indexOf("swap")),
-    ["swap", "uniswap_token", "stargate_token", "circle_approval", "metamask_native", "x402_solana"]);
+    ["swap", "uniswap_token", "stargate_token", "circle_approval", "metamask_native", "x402_solana", "permit2_allowance"]);
 });
 
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();

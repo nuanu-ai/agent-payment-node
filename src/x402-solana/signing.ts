@@ -8,7 +8,7 @@ import type { X402SolanaRecord, X402SolanaTerms } from "./model.js";
 export function x402SolanaMessageTerms(terms: X402SolanaTerms): X402SolanaMessageTerms {
   return { payer: terms.payer, feePayer: terms.feePayer, mint: terms.mint, decimals: terms.decimals, sourceTokenAccount: terms.sourceTokenAccount,
     destinationTokenAccount: terms.destinationTokenAccount, amountAtomic: terms.amountAtomic, computeUnitLimit: terms.computeUnitLimit,
-    computeUnitPriceMicroLamports: terms.computeUnitPriceMicroLamports };
+    computeUnitPriceMicroLamports: terms.computeUnitPriceMicroLamports, memo: terms.memo };
 }
 
 /** The profile's own local Solana account, which must still be the frozen payer. */

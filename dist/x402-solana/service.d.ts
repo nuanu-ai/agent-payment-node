@@ -3,14 +3,15 @@ import type { HttpPort } from "../ports.js";
 import { type SolanaRpcPort } from "../solana/rpc.js";
 import { type X402SolanaRecord } from "./model.js";
 import { X402SolanaRepository } from "./repository.js";
+import type { ProfilePolicyPort } from "../profile-policy.js";
 export interface X402SolanaPorts {
     readonly accounts: ChainWalletStoragePort;
     readonly http: HttpPort;
     /** Built only from an explicit APN_SOLANA_RPC_URL; absent for commands that read nothing from the chain. */
     readonly rpc?: SolanaRpcPort;
     readonly now: () => Date;
-    /** The owner's foreground decision on the exact frozen payment; throws when refused. */
-    readonly consent?: (record: X402SolanaRecord) => Promise<void>;
+    /** The owner's encrypted profile x402 policy store (Solana binding per mint); only read here, never changed. */
+    readonly policy?: ProfilePolicyPort;
 }
 export interface X402SolanaPayRequest {
     readonly profile: string;
@@ -26,6 +27,9 @@ export declare class X402SolanaService {
     constructor(root: string, ports: X402SolanaPorts);
     private now;
     private rpc;
+    private policyPort;
+    /** The owner's policy of this payment's mint, unchanged since prepare (a lowered or replaced policy refuses here). */
+    private currentPolicy;
     private locked;
     private write;
     /** Freeze one admitted payment (or replay the one this key already names); nothing is reserved or signed here. */
