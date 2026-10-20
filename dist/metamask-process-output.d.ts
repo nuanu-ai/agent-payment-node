@@ -21,3 +21,14 @@ export type MetaMaskPendingNotice = {
  */
 export declare function parseMetaMaskProcessOutput(bytes: Buffer): ParsedMetaMaskProcessOutput | null;
 export declare function classifyMetaMaskPendingNotices(notices: readonly Record<string, unknown>[], expectedRecoveryToken?: string): MetaMaskPendingNotice;
+/** What a verified AWAITING_MFA notice tells about the owner's approval: when it lapses and how the owner confirms it. */
+export interface MetaMaskMfaNotice {
+    readonly expiresAt: string | null;
+    readonly authMethod: string | null;
+}
+/**
+ * The owner-facing fields of the last notice of a stream `classifyMetaMaskPendingNotices` found pending. 6.1.5 writes
+ * `{kind, pollingId, expiresAt?, authMethod, message}`; a field that is absent or not in its exact form is null, never
+ * guessed. The provider's free-text message (which may carry a link) is not kept.
+ */
+export declare function metaMaskMfaNotice(notices: readonly Record<string, unknown>[]): MetaMaskMfaNotice;
