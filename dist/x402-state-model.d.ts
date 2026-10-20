@@ -330,6 +330,18 @@ export interface X402ResultRecord {
 }
 /** A seller body that arrives with a success or a pending settlement answer is the purchased result. */
 export declare function deliversX402Result(classification: SettlementResponseObservation["classification"] | undefined): boolean;
+/**
+ * The paid attempt whose body is the operation's result: the attempt the seller's settlement answer came with (only a
+ * success or pending answer delivers), or, when the seller gave no usable answer, the last attempt. The caller still
+ * checks that attempt was observed with a result status and this exact body.
+ */
+export declare function x402ResultAttempt(operation: {
+    readonly settlementResponseObservation?: {
+        readonly classification?: unknown;
+        readonly httpAttemptNumber?: unknown;
+    } | undefined;
+    readonly attempts: readonly X402Attempt[];
+}): X402Attempt | undefined;
 export type X402TerminalState = "completed" | "failed_before_effect" | "failed_expired_unused" | "failed_settled_without_result" | "abandoned_unknown";
 export interface X402ReceiptRecord {
     readonly schemaVersion: "apn.x402.receipt.v1";

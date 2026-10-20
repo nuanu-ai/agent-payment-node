@@ -1,14 +1,17 @@
 import { getAddress, isAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_EXACT_PERMIT2_PROXY_CODE_HASH, X402_PERMIT2_MAX_TIMEOUT_SECONDS, } from "./registry.js";
+import { decimalsRefusal, declaredMethod, evmExtraRefusal, evmOfferMethod, isOfferRefusal, offerRefusal, refusedOffersDetails, timeoutRefusal } from "../x402-offer-terms.js";
+import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_EXACT_PERMIT2_PROXY_CODE_HASH, } from "./registry.js";
 const OFFER_DOMAIN = "apn.x402-permit2.offer.v1";
 const MAX_UINT256 = (1n << 256n) - 1n;
 const ZERO = "0x0000000000000000000000000000000000000000";
+const OFFER_KEYS = ["scheme", "network", "asset", "amount", "payTo", "maxTimeoutSeconds", "extra"];
 /**
  * Select the lowest-index seller offer whose (network, token) `resolve` admits, paid through the exact Permit2 flow.
- * Unsupported offers may coexist; they are skipped, never repaired. An admitted offer with any deviation (unknown
- * field, another transfer method, a token domain hint other than the asset's, unbounded timeout) is not selectable.
+ * Unsupported offers may coexist; they are skipped, never repaired. An admitted offer that APN cannot sign (another
+ * scheme or transfer method, an unknown top-level field, a timeout outside the bound, an `extra` key APN understands
+ * with a wrong value) is refused by the field that decided it.
  */
 export function selectPermit2Offer(accepts, payer, resolve) {
     if (!Array.isArray(accepts) || accepts.length === 0)
@@ -16,7 +19,7 @@ export function selectPermit2Offer(accepts, payer, resolve) {
     const payerAddress = strictAddress(payer);
     if (payerAddress === undefined)
         throw new ApnError("APN_INVALID_INPUT", "The payer must be an exact EVM address.");
-    let listedButInvalid = false;
+    const refused = [];
     for (const [index, offer] of accepts.entries()) {
         if (!isPlainRecord(offer) || typeof offer.network !== "string")
             continue;
@@ -27,12 +30,14 @@ export function selectPermit2Offer(accepts, payer, resolve) {
         if (listAsset === undefined || listAsset.chain !== offer.network || listAsset.token.toLowerCase() !== token.toLowerCase())
             continue;
         const selection = validateOffer(index, offer, listAsset, payerAddress);
-        if (selection !== undefined)
+        if (!isOfferRefusal(selection))
             return selection;
-        listedButInvalid = true;
+        refused.push({ index: index.toString(), network: offer.network, asset: token.toLowerCase(), method: declaredMethod(offer.extra), ...selection });
     }
-    if (listedButInvalid)
-        refuse("x402_permit2_offer_invalid", "The seller's Permit2 offer for an admitted token is not an exact Permit2 offer APN can sign.");
+    if (refused.length > 0) {
+        const named = refusedOffersDetails(refused);
+        throw new ApnError("APN_X402_UNSUPPORTED_OFFER", named.message, { ...named.details, rail: "x402" });
+    }
     return refuse("x402_permit2_no_listed_offer", "No seller offer pays an owner-admitted token through the exact Permit2 flow.");
 }
 /** Revalidate a frozen selection against the asset it carries; any drift is state corruption. */
@@ -41,24 +46,32 @@ export function validatePermit2Selection(value, payer) {
     const again = listAsset === undefined || !Number.isSafeInteger(value.index) || value.index < 0 ||
         value.requirement?.network !== listAsset.chain || !sameAddress(value.requirement?.asset, listAsset.token)
         ? undefined : validateOffer(value.index, value.requirement, listAsset, payer);
-    if (again === undefined || canonicalJson(again) !== canonicalJson(value)) {
+    if (again === undefined || isOfferRefusal(again) || canonicalJson(again) !== canonicalJson(value)) {
         throw new ApnError("APN_STATE_CORRUPT", "The frozen x402 Permit2 offer selection is invalid.");
     }
     return again;
 }
 function validateOffer(index, offer, listAsset, payer) {
-    if (!exactKeys(offer, ["scheme", "network", "asset", "amount", "payTo", "maxTimeoutSeconds", "extra"]) || offer.scheme !== "exact")
-        return undefined;
-    if (!validExtra(offer.extra, listAsset))
-        return undefined;
-    if (typeof offer.amount !== "string" || !/^[1-9][0-9]{0,77}$/u.test(offer.amount) || BigInt(offer.amount) > MAX_UINT256)
-        return undefined;
-    if (typeof offer.maxTimeoutSeconds !== "number" || !Number.isSafeInteger(offer.maxTimeoutSeconds) ||
-        offer.maxTimeoutSeconds < 1 || offer.maxTimeoutSeconds > X402_PERMIT2_MAX_TIMEOUT_SECONDS)
-        return undefined;
+    if (offer.scheme !== "exact")
+        return offerRefusal("x402_offer_scheme_unsupported", "scheme", offer.scheme, "exact");
+    const extra = isPlainRecord(offer.extra) ? offer.extra : {};
+    const method = evmOfferMethod(extra);
+    if (isOfferRefusal(method) || method !== "permit2") {
+        return offerRefusal("x402_offer_method_unsupported", "extra.assetTransferMethod", extra.assetTransferMethod ?? "eip3009", "permit2");
+    }
+    const unknown = Object.keys(offer).find((key) => !OFFER_KEYS.includes(key));
+    if (unknown !== undefined)
+        return offerRefusal("x402_offer_field_unsupported", unknown, undefined, OFFER_KEYS.join(", "));
+    if (typeof offer.amount !== "string" || !/^[1-9][0-9]{0,77}$/u.test(offer.amount) || BigInt(offer.amount) > MAX_UINT256) {
+        return offerRefusal("x402_offer_amount_invalid", "amount", offer.amount);
+    }
+    const refusal = timeoutRefusal(offer.maxTimeoutSeconds, 1) ?? evmExtraRefusal(extra, "permit2", listAsset.chainId) ??
+        tokenDomainRefusal(extra, listAsset) ?? decimalsRefusal(extra, listAsset.decimals);
+    if (refusal !== null)
+        return refusal;
     const payTo = strictAddress(offer.payTo);
     if (payTo === undefined || [ZERO, payer, listAsset.token, PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY].some((address) => sameAddress(payTo, address))) {
-        return undefined;
+        return offerRefusal("x402_offer_payee_invalid", "payTo", offer.payTo, "a payee other than the payer, the token and the Permit2 contracts");
     }
     const requirement = structuredClone(offer);
     return {
@@ -72,13 +85,13 @@ function validateOffer(index, offer, listAsset, payer) {
     };
 }
 /** `name`/`version` are optional seller hints; when present they must equal the asset's token domain exactly. */
-function validExtra(value, listAsset) {
-    if (!isPlainRecord(value) || value.assetTransferMethod !== "permit2")
-        return false;
-    if (exactKeys(value, ["assetTransferMethod"]))
-        return true;
-    return exactKeys(value, ["assetTransferMethod", "name", "version"]) && listAsset.tokenDomain !== null &&
-        value.name === listAsset.tokenDomain.name && value.version === listAsset.tokenDomain.version;
+function tokenDomainRefusal(extra, listAsset) {
+    if (extra.name === undefined)
+        return null;
+    const domain = listAsset.tokenDomain;
+    if (domain === null || extra.name !== domain.name)
+        return offerRefusal("x402_offer_extra_invalid", "extra.name", extra.name, domain?.name);
+    return extra.version === domain.version ? null : offerRefusal("x402_offer_extra_invalid", "extra.version", extra.version, domain.version);
 }
 /** A carried asset is self-consistent: CAIP-2 and chain id agree, exact token, the one proxy code, well-formed domain facts. */
 function validAsset(value) {

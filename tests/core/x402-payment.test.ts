@@ -520,7 +520,7 @@ test("post-exposure transport ambiguity is durable and never retries implicitly"
   assert.equal(fixture.rpc.submissions.length, 0);
 });
 
-test("missing settlement response persists an observed unknown outcome without exposing seller body", async (t) => {
+test("a missing settlement response is an observed unknown outcome that still keeps the paid body; the nonce state completes it", async (t) => {
   const fixture = await authorizedFixture(t, { paidOutcome: paidObservation() });
   const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
@@ -528,10 +528,11 @@ test("missing settlement response persists an observed unknown outcome without e
   assert.equal(operation.state, "effect_unknown");
   assert.equal(operation.attempts[0]?.phase, "observed");
   assert.equal(operation.settlementResponseObservation, undefined);
-  assert.equal(operation.resultLink, undefined);
-  assert.equal(JSON.stringify(resumed).includes("forecast"), false);
+  assert.notEqual(operation.resultLink, undefined, "the purchased body is never lost for want of a header");
+  assert.equal(JSON.stringify(resumed).includes("forecast"), true);
   fixture.rpc.authorizationStateValue = true;
-  await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  const completed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal((completed.operation as { state?: unknown } | null)?.state, "completed", JSON.stringify(completed));
   assert.equal(fixture.http.calls.length, 2);
 });
 
@@ -568,7 +569,7 @@ test("UTF-8 Content-Type parameters are accepted and normalized to the base medi
   }
 });
 
-test("an unreadable result body keeps its payment response; duplicate control headers stay non-terminal with one send", async (t) => {
+test("an unreadable result body keeps its payment response; PAYMENT-RESPONSE copies count once only when identical, the body kept either way, one send", async (t) => {
   const settlementHeader = canonicalPaymentResponseHeader({
     success: true,
     transaction: X402_TRANSACTION,
@@ -699,18 +700,23 @@ test("an unreadable result body keeps its payment response; duplicate control he
           assert.notEqual(resumed.data, null, "the stored body is returned at once");
         }
       } else {
-        assert.equal(operation.state, "effect_unknown");
-        assert.equal(operation.attempts[0]?.phase, "ambiguous");
-        assert.equal(operation.resultLink, undefined);
+        // Byte-identical copies are one settlement hint; copies that differ or a folded value are none. The body stays.
+        assert.equal(operation.state, ONE_HINT.has(item.label) ? "settlement_pending" : "effect_unknown");
+        assert.equal(operation.attempts[0]?.phase, "observed");
+        assert.equal(operation.transactionHint?.transactionHash, ONE_HINT.has(item.label) ? X402_TRANSACTION : undefined);
+        const result = await fixture.core.context.state.loadX402Result(operation.profileHash, operation.operationId);
+        assert.equal(result?.bodyText, "{}", item.label);
       }
       fixture.rpc.authorizationStateValue = true;
-      await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+      const settled = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+      if (!BODY_ONLY.has(item.label)) assert.equal((settled.operation as { state?: unknown } | null)?.state, "completed", JSON.stringify(settled));
       assert.equal(fixture.http.calls.length, 2);
       assert.equal(fixture.rpc.submissions.length, 0);
     });
   }
 });
 
+const ONE_HINT = new Set(["duplicate-payment-response", "primary-and-alias-identical", "duplicate-alias"]);
 const BODY_ONLY = new Set([
   "mixed-case-media", "malformed-json", "malformed-content-type-parameter", "duplicate-content-type-parameter",
   "unknown-content-type-parameter", "non-utf8-content-type-parameter", "oversized-media",

@@ -8,8 +8,8 @@ import {
   X402_STATE_VERSION,
   TRANSITION_VERSION,
   ZERO_HASH,
-  deliversX402Result,
   x402AuthorizationIntentHash,
+  x402ResultAttempt,
   x402Fingerprint,
   x402RequestHash,
   x402TransactionHintSourceBindingHash,
@@ -323,16 +323,14 @@ export function validateStateSummary(
   const hasResultLink = operation.resultLink !== undefined;
   const hasReceiptLink = operation.receiptLink !== undefined;
   const lastAttempt = evidence.attempts.at(-1);
+  // Without a usable settlement answer the result is the last attempt's body: no seller claim, the chain proves payment.
+  const answeredWithoutHeader = evidence.settlementResponseObservation === undefined;
   if (hasResultLink) {
     const resultLink = record(operation.resultLink);
-    const response = evidence.settlementResponseObservation;
-    const attemptIndex = Number(response?.httpAttemptNumber ?? "0") - 1;
-    const attempt = Number.isSafeInteger(attemptIndex) && attemptIndex >= 0
-      ? evidence.attempts[attemptIndex]
-      : undefined;
+    const attempt = x402ResultAttempt(evidence);
     if (
-      !deliversX402Result(response?.classification) || attempt?.phase !== "observed" ||
-      !isX402ResultStatus(operation.resource, attempt.observation?.status) || attempt.observation?.bodyHash !== resultLink.resultHash
+      attempt?.phase !== "observed" || !isX402ResultStatus(operation.resource, attempt.observation?.status) ||
+      attempt.observation?.bodyHash !== resultLink.resultHash
     ) stateCorrupt("x402 result link does not bind its designated successful response.");
   }
   if (evidence.settlementEvidence !== undefined && !stateSettled && evidence.transactionHint === undefined) {
@@ -376,10 +374,13 @@ export function validateStateSummary(
   )) {
     stateCorrupt("x402 ambiguous settlement evidence is invalid.");
   }
+  // A body kept without a settlement answer does not contradict the delegated scan that found no transfer.
+  const keptBodyBesideScan = erc7710UnusedExpiry && answeredWithoutHeader;
   if (state === "effect_unknown" && evidence.unusedExpiryEvidence !== undefined && !stateUnusedPreterminal && (
-    !preterminalUnusedExpiry || hasResultLink
+    !preterminalUnusedExpiry || (hasResultLink && !keptBodyBesideScan)
   )) stateCorrupt("x402 preterminal unused-expiry evidence is incomplete or contradictory.");
-  if (state === "effect_unknown" && evidence.settlementEvidence !== undefined && hasResultLink) {
+  // A body kept without a settlement answer meets the chain's proof here for one write, then completes on the same call.
+  if (state === "effect_unknown" && evidence.settlementEvidence !== undefined && hasResultLink && !answeredWithoutHeader) {
     stateCorrupt("x402 effect-unknown state cannot combine final settlement evidence with a linked seller result.");
   }
   if (state === "settlement_pending" && evidence.transactionHint === undefined) stateCorrupt("x402 settlement pending lacks a transaction hint.");
@@ -391,14 +392,15 @@ export function validateStateSummary(
       : evidence.transactionHint?.source !== "payment_response")
   )) stateCorrupt("x402 seller-result recovery evidence is invalid.");
   if (state === "completed" && (
-    evidence.signatureCount !== 3 || evidence.settlementResponseObservation === undefined || evidence.transactionHint === undefined ||
-    evidence.settlementEvidence === undefined || evidence.unusedExpiryEvidence !== undefined || !hasResultLink || !hasReceiptLink
+    evidence.signatureCount !== 3 || evidence.settlementEvidence === undefined || evidence.unusedExpiryEvidence !== undefined ||
+    !hasResultLink || !hasReceiptLink ||
+    // With a settlement answer its hint is recorded; without one the chain's nonce proof stands alone (no seller hint).
+    (answeredWithoutHeader ? !stateSettled || evidence.transactionHint?.source === "payment_response" : evidence.transactionHint === undefined)
   )) stateCorrupt("x402 completed evidence graph is incomplete.");
   if (state === "completed") {
-    const response = evidence.settlementResponseObservation;
-    const attempt = response === undefined ? undefined : evidence.attempts[Number(response.httpAttemptNumber) - 1];
+    const attempt = x402ResultAttempt(evidence);
     if (
-      !deliversX402Result(response?.classification) || evidence.transactionHint?.source !== "payment_response" ||
+      (!answeredWithoutHeader && evidence.transactionHint?.source !== "payment_response") ||
       (attempt?.purpose !== "payment" && attempt?.purpose !== "result_recovery") || attempt.phase !== "observed" ||
       !isX402ResultStatus(operation.resource, attempt.observation?.status)
     ) stateCorrupt("x402 completed state lacks an observed successful paid response.");
@@ -412,7 +414,8 @@ export function validateStateSummary(
   if (state === "failed_expired_unused" && (
     (evidence.signatureCount !== 3 && !(stateUnusedExpiry && evidence.signatureCount === 0 && evidence.attempts.length === 0)) ||
     evidence.unusedExpiryEvidence === undefined || evidence.settlementEvidence !== undefined ||
-    (!stateUnusedExpiry && (evidence.settlementResponseObservation !== undefined || evidence.transactionHint !== undefined || hasResultLink)) ||
+    (!stateUnusedExpiry && (evidence.settlementResponseObservation !== undefined || evidence.transactionHint !== undefined ||
+      (hasResultLink && !keptBodyBesideScan))) ||
     !completeUnusedExpiryScan || (!erc7710UnusedExpiry && !stateUnusedExpiry && (evidence.authorizationUsedScan === undefined ||
       BigInt(evidence.authorizationUsedScan.nextFromBlock) !== BigInt(evidence.authorizationUsedScan.targetSafeHead.number) + 1n)) ||
     !hasReceiptLink
@@ -437,7 +440,7 @@ export function validateStateSummary(
     ) stateCorrupt("x402 settled-without-result evidence is invalid.");
   }
   if (hasResultLink && !["settlement_pending", "effect_unknown", "seller_result_recovery_pending", "completed", "abandoned_unknown",
-    ...(stateUnusedExpiry ? ["failed_expired_unused"] : [])].includes(state)) {
+    ...(stateUnusedExpiry || keptBodyBesideScan ? ["failed_expired_unused"] : [])].includes(state)) {
     stateCorrupt("x402 result link is invalid for state.");
   }
   if (evidence.settlementEvidence !== undefined && evidence.transactionHint !== undefined &&

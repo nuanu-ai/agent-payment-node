@@ -20,10 +20,11 @@ function validate(value) {
     if (!exactKeys(wire, ["x402Version", "resource", "accepted", "payload", ...(wire.extensions === undefined ? [] : ["extensions"])]) ||
         wire.x402Version !== 2)
         invalid();
+    // The seller's own resource echoed verbatim: url, description and mimeType are checked; its other keys (catalog
+    // fields such as serviceName or tags) are carried unchanged, as for EIP-3009.
     const resource = record(wire.resource);
-    if (!exactKeys(resource, ["url", ...["description", "mimeType"].filter(key => Object.hasOwn(resource, key))]) ||
-        ["description", "mimeType"].some(key => Object.hasOwn(resource, key) &&
-            (typeof resource[key] !== "string" || Buffer.byteLength(resource[key]) > 2048)))
+    if (["description", "mimeType"].some(key => Object.hasOwn(resource, key) &&
+        (typeof resource[key] !== "string" || Buffer.byteLength(resource[key]) > 2048)))
         invalid();
     if (typeof resource.url !== "string" || Buffer.byteLength(resource.url) < 1 || Buffer.byteLength(resource.url) > 2048)
         invalid();

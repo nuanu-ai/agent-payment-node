@@ -312,6 +312,22 @@ export function deliversX402Result(classification: SettlementResponseObservation
   return classification === "success" || classification === "settlement_pending";
 }
 
+/**
+ * The paid attempt whose body is the operation's result: the attempt the seller's settlement answer came with (only a
+ * success or pending answer delivers), or, when the seller gave no usable answer, the last attempt. The caller still
+ * checks that attempt was observed with a result status and this exact body.
+ */
+export function x402ResultAttempt(operation: {
+  readonly settlementResponseObservation?: { readonly classification?: unknown; readonly httpAttemptNumber?: unknown } | undefined;
+  readonly attempts: readonly X402Attempt[];
+}): X402Attempt | undefined {
+  const response = operation.settlementResponseObservation;
+  if (response === undefined) return operation.attempts.at(-1);
+  if (!deliversX402Result(response.classification as SettlementResponseObservation["classification"])) return undefined;
+  const index = Number(response.httpAttemptNumber) - 1;
+  return Number.isSafeInteger(index) && index >= 0 ? operation.attempts[index] : undefined;
+}
+
 export type X402TerminalState = "completed" | "failed_before_effect" | "failed_expired_unused" | "failed_settled_without_result" | "abandoned_unknown";
 
 export interface X402ReceiptRecord {
