@@ -8,6 +8,7 @@ import { TransferService } from "./transfer-service.js";
 import { WalletService } from "./wallet-service.js";
 import { OperationService } from "./operation-service.js";
 import { inspectX402 } from "./x402-http.js";
+import { x402Asset } from "./x402-network.js";
 import { canonicalIdempotencyKey, canonicalOperationId } from "./transfer-policy.js";
 import { X402Service } from "./x402-service.js";
 import { ApnError } from "./errors.js";
@@ -417,9 +418,9 @@ export class ApnCore {
             case "wallet.balance": return dataOutcome(request.asset === undefined ? await this.providerWallet.balance(request.profile) ?? await this.wallet.balance(request.profile) :
                 await evmWalletBalance(this.context, request.profile, request.asset), "chain_verified_public_read");
             case "wallet.portfolio": return dataOutcome(await readProfilePortfolio(this.context, request.profile, request.refresh), "chain_verified_public_read");
-            case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId), "encrypted_profile_policy_status");
+            case "wallet.policy.show": return dataOutcome(await this.wallet.policyShow(request.profile, request.chainId, request.asset), "encrypted_profile_policy_status");
             case "wallet.policy.set": return dataOutcome(await this.wallet.policySet(request), "encrypted_profile_policy_status");
-            case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, request.chainId, request.payer), "seller_challenge_static");
+            case "x402.inspect": return dataOutcome(await inspectX402(this.context.requireHttp(), request.url, request.httpRequest, x402Asset(request.chainId ?? 8453, request.asset), request.payer), "seller_challenge_static");
             case "x402.fetch.prepare": {
                 if ((request.chainId ?? 8453) === 8453)
                     await this.providerWallet.assertPaymentAvailable(request.profile, "x402", request.idempotencyKey);

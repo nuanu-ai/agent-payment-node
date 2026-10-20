@@ -1,4 +1,4 @@
-import { x402Network } from "./x402-network.js";
+import { isBaseUsdc, releasedX402Pair, x402Asset } from "./x402-network.js";
 import { decodePaymentRequiredHeader as decodeOfficialPaymentRequiredHeader, decodePaymentResponseHeader as decodeOfficialPaymentResponseHeader, decodePaymentSignatureHeader as decodeOfficialPaymentSignatureHeader, encodePaymentRequiredHeader as encodeOfficialPaymentRequiredHeader, } from "@x402/core/http";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical.js";
 import { CHAIN_CAIP2 } from "./constants.js";
@@ -201,19 +201,20 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(value, expected) {
         settlementResponseHash: domainHash("apn.x402.settlement.v1", normalizedCanonicalJson),
     };
 }
-export function inspectCandidates(paymentRequired, requestedUrl, chainId = 8453) {
+/** Offers of exactly the selected network and token (a bare chain id: its released USDC); others are skipped, never repaired. */
+export function inspectCandidates(paymentRequired, requestedUrl, selection = 8453) {
+    const asset = typeof selection === "number" ? x402Asset(selection) : selection;
     if (paymentRequired.x402Version !== 2 || !resourceMatches(paymentRequired.resource.url, requestedUrl))
         return [];
     const output = [];
     paymentRequired.accepts.forEach((requirements, index) => {
-        const candidate = inspectCandidate(requirements, index, chainId);
+        const candidate = inspectCandidate(requirements, index, asset);
         if (candidate !== null)
             output.push(candidate);
     });
     return output;
 }
-function inspectCandidate(requirements, index, chainId = 8453) {
-    const selected = x402Network(chainId);
+function inspectCandidate(requirements, index, selected) {
     const extra = requirements.extra;
     if (requirements.scheme !== "exact" || requirements.network !== selected.network ||
         !ADDRESS.test(requirements.asset) || requirements.asset.toLowerCase() !== selected.token.toLowerCase() ||
@@ -234,7 +235,7 @@ function inspectCandidate(requirements, index, chainId = 8453) {
         readiness: READINESS,
     };
     if (extra.assetTransferMethod === "erc7710") {
-        if (chainId !== 8453)
+        if (!isBaseUsdc(selected))
             return null;
         const facilitatorAddresses = canonicalErc7710Facilitators(extra);
         if (facilitatorAddresses === null)
@@ -250,7 +251,9 @@ function inspectCandidate(requirements, index, chainId = 8453) {
         Buffer.byteLength(extra.name, "utf8") > 128 ||
         typeof extra.version !== "string" || extra.version.length === 0 ||
         Buffer.byteLength(extra.version, "utf8") > 128 ||
-        (extra.decimals !== undefined && extra.decimals !== 6) ||
+        // A declared decimals hint must be USDC's 6 on the released pairs; elsewhere prepare compares it with the token's own.
+        (extra.decimals !== undefined && (releasedX402Pair(selected.chainId, selected.token) ? extra.decimals !== 6
+            : typeof extra.decimals !== "number" || !Number.isSafeInteger(extra.decimals) || extra.decimals < 0 || extra.decimals > 255)) ||
         (extra.assetTransferMethod !== undefined && extra.assetTransferMethod !== "eip3009") ||
         (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization"))
         return null;
@@ -286,7 +289,14 @@ function validatePaymentPayload(value) {
     validateResource(paymentPayload.resource);
     validateRequirements(paymentPayload.accepted);
     const accepted = paymentPayload.accepted;
-    const candidate = inspectCandidate(accepted, 0, x402Network(accepted.network).chainId);
+    let acceptedAsset;
+    try {
+        acceptedAsset = x402Asset(accepted.network, accepted.asset);
+    }
+    catch {
+        throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
+    }
+    const candidate = inspectCandidate(accepted, 0, acceptedAsset);
     if (candidate === null)
         throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
     const payload = record(paymentPayload.payload, "exact-EVM payload");

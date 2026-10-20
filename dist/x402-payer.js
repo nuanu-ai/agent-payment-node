@@ -1,19 +1,19 @@
 import { ApnError } from "./errors.js";
-import { networkPolicyBinding } from "./x402-network.js";
+import { isBaseUsdc, networkPolicyBinding, x402Asset } from "./x402-network.js";
 import { policyBinding } from "./profile-policy.js";
 import { LOCAL_PROVIDER_ID } from "./provider-profile.js";
 import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
 /** The profile x402 policy binding of a payer, from local state only (no provider call). */
-export async function x402PolicyBinding(context, profileHash, chainId) {
+export async function x402PolicyBinding(context, profileHash, asset) {
     const provider = context.profileRepository === undefined ? null : await context.requireProfileRepository().load(profileHash);
     if (provider !== null && provider.provider_id !== LOCAL_PROVIDER_ID)
         return policyBinding(provider);
     const wallet = await context.state.loadWallet(profileHash);
     if (wallet === null)
         throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
-    return networkPolicyBinding(policyBinding(wallet), chainId);
+    return networkPolicyBinding(policyBinding(wallet), asset);
 }
-export async function resolveX402Payer(context, profileHash, chainId = 8453) {
+export async function resolveX402Payer(context, profileHash, asset = x402Asset(8453)) {
     let provider = context.profileRepository === undefined
         ? null
         : await context.requireProfileRepository().load(profileHash);
@@ -23,12 +23,12 @@ export async function resolveX402Payer(context, profileHash, chainId = 8453) {
             throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
         return {
             wallet: wallet.address.toLowerCase(),
-            policy: networkPolicyBinding(policyBinding(wallet), chainId),
+            policy: networkPolicyBinding(policyBinding(wallet), asset),
             transferMethod: "eip3009",
         };
     }
-    if (chainId !== 8453)
-        throw new ApnError("APN_PROVIDER_UNAVAILABLE", "External x402 profile has no declared support on this network.");
+    if (!isBaseUsdc(asset))
+        throw new ApnError("APN_PROVIDER_UNAVAILABLE", "External x402 profile has no declared support on this network or token.");
     const repository = context.requireProfileRepository();
     const adapter = context.requireProviderRegistry().resolve(provider.provider_id);
     provider = await upgradeProviderProfile(adapter, provider, repository);

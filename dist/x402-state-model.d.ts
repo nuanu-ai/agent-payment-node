@@ -1,5 +1,4 @@
 import { type X402ChainText, type X402Network } from "./x402-network.js";
-import type { EvmChainId } from "./evm-asset.js";
 import type { X402DelegatedMaterialBinding } from "./provider-ports.js";
 import { type X402HttpRequestV1 } from "./x402-http-request.js";
 export declare const ZERO_HASH: string;
@@ -199,7 +198,7 @@ export interface Eip3009StateSettlementEvidence {
         readonly value: true;
         readonly blockNumber: string;
         readonly blockHash: `0x${string}`;
-        readonly blockTag: "safe";
+        readonly blockTag: "safe" | "finalized";
         readonly observedAt: string;
     };
     readonly transactionHash?: `0x${string}`;
@@ -392,6 +391,11 @@ export interface X402OperationRecord {
     readonly amountAtomic: string;
     readonly capAtomic: string;
     readonly selectedOffer: X402SelectedOffer;
+    /** Off the released USDC pairs: the token's on-chain decimals() and the proof tag frozen at prepare (absent = USDC, safe). */
+    readonly tokenFacts?: {
+        readonly decimals: number;
+        readonly proofTag: "safe" | "finalized";
+    };
     readonly providerSigner?: {
         readonly schemaVersion: "apn.x402.provider-signer.v1";
         readonly providerId: string;
@@ -455,7 +459,8 @@ export declare function x402RequestHash(input: {
     readonly profile: string;
     readonly canonicalUrl: string;
     readonly capAtomic: string;
-    readonly chainId?: EvmChainId;
+    readonly chainId?: number;
+    readonly token?: string;
     readonly httpRequest?: X402HttpRequestV1;
 }): string;
 export declare function x402Fingerprint(input: Pick<X402OperationRecord, "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier" | "providerSigner" | "delegatedMaterial">): string;

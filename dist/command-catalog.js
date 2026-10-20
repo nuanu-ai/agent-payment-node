@@ -17,7 +17,6 @@ import { JUPITER_COMMANDS, JUPITER_COMMAND_GROUPS } from "./swap/jupiter-solana/
 import { ORCA_COMMANDS, ORCA_COMMAND_GROUPS } from "./swap/orca-solana/command-catalog.js";
 import { CHAIN_COMMANDS, includeRailRecovery } from "./chain-command-catalog.js";
 import { PORTFOLIO_COMMANDS } from "./portfolio/command-catalog.js";
-import { EVM_NETWORKS } from "./evm-asset.js";
 import { removedV1Commands } from "./command-manifest-migration.js";
 import { UNISWAP_TOKEN_COMMANDS, UNISWAP_TOKEN_COMMAND_GROUPS } from "./swap/uniswap-token-command-catalog.js";
 import { renderHelp, renderReadmeCommandReference } from "./command-help.js";
@@ -66,7 +65,10 @@ const rpcRequired = option("--rpc-url", "https_url", true, noDefault, [
 ], "operator_input");
 const operationRequired = option("--operation", "operation_id", true, noDefault, ["64_lowercase_hex_characters"], "public");
 /** Selects the local-wallet x402 network; omission keeps the original Base meaning of these commands (no inheritance). */
-const chainOptional = option("--chain", "string", false, noDefault, ["enabled_mainnet_caip2", ...EVM_NETWORKS.map((network) => network.caip2), "omitted_means_eip155:8453"], "operator_input");
+const chainOptional = option("--chain", "string", false, noDefault, ["eip155_caip2_of_any_evm_chain", "rpc_chain_id_must_match", "omitted_means_eip155:8453"], "operator_input");
+/** The x402 token; the owner admits each chain+token pair in its own policy, and prepare proves its EIP-3009 identity on chain. */
+const assetOptional = option("--asset", "address", false, noDefault, ["exact_erc20_contract_address", "admitted_by_owner_x402_policy_for_this_chain",
+    "omitted_means_usdc_on_eip155:8453_eip155:1_eip155:42161_only"], "operator_input");
 const httpOptions = [
     option("--method", "string", false, noDefault, ["http_token_except_connect_and_trace", "default_GET"], "operator_input"),
     option("--headers-json", "string", false, noDefault, ["bounded_safe_header_object", "no_credentials_or_payment_headers"], "operator_input"),
@@ -174,32 +176,37 @@ const BASE_COMMANDS = [
     command(["wallet", "metamask", "native-transfer-status"], "apn wallet metamask native-transfer-status --operation <id>", "Read the durable native transfer journal.", [operationRequired], "local_read", "Reads public journal without private wallet action.", "none", "Never.", completedStates, [], ["apn wallet metamask native-transfer-status --operation <operation-id>"]),
     command(["wallet", "metamask", "native-transfer-observe"], "apn wallet metamask native-transfer-observe --operation <id>", "Observe stored exact transaction and settle actual full native fees.", [operationRequired], "network_read", "Public canonical RPC observation of the saved quote; never sends again.", "none", "Never.", completedStates, [], ["apn wallet metamask native-transfer-observe --operation <operation-id>"]),
     command(["wallet", "status"], "apn wallet status [--profile <profile>]", "Read wallet presence and public identity.", [profileOptional], "local_read", "Returns absent without creating state or accessing Keychain material.", "none", "Never.", completedStates, [], ["apn wallet status --profile default"]),
-    command(["wallet", "policy", "show"], "apn wallet policy show --profile <profile> [--chain <caip2>]", "Read the encrypted owner-approved profile policy.", [profileRequired, chainOptional], "local_read", "Reads wallet-bound policy state.", "none", "Never.", completedStates, [], ["apn wallet policy show --profile default", "apn wallet policy show --profile default --chain eip155:1"]),
-    command(["wallet", "policy", "set"], "apn wallet policy set --profile <profile> [--chain <caip2>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]", "Create, lower or raise owner-approved balance and x402 limits.", [
+    command(["wallet", "policy", "show"], "apn wallet policy show --profile <profile> [--chain <caip2>] [--asset <token>]", "Read the encrypted owner-approved profile policy.", [profileRequired, chainOptional, assetOptional], "local_read", "Reads wallet-bound policy state.", "none", "Never.", completedStates, [], ["apn wallet policy show --profile default", "apn wallet policy show --profile default --chain eip155:1"]),
+    command(["wallet", "policy", "set"], "apn wallet policy set --profile <profile> [--chain <caip2>] [--asset <token>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]", "Create, lower or raise owner-approved balance and x402 limits.", [
         profileRequired,
         chainOptional,
+        assetOptional,
         option("--max-balance-usdc-atomic", "atomic_usdc", true, noDefault, ["positive_canonical_integer"], "operator_input"),
         option("--max-x402-amount-atomic", "atomic_usdc", true, noDefault, ["positive_canonical_integer", "not_greater_than_max_balance_usdc_atomic"], "operator_input"),
         option("--max-balance-eth-wei", "wei", false, noDefault, ["positive_canonical_integer", "omission_preserves_existing_value"], "operator_input"),
         option("--x402-payees", "string", false, noDefault, ["comma_separated_1_to_16_unique_nonzero_evm_addresses_or_unrestricted", "omission_preserves_existing_value", "widening_requires_foreground_tty"], "operator_input"),
     ], "local_write", "Writes an encrypted wallet-bound profile policy.", "foreground_tty", "Required when a policy is created, any limit increases or the x402 payee pin widens; a pure decrease or a new pin is non-interactive.", completedStates, [], ["apn wallet policy set --profile default --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>",
-        "apn wallet policy set --profile default --chain eip155:1 --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>"]),
-    command(["x402", "inspect"], "apn x402 inspect [--chain <caip2>] --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; a seller may still process its application payload.", [
+        "apn wallet policy set --profile default --chain eip155:1 --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>",
+        "apn wallet policy set --profile default --chain eip155:137 --asset <token-contract> --max-balance-usdc-atomic <owner-limit-atomic> --max-x402-amount-atomic <owner-limit-atomic>"]),
+    command(["x402", "inspect"], "apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url>" + httpSynopsis + " [--payer <address>]", "Inspect supported offers using an unpaid request; a seller may still process its application payload.", [
         chainOptional,
+        assetOptional,
         ...httpOptions,
         option("--payer", "address", false, noDefault, ["canonical_evm_address"], "public"),
         option("--url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "maximum_2048_utf8_bytes", "canonical_whatwg_serialization", "public_target_required_at_runtime"], "public"),
     ], "network_request", "Performs one unpaid HTTPS request; application side effects depend on the seller.", "none", "Never signs or pays; caller must authorize the application request.", completedStates, [], ["apn x402 inspect --url https://seller.example/resource", "apn x402 inspect --chain eip155:1 --url https://seller.example/resource"]),
-    command(["x402", "fetch", "prepare"], "apn x402 fetch prepare --profile <profile> [--chain <caip2>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]" + httpSynopsis, "Freeze a policy-bounded standard x402 purchase.", [
+    command(["x402", "fetch", "prepare"], "apn x402 fetch prepare --profile <profile> [--chain <caip2>] [--asset <token>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>]" + httpSynopsis, "Freeze a policy-bounded standard x402 purchase.", [
         profileRequired,
         chainOptional,
+        assetOptional,
         ...httpOptions,
         option("--url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "maximum_2048_utf8_bytes", "canonical_whatwg_serialization", "public_target_required_at_runtime"], "public"),
         option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_200_safe_ascii_characters"], "operator_input"),
         rpcRequired,
         option("--max-amount-atomic", "atomic_usdc", false, noDefault, ["positive_canonical_integer", "may_only_lower_profile_limit"], "operator_input"),
-    ], "payment_prepare", "Reads seller and Base evidence, then durably freezes one purchase intent without signing.", "prior_profile_policy", "An owner-approved profile policy must already bound the purchase.", x402States, [{ command_path: ["x402", "fetch", "approve"], when: "After a successful prepare returns an operation ID." }], ["apn x402 fetch prepare --profile default --url https://seller.example/resource --idempotency-key <idempotency-key> --rpc-url <https-base-rpc-url>",
-        "apn x402 fetch prepare --profile default --chain eip155:42161 --url https://seller.example/resource --idempotency-key <idempotency-key> --rpc-url <https-arbitrum-rpc-url>"]),
+    ], "payment_prepare", "Reads the seller challenge and the selected network's token evidence, then durably freezes one purchase intent without signing.", "prior_profile_policy", "An owner-approved profile policy must already bound the purchase.", x402States, [{ command_path: ["x402", "fetch", "approve"], when: "After a successful prepare returns an operation ID." }], ["apn x402 fetch prepare --profile default --url https://seller.example/resource --idempotency-key <idempotency-key> --rpc-url <https-base-rpc-url>",
+        "apn x402 fetch prepare --profile default --chain eip155:42161 --url https://seller.example/resource --idempotency-key <idempotency-key> --rpc-url <https-arbitrum-rpc-url>",
+        "apn x402 fetch prepare --profile default --chain eip155:137 --asset <token-contract> --url https://seller.example/resource --idempotency-key <idempotency-key> --rpc-url <https-polygon-rpc-url>"]),
     command(["x402", "fetch", "approve"], "apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>", "Advance one frozen x402 request under its stored policy.", [operationRequired, rpcRequired], "payment_submit", "Rechecks frozen intent and policy, then obtains one local or provider-detached authorization, or executes one provider-owned paid fetch.", "prior_profile_policy", "APN adds no per-payment prompt; a detached provider signer may still require its own MFA.", x402States, [
         { command_path: ["operation", "status"], when: "To inspect any returned non-terminal state." },
         { command_path: ["operation", "resume"], when: "When documented durable recovery is permitted." },

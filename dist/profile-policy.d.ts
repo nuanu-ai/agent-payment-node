@@ -1,5 +1,4 @@
-import { type X402PolicyNetwork } from "./x402-network.js";
-import type { EvmChainId } from "./evm-asset.js";
+import { type X402Asset, type X402PolicyNetwork } from "./x402-network.js";
 import type { Address, WalletRecord } from "./model.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
 export declare const PROFILE_POLICY_VERSION: "apn.profile-policy.v1";
@@ -53,7 +52,8 @@ export declare function policyBinding(wallet: WalletRecord | ProviderProfileReco
 export declare function canonicalPolicyInput(input: ProfilePolicySetInput): ProfilePolicySetInput;
 export declare function sealProfilePolicy(value: Omit<ProfilePolicyRecord, "integrityHash">): ProfilePolicyRecord;
 export declare function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBinding): ProfilePolicyRecord;
-export declare function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, chainId?: EvmChainId): unknown;
+/** `asset` is the network and token the caller named; omitted for the original Base USDC spelling. */
+export declare function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, asset?: X402Asset): unknown;
 export declare const REDUCE_EXCESS_ACTION = "Reduce excess manually only to an independently verified address; APN does not sweep or refund automatically.";
 export interface FundingPosture {
     readonly classification: string;

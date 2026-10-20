@@ -1,4 +1,5 @@
 import { ApnError } from "./errors.js";
+import { formatAtomic } from "./money.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { X402Lifecycle } from "./x402-lifecycle.js";
 import { publicX402Operation, type X402OperationRecord } from "./x402-state-integrity.js";
@@ -55,10 +56,11 @@ function abandonIntent(operation: X402OperationRecord) {
     walletAddress: operation.wallet,
     recipient: operation.payee,
     amountAtomic: operation.amountAtomic,
-    amountDecimal: usdcDecimal(operation.amountAtomic),
+    // Released USDC records are 6-decimal USDC; any other token shows the decimals() it answered at prepare.
+    amountDecimal: operation.tokenFacts === undefined ? usdcDecimal(operation.amountAtomic) : formatAtomic(operation.amountAtomic, operation.tokenFacts.decimals),
     chainLabel: `EVM chain ${operation.chainId} (${operation.network})`,
-    assetLabel: `USDC (${operation.token})`,
-    unit: "USDC",
+    assetLabel: operation.tokenFacts === undefined ? `USDC (${operation.token})` : `token ${operation.token} (${operation.tokenFacts.decimals} decimals, read on chain at prepare)`,
+    unit: operation.tokenFacts === undefined ? "USDC" : "token units",
     outcomeNote: "Financial outcome: UNKNOWN. The x402 authorization can no longer execute, but it may have settled before its validity window closed.",
   };
 }

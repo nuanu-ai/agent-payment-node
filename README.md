@@ -167,8 +167,10 @@ apn operation resume --operation <operation-id> --rpc-url https://mainnet.base.o
 
 Creating a policy or raising a limit needs the foreground terminal; a pure decrease does not. `--x402-payees` optionally
 pins which sellers may be paid. `wallet policy show/set`, `x402 inspect` and `x402 fetch prepare` take
-`--chain <caip2>` (`eip155:8453`, `eip155:1` or `eip155:42161`) to select the local-wallet x402 network; omitting it
-means Base, and no network inherits another's limits. `x402 fetch prepare`
+`--chain <caip2>` (any `eip155:<id>`) and `--asset <token>` to select the local-wallet x402 network and token; omitting
+`--chain` means Base, omitting `--asset` means USDC on Base, Ethereum or Arbitrum and is refused elsewhere, and no
+network or token inherits another's limits. Prepare proves the token's EIP-3009 identity on that chain
+([any seller](docs/x402-any-seller.md)). `x402 fetch prepare`
 uses the owner's maximum, and `--max-amount-atomic` can only lower it for one call. Approval creates exactly one frozen
 authorization; `operation resume` owns the paid request, settlement observation and seller-result recovery. `--method`,
 `--headers-json` and `--body-base64` send POST and other requests with opaque body bytes bound into the operation.
@@ -320,10 +322,10 @@ apn wallet metamask native-transfer --profile <profile> --chain <chain> --recipi
 apn wallet metamask native-transfer-status --operation <id>
 apn wallet metamask native-transfer-observe --operation <id>
 apn wallet status [--profile <profile>]
-apn wallet policy show --profile <profile> [--chain <caip2>]
-apn wallet policy set --profile <profile> [--chain <caip2>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
-apn x402 inspect [--chain <caip2>] --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
-apn x402 fetch prepare --profile <profile> [--chain <caip2>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
+apn wallet policy show --profile <profile> [--chain <caip2>] [--asset <token>]
+apn wallet policy set --profile <profile> [--chain <caip2>] [--asset <token>] --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic> [--max-balance-eth-wei <wei>] [--x402-payees <address,...|unrestricted>]
+apn x402 inspect [--chain <caip2>] [--asset <token>] --url <https-url> [--method <method>] [--headers-json <json>] [--body-base64 <base64>] [--payer <address>]
+apn x402 fetch prepare --profile <profile> [--chain <caip2>] [--asset <token>] --url <https-url> --idempotency-key <key> --rpc-url <https-url> [--max-amount-atomic <atomic>] [--method <method>] [--headers-json <json>] [--body-base64 <base64>]
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]

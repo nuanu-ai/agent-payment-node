@@ -1,6 +1,6 @@
 import { getAddress } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "./canonical.js";
-import { validPolicyNetwork, x402Network } from "./x402-network.js";
+import { releasedX402Pair, validPolicyNetwork } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
 export const PROFILE_POLICY_VERSION = "apn.profile-policy.v1";
@@ -143,8 +143,9 @@ export function validateProfilePolicy(value, binding) {
         corrupt("Profile policy does not bind the current wallet identity.");
     return policy;
 }
-export function publicProfilePolicy(profile, policy, chainId) {
-    const selected = chainId === undefined ? {} : { chain: x402Network(chainId).network, token: x402Network(chainId).token };
+/** `asset` is the network and token the caller named; omitted for the original Base USDC spelling. */
+export function publicProfilePolicy(profile, policy, asset) {
+    const selected = asset === undefined ? {} : { chain: asset.network, token: asset.token };
     if (policy === null) {
         return {
             configured: false,
@@ -161,7 +162,7 @@ export function publicProfilePolicy(profile, policy, chainId) {
             updated_at: null,
             integrity_status: "not_present",
             proof_class: "encrypted_profile_policy_status",
-            next_actions: [chainId === undefined ? "apn wallet policy set" : `apn wallet policy set-network --chain eip155:${chainId}`],
+            next_actions: [asset === undefined ? "apn wallet policy set" : `apn wallet policy set-network --chain ${asset.network}${releasedX402Pair(asset.chainId, asset.token) ? "" : ` --asset ${asset.token}`}`],
         };
     }
     return {

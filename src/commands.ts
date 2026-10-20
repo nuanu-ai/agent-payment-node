@@ -1,6 +1,6 @@
 import type { CircleFundingParameters } from "./circle-v2-evm/funding-binding.js";
 import type { Address } from "./model.js";
-import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
+import type { EvmAssetSelection } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
 import type { ChainProvider } from "./direct-rail-ports.js";
@@ -148,21 +148,24 @@ export type CommandRequest =
   | { readonly command: "wallet.status"; readonly profile: string }
   | { readonly command: "wallet.balance"; readonly profile: string; readonly asset?: EvmAssetSelection }
   | { readonly command: "wallet.portfolio"; readonly profile: string; readonly refresh?: boolean }
-  | { readonly command: "wallet.policy.show"; readonly profile: string; readonly chainId?: EvmChainId }
+  | { readonly command: "wallet.policy.show"; readonly profile: string; readonly chainId?: number; readonly asset?: Address }
   | {
     readonly command: "wallet.policy.set";
     /** Omitted keeps the current x402 payee pin; null removes it; a list sets it. */
     readonly x402Payees?: readonly string[] | null;
-    readonly chainId?: EvmChainId;
+    readonly chainId?: number;
+    /** The x402 token the policy admits; omitted means the released USDC of the chain (Base, Ethereum, Arbitrum). */
+    readonly asset?: Address;
     readonly profile: string;
     readonly maxBalanceUsdcAtomic: string;
     readonly maxX402AmountAtomic: string;
     readonly maxBalanceEthWei?: string;
   }
-  | { readonly command: "x402.inspect"; readonly url: string; readonly httpRequest?: X402HttpRequestV1; readonly chainId?: EvmChainId; readonly payer?: Address }
+  | { readonly command: "x402.inspect"; readonly url: string; readonly httpRequest?: X402HttpRequestV1; readonly chainId?: number; readonly asset?: Address; readonly payer?: Address }
   | {
     readonly command: "x402.fetch.prepare";
-    readonly chainId?: EvmChainId;
+    readonly chainId?: number;
+    readonly asset?: Address;
     readonly httpRequest?: X402HttpRequestV1;
     readonly profile: string;
     readonly url: string;
