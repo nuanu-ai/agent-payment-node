@@ -6,6 +6,7 @@ import { ApnError } from "../errors.js";
 import { validateEvmNativeCustody, type EvmNativeCustody } from "../evm-native-custody.js";
 import { validateAssetUsageReservation, type AssetUsageReservation } from "../asset-usage-ledger.js";
 import { CIRCLE_SOURCE_OWNER, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleLegacyRoute, type CircleDestinationChain } from "./catalog.js";
+import { circleActualEconomics } from "./actual-economics.js";
 import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, encodeCircleBurn, encodeCircleMint,
   type CircleSourceProof, type CircleAttestation, type CircleReceiptProof, type decodeCircleDestination } from "./protocol.js";
 export type CircleRole = "approval" | "burn" | "mint" | "cleanup";
@@ -110,6 +111,7 @@ export function validateCircle(value: unknown): CircleOperationV1 {
 }
 export function publicCircle(op: CircleOperationV1) { return { operation_id: op.operationId, kind: "circle_route", state: op.state, terminal: op.terminal,
   source_profile: op.profile, destination_profile: op.destinationProfile, destination_chain: op.destinationChain, amount_atomic: "40100", minimum_output_atomic: "40000",
+  actual_economics: circleActualEconomics(op, "40100"),
   effects: op.effects.map(e => ({ role: e.role, phase: e.phase, transaction_hash: e.transactionHash, actual_fee_atomic: e.proof?.actualFeeAtomic ?? null })),
   source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? op.externalFulfillment?.destinationReceipt.finalityTag ?? null, nonce: op.attestation?.nonce ?? null,
   residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash, ...(op.nonceRetirement === undefined ? {} : { cleanup_retirement_receipt: op.nonceRetirement }),
