@@ -5,6 +5,7 @@ import { BASE_USDC, CHAIN_CAIP2, CHAIN_ID, TRANSFER_TOPIC, USDC_DECIMALS } from 
 import { ApnError, assertInput } from "./errors.js";
 import { evmUint, MAX_DIRECT_TRANSACTION_BYTES, publicEvmAsset } from "./evm-asset.js";
 import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
+import { publicEvmActualFee } from "./evm-direct-actual-fee.js";
 import { multiplyAtomic, parseAtomic } from "./money.js";
 import { canonicalAddress, validateBalance } from "./wallet-policy.js";
 import { publicDirectAllowlist } from "./direct-allowlist-gate.js";
@@ -138,7 +139,7 @@ export function publicOperation(operation) {
         token: operation.evm?.asset.kind === "native" ? null : operation.token,
         ...(operation.evm === undefined ? {} : { asset: publicEvmAsset(operation.evm.asset), fee_budget: {
                 max_fee_wei: operation.evm.maxFeeWei, enforcement: "pre_submission_quote", quote: operation.evm.feeQuote,
-            }, policy: { identity: "apn.direct.foreground-approval.v1", chain: `eip155:${operation.chainId}`, asset: publicEvmAsset(operation.evm.asset), amount_atomic: operation.amountAtomic, foreground_approval_required: true } }),
+            }, ...publicEvmActualFee(operation.evmActualFee, operation.evm.asset, operation.amountAtomic, operation.state), policy: { identity: "apn.direct.foreground-approval.v1", chain: `eip155:${operation.chainId}`, asset: publicEvmAsset(operation.evm.asset), amount_atomic: operation.amountAtomic, foreground_approval_required: true } }),
         ...(operation.allowlist === undefined ? {} : { allowlist: publicDirectAllowlist(operation.allowlist, operation.allowlistLease) }),
         wallet_address: operation.walletAddress,
         recipient: operation.recipient,
@@ -204,7 +205,8 @@ export function publicReceipt(receipt) {
             ? "rpc_safe_inclusion" : "inclusion_only"
         : "not_observed";
     return {
-        ...(receipt.evm === undefined ? {} : { asset: publicEvmAsset(receipt.evm.asset), amount_atomic: receipt.amountAtomic, fee_budget_wei: receipt.evm.maxFeeWei, ...(receipt.evm.feeQuote.feeModel === undefined ? {} : { fee_model: receipt.evm.feeQuote.feeModel }), chain_evidence: receipt.evmEvidence ?? null, finality: evmFinality }),
+        ...(receipt.evm === undefined ? {} : { asset: publicEvmAsset(receipt.evm.asset), amount_atomic: receipt.amountAtomic, fee_budget_wei: receipt.evm.maxFeeWei, ...(receipt.evm.feeQuote.feeModel === undefined ? {} : { fee_model: receipt.evm.feeQuote.feeModel }),
+            ...publicEvmActualFee(receipt.evmActualFee, receipt.evm.asset, receipt.amountAtomic, receipt.state), chain_evidence: receipt.evmEvidence ?? null, finality: evmFinality }),
         operation_id: receipt.operationId,
         state: receipt.state,
         terminal: receipt.terminal,

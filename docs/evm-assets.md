@@ -276,6 +276,16 @@ this path.
 
 ## Safety, recovery and proof
 
+- A completed or reverted transfer reports what it actually paid in
+  `actual_network_fee` (operation status and receipt alike), taken from its own
+  canonical receipt by the network's rule: gas used x effective price; on OP
+  stack networks plus the receipt's `l1Fee` and operator fee; Arbitrum's gas used
+  already includes L1 posting; Monad bills the gas limit. A component the
+  receipt does not carry makes it `incomplete` with the reason and no total, never
+  an estimate. `actual_sender_native_debit_atomic` adds the transferred value for a
+  completed native transfer. Both are null until an outcome is proven, and on
+  records completed before APN recorded them; `fee_budget` stays the approved cap.
+
 - Chain, asset kind/address/decimals, amount, recipient, payer, nonce and fee
   budget are frozen. Wrong-chain RPC fails before submission or recovery.
 - Global idempotency and conservative per-profile exclusion remain. Repeating

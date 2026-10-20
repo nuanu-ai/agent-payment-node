@@ -1,6 +1,7 @@
 import type { DirectEvmChainId } from "./evm-direct-networks.js";
 import type { EvmDirectBinding } from "./evm-direct.js";
 import type { EvmTransferEvidence } from "./evm-ports.js";
+import type { EvmActualFee } from "./evm-direct-actual-fee.js";
 import type { DirectAllowlistBinding } from "./direct-allowlist-gate.js";
 import type { DirectAssetUsageLease } from "./direct-asset-usage.js";
 import type { CoinbaseGaslessAllowlistBinding } from "./coinbase-gasless-policy.js";
@@ -191,6 +192,8 @@ export interface OperationRecord {
   readonly reason: string;
   readonly proofClass: string;
   readonly transactionHash?: Hex;
+  /** What a completed or reverted EVM transfer paid, from its own canonical receipt (absent on records written before APN recorded it). */
+  readonly evmActualFee?: EvmActualFee;
   readonly rawTransactionHash?: Hex;
   readonly lastSubmissionAt?: string;
   readonly transitions: readonly Transition[];
@@ -211,6 +214,7 @@ export interface ReceiptRecord {
   readonly evm?: EvmDirectBinding;
   readonly amountAtomic?: string;
   readonly evmEvidence?: EvmTransferEvidence;
+  readonly evmActualFee?: EvmActualFee;
   readonly coinbaseGaslessSettlement?: CoinbaseGaslessSettlement;
   readonly schemaVersion: "apn.state.v1";
   readonly operationId: string;
