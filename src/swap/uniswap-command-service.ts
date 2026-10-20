@@ -6,6 +6,8 @@ import { swapMechanismDigest } from "./pin.js";
 import { SWAP_INVENTORY_OWNER_ADMISSION, swapRouteDigest, swapRouteOf } from "./route-admission.js";
 import { UNISWAP_WBTC_MECHANISM_PIN, UNISWAP_WBTC_PROTOCOL_REGISTRY, UNISWAP_WBTC_PAIR, UNISWAP_WBTC_CODE_PINS, UNISWAP_V3_CODE_PINS, UNISWAP_V3_KEYLESS_MECHANISM_PIN, UNISWAP_V3_KEYLESS_PROTOCOL_REGISTRY, UNISWAP_V3_PAIRS,
   USDC_IMPLEMENTATION_PIN } from "./uniswap-v3/pins.js";
+import { swapActualEconomics } from "./receipt-facts.js";
+import type { SwapReceiptEconomics } from "./model.js";
 
 type Request = Extract<CommandRequest, { readonly command: `swap.uniswap.${string}` | `swap.uniswap-token.${string}` }>;
 export async function executeUniswapCommand(request: Request, context: RuntimeContext): Promise<CommandOutcome> {
@@ -41,10 +43,14 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
     return operationOutcome(await context.uniswapRuntime.prepare(request, context.clock.now()));
   }
   if (request.command === "swap.uniswap.status") {
-    if (context.uniswapRuntime !== undefined) return operationOutcome(await context.uniswapRuntime.status(request.operationId, context.clock.now()));
+    if (context.uniswapRuntime !== undefined) {
+      const operation = await context.uniswapRuntime.status(request.operationId, context.clock.now());
+      return operationOutcome({ ...operation, ...await context.uniswapRuntime.actualEconomics(operation) });
+    }
     const operation = await new SwapOperationRepository(context.state.root).loadAny(request.operationId);
     if (operation === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
-    return { proofClass: operation.state, data: null, operation, receipt: null, nextActions: [] };
+    return { proofClass: operation.state, data: null, receipt: null, nextActions: [],
+      operation: { ...operation, ...await swapActualEconomics(context.state.root, operation, undefined, context.clock.now()) } };
   }
   if (request.command === "swap.uniswap.approve") {
     if (context.uniswapRuntime === undefined) throw new ApnError("APN_OPERATION_BLOCKED",
@@ -56,8 +62,15 @@ export async function executeUniswapCommand(request: Request, context: RuntimeCo
   throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE",
     "Uniswap signing and sending are dormant until a complete exact single-send adapter is installed.", { reason: "uniswap_execution_dormant" });
 }
+/**
+ * The token lane's observed receipt already holds what the swap proved; `actualEconomics` gives it the shared swap shape:
+ * the exact input debit, the output credit, every gas the operation paid (approval, swap, cleanup) and the ETH that left.
+ */
 function tokenOutcome(value: Awaited<ReturnType<NonNullable<RuntimeContext["uniswapTokenRuntime"]>["status"]>>): CommandOutcome {
-  return { proofClass: value.phase, data: null, operation: value, receipt: value.receipt, nextActions: [] };
+  const receipt = value.receipt, actualEconomics: SwapReceiptEconomics | null = receipt === null ? null : { inputAtomic: receipt.inputDebitAtomic,
+    outputAtomic: receipt.outputCreditAtomic, networkFeeAtomic: (BigInt(receipt.approvalGasWei) + BigInt(receipt.swapGasWei) + BigInt(receipt.cleanupGasWei)).toString(),
+    nativeDebitAtomic: receipt.nativeDebitWei };
+  return { proofClass: value.phase, data: null, operation: { ...value, actualEconomics }, receipt: value.receipt, nextActions: [] };
 }
 function data(value: unknown, proofClass: string): CommandOutcome {
   return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };

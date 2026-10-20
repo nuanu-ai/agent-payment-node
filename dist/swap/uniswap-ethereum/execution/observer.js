@@ -2,6 +2,7 @@ import { canonicalJson, domainHash } from "../../../canonical.js";
 import { ApnError } from "../../../errors.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmTokenBalance, recheckEvmBlock } from "../../../evm-rpc-codec.js";
 import { validateSwapOperation } from "../../model.js";
+import { uniswapEconomicsFromReceipt } from "../../uniswap-receipt-facts.js";
 import { proveEvmUnlanded } from "../../unlanded.js";
 import { uniswapFeeAtomic, uniswapReceiptFee, validateUniswapReceipt } from "../../uniswap-receipt.js";
 import { UNISWAP_ROUTER } from "../../uniswap-pin.js";
@@ -90,6 +91,17 @@ export class UniswapEthereumReceiptObserver {
                 afterNative: balances.afterNative, beforeOutput: balances.beforeOutput, afterOutput: balances.afterOutput,
                 finalizedHead: { number: finalizedHead.number, hash: finalizedHead.hash }, observedAt }, binding.envelope, { transactionHash, account: operation.quote.account, recipient: operation.quote.recipient,
                 inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic, outputToken: outputTokenOf(operation) }) };
+    }
+    /** One read of a swap its record proved finalized: its own receipt and the finalized head, for the economics (no balances). */
+    async receiptEconomics(operationValue) {
+        const operation = validateSwapOperation(operationValue), hash = operation.receiptProof?.transactionHash;
+        if (hash === undefined)
+            blocked("Uniswap receipt facts need the record's proven transaction.", "receipt_facts_binding");
+        await this.assertChain();
+        const [receipt, finalized] = await Promise.all([this.call("eth_getTransactionReceipt", [hash]), evmRpcBlock(this.call, "finalized")]);
+        if (receipt === null)
+            blocked("The node has no receipt for this swap.", "receipt_facts_receipt_absent");
+        return uniswapEconomicsFromReceipt(operation, receipt, finalized);
     }
     /** Router deadline passed at a finalized block with no receipt for the sealed hash: the input can never move. */
     async proveUnlanded(deadlineSeconds, loadTransactionHash) {

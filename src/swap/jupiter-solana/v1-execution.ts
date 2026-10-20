@@ -2,7 +2,7 @@ import { canonicalJson, domainHash, isPlainRecord, sha256 } from "../../canonica
 import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
 import { rpcAtomic, SolanaRpc, solanaSignature, type SolanaMethod, type SolanaBatchRead } from "../../solana/rpc.js";
-import type { SwapOperationRecord } from "../model.js";
+import type { SwapOperationRecord, SwapReceiptEconomics } from "../model.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
 import type { JupiterV1OwnerAdmission } from "./v1-admission.js";
@@ -129,6 +129,14 @@ export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
    economics:{inputAtomic:guarded.inputAtomic,outputAtomic:receipt.recipientOutputAtomic,networkFeeAtomic:receipt.feeLamports,nativeDebitAtomic:receipt.nativeSpendLamports}});
  });}
  async proveUnlanded(input:GuardedSwapObservationInput):Promise<SwapUnlandedProof|null>{return await proveJupiterV1Unlanded(this.d,input);}
+ /** A swap finalized before its economics were recorded: its own finalized receipt read once more (observe only). */
+ async receiptEconomics(input:GuardedSwapObservationInput):Promise<SwapReceiptEconomics>{
+  const op=input.operation,material=validateJupiterV1PreparedMaterial(input.material),binding=await this.d.bindings.load(op,material);
+  const signature=binding===null?null:await this.d.bindings.loadSignature(op,binding);
+  if(binding===null||signature===null||signature!==op.receiptProof?.transactionHash||op.state!=="finalized")throw new ApnError("APN_RPC_PROTOCOL","Jupiter receipt facts need the record's proven signature.",{reason:"receipt_facts_binding"});
+  const guarded=await guardReceipt((await this.d.bindings.loadFresh(op,binding)).fresh),receipt=await validateFinalizedJupiterV1Receipt(this.d.rpc,guarded,{signature});
+  return {inputAtomic:guarded.inputAtomic,outputAtomic:receipt.recipientOutputAtomic,networkFeeAtomic:receipt.feeLamports,nativeDebitAtomic:receipt.nativeSpendLamports};
+ }
 }
 /** Under the operation lock that marking, signing and the single send hold: the frozen lifetime passed at finality and
  * the persisted signature, if any, has no status. Nothing is decrypted, signed or sent. */

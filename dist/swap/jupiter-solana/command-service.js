@@ -26,8 +26,10 @@ export async function executeJupiterCommand(request, context) {
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Swap operation was not found.");
     if (!JUPITER_V1_KNOWN_ROUTES.some(route => op.mechanismDigest === swapMechanismDigest(route.mechanismPin)))
         throw new ApnError("APN_OPERATION_BLOCKED", "This operation belongs to another mechanism.");
-    if (request.command === "swap.jupiter.status")
-        return await withDispatch(await runtime.status(request.operationId, context.clock.now()), context);
+    if (request.command === "swap.jupiter.status") {
+        const current = await runtime.status(request.operationId, context.clock.now());
+        return await withDispatch({ ...current, ...await runtime.actualEconomics(current) }, context);
+    }
     if (request.command === "swap.jupiter.approve")
         return await withDispatch(await runtime.approveAndExecute(request.operationId, context.clock.now()), context);
     return await withDispatch(await runtime.execute(request.operationId, context.clock.now()), context);

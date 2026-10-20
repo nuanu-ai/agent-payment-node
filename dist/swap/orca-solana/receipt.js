@@ -3,6 +3,7 @@ import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { rpcArray, rpcAtomic, rpcRecord, solanaSignature } from "../../solana/rpc.js";
 import { validateSwapOperation } from "../model.js";
+import { orcaEconomicsFromTransaction, orcaFactsAccounts } from "./receipt-facts.js";
 import { proveSolanaUnlanded } from "../unlanded.js";
 import { isOrcaTokenPlan, orcaPlanSides } from "./instructions.js";
 import { sha256Hex } from "./pins.js";
@@ -22,6 +23,17 @@ export class OrcaReceiptObserver {
     /** Finalized height past the bound lifetime and no status for the persisted signature: it can never land. */
     async proveUnlanded(lastValidBlockHeight, loadSignature) {
         return await proveSolanaUnlanded(this.rpc, { lastValidBlockHeight, loadSignature });
+    }
+    /** One read of a swap its record proved finalized: its own finalized transaction, for the economics (observe only). */
+    async receiptEconomics(operationValue, material) {
+        const operation = validateSwapOperation(operationValue), signature = operation.receiptProof?.transactionHash;
+        if (signature === undefined)
+            blocked("Orca receipt facts need the record's proven signature.", "receipt_facts_binding");
+        solanaSignature(signature);
+        const raw = await this.rpc.call("getTransaction", [signature, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
+        if (raw === null)
+            blocked("The node has no finalized transaction for this swap.", "receipt_facts_receipt_absent");
+        return orcaEconomicsFromTransaction(operation, orcaFactsAccounts(operation, material), raw);
     }
     async observeOutcome(operationValue, binding, material, signature) {
         const operation = validateSwapOperation(operationValue);
@@ -124,6 +136,7 @@ function accountIndex(messageBytes, key) {
         conflict();
     return index;
 }
+export { tokenBalance as orcaTokenBalance };
 function tokenBalance(value, index, mint, decimals, owner, allowMissing) {
     let found;
     for (const item of rpcArray(value ?? [], 64)) {

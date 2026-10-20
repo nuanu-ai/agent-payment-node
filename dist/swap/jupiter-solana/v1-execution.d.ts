@@ -1,6 +1,6 @@
 import type { ClockPort } from "../../ports.js";
 import { SolanaRpc, type SolanaMethod, type SolanaBatchRead } from "../../solana/rpc.js";
-import type { SwapOperationRecord } from "../model.js";
+import type { SwapOperationRecord, SwapReceiptEconomics } from "../model.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
 import type { JupiterV1OwnerAdmission } from "./v1-admission.js";
@@ -51,6 +51,8 @@ export declare class JupiterV1ExecutionDriver implements GuardedSwapExecutionDri
     execute(input: GuardedSwapExecutionInput): Promise<SwapOperationRecord>;
     observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord>;
     proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
+    /** A swap finalized before its economics were recorded: its own finalized receipt read once more (observe only). */
+    receiptEconomics(input: GuardedSwapObservationInput): Promise<SwapReceiptEconomics>;
 }
 /** Under the operation lock that marking, signing and the single send hold: the frozen lifetime passed at finality and
  * the persisted signature, if any, has no status. Nothing is decrypted, signed or sent. */
