@@ -12,12 +12,14 @@ import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { ETHEREUM_USDT } from "../../src/swap/uniswap-v3/pins.js";
 import { envelopeOf, UniswapTokenCustody } from "../../src/swap/uniswap-v3/token-custody.js";
 import { UniswapTokenEffectJournal } from "../../src/swap/uniswap-v3/token-effects.js";
-import { UniswapTokenExecution, type TokenEffectKind, type TokenEffectObservation, type UniswapTokenExecutionPorts } from "../../src/swap/uniswap-v3/token-execution.js";
+import { requotedCleanup, UniswapTokenExecution, type TokenEffectKind, type TokenEffectObservation, type UniswapTokenExecutionPorts } from "../../src/swap/uniswap-v3/token-execution.js";
 import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js";
 import { newUniswapTokenOperation, tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation,
   type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { createUniswapTokenRoute, UNISWAP_TOKEN_MECHANISM_PIN } from "../../src/swap/uniswap-v3/token-route.js";
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
+import { executeUniswapCommand, uniswapTokenNextActions } from "../../src/swap/uniswap-command-service.js";
+import { bindArgv } from "../../src/command-binder.js";
 import { UniswapTokenUsage } from "../../src/swap/uniswap-v3/token-usage.js";
 import { StateStore } from "../../src/state.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
@@ -156,10 +158,11 @@ async function production(root: string) {
     if (method === "eth_getTransactionByHash") return node.tx; if (method === "eth_getTransactionReceipt") return node.receipt;
     throw new Error(method);
   };
-  let phrase = ""; const tty = { isTerminal: () => true, openTerminal: async () => ({ fd: 1, write: async (screen: string) => { phrase = /Type ([a-z0-9-]+) and/u.exec(screen)?.[1] ?? ""; },
+  let phrase = ""; const screens: string[] = [];
+  const tty = { isTerminal: () => true, openTerminal: async () => ({ fd: 1, write: async (screen: string) => { screens.push(screen); phrase = /Type ([a-z0-9-]+) and/u.exec(screen)?.[1] ?? ""; },
     read: async function* () { yield Buffer.from(`${phrase}\n`); }, close: async () => undefined }) };
   const runtime = () => createUniswapTokenRuntime({ state, wrapping: WRAPPING, clock: { now: () => now }, call, foreground: "cleanup", tty, verifyPins: async () => undefined });
-  return { now, account, policy, state, usage, node, runtime };
+  return { now, account, policy, state, usage, node, runtime, screens };
 }
 /** The captured record's shape (gas envelopes, fee-cap diagnostic at submission_started, approval nonce 7, hashless swap nonce 8) for a test signer. */
 async function liveShaped(root: string, p: Awaited<ReturnType<typeof production>>) {
@@ -222,4 +225,54 @@ test("an approval refused before signing with zero allowance closes with no effe
   current = await p.runtime().cleanup(approved.operationId);
   assert.deepEqual([current.phase, current.cleanupReason, current.usageState, current.cleanupEvidence?.kind], ["cleaned", "zero_allowance_no_effect", "failed_before_effect", "zero_allowance_no_effect"]);
   assert.equal(current.preSignFailure?.reason, "uniswap_token_fee_cap"); assert.equal(p.node.sends.length, 0);
+});
+
+test("a cleanup the frozen fee cap refuses offers the owner's re-quote; the fresh quote checks the caps and the consent shows them", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const p = await production(temporary.root), op = await liveShaped(temporary.root, p);
+  p.node.baseFee = 150_000_000n; // twice it plus the tip is above the 0.2 gwei cap frozen at swap time
+  let current = await p.runtime().cleanup(op.operationId);
+  assert.deepEqual([current.phase, current.preSignFailure?.reason, current.cleanupAttempt], ["cleanup_required", "uniswap_token_fee_cap", null]);
+  const cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;
+  assert.deepEqual(uniswapTokenNextActions(current), [cleanup, `${cleanup} --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`]);
+  const status = await executeUniswapCommand({ command: "swap.uniswap-token.status", operationId: op.operationId }, { uniswapTokenRuntime: p.runtime() } as never);
+  assert.deepEqual(status.nextActions, uniswapTokenNextActions(current));
+
+  // Caps below the fresh quote are refused before consent; the refusal names the quote. Nothing is saved or signed.
+  const screens = p.screens.length;
+  await assert.rejects(p.runtime().cleanup(op.operationId, { maxFeePerGas: "300000000", maxPriorityFeePerGas: "1000000" }), (error: ApnError) =>
+    error.details?.reason === "uniswap_token_cleanup_fee_quote" && error.details?.minimumMaxFeePerGasWei === "300000001" && error.details?.baseFeePerGasWei === "150000000");
+  assert.equal(p.screens.length, screens); assert.equal((await new UniswapTokenJournal(temporary.root).load(op.operationId))?.integrityHash, current.integrityHash);
+
+  current = await p.runtime().cleanup(op.operationId, { maxFeePerGas: "1000000000", maxPriorityFeePerGas: "1000000" });
+  assert.equal(current.phase, "cleanup_submitted"); assert.equal(p.node.sends.length, 1);
+  const shown = p.screens.at(-1)!;
+  for (const line of ["base fee 150000000 wei", "Cleanup max fee per gas: 1000000000 wei (frozen: 200000000)", "Native debit cap: 130000000000000 wei (was 100000000000000)"])
+    assert.ok(shown.includes(line), line);
+  const signed = parseTransaction(p.node.sends[0]!);
+  assert.deepEqual([signed.nonce, signed.maxFeePerGas, signed.maxPriorityFeePerGas, signed.gas], [8, 1_000_000_000n, 1_000_000n, 70_000n]);
+  assert.deepEqual([current.cleanupGas.maxFeePerGas, current.maximumNativeDebitWei, current.swapGas.maxFeePerGas], ["1000000000", "130000000000000", "200000000"]);
+  assert.deepEqual([current.cleanupFeeQuote?.previousCleanupGas.maxFeePerGas, current.cleanupFeeQuote?.baseFeePerGasWei], ["200000000", "150000000"]);
+  landed(p, current); current = await p.runtime().status(op.operationId);
+  assert.deepEqual([current.phase, p.node.sends.length], ["cleaned", 1]);
+  assert.equal((await p.runtime().cleanup(op.operationId, { maxFeePerGas: "2000000000", maxPriorityFeePerGas: "1000000" })).phase, "cleaned");
+  assert.equal(p.node.sends.length, 1);
+});
+
+test("a re-quote never replaces the caps of a cleanup slot that holds a marker", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const p = await production(temporary.root), journal = new UniswapTokenJournal(temporary.root);
+  let op = await liveShaped(temporary.root, p);
+  op = await journal.save(transitionUniswapToken(op, "cleanup_submission_started", { cleanupAttempt: tokenAttempt(op, "cleanup", "8", p.now) }, p.now));
+  op = await journal.save(transitionUniswapToken(op, "cleanup_required", { cleanupReason: "cleanup_pre_sign_failed" }, p.now));
+  assert.throws(() => requotedCleanup(op, { maxFeePerGas: "1000000000", maxPriorityFeePerGas: "1" },
+    { blockNumber: "100", blockHash: H("b"), baseFeePerGasWei: "1", priorityFeePerGasWei: "1" }, p.now), (error: ApnError) => error.details?.reason === "uniswap_token_cleanup_requote_slot");
+});
+
+test("the cleanup command binds the owner's re-quote caps only as a complete, ordered pair", () => {
+  const base = ["swap", "ethereum", "uniswap-token", "cleanup", "--operation", "a".repeat(64)];
+  assert.deepEqual(bindArgv(base).request, { command: "swap.uniswap-token.cleanup", operationId: "a".repeat(64) });
+  assert.deepEqual(bindArgv([...base, "--max-fee-per-gas", "1000000000", "--max-priority-fee-per-gas", "1000000"]).request,
+    { command: "swap.uniswap-token.cleanup", operationId: "a".repeat(64), cleanupFees: { maxFeePerGas: "1000000000", maxPriorityFeePerGas: "1000000" } });
+  for (const extra of [["--max-fee-per-gas", "1000000000"], ["--max-priority-fee-per-gas", "1"], ["--max-fee-per-gas", "1", "--max-priority-fee-per-gas", "2"],
+    ["--max-fee-per-gas", "0", "--max-priority-fee-per-gas", "0"], ["--max-fee-per-gas", "01", "--max-priority-fee-per-gas", "0"]])
+    assert.throws(() => bindArgv([...base, ...extra]), { code: "APN_INVALID_INPUT" }, extra.join(" "));
 });

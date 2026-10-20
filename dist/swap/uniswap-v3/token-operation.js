@@ -35,7 +35,8 @@ export function validateUniswapTokenOperation(value) {
         "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"];
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
-            ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : [])] : common))
+            ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : []),
+            ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -87,6 +88,8 @@ export function validateUniswapTokenOperation(value) {
     // The diagnostic is the history of why cleanup became required: it stays through the owner's cleanup and its outcome.
     if (failure !== null && !PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase))
         corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
+    if (op.cleanupFeeQuote !== undefined)
+        validateCleanupFeeQuote(op);
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
     if (op.receipt !== null)
@@ -186,6 +189,19 @@ function validateCleanupEvidence(v) {
         !["current_allowance", "legacy_usage_reconciliation"].includes(v.source) || v.observedAllowanceAtomic !== "0" ||
         !canonicalInstant(v.observedAt))
         corrupt("Uniswap token cleanup evidence is invalid.");
+}
+function validateCleanupFeeQuote(op) {
+    const q = op.cleanupFeeQuote;
+    if (!PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase) || !isPlainRecord(q) || !exactKeys(q, ["schemaVersion", "blockNumber", "blockHash", "baseFeePerGasWei",
+        "priorityFeePerGasWei", "previousCleanupGas", "previousMaximumNativeDebitWei", "quotedAt"]) || q.schemaVersion !== "apn.uniswap-token-cleanup-fee-quote.v1" ||
+        !/^0x[a-f0-9]{64}$/u.test(q.blockHash) || !canonicalInstant(q.quotedAt) || q.quotedAt > op.updatedAt)
+        corrupt("Uniswap token cleanup fee quote is invalid.");
+    uint(q.blockNumber);
+    uint(q.baseFeePerGasWei);
+    uint(q.priorityFeePerGasWei);
+    validateGas(q.previousCleanupGas);
+    if (q.previousCleanupGas.gasLimit !== op.cleanupGas.gasLimit || uint(q.previousMaximumNativeDebitWei) > uint(op.maximumNativeDebitWei))
+        corrupt("Uniswap token cleanup fee quote is invalid.");
 }
 function validateFailureDiagnostic(v) {
     if (v === null)

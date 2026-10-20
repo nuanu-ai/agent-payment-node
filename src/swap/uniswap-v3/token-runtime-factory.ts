@@ -19,7 +19,8 @@ import { UniswapTokenSigningGuard } from "./token-guard.js";
 import { UniswapTokenUsage } from "./token-usage.js";
 import { InstalledUniswapTokenRuntime } from "./token-runtime.js";
 import { UniswapTokenRpcBudgetJournal } from "./token-rpc-budget.js";
-import { tokenFinalizedBatch, type TokenRpcCall } from "./token-rpc.js";
+import { tokenBatch, tokenBlock, tokenChain, tokenFinalizedBatch, tokenQuantity, type TokenRpcCall } from "./token-rpc.js";
+import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { checkNeverLands } from "../../evm-finalized-proof.js";
 
 export function createUniswapTokenRuntime(input: { readonly state: StateStore; readonly wrapping: WrappingSecretPort;
@@ -48,6 +49,16 @@ export function createUniswapTokenRuntime(input: { readonly state: StateStore; r
       return await checkNeverLands({ chainId: 1, account: op.account, nonce: BigInt(attempt.nonce), transactionHash: attempt.transactionHash!,
         ...(op.quoteBlock === undefined ? {} : { before: { hash: op.quoteBlock.hash, number: BigInt(op.quoteBlock.number) } }) },
         tokenFinalizedBatch(call as TokenRpcCall)); },
+    cleanupFeeQuote: async () => {
+      const [chain, rawBlock, rawPriority] = await tokenBatch(call as TokenRpcCall, "primary", [
+        { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+        { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
+        { method: "eth_maxPriorityFeePerGas", params: [], cachePolicy: "none", decoder: tokenQuantity }]);
+      if (evmRpcQuantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Uniswap token cleanup fee quote requires Ethereum chain 1.");
+      const block = evmRpcRecord(rawBlock);
+      return { blockNumber: evmRpcQuantity(block.number).toString(), blockHash: evmRpcHex(block.hash, 32),
+        baseFeePerGasWei: evmRpcQuantity(block.baseFeePerGas).toString(), priorityFeePerGasWei: evmRpcQuantity(rawPriority).toString() };
+    },
     foregroundApprove: async (op) => { await approveOwner(op); await foreground(input.foreground === "approve", op, false, clock.now(), input.tty); await approveOwner(op); },
     foregroundCleanup: async (op) => { await approveOwner(op); await foreground(input.foreground === "cleanup", op, true, clock.now(), input.tty); await approveOwner(op); },
     confirm: async (material) => await guard.confirm(material),
@@ -62,6 +73,9 @@ async function foreground(enabled: boolean, op: UniswapTokenOperation, cleanup: 
   const lines = cleanup ? ["Agent Payment Node Uniswap token allowance cleanup", `Profile: ${op.profile}`, `Operation: ${op.operationId}`,
     `Token/spender: ${op.route.inputToken} / ${op.route.router}`, "Replacement allowance: 0", `Reason: ${op.cleanupReason ?? "residual_allowance"}`,
     `Native debit so far: ${op.accumulatedNativeDebitWei} wei; aggregate cap with this cleanup: ${op.maximumNativeDebitWei} wei`,
+    ...(op.cleanupFeeQuote === undefined ? [] : [`Cleanup fee caps re-quoted by the owner at Ethereum block ${op.cleanupFeeQuote.blockNumber} (base fee ${op.cleanupFeeQuote.baseFeePerGasWei} wei, priority fee ${op.cleanupFeeQuote.priorityFeePerGasWei} wei)`,
+      `Cleanup max fee per gas: ${op.cleanupGas.maxFeePerGas} wei (frozen: ${op.cleanupFeeQuote.previousCleanupGas.maxFeePerGas}); max priority fee: ${op.cleanupGas.maxPriorityFeePerGas} wei (frozen: ${op.cleanupFeeQuote.previousCleanupGas.maxPriorityFeePerGas}); gas limit ${op.cleanupGas.gasLimit}`,
+      `Native debit cap: ${op.maximumNativeDebitWei} wei (was ${op.cleanupFeeQuote.previousMaximumNativeDebitWei})`]),
     ...(op.retiredEffects ?? []).filter((row) => row.kind === "cleanup").map((row) => `Earlier cleanup ${row.attempt.transactionHash}: ${row.reason}`)] :
     ["Agent Payment Node Uniswap V3 token swap approval", `Profile: ${op.profile}`, `Operation: ${op.operationId}`, `Signer: ${op.account}`,
       `Exact input: ${op.route.amountIn} atomic at ${op.route.inputToken}`, `Minimum output: ${op.route.amountOutMinimum} atomic at ${op.route.outputToken}`,

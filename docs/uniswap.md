@@ -121,6 +121,13 @@ amount. Successful execution proves the exact input debit, minimum output, and
 zero residual allowance. A reverted or drifted post-approval operation enters
 `cleanup_required`; only the explicit foreground `cleanup` command can send the
 zero allowance cleanup. `status` observes and may reconcile durable local state.
+A cleanup whose fee caps (frozen at quote time) are below the current Ethereum fees is
+refused before signing and stays `cleanup_required`; its `next_actions` offer the same
+cleanup again and `cleanup --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`.
+Those are the owner's own caps for this cleanup only: they must cover a fresh fee quote
+(twice the latest base fee plus the node's priority fee, the signing guard's rule; a
+refusal names the quote), and the foreground consent shows them, the frozen caps and the
+new native debit cap before anything is signed. APN never raises a cap by itself.
 The Ethereum raw signer may coexist with same-address MetaMask Smart Account
 profiles and their Base delegation grants. Approval and token effects still
 reject a second local signing profile or wallet for that address under the
