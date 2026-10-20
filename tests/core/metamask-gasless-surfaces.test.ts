@@ -30,6 +30,7 @@ const GASLESS_PATHS = [
   "gasless transfer quote",
   "gasless transfer prepare",
   "gasless transfer approve",
+  "gasless transfer revoke",
   "gasless transfer approve-sealed",
 ] as const;
 const GASLESS_TOOLS = [

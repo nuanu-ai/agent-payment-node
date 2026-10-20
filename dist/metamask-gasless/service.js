@@ -5,13 +5,15 @@ import { canonicalOperationId } from "../transfer-policy.js";
 import { MetaMaskGaslessClock } from "./clock.js";
 import { MetaMaskGaslessExecution } from "./execution.js";
 import { MetaMaskGaslessOperationRepository } from "./journal/repository.js";
-import { publicMetaMaskGaslessOperation } from "./journal/receipt.js";
+import { liveMetaMaskGaslessOperation, publicMetaMaskGaslessOperation } from "./journal/receipt.js";
 import { advanceMetaMaskGaslessOperation } from "./journal/transitions.js";
+import { MetaMaskGaslessObservationService } from "./observation.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import { MetaMaskGaslessPreparation } from "./prepare.js";
 import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
+import { revokeMetaMaskGasless } from "./revocation/service.js";
 import { canonicalProfile } from "../wallet-policy.js";
 /**
  * MetaMask quoted no USDC relay fee. Its own client reads that answer as the server wallet's USDC not covering the
@@ -91,7 +93,7 @@ export class MetaMaskGaslessService {
     async approve(operationId) {
         return await this.locked(operationId, async (op) => {
             if (op.terminal || op.state !== "awaiting_approval")
-                return publicMetaMaskGaslessOperation(op);
+                return liveMetaMaskGaslessOperation(op);
             const approval = this.dependencies().approval;
             if (approval === undefined)
                 throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve this MetaMask USDC transfer in a foreground terminal.", {
@@ -103,27 +105,33 @@ export class MetaMaskGaslessService {
     async resume(operationId, observationRpcEnv) {
         const environmentName = observationRpcEnv === undefined ? undefined : mmObservationRpcEnv(observationRpcEnv);
         return await this.locked(operationId, async (op) => {
-            if (op.terminal || op.state === "awaiting_approval")
-                return publicMetaMaskGaslessOperation(op);
+            // An abandoned dispatch is still observed: a later chain proof replaces the owner's acknowledgement.
+            const provable = op.state === "abandoned_unknown" && op.submissionAttempts === 1;
+            if ((op.terminal && !provable) || op.state === "awaiting_approval")
+                return liveMetaMaskGaslessOperation(op);
             if (environmentName === undefined)
-                return this.project(await this.execution().run(op));
+                return this.project(provable ? await this.observation().run(op) : await this.execution().run(op));
             const factory = this.dependencies().observationRpcFor;
             if (factory === undefined)
                 return mmFail("mm_gasless_rpc_binding");
-            return this.project(await this.execution().observeWith(op, { rpc: factory(op.intent.request.chainId, environmentName), environmentName }));
+            return this.project(await this.observation({ rpc: factory(op.intent.request.chainId, environmentName), environmentName }).run(op));
         });
     }
+    /** The owner's on-chain disable of a disclosed delegation whose outcome is still unproved (no journal write). */
+    async revoke(operationId) {
+        return await this.locked(operationId, async (op) => await revokeMetaMaskGasless(this.context.state, op, this.dependencies().rpcFor, this.dependencies().revocation ?? {}));
+    }
     async status(operationId) {
-        return await this.locked(operationId, async (op) => publicMetaMaskGaslessOperation(op));
+        return await this.locked(operationId, async (op) => liveMetaMaskGaslessOperation(op));
     }
     async receipt(operationId) {
         return await this.locked(operationId, async (op) => await this.records.loadReceipt(op.profileHash, op.operationId));
     }
     project(step) {
-        const result = publicMetaMaskGaslessOperation(step.operation);
+        const result = liveMetaMaskGaslessOperation(step.operation);
         const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
                 reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
-        return step.warning === undefined ? result : { ...result, transient_warning: step.warning, ...unsaved };
+        return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved };
     }
     dependencies() {
         if (this.context.metaMaskGasless === undefined)
@@ -132,12 +140,18 @@ export class MetaMaskGaslessService {
     }
     execution() {
         const d = this.dependencies();
-        return new MetaMaskGaslessExecution(this.context.state, d.rpcFor, d.provider, this.context.clock, async (op, patch, at) => {
-            const next = advanceMetaMaskGaslessOperation(op, patch, at);
-            await this.records.persist(next);
-            return next;
-        }, this.context.wait);
+        return new MetaMaskGaslessExecution(this.context.state, d.rpcFor, d.provider, this.context.clock, this.save, this.context.wait);
     }
+    /** Observation only; an owner-named RPC replaces the frozen endpoint for the read, never for approval or dispatch. */
+    observation(observer) {
+        const d = this.dependencies();
+        return new MetaMaskGaslessObservationService(this.context.state, d.rpcFor, d.provider, new MetaMaskGaslessClock(this.context.clock), this.save, observer);
+    }
+    save = async (op, patch, at) => {
+        const next = advanceMetaMaskGaslessOperation(op, patch, at);
+        await this.records.persist(next);
+        return next;
+    };
     async locked(input, work) {
         const id = canonicalOperationId(input), first = await this.operations.required(id);
         if (first.kind !== "metamask_gasless_transfer")

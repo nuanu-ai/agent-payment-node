@@ -4,6 +4,8 @@ import { type GaslessTransport } from "../../gasless/https.js";
 import type { MetaMaskGaslessBalance, MetaMaskGaslessChainId, MetaMaskGaslessCursor, MetaMaskGaslessIntent, MetaMaskGaslessProviderObservation, MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot } from "../model.js";
 import type { MetaMaskGaslessObservationRpcFactory, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "../ports.js";
 import { type MetaMaskGaslessFailureReason } from "../reasons.js";
+import type { MetaMaskDisableCall } from "../revocation/call.js";
+import { type MetaMaskRevocationChain } from "../revocation/chain.js";
 export { validateMetaMaskGaslessSnapshot } from "./snapshot.js";
 export interface MetaMaskGaslessRpcOptions {
     readonly chainId: MetaMaskGaslessChainId;
@@ -38,6 +40,8 @@ export declare class MetaMaskGaslessRpc implements MetaMaskGaslessRpcPort {
         readonly feeMode?: "sponsored";
     }): Promise<MetaMaskGaslessSnapshot>;
     observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor, provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
+    /** Chain facts for the owner's disable of this exact dispatched delegation, against the deployment it froze. */
+    revocation(intent: MetaMaskGaslessIntent, disable: MetaMaskDisableCall, operationId: string): Promise<MetaMaskRevocationChain>;
     /**
      * Observation proves a saved operation against the deployment it froze (token, manager and enforcers from the
      * record, code pins from its prepare snapshot), never against today's registry: a later pin change refuses new

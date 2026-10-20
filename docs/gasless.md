@@ -743,6 +743,19 @@ MFA remain unresolved. A canonical revert is `failed_effects_pending` and
 retains the profile guard because the permission may still be redeemed later.
 Only independently proved completion or failure before any effect is terminal.
 
+A third proof closes it too: the delegation disabled before any redemption. Only
+the delegator (the server wallet itself) can call
+`DelegationManager.disableDelegation` for it, and from then on every
+`redeemDelegations` of that hash reverts (`CannotUseADisabledDelegation`). Each
+resume whose redemption count reads 0 at the finality block also reads
+`disabledDelegations(<delegation hash>)` on the pinned manager at that same
+block, pinned by hash, against the manager's pinned code. When it is set, the
+operation becomes `revoked_unused` (terminal, reason
+`mm_gasless_delegation_disabled`, `one_use_status: disabled_unused`), its account
+and profile holds are released and nothing is sent. The delegation can be
+redeemed again only if that same wallet calls `enableDelegation`, which is a new
+act of the owner's wallet, not of APN or a relayer.
+
 If MetaMask requires MFA, the operation reports `mm_gasless_provider_approval`.
 Confirm the existing transaction in MetaMask Mobile or the email registered to
 your MetaMask dashboard, then resume the same operation. APN does not approve
@@ -796,9 +809,48 @@ transfer later because its delegation has no on-chain expiry. The confirmation
 screen shows the gross of the batch actually dispatched; for a fixed-net transfer
 it also shows the approved ceiling beside it.
 
+Abandonment is an acknowledgement, not an outcome. `apn operation resume` still
+observes an abandoned dispatch (the provider status of the original request, then
+the chain), and a proof replaces it: the redemption (`completed`, with its exact
+delivery and fee) or the delegation disabled before any redemption
+(`revoked_unused`). Anything else is shown as `transient_observation` and is not
+saved over the acknowledgement.
+
 When an observation went through `--observation-rpc-env`, the next action of the
 still unresolved operation repeats that option. Receipts written before this
 option appeared in next actions remain valid.
+
+### Disabling a disclosed MetaMask delegation
+
+When MetaMask closed the request (`FAILED`, `DENIED`, `EXPIRED`), the relay
+reverted, or the owner abandoned the operation, the delegation may still be
+redeemed and only a proof ends that. The owner's exit is to disable it from the
+server wallet itself:
+
+```sh
+apn gasless transfer revoke --operation <operation-id>
+apn operation resume --operation <operation-id>
+```
+
+`revoke` reads, at the finality block pinned by hash, that the delegation is not
+redeemed and not disabled, and that the pinned DelegationManager hashes the call's
+delegation tuple (`getDelegationHash`) to the operation's delegation hash. It then
+prices exactly `DelegationManager.disableDelegation(<that delegation>)` from the
+server wallet at the latest block (`eth_estimateGas`, pending nonce, 2 x base fee
++ priority fee, and on OP-stack chains the L1 data and operator fee upper bounds)
+and refuses with `APN_INSUFFICIENT_GAS` and the exact amount to send when the
+wallet's native balance is below that maximum. The foreground screen shows the
+call, the nonce, the gas fields and the maximum native cost; after the six
+character code, the MetaMask Agent Wallet (`mm wallet send-transaction`, the
+path the native-fee lane uses) signs and broadcasts it after its own Guard
+policy and MFA. APN first checks that the wallet's selected server wallet is the
+delegator. The call moves no USDC; the pinned nonce lets one such call land, and
+a second disable reverts (`AlreadyDisabled`). Nothing is written to the
+operation: the chain is the record. `operation resume` then proves the outcome:
+`revoked_unused` when the delegation is disabled with no redemption, or
+`completed` when the redemption landed first. MCP returns the CLI handoff.
+These operations list `apn gasless transfer revoke` among their next actions;
+receipts written before that action existed remain valid.
 
 ## MetaMask Smart Account
 

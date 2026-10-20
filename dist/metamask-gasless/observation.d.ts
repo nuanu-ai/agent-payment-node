@@ -33,6 +33,11 @@ export declare class MetaMaskGaslessObservationService {
     private readonly save;
     private readonly observer?;
     constructor(state: StateStore, rpcFor: MetaMaskGaslessRpcFactory, provider: MetaMaskGaslessProviderPort, clock: MetaMaskGaslessClock, save: MetaMaskGaslessSave, observer?: MetaMaskGaslessObserver | undefined);
+    /**
+     * One bounded observation. An operation the owner abandoned is observed the same way (provider status bound to the
+     * original request, then the chain), but only a proof replaces the abandonment: the redemption, or its delegation
+     * disabled before any redemption. Anything else is reported, never saved.
+     */
     run(op: MetaMaskGaslessOperationRecord, submitted?: MetaMaskGaslessProviderRead): Promise<MetaMaskGaslessStep>;
     private source;
     private readProvider;
