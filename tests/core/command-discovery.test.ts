@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmod, lstat, mkdir, readFile, readdir, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, lstat, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import test from "node:test";
+import { pathToFileURL } from "node:url";
+import test, { after } from "node:test";
 import {
   COMMAND_GROUPS,
   COMMAND_MANIFEST,
@@ -33,23 +33,9 @@ import { temporaryState } from "./helpers.js";
 import { TestHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
-/**
- * The compiled CLI resolves its state root from the effective user's passwd home, never HOME. Tests run it with that home
- * redirected (a preload replaces os.userInfo().homedir) so they never read or touch the real ~/.apn.
- */
-const EFFECTIVE_HOME_PRELOAD = `data:text/javascript,${encodeURIComponent([
-  "import os from \"node:os\"; import { syncBuiltinESMExports } from \"node:module\";",
-  "const real = os.userInfo; os.userInfo = (options) => ({ ...real(options), homedir: process.env.APN_TEST_EFFECTIVE_HOME });",
-  "syncBuiltinESMExports();"].join(" "))}`;
-/** In-process calls that fail before any state access still get a state root that is never the real ~/.apn. */
-const NO_STATE_ROOT = join(tmpdir(), `apn-discovery-no-state-${process.pid}`, ".apn");
-async function effectiveHome(base: string): Promise<string> {
-  const home = join(base, "effective-home"); await mkdir(home, { recursive: true, mode: 0o700 }); return home;
-}
-function spawnApn(argv: readonly string[], options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv; readonly home: string }) {
-  return spawnSync(process.execPath, ["--import", EFFECTIVE_HOME_PRELOAD, resolve("bin/apn.js"), ...argv],
-    { encoding: "utf8", cwd: options.cwd, env: { ...options.env, APN_TEST_EFFECTIVE_HOME: options.home } });
-}
+/** In-process invocations that must fail before touching state still get a private root, never the real ~/.apn. */
+const isolated = await temporaryState(), temporaryRoot = isolated.base;
+after(isolated.cleanup);
 
 const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
@@ -102,13 +88,13 @@ const EXPECTED_COMMANDS = [
   "pay transfer prepare-tron",
   "wallet portfolio",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
-  "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
+  "circle approval prepare", "circle approval revoke", "circle approval execute", "circle approval status", "circle source submit",
   "sei funding prepare", "sei funding approve", "sei funding status",
   "circle evm prepare", "circle evm approve-source", "circle evm adopt-external-mint", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm status",
   "mega funding prepare", "mega funding approve", "mega funding status",
   "oneclick source submit", "oneclick source status",
   "gasless usdt prepare", "gasless usdt status", "gasless usdt resume", "gasless usdt execute", "gasless usdt execution-status", "gasless usdt observe",
-  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer approve-sealed",
+  "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer revoke", "gasless transfer approve-sealed",
   "allowlist inventory", "allowlist resolve", "allowlist policy prepare", "allowlist policy stage", "allowlist policy activate",
   "allowlist policy revoke", "allowlist policy status",
   "swap ethereum uniswap inventory", "swap ethereum uniswap quote", "swap ethereum uniswap prepare", "swap ethereum uniswap status", "swap ethereum uniswap approve", "swap ethereum uniswap execute",
@@ -286,7 +272,7 @@ test("invalid discovery and operational usage return bounded catalog-only guidan
   }
   assert.deepEqual(catalogNextActions(["wallet", "status", "--profile"]), ["apn help wallet status", "apn help"]);
   assert.deepEqual(catalogNextActions([canary]), ["apn help"]);
-  const operational = await runCli(["wallet", "status", "--profile"], {}, { stateRoot: NO_STATE_ROOT });
+  const operational = await runCli(["wallet", "status", "--profile"], {}, { stateRoot: join(temporaryRoot, "never-created") });
   assert.equal(operational.ok, false);
   assert.deepEqual(operational.next_actions, ["apn help wallet status", "apn help"]);
 });
@@ -337,7 +323,7 @@ test("manifest v2 names every removed v1 command with a current replacement, and
     assert.equal(COMMANDS.some((command) => command.path.join(" ") === entry.path.join(" ")), false, entry.path.join(" "));
     if (entry.replacement === null) {
       // Removed without a successor: the reason, ordinary discovery guidance and no invented replacement.
-      const invoked = await runCli([...entry.path, "--profile", "x"], {}, { stateRoot: NO_STATE_ROOT });
+      const invoked = await runCli([...entry.path, "--profile", "x"], {}, { stateRoot: join(temporaryRoot, "never-created") });
       assert.equal(invoked.error?.code, "APN_UNSUPPORTED_COMMAND");
       assert.equal(invoked.error?.message.endsWith(entry.reason), true);
       assert.equal(invoked.next_actions.every((action) => action.startsWith("apn help")), true, JSON.stringify(invoked.next_actions));
@@ -349,7 +335,7 @@ test("manifest v2 names every removed v1 command with a current replacement, and
     assert.match(next[1] ?? "", /^apn help /u);
     assert.ok(COMMANDS.some((command) => next[1] === `apn help ${command.path.join(" ")}`), next[1]);
     assert.deepEqual(catalogNextActions(["help", ...entry.path]), next);
-    const invoked = await runCli([...entry.path, "--profile", "x"], {}, { stateRoot: NO_STATE_ROOT });
+    const invoked = await runCli([...entry.path, "--profile", "x"], {}, { stateRoot: join(temporaryRoot, "never-created") });
     assert.equal(invoked.error?.code, "APN_UNSUPPORTED_COMMAND");
     assert.equal(invoked.error?.message.endsWith(entry.replacement), true);
     assert.deepEqual(invoked.next_actions, next);
@@ -568,15 +554,15 @@ test("README command block and package/build identity are mechanically identical
 test("actual compiled CLI ignores caller HOME and leaves effective-user APN state unchanged for an absent profile", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
+  const entrypoint = resolve("bin/apn.js");
   const profile = `no-effect-${randomBytes(16).toString("hex")}`;
-  const home = await effectiveHome(temporary.base), effectiveRoot = join(home, ".apn");
-  // The preload really redirects the effective-user home the CLI resolves its state root from.
-  const probe = spawnSync(process.execPath, ["--import", EFFECTIVE_HOME_PRELOAD, "--input-type=module", "-e",
-    "import { userInfo } from \"node:os\"; process.stdout.write(userInfo().homedir);"],
-  { encoding: "utf8", env: { ...process.env, APN_TEST_EFFECTIVE_HOME: home } });
-  assert.equal(probe.stdout, home, probe.stderr);
+  const effective = await effectiveUserHome(temporary.base), effectiveRoot = effective.root;
   const before = await treeMetadataDigest(effectiveRoot);
-  const result = spawnApn(["wallet", "status", "--profile", profile], { cwd: temporary.base, env: { ...process.env, HOME: "" }, home });
+  const result = spawnSync(process.execPath, [...effective.preload, entrypoint, "wallet", "status", "--profile", profile], {
+    encoding: "utf8",
+    cwd: temporary.base,
+    env: { ...process.env, HOME: "" },
+  });
   assert.equal(result.status, 0, result.stderr ?? result.error?.message);
   assert.equal(result.stderr, "");
   const envelope = JSON.parse(result.stdout) as { readonly ok: boolean; readonly data: { readonly profile: string; readonly status: string } };
@@ -593,10 +579,12 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
 
 test("actual compiled Stargate status needs no RPC environment and creates no state", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const home = await effectiveHome(temporary.base), effectiveRoot = join(home, ".apn");
+  const effective = await effectiveUserHome(temporary.base), effectiveRoot = effective.root;
   const before = await treeMetadataDigest(effectiveRoot), environment = { ...process.env };
   delete environment.APN_ETHEREUM_RPC_URL; delete environment.APN_UNICHAIN_RPC_URL;
-  const result = spawnApn(["stargate", "native", "status", "--operation", "d".repeat(64)], { cwd: temporary.base, env: environment, home });
+  const result = spawnSync(process.execPath, [...effective.preload, resolve("bin/apn.js"), "stargate", "native", "status", "--operation", "d".repeat(64)], {
+    encoding: "utf8", cwd: temporary.base, env: environment,
+  });
   assert.equal(result.status, 1, result.stderr ?? result.error?.message); assert.equal(result.stderr, "");
   const envelope = JSON.parse(result.stdout) as { readonly ok: boolean; readonly error: { readonly code: string } };
   assert.equal(envelope.ok, false); assert.equal(envelope.error.code, "APN_OPERATION_NOT_FOUND");
@@ -606,7 +594,8 @@ test("actual compiled Stargate status needs no RPC environment and creates no st
 test("actual compiled discovery is raw and no-effect with empty or unwritable caller HOME", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const home = await effectiveHome(temporary.base), effectiveRoot = join(home, ".apn");
+  const entrypoint = resolve("bin/apn.js");
+  const effective = await effectiveUserHome(temporary.base), effectiveRoot = effective.root;
   const before = await treeMetadataDigest(effectiveRoot);
   const unwritableHome = join(temporary.base, "unwritable-home");
   await mkdir(unwritableHome, { mode: 0o700 });
@@ -620,14 +609,22 @@ test("actual compiled discovery is raw and no-effect with empty or unwritable ca
       [["wallet", "--help"], renderHelp(["wallet"])],
       [["help", "--json"], JSON.stringify(COMMAND_MANIFEST)],
     ] as const) {
-      const result = spawnApn(argv, { cwd: temporary.base, env: { ...process.env, HOME: callerHome }, home });
+      const result = spawnSync(process.execPath, [...effective.preload, entrypoint, ...argv], {
+        encoding: "utf8",
+        cwd: temporary.base,
+        env: { ...process.env, HOME: callerHome },
+      });
       assert.equal(result.status, 0, result.stderr ?? result.error?.message);
       assert.equal(result.stderr, "");
       assert.equal(result.stdout, `${expectedOutput}\n`);
       assert.equal(result.stdout.includes(canary), false);
     }
 
-    const invalid = spawnApn(["help", "wallet", canary], { cwd: temporary.base, env: { ...process.env, HOME: callerHome }, home });
+    const invalid = spawnSync(process.execPath, [...effective.preload, entrypoint, "help", "wallet", canary], {
+      encoding: "utf8",
+      cwd: temporary.base,
+      env: { ...process.env, HOME: callerHome },
+    });
     assert.equal(invalid.status, 1, invalid.stderr ?? invalid.error?.message);
     assert.equal(invalid.stderr, "");
     assert.equal(invalid.stdout, `${invalid.stdout.trim()}\n`, "invalid discovery emits one raw JSON value and one terminator");
@@ -741,6 +738,20 @@ function cloneManifest(): {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/**
+ * The compiled CLI's effective user, for one spawned process: APN reads `os.userInfo().homedir` (never HOME), so a preload
+ * points that call at a temporary home holding an initialized `.apn`. The product path is unchanged and the real ~/.apn
+ * is never read or written; HOME stays a separate, caller-controlled value the CLI must ignore.
+ */
+async function effectiveUserHome(base: string): Promise<{ readonly root: string; readonly preload: readonly string[] }> {
+  const home = join(base, "effective-user-home"), root = join(home, ".apn"), preload = join(base, "effective-user-home.mjs");
+  await mkdir(home, { mode: 0o700 }); await new StateStore(root).initialize();
+  await writeFile(preload, [`import os from "node:os";`, `import { syncBuiltinESMExports } from "node:module";`,
+    `const userInfo = os.userInfo;`, `os.userInfo = (options) => ({ ...userInfo(options), homedir: ${JSON.stringify(home)} });`,
+    `syncBuiltinESMExports();`, ""].join("\n"), { mode: 0o600 });
+  return { root, preload: ["--import", pathToFileURL(preload).href] };
 }
 
 async function treeMetadataDigest(root: string): Promise<string> {

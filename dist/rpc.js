@@ -9,6 +9,7 @@ import { readX402Permit2NonceBit, readX402Permit2PrepareEvidence } from "./x402-
 import { sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { readEvmReceiptFeeFields } from "./evm-direct-actual-fee.js";
 import { EvmRpc } from "./evm-rpc.js";
 import { EvmDirectRpcGuard } from "./evm-direct-rpc-guard.js";
 import { parseAtomic } from "./money.js";
@@ -359,7 +360,8 @@ export class HttpsBaseRpc {
                 throw new ApnError("APN_RPC_PROTOCOL", "RPC log topics are invalid.");
             return { address: rpcAddress(log.address), topics: log.topics.map((topic) => rpcHex(topic, 32)), data: rpcHex(log.data) };
         });
-        return { transactionHash: rpcHex(receipt.transactionHash, 32), status: status === 1n ? "success" : "reverted", blockNumberAtomic: rpcQuantity(receipt.blockNumber).toString(), logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin };
+        return { transactionHash: rpcHex(receipt.transactionHash, 32), status: status === 1n ? "success" : "reverted", blockNumberAtomic: rpcQuantity(receipt.blockNumber).toString(), logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin,
+            evmFeeFields: readEvmReceiptFeeFields(receipt) };
     }
     async coinbaseGaslessCall(method, params) {
         return await this.call(method, params);

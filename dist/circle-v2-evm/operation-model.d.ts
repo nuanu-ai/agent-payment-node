@@ -104,6 +104,24 @@ export declare function publicCircle(op: CircleOperationV1): {
     destination_chain: CircleDestinationChain;
     amount_atomic: string;
     minimum_output_atomic: string;
+    actual_economics: {
+        asset: {
+            symbol: string;
+            decimals: number;
+            source_chain: string;
+            source_token: `0x${string}`;
+            destination_chain: string;
+            destination_token: `0x${string}`;
+        };
+        actual_source_gross_atomic: string | null;
+        source_burn_transaction_hash: `0x${string}` | null;
+        source_burn_finality: "safe" | "included" | "finalized" | null;
+        actual_destination_net_atomic: string | null;
+        actual_issuer_fee_atomic: string | null;
+        destination_mint: "external" | "owned" | null;
+        destination_mint_transaction_hash: `0x${string}` | null;
+        destination_mint_finality: "safe" | "included" | "finalized" | null;
+    };
     effects: {
         role: CircleRole;
         phase: CircleEffectPhase;

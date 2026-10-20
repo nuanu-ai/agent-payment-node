@@ -71,7 +71,7 @@ test("refresh rejects nonce and balance drift before signing or broadcast", asyn
   await assert.rejects(f.make().execute(p.id, async () => true), { code: "APN_REPREPARE_REQUIRED" });
   assert.equal(f.signings, 0); assert.equal(f.sends, 0);
   f.nonce = "7"; f.balance = "429999";
-  await assert.rejects(f.make().execute(p.id, async () => true), { code: "APN_PROVIDER_PROTOCOL" });
+  await assert.rejects(f.make().execute(p.id, async () => true), { code: "APN_INSUFFICIENT_USDC" });
   assert.equal(f.sends, 0);
 });
 test("exact finalized Approval event and fresh allowance are both needed for completion", async t => {

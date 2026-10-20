@@ -7,7 +7,7 @@ import { assertMetaMaskGaslessObservable, metaMaskGaslessObservationRoom,
 import type { MetaMaskGaslessCursor, MetaMaskGaslessMutable, MetaMaskGaslessObservation, MetaMaskGaslessProviderObservation,
   MetaMaskGaslessRpcObservation } from "./model.js";
 import { MM_CLOSED_PROVIDER_STATUSES, MM_PROVIDER_STATUSES } from "./model.js";
-import { MM_TERMINAL, type MetaMaskGaslessOperationRecord } from "./operation-model.js";
+import { MM_PROVED_AFTER_ABANDON, MM_TERMINAL, type MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "./ports.js";
 import { mmClassify, mmFail, mmFailure, type MetaMaskGaslessFailure, type MetaMaskGaslessFailureReason } from "./reasons.js";
@@ -46,8 +46,14 @@ export class MetaMaskGaslessObservationService {
     private readonly provider: MetaMaskGaslessProviderPort, private readonly clock: MetaMaskGaslessClock,
     private readonly save: MetaMaskGaslessSave, private readonly observer?: MetaMaskGaslessObserver) {}
 
+  /**
+   * One bounded observation. An operation the owner abandoned is observed the same way (provider status bound to the
+   * original request, then the chain), but only a proof replaces the abandonment: the redemption, or its delegation
+   * disabled before any redemption. Anything else is reported, never saved.
+   */
   async run(op: MetaMaskGaslessOperationRecord, submitted?: MetaMaskGaslessProviderRead): Promise<MetaMaskGaslessStep> {
-    if (op.terminal || op.submissionAttempts !== 1) return { operation: op };
+    const abandoned = op.state === "abandoned_unknown";
+    if ((op.terminal && !abandoned) || op.submissionAttempts !== 1) return { operation: op };
     try {
       this.clock.check(op);
       assertMetaMaskGaslessObservable(op);
@@ -65,7 +71,8 @@ export class MetaMaskGaslessObservationService {
           ...(chain.settlement === null ? [] : [chain.settlement.observedAt])]);
       } catch (error) {
         const classified = mmClassify(error, "mm_gasless_rpc_unavailable").reason;
-        if (classified === "mm_gasless_clock") throw error;
+        // A missing RPC setting observed nothing: the operation stays as it is and the error names the variable to set.
+        if (classified === "mm_gasless_clock" || classified === "mm_gasless_rpc_setting") throw error;
         const invalid = ["mm_gasless_rpc_binding", "mm_gasless_evidence_invalid"].includes(classified);
         const reason = invalid ? classified : "mm_gasless_rpc_unavailable";
         const at = new Date(this.clock.check(op)).toISOString();
@@ -81,6 +88,9 @@ export class MetaMaskGaslessObservationService {
         chain = { ...chain, observation: { ...chain.observation, candidateTxHash: op.observation.candidateTxHash } };
       }
       const patch = this.decide(op, chain, providerObservation, result.failure);
+      if (abandoned && !MM_PROVED_AFTER_ABANDON.includes(patch.state ?? op.state)) {
+        return { operation: op, unsaved: { observation: chain.observation, cursor: chain.cursor } };
+      }
       const at = new Date(this.clock.check(op, [chain.observation.observedAt,
         ...(providerObservation === null ? [] : [providerObservation.observedAt])])).toISOString();
       if (metaMaskGaslessObservationUnchanged(op, patch)) return { operation: op };
@@ -141,6 +151,9 @@ export class MetaMaskGaslessObservationService {
       return { ...base, state: "completed", settlement: chain.settlement, failure: null };
     }
     if (chain.settlement !== null || chain.observation.phase === "success") mmFail("mm_gasless_evidence_invalid");
+    if (chain.observation.phase === "disabled") {
+      return { ...base, state: "revoked_unused", failure: mmFailure("mm_gasless_delegation_disabled") };
+    }
     if (chain.observation.phase === "reverted") {
       return { ...base, state: "failed_effects_pending", failure: mmFailure("mm_gasless_transaction_reverted") };
     }

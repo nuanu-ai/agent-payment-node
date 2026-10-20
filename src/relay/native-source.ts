@@ -30,6 +30,7 @@ import { verifyRelayBaseFunding } from "./base-source-guard.js";
 import { RelayNativeDepositCustody, verifySignedNativeDeposit as verifySigned } from "./native-source-custody.js";
 import { decodeRelayBaseReceiptFee, verifyRelayBaseReceiptFee } from "./source-fee-proof.js";
 import { RelayRpcInvocation, RELAY_EXECUTION_WALL_MS } from "./rpc-budget.js";
+import { postEffectReadFailure, type PostEffectReadFailure } from "../post-effect-read-failure.js";
 
 const HASH = /^[a-f0-9]{64}$/u;
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
@@ -39,6 +40,8 @@ type Rpc = Pick<HttpsBaseRpc, "batchCall" | "submitRawTransaction">;
 export { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce, publicRelayNativeSourceJournal,
   type RelayNativeSourceJournal } from "./native-source-journal.js";
 import { RelayNativeSourceJournalRepository, dispatchRelayNativeDepositOnce, type RelayNativeSourceJournal } from "./native-source-journal.js";
+/** The journal; `observationFailure` only when this call dispatched the deposit and a later read or check failed. */
+export type RelayNativeExecuteResult = RelayNativeSourceJournal & { readonly observationFailure?: PostEffectReadFailure };
 export interface RelayNativeSourcePorts {
   readonly confirm: (summary: { operationId: string; sourceChainId: 56 | 8453; destinationChainId: 137 | 143 | 4326; sourceAccount: string;
     recipient: string; amountAtomic: string; minOutputAtomic: string; deadline: string; quoteDigest: string;
@@ -47,6 +50,7 @@ export interface RelayNativeSourcePorts {
 }
 export class RelayNativeSourceRuntime {
   readonly #heldCustody = new WeakSet<RelayUnsignedOperation>();
+  readonly #dispatched = new WeakSet<RelayUnsignedOperation>();
   private readonly wallets: EncryptedWalletStore;
   private readonly permissions: EncryptedSmartAccountPermissionStore;
   private readonly journals: RelayNativeSourceJournalRepository;
@@ -59,7 +63,7 @@ export class RelayNativeSourceRuntime {
     this.usage = new AssetUsageLedger(state.root);
   }
   /** `profile` is the caller's explicit profile; the operation is found only under its hash (OWNR 4.1). */
-  async execute(profile: string, operationId: string): Promise<RelayNativeSourceJournal> {
+  async execute(profile: string, operationId: string): Promise<RelayNativeExecuteResult> {
     if (!HASH.test(operationId)) throw new ApnError("APN_INVALID_INPUT", "Relay native execute requires an operation ID.");
     allowlistProfileHash(profile);
     const op = await new RelayUnsignedOperationRepository(this.state.root).loadOperation(this.state.profileHash(profile), operationId);
@@ -74,12 +78,20 @@ export class RelayNativeSourceRuntime {
       const rpc = invocation?.rpc ?? transport;
       const work = () => this.state.withLocks([`profile:${op.profileHash}`, `profile:${allowlistProfileHash(profile)}`, `relay-native-source:${operationId}`, evmAddressLock(op.sourceAccount)],
         async () => this.run(op, profile, rpc, abort.signal));
-      const result = op.sourceChainId !== 8453 ? await work() : await this.state.withLocks([
-        walletCustodyLock(this.state, profile)], async () => {
-        this.#heldCustody.add(op);
-        try { return await work(); } finally { this.#heldCustody.delete(op); }
-      });
-      invocation?.assertAllowed(); return result;
+      try {
+        const result = op.sourceChainId !== 8453 ? await work() : await this.state.withLocks([
+          walletCustodyLock(this.state, profile)], async () => {
+          this.#heldCustody.add(op);
+          try { return await work(); } finally { this.#heldCustody.delete(op); }
+        });
+        invocation?.assertAllowed(); return result;
+      } catch (error) {
+        // Once this call fenced and dispatched the deposit, a later failure answers with its saved journal (hash, phase,
+        // the observe step) and names the failed read, never a bare error that hides the send. Nothing is resent.
+        const saved = this.#dispatched.has(op) ? await this.journals.load(op).catch(() => null) : null;
+        if (saved === null) throw error;
+        return { ...saved, observationFailure: postEffectReadFailure(error) };
+      }
     } finally { abort.abort(); clearTimeout(timeout); }
   }
   private assertLane(op: RelayUnsignedOperation): void {
@@ -302,6 +314,7 @@ export class RelayNativeSourceRuntime {
         authority!.assert(await this.admission(op, profile, this.clock.now()));
         j = await dispatchRelayNativeDepositOnce(op, j, this.journals,
           raw => { authority!.assert(); return rpc.submitRawTransaction(raw, () => authority!.assert()); }, signed.raw, this.clock.now());
+        this.#dispatched.add(op);
       }
       if (j.phase === "submitting") {
         const outcome = await this.observe(op, rpc, j.transactionHash as Hex);

@@ -1,7 +1,9 @@
 import type { Address, Hex } from "../../model.js";
 import type { MetaMaskGaslessBlock } from "../model.js";
 import { type MetaMaskGaslessFailureReason } from "../reasons.js";
-export type MmRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getCode" | "eth_getStorageAt" | "eth_call" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getLogs";
+export type MmRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getCode" | "eth_getStorageAt" | "eth_call" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getLogs" | 
+/** Read only, used solely to price the owner's own delegation disable before its consent screen. */
+"eth_getTransactionCount" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "eth_getBalance";
 export type MmRpcCall = (method: MmRpcMethod, params: readonly unknown[]) => Promise<unknown>;
 export interface MmRawBlock {
     readonly block: MetaMaskGaslessBlock;

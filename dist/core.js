@@ -2,6 +2,7 @@ import { runMetaMaskNativeTransfer, readMetaMaskNativeTransfer } from "./metamas
 import { readPermit2ProductionStatus } from "./x402-permit2/status.js";
 import { OUTPUT_VERSION, PRODUCT_VERSION } from "./constants.js";
 import { failureEnvelope, successEnvelope } from "./output.js";
+import { externalWalletRequest } from "./external-wallet-request.js";
 import { dataOutcome, operationOutcome, receiptOutcome } from "./core-outcome.js";
 import { RuntimeContext } from "./runtime.js";
 import { TransferService } from "./transfer-service.js";
@@ -82,7 +83,7 @@ export class ApnCore {
             return successEnvelope(request, requestId, await this.dispatch(request));
         }
         catch (error) {
-            return failureEnvelope(request.command, requestId, error);
+            return failureEnvelope(request.command, requestId, error, await externalWalletRequest(this.context.state, request));
         }
     }
     async dispatch(request) {
@@ -361,6 +362,7 @@ export class ApnCore {
                 }
                 return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash).statusBound(request.operationId));
             case "gasless.transfer.approve-sealed": return operationOutcome(await this.gasless.approveSealed(request.operationId));
+            case "gasless.transfer.revoke": return dataOutcome(await this.metaMaskGasless.revoke(request.operationId), "owner_wallet_handoff_unproven");
             case "gasless.transfer.approve": {
                 const stored = await this.operations.required(request.operationId), { kind } = stored;
                 if (kind === "direct_transfer" && stored.record.providerDirect?.coinbaseGasless !== undefined) {
@@ -469,7 +471,7 @@ export class ApnCore {
                     nextActions: recovered.operation.nextActions,
                 };
             }
-            case "operation.status": return await this.operationCommands.status(request.operationId);
+            case "operation.status": return await this.operationCommands.status(request.operationId, request.refreshAllowance === true);
             case "receipt.get": return await this.operationCommands.receipt(request.operationId);
         }
     }

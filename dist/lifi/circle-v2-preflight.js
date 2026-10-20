@@ -26,12 +26,12 @@ function sourceBlock(value) {
     const block = bridgeRecord(value);
     return { number: quantity(block.number), hash: bridgeHex(block.hash, 32, 32), timestamp: quantity(block.timestamp) };
 }
-function fresh(timestamp) {
-    const now = BigInt(Math.floor(Date.now() / 1000));
+function fresh(timestamp, clock) {
+    const now = BigInt(Math.floor(clock() / 1000));
     return timestamp <= now + 30n && now <= timestamp + 120n;
 }
 /** Circle checks its own current tip; Base simulation is pinned to a separate canonical block observation. Neither authorizes execution. */
-export async function inspectCircleV2Preflight(input, transport) {
+export async function inspectCircleV2Preflight(input, transport, now) {
     const tx = bridgeRecord(input.transaction);
     const data = bridgeHex(tx.data);
     let decoded;
@@ -71,7 +71,7 @@ export async function inspectCircleV2Preflight(input, transport) {
             fail("expiry");
     }
     else if (expiry.mode === "TIMESTAMP") {
-        if (integer(expiry.expiresAt) !== integer(quotedExpiry.expiresAt) || integer(expiry.expiresAt) <= BigInt(Math.floor(Date.now() / 1000)))
+        if (integer(expiry.expiresAt) !== integer(quotedExpiry.expiresAt) || integer(expiry.expiresAt) <= BigInt(Math.floor(now() / 1000)))
             fail("expiry");
     }
     else
@@ -100,7 +100,7 @@ export async function inspectCircleV2Preflight(input, transport) {
     catch {
         return fail("base_unavailable");
     }
-    if (!fresh(block.timestamp))
+    if (!fresh(block.timestamp, now))
         fail("stale_block");
     await inspectCircleV2UpfrontOffline({ ...input, sourceBlockNumber: block.number.toString() });
     if (expiry.mode === "BLOCK_NUMBER" && block.number >= integer(expiry.expiresAtBlock))
@@ -120,9 +120,9 @@ export async function inspectCircleV2Preflight(input, transport) {
     catch {
         return fail("base_unavailable");
     }
-    if (after.number < block.number || !fresh(after.timestamp) ||
+    if (after.number < block.number || !fresh(after.timestamp, now) ||
         (expiry.mode === "BLOCK_NUMBER" && after.number >= integer(expiry.expiresAtBlock)) ||
-        pinned.number !== block.number || pinned.hash !== block.hash || pinned.timestamp !== block.timestamp || !fresh(pinned.timestamp))
+        pinned.number !== block.number || pinned.hash !== block.hash || pinned.timestamp !== block.timestamp || !fresh(pinned.timestamp, now))
         fail("stale_block");
     return { kind: "circle_v2_preflight_snapshot", executionAdmitted: false, blockNumber: block.number.toString(), blockHash: block.hash, abiSignature: ABI_SIGNATURE };
 }

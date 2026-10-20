@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2 } from "./constants.js";
 import { canonicalizeNormalizedProviderJson } from "./normalized-provider-json.js";
-import { publicX402ResultData, validateX402Receipt, } from "./x402-state-integrity.js";
+import { publicX402ResultData, X402_RESULT_HASH_RULE, validateX402Receipt, } from "./x402-state-integrity.js";
 export function projectPublicX402Result(input) {
     if (input.variant === "local")
         return validatePublicX402Result(publicX402ResultData(input.result));
@@ -96,17 +96,21 @@ export function validatePublicX402Result(value) {
         }
         return value;
     }
-    if (!exactKeys(value, ["kind", "media_type", "body", "sha256", "byte_length", ...(value.body_encoding === undefined ? [] : ["body_encoding"])]) ||
+    if (!exactKeys(value, ["kind", "media_type", "body", "sha256", "byte_length", "result_hash", "result_hash_rule",
+        ...(value.body_encoding === undefined ? [] : ["body_encoding"])]) || !hash(value.result_hash) ||
+        value.result_hash_rule !== X402_RESULT_HASH_RULE ||
         typeof value.media_type !== "string" || value.media_type.length < 1 || value.media_type.length > 128)
         throw new TypeError("Invalid public x402 result.");
-    if (value.body_encoding !== undefined) {
-        if (value.body_encoding !== "base64" || typeof value.body !== "string" || value.body.length > Math.ceil(256 * 1024 / 3) * 4) {
-            throw new TypeError("Invalid opaque public x402 result.");
-        }
-        const bytes = Buffer.from(value.body, "base64");
-        if (bytes.length > 256 * 1024 || bytes.toString("base64") !== value.body || value.byte_length !== String(bytes.length) ||
-            value.sha256 !== domainHash("apn.x402.result-body.v1", bytes))
-            throw new TypeError("Invalid opaque public x402 result binding.");
+    if (value.body_encoding !== undefined && (value.body_encoding !== "base64" || typeof value.body !== "string" ||
+        value.body.length > Math.ceil(256 * 1024 / 3) * 4))
+        throw new TypeError("Invalid opaque public x402 result.");
+    // Exact bytes are known for base64 and text bodies (a JSON body is shown parsed): both hashes must bind them.
+    if (typeof value.body === "string" && (value.body_encoding !== undefined || value.media_type !== "application/json")) {
+        const bytes = Buffer.from(value.body, value.body_encoding === undefined ? "utf8" : "base64");
+        if (bytes.length > 256 * 1024 || (value.body_encoding !== undefined && bytes.toString("base64") !== value.body) ||
+            value.byte_length !== String(bytes.length) || value.sha256 !== sha256(bytes) ||
+            value.result_hash !== domainHash("apn.x402.result-body.v1", bytes))
+            throw new TypeError("Invalid public x402 result binding.");
     }
     return value;
 }

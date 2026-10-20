@@ -8,6 +8,9 @@ import { armDirectEvmStep, requireEvmRpc } from "./evm-direct.js";
 import { LOCAL_DIRECT_SENT_ABANDON } from "./state-integrity.js";
 import { directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { checkNeverLands } from "./evm-finalized-proof.js";
+import { deriveEvmActualFee } from "./evm-direct-actual-fee.js";
+import { directActualFee } from "./direct-receipt-facts.js";
+import { canonicalJson } from "./canonical.js";
 import { canonicalOperationId, hasExactTransfer, hasSoleExactTransfer, parseEffect, publicOperation, publicReceipt, verifyEffect } from "./transfer-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
@@ -231,8 +234,11 @@ export class TransferServiceObservation {
         const operationId = canonicalOperationId(operationIdInput);
         await this.context.ready();
         const found = await this.requiredOperation(operationId);
-        if (found.providerDirect === undefined)
-            return publicOperation(found);
+        if (found.providerDirect === undefined) {
+            const facts = await this.actualFee(found, async () => await this.context.state.loadReceipt(found.profileHash, operationId));
+            return { ...publicOperation(facts.fee === undefined ? found : { ...found, evmActualFee: facts.fee }),
+                ...(facts.refusal === undefined ? {} : { actual_facts_refusal: facts.refusal }) };
+        }
         return await this.context.state.withLocks([
             `profile:${found.profileHash}`,
             `operation:${operationId}`,
@@ -251,10 +257,18 @@ export class TransferServiceObservation {
             assertDirectTerminalReceiptAuthority(operation, receipt);
         if (receipt === null)
             throw new ApnError("APN_RECEIPT_NOT_FOUND", "Durable receipt is not available.");
-        if (receipt.operationIntegrityHash !== operation.integrityHash) {
+        if (receipt.operationIntegrityHash !== operation.integrityHash ||
+            canonicalJson(receipt.evmActualFee ?? null) !== canonicalJson(operation.evmActualFee ?? null)) {
             throw new ApnError("APN_STATE_CORRUPT", "Receipt is not linked to the current operation transition.");
         }
-        return publicReceipt(receipt);
+        const facts = await this.actualFee(operation, async () => receipt);
+        const view = publicReceipt(facts.fee === undefined ? receipt : { ...receipt, evmActualFee: facts.fee });
+        return { ...view, ...(Object.hasOwn(view, "actual_network_fee") ? {} : { actual_network_fee: null, actual_sender_native_debit_atomic: null }),
+            ...(facts.refusal === undefined ? {} : { actual_facts_refusal: facts.refusal }) };
+    }
+    /** A completed transfer's fee: recorded, or (records written before APN recorded it) its receipt-facts sidecar or one read. */
+    async actualFee(operation, loadReceipt) {
+        return await directActualFee(this.context.state.root, this.context.finalizedRead, operation, loadReceipt, this.context.clock.now());
     }
     async inspectReceipt(operation, rpc) {
         return (await this.observeReceipt(operation, rpc)).operation;
@@ -294,14 +308,19 @@ export class TransferServiceObservation {
             if (receipt.evmEvidence?.transactionVerified !== true)
                 return await this.lifecycle.transition(operation, "unknown_finality", false, "evm_transaction_mismatch", "invalid_receipt");
         }
+        // The transaction's own receipt states what it paid; it is recorded with the proven outcome only (Base USDC lane too).
+        const paid = receipt.evmFeeFields === undefined ? {} : { evmActualFee: deriveEvmActualFee({
+                chainId: operation.chainId, transactionHash: operation.transactionHash.toLowerCase(), blockNumberAtomic: receipt.blockNumberAtomic,
+                gasLimitAtomic: operation.economics.gasLimitAtomic, maxFeePerGasAtomic: operation.economics.maxFeePerGasAtomic, receiptFields: receipt.evmFeeFields
+            }, directEvmNetwork(operation.chainId).feeModel) };
         if (receipt.status === "reverted") {
-            return await this.lifecycle.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", {}, receipt);
+            return await this.lifecycle.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", paid, receipt);
         }
         const native = operation.evm?.asset.kind === "native";
         if (!native && !(operation.evm === undefined ? hasExactTransfer(receipt, operation) : hasSoleExactTransfer(receipt, operation))) {
             return await this.lifecycle.transition(operation, "unknown_finality", false, "successful_receipt_missing_exact_transfer", "invalid_receipt", {}, receipt);
         }
-        return await this.lifecycle.transition(operation, "completed", true, operation.evm === undefined ? "confirmed_exact_usdc_transfer" : native ? "confirmed_exact_native_transfer" : "confirmed_exact_erc20_transfer", operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_exact_transfer_event", {}, receipt);
+        return await this.lifecycle.transition(operation, "completed", true, operation.evm === undefined ? "confirmed_exact_usdc_transfer" : native ? "confirmed_exact_native_transfer" : "confirmed_exact_erc20_transfer", operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_exact_transfer_event", paid, receipt);
     }
     async requiredOperation(operationId) {
         const operation = await this.context.state.findOperation(operationId);

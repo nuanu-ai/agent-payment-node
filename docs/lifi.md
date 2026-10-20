@@ -917,7 +917,20 @@ takes that nonce; once the preparation expired, `apn operation abandon
 consent (it may still land and set the allowance).
 Its `allowance` field says what the approval leaves: a completed approval leaves
 the Base USDC allowance it set for the Circle V2 TokenMessengerWithFees wrapper,
-which `apn circle source submit` spends; APN has no command that revokes it.
+which `apn circle source submit` spends. A burn spends the principal plus
+Circle's fee, so whatever the approval granted beyond that stays on the
+wrapper. The `apn operation status` that records a source burn's finalized
+receipt reads that residual allowance once, at the same finalized head, and
+stores it beside the journal with its block (`residualAllowance`); later
+statuses show the stored value and read no chain, unless the caller passes
+`--refresh-allowance` or nothing is stored yet (an unreadable value is shown as
+`null` with its reason, never guessed). When it is above zero the status names
+`apn circle approval revoke --profile <profile> ...`: the same approval family with a zero cap, prepared
+unsigned, confirmed in the foreground by `apn circle approval execute`, sent
+once and observed by `apn circle approval status` (Approval event with value 0
+and a fresh zero allowance). A completed revoke sets the payer's stored
+residuals to 0 at its own fresh-read block, without another read. Revoke
+refuses when the allowance is already 0.
 Every other outcome changed no allowance.
 
 ## Stargate fee refusal and funding checkpoint, 2026-10-08
@@ -1206,3 +1219,31 @@ per prepare and approve), counts a nonzero Base operator fee instead of refusing
 it, and no longer applies lane constants (30k gas, 0.1 gwei, global fee, floor and,
 for Sei, amount caps) on top of the owner's ceiling, floor and asset policy.
 Provider responses must carry their required fields; fields GasZip adds later are ignored.
+
+## Empty route lists name the provider's answer (QA 0.5.51)
+
+APN drops no route LI.FI returns: every route in the `POST /v1/advanced/routes`
+answer is listed, preparable or with its gate. An empty `routes` list is
+therefore LI.FI's own answer to the exact request APN sent, and `bridge routes`
+(CLI and MCP alike) now adds `no_route`: the provider, endpoint, CAIP-2 chains,
+tokens, atomic amount, the tools APN allowed (`across` and `stargateV2` with no
+exchange and no destination call; for the reviewed Ethereum ETH to BNB composite
+`across`, `fly` and a destination call), whether LI.FI sent `unavailableRoutes`,
+and its `filteredOut` and `failed` rows (path, step, tool, error type, code,
+message), at most eight of each, control characters stripped, each field at most
+240 characters. A response with routes is unchanged.
+
+QA rows BRIDGE-LIFI-008/009 (0.001 and 0.01 ETH): for Ethereum ETH to Monad MON
+both captures have `response_hash`
+`fadee8ede726896cd8294347660b236e767470485f59a014fff4447794395635`, the sha256 of
+`{"routes":[],"unavailableRoutes":{"filteredOut":[],"failed":[]}}`, and a keyless
+replay on 2026-10-20 returned the same bytes: LI.FI offers no direct Across or
+Stargate fill of native MON from ETH and reports nothing it filtered or failed.
+With exchanges open it routes ETH through a swap on Ethereum, Across and a
+KyberSwap swap on Monad, a graph APN has not reviewed. For BNB the two QA
+responses differ (`92d92a74…`, `2c250823…`) and were not captured; on
+2026-10-20 the same request returned the reviewed across+fly composite at
+0.001 ETH (APN's parser admits it as preparable) and no route at 0.01 ETH, where
+LI.FI reported three failed paths, each "Tool fly not applied."
+(`TOOL_NOT_ALLOWED`) on its fly step. Both are provider conditions.
+

@@ -2,7 +2,12 @@ import { hashObject } from "../canonical.js";
 export const MM_OPERATION_VERSION = "apn.metamask-gasless-operation.v1";
 export const MM_OPERATION_KIND = "metamask_gasless_transfer";
 export const MM_RECEIPT_VERSION = "apn.metamask-gasless-receipt.v1";
-export const MM_TERMINAL = ["completed", "failed_before_effect", "abandoned_unknown"];
+export const MM_TERMINAL = ["completed", "failed_before_effect", "abandoned_unknown", "revoked_unused"];
+/**
+ * The owner's abandonment is an acknowledgement, not an outcome: a later chain proof (the redemption, or its disabled
+ * delegation never redeemed) still replaces it. No other terminal state moves.
+ */
+export const MM_PROVED_AFTER_ABANDON = ["completed", "revoked_unused"];
 export const MM_HISTORY_LIMIT = 96;
 /**
  * Nonterminal transitions stop one short of the limit, so the final slot is always free for the one terminal

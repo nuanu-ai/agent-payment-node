@@ -64,13 +64,18 @@ export class UniswapTokenExecution {
             return await this.observeCleanup(await this.continueStart(op, "cleanup"));
         return op;
     }
-    async cleanup(id) {
+    async cleanup(id, fees) {
         let op = await this.syncUsage(await this.required(id));
         if (op.phase === "cleaned")
             return op;
         if (op.phase !== "cleanup_required")
             blocked("Token swap cleanup is not required.", "uniswap_cleanup_phase");
-        await this.ports.foregroundCleanup(op);
+        // The owner's own caps replace the frozen ones for this cleanup only: checked against a fresh fee quote, shown at the
+        // consent below (its code binds the new caps), and saved only after it. Nothing raises them automatically.
+        const requoted = fees === undefined ? null : requotedCleanup(op, fees, await this.feeQuote(op), this.ports.now());
+        await this.ports.foregroundCleanup(requoted ?? op);
+        if (requoted !== null)
+            op = await this.persist(requoted);
         if (await this.ports.currentAllowance(op) === "0") {
             // Every attempt is a bound transaction that landed or was retired: the residual allowance is already gone.
             const attempts = [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].filter((row) => row !== null);
@@ -85,14 +90,23 @@ export class UniswapTokenExecution {
                 cleanupEvidence: cleanupEvidence("current_allowance", this.ports.now()) }, this.ports.now()));
             return await this.cleaned(op);
         }
+        // A cleanup refused before signing is back in cleanup_required with its diagnostic: nothing to observe.
         op = await this.start(op, "cleanup");
-        return await this.observeCleanup(await this.continueStart(op, "cleanup"));
+        return cleanupActive(op.phase) ? await this.observeCleanup(await this.continueStart(op, "cleanup")) : op;
     }
     async start(op, kind) {
         return await this.ports.withAccountLock(op, async () => {
             const nonce = await this.ports.allocateNonce(op, kind), attempt = tokenAttempt(op, kind, nonce, this.ports.now());
-            op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now()));
-            return await this.finishStart(op, kind);
+            // Nothing signs before the marker is durable: a refused or raced marker hands the reservation back (or keeps a signed one).
+            let marked;
+            try {
+                marked = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now()));
+            }
+            catch (error) {
+                await this.ports.releaseNonce(op, kind, nonce);
+                throw error;
+            }
+            return await this.finishStart(marked, kind);
         });
     }
     async continueStart(op, kind) {
@@ -126,8 +140,8 @@ export class UniswapTokenExecution {
             await this.ports.guard(op, kind, attempt.nonce);
         }
         catch (error) {
-            await this.ports.releaseNonce(op, kind, attempt.nonce);
-            return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase));
+            const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce);
+            return await this.cleanupRequired(op, kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase), unmarked(kind, unsigned));
         }
         this.ports.reserveSendCapacity?.();
         let sealed;
@@ -140,8 +154,8 @@ export class UniswapTokenExecution {
                 await this.ports.commitNonce(op, kind, attempt.nonce);
                 throw error;
             }
-            await this.ports.releaseNonce(op, kind, attempt.nonce);
-            return await this.cleanupRequired(op, `${kind}_sign_failed`);
+            const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce);
+            return await this.cleanupRequired(op, `${kind}_sign_failed`, op.accumulatedNativeDebitWei, undefined, undefined, unmarked(kind, unsigned));
         }
         await this.ports.commitNonce(op, kind, attempt.nonce);
         op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
@@ -279,9 +293,9 @@ export class UniswapTokenExecution {
         return await this.persist(transitionUniswapToken(op, "cleaned", { accumulatedNativeDebitWei: native,
             ...(noEffect ? { cleanupReason: "zero_allowance_no_effect" } : {}), ...usagePatch(usage) }, this.ports.now()));
     }
-    async cleanupRequired(op, reason, native = op.accumulatedNativeDebitWei, usage, preSignFailure) {
+    async cleanupRequired(op, reason, native = op.accumulatedNativeDebitWei, usage, preSignFailure, unmarkedAttempt = {}) {
         return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: reason, accumulatedNativeDebitWei: native,
-            ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }) }, this.ports.now()));
+            ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }), ...unmarkedAttempt }, this.ports.now()));
     }
     async retireExpiredPrepared(op) {
         if (op.phase !== "prepared" || !expired(op, this.ports.now()))
@@ -326,6 +340,11 @@ export class UniswapTokenExecution {
                 blocked("A started token effect cannot prove no-effect cleanup.", "uniswap_token_public_effect_missing");
             }
     }
+    async feeQuote(op) {
+        if (this.ports.cleanupFeeQuote === undefined)
+            blocked("A fresh fee quote is unavailable.", "uniswap_token_cleanup_fee_quote_unavailable");
+        return await this.ports.cleanupFeeQuote(op);
+    }
     async required(id) { const op = await this.journal.load(id); if (op === null)
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Uniswap token operation was not found."); return op; }
     async persist(op) { return await this.journal.save(validateUniswapTokenOperation(op)); }
@@ -353,6 +372,30 @@ function diagnostic(error, phase) {
         reason: sanitizeUniswapTokenFailureField("reason", e?.details?.reason ?? e?.details?.transportReason),
         rpcMethod: sanitizeUniswapTokenFailureField("rpcMethod", e?.details?.rpcMethod),
         endpointRole: sanitizeUniswapTokenFailureField("endpointRole", e?.details?.endpointRole), phase };
+}
+/**
+ * R4 exit 2 "never signed": the refusal came before signing, inside the account lock, and custody then showed no signed bytes
+ * while it freed the nonce. The marker of that attempt is dropped so the zero-allowance cleanup can prove no effect; an attempt
+ * custody may hold signed bytes for keeps its marker (its exit stays proof or the owner's abandon).
+ */
+function unmarked(kind, unsigned) { return unsigned ? { [`${kind}Attempt`]: null } : {}; }
+/** The record for one consented cleanup re-quote; refused when the caps miss the quote or a cleanup marker holds the slot. */
+export function requotedCleanup(op, fees, quote, now) {
+    if (op.phase !== "cleanup_required" || op.cleanupAttempt !== null)
+        blocked("A cleanup re-quote needs a free cleanup slot.", "uniswap_token_cleanup_requote_slot");
+    const maxFee = BigInt(fees.maxFeePerGas), priority = BigInt(fees.maxPriorityFeePerGas), base = BigInt(quote.baseFeePerGasWei), market = BigInt(quote.priorityFeePerGasWei), minimum = base * 2n + market;
+    // The signing guard's own rule: the priority cap covers the market tip and the max fee covers twice the base fee plus it.
+    if (priority > maxFee || priority < market || maxFee < minimum)
+        throw new ApnError("APN_OPERATION_BLOCKED", "The cleanup fee caps are below the fresh fee quote.", { reason: "uniswap_token_cleanup_fee_quote", blockNumber: quote.blockNumber, baseFeePerGasWei: quote.baseFeePerGasWei,
+            priorityFeePerGasWei: quote.priorityFeePerGasWei, minimumMaxFeePerGasWei: minimum.toString() });
+    const gas = { gasLimit: op.cleanupGas.gasLimit, maxFeePerGas: fees.maxFeePerGas, maxPriorityFeePerGas: fees.maxPriorityFeePerGas };
+    const cleanupMax = BigInt(gas.gasLimit) * maxFee, envelopeMax = (g) => BigInt(g.gasLimit) * BigInt(g.maxFeePerGas);
+    const cap = [BigInt(op.maximumNativeDebitWei), BigInt(op.accumulatedNativeDebitWei) + cleanupMax, envelopeMax(op.approvalGas) + envelopeMax(op.swapGas) + cleanupMax]
+        .reduce((a, b) => a > b ? a : b);
+    return transitionUniswapToken(op, "cleanup_required", { cleanupGas: gas, maximumNativeDebitWei: cap.toString(), cleanupFeeQuote: {
+            schemaVersion: "apn.uniswap-token-cleanup-fee-quote.v1", ...quote, previousCleanupGas: op.cleanupGas,
+            previousMaximumNativeDebitWei: op.maximumNativeDebitWei, quotedAt: now.toISOString()
+        } }, now);
 }
 function corrupt(message) { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message, reason) { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

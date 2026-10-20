@@ -9,6 +9,7 @@ import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute 
 import { assertCircleSource, assertCircleAttestation, encodeCircleApproval, encodeCircleBurn, encodeCircleMint } from "./protocol.js";
 import { circleBlocked, circleCorrupt, circleSame, validateCircle, publicCircle } from "./operation-model.js";
 import { validateCircleFundingBinding, assertCircleFundingFee } from "./funding-binding.js";
+import { circleActualEconomics } from "./actual-economics.js";
 /** Every state a v2 (funding) Circle route may hold, and its outcomes (the record's `terminal` flag must equal membership). */
 export const CIRCLE_V2_STATES = ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality",
     "cleanup_required", "completed", "cleaned", "cancelled_unsubmitted", "external_fulfilled", "abandoned_unknown"];
@@ -170,14 +171,44 @@ export function publicCircleFundingOperation(op, externalMint) {
     return { operation_id: op.operationId, kind: "circle_route", state: op.state, terminal: op.terminal,
         source_profile: op.profile, destination_profile: op.destinationProfile, destination_chain: op.destinationChain,
         amount_atomic: op.funding.amountAtomic, minimum_output_atomic: op.funding.minMintAtomic, maximum_issuer_fee_atomic: op.funding.maxFeeAtomic, recipient: op.funding.recipient,
+        actual_economics: circleActualEconomics(op, op.funding.amountAtomic), source_signing_expires_at: op.expiresAt,
         effects: op.effects.map(e => ({ role: e.role, phase: e.phase, transaction_hash: e.transactionHash, actual_fee_atomic: e.proof?.actualFeeAtomic ?? null })),
         source_finality: op.source?.finalityTag ?? null, destination_finality: op.destination?.finalityTag ?? op.externalFulfillment?.destinationReceipt.finalityTag ?? null,
         residual_allowance_atomic: op.residualAllowanceAtomic, usage_finalized: op.usageFinalized, integrity_hash: op.integrityHash,
         ...(op.externalFulfillment === undefined ? {} : { external_fulfillment: op.externalFulfillment, proof_class: "circle_funding_external_mint_fulfillment", controlled_destination_native_atomic: "0", external_destination_fee_payer: op.externalFulfillment.caller }),
         ...(externalMint === undefined || externalMint === null ? {} : { external_mint: externalMint }),
-        next_actions: op.terminal ? [] : externalMint?.status === "not_found" ? [`apn circle evm adopt-external-mint --operation ${op.operationId} --transaction-hash <transaction-hash>`]
-            : !usedExternally && op.effects.some(e => e.role === "mint" && e.phase === "abandoned_unsent") ? [`apn circle evm approve-mint --operation ${op.operationId}`]
-                : op.effects.some(e => e.role === "cleanup" && e.phase === "abandoned_unsent") ? [`apn circle evm cleanup --operation ${op.operationId}`] : [`apn circle evm observe --operation ${op.operationId}`] };
+        next_actions: circleFundingNextActions(op, externalMint, usedExternally) };
+}
+const UNSIGNED = ["prepared", "signing_started", "sealed"];
+/**
+ * The owner step the route waits for, read from its state and effect phases. Nothing is started here: approve-source and
+ * approve-mint ask for their own foreground consent, and observe never signs. Before any source bytes can be on chain the
+ * cleanup exit is named after approve-source, because approve-source refuses unsigned effects once the preparation window
+ * (`source_signing_expires_at`) has passed.
+ */
+function circleFundingNextActions(op, externalMint, usedExternally) {
+    const run = (command) => `apn circle evm ${command} --operation ${op.operationId}`;
+    const approval = op.effects[0], burn = op.effects[1], mint = op.effects.find(e => e.role === "mint");
+    if (op.terminal)
+        return [];
+    if (externalMint?.status === "not_found")
+        return [`apn circle evm adopt-external-mint --operation ${op.operationId} --transaction-hash <transaction-hash>`];
+    if (!usedExternally && mint?.phase === "abandoned_unsent")
+        return [run("approve-mint")];
+    if (op.state === "cleanup_required" || op.effects.some(e => e.role === "cleanup" && e.phase === "abandoned_unsent"))
+        return [run("cleanup")];
+    // A possibly-sent effect, or bytes whose submission is not recorded yet: only observation decides it.
+    if (op.effects.some(e => ["submission_started", "submitted", "unknown"].includes(e.phase)))
+        return [run("observe")];
+    if (op.source === null) {
+        if (!UNSIGNED.includes(approval.phase) && !(approval.phase === "confirmed" && UNSIGNED.includes(burn.phase)))
+            return [run("observe")];
+        const cancellable = ["prepared", "signing_started"].includes(approval.phase) && ["prepared", "signing_started"].includes(burn.phase) && op.effects.length === 2;
+        return approval.phase === "confirmed" || cancellable ? [run("approve-source"), run("cleanup")] : [run("approve-source")];
+    }
+    if (!usedExternally && op.attestation !== null && op.destination === null && (mint === undefined || UNSIGNED.includes(mint.phase)))
+        return [run("approve-mint")];
+    return [run("observe")];
 }
 function shape(value, keys) { return isPlainRecord(value) && exactKeys(value, keys); }
 export function validateKnownCircle(value) {

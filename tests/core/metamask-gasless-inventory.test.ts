@@ -70,20 +70,31 @@ test("SDK malformed network inventories cannot reach quote RPC or a transaction 
   });
 });
 
-test("SDK disabled relay capability stays unavailable even with rich valid metadata", async (t) => {
-  for (const mode of ["disabled", "absent", "sponsorship-only"] as const) await t.test(mode, async () => {
+class UnlistedExchange extends SdkExchange {
+  override async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
+    const response = await super.request(request);
+    if (!request.url.endsWith("/v1/supportedNetworks")) return response;
+    const body = JSON.parse(response.body) as { networks: Array<{ chainId: number }> };
+    return { status: 200, body: JSON.stringify({ networks: body.networks.filter(row => row.chainId !== 8453) }) };
+  }
+}
+test("SDK disabled relay capability is refused naming the provider list that lacks it", async (t) => {
+  const expected = { disabled: ["listed", "disabled"], absent: ["listed", "absent"], "sponsorship-only": ["listed", "disabled"],
+    unlisted: ["unlisted", "enabled"] } as const;
+  for (const mode of ["disabled", "absent", "sponsorship-only", "unlisted"] as const) await t.test(mode, async () => {
   const home = await syntheticHome(); t.after(home.cleanup);
-  const exchange = new InventoryExchange("sentinel", (body) => {
+  const exchange = mode === "unlisted" ? new UnlistedExchange(8453) : new InventoryExchange("sentinel", (body) => {
     if (mode === "absent") { delete body["8453"]; return body; }
     return { ...body, 8453: { ...(body["8453"] as Record<string, unknown>), relayTransactions: false,
       sponsorship: { enabled: mode === "sponsorship-only", rules: [] } } };
   });
   const response = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
     { homeDirectory: home.home, now: () => NOW, exchange });
+  const [relayServerWalletNetwork, relaySentinelFlag] = expected[mode];
   assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false,
-    failure: { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "mm_gasless_capability_unavailable" },
+    failure: { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "mm_gasless_relay_unsupported" },
     diagnostic: { mode: "quote", stage: "relay_support", invariant: "closed_failure", network: "none",
-      httpStatus: null, exitCode: null, signal: "none", timedOut: false } });
+      httpStatus: null, exitCode: null, signal: "none", timedOut: false, relayServerWalletNetwork, relaySentinelFlag } });
   assert.equal(exchange.requests.length, 3);
   assert.equal(exchange.requests.some((request) => request.method === "POST"), false);
   });

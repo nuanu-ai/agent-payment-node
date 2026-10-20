@@ -30,7 +30,9 @@ export function publicFinalizedRead(url, label, https = new BridgeHttps()) {
 }
 /** The public RPC setting each family already reads for that chain. */
 export const FINALIZED_RPC_ENV = Object.freeze({ 1: "APN_ETHEREUM_RPC_URL", 10: "APN_OPTIMISM_RPC_URL",
-    56: "APN_BNB_RPC_URL", 143: "APN_MONAD_RPC_URL", 8453: "APN_BASE_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL" });
+    56: "APN_BNB_RPC_URL", 143: "APN_MONAD_RPC_URL", 8453: "APN_BASE_RPC_URL", 42161: "APN_ARBITRUM_RPC_URL", 59144: "APN_LINEA_RPC_URL",
+    // The direct-transfer networks' receipt-facts read (status of a transfer completed before its fee was recorded).
+    130: "APN_UNICHAIN_RPC_URL", 137: "APN_POLYGON_RPC_URL", 1329: "APN_SEI_RPC_URL", 43114: "APN_AVALANCHE_RPC_URL" });
 /** The production reader: the chain's own APN_<CHAIN>_RPC_URL, read keyless; a missing setting is named in the refusal. */
 export function environmentFinalizedReader(environment) {
     return chainId => {

@@ -1,5 +1,5 @@
 import { type SolanaRpcPort } from "../../solana/rpc.js";
-import { type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
+import { type SwapOperationRecord, type SwapReceiptEconomics, type SwapReceiptProof } from "../model.js";
 import { type SwapUnlandedProof } from "../unlanded.js";
 import type { OrcaExecutionBinding } from "./effects.js";
 import type { OrcaKeylessMaterial } from "./material.js";
@@ -19,5 +19,9 @@ export declare class OrcaReceiptObserver {
     constructor(rpc: SolanaRpcPort, now: () => Date);
     /** Finalized height past the bound lifetime and no status for the persisted signature: it can never land. */
     proveUnlanded(lastValidBlockHeight: string, loadSignature: () => Promise<string | null>): Promise<SwapUnlandedProof | null>;
+    /** One read of a swap its record proved finalized: its own finalized transaction, for the economics (observe only). */
+    receiptEconomics(operationValue: SwapOperationRecord, material: OrcaKeylessMaterial): Promise<SwapReceiptEconomics>;
     observeOutcome(operationValue: SwapOperationRecord, binding: OrcaExecutionBinding, material: OrcaKeylessMaterial, signature: string): Promise<OrcaObservedOutcome | null>;
 }
+export { tokenBalance as orcaTokenBalance };
+declare function tokenBalance(value: unknown, index: number, mint: string, decimals: number, owner: string, allowMissing: boolean): bigint;

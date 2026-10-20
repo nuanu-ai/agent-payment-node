@@ -498,6 +498,8 @@ export declare const failureSchema: z.ZodObject<{
             destination_not_safe_success: "destination_not_safe_success";
             destination_transaction_reverted: "destination_transaction_reverted";
             destination_trace_rebind: "destination_trace_rebind";
+            destination_fill_unmatched: "destination_fill_unmatched";
+            destination_fill_ambiguous: "destination_fill_ambiguous";
             bridge_deployment_code_changed: "bridge_deployment_code_changed";
             bridge_deployment_configuration_changed: "bridge_deployment_configuration_changed";
             historical_deployment_contract_hash: "historical_deployment_contract_hash";
@@ -1130,6 +1132,8 @@ export declare const transitionSchema: z.ZodObject<{
                 destination_not_safe_success: "destination_not_safe_success";
                 destination_transaction_reverted: "destination_transaction_reverted";
                 destination_trace_rebind: "destination_trace_rebind";
+                destination_fill_unmatched: "destination_fill_unmatched";
+                destination_fill_ambiguous: "destination_fill_ambiguous";
                 bridge_deployment_code_changed: "bridge_deployment_code_changed";
                 bridge_deployment_configuration_changed: "bridge_deployment_configuration_changed";
                 historical_deployment_contract_hash: "historical_deployment_contract_hash";
@@ -1911,6 +1915,8 @@ export declare const operationSchema: z.ZodObject<{
                     destination_not_safe_success: "destination_not_safe_success";
                     destination_transaction_reverted: "destination_transaction_reverted";
                     destination_trace_rebind: "destination_trace_rebind";
+                    destination_fill_unmatched: "destination_fill_unmatched";
+                    destination_fill_ambiguous: "destination_fill_ambiguous";
                     bridge_deployment_code_changed: "bridge_deployment_code_changed";
                     bridge_deployment_configuration_changed: "bridge_deployment_configuration_changed";
                     historical_deployment_contract_hash: "historical_deployment_contract_hash";
@@ -2259,6 +2265,8 @@ export declare const operationSchema: z.ZodObject<{
                 destination_not_safe_success: "destination_not_safe_success";
                 destination_transaction_reverted: "destination_transaction_reverted";
                 destination_trace_rebind: "destination_trace_rebind";
+                destination_fill_unmatched: "destination_fill_unmatched";
+                destination_fill_ambiguous: "destination_fill_ambiguous";
                 bridge_deployment_code_changed: "bridge_deployment_code_changed";
                 bridge_deployment_configuration_changed: "bridge_deployment_configuration_changed";
                 historical_deployment_contract_hash: "historical_deployment_contract_hash";

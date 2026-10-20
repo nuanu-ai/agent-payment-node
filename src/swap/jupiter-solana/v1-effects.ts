@@ -5,7 +5,7 @@ import type { RailSignedEffect } from "../../direct-rail-ports.js";
 import { SecureStateStore, stateIdentifier } from "../../secure-state-store.js";
 import type { SwapOperationRecord } from "../model.js";
 import { validateSwapOperation } from "../model.js";
-import { validateJupiterV1PreparedMaterial, type JupiterV1PreparedMaterial, validateJupiterV1Material, type JupiterV1ResolvedMaterial } from "./v1-material.js";
+import { validateJupiterV1PreparedMaterial, type JupiterV1PreparedMaterial, validateJupiterV1Material, type JupiterV1ResolvedMaterial, jupiterV1SameMessageExceptLifetime } from "./v1-material.js";
 import { detached, jupiterV1AccountBindingHash, type JupiterV1OwnerBinding } from "./v1-admission.js";
 import { SwapOperationRepository } from "../repository.js";
 import { loadActiveAssetPolicyRegistry } from "../../allowlist-active-policy.js";
@@ -29,8 +29,8 @@ export interface JupiterV1ExecutionBinding {
 export function createJupiterV1ExecutionBinding(operation:SwapOperationRecord,material:JupiterV1PreparedMaterial,
  admission:JupiterV1OwnerBinding,simulation:JupiterV1SimulationProof,checkedAt:Date,fresh:JupiterV1ResolvedMaterial):JupiterV1ExecutionBinding{
  const body={schemaVersion:SCHEMA,operationId:operation.operationId,markerHash:operation.submissionMarker!.markerHash,
- quoteHash:operation.quote.quoteHash,materialDigest:material.execution.materialDigest,messageHash:material.execution.messageHash,
- unsignedPayload:material.execution.transactionBase64,accountBindingHash:admission.accountBindingHash,policyDigest:operation.policyDigest,
+ quoteHash:operation.quote.quoteHash,materialDigest:material.execution.materialDigest,messageHash:fresh.messageHash,
+ unsignedPayload:fresh.transactionBase64,accountBindingHash:admission.accountBindingHash,policyDigest:operation.policyDigest,
  activationDigest:admission.activationDigest,ownerAdmissionHash:admission.admissionHash,checkedAt:checkedAt.toISOString(),freshMaterialDigest:fresh.materialDigest,freshAdmissionDigest:simulation.admissionDigest,proofDigest:domainHash("apn.jupiter-v1-simulation-proof.v1",canonicalJson(simulation)),simulation};
  return validateJupiterV1ExecutionBinding({...body,bindingHash:domainHash(SCHEMA,canonicalJson(body))},operation,material);
 }
@@ -40,12 +40,23 @@ export function validateJupiterV1ExecutionBinding(value:unknown,operationValue:S
  const b=value as unknown as JupiterV1ExecutionBinding,{bindingHash,...body}=b;
  if(b.schemaVersion!==SCHEMA||bindingHash!==domainHash(SCHEMA,canonicalJson(body))||operation.submissionMarker===null||
  b.operationId!==operation.operationId||b.markerHash!==operation.submissionMarker.markerHash||b.quoteHash!==operation.quote.quoteHash||
- b.materialDigest!==material.execution.materialDigest||b.messageHash!==material.execution.messageHash||b.unsignedPayload!==material.execution.transactionBase64||
+ b.materialDigest!==material.execution.materialDigest||!boundMessage(b,material)||
  b.policyDigest!==operation.policyDigest||![b.accountBindingHash,b.activationDigest,b.ownerAdmissionHash].every(h=>/^[a-f0-9]{64}$/u.test(h))||
  b.checkedAt<operation.submissionMarker.markedAt||b.checkedAt>=operation.quote.expiresAt||!Number.isFinite(Date.parse(b.checkedAt))||
  new Date(b.checkedAt).toISOString()!==b.checkedAt||b.freshAdmissionDigest!==b.simulation.admissionDigest||b.proofDigest!==domainHash("apn.jupiter-v1-simulation-proof.v1",canonicalJson(b.simulation))||b.simulation.success!==true||b.simulation.messageHash!==b.messageHash||
  BigInt(b.simulation.recipientOutputAtomic)<BigInt(operation.quote.minimumOutputAtomic)||BigInt(b.simulation.nativeSpendLamports)>BigInt(material.execution.maximumNativeExpenseLamports))corrupt();
  return detached(b);
+}
+/**
+ * The bound unsigned message is the quoted one (bindings written before the approval re-froze the lifetime), or the
+ * quoted message with only its recent blockhash replaced: unsigned, canonical, and hashed to the bound message hash.
+ */
+function boundMessage(b:JupiterV1ExecutionBinding,material:JupiterV1PreparedMaterial):boolean{
+ if(b.unsignedPayload===material.execution.transactionBase64)return b.messageHash===material.execution.messageHash;
+ try{const bytes=Buffer.from(b.unsignedPayload,"base64"),wire=getTransactionDecoder().decode(bytes),message=Buffer.from(wire.messageBytes);
+  return bytes.toString("base64")===b.unsignedPayload&&Object.keys(wire.signatures).length===1&&Object.values(wire.signatures).every(s=>s===null||s.every(x=>x===0))&&
+   sha256(message)===b.messageHash&&jupiterV1SameMessageExceptLifetime(material.execution.messageBase64,message.toString("base64"));
+ }catch{return false;}
 }
 export interface JupiterV1SendClaim {readonly schemaVersion:"apn.jupiter-v1-send-claim.v1";readonly operationId:string;
  readonly markerHash:string;readonly bindingHash:string;readonly signature:string;readonly rawPayloadHash:string;readonly claimedAt:string;readonly claimHash:string}
@@ -132,7 +143,7 @@ export class JupiterV1LocalSigner {
  static readonly #instances=new WeakMap<object,string>();
  static assertGenuine(value:JupiterV1LocalSigner,root:string):void{if(Object.getPrototypeOf(value)!==JupiterV1LocalSigner.prototype||this.#instances.get(value)!==root)corrupt();}
  readonly #custody:ChainAccountStore;
- readonly #grants=new WeakMap<object,{readonly ownerHash:string;readonly quoteHash:string;readonly policyDigest:string;readonly activationDigest:string;readonly screenHash:string}>();
+ readonly #grants=new WeakMap<object,{readonly ownerHash:string;readonly quoteHash:string;readonly policyDigest:string;readonly activationDigest:string;readonly screenHash:string;readonly messageHash:string}>();
   #fence:{operation:SwapOperationRecord;binding:JupiterV1ExecutionBinding}|null=null;
  readonly #operationGrants=new Map<string,object>();readonly #approvedScreens=new Map<string,string>();readonly #sealedEffects=new Map<string,{bindingHash:string;screenHash:string;effect:RailSignedEffect}>();readonly #root:string;
  constructor(root:string, wrappingSecret:WrappingSecretPort){this.#root=root;JupiterV1LocalSigner.#instances.set(this,root);
@@ -150,8 +161,10 @@ export class JupiterV1LocalSigner {
  }
  /** The intent is detached synchronously before the first await. No returned artifact alone authorizes signing. */
  async approve(operationValue:SwapOperationRecord,materialValue:JupiterV1PreparedMaterial,
- admissionValue:JupiterV1OwnerBinding):Promise<GuardedSwapApprovalArtifact>{
-  const operation=detached(validateSwapOperation(operationValue)),material=detached(validateJupiterV1PreparedMaterial(materialValue)),admission=detached(admissionValue);
+ admissionValue:JupiterV1OwnerBinding,freshValue:JupiterV1ResolvedMaterial):Promise<GuardedSwapApprovalArtifact>{
+  const operation=detached(validateSwapOperation(operationValue)),material=detached(validateJupiterV1PreparedMaterial(materialValue)),admission=detached(admissionValue),
+   fresh=detached(validateJupiterV1Material(freshValue));
+  if(!jupiterV1SameMessageExceptLifetime(material.execution.messageBase64,fresh.messageBase64))corrupt();
   const intent:GuardedSwapApprovalIntent=detached({operationId:operation.operationId,profile:operation.quote.profile,account:operation.quote.account,recipient:operation.quote.recipient,
    inputAmountAtomic:operation.quote.inputAmountAtomic,expectedOutputAtomic:operation.quote.expectedOutputAtomic,minimumOutputAtomic:operation.quote.minimumOutputAtomic,
    slippageBps:operation.quote.slippageBps,gasOrEnergy:material.gasOrEnergy,deadline:operation.quote.expiresAt,quoteHash:operation.quote.quoteHash,
@@ -165,7 +178,7 @@ export class JupiterV1LocalSigner {
   await this.assertPolicy(intent.profile,intent.account,operation.policyDigest,admission.activationDigest);
   const owner=await this.publicOwner(intent.profile,intent.account);
   if(jupiterV1AccountBindingHash(owner)!==admission.accountBindingHash)corrupt();
-  const lines=detached(await jupiterV1ApprovalScreen(material,intent));
+  const lines=detached(await jupiterV1ApprovalScreen(material,intent,fresh));
   const screenHash=domainHash("apn.jupiter-v1-native-tty.v1",canonicalJson({operationId:operation.operationId,quote:operation.quote,owner,
    admission,materialDigest:material.execution.materialDigest,intent,lines}));
   await exactChainConsent(lines,approvalCode("swap",operation.operationId,screenHash),intent.deadline,{});
@@ -174,7 +187,7 @@ export class JupiterV1LocalSigner {
   await this.assertPolicy(intent.profile,intent.account,operation.policyDigest,admission.activationDigest);
   const artifact=sealGuardedSwapApproval(intent,new Date(),screenHash);
   const grant=Object.freeze({kind:"jupiter-v1-foreground-grant"});this.#operationGrants.set(operation.operationId,grant);
-  this.#grants.set(grant,Object.freeze({ownerHash:admission.accountBindingHash,quoteHash:operation.quote.quoteHash,policyDigest:operation.policyDigest,activationDigest:admission.activationDigest,screenHash}));this.#approvedScreens.set(operation.operationId,screenHash);
+  this.#grants.set(grant,Object.freeze({ownerHash:admission.accountBindingHash,quoteHash:operation.quote.quoteHash,policyDigest:operation.policyDigest,activationDigest:admission.activationDigest,screenHash,messageHash:fresh.messageHash}));this.#approvedScreens.set(operation.operationId,screenHash);
   return artifact;
  }
  async sign(operationValue:SwapOperationRecord,bindingValue:JupiterV1ExecutionBinding,materialValue:JupiterV1PreparedMaterial,admissionValue:JupiterV1OwnerBinding):Promise<RailSignedEffect>{
@@ -188,7 +201,8 @@ export class JupiterV1LocalSigner {
   await this.assertActive(operation,binding);
   const token=this.#operationGrants.get(operation.operationId),grant=token===undefined?undefined:this.#grants.get(token);this.#operationGrants.delete(operation.operationId);if(token!==undefined)this.#grants.delete(token);
   if(grant===undefined||grant.ownerHash!==binding.accountBindingHash||grant.quoteHash!==binding.quoteHash||grant.policyDigest!==binding.policyDigest||
-   grant.activationDigest!==admission.activationDigest||grant.screenHash!==this.#approvedScreens.get(operation.operationId)||admission.accountBindingHash!==binding.accountBindingHash)throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED","The exact first Jupiter signature requires this genuine foreground TTY session.");
+   grant.activationDigest!==admission.activationDigest||grant.screenHash!==this.#approvedScreens.get(operation.operationId)||admission.accountBindingHash!==binding.accountBindingHash||
+   grant.messageHash!==binding.messageHash)throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED","The exact first Jupiter signature requires this genuine foreground TTY session.");
   const account=await this.publicOwner(operation.quote.profile,operation.quote.account);if(jupiterV1AccountBindingHash(account)!==binding.accountBindingHash)corrupt();
   await this.assertActive(operation,binding);
   this.#fence={operation,binding};

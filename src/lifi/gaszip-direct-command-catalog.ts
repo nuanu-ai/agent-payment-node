@@ -2,8 +2,10 @@ import type { CommandDefinition, CommandOption } from "../command-catalog.js";
 import type { CommandRequest } from "../commands.js";
 import { bridgeAddress, bridgeHash, bridgeUint } from "./validation.js";
 import { GASZIP_DIRECT_ROUTES, type GaszipDirectRoute } from "./gaszip-direct-route.js";
+import { GASZIP_STATES, GASZIP_TERMINAL_STATES } from "./gaszip-outcome.js";
 const option=(name:CommandOption["name"],type:CommandOption["type"]):CommandOption=>({name,type,required:true,default:{kind:"none"},constraints:["explicit_finite_input"],sensitivity:"operator_input"});
-const states={terminal:["completed","failed_before_effect","failed_confirmed_revert"],non_terminal:["prepared","signing_started","sealed","submitting","submitted","unknown_finality"]};
+/** The published states are the journal's own lists, so every outcome a record may hold (destination_failed too) is named. */
+const states={terminal:[...GASZIP_TERMINAL_STATES],non_terminal:GASZIP_STATES.filter(state=>!GASZIP_TERMINAL_STATES.includes(state))};
 /** Example destination floors only; the caller always supplies its own amount, floor and fee ceiling. */
 const EXAMPLE_FLOOR:Readonly<Record<GaszipDirectRoute["lane"],string>>={mega:"8000000000000",sei:"250000000000000000"};
 function commands(route:GaszipDirectRoute):readonly CommandDefinition[]{

@@ -9,7 +9,7 @@ import { accountRead, associatedToken, multipleAccounts, readAccounts, requireNa
 import { inspectSolana } from "./evidence.js";
 import { solanaMessage, validateSolanaEffect, validateSolanaMessage } from "./message.js";
 import { simulateSolanaSend } from "./simulation.js";
-import { assertSolanaNetwork, assertSolanaNetworkValue, protocolFailure, rpcAtomic, rpcRecord, solanaAddress, solanaReadBatch, solanaSignature } from "./rpc.js";
+import { assertSolanaNetwork, assertSolanaNetworkValue, protocolFailure, readSolanaBlockHeight, rpcAtomic, rpcRecord, solanaAddress, solanaBlockHeightValue, solanaReadBatch, solanaSignature } from "./rpc.js";
 export class SolanaLocalAdapter {
     storage;
     rpc;
@@ -147,7 +147,7 @@ export class SolanaLocalAdapter {
         if (typeof block.blockhash !== "string")
             protocolFailure();
         solanaAddress(block.blockhash);
-        const observedBlockHeight = rpcAtomic(height);
+        const observedBlockHeight = solanaBlockHeightValue(height, latestBlock);
         const candidate = { blockReference: block.blockhash, lastValidBlockHeight: rpcAtomic(block.lastValidBlockHeight).toString(),
             observedBlockHeight: observedBlockHeight.toString(), acquiredAt: this.now().toISOString() };
         const message = await solanaMessage(prepared, candidate);
@@ -224,7 +224,7 @@ export class SolanaLocalAdapter {
         if (lastValidBlockHeight === null)
             validityOpen();
         // A finalized chain above lastValidBlockHeight can no longer include a transaction using this blockhash.
-        if (rpcAtomic(await this.rpc.call("getBlockHeight", [{ commitment: "finalized" }])) <= atomic(lastValidBlockHeight))
+        if (await readSolanaBlockHeight(this.rpc, "finalized") <= atomic(lastValidBlockHeight))
             validityOpen();
         const statuses = rpcRecord(await this.rpc.call("getSignatureStatuses", [[transactionId], { searchTransactionHistory: true }])).value;
         if (!Array.isArray(statuses) || statuses.length !== 1 || statuses[0] !== null)

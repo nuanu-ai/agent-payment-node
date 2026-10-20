@@ -600,11 +600,21 @@ test("native records bind owner admission to their own schema: v3 requires it, v
 
 test("BRDG-35: the file journal owner lock is the kernel evmAddressLock held by every other EVM family", async (t) => {
   const root = await mkdtemp(join(await realpath(tmpdir()), "apn-stargate-native-owner-lock-")); t.after(async () => await rm(root, { recursive: true, force: true }));
-  const state = new StateStore(root); await state.initialize(); const journal = new FileStargateNativeJournal(root, state);
+  // Events, not sleeps: the other family is inside its lock before Stargate starts, and Stargate's attempt on that same
+  // kernel lock is observed (the store's acquire hook) before the other family lets go.
+  let attempted!: (key: string) => void; const attempt = new Promise<string>(resolve => { attempted = resolve; });
+  let familyInside = false;
+  class ObservedLocks extends StateStore {
+    protected override async beforeLockAcquire(key: string): Promise<void> { if (familyInside) attempted(key); }
+  }
+  const state = new ObservedLocks(root); await state.initialize(); const journal = new FileStargateNativeJournal(root, state);
   const order: string[] = []; let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
-  const family = state.withLocks([evmAddressLock(OWNER)], async () => { order.push("other-family"); await held; order.push("other-family-done"); });
-  await new Promise(resolve => setTimeout(resolve, 20));
+  let entered!: () => void; const inside = new Promise<void>(resolve => { entered = resolve; });
+  const family = state.withLocks([evmAddressLock(OWNER)], async () => { order.push("other-family"); familyInside = true; entered(); await held; order.push("other-family-done"); });
+  await inside;
   const stargate = journal.withOwnerLock(OWNER, async () => { order.push("stargate"); });
-  await new Promise(resolve => setTimeout(resolve, 50)); release(); await Promise.all([family, stargate]);
+  assert.equal(await attempt, evmAddressLock(OWNER), "Stargate waits on the very lock the other family holds");
+  assert.deepEqual(order, ["other-family"]);
+  release(); await Promise.all([family, stargate]);
   assert.deepEqual(order, ["other-family", "other-family-done", "stargate"]);
 });

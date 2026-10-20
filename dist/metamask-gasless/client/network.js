@@ -1,3 +1,4 @@
+import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT } from "./provider-endpoints.js";
 import { request as httpsRequest } from "node:https";
 import { canonicalJson, hashObject, sha256, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress } from "../../network-policy.js";
@@ -8,9 +9,9 @@ import { mmFail } from "../reasons.js";
 import { encodeFunctionData, parseAbi } from "viem";
 const MIMIR = "https://agentic-mimir-service.api.cx.metamask.io";
 const PROXY = "https://agentic-proxy.workers.cx.metamask.io";
-const MIMIR_NETWORKS = `${MIMIR}/v1/supportedNetworks`;
+const MIMIR_NETWORKS = MM_SERVER_WALLET_NETWORKS_ENDPOINT;
 const ACCOUNTS_NETWORKS = `${PROXY}/proxy/prd/accounts/v2/supportedNetworks`;
-const SENTINEL_NETWORKS = `${PROXY}/proxy/prd/tx-sentinel-ethereum-mainnet/networks`;
+const SENTINEL_NETWORKS = MM_SENTINEL_NETWORKS_ENDPOINT;
 const MAX_RESPONSE = 4 * 1024 * 1024;
 const transferAbi = parseAbi(["function transfer(address,uint256) returns (bool)"]);
 export class HelperNetworkPolicy {
@@ -26,7 +27,14 @@ export class HelperNetworkPolicy {
     lastClockMs;
     deadlineFailure;
     sessionFailure = false;
+    #relayListing;
+    #relayFlag;
     #readFailures = new WeakMap();
+    /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
+    relaySupportFacts() {
+        return this.#relayListing === undefined || this.#relayFlag === undefined ? undefined
+            : { relayServerWalletNetwork: this.#relayListing, relaySentinelFlag: this.#relayFlag };
+    }
     /** Transient fixed metadata, never response content or permission. */
     readFailureContext(error) {
         return error !== null && typeof error === "object" ? this.#readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
@@ -117,6 +125,8 @@ export class HelperNetworkPolicy {
                     if (key === "sentinel-quote" && response.status === 200 && this.context.mode === "quote" && body !== null)
                         this.#sponsoredProof = captureSponsoredQuote(response.body, body, this.context);
                     validateResponse(key, response.body, body, this.context);
+                    if (this.context.mode === "quote")
+                        this.recordRelayFacts(key, response.body, this.context.input.chainId);
                 }
                 catch (error) {
                     validationFailed = true;
@@ -134,8 +144,19 @@ export class HelperNetworkPolicy {
                 this.#readFailures.set(error, { network: readNetwork, httpStatus: readStatus, validationFailed,
                     ...(validationFailed && readNetwork === "sentinel-quote" && validationPredicates.has(error)
                         ? { validationPredicate: validationPredicates.get(error),
-                            ...(tokenFeesShapes.has(error) ? { tokenFeesShape: tokenFeesShapes.get(error) } : {}) } : {}) });
+                            ...(tokenFeesShapes.has(error) ? { tokenFeesShape: tokenFeesShapes.get(error) } : {}),
+                            ...(feeFacts.has(error) ? { feeFacts: feeFacts.get(error) } : {}) } : {}) });
             throw error;
+        }
+    }
+    /** Both bodies already passed `validateResponse`; only the quoted chain's row is read, as the SDK reads it. */
+    recordRelayFacts(key, body, chainId) {
+        if (key === "mimir-networks")
+            this.#relayListing = parseBody(body).networks
+                .some(row => row.chainId === chainId) ? "listed" : "unlisted";
+        if (key === "sentinel-networks") {
+            const value = parseBody(body), row = Object.hasOwn(value, String(chainId)) ? value[String(chainId)] : undefined;
+            this.#relayFlag = row === undefined ? "absent" : row.relayTransactions === true ? "enabled" : "disabled";
         }
     }
     assertSubmitDeadline() {
@@ -378,17 +399,22 @@ function validateResponse(key, body, requestBody, context) {
 }
 const validationPredicates = new WeakMap();
 const tokenFeesShapes = new WeakMap();
-function sentinelRequire(condition, predicate, shape) {
+const feeFacts = new WeakMap();
+function sentinelRequire(condition, predicate, shape, facts) {
     if (condition)
         return;
+    // A well-formed answer without a token-fee list is MetaMask's own answer (its SDK reads it as an uncovered
+    // transfer plus fee); any other shape stays a provider protocol failure.
     try {
-        mmFail("mm_gasless_provider_unavailable");
+        mmFail(shape === "missing" || shape === "null" ? "mm_gasless_fee_unquoted" : "mm_gasless_provider_unavailable");
     }
     catch (error) {
         if (error !== null && typeof error === "object") {
             validationPredicates.set(error, predicate);
             if (shape !== undefined)
                 tokenFeesShapes.set(error, shape);
+            if (facts !== undefined)
+                feeFacts.set(error, facts);
         }
         throw error;
     }
@@ -428,7 +454,7 @@ function validateSentinelResponse(value, context) {
         // Parsed JSON supplies only these closed kinds; no value or arbitrary field is retained.
         const kind = !present ? "missing" : value === null ? "null" : typeof value === "object" ? "object" :
             typeof value === "string" ? "string" : typeof value === "number" ? "number" : "boolean";
-        sentinelRequire(false, "sentinel_token_fees", kind);
+        sentinelRequire(false, "sentinel_token_fees", kind, sentinelFeeFacts(result, tx, fee));
     }
     const tokenFees = fee.tokenFees;
     sentinelRequire(tokenFees.length >= 1 && tokenFees.length <= 32, "sentinel_token_fees_length");
@@ -450,6 +476,14 @@ function validateSentinelResponse(value, context) {
     sentinelRequire(token.decimals === 6, "sentinel_decimals");
     sentinelRequire(tokenFeeQuantity(entry.balanceNeededToken), "sentinel_fee_quantity");
     sentinelRequire(typeof entry.feeRecipient === "string" && /^0x[0-9a-fA-F]{40}$/u.test(entry.feeRecipient), "sentinel_fee_recipient");
+}
+/** Closed kinds only; the provider's own error text and values never leave this function. */
+function sentinelFeeFacts(result, tx, fee) {
+    const sponsorship = result.sponsorship, error = fee.error;
+    return { sentinelSimulation: !Object.hasOwn(tx, "status") ? "absent" : tx.status === "0x1" ? "succeeded" : tx.status === "0x0" ? "reverted" : "other",
+        sentinelFeeError: error === undefined || error === null || error === "" ? "absent" : typeof error === "string" ? "present" : "other",
+        sentinelSponsorship: !Object.hasOwn(result, "sponsorship") ? "absent" : !isPlainRecord(sponsorship) ? "other" :
+            sponsorship.isSponsored === true ? "sponsored" : sponsorship.isSponsored === false ? "not_sponsored" : "other" };
 }
 /** Parse only a successful principal simulation from the already validated original request. */
 function captureSponsoredQuote(body, request, context) {
