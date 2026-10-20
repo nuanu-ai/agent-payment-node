@@ -16,6 +16,7 @@ import { recoverPermit2Payer } from "../../src/x402-permit2/authorization.js";
 import { reconstructPermit2ProductionMaterial } from "../../src/x402-permit2/production-material.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; };
 async function setup(t: test.TestContext, sponsor = false, maxTimeoutSeconds = 60, reflectedRisk = false) {
   const f = await journalFixture(t, sponsor, maxTimeoutSeconds); (f.input as { mode: string }).mode = "expired_unused";
@@ -79,7 +80,8 @@ test("a continuation that no longer names the saved hold, another signer or anot
 test("actual custody lock wait expires UI grant before decrypt", async t => {
   const f = await setup(t), entered = deferred(), release = deferred();
   const holder = f.state.withLocks([walletCustodyLock(f.state, "owner")], async () => { entered.resolve(); await release.promise; });
-  await entered.promise; const signing = f.sign(); await new Promise(r => setTimeout(r, 30)); f.advance(62); release.resolve();
+  // Signing is seen refused by the held custody lock before the grant window passes (an event, not a pause).
+  await entered.promise; const blocked = lockRefusals(t).refused(walletCustodyLock(f.state, "owner")), signing = f.sign(); await blocked; f.advance(62); release.resolve();
   await holder; await assert.rejects(signing); assert.equal(f.decrypts(), 0);
 });
 for (const fault of ["expiry", "payer_code", "lease", "chain"] as const) test(`post-decrypt ${fault} denies signature bundle and clears before custody release`, async t => {
@@ -103,8 +105,9 @@ test("deferred describe drains and clears an expired late secret before actual c
     const loaded = await original.call(this, profile); entered.resolve(); await release.promise; return loaded;
   });
   const signing = f.sign(); await entered.promise; let acquired = false;
+  const blocked = lockRefusals(t).refused(walletCustodyLock(f.state, "owner"));
   const contender = f.state.withLocks([walletCustodyLock(f.state, "owner")], async () => { acquired = true; assert.ok(f.cleared()); });
-  f.advance(62); await new Promise(r => setTimeout(r, 30)); assert.equal(acquired, false); release.resolve();
+  f.advance(62); await blocked; assert.equal(acquired, false); release.resolve();
   await assert.rejects(signing); await contender; assert.equal(acquired, true); assert.equal(f.decrypts(), 1);
 });
 test("store failure occurs after custody release with cleared secret and preserves held risk", async t => {
@@ -216,10 +219,11 @@ for (const seconds of [6, 62]) test(`wrapping load delayed ${seconds * 1000}ms r
   const f = await setup(t, false, 120), entered = deferred(), release = deferred(); let wrapping: Buffer | undefined;
   t.mock.method(f.wrapping, "load", async () => { entered.resolve(); await release.promise; return wrapping = Buffer.alloc(32, 7); });
   const signing = f.sign(); await entered.promise; let acquired = false;
+  const blocked = lockRefusals(t).refused(walletCustodyLock(f.state, "owner"));
   const contender = f.state.withLocks([walletCustodyLock(f.state, "owner")], async () => {
     acquired = true; assert.ok(wrapping); assert.equal(wrapping.every(x => x === 0), true); assert.equal(f.decrypts(), 0);
   });
-  const before = f.now().getTime(); f.advance(seconds + 1); assert.equal(f.now().getTime() - before, seconds * 1000); await new Promise(r => setTimeout(r, 30)); assert.equal(acquired, false); release.resolve();
+  const before = f.now().getTime(); f.advance(seconds + 1); assert.equal(f.now().getTime() - before, seconds * 1000); await blocked; assert.equal(acquired, false); release.resolve();
   await assert.rejects(signing); await contender; assert.equal(acquired, true); assert.equal(f.decrypts(), 0);
   assert.equal((await f.lease()).state, "unknown_finality");
 });
