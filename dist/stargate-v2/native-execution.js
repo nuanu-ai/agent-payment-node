@@ -11,6 +11,7 @@ import { canonicalProfile } from "../wallet-policy.js";
 import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } from "./abi.js";
 import { stargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
+import { stargateFundsRefusal } from "./funds.js";
 export class LocalStargateNativeSigner {
     state;
     wallets;
@@ -91,16 +92,20 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
         if (finalFee !== BigInt(quote.quote.nativeMessageFeeAtomic))
             fail("APN_REPREPARE_REQUIRED", "final_send_fee_differs");
         const value = amount + finalFee;
+        // Known before any gas read: a value past the cap is refused here, never by the node's estimate (gas comes on top).
+        if (value > cap)
+            stargateFundsRefusal("max_native_debit_exceeded", { required: value, limit: cap, principal: amount, messagingFee: finalFee });
         const data = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken",
             args: [sendParam, { nativeFee: finalFee, lzTokenFee: 0n }, owner] });
         const prepared = await ports.prepareEnvelope({ chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString() });
         const gasUpper = uint(prepared.gasLimitAtomic, true) * uint(prepared.maxFeePerGasAtomic, true), maximumDebit = value + gasUpper;
         if (uint(prepared.maxPriorityFeePerGasAtomic) > uint(prepared.maxFeePerGasAtomic, true))
             fail("APN_RPC_PROTOCOL", "priority_fee");
+        const debit = { required: maximumDebit, principal: amount, messagingFee: finalFee, gas: gasUpper };
         if (maximumDebit > cap)
-            fail("APN_OPERATION_BLOCKED", "max_native_debit_exceeded");
+            stargateFundsRefusal("max_native_debit_exceeded", { ...debit, limit: cap });
         if (uint(prepared.nativeBalanceAtomic) < maximumDebit)
-            fail("APN_OPERATION_BLOCKED", "insufficient_native_balance");
+            stargateFundsRefusal("insufficient_native_balance", { ...debit, limit: uint(prepared.nativeBalanceAtomic) });
         const finalityPolicy = stargateV2RouteFinalityPolicy(SOURCE_CHAIN, DESTINATION_CHAIN);
         const destination = await ports.destinationBalance(recipient, finalityPolicy.destination.blockTag);
         uint(destination.balanceAtomic);

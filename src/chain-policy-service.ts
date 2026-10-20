@@ -8,7 +8,8 @@ import { RailOperationRepository } from "./rail-operation-repository.js";
 import type { RuntimeContext } from "./runtime.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { assertWalletLifecycleAvailable } from "./wallet-lifecycle-guard.js";
-import { X402_SOLANA_MECHANISM, X402_SOLANA_NETWORK } from "./x402-solana/constants.js";
+import { X402_SOLANA_ALLOWLIST_CHAIN, X402_SOLANA_MECHANISM, X402_SOLANA_NETWORK } from "./x402-solana/constants.js";
+import { loadAllowlistInventory } from "./allowlist-inventory.js";
 
 export class ChainPolicyService {
   readonly policies: ChainPolicyStore;
@@ -105,17 +106,24 @@ export class ChainPolicyService {
   }
 }
 
-/** x402 `exact` on Solana (src/x402-solana): a classic SPL mint the owner admitted, paid from the local wallet, the seller's facilitator pays the fee. */
-const SOLANA_X402 = {
-  available: true, scheme: "exact", network: X402_SOLANA_NETWORK, provider: "local", feePayer: "seller_facilitator",
-  assets: "owner_admitted_classic_spl_mint", refused: ["native_sol", "token_2022_mint"],
-  requires: ["local_solana_wallet", "APN_SOLANA_RPC_URL", `allowlist_x402_row_${X402_SOLANA_MECHANISM.provider}`, "wallet_policy_per_mint"],
-  commands: ["x402 solana pay", "x402 solana observe", "x402 solana status"],
-} as const;
+/**
+ * x402 `exact` on Solana (src/x402-solana), paid from the local wallet with the seller's facilitator as fee payer. The
+ * payable mints are the classic SPL tokens of the frozen allowlist inventory: the owner's x402 row can name no other.
+ */
+function solanaX402() {
+  const assets = loadAllowlistInventory().assets.filter((row) => row.chain === X402_SOLANA_ALLOWLIST_CHAIN && row.kind === "token" &&
+    row.tokenStandard === "SPL Token").map((row) => ({ symbol: row.symbol, mint: row.identifier, decimals: row.decimals }));
+  return {
+    available: true, scheme: "exact", network: X402_SOLANA_NETWORK, provider: "local", feePayer: "seller_facilitator",
+    assets, assetSource: "allowlist_inventory_classic_spl", refused: ["native_sol", "token_2022_mint", "mint_outside_inventory"],
+    requires: ["local_solana_wallet", "APN_SOLANA_RPC_URL", `allowlist_x402_row_${X402_SOLANA_MECHANISM.provider}`, "wallet_policy_per_mint"],
+    commands: ["x402 solana pay", "x402 solana observe", "x402 solana status"],
+  };
+}
 
 export function solanaCapabilities() {
   return {
-    rail: "solana", network: "mainnet", assets: [chainAsset("solana", "sol"), chainAsset("solana", "usdc"), chainAsset("solana", "usdt")], x402: SOLANA_X402,
+    rail: "solana", network: "mainnet", assets: [chainAsset("solana", "sol"), chainAsset("solana", "usdc"), chainAsset("solana", "usdt")], x402: solanaX402(),
     profiles: [
       { provider: "local", execution: "local_signed", direct: true, x402: true, requires: ["separate_encrypted_wallet", "explicit_rpc", "foreground_policy", "foreground_transfer_approval"] },
       { provider: "coinbase-awal", execution: "provider_atomic", direct: false, x402: false, accountAndBalance: true, blocker: "pinned_provider_fee_and_rent_guarantee_unavailable" },

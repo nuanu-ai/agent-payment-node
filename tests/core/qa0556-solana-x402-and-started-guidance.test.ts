@@ -20,7 +20,10 @@ test("CLI and MCP Solana capabilities name the local x402 exact SPL lane and not
   const data = output.data as { x402: Record<string, unknown>; profiles: { provider: string; x402?: boolean }[] };
   assert.deepEqual(data.x402, {
     available: true, scheme: "exact", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", provider: "local", feePayer: "seller_facilitator",
-    assets: "owner_admitted_classic_spl_mint", refused: ["native_sol", "token_2022_mint"],
+    // QA 0.5.57: the owner's x402 row can name only an inventory mint, so the capability lists those (wSOL is not one).
+    assets: [{ symbol: "USDC", mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
+      { symbol: "USDT", mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6 }],
+    assetSource: "allowlist_inventory_classic_spl", refused: ["native_sol", "token_2022_mint", "mint_outside_inventory"],
     requires: ["local_solana_wallet", "APN_SOLANA_RPC_URL", "allowlist_x402_row_x402-exact-svm", "wallet_policy_per_mint"],
     commands: ["x402 solana pay", "x402 solana observe", "x402 solana status"],
   });

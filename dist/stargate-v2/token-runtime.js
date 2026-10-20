@@ -15,6 +15,7 @@ import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_W
 import { legacyStargateStatusAfter } from "../legacy/stargate-v2/status.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
 import { uint } from "./token-codec.js";
+import { stargateFundsRefusal } from "./funds.js";
 function stargateUsageState(state) {
     return state;
 }
@@ -130,18 +131,7 @@ export class StargateTokenService {
         const tokenAt = async (rpc, token, account, tag) => decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", data: await rpc.call("eth_call", [{ to: token, data: encodeFunctionData({ abi: STARGATE_ERC20_ABI, functionName: "balanceOf", args: [account] }) }, tag]) });
         return { sourceCall: (m, p) => source.call(m, p), destinationCall: (m, p) => destination.call(m, p),
             destinationBalances: async (recipient, finalityTag) => { const block = record(await destination.call("eth_getBlockByNumber", [finalityTag, false])); return { tokenAtomic: (await tokenAt(destination, STARGATE_TOKEN_DESTINATION_TOKEN, recipient, String(block.number))).toString(), nativeAtomic: quantity(await destination.call("eth_getBalance", [recipient, block.number])).toString(), blockNumberAtomic: quantity(block.number).toString(), blockHash: hash(block.hash) }; },
-            prepareEnvelope: async (tx) => {
-                if (quantity(await source.call("eth_chainId", [])) !== 10n)
-                    throw new ApnError("APN_CHAIN_MISMATCH", "Optimism RPC identity changed.");
-                const block = record(await source.call("eth_getBlockByNumber", ["latest", false]));
-                const rpcTx = { from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.valueAtomic).toString(16)}` };
-                const [nonceRaw, balance, gas, tip] = await Promise.all([source.call("eth_getTransactionCount", [tx.from, "pending"]), source.call("eth_getBalance", [tx.from, "pending"]), source.call("eth_estimateGas", [rpcTx]), source.call("eth_maxPriorityFeePerGas", [])]);
-                const nonce = tx.nonceAtomic === undefined ? quantity(nonceRaw) : BigInt(tx.nonceAtomic);
-                if (nonce < quantity(nonceRaw))
-                    throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen Stargate nonce is stale.");
-                const priority = quantity(tip), maxFee = 2n * quantity(block.baseFeePerGas) + priority;
-                return { nonceAtomic: nonce.toString(), gasLimitAtomic: (quantity(gas) * 12n / 10n + 1n).toString(), maxFeePerGasAtomic: maxFee.toString(), maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
-            },
+            prepareEnvelope: async (tx) => await stargateTokenEnvelope(source, tx),
             signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async (op) => await new TtyStargateTokenApproval().approve(op),
             approveCleanup: async (op) => await new TtyStargateTokenApproval().approveCleanup(op),
             admitPolicy: async (input) => {
@@ -227,6 +217,23 @@ catch {
 /** BRDG-30/31: the GUID- and recipient-filtered OFTReceived from the pinned pool, found by a resumable windowed scan, at
  * the destination finality head, is the delivery proof; PacketDelivered (and the native drop when the Executor applied it
  * in the same transaction) come from that transaction's receipt, so a redelivery by any caller still proves it. */
+/** The Optimism source envelope reads; the balance comes first, so an unfunded known value is refused before eth_estimateGas. */
+export async function stargateTokenEnvelope(source, tx) {
+    if (quantity(await source.call("eth_chainId", [])) !== 10n)
+        throw new ApnError("APN_CHAIN_MISMATCH", "Optimism RPC identity changed.");
+    const block = record(await source.call("eth_getBlockByNumber", ["latest", false]));
+    // The balance is read before the estimate: an unfunded value is the owner's shortfall, not a node failure.
+    const balance = await source.call("eth_getBalance", [tx.from, "pending"]);
+    if (quantity(balance) < BigInt(tx.valueAtomic))
+        stargateFundsRefusal("insufficient_native_balance", { required: BigInt(tx.valueAtomic), limit: quantity(balance) });
+    const rpcTx = { from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.valueAtomic).toString(16)}` };
+    const [nonceRaw, gas, tip] = await Promise.all([source.call("eth_getTransactionCount", [tx.from, "pending"]), source.call("eth_estimateGas", [rpcTx]), source.call("eth_maxPriorityFeePerGas", [])]);
+    const nonce = tx.nonceAtomic === undefined ? quantity(nonceRaw) : BigInt(tx.nonceAtomic);
+    if (nonce < quantity(nonceRaw))
+        throw new ApnError("APN_REPREPARE_REQUIRED", "Frozen Stargate nonce is stale.");
+    const priority = quantity(tip), maxFee = 2n * quantity(block.baseFeePerGas) + priority;
+    return { nonceAtomic: nonce.toString(), gasLimitAtomic: (quantity(gas) * 12n / 10n + 1n).toString(), maxFeePerGasAtomic: maxFee.toString(), maxPriorityFeePerGasAtomic: priority.toString(), nativeBalanceAtomic: quantity(balance).toString() };
+}
 export async function observeStargateTokenDestination(rpc, input, tokenAt, cursor) {
     const finalityHead = record(await rpc.call("eth_getBlockByNumber", [input.finalityTag, false])), head = quantity(finalityHead.number);
     const baselineNumber = BigInt(input.fromBlockNumberAtomic), baselineTag = `0x${baselineNumber.toString(16)}`;

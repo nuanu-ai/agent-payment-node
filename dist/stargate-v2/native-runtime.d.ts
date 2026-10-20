@@ -3,7 +3,7 @@ import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { Address } from "../model.js";
 import type { StateStore } from "../state.js";
 import { BridgeHttps } from "../lifi/https.js";
-import { type StargateConfirmedReceipt, type StargateNativeExecutionPorts, type StargateNativeOperation } from "./native-execution.js";
+import { type StargateConfirmedReceipt, type StargateNativeExecutionPorts, type StargatePreparedEnvelopeEvidence, type StargateNativeOperation } from "./native-execution.js";
 import { type StargateScanCursor } from "./destination-scan.js";
 import { type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 export type StargateRpcMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getBalance" | "eth_getTransactionCount" | "eth_getCode" | "eth_call" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "eth_sendRawTransaction" | "eth_getTransactionReceipt" | "eth_getTransactionByHash" | "eth_getLogs";
@@ -19,6 +19,8 @@ export declare class StargateJsonRpc {
     }[]): Promise<readonly unknown[]>;
     call(method: string, params: readonly unknown[]): Promise<unknown>;
 }
+/** The source envelope reads: chain, head and balance first, so an unfunded known value is refused before eth_estimateGas. */
+export declare function stargateNativeEnvelope(source: Pick<StargateJsonRpc, "call" | "batchCall">, sourceCall: (method: string, params: readonly unknown[]) => Promise<unknown>, prepareBatch: boolean, tx: Parameters<StargateNativeExecutionPorts["prepareEnvelope"]>[0]): Promise<StargatePreparedEnvelopeEvidence>;
 export declare class StargateNativeService {
     private readonly state;
     private readonly environment;
