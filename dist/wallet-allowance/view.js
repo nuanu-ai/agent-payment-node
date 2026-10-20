@@ -1,4 +1,4 @@
-const selectors = (input) => `--profile ${input.profile} --chain eip155:${input.chainId} --token ${input.token} --spender ${input.spender}`;
+const selectors = (input) => `--profile ${input.profile} --chain eip155:${input.chainId} --asset ${input.token} --spender ${input.spender}`;
 /** The exact revoke command for one residual permission; the gas caps are the owner's own inputs. */
 export function walletAllowanceRevokeCommand(input) {
     return `apn wallet allowance revoke ${selectors(input)} --max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>`;

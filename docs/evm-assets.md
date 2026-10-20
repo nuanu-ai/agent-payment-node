@@ -374,7 +374,7 @@ installation, merchant availability or x402 settlement proof.
 
 ## Reading and revoking an allowance the wallet granted
 
-`apn wallet allowance status --profile <p> --chain eip155:<id> --token <token-address> --spender <address>`
+`apn wallet allowance status --profile <p> --chain eip155:<id> --asset <token-address> --spender <address>`
 reads one ERC-20 allowance of the profile's local wallet at the chain's latest block
 (CLI and MCP; read-only). `apn wallet allowance revoke` with the same selectors plus
 `--max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>`
@@ -391,8 +391,12 @@ a zero allowance there); the shared finalized never-lands proof closes one that 
 never land (`superseded`, naming the same revoke again), and `apn operation abandon`
 is the owner's last exit (`abandoned_unknown`, naming the allowance read, since it may
 still land). Repeating the command continues the open revoke of the same profile,
-chain, token and spender and never sends twice. MCP returns the CLI handoff for the
-revoke.
+chain, token and spender and never sends twice. A send the RPC refuses before
+transport (the command's POST cap, the provider's cooldown, HTTP 429) leaves the
+revoke `signed`, and the error and its status name the same revoke command with its
+frozen caps, which later sends the same sealed bytes once. A revoke never consented
+stops holding the wallet's chain once its 240 s consent window plus the 10 minute
+unstarted margin has passed. MCP returns the CLI handoff for the revoke.
 
 ## Capability boundary
 

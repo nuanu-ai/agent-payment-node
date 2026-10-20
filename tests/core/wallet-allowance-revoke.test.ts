@@ -60,7 +60,7 @@ test("QA 0.5.52 live ea09a115…: the cleaned USDT swap shows its standing 10000
   assert.equal(out.ok, true, JSON.stringify(out.error));
   assert.deepEqual([out.data, out.next_actions], [{ residualAllowance: { chain: "eip155:1", token: ETHEREUM_USDT, owner: op.account,
     spender: UNISWAP_V3_SWAP_ROUTER, allowanceAtomic: "10000", readAt: "latest" } }, [revoke]]);
-  assert.equal(revoke, `apn wallet allowance revoke --profile qa-20261013-evm-recv --chain eip155:1 --token ${ETHEREUM_USDT} --spender ${UNISWAP_V3_SWAP_ROUTER} ` +
+  assert.equal(revoke, `apn wallet allowance revoke --profile qa-20261013-evm-recv --chain eip155:1 --asset ${ETHEREUM_USDT} --spender ${UNISWAP_V3_SWAP_ROUTER} ` +
     "--max-gas-limit <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>");
   assert.equal((out.operation as UniswapTokenOperation).integrityHash, op.integrityHash, "status reads; the record is unchanged");
   assert.deepEqual(chain.node.sends, []);
@@ -95,7 +95,7 @@ test("wallet allowance revoke: the residual's named revoke sends approve(router,
   const chain = movingNode({ account: ACCOUNT, allowance: "10000", pending: 10n }), terminal = typingTerminal(), posts: string[] = [];
   const options = { stateRoot: temporary.root, wrappingSecret: WRAPPING, clock: { now: () => new Date() }, walletAllowanceRpc: () => allowanceRpc(chain, posts),
     walletAllowanceTtyOptions: terminal.tty, finalizedRead: () => allowanceRpc(chain, posts) };
-  const target = ["--profile", PROFILE, "--chain", "eip155:1", "--token", ETHEREUM_USDT, "--spender", UNISWAP_V3_SWAP_ROUTER];
+  const target = ["--profile", PROFILE, "--chain", "eip155:1", "--asset", ETHEREUM_USDT, "--spender", UNISWAP_V3_SWAP_ROUTER];
   const revoke = ["wallet", "allowance", "revoke", ...target, "--max-gas-limit", "60000", "--max-fee-per-gas-wei", "2000000000", "--max-priority-fee-per-gas-wei", "1000000"];
 
   const named = await uniswapStatus(temporary.root, chain, op), command = named.next_actions[0]!;
@@ -138,7 +138,7 @@ test("wallet allowance revoke: the residual's named revoke sends approve(router,
   const server = createMcpServer(options), pair = InMemoryTransport.createLinkedPair(); await server.connect(pair[1]);
   const client = new Client({ name: "wallet-allowance", version: "1" }); await client.connect(pair[0]); t.after(async () => { await client.close(); await server.close(); });
   const text = (result: Awaited<ReturnType<Client["callTool"]>>) => { const content = result.content[0]; return JSON.parse(content?.type === "text" ? content.text : "{}") as OutputEnvelope; };
-  const args = { profile: PROFILE, chain: "eip155:1", token: ETHEREUM_USDT, spender: UNISWAP_V3_SWAP_ROUTER };
+  const args = { profile: PROFILE, chain: "eip155:1", asset: ETHEREUM_USDT, spender: UNISWAP_V3_SWAP_ROUTER };
   assert.equal((text(await client.callTool({ name: "apn_wallet_allowance_status", arguments: args })).data as { allowance_atomic: string }).allowance_atomic, "0");
   const handoff = text(await client.callTool({ name: "apn_foreground_handoff", arguments: { command: "wallet allowance revoke", arguments: { ...args,
     max_gas_limit: "60000", max_fee_per_gas_wei: "2000000000", max_priority_fee_per_gas_wei: "1000000" } } }));
@@ -154,7 +154,7 @@ test("wallet allowance revoke: a sent revoke the chain can never include ends su
     walletAllowanceTtyOptions: terminal.tty, finalizedRead: () => allowanceRpc(chain),
     operationAbandonApproval: { approve: async (intent: { readonly assetLabel: string }) => { approvals.push(intent.assetLabel); } } };
   const target = { profile: PROFILE, chainId: 1, token: ETHEREUM_USDT, spender: UNISWAP_V3_SWAP_ROUTER };
-  const revoke = ["wallet", "allowance", "revoke", "--profile", PROFILE, "--chain", "eip155:1", "--token", ETHEREUM_USDT, "--spender", UNISWAP_V3_SWAP_ROUTER,
+  const revoke = ["wallet", "allowance", "revoke", "--profile", PROFILE, "--chain", "eip155:1", "--asset", ETHEREUM_USDT, "--spender", UNISWAP_V3_SWAP_ROUTER,
     "--max-gas-limit", "60000", "--max-fee-per-gas-wei", "2000000000", "--max-priority-fee-per-gas-wei", "1000000"];
   const view = (out: OutputEnvelope) => out.data as { operation_id: string; state: string; outcome: { kind: string } | null; next_actions: string[] };
   const status = async (id: string) => await runCli(["operation", "status", "--operation", id], process.env, options);
@@ -185,7 +185,7 @@ test("wallet allowance revoke: a sent revoke the chain can never include ends su
 test("wallet allowance commands need the chain's own RPC setting and refuse by name", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const saved = process.env.APN_ETHEREUM_RPC_URL; delete process.env.APN_ETHEREUM_RPC_URL;
   t.after(() => { if (saved !== undefined) process.env.APN_ETHEREUM_RPC_URL = saved; });
-  const target = (chain: string) => ["--profile", "default", "--chain", chain, "--token", ETHEREUM_USDT, "--spender", UNISWAP_V3_SWAP_ROUTER];
+  const target = (chain: string) => ["--profile", "default", "--chain", chain, "--asset", ETHEREUM_USDT, "--spender", UNISWAP_V3_SWAP_ROUTER];
   const unset = await runCli(["wallet", "allowance", "status", ...target("eip155:1")], process.env, { stateRoot: temporary.root });
   assert.deepEqual([unset.error?.code, unset.error?.details?.reason, unset.error?.details?.setting], ["APN_RPC_CONFIG", "wallet_allowance_rpc_required", "APN_ETHEREUM_RPC_URL"]);
   assert.match(unset.next_actions[0] ?? "", /APN_ETHEREUM_RPC_URL/u);

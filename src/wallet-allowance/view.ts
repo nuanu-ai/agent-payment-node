@@ -1,7 +1,7 @@
 import type { WalletAllowanceRevokeRecord } from "./model.js";
 
 type Target = { readonly profile: string; readonly chainId: number; readonly token: string; readonly spender: string };
-const selectors = (input: Target) => `--profile ${input.profile} --chain eip155:${input.chainId} --token ${input.token} --spender ${input.spender}`;
+const selectors = (input: Target) => `--profile ${input.profile} --chain eip155:${input.chainId} --asset ${input.token} --spender ${input.spender}`;
 
 /** The exact revoke command for one residual permission; the gas caps are the owner's own inputs. */
 export function walletAllowanceRevokeCommand(input: Target): string {
