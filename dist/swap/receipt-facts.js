@@ -1,0 +1,93 @@
+import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
+import { ApnError } from "../errors.js";
+import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
+import { validSwapEconomics } from "./model.js";
+/**
+ * A swap finalized before APN recorded its economics keeps its sealed record untouched. Its status reads that swap's own
+ * finalized transaction once more through the lane's configured RPC, bound to the transaction hash the record proved, and
+ * keeps what it proved here, bound to the record's integrity hash; later reads use this file and no RPC. A missing RPC
+ * setting or an unreadable transaction refuses this extra read only, by name: the status itself still answers.
+ */
+export const SWAP_RECEIPT_FACTS_SCHEMA = "apn.swap-receipt-facts.v1";
+const PROVEN = ["finalized", "failed_confirmed_revert"];
+/** What a finalized record allows: success credits an output, a revert moved no input and credited nothing. */
+export function assertSwapEconomicsOutcome(record, economics) {
+    if (!validSwapEconomics(economics) || !PROVEN.includes(record.state) || (record.state === "finalized" ? economics.outputAtomic === null
+        : economics.outputAtomic !== null || economics.inputAtomic !== "0")) {
+        throw new ApnError("APN_STATE_CORRUPT", "Swap economics contradict the swap outcome.");
+    }
+    return economics;
+}
+export class SwapReceiptFactsStore extends SecureStateStore {
+    path(operationId) { stateIdentifier(operationId, "Swap receipt facts operation"); return `receipt-facts/${operationId}.swap.json`; }
+    async load(record) {
+        const value = await this.readJson(this.path(record.operationId));
+        return value === null ? null : validateFacts(value, record);
+    }
+    /** Create-only: a concurrent reader's file wins and is returned after the same validation. */
+    async create(record, economics, observedAt) {
+        const body = { schemaVersion: SWAP_RECEIPT_FACTS_SCHEMA, operationId: record.operationId, recordIntegrityHash: record.integrityHash,
+            transactionHash: record.receiptProof?.transactionHash ?? "", economics, observedAt };
+        const facts = validateFacts({ ...body, integrityHash: hashObject(body) }, record);
+        await this.initialize();
+        await this.ensureDirectory("receipt-facts");
+        try {
+            await this.writeJson(this.path(record.operationId), facts, true);
+        }
+        catch (error) {
+            if (!(error instanceof ApnError) || error.message !== "State target is already occupied.")
+                throw error;
+            const existing = await this.load(record);
+            if (existing === null)
+                throw error;
+            return existing;
+        }
+        return facts;
+    }
+}
+function validateFacts(value, record) {
+    const corrupt = () => { throw new ApnError("APN_STATE_CORRUPT", "Swap receipt facts are not the ones this record allows."); };
+    if (!isPlainRecord(value) || canonicalJson(Object.keys(value).sort()) !== canonicalJson(["economics", "integrityHash", "observedAt", "operationId",
+        "recordIntegrityHash", "schemaVersion", "transactionHash"]))
+        corrupt();
+    const facts = value, { integrityHash, ...body } = facts;
+    if (facts.schemaVersion !== SWAP_RECEIPT_FACTS_SCHEMA || hashObject(body) !== integrityHash || facts.operationId !== record.operationId ||
+        facts.recordIntegrityHash !== record.integrityHash || record.receiptProof === null || !record.receiptProof.finalized ||
+        facts.transactionHash !== record.receiptProof.transactionHash || typeof facts.observedAt !== "string" || !Number.isFinite(Date.parse(facts.observedAt)))
+        corrupt();
+    assertSwapEconomicsOutcome(record, facts.economics);
+    return facts;
+}
+/**
+ * The status envelope's receipt slot for a swap (the record itself stays exactly as sealed in the operation slot): null
+ * before an outcome, otherwise what its finalized transaction moved and paid, or why that could not be read.
+ */
+export async function swapStatusReceipt(record, view) {
+    return PROVEN.includes(record.state) ? await view() : null;
+}
+/** The record's own economics, its facts sidecar, or one read now; never a failure of the status it serves. */
+export async function swapActualEconomics(root, record, read, now) {
+    if (record.receiptProof?.economics !== undefined)
+        return { actualEconomics: record.receiptProof.economics, actualEconomicsSource: "receipt_proof" };
+    if (!PROVEN.includes(record.state) || record.receiptProof === null)
+        return { actualEconomics: null };
+    const store = new SwapReceiptFactsStore(root);
+    try {
+        const stored = await store.load(record);
+        if (stored !== null)
+            return { actualEconomics: stored.economics, actualEconomicsSource: "receipt_facts" };
+        if (read === undefined)
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "This lane cannot read its receipt facts.", { reason: "receipt_facts_unsupported" });
+        const economics = assertSwapEconomicsOutcome(record, await read());
+        return { actualEconomics: (await store.create(record, economics, now.toISOString())).economics, actualEconomicsSource: "receipt_facts" };
+    }
+    catch (error) {
+        const code = error instanceof ApnError ? error.code : "APN_RPC_PROTOCOL";
+        return { actualEconomics: null, actualFactsRefusal: { code,
+                reason: code === "APN_RPC_CONFIG" ? "receipt_facts_rpc_required" : code === "APN_STATE_CORRUPT" ? "receipt_facts_state_invalid"
+                    : error instanceof ApnError && typeof error.details?.reason === "string" ? error.details.reason : "receipt_facts_unavailable",
+                message: code === "APN_RPC_CONFIG" && error instanceof Error ? error.message
+                    : "The finalized transaction could not be read for its economics; status is unchanged and the read is retried next time." } };
+    }
+}
+//# sourceMappingURL=receipt-facts.js.map

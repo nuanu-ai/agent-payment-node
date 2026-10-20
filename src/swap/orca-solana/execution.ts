@@ -3,7 +3,7 @@ import type { ChainWalletStoragePort } from "../../direct-rail-ports.js";
 import { ApnError } from "../../errors.js";
 import type { ClockPort } from "../../ports.js";
 import { assertSolanaNetwork, rpcAtomic, type SolanaRpcPort } from "../../solana/rpc.js";
-import { validateSwapOperation, type SwapOperationRecord } from "../model.js";
+import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptEconomics } from "../model.js";
 import type { SwapProtocolRegistry } from "../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../runtime.js";
 import type { GuardedSwapService } from "../service.js";
@@ -101,7 +101,7 @@ export interface OrcaExecutionDriverDependencies {
   readonly bindings: Pick<OrcaExecutionBindingStore, "save" | "load">;
   readonly signer: Pick<OrcaLocalSigner, "sign">;
   readonly sender: Pick<OrcaSingleSender, "sendOnce">;
-  readonly observer: Pick<OrcaReceiptObserver, "observeOutcome" | "proveUnlanded">;
+  readonly observer: Pick<OrcaReceiptObserver, "observeOutcome" | "proveUnlanded"> & Partial<Pick<OrcaReceiptObserver, "receiptEconomics">>;
   readonly effects: Pick<ChainWalletStoragePort, "effect">;
   readonly clock: ClockPort;
 }
@@ -155,6 +155,13 @@ export class OrcaSolanaExecutionDriver implements GuardedSwapExecutionDriver {
     if (operation.state === "submitting") operation = await this.d.core.recordPossibleSend(operation, "unknown_finality", this.d.clock.now());
     if (binding === null || effect === null) return operation;
     return await this.observeExact(operation, binding, material, effect.transactionId);
+  }
+
+  /** A swap finalized before its economics were recorded: one read of its own finalized transaction (observe only). */
+  async receiptEconomics(input: GuardedSwapObservationInput): Promise<SwapReceiptEconomics> {
+    const read = this.d.observer.receiptEconomics;
+    if (read === undefined) blocked("This Orca observer cannot read receipt facts.", "receipt_facts_unsupported");
+    return await read.call(this.d.observer, validateSwapOperation(input.operation), validateOrcaKeylessMaterial(input.material));
   }
 
   /**

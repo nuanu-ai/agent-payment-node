@@ -5,6 +5,7 @@ import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequ
 import { evmDirectReads, OP_STACK_GAS_ORACLE, OP_STACK_GAS_ORACLE_ABI } from "./evm-direct-reads.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, evmTokenBalance, recheckEvmBlock } from "./evm-rpc-codec.js";
 import { observeEvmTransfer } from "./evm-transfer-evidence.js";
+import { readEvmReceiptFeeFields } from "./evm-direct-actual-fee.js";
 export class EvmRpc {
     call;
     rpcOrigin;
@@ -149,7 +150,7 @@ export class EvmRpc {
         return {
             transactionHash: receiptHash, status: status === 1n ? "success" : "reverted",
             blockNumberAtomic: blockNumber.toString(), blockHash,
-            logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin,
+            logs, observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin, evmFeeFields: readEvmReceiptFeeFields(receipt),
         };
     }
     /** Bounded read-only transport for the native fee observer. */

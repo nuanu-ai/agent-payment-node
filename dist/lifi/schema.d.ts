@@ -556,10 +556,10 @@ export declare const consentSchema: z.ZodObject<{
 }, z.core.$strict>;
 export declare const stateSchema: z.ZodEnum<{
     completed: "completed";
-    unknown_finality: "unknown_finality";
-    failed_before_effect: "failed_before_effect";
     failed_confirmed_revert: "failed_confirmed_revert";
     awaiting_approval: "awaiting_approval";
+    unknown_finality: "unknown_finality";
+    failed_before_effect: "failed_before_effect";
     execution_pending: "execution_pending";
     source_pending: "source_pending";
     destination_pending: "destination_pending";
@@ -567,12 +567,12 @@ export declare const stateSchema: z.ZodEnum<{
     failed_after_approval: "failed_after_approval";
 }>;
 export declare const phaseSchema: z.ZodEnum<{
+    submitted_pending: "submitted_pending";
+    unknown_finality: "unknown_finality";
     signing_started: "signing_started";
     sealed: "sealed";
-    unknown_finality: "unknown_finality";
     unsealed: "unsealed";
     submitting: "submitting";
-    submitted_pending: "submitted_pending";
     included_success: "included_success";
     included_revert: "included_revert";
     safe_success: "safe_success";
@@ -623,12 +623,12 @@ export declare const effectSchema: z.ZodObject<{
         approval: "approval";
     }>;
     phase: z.ZodEnum<{
+        submitted_pending: "submitted_pending";
+        unknown_finality: "unknown_finality";
         signing_started: "signing_started";
         sealed: "sealed";
-        unknown_finality: "unknown_finality";
         unsealed: "unsealed";
         submitting: "submitting";
-        submitted_pending: "submitted_pending";
         included_success: "included_success";
         included_revert: "included_revert";
         safe_success: "safe_success";
@@ -751,12 +751,12 @@ export declare const transitionSchema: z.ZodObject<{
             approval: "approval";
         }>;
         phase: z.ZodEnum<{
+            submitted_pending: "submitted_pending";
+            unknown_finality: "unknown_finality";
             signing_started: "signing_started";
             sealed: "sealed";
-            unknown_finality: "unknown_finality";
             unsealed: "unsealed";
             submitting: "submitting";
-            submitted_pending: "submitted_pending";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -876,10 +876,10 @@ export declare const transitionSchema: z.ZodObject<{
     transitionHash: z.ZodString;
     state: z.ZodEnum<{
         completed: "completed";
-        unknown_finality: "unknown_finality";
-        failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
+        unknown_finality: "unknown_finality";
+        failed_before_effect: "failed_before_effect";
         execution_pending: "execution_pending";
         source_pending: "source_pending";
         destination_pending: "destination_pending";
@@ -1279,12 +1279,12 @@ export declare const operationSchema: z.ZodObject<{
             approval: "approval";
         }>;
         phase: z.ZodEnum<{
+            submitted_pending: "submitted_pending";
+            unknown_finality: "unknown_finality";
             signing_started: "signing_started";
             sealed: "sealed";
-            unknown_finality: "unknown_finality";
             unsealed: "unsealed";
             submitting: "submitting";
-            submitted_pending: "submitted_pending";
             included_success: "included_success";
             included_revert: "included_revert";
             safe_success: "safe_success";
@@ -1534,12 +1534,12 @@ export declare const operationSchema: z.ZodObject<{
                 approval: "approval";
             }>;
             phase: z.ZodEnum<{
+                submitted_pending: "submitted_pending";
+                unknown_finality: "unknown_finality";
                 signing_started: "signing_started";
                 sealed: "sealed";
-                unknown_finality: "unknown_finality";
                 unsealed: "unsealed";
                 submitting: "submitting";
-                submitted_pending: "submitted_pending";
                 included_success: "included_success";
                 included_revert: "included_revert";
                 safe_success: "safe_success";
@@ -1659,10 +1659,10 @@ export declare const operationSchema: z.ZodObject<{
         transitionHash: z.ZodString;
         state: z.ZodEnum<{
             completed: "completed";
-            unknown_finality: "unknown_finality";
-            failed_before_effect: "failed_before_effect";
             failed_confirmed_revert: "failed_confirmed_revert";
             awaiting_approval: "awaiting_approval";
+            unknown_finality: "unknown_finality";
+            failed_before_effect: "failed_before_effect";
             execution_pending: "execution_pending";
             source_pending: "source_pending";
             destination_pending: "destination_pending";
@@ -2009,10 +2009,10 @@ export declare const operationSchema: z.ZodObject<{
     integrityHash: z.ZodString;
     state: z.ZodEnum<{
         completed: "completed";
-        unknown_finality: "unknown_finality";
-        failed_before_effect: "failed_before_effect";
         failed_confirmed_revert: "failed_confirmed_revert";
         awaiting_approval: "awaiting_approval";
+        unknown_finality: "unknown_finality";
+        failed_before_effect: "failed_before_effect";
         execution_pending: "execution_pending";
         source_pending: "source_pending";
         destination_pending: "destination_pending";

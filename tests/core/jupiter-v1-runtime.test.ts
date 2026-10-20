@@ -169,7 +169,9 @@ test("V1 genuine Native pipeline prepares unsigned, prompts exact TTY, sends onc
  assert.equal(canonicalJson(await originRepository.loadAny(result.operationId)),originBefore);
  assert.equal(f.rpcReads,originReads);assert.equal(f.providerReads,originProviderReads);assert.equal(f.secretReads,originSecrets);assert.equal(f.sends,1);
 
- f.setFinal();const finalized=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());assert.equal(finalized.state,"finalized");const secrets=f.secretReads;
+ f.setFinal();const finalized=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());assert.equal(finalized.state,"finalized");
+ // QA 0.5.51 shared SwapReceiptProof: the finalized receipt's own exact input, output, fee and SOL spend.
+ const economics=finalized.receiptProof?.economics;assert.equal(economics?.inputAtomic,finalized.quote.inputAmountAtomic);assert.ok(BigInt(economics!.outputAtomic!)>=BigInt(finalized.quote.minimumOutputAtomic));assert.ok(BigInt(economics!.networkFeeAtomic!)>0n);assert.ok(BigInt(economics!.nativeDebitAtomic!)>0n);const secrets=f.secretReads;
  const finalStatus=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},{state:new StateStore(f.temp.root),clock:{now:()=>new Date()},jupiterV1Runtime:f.runtime("observe",op.operationId,false)} as RuntimeContext);
  assert.deepEqual(finalStatus.nextActions,[]);
  const again=await f.runtime("execute",op.operationId).execute(op.operationId,new Date());assert.equal(again.state,"finalized");assert.equal(f.sends,1);assert.equal(f.secretReads,secrets);assert.equal(forbiddenGetter.mock.callCount(),0);

@@ -1,6 +1,6 @@
 import type { Hex } from "viem";
 import type { EvmRpcCall } from "../../../evm-ports.js";
-import { type SwapOperationRecord, type SwapReceiptProof } from "../../model.js";
+import { type SwapOperationRecord, type SwapReceiptEconomics, type SwapReceiptProof } from "../../model.js";
 import { type SwapUnlandedProof } from "../../unlanded.js";
 import { type UniswapBalanceEvidencePort } from "./evidence-store.js";
 import type { UniswapExecutionBinding, UniswapReceiptObserverPort } from "./types.js";
@@ -17,6 +17,8 @@ export declare class UniswapEthereumReceiptObserver implements UniswapReceiptObs
     constructor(call: EvmRpcCall, now?: () => Date, evidence?: UniswapBalanceEvidencePort | undefined);
     observe(operationValue: SwapOperationRecord, bindingValue: UniswapExecutionBinding, transactionHash: Hex): Promise<SwapReceiptProof | null>;
     observeOutcome(operationValue: SwapOperationRecord, bindingValue: UniswapExecutionBinding, transactionHash: Hex): Promise<UniswapObservedOutcome | null>;
+    /** One read of a swap its record proved finalized: its own receipt and the finalized head, for the economics (no balances). */
+    receiptEconomics(operationValue: SwapOperationRecord): Promise<SwapReceiptEconomics>;
     /** Router deadline passed at a finalized block with no receipt for the sealed hash: the input can never move. */
     proveUnlanded(deadlineSeconds: number, loadTransactionHash: () => Promise<string | null>): Promise<SwapUnlandedProof | null>;
     /** Status 0 at a canonical finalized block with no logs proves the input never left; only gas was spent. */

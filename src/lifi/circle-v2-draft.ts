@@ -42,7 +42,8 @@ function jsonCopy(value: unknown): unknown {
 function canonical(value: unknown): string { return JSON.stringify(jsonCopy(value)); }
 
 /** The returned data is an unsubmitted inspection record; callers must re-preflight before any later submission. */
-export async function inspectCircleV2PreflightedDraft(input: CircleV2DraftInput, transport: CircleV2PreflightTransport): Promise<CircleV2PreflightedDraft> {
+export async function inspectCircleV2PreflightedDraft(input: CircleV2DraftInput, transport: CircleV2PreflightTransport,
+  now: () => number): Promise<CircleV2PreflightedDraft> {
   if ((input as { executable?: unknown }).executable !== undefined ||
       (input as { executionAdmitted?: unknown }).executionAdmitted !== undefined) fail("executable_flag");
   const tx = bridgeRecord(input.transaction);
@@ -50,7 +51,7 @@ export async function inspectCircleV2PreflightedDraft(input: CircleV2DraftInput,
   const payer = bridgeAddress(input.payer);
   if (tx.from !== undefined && bridgeAddress(tx.from) !== payer) fail("payer_mismatch");
   const snapshot = jsonCopy(input) as CircleV2PreflightInput;
-  const preflight = await inspectCircleV2Preflight(snapshot, transport);
+  const preflight = await inspectCircleV2Preflight(snapshot, transport, now);
   const upfront = await inspectCircleV2UpfrontOffline({ ...snapshot, sourceBlockNumber: preflight.blockNumber });
   const frozenTx = bridgeRecord(snapshot.transaction);
   const blockers = [

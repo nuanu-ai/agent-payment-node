@@ -26,7 +26,7 @@ function jsonCopy(value) {
 }
 function canonical(value) { return JSON.stringify(jsonCopy(value)); }
 /** The returned data is an unsubmitted inspection record; callers must re-preflight before any later submission. */
-export async function inspectCircleV2PreflightedDraft(input, transport) {
+export async function inspectCircleV2PreflightedDraft(input, transport, now) {
     if (input.executable !== undefined ||
         input.executionAdmitted !== undefined)
         fail("executable_flag");
@@ -37,7 +37,7 @@ export async function inspectCircleV2PreflightedDraft(input, transport) {
     if (tx.from !== undefined && bridgeAddress(tx.from) !== payer)
         fail("payer_mismatch");
     const snapshot = jsonCopy(input);
-    const preflight = await inspectCircleV2Preflight(snapshot, transport);
+    const preflight = await inspectCircleV2Preflight(snapshot, transport, now);
     const upfront = await inspectCircleV2UpfrontOffline({ ...snapshot, sourceBlockNumber: preflight.blockNumber });
     const frozenTx = bridgeRecord(snapshot.transaction);
     const blockers = [

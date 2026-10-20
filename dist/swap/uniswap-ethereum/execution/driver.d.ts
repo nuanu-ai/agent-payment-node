@@ -1,6 +1,6 @@
 import type { Hex } from "viem";
 import type { ClockPort } from "../../../ports.js";
-import { type SwapOperationRecord } from "../../model.js";
+import { type SwapOperationRecord, type SwapReceiptEconomics } from "../../model.js";
 import type { SwapProtocolRegistry } from "../../protocol-registry.js";
 import type { GuardedSwapExecutionDriver, GuardedSwapExecutionInput, GuardedSwapObservationInput } from "../../runtime.js";
 import type { GuardedSwapService } from "../../service.js";
@@ -11,6 +11,7 @@ import type { UniswapEffectStorePort, UniswapExecutionBinding, UniswapExecutionG
 export interface UniswapOutcomeObserverPort {
     observeOutcome(operation: SwapOperationRecord, binding: UniswapExecutionBinding, transactionHash: Hex): Promise<UniswapObservedOutcome | null>;
     proveUnlanded(deadlineSeconds: number, loadTransactionHash: () => Promise<string | null>): Promise<SwapUnlandedProof | null>;
+    receiptEconomics?(operation: SwapOperationRecord): Promise<SwapReceiptEconomics>;
 }
 export interface UniswapExecutionDriverDependencies {
     readonly core: GuardedSwapService;
@@ -34,6 +35,8 @@ export declare class UniswapEthereumExecutionDriver implements GuardedSwapExecut
     constructor(d: UniswapExecutionDriverDependencies);
     execute(input: GuardedSwapExecutionInput): Promise<SwapOperationRecord>;
     observe(input: GuardedSwapObservationInput): Promise<SwapOperationRecord>;
+    /** A swap finalized before its economics were recorded: one read of its own receipt (observe only). */
+    receiptEconomics(input: GuardedSwapObservationInput): Promise<SwapReceiptEconomics>;
     /** The router deadline is the quote expiry; the signed hash, when one was ever sealed, is read after the finalized block. */
     proveUnlanded(input: GuardedSwapObservationInput): Promise<SwapUnlandedProof | null>;
     /**

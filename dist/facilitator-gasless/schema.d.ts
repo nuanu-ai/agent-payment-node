@@ -82,9 +82,9 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
         transitionHash: z.ZodString;
         state: z.ZodEnum<{
             completed: "completed";
-            failed_before_effect: "failed_before_effect";
-            abandoned_unknown: "abandoned_unknown";
             awaiting_approval: "awaiting_approval";
+            abandoned_unknown: "abandoned_unknown";
+            failed_before_effect: "failed_before_effect";
             expired_unused: "expired_unused";
             approved: "approved";
             verify_started: "verify_started";
@@ -171,9 +171,9 @@ export declare const facilitatorOperationSchema: z.ZodObject<{
     integrityHash: z.ZodString;
     state: z.ZodEnum<{
         completed: "completed";
-        failed_before_effect: "failed_before_effect";
-        abandoned_unknown: "abandoned_unknown";
         awaiting_approval: "awaiting_approval";
+        abandoned_unknown: "abandoned_unknown";
+        failed_before_effect: "failed_before_effect";
         expired_unused: "expired_unused";
         approved: "approved";
         verify_started: "verify_started";
