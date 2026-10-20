@@ -17,7 +17,7 @@ export const blockHash = (number: bigint) => `0x${"b".repeat(48)}${number.toStri
  * at any block answer the current values; transactions land where a test puts them.
  */
 export function movingNode(input: { readonly account: string; readonly allowance: string; readonly pending: bigint }) {
-  const node = { rpcNow: Date.now(), head: 1_000n, baseFee: 1n, allowance: input.allowance, pending: input.pending, finalizedNonce: 0n, finalizedLag: 64n,
+  const node = { rpcNow: Date.now(), head: 1_000n, baseFee: 1n, allowance: input.allowance, allowanceAt: undefined as ((tag: string) => string | undefined) | undefined, pending: input.pending, finalizedNonce: 0n, finalizedLag: 64n,
     sends: [] as Hex[], txs: new Map<string, Record<string, unknown>>(), receipts: new Map<string, Record<string, unknown>>(), methods: [] as string[] };
   const block = (number: bigint) => ({ number: hex(number), hash: blockHash(number), parentHash: blockHash(number - 1n), baseFeePerGas: hex(node.baseFee) });
   const value = (method: string, params: readonly unknown[]): unknown => {
@@ -34,7 +34,7 @@ export function movingNode(input: { readonly account: string; readonly allowance
     if (method === "eth_maxPriorityFeePerGas") return "0x1";
     if (method === "eth_call") { const tx = params[0] as { readonly to?: string; readonly data?: string }, data = String(tx.data ?? "");
       if (tx.to === UNISWAP_V3_QUOTER_V2) return `0x${[999_000n, 0n, 0n, 0n].map((v) => word(v).slice(2)).join("")}`;
-      if (data.startsWith("0xdd62ed3e")) return word(BigInt(node.allowance)); if (data.startsWith("0x70a08231")) return word(10_000_000n);
+      if (data.startsWith("0xdd62ed3e")) return word(BigInt(node.allowanceAt?.(String(params[1])) ?? node.allowance)); if (data.startsWith("0x70a08231")) return word(10_000_000n);
       return word(1n); }
     if (method === "eth_sendRawTransaction") { const raw = params[0] as Hex; node.sends.push(raw); return keccak256(raw); }
     if (method === "eth_getTransactionByHash") return node.txs.get(String(params[0])) ?? null;

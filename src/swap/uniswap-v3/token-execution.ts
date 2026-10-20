@@ -178,12 +178,14 @@ export class UniswapTokenExecution {
     if (result === null || result.status === "pending") return op;
     if (result.status !== "success" || result.transactionHash !== hash || result.allowanceAtomic !== op.route.amountIn)
       return await this.cleanupRequired(op, "approval_failed_or_mismatch");
-    const evidence = { schemaVersion: "apn.uniswap-token-expired-approval-evidence.v1" as const,
-      kind: "expired_approval_no_swap" as const, approvalTransactionHash: hash,
-      observedAllowanceAtomic: result.allowanceAtomic, observedAt: this.ports.now().toISOString() };
-    op = await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "deadline_expired_after_approval", cleanupEvidence: evidence }, this.ports.now()));
-    const usage = await this.ports.followUsage(op, "failed_before_effect");
-    return await this.persist(transitionUniswapToken(op, "cleaned", usagePatch(usage), this.ports.now()));
+    // The approval landed exactly and no swap was ever started. `cleaned` means no residual allowance: one still standing
+    // needs the owner's consented revoke (the cleanup command), and the hold is released once that cleanup is observed; an
+    // allowance already zero closes now, the hold released with it. Approval gas stays charged either way.
+    const now = this.ports.now();
+    if (await this.ports.currentAllowance(op) !== "0") return await this.cleanupRequired(op, "deadline_expired_after_approval");
+    return await this.settlePrincipal(await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "zero_allowance_after_effect",
+      cleanupEvidence: { schemaVersion: "apn.uniswap-token-zero-allowance-evidence.v1", kind: "zero_allowance_after_effect", observedAllowanceAtomic: "0",
+        observedAt: now.toISOString() } }, now)));
   }
   private async observeSwap(op: UniswapTokenOperation) {
     const hash = op.swapAttempt?.transactionHash; if (hash === null || hash === undefined) return op;
@@ -298,7 +300,8 @@ export class UniswapTokenExecution {
       cleanupEvidence: cleanupEvidence("current_allowance", this.ports.now()) }, this.ports.now()));
   }
   private async syncUsage(op: UniswapTokenOperation) { if (op.usageReservationId === null) return op;
-    if (op.phase === "cleaned" && op.cleanupEvidence?.kind === "expired_approval_no_swap") {
+    // A recorded release whose ledger step did not complete (records of the earlier expired-approval exit, or principalRelease).
+    if (op.phase === "cleaned" && (op.cleanupEvidence?.kind === "expired_approval_no_swap" || op.principalRelease !== undefined)) {
       const current = await this.ports.currentUsage(op);
       if (current.state === "reserved") {
         const released = await this.ports.followUsage(op, "failed_before_effect");

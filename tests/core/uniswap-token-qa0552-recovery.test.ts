@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { privateKeyToAccount } from "viem/accounts";
-import type { Hex } from "viem";
+import { parseTransaction, type Hex } from "viem";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageReservation } from "../../src/asset-usage-ledger.js";
 import { idempotency, seal } from "../../src/asset-usage-ledger-record.js";
 import { canonicalJson, domainHash, hashObject } from "../../src/canonical.js";
@@ -18,7 +18,7 @@ import { UNISWAP_USDC } from "../../src/swap/uniswap-pin.js";
 import { envelopeOf } from "../../src/swap/uniswap-v3/token-custody.js";
 import { UniswapTokenEffectJournal } from "../../src/swap/uniswap-v3/token-effects.js";
 import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js";
-import { UniswapTokenJournal, validateUniswapTokenOperation, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
+import { tokenAttempt, transitionUniswapToken, UniswapTokenJournal, validateUniswapTokenOperation, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { UNISWAP_TOKEN_MECHANISM_PIN } from "../../src/swap/uniswap-v3/token-route.js";
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
@@ -52,7 +52,7 @@ function nonceRows(root: string, account: string): string[] {
   return Object.values(raw.reservations as Record<string, { kind: string; nonce: string; state: string }>).map((row) => `${row.kind}:${row.nonce}:${row.state}`).sort();
 }
 
-test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stranded swap unsigned and closes the expired approval with no send", async (t) => {
+test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stranded swap unsigned and, the 1 USDC approval standing, requires cleanup", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const op = validateUniswapTokenOperation(LIVE.stranded.operation);
   const now = new Date((op.route.deadline + 3_600) * 1000), usage = seal({ schemaVersion: "apn.asset-usage-reservation.v1", ...identity(op),
     reservationId: op.usageReservationId!, idempotencyHash: idempotency(usageKey(op)), policyDigest: op.policyDigest, registryVersion: "qa.052.central.captured",
@@ -81,16 +81,60 @@ test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stran
   assert.deepEqual([mcp.error?.details?.reason, mcp.next_actions], [refused.error?.details?.reason, refused.next_actions], "CLI and MCP name the same exit");
   assert.equal((await new UniswapTokenJournal(temporary.root).load(op.operationId))?.integrityHash, op.integrityHash);
 
-  const executed = await c.cli("execute", 15), closed = executed.operation as UniswapTokenOperation;
+  const executed = await c.cli("execute", 15), closed = executed.operation as UniswapTokenOperation, cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;
   assert.equal(executed.ok, true, JSON.stringify(executed.error));
-  assert.deepEqual([closed.operationId, closed.phase, closed.cleanupReason, closed.cleanupEvidence?.kind, closed.usageState, closed.swapAttempt],
-    [op.operationId, "cleaned", "deadline_expired_after_approval", "expired_approval_no_swap", "failed_before_effect", null]);
+  assert.deepEqual([closed.operationId, closed.phase, closed.cleanupReason, closed.cleanupEvidence, closed.usageState, closed.swapAttempt, executed.next_actions],
+    [op.operationId, "cleanup_required", "deadline_expired_after_approval", null, "reserved", null, [cleanup]]);
   assert.deepEqual([closed.approvalAttempt, closed.accumulatedNativeDebitWei, closed.usageReservationId], [op.approvalAttempt, op.accumulatedNativeDebitWei, op.usageReservationId]);
   assert.deepEqual(c.chain.node.sends, [], "nothing is signed or sent"); assert.deepEqual(nonceRows(temporary.root, op.account), ["approval:9:committed"]);
-  assert.deepEqual([await c.row(), await c.used()], ["failed_before_effect", "0"]);
+  assert.deepEqual([await c.row(), await c.used()], ["reserved", op.route.amountIn], "the hold is released with the cleaned that follows the owner's revoke");
   const journal = new UniswapTokenJournal(temporary.root); assert.equal((await journal.load(op.operationId))?.integrityHash, closed.integrityHash);
-  const again = await c.cli("status", 11); assert.equal((again.operation as UniswapTokenOperation).integrityHash, closed.integrityHash);
+  const again = await c.cli("status", 11);
+  assert.deepEqual([(again.operation as UniswapTokenOperation).integrityHash, again.next_actions], [closed.integrityHash, [cleanup]]);
   assert.equal(((await c.cli("execute", 15)).operation as UniswapTokenOperation).integrityHash, closed.integrityHash);
+});
+
+test("867244e9…-shaped: a residual allowance takes one consented revoke at the freed nonce before cleaned; a zero one closes at once", async (t) => {
+  for (const residual of [true, false]) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup); const key = `0x${"0".repeat(63)}7` as Hex, account = privateKeyToAccount(key).address;
+    const state = new StateStore(temporary.root); await state.initialize(); await new EncryptedWalletStore(state, WRAPPING).importNew("qa0552-shaped", key, account);
+    let now = new Date(); await activateDirectPolicy(temporary.root, "qa0552-shaped", { accounts: { evm: account }, now, admissions: [UNISWAP_USDC, ETHEREUM_USDT]
+      .map((identifier) => ({ chain: "eip155:1", kind: "token" as const, identifier, rail: "swap" as const, maximumPerTransferAtomic: "1000000",
+        dailyLimitAtomic: "1000000", mechanism: UNISWAP_TOKEN_MECHANISM_PIN })) });
+    const live = LIVE.stranded.operation, chain = movingNode({ account, allowance: "0", pending: 9n }), terminal = typingTerminal(), ledger = new AssetUsageLedger(temporary.root);
+    const run = (cap: number, foreground: "approve" | "cleanup" | "refuse" = "refuse") => createUniswapTokenRuntime({ state, wrapping: WRAPPING, clock: { now: () => now },
+      call: tokenSession(state, chain, cap), foreground, tty: terminal.tty, verifyPins: pinsLikeProduction });
+    const used = async () => (await ledger.usage({ account, chain: "eip155:1", asset: { kind: "token", identifier: UNISWAP_USDC } }, now)).amountAtomic;
+    const quote = await run(8).quote({ command: "swap.uniswap-token.quote", profile: "qa0552-shaped", account, recipient: account, sourceToken: UNISWAP_USDC,
+      outputToken: ETHEREUM_USDT, amountAtomic: live.route.amountIn, minimumOutputAtomic: live.route.amountOutMinimum, approvalCapAtomic: live.approvalCapAtomic,
+      deadline: Math.floor(now.getTime() / 1000) + 600, maxApprovalGasLimit: live.approvalGas.gasLimit, maxSwapGasLimit: live.swapGas.gasLimit,
+      maxCleanupGasLimit: live.cleanupGas.gasLimit, maxFeePerGas: live.swapGas.maxFeePerGas, maxPriorityFeePerGas: live.swapGas.maxPriorityFeePerGas,
+      maxNativeDebitWei: live.maximumNativeDebitWei }) as { quoteHash: string };
+    let op = await run(9).prepare({ command: "swap.uniswap-token.prepare", profile: "qa0552-shaped", quoteHash: quote.quoteHash, idempotencyKey: `shaped-${residual}` });
+    op = await run(14, "approve").approve(op.operationId); chain.land(chain.node.sends[0]!, chain.node.head - 5n); chain.node.allowance = live.route.amountIn;
+    op = await run(11).status(op.operationId); assert.equal(op.phase, "approval_observed"); const approvalGas = op.accumulatedNativeDebitWei;
+    // The 0.5.52 stop: the swap marker at nonce 10 is durable and its nonce reserved, nothing signed; then the route expires.
+    op = await new UniswapTokenJournal(temporary.root).save(transitionUniswapToken(op, "submission_started", { swapAttempt: tokenAttempt(op, "swap", "10", now) }, now));
+    assert.equal(await new UniswapTokenNonceStore(temporary.root).allocate(op, "swap", 10n), "10");
+    now = new Date((op.route.deadline + 3_600) * 1000);
+    if (!residual) chain.node.allowanceAt = (tag) => tag === "latest" ? "0" : undefined;
+    op = await run(15).execute(op.operationId);
+    if (!residual) {
+      assert.deepEqual([op.phase, op.cleanupReason, op.usageState, op.principalRelease?.kind, chain.node.sends.length, await used()],
+        ["cleaned", "zero_allowance_after_effect", "failed_before_effect", "swap_never_signed", 1, "0"]);
+      continue;
+    }
+    assert.deepEqual([op.phase, op.cleanupReason, op.swapAttempt, op.usageState, chain.node.sends.length, await used()],
+      ["cleanup_required", "deadline_expired_after_approval", null, "reserved", 1, live.route.amountIn]);
+    assert.deepEqual(nonceRows(temporary.root, account), ["approval:9:committed"]);
+    op = await run(14, "cleanup").cleanup(op.operationId); assert.deepEqual([op.phase, op.cleanupAttempt?.nonce, chain.node.sends.length], ["cleanup_submitted", "10", 2]);
+    const revoke = parseTransaction(chain.node.sends[1]!);
+    assert.deepEqual([revoke.nonce, revoke.to?.toLowerCase(), revoke.data], [10, UNISWAP_USDC.toLowerCase(), envelopeOf(op, "cleanup", "10").data]);
+    chain.land(chain.node.sends[1]!, chain.node.head - 5n); chain.node.allowance = "0"; op = await run(11).status(op.operationId);
+    assert.deepEqual([op.phase, op.usageState, op.principalRelease?.kind, op.accumulatedNativeDebitWei, await used(), chain.node.sends.length],
+      ["cleaned", "failed_before_effect", "swap_never_signed", (BigInt(approvalGas) + 42_000n).toString(), "0", 2]);
+    assert.equal((await run(11).status(op.operationId)).integrityHash, op.integrityHash);
+  }
 });
 
 test("QA 0.5.52 live 262d15ed… (USDC) and fc03d78f… (USDT): status releases the principal once the finalized chain holds the cleanup at the swap's nonce", async (t) => {

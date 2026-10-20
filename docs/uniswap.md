@@ -143,10 +143,17 @@ attempt marker, so no read can take it. A started approval or swap with no hash 
 no public sealed effect (a stop between its marker and signing) makes `status` refuse
 with `uniswap_token_public_effect_missing` and name `execute`: that forward command
 opens custody under the account lock, and when custody holds no signed bytes it frees
-the nonce, drops the marker, closes a route whose deadline passed (an observed
-approval becomes `cleaned` / `expired_approval_no_swap`, nothing sent) and otherwise
-stops; the next `execute` starts the effect afresh. Signed bytes found are journaled
-and only observed.
+the nonce, drops the marker, closes a route whose deadline passed (below) and
+otherwise stops; the next `execute` starts the effect afresh. Signed bytes found are
+journaled and only observed.
+`cleaned` means no residual allowance. When the route deadline passed after an
+approval landed and no swap was ever started, `status`/`execute` prove the approval
+and read the current allowance: if it is still above zero the swap becomes
+`cleanup_required` (`deadline_expired_after_approval`, `next_actions` naming
+`cleanup`), whose consented revoke sends once and is observed to proof; if it is
+already zero the swap is `cleaned` at once. Either way the principal hold is released
+with `cleaned` and the approval gas stays charged. Every `cleanup_required` swap names
+the `cleanup` command in its `next_actions`.
 A `cleaned` swap whose approval landed releases its principal hold only on proof
 that no swap of it can land, recorded as `principalRelease`: no swap marker is left
 (`swap_never_signed`), or its hashless marker's nonce is held, at the finalized tag,

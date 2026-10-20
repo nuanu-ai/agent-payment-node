@@ -75,12 +75,15 @@ function tokenOutcome(value) {
         nativeDebitAtomic: receipt.nativeDebitWei };
     return { proofClass: value.phase, data: null, operation: value, receipt: receipt === null ? null : { ...receipt, actualEconomics }, nextActions: uniswapTokenNextActions(value) };
 }
-/** A cleanup the fee cap refused before signing: retry it as frozen, or re-quote its own caps under fresh consent. */
+/**
+ * A swap that requires cleanup names its one exit, the owner's consented cleanup; when the fee cap refused it before
+ * signing, the same cleanup may instead re-quote its own caps under fresh consent.
+ */
 export function uniswapTokenNextActions(op) {
-    if (op.phase !== "cleanup_required" || op.preSignFailure?.reason !== "uniswap_token_fee_cap")
+    if (op.phase !== "cleanup_required")
         return [];
     const cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;
-    return [cleanup, `${cleanup} --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`];
+    return op.preSignFailure?.reason === "uniswap_token_fee_cap" ? [cleanup, `${cleanup} --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`] : [cleanup];
 }
 function data(value, proofClass) {
     return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };
