@@ -3,6 +3,9 @@ export declare const WALLET_ALLOWANCE_REVOKE_SCHEMA: "apn.wallet-allowance-revok
 export declare const WALLET_ALLOWANCE_REVOKE_FAMILY: "wallet_allowance_revoke";
 export declare const WALLET_ALLOWANCE_REVOKE_STORE: "wallet-allowance-revokes";
 export type WalletAllowanceRevokeState = "prepared" | "signed" | "submitted" | "completed" | "reverted" | "superseded" | "failed_before_effect" | "abandoned_unknown";
+/** The journal bound (widened from 8 for refused sends); a refused send goes back to `signed` only while a restart and an exit still fit. */
+export declare const WALLET_ALLOWANCE_REVOKE_JOURNAL_MAX = 16;
+export declare const SEND_REFUSED_BEFORE_TRANSPORT = "send_refused_before_transport";
 export declare const WALLET_ALLOWANCE_REVOKE_STATES: readonly WalletAllowanceRevokeState[];
 export declare const WALLET_ALLOWANCE_REVOKE_TERMINAL_STATES: readonly WalletAllowanceRevokeState[];
 declare const recordSchema: z.ZodObject<{

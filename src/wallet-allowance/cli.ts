@@ -66,7 +66,8 @@ export function walletAllowanceRpc(chainId: number, state: StateStore, options: 
     { reason: "wallet_allowance_rpc_required", chain: `eip155:${chainId}`, setting: rpcSetting });
   const rpc = new HttpsBaseRpc(url, { directGuardState: state });
   rpc.armEvmDirectRpcGuard();
-  return { rpcSetting, rpc: { batch: async (calls) => await rpc.batchCall(calls), send: async (raw) => await rpc.submitRawTransaction(raw) } };
+  return { rpcSetting, rpc: { batch: async (calls) => await rpc.batchCall(calls), send: async (raw) => await rpc.submitRawTransaction(raw),
+    checkSend: async () => await rpc.assertPostCapacity() } };
 }
 
 async function consent(record: WalletAllowanceRevokeRecord, options: RuntimeFactoryOptions): Promise<void> {

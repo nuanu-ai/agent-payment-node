@@ -369,6 +369,9 @@ export class HttpsBaseRpc implements RpcPort, X402RpcPort {
     return { gasLimitAtomic: gas.toString(), maxFeePerGasAtomic: (baseFee * 2n + priority).toString(), maxPriorityFeePerGasAtomic: priority.toString() };
   }
 
+  /** The pre-transport refusal a guarded POST would meet now (cap spent, provider cooling down); sends nothing. */
+  async assertPostCapacity(): Promise<void> { await this.directGuard?.assertCanPost(this.endpoint.toString()); }
+
   async submitRawTransaction(rawTransaction: Hex, beforeSend?: () => void): Promise<Hex> {
     try { return rpcHex(await this.call("eth_sendRawTransaction", [rawTransaction], beforeSend), 32); }
     catch (error) {

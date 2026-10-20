@@ -91,7 +91,7 @@ const CASES: Readonly<Record<Exclude<OperationFamily, "relay_unsigned">, readonl
     record: state => ({ state, effectAttempts: state === "prepared" ? 0 : 1, context: { consentExpiresAt: FUTURE } }) }],
   x402_solana: [byState("x402 solana", X402_SOLANA_STATES, X402_SOLANA_TERMINAL_STATES)],
   permit2_allowance: [byState("permit2 allowance", PERMIT2_ALLOWANCE_STATES, PERMIT2_ALLOWANCE_TERMINAL_STATES)],
-  wallet_allowance_revoke: [byState("wallet allowance revoke", WALLET_ALLOWANCE_REVOKE_STATES, WALLET_ALLOWANCE_REVOKE_TERMINAL_STATES)],
+  wallet_allowance_revoke: [byState("wallet allowance revoke", WALLET_ALLOWANCE_REVOKE_STATES, WALLET_ALLOWANCE_REVOKE_TERMINAL_STATES, { terms: { expiresAt: FUTURE } })],
 };
 
 test("every adapter is terminal exactly in its family's own terminal states", async () => {

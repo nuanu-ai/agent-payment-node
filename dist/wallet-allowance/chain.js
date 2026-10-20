@@ -2,6 +2,14 @@ import { encodeFunctionData, keccak256, parseAbi, parseTransaction, recoverTrans
 import { ApnError } from "../errors.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
 import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
+/**
+ * A send refused before its bytes reached the node: the guard's POST cap (its own count), the provider family's cooldown
+ * (refused before transport), or the provider's HTTP 429. Anything else from a send may have reached the network.
+ */
+export function sendRefusedBeforeTransport(error) {
+    return error.code === "APN_RPC_BUDGET_EXCEEDED" && error.details?.maxPhysicalRequests !== undefined ||
+        error.code === "APN_PROVIDER_UNAVAILABLE" && error.details?.reason === "rpc_provider_cooldown" || error.details?.httpStatus === 429;
+}
 const APPROVAL_TOPIC = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";
 const ERC20 = parseAbi(["function approve(address spender, uint256 amount) returns (bool)"]);
 const word = (value) => value.slice(2).toLowerCase().padStart(64, "0");

@@ -7,7 +7,7 @@ import { WalletAllowanceRevokeRepository } from "../../src/wallet-allowance/repo
 import type { movingNode } from "./uniswap-token-qa0552-harness.js";
 
 type Call = { readonly method: string; readonly params: readonly unknown[] };
-/** The fake node's transport as the family's chain port and as a finalized reader: one POST per batch, one per send. */
+/** The fake node's transport as the family's chain port and as a finalized reader: one POST per batch, one per send (no POST cap, no cooldown). */
 export function allowanceRpc(chain: ReturnType<typeof movingNode>, posts: string[] = []): WalletAllowanceRpc & PublicFinalizedRead {
   let id = 0;
   const post = async (body: unknown) => JSON.parse((await chain.request("https://rpc.example", "POST", JSON.stringify(body))).body) as unknown;
@@ -18,7 +18,8 @@ export function allowanceRpc(chain: ReturnType<typeof movingNode>, posts: string
     return rows.map((row) => answers.find((answer) => answer.id === row.id)!.result);
   };
   return { batch: async (calls: readonly (Call | FinalizedReadCall)[]) => await batch(calls), call: async (method: string, params: readonly unknown[]) => (await batch([{ method, params }]))[0],
-    send: async (raw: Hex) => { posts.push("send"); return ((await post({ jsonrpc: "2.0", id: ++id, method: "eth_sendRawTransaction", params: [raw] })) as { result: Hex }).result; } };
+    send: async (raw: Hex) => { posts.push("send"); return ((await post({ jsonrpc: "2.0", id: ++id, method: "eth_sendRawTransaction", params: [raw] })) as { result: Hex }).result; },
+    checkSend: async () => undefined };
 }
 
 /** A prepared revoke written straight to its store, for the generic operation commands. */
