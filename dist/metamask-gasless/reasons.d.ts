@@ -14,6 +14,8 @@ export declare const MM_REASON_CODES: {
     readonly mm_gasless_expired: "APN_REPREPARE_REQUIRED";
     readonly mm_gasless_clock: "APN_REPREPARE_REQUIRED";
     readonly mm_gasless_rpc_binding: "APN_RPC_PROTOCOL";
+    /** The chain's RPC environment variable is unset, empty or not a public HTTPS URL; no RPC was asked anything. */
+    readonly mm_gasless_rpc_setting: "APN_RPC_CONFIG";
     readonly mm_gasless_rpc_unavailable: "APN_RPC_AMBIGUOUS";
     /** The RPC refused eth_getLogs as too wide even at the narrowest bounded window. */
     readonly mm_gasless_rpc_log_range: "APN_RPC_CONFIG";

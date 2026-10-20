@@ -1,9 +1,10 @@
 import { canonicalJson, exactKeys, sha256 } from "../../canonical.js";
+import { ApnError } from "../../errors.js";
 import { parsePublicHttpsUrl } from "../../network-policy.js";
 import { classifyX402LogAvailabilityMessage } from "../../rpc-envelope.js";
 import { GaslessHttps } from "../../gasless/https.js";
 import { mmAssertStableQuote, mmQuote } from "../economics.js";
-import { mmRegistry, MM_RPC_ENV } from "../registry.js";
+import { mmRegistry, MM_RPC_ENV, MM_SENTINEL_SLUG } from "../registry.js";
 import { mmFail } from "../reasons.js";
 import { mmEvidenceAt, mmEvidenceFail } from "./diagnostic.js";
 import { mmValidateUnsigned } from "../unsigned.js";
@@ -24,9 +25,7 @@ export function metaMaskGaslessRpcFactory(environment, clock, transport) {
         const selected = mmChain(chainId), existing = cache.get(selected);
         if (existing !== undefined)
             return existing;
-        const name = MM_RPC_ENV[selected], rpcUrl = environment[name];
-        if (rpcUrl === undefined || rpcUrl.length === 0)
-            mmFail("mm_gasless_rpc_binding");
+        const name = MM_RPC_ENV[selected], rpcUrl = mmRpcSetting(environment, name, selected);
         const created = new MetaMaskGaslessRpc({ chainId: selected, rpcUrl, clock, transport: selectedTransport });
         cache.set(selected, created);
         return created;
@@ -36,11 +35,25 @@ export function metaMaskGaslessRpcFactory(environment, clock, transport) {
 export function metaMaskGaslessObservationRpcFactory(environment, clock, transport) {
     const selectedTransport = transport ?? new GaslessHttps();
     return (chainId, environmentName) => {
-        const rpcUrl = environment[mmObservationRpcEnv(environmentName)];
-        if (rpcUrl === undefined || rpcUrl.length === 0)
-            mmFail("mm_gasless_rpc_binding");
-        return new MetaMaskGaslessRpc({ chainId: mmChain(chainId), rpcUrl, clock, transport: selectedTransport, observationOnly: true });
+        const selected = mmChain(chainId), rpcUrl = mmRpcSetting(environment, mmObservationRpcEnv(environmentName), selected);
+        return new MetaMaskGaslessRpc({ chainId: selected, rpcUrl, clock, transport: selectedTransport, observationOnly: true });
     };
+}
+/**
+ * The URL in one RPC environment variable. An unset, empty or non-public-HTTPS value is a configuration refusal that names
+ * the variable and the chain, raised before any network request; a reachable RPC of the wrong chain stays a binding refusal.
+ */
+function mmRpcSetting(environment, name, chainId) {
+    const value = environment[name], missing = value === undefined || value.length === 0;
+    if (!missing) {
+        try {
+            parsePublicHttpsUrl(value, "APN_RPC_CONFIG", "MetaMask gasless RPC endpoint", 2048);
+            return value;
+        }
+        catch { /* named below */ }
+    }
+    throw new ApnError("APN_RPC_CONFIG", `MetaMask gasless on eip155:${chainId} (${MM_SENTINEL_SLUG[chainId]}) needs ${name} ` +
+        `set to a public, credential-free HTTPS RPC endpoint of that chain; ${missing ? "it is not set" : "its value is not one"}.`, { reason: "mm_gasless_rpc_setting", chainId: `eip155:${chainId}`, environmentVariable: name });
 }
 export function mmObservationRpcEnv(value) {
     if (typeof value !== "string" || value.length > 128 || !/^APN_[A-Z0-9_]+_RPC_URL$/u.test(value))
