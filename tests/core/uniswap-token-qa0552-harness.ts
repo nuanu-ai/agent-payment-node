@@ -39,6 +39,10 @@ export function movingNode(input: { readonly account: string; readonly allowance
     if (method === "eth_sendRawTransaction") { const raw = params[0] as Hex; node.sends.push(raw); return keccak256(raw); }
     if (method === "eth_getTransactionByHash") return node.txs.get(String(params[0])) ?? null;
     if (method === "eth_getTransactionReceipt") return node.receipts.get(String(params[0])) ?? null;
+    // The era block of the never-lands rule: the transactions the node indexes in that block, by number.
+    const inBlock = () => [...node.txs.values()].filter((tx) => tx.blockNumber === params[0]);
+    if (method === "eth_getBlockTransactionCountByNumber") return hex(BigInt(inBlock().length));
+    if (method === "eth_getTransactionByBlockNumberAndIndex") return inBlock()[Number(params[1])] ?? null;
     throw new Error(`unexpected RPC method ${method}`);
   };
   /** The signed transaction lands in a block; its account nonce moves past it. */
@@ -46,8 +50,12 @@ export function movingNode(input: { readonly account: string; readonly allowance
     const tx = parseTransaction(raw), hash = keccak256(raw), at = { blockNumber: hex(number), blockHash: blockHash(number) };
     node.txs.set(hash, { hash, chainId: "0x1", from: input.account, to: tx.to, input: tx.data, value: "0x0", nonce: hex(BigInt(tx.nonce!)),
       gas: hex(tx.gas!), maxFeePerGas: hex(tx.maxFeePerGas!), maxPriorityFeePerGas: hex(tx.maxPriorityFeePerGas!), type: "0x2", ...at });
+    // An ERC-20 approve logs Approval(owner, spender, amount), as a token does.
+    const approve = String(tx.data).startsWith("0x095ea7b3"), padded = (value: string) => `0x${value.slice(2).toLowerCase().padStart(64, "0")}`;
+    const logs = status === 1 && approve ? [{ address: tx.to, topics: ["0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925",
+      padded(input.account), padded(`0x${String(tx.data).slice(34, 74)}`)], data: `0x${String(tx.data).slice(74)}` }] : [];
     node.receipts.set(hash, { transactionHash: hash, from: input.account, to: tx.to, status: hex(BigInt(status)), gasUsed: "0x5208",
-      effectiveGasPrice: hex(node.baseFee + 1n), ...at });
+      effectiveGasPrice: hex(node.baseFee + 1n), logs, ...at });
     if (BigInt(tx.nonce!) >= node.pending) node.pending = BigInt(tx.nonce!) + 1n;
     return hash;
   };

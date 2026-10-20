@@ -32,6 +32,7 @@ import { bindJupiterCommand } from "./swap/jupiter-solana/command-catalog.js";
 import { bindOrcaCommand } from "./swap/orca-solana/command-catalog.js";
 import { bindX402SolanaCommand } from "./x402-solana/command-catalog.js";
 import { bindPermit2AllowanceCommand } from "./x402-permit2/allowance/catalog.js";
+import { bindWalletAllowanceCommand } from "./wallet-allowance/catalog.js";
 import { bindAllowlistCommand } from "./allowlist-command-catalog.js";
 import { bindRelayPrepare } from "./relay/command-route.js";
 
@@ -99,6 +100,7 @@ function bindParsedCatalog(parsed: ParsedCatalogCommand): BoundCommand {
   if (parsed.command.path.join(" ") === "x402 merchant retire-unsent") return { request: { command:"x402.merchant.retire-unsent",operationId:value(options,"--operation") } };
   if (parsed.command.path.join(" ") === "x402 merchant status") return { request: { command: "x402.merchant.status", operationId: value(options, "--operation") } };
   if (parsed.command.path.slice(0, 3).join(" ") === "x402 permit2 allowance") return bindPermit2AllowanceCommand(parsed.command.path.join(" "), options);
+  if (parsed.command.path.slice(0, 2).join(" ") === "wallet allowance") return bindWalletAllowanceCommand(parsed.command.path.join(" "), options);
   if (parsed.command.path.slice(0, 2).join(" ") === "x402 solana") return { request: bindX402SolanaCommand(parsed.command.path.join(" "), options) };
   if (parsed.command.path.join(" ") === "x402 permit2 status") return { request: { command: "x402.permit2.status", profile: value(options, "--profile"), operationId: value(options, "--operation") } };
   if (parsed.command.path[0] === "relay") return bindRelayCommand(parsed.command.path.join(" "), options);

@@ -88,6 +88,7 @@ import { orcaStableLegacyFinisher } from "./legacy/orca-stable/finisher.js";
 import { executeX402SolanaCli } from "./x402-solana/cli.js";
 import { x402SolanaPorts } from "./x402-solana/runtime.js";
 import { executePermit2AllowanceCli } from "./x402-permit2/allowance/cli.js";
+import { executeWalletAllowanceCli } from "./wallet-allowance/cli.js";
 import { TtyOrcaStableConsent } from "./legacy/orca-stable/recovery-consent.js";
 import { permit2CurrentOwnerPreflight, permit2PublicRpc } from "./x402-permit2/preflight.js";
 import { executePermit2ProductionCli } from "./x402-permit2/production-cli.js";
@@ -352,6 +353,8 @@ async function executeBound(bound, options, root) {
         return executeX402SolanaCli(bound, options, root);
     if (bound.request.command.startsWith("x402.permit2.allowance."))
         return executePermit2AllowanceCli(bound, options, root);
+    if (bound.request.command.startsWith("wallet.allowance."))
+        return executeWalletAllowanceCli(bound, options, root);
     if (bound.request.command === "relay.route")
         return executeRelayRoute(bound, root, (internal) => executeBoundCommand(internal, options));
     if (bound.request.command === "x402.permit2.approve" || bound.request.command === "x402.permit2.observe")

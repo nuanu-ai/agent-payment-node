@@ -332,5 +332,78 @@
       "nonceAtFinality": "7",
       "cleanupFeeWei": "2332940504460"
     }
-  ]
+  ],
+  "expiredCleaned": {
+    "operation": {
+      "account": "0x3De1d3CB9e5a9B24Df663a220f11C304CFe1133b",
+      "accumulatedNativeDebitWei": "4421731232529",
+      "allowanceAtPrepare": "0",
+      "approvalAttempt": {
+        "attempts": 1,
+        "markedAt": "2026-10-20T08:07:57.369Z",
+        "markerHash": "9142cf4977b19b520e9242dc524207c630f4545cb04a034d5aebd8efbdc37b62",
+        "nonce": "7",
+        "transactionHash": "0x1b453b7e5f10dec937db6ca1ff692c293b62a2657762df905af93e2aad099f92"
+      },
+      "approvalCapAtomic": "10000",
+      "approvalGas": {
+        "gasLimit": "60000",
+        "maxFeePerGas": "400000000",
+        "maxPriorityFeePerGas": "50000000"
+      },
+      "cleanupAttempt": null,
+      "cleanupEvidence": {
+        "schemaVersion": "apn.uniswap-token-expired-approval-evidence.v1",
+        "kind": "expired_approval_no_swap",
+        "approvalTransactionHash": "0x1b453b7e5f10dec937db6ca1ff692c293b62a2657762df905af93e2aad099f92",
+        "observedAllowanceAtomic": "10000",
+        "observedAt": "2026-10-20T08:37:27.163Z"
+      },
+      "cleanupGas": {
+        "gasLimit": "60000",
+        "maxFeePerGas": "400000000",
+        "maxPriorityFeePerGas": "50000000"
+      },
+      "cleanupReason": "deadline_expired_after_approval",
+      "createdAt": "2026-10-20T08:07:19.643Z",
+      "maximumNativeDebitWei": "150000000000000",
+      "mechanismDigest": "88166af2bee373780a52f993f1765cf78f13366d4ada32be3a12e658c2448e01",
+      "operationId": "ea09a1151d21d5aef6ae361c1916cc807d45cf81f77b8377b18d2c6bf03f9d05",
+      "phase": "cleaned",
+      "policyDigest": "95c5a5e35d0b55cdd500a5a9f8a904b6e3c809df9bacfa064a173927bb5594af",
+      "preSignFailure": null,
+      "previousIntegrityHash": "94582d6b8bb4109b539ae2b89d36a6bc38247fe459c083a678d5ccfda36a8d4b",
+      "profile": "qa-20261013-evm-recv",
+      "quoteBlock": {
+        "hash": "0x53d9b7afd27a0dd5373e7759e2392b76f609ba79543a00a79656526c34cedabd",
+        "number": "26232493"
+      },
+      "receipt": null,
+      "route": {
+        "amountIn": "10000",
+        "amountOutMinimum": "9800",
+        "calldata": "0x414bf389000000000000000000000000dac17f958d2ee523a2206206994597c13d831ec7000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000000640000000000000000000000003de1d3cb9e5a9b24df663a220f11c304cfe1133b000000000000000000000000000000000000000000000000000000006ad7281b000000000000000000000000000000000000000000000000000000000000271000000000000000000000000000000000000000000000000000000000000026480000000000000000000000000000000000000000000000000000000000000000",
+        "deadline": 1792485403,
+        "fee": 100,
+        "inputToken": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "outputToken": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        "pool": "0x3416cF6C708Da44DB2624D63ea0AAef7113527C6",
+        "recipient": "0x3De1d3CB9e5a9B24Df663a220f11C304CFe1133b",
+        "routeHash": "15586181201c2fdafc0af90e68f151d051062ee3beb464fa38e41126178fd44e",
+        "router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+        "schemaVersion": "apn.uniswap-v3.swap-router.exact-input-single.v1"
+      },
+      "schemaVersion": "apn.uniswap-token-operation.v2",
+      "swapAttempt": null,
+      "swapGas": {
+        "gasLimit": "180000",
+        "maxFeePerGas": "400000000",
+        "maxPriorityFeePerGas": "50000000"
+      },
+      "updatedAt": "2026-10-20T08:37:27.463Z",
+      "usageReservationId": "d037b6db6b74b189a7cf6123b86f0ea955db9343960cc2b995c0b2fb478a4c18",
+      "usageState": "failed_before_effect",
+      "integrityHash": "ba157f4362db60c4d1ab826cb85e7594254da378307e09bd1dfb8f2e3d35b0ba"
+    }
+  }
 }

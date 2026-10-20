@@ -44,6 +44,8 @@ export interface UniswapTokenCommandRuntime {
   prepare(request: Extract<import("../../commands.js").CommandRequest, { readonly command: "swap.uniswap-token.prepare" }>): Promise<UniswapTokenOperation>;
   approve(id: string): Promise<UniswapTokenOperation>; execute(id: string): Promise<UniswapTokenOperation>;
   status(id: string): Promise<UniswapTokenOperation>; cleanup(id: string, fees?: TokenCleanupFees): Promise<UniswapTokenOperation>;
+  /** The live allowance a swap the earlier expired-approval exit cleaned with its approval standing still has; null for any other record. */
+  residualAllowance?(operation: UniswapTokenOperation): Promise<string | null>;
 }
 export class UniswapTokenExecution {
   /** Effects broadcast by this invocation: their nonce cannot be finalized past yet, so no never-lands read is spent on them. */
