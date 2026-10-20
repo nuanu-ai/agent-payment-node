@@ -277,7 +277,8 @@ test("V1 never-lands waits for the signed message's own lifetime, not the quote'
  const result=await f.runtime("execute",op.operationId).approveAndExecute(op.operationId,new Date());assert.equal(result.state,"unknown_finality");assert.equal(f.sends,1);
  // Finalized past the quote's 1100 but not the signed 1340: the signed transaction can still land.
  f.setFinalizedHeight(1101);assert.equal((await f.runtime("observe",op.operationId,false).status(op.operationId,new Date())).state,"unknown_finality");
- f.setFinalizedHeight(1341);const expired=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());
+ // A cluster at height 1341 serves a newer latest blockhash valid ~150 blocks ahead; the expiry proof checks the two agree.
+ f.setLatest(getBase58Decoder().decode(Buffer.alloc(32,63)),1491);f.setFinalizedHeight(1341);const expired=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());
  assert.equal(expired.state,"expired_unlanded");assert.equal(f.sends,1);assert.equal(expired.usageLease?.state,"released_unsubmitted");
 });
 test("V1 expiry after signing retains public failure and never retries without a send claim",async t=>{
