@@ -5,7 +5,7 @@ import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 /** Existing lifecycle mutations only; recovery cannot introduce an arbitrary signer. */
 export interface TransferObserveLifecycle {
     followUsage<T extends OperationRecord>(operation: T): Promise<T>;
-    transition(operation: LocalOperationRecord, state: OperationRecord["state"], terminal: boolean, reason: string, proofClass: string, extra?: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease">>, rpcReceipt?: RpcReceipt): Promise<LocalOperationRecord>;
+    transition(operation: LocalOperationRecord, state: OperationRecord["state"], terminal: boolean, reason: string, proofClass: string, extra?: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease" | "evmActualFee">>, rpcReceipt?: RpcReceipt): Promise<LocalOperationRecord>;
     /** Caller protects and releases its exact reservation without recursively taking the bucket lock. */
     persistNoPrivateEntry(operation: LocalOperationRecord): Promise<LocalOperationRecord>;
     failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never>;

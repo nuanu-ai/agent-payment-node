@@ -327,7 +327,7 @@ export class TransferService {
     terminal: boolean,
     reason: string,
     proofClass: string,
-    extra: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease">> = {},
+    extra: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease" | "evmActualFee">> = {},
     rpcReceipt?: RpcReceipt,
     followUsage = true,
   ): Promise<LocalOperationRecord> {
@@ -355,6 +355,7 @@ export class TransferService {
         ...(operation.evm?.asset.kind === "native" ? {} : { exactTransferLog: hasExactTransfer(rpcReceipt, operation) }),
         ...(rpcReceipt.evmEvidence === undefined ? {} : { evmEvidence: rpcReceipt.evmEvidence }),
       }),
+      ...(operation.evmActualFee === undefined ? {} : { evmActualFee: operation.evmActualFee }),
       createdAt: operation.evm === undefined ? this.context.clock.now().toISOString() : operation.transitions.at(-1)!.at,
       operationIntegrityHash: operation.integrityHash,
     };

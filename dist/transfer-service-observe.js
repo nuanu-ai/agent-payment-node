@@ -8,6 +8,7 @@ import { armDirectEvmStep, requireEvmRpc } from "./evm-direct.js";
 import { LOCAL_DIRECT_SENT_ABANDON } from "./state-integrity.js";
 import { directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { checkNeverLands } from "./evm-finalized-proof.js";
+import { deriveEvmActualFee } from "./evm-direct-actual-fee.js";
 import { canonicalOperationId, hasExactTransfer, hasSoleExactTransfer, parseEffect, publicOperation, publicReceipt, verifyEffect } from "./transfer-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { ProviderDirectRequestRecoveryService } from "./provider-direct-request-recovery.js";
@@ -294,14 +295,19 @@ export class TransferServiceObservation {
             if (receipt.evmEvidence?.transactionVerified !== true)
                 return await this.lifecycle.transition(operation, "unknown_finality", false, "evm_transaction_mismatch", "invalid_receipt");
         }
+        // The verified transaction's own receipt states what it paid; it is recorded with the proven outcome only.
+        const paid = operation.evm === undefined || receipt.evmFeeFields === undefined ? {} : { evmActualFee: deriveEvmActualFee({
+                chainId: operation.chainId, transactionHash: operation.transactionHash, blockNumberAtomic: receipt.blockNumberAtomic,
+                gasLimitAtomic: operation.economics.gasLimitAtomic, maxFeePerGasAtomic: operation.economics.maxFeePerGasAtomic, receiptFields: receipt.evmFeeFields
+            }) };
         if (receipt.status === "reverted") {
-            return await this.lifecycle.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", {}, receipt);
+            return await this.lifecycle.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", paid, receipt);
         }
         const native = operation.evm?.asset.kind === "native";
         if (!native && !(operation.evm === undefined ? hasExactTransfer(receipt, operation) : hasSoleExactTransfer(receipt, operation))) {
             return await this.lifecycle.transition(operation, "unknown_finality", false, "successful_receipt_missing_exact_transfer", "invalid_receipt", {}, receipt);
         }
-        return await this.lifecycle.transition(operation, "completed", true, operation.evm === undefined ? "confirmed_exact_usdc_transfer" : native ? "confirmed_exact_native_transfer" : "confirmed_exact_erc20_transfer", operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_exact_transfer_event", {}, receipt);
+        return await this.lifecycle.transition(operation, "completed", true, operation.evm === undefined ? "confirmed_exact_usdc_transfer" : native ? "confirmed_exact_native_transfer" : "confirmed_exact_erc20_transfer", operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_exact_transfer_event", paid, receipt);
     }
     async requiredOperation(operationId) {
         const operation = await this.context.state.findOperation(operationId);

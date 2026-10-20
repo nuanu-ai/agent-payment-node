@@ -8,6 +8,7 @@ import { armDirectEvmStep, requireEvmRpc } from "./evm-direct.js";
 import { LOCAL_DIRECT_SENT_ABANDON } from "./state-integrity.js";
 import { directEvmNetwork, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { checkNeverLands, type EraBlock, type NeverLandsCheck } from "./evm-finalized-proof.js";
+import { deriveEvmActualFee } from "./evm-direct-actual-fee.js";
 import type { Economics, Hex, OperationRecord } from "./model.js";
 import type { OperationAbandonIntent } from "./operation-abandon-approval.js";
 import type { RpcPort, RpcReceipt } from "./ports.js";
@@ -21,7 +22,7 @@ import { ProviderDirectState } from "./provider-direct-state.js";
 export interface TransferObserveLifecycle {
   followUsage<T extends OperationRecord>(operation: T): Promise<T>;
   transition(operation: LocalOperationRecord, state: OperationRecord["state"], terminal: boolean, reason: string, proofClass: string,
-    extra?: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease">>,
+    extra?: Partial<Pick<OperationRecord, "transactionHash" | "rawTransactionHash" | "lastSubmissionAt" | "allowlistLease" | "evmActualFee">>,
     rpcReceipt?: RpcReceipt): Promise<LocalOperationRecord>;
   /** Caller protects and releases its exact reservation without recursively taking the bucket lock. */
   persistNoPrivateEntry(operation: LocalOperationRecord): Promise<LocalOperationRecord>;
@@ -294,8 +295,12 @@ export class TransferServiceObservation {
       catch (error) { return await this.lifecycle.transition(operation, "unknown_finality", false, evmEffectFailureReason(error), "inclusion_effect_unproven"); }
       if (receipt.evmEvidence?.transactionVerified !== true) return await this.lifecycle.transition(operation, "unknown_finality", false, "evm_transaction_mismatch", "invalid_receipt");
     }
+    // The verified transaction's own receipt states what it paid; it is recorded with the proven outcome only.
+    const paid = operation.evm === undefined || receipt.evmFeeFields === undefined ? {} : { evmActualFee: deriveEvmActualFee({
+      chainId: operation.chainId, transactionHash: operation.transactionHash, blockNumberAtomic: receipt.blockNumberAtomic,
+      gasLimitAtomic: operation.economics.gasLimitAtomic, maxFeePerGasAtomic: operation.economics.maxFeePerGasAtomic, receiptFields: receipt.evmFeeFields }) };
     if (receipt.status === "reverted") {
-      return await this.lifecycle.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", {}, receipt);
+      return await this.lifecycle.transition(operation, "failed_confirmed_revert", true, "confirmed_receipt_revert", "confirmed_receipt", paid, receipt);
     }
     const native = operation.evm?.asset.kind === "native";
     if (!native && !(operation.evm === undefined ? hasExactTransfer(receipt, operation) : hasSoleExactTransfer(receipt, operation))) {
@@ -303,7 +308,7 @@ export class TransferServiceObservation {
     }
     return await this.lifecycle.transition(
       operation, "completed", true, operation.evm === undefined ? "confirmed_exact_usdc_transfer" : native ? "confirmed_exact_native_transfer" : "confirmed_exact_erc20_transfer",
-      operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_exact_transfer_event", {}, receipt,
+      operation.evm === undefined ? "confirmed_receipt_and_exact_transfer_log" : native ? "included_native_transaction_and_receipt" : "included_exact_transfer_event", paid, receipt,
     );
   }
 
