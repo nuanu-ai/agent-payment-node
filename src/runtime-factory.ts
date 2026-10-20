@@ -78,6 +78,7 @@ import { TtyAllowlistPolicyApproval } from "./allowlist-policy-activation.js";
 import { createUniswapKeylessRuntime, lazyEthereumRpcCall, REFUSING_SWAP_APPROVAL } from "./swap/uniswap-v3/runtime-factory.js";
 import { createUniswapTokenRuntime } from "./swap/uniswap-v3/token-runtime-factory.js";
 import { createTokenRpc } from "./swap/uniswap-v3/token-rpc.js";
+import { UNISWAP_TOKEN_EXECUTE_PLAN, uniswapTokenProbedCap } from "./swap/uniswap-v3/token-runtime.js";
 import { tokenPrimaryCandidates } from "./swap/uniswap-v3/token-rpc-pool.js";
 import { loadActiveAssetPolicyRegistry } from "./allowlist-active-policy.js";
 import { verifyUniswapV3CodePins, verifyUniswapV3MutablePins } from "./swap/uniswap-v3/pins.js";
@@ -89,6 +90,7 @@ import { orcaStableLegacyFinisher } from "./legacy/orca-stable/finisher.js";
 import { executeX402SolanaCli } from "./x402-solana/cli.js";
 import { x402SolanaPorts } from "./x402-solana/runtime.js";
 import { executePermit2AllowanceCli } from "./x402-permit2/allowance/cli.js";
+import { executeWalletAllowanceCli } from "./wallet-allowance/cli.js";
 import { TtyOrcaStableConsent } from "./legacy/orca-stable/recovery-consent.js";
 import { permit2CurrentOwnerPreflight, permit2PublicRpc } from "./x402-permit2/preflight.js";
 import { executePermit2ProductionCli } from "./x402-permit2/production-cli.js";
@@ -372,7 +374,7 @@ function uniswapTokenRpcBudget(command: string): { readonly maxHttpRequests: num
   if (command === "swap.uniswap-token.quote") return { maxHttpRequests: (overhead === 0 ? 8 : 7 + overhead), deadlineMs: 60_000 };
   if (command === "swap.uniswap-token.prepare") return { maxHttpRequests: (overhead === 0 ? 9 : 8 + overhead), deadlineMs: 60_000 };
   if (command === "swap.uniswap-token.approve") return { maxHttpRequests: 14 + overhead, deadlineMs: 90_000 };
-  if (command === "swap.uniswap-token.execute") return { maxHttpRequests: 24, deadlineMs: 150_000 };
+  if (command === "swap.uniswap-token.execute") return { maxHttpRequests: uniswapTokenProbedCap(UNISWAP_TOKEN_EXECUTE_PLAN, overhead), deadlineMs: 150_000 };
   // Status: observation (2), the never-lands batch (2) and, once that suggests never-lands, its index proof (era block,
   // then the deciding batch and its receipt route: 3 more), plus an allowance read and retry headroom.
   if (command === "swap.uniswap-token.status") return { maxHttpRequests: 11 + overhead, deadlineMs: 45_000 };
@@ -397,6 +399,7 @@ async function executeBound(bound: BoundCommand, options: RuntimeFactoryOptions,
   if (bound.request.command.startsWith("x402.merchant.")) return executeMerchantCli(bound, options, root);
   if (bound.request.command.startsWith("x402.solana.")) return executeX402SolanaCli(bound, options, root);
   if (bound.request.command.startsWith("x402.permit2.allowance.")) return executePermit2AllowanceCli(bound, options, root);
+  if (bound.request.command.startsWith("wallet.allowance.")) return executeWalletAllowanceCli(bound, options, root);
   if (bound.request.command === "relay.route") return executeRelayRoute(bound, root, (internal) => executeBoundCommand(internal, options));
   if (bound.request.command === "x402.permit2.approve" || bound.request.command === "x402.permit2.observe") return executePermit2ProductionCli(bound, options, root);
   if (bound.request.command === "x402.permit2.preflight") {

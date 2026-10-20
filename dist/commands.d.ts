@@ -113,6 +113,21 @@ export type CommandRequest = {
     readonly command: "x402.permit2.allowance.observe" | "x402.permit2.allowance.status";
     readonly operationId: string;
 } | {
+    readonly command: "wallet.allowance.revoke";
+    readonly profile: string;
+    readonly chainId: number;
+    readonly token: Address;
+    readonly spender: Address;
+    readonly maxGasLimit: string;
+    readonly maxFeePerGasWei: string;
+    readonly maxPriorityFeePerGasWei: string;
+} | {
+    readonly command: "wallet.allowance.status";
+    readonly profile: string;
+    readonly chainId: number;
+    readonly token: Address;
+    readonly spender: Address;
+} | {
     readonly command: "relay.prepare";
     readonly profile: string;
     readonly recipient: string;

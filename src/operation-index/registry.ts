@@ -19,6 +19,7 @@ import { swapAdapter } from "./adapters/swap.js";
 import { uniswapTokenAdapter } from "./adapters/uniswap-token.js";
 import { x402SolanaAdapter } from "./adapters/x402-solana.js";
 import { permit2AllowanceAdapter } from "./adapters/permit2-allowance.js";
+import { walletAllowanceRevokeAdapter } from "./adapters/wallet-allowance.js";
 import type { OperationFamily } from "./types.js";
 
 export type OperationRegistry = ReadonlyMap<OperationFamily, OperationFamilyAdapter>;
@@ -37,7 +38,7 @@ export function operationRegistry(): OperationRegistry {
     // Phase 4b WP2: every other money family.
     gaslessUsdtAdapter, metaMaskNativeAdapter, swapAdapter, uniswapTokenAdapter, stargateNativeAdapter, stargateTokenAdapter,
     oneClickSourceAdapter, circleSourceAdapter, circleApprovalAdapter,
-    x402SolanaAdapter, permit2AllowanceAdapter,
+    x402SolanaAdapter, permit2AllowanceAdapter, walletAllowanceRevokeAdapter,
   ] as readonly unknown[] as readonly OperationFamilyAdapter[]).map(adapter => [adapter.family, adapter]));
   return registry;
 }

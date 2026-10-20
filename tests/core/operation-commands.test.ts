@@ -17,6 +17,7 @@ import { metaMaskNative, NoSecret, unexecutedUsdt, WP2_FAMILY_RECORDS } from "./
 import { ExactX402Native, QueuedHttp, RecoveryRpc, X402_TEST_ACCOUNT, challengeObservation } from "./x402-helpers.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
 import { preparedAllowanceRecord, preparedSolanaRecord } from "./x402-solana-helpers.js";
+import { preparedRevokeRecord } from "./wallet-allowance-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_URL, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
 /**
@@ -138,6 +139,9 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
   // Prepared and unsigned: observation runs on the family's own command (it needs --rpc-url); the unsigned approve has no abandon.
   permit2_allowance: async t => { const state = await root(t); return { root: state, id: await preparedAllowanceRecord(state), cli: true, status: "ok",
     resume: RESUME_BY_FAMILY, abandon: { code: "APN_OPERATION_BLOCKED", reason: "x402_permit2_allowance_unsigned", family: true }, receipt: NO_RECEIPT }; },
+  // Prepared and unsigned: its status observes (no RPC before signing); the unsigned revoke has no abandon.
+  wallet_allowance_revoke: async t => { const state = await root(t); return { root: state, id: await preparedRevokeRecord(state), cli: true, status: "ok",
+    resume: RESUME_BY_FAMILY, abandon: { code: "APN_OPERATION_BLOCKED", reason: "wallet_allowance_revoke_unsigned", family: true }, receipt: NO_RECEIPT }; },
 };
 
 function check(result: OutputEnvelope, expected: Answer, id: string, label: string): void {

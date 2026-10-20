@@ -78,6 +78,27 @@ export interface UniswapTokenCleanupFeeQuote {
     readonly previousMaximumNativeDebitWei: string;
     readonly quotedAt: string;
 }
+/**
+ * Why a cleaned swap's principal hold was released although an approval of it landed (R4 exit 2): no swap of it was ever
+ * signed (no swap marker is left; a marker is dropped only when custody showed no signed bytes for it), or the hashless
+ * swap marker's nonce is consumed in the finalized chain by this operation's own landed cleanup, so no swap of it can
+ * ever land. Spent gas and every attempt stay in the record.
+ */
+export type UniswapTokenPrincipalRelease = {
+    readonly schemaVersion: "apn.uniswap-token-principal-release.v1";
+    readonly kind: "swap_never_signed";
+    readonly observedAt: string;
+} | {
+    readonly schemaVersion: "apn.uniswap-token-principal-release.v1";
+    readonly kind: "swap_nonce_consumed_by_cleanup";
+    readonly swapNonce: string;
+    readonly cleanupTransactionHash: string;
+    readonly cleanupBlockNumber: string;
+    readonly cleanupBlockHash: string;
+    readonly finalizedBlockNumber: string;
+    readonly finalizedNonce: string;
+    readonly observedAt: string;
+};
 export interface UniswapTokenFailureDiagnostic {
     readonly code: string | null;
     readonly reason: string | null;
@@ -122,6 +143,8 @@ export interface UniswapTokenOperation {
     readonly cleanupFeeQuote?: UniswapTokenCleanupFeeQuote;
     /** Present only once an attempt was retired (v2 records without it read as before). */
     readonly retiredEffects?: readonly UniswapTokenRetiredEffect[];
+    /** Present only once a cleaned swap's principal hold was released on proof that no swap of it can land. */
+    readonly principalRelease?: UniswapTokenPrincipalRelease;
     readonly receipt: UniswapTokenReceipt | null;
     readonly previousIntegrityHash: string | null;
     readonly integrityHash: string;
@@ -144,4 +167,6 @@ export declare class UniswapTokenJournal extends SecureStateStore {
 }
 export declare function transitionUniswapToken(opValue: UniswapTokenOperation, phase: UniswapTokenPhase, patch: Partial<UniswapTokenOperation>, now: Date): UniswapTokenOperation;
 export declare function tokenAttempt(op: UniswapTokenOperation, kind: "approval" | "swap" | "cleanup", nonce: string, now: Date): UniswapTokenAttempt;
+/** A cleanup of this operation that landed (current, or retired after landing) and so consumed its nonce. */
+export declare function landedTokenCleanups(op: Pick<UniswapTokenOperation, "cleanupAttempt" | "retiredEffects">): readonly UniswapTokenAttempt[];
 export {};

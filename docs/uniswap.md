@@ -135,6 +135,34 @@ amount. Successful execution proves the exact input debit, minimum output, and
 zero residual allowance. A reverted or drifted post-approval operation enters
 `cleanup_required`; only the explicit foreground `cleanup` command can send the
 zero allowance cleanup. `status` observes and may reconcile durable local state.
+The swap's signing guard is its post-approval revalidation: at one fresh block it
+checks the chain, the code pins, the exact allowance, the source balance, the fresh
+quote floor, the exact simulation, the gas cap, the native balance and the fee caps,
+and reads none of them twice. `execute` holds its one send slot before it writes an
+attempt marker, so no read can take it. A started approval or swap with no hash and
+no public sealed effect (a stop between its marker and signing) makes `status` refuse
+with `uniswap_token_public_effect_missing` and name `execute`: that forward command
+opens custody under the account lock, and when custody holds no signed bytes it frees
+the nonce, drops the marker, closes a route whose deadline passed (below) and
+otherwise stops; the next `execute` starts the effect afresh. Signed bytes found are
+journaled and only observed.
+`cleaned` means no residual allowance. When the route deadline passed after an
+approval landed and no swap was ever started, `status`/`execute` prove the approval
+and read the current allowance: if it is still above zero the swap becomes
+`cleanup_required` (`deadline_expired_after_approval`, `next_actions` naming
+`cleanup`), whose consented revoke sends once and is observed to proof; if it is
+already zero the swap is `cleaned` at once. Either way the principal hold is released
+with `cleaned` and the approval gas stays charged. Every `cleanup_required` swap names
+the `cleanup` command in its `next_actions`.
+A swap an earlier release cleaned with its approval still standing
+(`expired_approval_no_swap`) shows the live residual in its `status` (`data.residualAllowance`,
+read at `latest`) and names the exact `apn wallet allowance revoke` command for it.
+A `cleaned` swap whose approval landed releases its principal hold only on proof
+that no swap of it can land, recorded as `principalRelease`: no swap marker is left
+(`swap_never_signed`), or its hashless marker's nonce is held, at the finalized tag,
+by its own landed cleanup (`swap_nonce_consumed_by_cleanup`: one primary batch reads
+the finalized nonce, the cleanup by hash and the finalized head). Gas, attempts and
+history stay; a bound or unproven swap keeps its hold.
 A cleanup whose fee caps (frozen at quote time) are below the current Ethereum fees is
 refused before signing and stays `cleanup_required`; its `next_actions` offer the same
 cleanup again and `cleanup --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`.
@@ -184,8 +212,11 @@ The distinct archive is independently chain-checked and must return the exact
 hash for the primary's numeric pinned block before historical state is used.
 Its anchor request verifies the archive chain, allowing nine token code and
 safety reads to fit in three batches of three. With three primaries,
-the effect-bearing reservations are quote 10, prepare 11, approval 17, and swap
-24 physical attempts, totaling 62 against the durable operation ceiling of 64. Status and
+the effect-bearing reservations are quote 10, prepare 11, approval 17, and execute
+17 physical attempts (its plan is 15 POSTs with one primary: an approval execute
+resumes is allowance 1, nonce 1, block 1, pins 4, state 1, simulation 1, gas 1, fees
+1, send 1, first observation up to 3; a swap is one fewer; each further candidate may
+cost one more probe). Status and
 cleanup reserve no new cumulative effect budget but enforce request-session
 caps of 11 and 17. Durable telemetry stores only opaque provider IDs, finite
 outcome/reason enums, and counters.
