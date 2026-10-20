@@ -13,7 +13,8 @@ export interface UniswapTokenExecutionPorts {
   now(): Date; foregroundApprove(operation: UniswapTokenOperation): Promise<void>; foregroundCleanup(operation: UniswapTokenOperation): Promise<void>;
   withAccountLock<T>(operation: UniswapTokenOperation, work: () => Promise<T>): Promise<T>;
   allocateNonce(operation: UniswapTokenOperation, kind: TokenEffectKind): Promise<string>; currentAllowance(operation: UniswapTokenOperation): Promise<string>;
-  releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
+  /** True when custody holds no signed bytes for the effect and its reservation is free; false when a signed effect committed it. */
+  releaseNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<boolean>;
   commitNonce(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
   guard(operation: UniswapTokenOperation, kind: TokenEffectKind, nonce: string): Promise<void>;
   reserveSendCapacity?(): void;
@@ -87,12 +88,16 @@ export class UniswapTokenExecution {
       await this.assertNoEffect(op);
       op = await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: "zero_allowance_no_effect",
         cleanupEvidence: cleanupEvidence("current_allowance", this.ports.now()) }, this.ports.now())); return await this.cleaned(op); }
-    op = await this.start(op, "cleanup"); return await this.observeCleanup(await this.continueStart(op, "cleanup"));
+    // A cleanup refused before signing is back in cleanup_required with its diagnostic: nothing to observe.
+    op = await this.start(op, "cleanup"); return cleanupActive(op.phase) ? await this.observeCleanup(await this.continueStart(op, "cleanup")) : op;
   }
   private async start(op: UniswapTokenOperation, kind: TokenEffectKind) {
     return await this.ports.withAccountLock(op, async () => { const nonce = await this.ports.allocateNonce(op, kind), attempt = tokenAttempt(op, kind, nonce, this.ports.now());
-      op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now()));
-      return await this.finishStart(op, kind); });
+      // Nothing signs before the marker is durable: a refused or raced marker hands the reservation back (or keeps a signed one).
+      let marked: UniswapTokenOperation;
+      try { marked = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: attempt }, this.ports.now())); }
+      catch (error) { await this.ports.releaseNonce(op, kind, nonce); throw error; }
+      return await this.finishStart(marked, kind); });
   }
   private async continueStart(op: UniswapTokenOperation, kind: TokenEffectKind) {
     const attempt = attemptOf(op, kind); if (attempt.transactionHash !== null) return op;
@@ -115,14 +120,14 @@ export class UniswapTokenExecution {
       op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: recovered.transactionHash } }, this.ports.now()));
       return await this.submit(op, kind); }
     try { await this.ports.guard(op, kind, attempt.nonce); }
-    catch (error) { await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op,
-      kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase)); }
+    catch (error) { const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op,
+      kind === "swap" ? "post_approval_revalidation_failed" : `${kind}_pre_sign_failed`, op.accumulatedNativeDebitWei, undefined, diagnostic(error, op.phase), unmarked(kind, unsigned)); }
     this.ports.reserveSendCapacity?.();
     let sealed: TokenSealedEffect;
     try { sealed = await this.ports.seal(op, kind, attempt.nonce); }
     catch (error) { const durable = await this.ports.probeSealed(op, kind, attempt.nonce);
       if (durable !== null) { await this.ports.commitNonce(op, kind, attempt.nonce); throw error; }
-      await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op, `${kind}_sign_failed`); }
+      const unsigned = await this.ports.releaseNonce(op, kind, attempt.nonce); return await this.cleanupRequired(op, `${kind}_sign_failed`, op.accumulatedNativeDebitWei, undefined, undefined, unmarked(kind, unsigned)); }
     await this.ports.commitNonce(op, kind, attempt.nonce);
     op = await this.persist(transitionUniswapToken(op, started(kind), { [`${kind}Attempt`]: { ...attempt, transactionHash: sealed.transactionHash } }, this.ports.now()));
     return await this.submit(op, kind);
@@ -223,9 +228,9 @@ export class UniswapTokenExecution {
     return await this.persist(transitionUniswapToken(op, "cleaned", { accumulatedNativeDebitWei: native,
       ...(noEffect ? { cleanupReason: "zero_allowance_no_effect" } : {}), ...usagePatch(usage) }, this.ports.now())); }
   private async cleanupRequired(op: UniswapTokenOperation, reason: string, native = op.accumulatedNativeDebitWei, usage?: TokenUsageBinding,
-    preSignFailure?: import("./token-operation.js").UniswapTokenFailureDiagnostic) {
+    preSignFailure?: import("./token-operation.js").UniswapTokenFailureDiagnostic, unmarkedAttempt: Partial<UniswapTokenOperation> = {}) {
     return await this.persist(transitionUniswapToken(op, "cleanup_required", { cleanupReason: reason, accumulatedNativeDebitWei: native,
-      ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }) }, this.ports.now())); }
+      ...(usage === undefined ? {} : usagePatch(usage)), ...(preSignFailure === undefined ? {} : { preSignFailure }), ...unmarkedAttempt }, this.ports.now())); }
   private async retireExpiredPrepared(op: UniswapTokenOperation) {
     if (op.phase !== "prepared" || !expired(op, this.ports.now())) return op;
     if (op.approvalAttempt !== null || op.swapAttempt !== null || op.cleanupAttempt !== null ||
@@ -280,5 +285,11 @@ function diagnostic(error: unknown, phase: UniswapTokenPhase): import("./token-o
     reason: sanitizeUniswapTokenFailureField("reason", e?.details?.reason ?? e?.details?.transportReason),
     rpcMethod: sanitizeUniswapTokenFailureField("rpcMethod", e?.details?.rpcMethod),
     endpointRole: sanitizeUniswapTokenFailureField("endpointRole", e?.details?.endpointRole), phase }; }
+/**
+ * R4 exit 2 "never signed": the refusal came before signing, inside the account lock, and custody then showed no signed bytes
+ * while it freed the nonce. The marker of that attempt is dropped so the zero-allowance cleanup can prove no effect; an attempt
+ * custody may hold signed bytes for keeps its marker (its exit stays proof or the owner's abandon).
+ */
+function unmarked(kind: TokenEffectKind, unsigned: boolean): Partial<UniswapTokenOperation> { return unsigned ? { [`${kind}Attempt`]: null } : {}; }
 function corrupt(message: string): never { throw new ApnError("APN_STATE_CORRUPT", message); }
 function blocked(message: string, reason: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }

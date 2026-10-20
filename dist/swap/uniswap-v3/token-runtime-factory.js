@@ -21,7 +21,7 @@ export function createUniswapTokenRuntime(input) {
     const ports = {
         now: () => clock.now(), withAccountLock: async (op, work) => await custody.withAccountLock(op, work),
         allocateNonce: async (op, kind) => await custody.allocateNonce(op, kind), currentAllowance: async (op) => await custody.currentAllowance(op),
-        releaseNonce: async (op, kind, nonce) => { await custody.releaseNonce(op, kind, nonce); },
+        releaseNonce: async (op, kind, nonce) => await custody.releaseNonce(op, kind, nonce),
         commitNonce: async (op, kind, nonce) => { await custody.commitNonce(op, kind, nonce); },
         guard: async (op, kind, nonce) => await guard.inspect(op, kind, nonce), reserveUsage: async (op) => await usage.reserve(op),
         reserveSendCapacity: () => call.reserveEffectSlot?.(),
