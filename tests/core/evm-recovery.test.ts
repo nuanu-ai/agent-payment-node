@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -19,26 +18,27 @@ import { sealOperation, validateOperation } from "../../src/state-integrity.js";
 import { EVM_REQUEST, EVM_TOKEN, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { EVM_USDC } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
+import { FRESH_PROCESS_TEST_TIMEOUT_MS, freshProcess } from "./fresh-process.js";
 
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
 
-for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process dispatches the recovered signature once without signing`, async (context) => {
+for (const chainId of [8453, 1, 42161] as const) test(`chain ${chainId}: a real terminated process leaves started state and a separate process dispatches the recovered signature once without signing`, { timeout: FRESH_PROCESS_TEST_TIMEOUT_MS }, async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const setup = evmCore(temporary.root); await ensureDirectWallet(setup);
   setup.rpc.chainId = chainId;
   if (chainId !== 8453) { setup.rpc.l1Fee = 0n; setup.rpc.operatorFee = 0n; }
   const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, asset: { ...EVM_REQUEST.asset, chainId } }) as { operation_id: string };
   const worker = fileURLToPath(new URL("./evm-crash-worker.js", import.meta.url));
-  const crashed = spawnSync(process.execPath, [worker, "sign-crash", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
+  const crashed = await freshProcess(context, [worker, "sign-crash", temporary.root, prepared.operation_id]);
   assert.equal(crashed.status, 74, crashed.stderr);
   assert.equal((await setup.core.transfer.status(prepared.operation_id) as { state: string }).state, "started");
-  const resumed = spawnSync(process.execPath, [worker, "resume", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
+  const resumed = await freshProcess(context, [worker, "resume", temporary.root, prepared.operation_id]);
   assert.equal(resumed.status, 0, resumed.stderr);
   const result = JSON.parse(resumed.stdout);
   assert.equal(result.result.state, "completed", "the recovered signature is dispatched and its receipt read in the same invocation");
   assert.equal(result.approvals, 0); assert.equal(result.submissions, 1);
-  const replay = spawnSync(process.execPath, [worker, "observe", temporary.root, prepared.operation_id], { encoding: "utf8", timeout: 15000 });
+  const replay = await freshProcess(context, [worker, "observe", temporary.root, prepared.operation_id]);
   assert.equal(replay.status, 0, replay.stderr);
   const observed = JSON.parse(replay.stdout);
   assert.equal(observed.result.state, "completed"); assert.equal(observed.approvals, 0); assert.equal(observed.submissions, 0);
