@@ -84,7 +84,7 @@ const EXPECTED_COMMANDS = [
   "pay transfer prepare-tron",
   "wallet portfolio",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
-  "circle approval prepare", "circle approval execute", "circle approval status", "circle source submit",
+  "circle approval prepare", "circle approval revoke", "circle approval execute", "circle approval status", "circle source submit",
   "sei funding prepare", "sei funding approve", "sei funding status",
   "circle evm prepare", "circle evm approve-source", "circle evm adopt-external-mint", "circle evm approve-mint", "circle evm observe", "circle evm refresh-attestation", "circle evm cleanup", "circle evm status",
   "mega funding prepare", "mega funding approve", "mega funding status",

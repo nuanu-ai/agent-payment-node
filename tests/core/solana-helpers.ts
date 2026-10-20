@@ -83,8 +83,10 @@ export class SolanaTestRpc implements SolanaRpcPort {
     switch (method) {
       case "getGenesisHash": return this.genesis;
       case "getMultipleAccounts": return { context: { slot: 300n }, value: (params[0] as string[]).map((key) => this.account(key)) };
+      // Like a real node, a chain that moved past the frozen window answers a newer blockhash valid above its height.
       case "getLatestBlockhash": return { context: { slot: 300n },
-        value: { blockhash: this.blockhashCalls++ > 0 ? this.reboundBlockhash ?? SOL_BLOCKHASH : SOL_BLOCKHASH, lastValidBlockHeight: this.lastValidBlockHeight } };
+        value: { blockhash: this.blockhashCalls++ > 0 ? this.reboundBlockhash ?? SOL_BLOCKHASH : SOL_BLOCKHASH,
+          lastValidBlockHeight: this.blockHeight > this.lastValidBlockHeight ? this.blockHeight + 150n : this.lastValidBlockHeight } };
       case "simulateTransaction": {
         this.simulateCalls++;
         if (this.simulateRateLimit) throw new ApnError("APN_RPC_RATE_LIMITED", "synthetic provider cooldown", { retryAfterMs: 3_000 });
