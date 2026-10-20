@@ -13,7 +13,7 @@ export declare class OperationCommands {
     private readonly context;
     private readonly index;
     constructor(context: RuntimeContext);
-    status(operationId: string): Promise<CommandOutcome>;
+    status(operationId: string, refreshAllowance?: boolean): Promise<CommandOutcome>;
     resume(request: ResumeRequest): Promise<CommandOutcome>;
     receipt(operationId: string): Promise<CommandOutcome>;
     abandon(operationIdInput: string): Promise<CommandOutcome>;

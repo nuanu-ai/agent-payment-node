@@ -50,7 +50,11 @@ export interface OperationFamilyAdapter<R = unknown> {
     readonly unknownClaims?: readonly OperationClaim[];
     /** The public projection `OperationService.status` returns. */
     view(record: R, root: string): Promise<unknown>;
-    status?(ctx: RuntimeContext, record: R): Promise<CommandOutcome>;
+    status?(ctx: RuntimeContext, record: R, options?: {
+        readonly refreshAllowance?: boolean;
+    }): Promise<CommandOutcome>;
+    /** The family stores a residual token allowance its status shows; only it accepts `operation status --refresh-allowance`. */
+    readonly refreshesAllowance?: true;
     receipt?(ctx: RuntimeContext, record: R): Promise<CommandOutcome>;
     resume?(ctx: RuntimeContext, record: R, options: OperationResumeOptions): Promise<CommandOutcome>;
     abandon?(ctx: RuntimeContext, record: R): Promise<unknown>;

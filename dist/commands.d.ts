@@ -609,6 +609,7 @@ export type CommandRequest = {
 } | {
     readonly command: "operation.status";
     readonly operationId: string;
+    readonly refreshAllowance?: true;
 } | {
     readonly command: "receipt.get";
     readonly operationId: string;

@@ -327,7 +327,7 @@ apn x402 fetch prepare --profile <profile> [--chain <caip2>] --url <https-url> -
 apn x402 fetch approve --operation <operation-id> --rpc-url <https-url>
 apn pay transfer prepare --profile <profile> --idempotency-key <key> --to <address> --amount-usdc <decimal> --rpc-url <https-url>
 apn pay transfer approve --operation <operation-id> [--rpc-url <https-url>]
-apn operation status --operation <operation-id>
+apn operation status --operation <operation-id> [--refresh-allowance]
 apn operation abandon --operation <operation-id>
 apn operation resume --operation <operation-id> [--rpc-url <https-url>] [--wait-seconds <1..300>] [--observe-only true] [--coinbase-observation-rpc publicnode-base] [--observation-rpc-env <APN_ENV_RPC_URL>]
 apn operation recover-provider-request --operation <operation-id> --provider-request-id <provider-request-id>

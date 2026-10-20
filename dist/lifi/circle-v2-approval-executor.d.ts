@@ -31,6 +31,11 @@ export interface CircleApprovalRecord {
     readonly failureReason?: string;
     /** `failed_proven_superseded` only: the payer's nonce at the `finalized` tag when status proved the approval can never land. */
     readonly finalizedNonceAtomic?: string;
+    /** `completed` (written since 0.5.52): the block of the fresh read that proved the allowance equal to the approved cap. */
+    readonly observedAllowanceBlock?: {
+        readonly numberAtomic: string;
+        readonly hash: string;
+    };
     readonly integrityHash: string;
 }
 export interface CircleApprovalRpc {
@@ -95,6 +100,10 @@ export declare function publicCircleApproval(record: CircleApprovalRecord): {
     observedAllowanceAtomic: string | null;
     failureReason?: string;
     finalizedNonceAtomic?: string;
+    observedAllowanceBlock?: {
+        readonly numberAtomic: string;
+        readonly hash: string;
+    };
     integrityHash: string;
 };
 /**
@@ -133,6 +142,11 @@ export declare class CircleV2ApprovalExecutor {
     private fresh;
     private unknown;
     private observe;
+    /**
+     * A completed revoke proved the wrapper allowance 0 at its fresh read's block: every stored Circle Base to Solana residual
+     * of this payer and wrapper at an earlier block becomes 0 (no chain read). Re-applied on each status; idempotent.
+     */
+    private revoked;
 }
 /**
  * The owner exit (R4 exit 3) of an approval whose send may have left APN and that no proof decides yet: once its

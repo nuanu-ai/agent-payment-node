@@ -25,7 +25,8 @@ export const circleSourceAdapter = {
     state: record => record.phase,
     salvage: raw => salvageRecord(raw, value => [salvageEvm(8453, field(value, "sourceCall", "from"))]),
     view: async (record) => record,
-    status: async (context, record) => operationOutcome(await circleSourceStatus(context.state.root, record, context.finalizedRead, () => context.clock.now().getTime())),
+    status: async (context, record, options) => operationOutcome(await circleSourceStatus(context.state.root, record, context.finalizedRead, () => context.clock.now().getTime(), options?.refreshAllowance === true)),
+    refreshesAllowance: true,
     // The route has no observation or exit command of its own: the generic status is its observer.
     commands: { status: OPERATION_STATUS },
 };
