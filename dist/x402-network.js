@@ -12,8 +12,17 @@ const RELEASED_USDC = Object.freeze({
     1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     42161: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
 });
-/** Chains where released APN proves x402 settlement at `safe`; every other chain proves at `finalized`, the stronger tag. */
-const SAFE_PROOF_CHAINS = Object.freeze([8453, 1, 42161]);
+/**
+ * Chains whose x402 settlement is proven at `safe`, decided by the chain's stack, never by what a node answers:
+ * - Ethereum (1, justified checkpoint) and Arbitrum One (42161, Nitro: batch posted to L1), as released APN does;
+ * - OP Stack chains (`safe` = derived from data posted to L1), the rule APN already uses for Base. Source: the OP
+ *   Superchain Registry (github.com/ethereum-optimism/superchain-registry) for the stack, corroborated on chain on
+ *   2026-10-20: the L1Block (0x4200…0015) and GasPriceOracle (0x4200…000F) predeploys present and `safe` served behind
+ *   `latest` (docs/x402-any-seller.md). OP 10, Base 8453, World Chain 480, Celo 42220, Unichain 130, Ink 57073,
+ *   Soneium 1868, Mode 34443, Zora 7777777, Lisk 1135, Fraxtal 252, Metal L2 1750, Shape 360.
+ * Every other chain proves at `finalized`, the stronger tag (Polygon PoS clients serve no `safe`).
+ */
+const SAFE_PROOF_CHAINS = Object.freeze([1, 42161, 10, 8453, 480, 42220, 130, 57073, 1868, 34443, 7777777, 1135, 252, 1750, 360]);
 const CHAIN_TEXT = /^[1-9][0-9]{0,15}$/u;
 const LOWER_TOKEN = /^0x[0-9a-f]{40}$/u;
 const ZERO = "0x0000000000000000000000000000000000000000";

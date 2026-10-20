@@ -5,6 +5,7 @@ export { isPublicIp } from "./network-policy.js";
 import { performance } from "node:perf_hooks";
 import { record, rpcAddress, rpcQuantity, rpcHex, rpcUint256Data, nonzeroBytes32, x402RpcLog } from "./base-rpc-codec.js";
 import { releasedX402Pair, x402Asset } from "./x402-network.js";
+import { readX402Permit2NonceBit, readX402Permit2PrepareEvidence } from "./x402-permit2-rpc.js";
 import { sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID, MAX_RPC_RESPONSE_BYTES, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -242,6 +243,18 @@ export class HttpsBaseRpc {
             observedAt: new Date().toISOString(),
             rpcOrigin: this.rpcOrigin,
         };
+    }
+    /** Prepare evidence of a Permit2 offer for this instance's asset (src/x402-permit2-rpc.ts). */
+    async getX402Permit2PrepareEvidence(address, nonce, permitNeeded) {
+        return await readX402Permit2PrepareEvidence({ call: (method, params) => this.call(method, params), batch: (calls) => this.batchCall(calls),
+            rpcOrigin: this.rpcOrigin, asset: this.x402, address, nonce, permitNeeded });
+    }
+    /** Permit2's nonce bit, read like `getX402AuthorizationState` at a tag's or a number's block. */
+    async getX402Permit2NonceState(owner, nonce, block) {
+        const identity = "tag" in block ? await this.getX402Head(block.tag) : await this.getX402Block(block.number);
+        const value = await readX402Permit2NonceBit({ call: (method, params) => this.call(method, params), owner, nonce, blockNumber: identity.number });
+        return { value, blockNumber: identity.number, blockHash: identity.hash, blockTimestamp: identity.timestamp,
+            blockTag: "tag" in block ? block.tag : "number", observedAt: new Date().toISOString(), rpcOrigin: this.rpcOrigin };
     }
     async getX402AuthorizationUsedLogs(input) {
         const from = parseAtomic(input.fromBlock);

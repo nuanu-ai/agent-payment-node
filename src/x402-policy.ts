@@ -88,7 +88,7 @@ export function selectPrepareOffer(
   let hasSufficientBalance = false;
   let decimalsMismatch = false;
   for (const candidate of underCap) {
-    if (candidate.assetTransferMethod !== transferMethod) continue;
+    if (candidate.assetTransferMethod === "permit2" || candidate.assetTransferMethod !== transferMethod) continue;
     hasMatchingMethod = true;
     const amount = parseAtomic(candidate.amountAtomic, { positive: true });
     if (amount > balance) continue;
@@ -178,11 +178,14 @@ export function materializePaymentIdentifier(
   return { ...declaration, info: { ...declaration.info, id: paymentIdentifier.value } };
 }
 
+/** The observation fields every method's prepare evidence shares; only EIP-3009 carries a token domain separator. */
+export type PrepareObservation = Omit<X402PrepareEvidence, "domainSeparator"> & { readonly domainSeparator?: `0x${string}` };
+
 export function validatePrepareEvidence(
-  evidence: X402PrepareEvidence,
+  evidence: PrepareObservation,
   wallet: Address,
   context: PrepareEvidenceContext,
-  transferMethod: "eip3009" | "erc7710",
+  transferMethod: "eip3009" | "erc7710" | "permit2",
 ): void {
   const observedAtMs = Date.parse(evidence.observedAt);
   if (
@@ -192,7 +195,7 @@ export function validatePrepareEvidence(
     observedAtMs < context.invocationStartedAtMs || observedAtMs > context.invocationCompletedAtMs ||
     !BYTES32.test(evidence.block.hash) || /^0x0{64}$/u.test(evidence.block.hash)
   ) throw new ApnError("APN_RPC_PROTOCOL", "x402 prepare RPC evidence is invalid or mismatched.");
-  if (transferMethod === "eip3009" && !BYTES32.test(evidence.domainSeparator)) {
+  if (transferMethod === "eip3009" && (evidence.domainSeparator === undefined || !BYTES32.test(evidence.domainSeparator))) {
     throw new ApnError("APN_RPC_PROTOCOL", "x402 EIP-3009 token-domain evidence is invalid.");
   }
   // Off the released USDC pairs the token's own decimals() and an unused fresh nonce must have been read in the same batch.

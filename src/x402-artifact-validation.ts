@@ -50,7 +50,7 @@ export function validateX402ReceiptUnsafe(value: unknown): X402ReceiptRecord {
   const resource = exactRecord(receipt.resource, ["origin", "path", "urlHash"]);
   if (typeof resource.origin !== "string" || new URL(resource.origin).origin !== resource.origin || !resource.origin.startsWith("https://") || typeof resource.path !== "string" || !resource.path.startsWith("/")) stateCorrupt("x402 receipt resource is invalid.");
   hash(resource.urlHash); hash(receipt.fingerprint); hash(receipt.offerHash); address(receipt.payer); address(receipt.payee); positive(receipt.amountAtomic);
-  if (receipt.transferMethod !== undefined && receipt.transferMethod !== "eip3009" && receipt.transferMethod !== "erc7710") {
+  if (receipt.transferMethod !== undefined && receipt.transferMethod !== "eip3009" && receipt.transferMethod !== "erc7710" && receipt.transferMethod !== "permit2") {
     stateCorrupt("x402 receipt transfer method is invalid.");
   }
   if (receipt.transferMethod === "erc7710" && receipt.network !== "eip155:8453") stateCorrupt("ERC-7710 receipt network is unsupported.");

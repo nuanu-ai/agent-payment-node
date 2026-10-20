@@ -55,7 +55,7 @@ export function validateX402ReceiptUnsafe(value) {
     address(receipt.payer);
     address(receipt.payee);
     positive(receipt.amountAtomic);
-    if (receipt.transferMethod !== undefined && receipt.transferMethod !== "eip3009" && receipt.transferMethod !== "erc7710") {
+    if (receipt.transferMethod !== undefined && receipt.transferMethod !== "eip3009" && receipt.transferMethod !== "erc7710" && receipt.transferMethod !== "permit2") {
         stateCorrupt("x402 receipt transfer method is invalid.");
     }
     if (receipt.transferMethod === "erc7710" && receipt.network !== "eip155:8453")

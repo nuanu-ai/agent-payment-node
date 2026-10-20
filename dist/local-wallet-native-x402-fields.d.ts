@@ -7,9 +7,18 @@ export interface X402Binding {
     readonly wallet: Address;
     readonly chainId: X402ChainText;
     readonly token: Address;
-    readonly tokenDomain: {
+    /** EIP-3009: the token's EIP-712 domain. Absent on a Permit2 witness transfer. */
+    readonly tokenDomain?: {
         readonly name: string;
         readonly version: string;
+    };
+    /** Permit2 witness transfer: the seller-sponsored exact-amount EIP-2612 permit to Permit2, or null. */
+    readonly permit2?: {
+        readonly eip2612: {
+            readonly name: string;
+            readonly version: string;
+            readonly nonce: string;
+        } | null;
     };
     readonly authorization: {
         readonly from: Address;
@@ -29,8 +38,9 @@ export interface X402Create extends X402Binding {
         readonly createdAt: string;
     };
 }
-export declare function parseX402Create(payload: Readonly<Record<string, unknown>>): X402Create;
-export declare function parseX402Recovery(payload: Readonly<Record<string, unknown>>): X402Binding & {
+export type X402CustodyMethod = "eip3009" | "permit2";
+export declare function parseX402Create(payload: Readonly<Record<string, unknown>>, method?: X402CustodyMethod): X402Create;
+export declare function parseX402Recovery(payload: Readonly<Record<string, unknown>>, method?: X402CustodyMethod): X402Binding & {
     readonly expectedSignatureHash?: string;
 };
 export declare function x402RecoveryBinding(value: X402Binding): X402Binding;

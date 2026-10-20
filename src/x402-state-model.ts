@@ -1,7 +1,9 @@
-import { isBaseUsdc, releasedX402Pair, type X402ChainText, type X402Network } from "./x402-network.js";
-import { canonicalJson, domainHash, hashObject } from "./canonical.js";
+import { isBaseUsdc, type X402ChainText, type X402Network } from "./x402-network.js";
+import { canonicalJson, domainHash } from "./canonical.js";
 import type { X402DelegatedMaterialBinding } from "./provider-ports.js";
 import { x402HttpRequestBinding, type X402HttpRequestV1 } from "./x402-http-request.js";
+
+export { x402Fingerprint, x402RequestHash } from "./x402-request-identity.js";
 
 export const ZERO_HASH = "0".repeat(64);
 export const X402_STATE_VERSION = "apn.x402.state.v1" as const;
@@ -71,7 +73,16 @@ export interface X402SelectedErc7710Offer extends X402SelectedOfferBase {
   };
 }
 
-export type X402SelectedOffer = X402SelectedEip3009Offer | X402SelectedErc7710Offer;
+/** Permit2 witness transfer; `eip2612` is the seller-sponsored exact-amount permit when the allowance was short at prepare. */
+export interface X402SelectedPermit2Offer extends X402SelectedOfferBase {
+  readonly resolved: {
+    readonly assetTransferMethod: "permit2";
+    readonly paymentFlow: "permit2WitnessTransfer";
+    readonly eip2612: { readonly tokenName: string; readonly tokenVersion: string; readonly nonce: string } | null;
+  };
+}
+
+export type X402SelectedOffer = X402SelectedEip3009Offer | X402SelectedErc7710Offer | X402SelectedPermit2Offer;
 
 export interface X402HttpObservation {
   readonly attemptNumber: string;
@@ -318,7 +329,7 @@ export interface X402ReceiptRecord {
   readonly amountAtomic: string;
   readonly network: X402Network;
   readonly token: `0x${string}`;
-  readonly transferMethod?: "eip3009" | "erc7710";
+  readonly transferMethod?: "eip3009" | "erc7710" | "permit2";
   readonly paymentIdentifier?: string;
   readonly settlementResponseHash?: string;
   readonly settlementEvidence?: SettlementEvidence;
@@ -407,45 +418,6 @@ export interface X402OperationRecord {
   readonly updatedAt: string;
   readonly transitions: readonly X402Transition[];
   readonly integrityHash: string;
-}
-
-export function x402RequestHash(input: { readonly profile: string; readonly canonicalUrl: string; readonly capAtomic: string; readonly chainId?: number; readonly token?: string; readonly httpRequest?: X402HttpRequestV1 }): string {
-  const chainId = input.chainId ?? 8453;
-  return hashObject({
-    ...x402HttpRequestBinding(input.httpRequest),
-    method: "x402.fetch.prepare",
-    ...(chainId === 8453 ? {} : { network: `eip155:${chainId}` }),
-    // Released USDC requests keep their original hash; any other token is part of the request identity.
-    ...(input.token === undefined || releasedX402Pair(chainId, input.token) ? {} : { token: input.token.toLowerCase() }),
-    profile: input.profile,
-    canonicalUrl: input.canonicalUrl,
-    capAtomic: input.capAtomic,
-  });
-}
-
-export function x402Fingerprint(input: Pick<X402OperationRecord,
-  "kind" | "profile" | "operationId" | "resource" | "chainId" | "network" | "token" | "capAtomic" | "selectedOffer" | "wallet" | "paymentIdentifier" | "providerSigner" | "delegatedMaterial"
->): string {
-  return domainHash("apn.x402.request.v1", canonicalJson({
-    kind: input.kind,
-    profile: input.profile,
-    operationId: input.operationId,
-    method: input.resource.httpRequest?.method ?? "GET",
-    ...x402HttpRequestBinding(input.resource.httpRequest),
-    canonicalFullUrl: input.resource.canonicalUrl,
-    chainId: input.chainId,
-    network: input.network,
-    token: input.token,
-    capAtomic: input.capAtomic,
-    selectedOfferHash: input.selectedOffer.offerHash,
-    wallet: input.wallet,
-    ...(input.providerSigner === undefined ? {} : { providerSigner: input.providerSigner }),
-    ...(input.delegatedMaterial === undefined ? {} : { delegatedMaterial: input.delegatedMaterial }),
-    acceptedResolvedDefaults: input.selectedOffer.resolved,
-    paymentIdentifier: input.paymentIdentifier === undefined
-      ? { advertised: false }
-      : { advertised: true, declarationHash: input.paymentIdentifier.declarationHash, value: input.paymentIdentifier.value },
-  }));
 }
 
 export function x402AuthorizationIntentHash(value: Omit<X402OperationRecord["authorization"], "intentHash">): string {

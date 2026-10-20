@@ -91,7 +91,9 @@ test(`${networkName} offer selection refuses other networks, assets, mechanisms 
   const required = { ...X402_PAYMENT_REQUIRED, accepts: [{ ...X402_REQUIREMENTS, network: network, asset: x402Network(chainId).token }] };
   assert.equal(inspectCandidates(required, X402_URL, chainId).length, 1);
   assert.equal(inspectCandidates(required, X402_URL).length, 0);
-  for (const override of [{ network: chainId === 1 ? "eip155:42161" as const : "eip155:1" as const }, { asset: x402Network(8453).token }, { extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "permit2" } }, { extra: { assetTransferMethod: "erc7710", facilitatorAddresses: ["0x2222222222222222222222222222222222222222"] } }]) {
+  // A Permit2 offer of this network's token is now a candidate of its own method (paid only when no EIP-3009 offer exists).
+  assert.equal(inspectCandidates({ ...required, accepts: [{ ...required.accepts[0]!, extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "permit2" } }] }, X402_URL, chainId)[0]?.assetTransferMethod, "permit2");
+  for (const override of [{ network: chainId === 1 ? "eip155:42161" as const : "eip155:1" as const }, { asset: x402Network(8453).token }, { extra: { assetTransferMethod: "erc7710", facilitatorAddresses: ["0x2222222222222222222222222222222222222222"] } }]) {
     assert.equal(inspectCandidates({ ...required, accepts: [{ ...required.accepts[0]!, ...override }] }, X402_URL, chainId).length, 0);
   }
 });

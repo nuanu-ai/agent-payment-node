@@ -97,7 +97,8 @@ test("larger lists retain byte, schema, supported-mechanism and selected-network
     extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "permit2" },
   });
   const decoded = decodePaymentRequiredHeader(encodeCanonicalBase64Json(challenge));
-  assert.deepEqual(inspectCandidates(decoded, X402_URL, 1).map(candidate => candidate.index), ["20"]);
+  // The same token's Permit2 offer is a candidate of its own method; EIP-3009 is still paid first when both are offered.
+  assert.deepEqual(inspectCandidates(decoded, X402_URL, 1).map(candidate => [candidate.index, candidate.assetTransferMethod]), [["20", "eip3009"], ["21", "permit2"]]);
   assert.deepEqual(inspectCandidates(decoded, X402_URL, 8453), []);
 });
 

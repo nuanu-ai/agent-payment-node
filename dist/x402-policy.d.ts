@@ -37,5 +37,9 @@ export declare function tokenDomainSeparator(name: string, version: string, asse
 } | number): `0x${string}`;
 export declare function paymentIdentifierState(paymentRequired: PaymentRequired, operationId: string): X402OperationRecord["paymentIdentifier"] | undefined;
 export declare function materializePaymentIdentifier(paymentIdentifier: X402OperationRecord["paymentIdentifier"] | undefined): unknown | undefined;
-export declare function validatePrepareEvidence(evidence: X402PrepareEvidence, wallet: Address, context: PrepareEvidenceContext, transferMethod: "eip3009" | "erc7710"): void;
+/** The observation fields every method's prepare evidence shares; only EIP-3009 carries a token domain separator. */
+export type PrepareObservation = Omit<X402PrepareEvidence, "domainSeparator"> & {
+    readonly domainSeparator?: `0x${string}`;
+};
+export declare function validatePrepareEvidence(evidence: PrepareObservation, wallet: Address, context: PrepareEvidenceContext, transferMethod: "eip3009" | "erc7710" | "permit2"): void;
 export {};

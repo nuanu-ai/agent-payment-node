@@ -143,6 +143,12 @@ export function validateTransferMethodEvidence(method, transactionHint, authoriz
         unusedExpiryEvidence?.schemaVersion === "apn.x402.erc7710-unused-expiry-evidence.v1") {
         stateCorrupt("x402 EIP-3009 operation contains ERC-7710 settlement evidence.");
     }
+    // Permit2 operations are proven only by Permit2's nonce bit (the v2 state evidence), never by an EIP-3009 log scan.
+    if (method === "permit2" && (authorizationUsedScan !== undefined || transactionHint?.source === "authorization_used_log" ||
+        settlementEvidence !== undefined && settlementEvidence.schemaVersion !== "apn.x402.settlement-evidence.v2" ||
+        unusedExpiryEvidence !== undefined && unusedExpiryEvidence.schemaVersion !== "apn.x402.unused-expiry-evidence.v2")) {
+        stateCorrupt("x402 Permit2 operation contains EIP-3009-only evidence.");
+    }
 }
 export function validateAuthorizationUsedScan(value, operation) {
     const scan = allowedRecord(value, ["schemaVersion", "searchStartBlock", "nextFromBlock", "targetSafeHead", "candidates", "status", "updatedAt", "evidenceHash"], ["lastCompletedChunk", "unavailableReason"]);

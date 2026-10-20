@@ -28,24 +28,34 @@ from the chain at prepare. Nothing is inferred from the seller's words alone.
 
 ## Finality and read tags
 
-- EIP-3009: proofs and the prepare read use `safe` on Base, Ethereum and Arbitrum (where released APN already proves
-  at `safe`) and `finalized` on every other chain. The choice is frozen in the record (`tokenFacts.proofTag`); no tag
-  is ever retried with another. Polygon PoS clients do not serve `safe` (answer: "safe block not found"), so the
-  strongest tag is the only one that works there. Expiry stays a `finalized` proof everywhere. On slow-finality chains
-  (OP Stack, other L2s) a `finalized` balance lags funding by up to ~20 min; proving at `safe` there is an owner
-  decision (one entry in the safe-chain list), never a fallback.
-- Permit2: pre-sign facts (balance, allowance, nonce word, payer code) are read at `latest`, pinned by block hash, so the
-  existing 30 s block-age bound holds on every chain; they predict settlement and cannot move money (the signature
-  binds token, amount, payee, nonce and a deadline of at most 300 s). Settlement and expiry stay `finalized` proofs.
+- The proof tag is decided by the chain's stack, frozen in the record (`tokenFacts.proofTag`), never taken from what a
+  node answers and never retried with another tag. `safe`: Ethereum 1 (justified checkpoint), Arbitrum One 42161
+  (Nitro, batch posted to L1) and OP Stack chains (`safe` = derived from data posted to L1, the rule APN already uses
+  for Base): OP 10, Base 8453, World Chain 480, Celo 42220, Unichain 130, Ink 57073, Soneium 1868, Mode 34443,
+  Zora 7777777, Lisk 1135, Fraxtal 252, Metal L2 1750, Shape 360. Source: the OP Superchain Registry
+  (`ethereum-optimism/superchain-registry`) for the stack, corroborated on chain on 2026-10-20 (L1Block
+  `0x4200…0015` and GasPriceOracle `0x4200…000F` predeploys present, `safe` served behind `latest`). Every other
+  chain is `finalized`: Polygon PoS (no `safe`: "safe block not found"), BNB, Avalanche, Monad, Sei (instant or fast
+  finality), and chains whose stack is not confirmed from the registry (BOB, Cyber, Orderly, MegaETH, Swellchain,
+  Mint, Superseed: OP-style predeploys but registry membership unconfirmed here). Adding a chain is one list entry.
+- EIP-3009: the prepare read and the settlement proof use that tag; expiry is always a `finalized` proof.
+- Permit2: settlement uses the same tag, expiry `finalized`. Pre-sign facts (balance, allowance, nonce word, payer
+  code) are read at `latest`, pinned by block hash, so the 30 s block-age bound holds on every chain; they predict
+  settlement and cannot move money (the signature binds token, amount, payee, nonce and a deadline of at most 300 s).
 
 ## Method choice (deterministic)
 
-The command is the method: `x402 fetch` pays only EIP-3009 offers (no `assetTransferMethod`, or `eip3009`), and
-`x402 permit2 approve` pays only `permit2` offers, even for USDC. `x402 fetch` takes the lowest-index offer of the
-selected chain+token within cap, balance and token domain; `x402 permit2 approve` takes the lowest-index Permit2 offer
-on any owner-admitted chain+token (cap or balance then refuse, never skip). An operation never changes method. When the chosen asset is
-offered only through Permit2, `x402 fetch` refuses with `x402_offer_permit2_only` and names the Permit2 command;
-consent stays where it is (Permit2 is foreground TTY).
+- `x402 fetch` (unattended, CLI and MCP, profile x402 policy): EIP-3009 when the seller offers it for the selected
+  chain+token, otherwise Permit2 (local wallet only); the lowest-index offer of that method within cap, balance and payee
+  pin wins, and an operation never changes method. Permit2 here has the same caps, overfunded-wallet guard, payee pin,
+  usage reservation, idempotency, single send and recovery as EIP-3009; the frozen authorization is the witness transfer
+  (32-byte random nonce = Permit2 unordered nonce, `validBefore` = deadline). The wallet's existing allowance to Permit2
+  must cover the price, or the seller's declared EIP-2612 sponsorship pays it with an exact-amount permit whose
+  name/version hint must recompute the token's on-chain `DOMAIN_SEPARATOR`. APN never sends an on-chain approval to
+  Permit2 unattended (the refusal `x402_permit2_allowance_required` names the spender). Settlement is Permit2's nonce bit
+  at the stack's tag; expiry is the bit unused at `finalized` past the deadline. A seller-required payment identifier is
+  refused (the Permit2 wire carries none); every wire check runs before signing.
+- `x402 permit2 approve` stays the foreground TTY lane under allowlist admission (lowest-index admitted Permit2 offer).
 
 ## RPC
 

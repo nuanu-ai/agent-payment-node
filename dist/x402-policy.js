@@ -49,7 +49,7 @@ export function selectPrepareOffer(challenge, underCap, evidence, wallet, contex
     let hasSufficientBalance = false;
     let decimalsMismatch = false;
     for (const candidate of underCap) {
-        if (candidate.assetTransferMethod !== transferMethod)
+        if (candidate.assetTransferMethod === "permit2" || candidate.assetTransferMethod !== transferMethod)
             continue;
         hasMatchingMethod = true;
         const amount = parseAtomic(candidate.amountAtomic, { positive: true });
@@ -142,7 +142,7 @@ export function validatePrepareEvidence(evidence, wallet, context, transferMetho
         observedAtMs < context.invocationStartedAtMs || observedAtMs > context.invocationCompletedAtMs ||
         !BYTES32.test(evidence.block.hash) || /^0x0{64}$/u.test(evidence.block.hash))
         throw new ApnError("APN_RPC_PROTOCOL", "x402 prepare RPC evidence is invalid or mismatched.");
-    if (transferMethod === "eip3009" && !BYTES32.test(evidence.domainSeparator)) {
+    if (transferMethod === "eip3009" && (evidence.domainSeparator === undefined || !BYTES32.test(evidence.domainSeparator))) {
         throw new ApnError("APN_RPC_PROTOCOL", "x402 EIP-3009 token-domain evidence is invalid.");
     }
     // Off the released USDC pairs the token's own decimals() and an unused fresh nonce must have been read in the same batch.

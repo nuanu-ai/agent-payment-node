@@ -9,7 +9,8 @@ import { assertPermit2ApprovalCurrent, assertPermit2ApprovalWindow, permit2Now }
 import type { Permit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { parseDirectIntent, parseDirectRecovery } from "./local-wallet-direct-payload.js";
 import { signedDirectTransaction } from "./local-wallet-direct-signed.js";
-import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization } from "./local-wallet-native-x402-fields.js";
+import { parseX402Create, parseX402Recovery, x402RecoveryBinding, publicAuthorization, type X402CustodyMethod } from "./local-wallet-native-x402-fields.js";
+import { x402Eip2612TypedData, x402Permit2TypedData } from "./x402-permit2-exact.js";
 import { assertWallet, ensureX402Live, effectSlot, requestProfile, protocol, rejected } from "./local-wallet-native-fields.js";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
@@ -132,6 +133,8 @@ export class LocalWalletNative implements NativePort {
         case "directTransfer.signedMaterial.get": return await signedDirectTransaction(this.state, payload, this.withWallet.bind(this));
         case "x402Exact.approveAndAuthorize": return await this.approveX402(payload);
         case "x402Exact.authorizationMaterial.get": return await this.getX402(payload);
+        case "x402Permit2.approveAndAuthorize": return await this.approveX402(payload, "permit2");
+        case "x402Permit2.authorizationMaterial.get": return await this.getX402(payload, "permit2");
       }
     });
   }
@@ -274,11 +277,11 @@ export class LocalWalletNative implements NativePort {
     return await new DirectPublicEffectJournal(this.state).effect(operation);
   }
 
-  private async approveX402(payload: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const intent = parseX402Create(payload);
+  private async approveX402(payload: Readonly<Record<string, unknown>>, method: X402CustodyMethod = "eip3009"): Promise<unknown> {
+    const intent = parseX402Create(payload, method);
     return await this.withWallet(intent.profile, async (identity, secret) => {
       assertWallet(identity, intent.wallet);
-      const slot = effectSlot("apn-x402-effect-v1", intent.profile, intent.operationId, intent.fingerprint);
+      const slot = effectSlot(x402EffectDomain(method), intent.profile, intent.operationId, intent.fingerprint);
       const createPayloadHash = hashObject(payload);
       const recoveryBindingHash = hashObject(x402RecoveryBinding(intent));
       const existing = secret.x402Effects[slot];
@@ -288,30 +291,42 @@ export class LocalWalletNative implements NativePort {
       ensureX402Live(intent.authorization.validBefore); // never sign, or return, an authorization no chain can settle
       if (existing !== undefined) return publicX402Effect(existing);
       const account = privateKeyToAccount(secret.privateKey);
-      const signature = await account.signTypedData({
-        domain: {
-          name: intent.tokenDomain.name,
-          version: intent.tokenDomain.version,
-          chainId: Number(intent.chainId),
-          verifyingContract: intent.token,
-        },
-        types: {
-          TransferWithAuthorization: [
-            { name: "from", type: "address" }, { name: "to", type: "address" },
-            { name: "value", type: "uint256" }, { name: "validAfter", type: "uint256" },
-            { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" },
-          ],
-        },
-        primaryType: "TransferWithAuthorization",
-        message: {
-          from: intent.authorization.from,
-          to: intent.authorization.to,
-          value: BigInt(intent.authorization.value),
-          validAfter: 0n,
-          validBefore: BigInt(intent.authorization.validBefore),
-          nonce: intent.authorization.nonce,
-        },
-      });
+      let eip2612Signature: Hex | undefined;
+      let signature: Hex;
+      if (intent.permit2 !== undefined) {
+        // Permit2 witness transfer: the typed data is rebuilt here from the frozen terms, never taken from the caller.
+        const terms = { chainId: Number(intent.chainId), token: intent.token, from: intent.authorization.from, to: intent.authorization.to,
+          value: intent.authorization.value, nonce: intent.authorization.nonce, deadline: intent.authorization.validBefore };
+        signature = await account.signTypedData(x402Permit2TypedData(terms) as Parameters<typeof account.signTypedData>[0]);
+        if (intent.permit2.eip2612 !== null) {
+          eip2612Signature = await account.signTypedData(x402Eip2612TypedData(terms, intent.permit2.eip2612) as Parameters<typeof account.signTypedData>[0]);
+        }
+      } else {
+        signature = await account.signTypedData({
+          domain: {
+            name: intent.tokenDomain!.name,
+            version: intent.tokenDomain!.version,
+            chainId: Number(intent.chainId),
+            verifyingContract: intent.token,
+          },
+          types: {
+            TransferWithAuthorization: [
+              { name: "from", type: "address" }, { name: "to", type: "address" },
+              { name: "value", type: "uint256" }, { name: "validAfter", type: "uint256" },
+              { name: "validBefore", type: "uint256" }, { name: "nonce", type: "bytes32" },
+            ],
+          },
+          primaryType: "TransferWithAuthorization",
+          message: {
+            from: intent.authorization.from,
+            to: intent.authorization.to,
+            value: BigInt(intent.authorization.value),
+            validAfter: 0n,
+            validBefore: BigInt(intent.authorization.validBefore),
+            nonce: intent.authorization.nonce,
+          },
+        });
+      }
       const authorization = publicAuthorization(intent.authorization);
       const effect: X402EffectMaterial = {
         createPayloadHash,
@@ -319,6 +334,7 @@ export class LocalWalletNative implements NativePort {
         authorization,
         signature,
         signatureHash: domainHash("apn.x402.signature.v1", Buffer.from(signature.slice(2), "hex")),
+        ...(eip2612Signature === undefined ? {} : { eip2612Signature }),
       };
       secret.x402Effects[slot] = effect;
       await this.wallets.save(identity, secret);
@@ -326,11 +342,11 @@ export class LocalWalletNative implements NativePort {
     });
   }
 
-  private async getX402(payload: Readonly<Record<string, unknown>>): Promise<unknown> {
-    const recovery = parseX402Recovery(payload);
+  private async getX402(payload: Readonly<Record<string, unknown>>, method: X402CustodyMethod = "eip3009"): Promise<unknown> {
+    const recovery = parseX402Recovery(payload, method);
     return await this.withWallet(recovery.profile, async (identity, secret) => {
       assertWallet(identity, recovery.wallet);
-      const slot = effectSlot("apn-x402-effect-v1", recovery.profile, recovery.operationId, recovery.fingerprint);
+      const slot = effectSlot(x402EffectDomain(method), recovery.profile, recovery.operationId, recovery.fingerprint);
       const effect = secret.x402Effects[slot];
       if (effect === undefined) throw rejected("APN_X402_AUTHORIZATION_NOT_FOUND", "x402 authorization material was not found.");
       const expectedHash = hashObject(x402RecoveryBinding(recovery));
@@ -356,3 +372,6 @@ export class LocalWalletNative implements NativePort {
     }
   }
 }
+
+/** Separate custody slots: an EIP-3009 authorization and a Permit2 witness transfer of one operation never share one. */
+function x402EffectDomain(method: X402CustodyMethod): string { return method === "eip3009" ? "apn-x402-effect-v1" : "apn-x402-permit2-effect-v1"; }

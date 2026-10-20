@@ -18,8 +18,9 @@ const STORE = { directory: "x402-operations", perProfile: true };
 const LOCAL_SCHEMA = "apn.x402.state.v1";
 const PROVIDER_SCHEMAS = ["apn.provider-x402.state.v1", "apn.provider-x402.state.v2"];
 export function x402Domains(operation) {
-    // A local EIP-3009 authorization spends by its own random nonce: it shares the account with other purchases only.
-    if (operation.strategy === "local" && operation.record.selectedOffer.resolved.assetTransferMethod === "eip3009") {
+    // A local EIP-3009 authorization or Permit2 witness transfer spends by its own random nonce: it shares the account with
+    // other purchases only.
+    if (operation.strategy === "local" && ["eip3009", "permit2"].includes(operation.record.selectedOffer.resolved.assetTransferMethod)) {
         return [sharedEvmConflictDomain(operation.record.chainId, operation.record.wallet)];
     }
     // Provider-atomic x402 is Base-only; its record carries the network as CAIP-2 instead of a chain id.
@@ -52,7 +53,7 @@ export const x402Adapter = {
     salvage: raw => salvageRecord(raw, value => {
         const schema = field(value, "schemaVersion");
         if (schema === LOCAL_SCHEMA) {
-            return [salvageEvm(field(value, "chainId"), field(value, "wallet"), field(value, "selectedOffer", "resolved", "assetTransferMethod") === "eip3009")];
+            return [salvageEvm(field(value, "chainId"), field(value, "wallet"), ["eip3009", "permit2"].includes(String(field(value, "selectedOffer", "resolved", "assetTransferMethod"))))];
         }
         if (!PROVIDER_SCHEMAS.includes(schema))
             throw new Error("Unknown x402 schema.");

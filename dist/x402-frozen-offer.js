@@ -17,10 +17,15 @@ export function frozenOfferTimeout(requirements, operation, resolved) {
         typeof requirements.payTo !== "string" || requirements.payTo.toLowerCase() !== operation.payee ||
         typeof timeout !== "number" || !Number.isSafeInteger(timeout) || timeout < 1)
         stateCorrupt("x402 frozen offer economics disagree with protected state.");
+    const sponsored = resolved.eip2612;
     const methodMatches = resolved.assetTransferMethod === "erc7710"
         ? extra.assetTransferMethod === "erc7710" && (extra.facilitatorAddresses === undefined || sameAddresses(extra.facilitatorAddresses, resolved.facilitatorAddresses))
-        : (extra.assetTransferMethod === undefined || extra.assetTransferMethod === "eip3009") &&
-            extra.name === resolved.tokenName && extra.version === resolved.tokenVersion;
+        : resolved.assetTransferMethod === "permit2"
+            // A sponsored permit signs the token domain the seller hinted; without sponsorship the hints are not used.
+            ? extra.assetTransferMethod === "permit2" && (sponsored === null || sponsored === undefined ||
+                extra.name === sponsored.tokenName && extra.version === sponsored.tokenVersion)
+            : (extra.assetTransferMethod === undefined || extra.assetTransferMethod === "eip3009") &&
+                extra.name === resolved.tokenName && extra.version === resolved.tokenVersion;
     if (!methodMatches)
         stateCorrupt("x402 frozen offer method disagrees with protected state.");
     return BigInt(timeout);

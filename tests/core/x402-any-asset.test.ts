@@ -29,7 +29,8 @@ for (const spec of ASSET_CASES) {
     const frozen = (await fixture.state.findX402Operation(operationId))!;
     assert.equal(frozen.network, `eip155:${spec.chainId}`); assert.equal(frozen.token, spec.token.toLowerCase());
     assert.deepEqual(frozen.tokenFacts, { decimals: spec.decimals, proofTag: fixture.asset.proofTag });
-    assert.equal(fixture.asset.proofTag, [8453, 1, 42161].includes(spec.chainId) ? "safe" : "finalized");
+    // Proof tag by stack: Ethereum, Arbitrum and OP Stack chains (Base, World Chain) at safe; Polygon, Monad, BNB at finalized.
+    assert.equal(fixture.asset.proofTag, [8453, 1, 42161, 480].includes(spec.chainId) ? "safe" : "finalized");
     // The token the RPC was bound to and the nonce prepare probed are this asset's and this authorization's.
     assert.deepEqual(fixture.rpc.boundTokens, [spec.token]);
     assert.deepEqual(fixture.rpc.probedNonces, [frozen.authorization.nonce]);
@@ -95,13 +96,14 @@ test("prepare refuses a token whose chain facts do not prove the offer's EIP-300
   }
 });
 
-test("an asset offered only through Permit2 names the foreground Permit2 command; inspect lists what the seller offers", async (context) => {
+test("a Permit2-only offer is paid by the same unattended lane; inspect lists every offer the seller makes", async (context) => {
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const fixture = assetFixture(temporary.root, POLYGON); await admitAsset(fixture, POLYGON);
   fixture.http.outcomes[0] = assetChallenge(POLYGON, { assetTransferMethod: "permit2" });
-  const refused = await fixture.core.execute(request(POLYGON));
-  assert.equal(refused.error?.details?.reason, "x402_offer_permit2_only", JSON.stringify(refused));
-  assert.match(refused.error?.message ?? "", /apn x402 permit2 approve/u);
+  const prepared = await fixture.core.execute(request(POLYGON));
+  assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  const frozen = (await fixture.state.findX402Operation(operationOf(prepared)))!;
+  assert.equal(frozen.selectedOffer.resolved.assetTransferMethod, "permit2"); assert.equal(frozen.tokenFacts?.proofTag, "finalized");
   fixture.http.outcomes.push(assetChallenge(POLYGON));
   const inspected = await fixture.core.execute({ command: "x402.inspect", url: X402_URL, chainId: 137, asset: POLYGON.token });
   assert.equal(inspected.ok, true, JSON.stringify(inspected));

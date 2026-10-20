@@ -95,8 +95,12 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   const resolvedRecord = record(selectedOffer.resolved);
   const resolved = resolvedRecord.assetTransferMethod === "erc7710"
     ? exactRecord(resolvedRecord, ["assetTransferMethod", "paymentFlow", "facilitatorAddresses"])
-    : exactRecord(resolvedRecord, ["tokenName", "tokenVersion", "assetTransferMethod", "paymentFlow"]);
-  if (resolved.assetTransferMethod === "erc7710") {
+    : resolvedRecord.assetTransferMethod === "permit2" ? exactRecord(resolvedRecord, ["assetTransferMethod", "paymentFlow", "eip2612"])
+      : exactRecord(resolvedRecord, ["tokenName", "tokenVersion", "assetTransferMethod", "paymentFlow"]);
+  if (resolved.assetTransferMethod === "permit2") {
+    if (resolved.paymentFlow !== "permit2WitnessTransfer" || !validPermit2Sponsorship(resolved.eip2612) ||
+      operation.providerSigner !== undefined || operation.paymentIdentifier !== undefined) stateCorrupt("x402 Permit2 resolved offer is invalid.");
+  } else if (resolved.assetTransferMethod === "erc7710") {
     if (resolved.paymentFlow !== "delegatedErc20Transfer" || !Array.isArray(resolved.facilitatorAddresses) ||
       resolved.facilitatorAddresses.length === 0 || resolved.facilitatorAddresses.length > 16 ||
       new Set(resolved.facilitatorAddresses).size !== resolved.facilitatorAddresses.length) {
@@ -181,7 +185,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   if (
     authorization.from !== operation.wallet || authorization.to !== operation.payee || authorization.value !== operation.amountAtomic ||
     authorization.validAfter !== "0" ||
-    (resolved.assetTransferMethod === "eip3009"
+    (resolved.assetTransferMethod !== "erc7710"
       ? BigInt(authorization.validBefore as string) !== BigInt(authorization.createdAt as string) + maxTimeoutSeconds
       : BigInt(authorization.validBefore as string) !== BigInt(
           operation.delegatedMaterial === undefined ? "0" : String(record(operation.delegatedMaterial).effectiveExpiryUnix),
@@ -206,7 +210,7 @@ export function validateX402OperationUnsafe(value: unknown): X402OperationRecord
   const authorizationUsedScan = operation.authorizationUsedScan === undefined ? undefined : validateAuthorizationUsedScan(operation.authorizationUsedScan, operation);
   const settlementEvidence = operation.settlementEvidence === undefined ? undefined : validateSettlementEvidence(operation.settlementEvidence, operation);
   const unusedExpiryEvidence = operation.unusedExpiryEvidence === undefined ? undefined : validateUnusedExpiryEvidence(operation.unusedExpiryEvidence, operation);
-  validateTransferMethodEvidence(resolved.assetTransferMethod as "eip3009" | "erc7710", transactionHint,
+  validateTransferMethodEvidence(resolved.assetTransferMethod as "eip3009" | "erc7710" | "permit2", transactionHint,
     authorizationUsedScan, settlementEvidence, unusedExpiryEvidence);
   if (operation.resultLink !== undefined) {
     const link = exactRecord(operation.resultLink, ["resultHash", "resultIntegrityHash"]);
@@ -468,4 +472,14 @@ function validTokenFacts(value: unknown): boolean {
   const facts = value as Record<string, unknown>;
   return Object.keys(facts).length === 2 && Number.isSafeInteger(facts.decimals) && (facts.decimals as number) >= 0 &&
     (facts.decimals as number) <= 255 && (facts.proofTag === "safe" || facts.proofTag === "finalized");
+}
+
+/** A Permit2 operation's sponsored permit: null, or the token's non-empty EIP-712 name/version and a canonical permit nonce. */
+function validPermit2Sponsorship(value: unknown): boolean {
+  if (value === null) return true;
+  if (typeof value !== "object" || Array.isArray(value)) return false;
+  const permit = value as Record<string, unknown>;
+  return Object.keys(permit).length === 3 && typeof permit.tokenName === "string" && permit.tokenName.length > 0 &&
+    typeof permit.tokenVersion === "string" && permit.tokenVersion.length > 0 &&
+    typeof permit.nonce === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(permit.nonce);
 }

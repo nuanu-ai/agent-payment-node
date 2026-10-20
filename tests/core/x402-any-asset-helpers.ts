@@ -3,7 +3,8 @@ import { testRuntime } from "./installed-runtime.js";
 import * as policyRuntime from "../../src/encrypted-profile-policy.js";
 import * as nativeRuntime from "../../src/local-wallet-native.js";
 import type { Address, Hex } from "../../src/model.js";
-import type { NativePort, NativeRequest, X402PrepareEvidence } from "../../src/ports.js";
+import type { NativePort, NativeRequest, X402AuthorizationState, X402BlockReference, X402PrepareEvidence } from "../../src/ports.js";
+import type { X402Permit2PrepareEvidence } from "../../src/x402-permit2-rpc.js";
 import type { ProfilePolicyApprovalIntent } from "../../src/policy-approval.js";
 import { StateStore } from "../../src/state.js";
 import { x402Asset, type X402Asset } from "../../src/x402-network.js";
@@ -38,6 +39,21 @@ export class AssetRpc extends RecoveryRpc {
   readonly boundTokens: string[] = [];
   readonly probedNonces: (Hex | undefined)[] = [];
   tokenFacts: X402PrepareEvidence["tokenFacts"];
+  /** Permit2 offers: allowance to Permit2, the token's permit facts when asked, and the Permit2 nonce bit. */
+  permit2 = { allowanceAtomic: "50000000", permit: { domainSeparator: `0x${"0".repeat(64)}` as Hex, nonce: "9" }, used: false, permitReads: 0 };
+  async getX402Permit2PrepareEvidence(address: Address, nonce: Hex, permitNeeded: (allowanceAtomic: string) => boolean): Promise<X402Permit2PrepareEvidence> {
+    this.x402PrepareCalls += 1; this.probedNonces.push(nonce);
+    const needed = permitNeeded(this.permit2.allowanceAtomic);
+    if (needed) this.permit2.permitReads += 1;
+    return { address, usdcAtomic: this.x402Evidence.usdcAtomic, allowanceAtomic: this.permit2.allowanceAtomic, rpcOriginHash: this.x402Evidence.rpcOriginHash,
+      observedAt: this.x402Evidence.observedAt, queriedTag: this.x402Evidence.queriedTag, block: { ...this.x402Evidence.block },
+      tokenFacts: { decimals: this.tokenFacts?.decimals ?? 6, nonceUnused: true }, ...(needed ? { permit: { ...this.permit2.permit } } : {}) };
+  }
+  async getX402Permit2NonceState(owner: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState> {
+    const state = await this.getX402AuthorizationState(owner, nonce, block);
+    this.x402Calls.push(`permit2:${"tag" in block ? block.tag : block.number}`);
+    return { ...state, value: this.permit2.used };
+  }
   override forX402Network(chainId: number, token?: Address): RecoveryRpc {
     this.boundTokens.push(String(token));
     return super.forX402Network(chainId as never);

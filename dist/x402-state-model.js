@@ -1,47 +1,13 @@
-import { isBaseUsdc, releasedX402Pair } from "./x402-network.js";
-import { canonicalJson, domainHash, hashObject } from "./canonical.js";
+import { isBaseUsdc } from "./x402-network.js";
+import { canonicalJson, domainHash } from "./canonical.js";
 import { x402HttpRequestBinding } from "./x402-http-request.js";
+export { x402Fingerprint, x402RequestHash } from "./x402-request-identity.js";
 export const ZERO_HASH = "0".repeat(64);
 export const X402_STATE_VERSION = "apn.x402.state.v1";
 export const TRANSITION_VERSION = "apn.x402.transition.v1";
 /** A seller body that arrives with a success or a pending settlement answer is the purchased result. */
 export function deliversX402Result(classification) {
     return classification === "success" || classification === "settlement_pending";
-}
-export function x402RequestHash(input) {
-    const chainId = input.chainId ?? 8453;
-    return hashObject({
-        ...x402HttpRequestBinding(input.httpRequest),
-        method: "x402.fetch.prepare",
-        ...(chainId === 8453 ? {} : { network: `eip155:${chainId}` }),
-        // Released USDC requests keep their original hash; any other token is part of the request identity.
-        ...(input.token === undefined || releasedX402Pair(chainId, input.token) ? {} : { token: input.token.toLowerCase() }),
-        profile: input.profile,
-        canonicalUrl: input.canonicalUrl,
-        capAtomic: input.capAtomic,
-    });
-}
-export function x402Fingerprint(input) {
-    return domainHash("apn.x402.request.v1", canonicalJson({
-        kind: input.kind,
-        profile: input.profile,
-        operationId: input.operationId,
-        method: input.resource.httpRequest?.method ?? "GET",
-        ...x402HttpRequestBinding(input.resource.httpRequest),
-        canonicalFullUrl: input.resource.canonicalUrl,
-        chainId: input.chainId,
-        network: input.network,
-        token: input.token,
-        capAtomic: input.capAtomic,
-        selectedOfferHash: input.selectedOffer.offerHash,
-        wallet: input.wallet,
-        ...(input.providerSigner === undefined ? {} : { providerSigner: input.providerSigner }),
-        ...(input.delegatedMaterial === undefined ? {} : { delegatedMaterial: input.delegatedMaterial }),
-        acceptedResolvedDefaults: input.selectedOffer.resolved,
-        paymentIdentifier: input.paymentIdentifier === undefined
-            ? { advertised: false }
-            : { advertised: true, declarationHash: input.paymentIdentifier.declarationHash, value: input.paymentIdentifier.value },
-    }));
 }
 export function x402AuthorizationIntentHash(value) {
     return domainHash("apn.x402.authorization-intent.v1", canonicalJson(value));
