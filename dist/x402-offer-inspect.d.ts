@@ -25,3 +25,9 @@ export declare function inspectOffer(requirements: PaymentRequirements, index: n
  * origin or path, every such offer was refused (each with its reason), or the seller offers this network and token not at all.
  */
 export declare function unsupportedOfferError(asset: X402Asset, paymentRequired: PaymentRequired, inspection: X402OfferInspection): ApnError;
+/**
+ * The seller's resource names the requested endpoint: the same scheme, host, port and path after WHATWG normalisation.
+ * Query and fragment may differ (most sellers name the resource without the caller's query); the seller's resource is
+ * still echoed unchanged in the payment payload, and the paid request goes to the requested URL.
+ */
+export declare function x402ResourceNamesRequest(value: string, requested: string): boolean;

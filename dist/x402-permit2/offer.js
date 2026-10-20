@@ -1,7 +1,7 @@
 import { getAddress, isAddress } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { decimalsRefusal, declaredMethod, evmExtraRefusal, evmOfferMethod, isOfferRefusal, offerRefusal, refusedOffersDetails, timeoutRefusal } from "../x402-offer-terms.js";
+import { decimalsRefusal, declaredMethod, evmExtraRefusal, evmOfferMethod, isOfferRefusal, offerRefusal, refusedOffersDetails, timeoutRefusal, X402_OFFER_MIN_TIMEOUT_SECONDS } from "../x402-offer-terms.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_EXACT_PERMIT2_PROXY_CODE_HASH, } from "./registry.js";
 const OFFER_DOMAIN = "apn.x402-permit2.offer.v1";
 const MAX_UINT256 = (1n << 256n) - 1n;
@@ -32,13 +32,30 @@ export function selectPermit2Offer(accepts, payer, resolve) {
         const selection = validateOffer(index, offer, listAsset, payerAddress);
         if (!isOfferRefusal(selection))
             return selection;
-        refused.push({ index: index.toString(), network: offer.network, asset: token.toLowerCase(), method: declaredMethod(offer.extra), ...selection });
+        refused.push({ index: index.toString(), network: listAsset.chain, asset: token.toLowerCase(), method: declaredMethod(offer.extra), ...selection });
     }
     if (refused.length > 0) {
         const named = refusedOffersDetails(refused);
         throw new ApnError("APN_X402_UNSUPPORTED_OFFER", named.message, { ...named.details, rail: "x402" });
     }
     return refuse("x402_permit2_no_listed_offer", "No seller offer pays an owner-admitted token through the exact Permit2 flow.");
+}
+/**
+ * A new Permit2 selection that APN signs through local custody (the foreground Permit2 lane, its preflight and the
+ * inspection that leads to them): the offer {@link selectPermit2Offer} picks must leave at least
+ * {@link X402_OFFER_MIN_TIMEOUT_SECONDS}, else it is refused by name (`x402_offer_timeout_below_bound`) here, before any
+ * consent, instead of expiring at signing after the owner approved. The bound refuses the selected offer rather than
+ * skipping it: a saved operation re-derives its offer with {@link selectPermit2Offer}, and both must pick the same one
+ * (records prepared before the bound, with a shorter window, still load).
+ */
+export function selectPermit2OfferToSign(accepts, payer, resolve) {
+    const selection = selectPermit2Offer(accepts, payer, resolve);
+    const refusal = timeoutRefusal(selection.maxTimeoutSeconds, X402_OFFER_MIN_TIMEOUT_SECONDS);
+    if (refusal === null)
+        return selection;
+    const named = refusedOffersDetails([{ index: selection.index.toString(), network: selection.listAsset.chain,
+            asset: selection.listAsset.token.toLowerCase(), method: "permit2", ...refusal }]);
+    throw new ApnError("APN_X402_UNSUPPORTED_OFFER", named.message, { ...named.details, rail: "x402" });
 }
 /** Revalidate a frozen selection against the asset it carries; any drift is state corruption. */
 export function validatePermit2Selection(value, payer) {

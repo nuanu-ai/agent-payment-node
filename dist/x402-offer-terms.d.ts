@@ -24,6 +24,12 @@ export interface X402RefusedOffer extends X402OfferRefusal {
     readonly method: string;
 }
 export type X402EvmMethod = "eip3009" | "permit2" | "erc7710";
+/**
+ * A seller-controlled value as a refusal's structured details show it, never its `message`: verbatim only when its text
+ * (a string itself, anything else as JSON) matches {@link SELLER_VERBATIM}, otherwise only the UTF-8 byte length and
+ * sha256 of that text. Seller text is untrusted input an agent reads; this way it cannot reach the agent as instructions.
+ */
+export declare function sellerValue(value: unknown): string;
 export declare function offerRefusal(reason: X402OfferRefusalReason, field: string, value?: unknown, expected?: string): X402OfferRefusal;
 export declare function isOfferRefusal(value: unknown): value is X402OfferRefusal;
 /** The seller's window must be a whole number of seconds from `minimum` through {@link X402_OFFER_MAX_TIMEOUT_SECONDS}. */
@@ -45,7 +51,8 @@ export declare function declaredMethod(extra: unknown): string;
 /**
  * The refusal details for offers of the selected chain and token that were all refused: the reason they share (or
  * `x402_offers_refused` when they differ), the first one's deciding field with the seller's value and what APN accepts
- * there, a message naming it, and every refused offer in seller order as one line each (at most 16).
+ * there, and every refused offer in seller order as one line each (at most 16). The message names only APN's own words
+ * (the offer's place, the selected network and token, the reason and field); every seller value stays in the details.
  */
 export declare function refusedOffersDetails(refused: readonly X402RefusedOffer[]): {
     readonly message: string;

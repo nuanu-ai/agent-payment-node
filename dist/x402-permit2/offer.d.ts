@@ -30,5 +30,14 @@ export type Permit2OfferRefusal = "x402_permit2_no_listed_offer" | "x402_permit2
  * `description`, …) are the seller's own and stay in the requirement unchanged.
  */
 export declare function selectPermit2Offer(accepts: readonly unknown[], payer: Address, resolve: Permit2AssetResolver): Permit2OfferSelection;
+/**
+ * A new Permit2 selection that APN signs through local custody (the foreground Permit2 lane, its preflight and the
+ * inspection that leads to them): the offer {@link selectPermit2Offer} picks must leave at least
+ * {@link X402_OFFER_MIN_TIMEOUT_SECONDS}, else it is refused by name (`x402_offer_timeout_below_bound`) here, before any
+ * consent, instead of expiring at signing after the owner approved. The bound refuses the selected offer rather than
+ * skipping it: a saved operation re-derives its offer with {@link selectPermit2Offer}, and both must pick the same one
+ * (records prepared before the bound, with a shorter window, still load).
+ */
+export declare function selectPermit2OfferToSign(accepts: readonly unknown[], payer: Address, resolve: Permit2AssetResolver): Permit2OfferSelection;
 /** Revalidate a frozen selection against the asset it carries; any drift is state corruption. */
 export declare function validatePermit2Selection(value: Permit2OfferSelection, payer: Address): Permit2OfferSelection;
