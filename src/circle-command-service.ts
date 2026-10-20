@@ -42,7 +42,9 @@ export async function executeCircleCommand(request: Extract<CommandRequest, { co
         if (request.command === "circle.evm.status") return operationOutcome(await service.status(request.operationId));
         const result = request.command === "circle.evm.approve-source" ? await service.approveSource(request.operationId) : request.command === "circle.evm.approve-mint" ? await service.approveMint(request.operationId) : request.command === "circle.evm.refresh-attestation" ? await service.refreshAttestation(request.operationId) : request.command === "circle.evm.cleanup" ? await service.cleanup(request.operationId) : await service.observe(request.operationId);
         // A mint someone else relayed for this burn is reported with its next action (adopted, awaiting finality, or not found).
-        return operationOutcome(publicCircleFundingOperation(validateCircleFundingOperation(result.operation), result.externalMint));
+        const failed = result.observationFailure === undefined ? {} : { observation_failure: { stage: "after_effect_sent", code: result.observationFailure.code,
+          reason: result.observationFailure.reason, http_status: result.observationFailure.httpStatus } };
+        return operationOutcome({ ...publicCircleFundingOperation(validateCircleFundingOperation(result.operation), result.externalMint), ...failed });
       }
       case "circle.approval.prepare": {
         await context.ready();

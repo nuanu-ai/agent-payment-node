@@ -63,8 +63,10 @@ export type CommandRequest =
       readonly maxCleanupGasLimit: string; readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string;
       readonly maxNativeDebitWei: string }
   | { readonly command: "swap.uniswap-token.prepare"; readonly profile: string; readonly quoteHash: string; readonly idempotencyKey: string }
-  | { readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute" | "swap.uniswap-token.cleanup";
-      readonly operationId: string }
+  | { readonly command: "swap.uniswap-token.status" | "swap.uniswap-token.approve" | "swap.uniswap-token.execute"; readonly operationId: string }
+  /** `cleanupFees`: the owner's own new caps for this cleanup only, checked against a fresh fee quote and shown at consent. */
+  | { readonly command: "swap.uniswap-token.cleanup"; readonly operationId: string;
+      readonly cleanupFees?: { readonly maxFeePerGas: string; readonly maxPriorityFeePerGas: string } }
   | { readonly command: "swap.sunswap.inventory" }
   | { readonly command: "swap.sunswap.quote"; readonly profile: string; readonly account: string; readonly recipient: string;
       readonly amountAtomic: string; readonly slippageBps: number; readonly ownerSlippageCapBps: number; readonly feeLimitSun: string; readonly deadline: number }
