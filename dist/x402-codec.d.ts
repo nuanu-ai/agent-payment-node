@@ -26,4 +26,4 @@ export declare function decodeAndNormalizePaymentResponseHeader(value: string, e
     readonly network?: X402Network;
 }): DecodedPaymentResponse;
 /** Offers of exactly the selected network and token (a bare chain id: its released USDC); others are skipped, never repaired. */
-export declare function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, selection?: X402Asset | number): readonly InspectCandidate[];
+export declare function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, asset: X402Asset): readonly InspectCandidate[];

@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { X402AuthorizationState, X402BlockReference, X402RpcPort } from "./ports.js";
-import { x402AssetOf } from "./x402-network.js";
+import { x402AssetOf, x402ExpiredAt } from "./x402-network.js";
 import { assertX402RpcChain } from "./x402-service-rpc.js";
 import type { Eip3009StateUnusedExpiryEvidence, X402OperationRecord } from "./x402-state-model.js";
 
@@ -11,6 +11,8 @@ const UNUSED_EXPIRY_V2 = "apn.x402.unused-expiry-evidence.v2" as const;
  * An EIP-3009 authorization executes only while block.timestamp < validBefore, and its
  * (authorizer, nonce) state flips to used exactly once. A finalized block at or after validBefore
  * that still reads "unused" therefore proves the signed authorization can never move money.
+ * Permit2 reverts only when block.timestamp > deadline, so it can still settle in a block stamped
+ * exactly at the deadline (chains make several blocks per second): its proof needs a later block.
  * Returns null when the chain cannot prove it yet.
  */
 export async function readX402UnusedExpiryEvidence(
@@ -25,7 +27,7 @@ export async function readX402UnusedExpiryEvidence(
   if (
     state.value || state.blockTag !== "finalized" || state.rpcOrigin !== chain.rpcOrigin ||
     !/^(?:0|[1-9][0-9]*)$/u.test(state.blockTimestamp) ||
-    BigInt(state.blockTimestamp) < BigInt(operation.authorization.validBefore)
+    !x402ExpiredAt(method, BigInt(state.blockTimestamp), BigInt(operation.authorization.validBefore))
   ) return null;
   const body = {
     schemaVersion: UNUSED_EXPIRY_V2,

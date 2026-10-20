@@ -21,13 +21,15 @@ export function requireX402Rpc(context: RuntimeContext, asset: X402Asset): RpcPo
   }
 }
 
+/** The RPC bound to exactly this network and token (Base USDC included); no instance carries an implied asset. */
 export function selectX402Rpc(rpc: RpcPort, asset: X402Asset): RpcPort {
+  if (rpc.forX402Network !== undefined) return rpc.forX402Network(asset.chainId, asset.token);
+  // Only an in-process adapter without network selection (a single-network test port) may answer Base USDC itself.
   if (isBaseUsdc(asset)) return rpc;
-  if (rpc.forX402Network === undefined) throw new ApnError("APN_RPC_CONFIG", "RPC adapter lacks explicit x402 network support.");
-  return rpc.forX402Network(asset.chainId, asset.token);
+  throw new ApnError("APN_RPC_CONFIG", "RPC adapter lacks explicit x402 network support.");
 }
 
-export async function assertX402RpcChain(rpc: Partial<X402RpcPort>, chainId = 8453) {
+export async function assertX402RpcChain(rpc: Partial<X402RpcPort>, chainId: number) {
   const chain = await rpc.assertX402Chain?.(chainId);
   if (chain === undefined || chain.chainId !== chainId || !chain.rpcOrigin) {
     throw new ApnError("APN_CHAIN_MISMATCH", `RPC does not prove the frozen x402 network eip155:${chainId}.`, { chain: `eip155:${chainId}` });

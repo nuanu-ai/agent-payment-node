@@ -140,7 +140,8 @@ export class Permit2AllowanceService {
       const active = await loadActiveAssetPolicyRegistry(this.root, profile, this.now());
       const row = active?.registry.chains.find((chain) => chain.family === "evm" && chain.chain === `eip155:${chainId}`)?.assets
         .find((asset) => asset.kind === "token" && asset.identifier?.toLowerCase() === token.toLowerCase() && asset.rails.x402 &&
-          asset.mechanismPins?.x402?.provider === X402_PERMIT2_MECHANISM.provider);
+          asset.mechanismPins?.x402?.provider === X402_PERMIT2_MECHANISM.provider &&
+          asset.mechanismPins.x402.reference.toLowerCase() === X402_PERMIT2_MECHANISM.reference.toLowerCase());
       const caps = row === undefined ? undefined : active!.registry.schemaVersion === ASSET_POLICY_REGISTRY_SCHEMA_V2 ? row.railCaps?.x402 : row.caps;
       if (caps !== undefined) { bound = caps.dailyLimitAtomic; source = "allowlist_permit2_row"; digest = active!.digest; }
     }

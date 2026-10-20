@@ -1,5 +1,5 @@
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
-import { isBaseUsdc, releasedX402Pair, validX402Tuple } from "./x402-network.js";
+import { isBaseUsdc, releasedX402Pair, validX402Tuple, x402ProofTag } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
 import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenOfferTimeout } from "./x402-frozen-offer.js";
@@ -40,7 +40,8 @@ export function validateX402OperationUnsafe(value) {
         (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined)))
         stateCorrupt("x402 chain or token binding is invalid.");
     // Released USDC records carry no token facts; every other token carries its on-chain decimals and the frozen proof tag.
-    if (releasedX402Pair(operation.chainId, operation.token) ? operation.tokenFacts !== undefined : !validTokenFacts(operation.tokenFacts)) {
+    if (releasedX402Pair(operation.chainId, operation.token) ? operation.tokenFacts !== undefined
+        : !validTokenFacts(operation.tokenFacts, Number(operation.chainId))) {
         stateCorrupt("x402 token facts are invalid.");
     }
     address(operation.wallet);
@@ -406,12 +407,13 @@ export function validateStateSummary(operation, evidence) {
             stateCorrupt("x402 authorization-used transaction hint is not a completed full-range unique scan proof.");
     }
 }
-function validTokenFacts(value) {
+/** The proof tag must be the one the chain's stack prescribes (a record can never weaken its own proof). */
+function validTokenFacts(value, chainId) {
     if (typeof value !== "object" || value === null || Array.isArray(value))
         return false;
     const facts = value;
     return Object.keys(facts).length === 2 && Number.isSafeInteger(facts.decimals) && facts.decimals >= 0 &&
-        facts.decimals <= 255 && (facts.proofTag === "safe" || facts.proofTag === "finalized");
+        facts.decimals <= 255 && facts.proofTag === x402ProofTag(chainId);
 }
 /** A Permit2 operation's sponsored permit: null, or the token's non-empty EIP-712 name/version and a canonical permit nonce. */
 function validPermit2Sponsorship(value) {

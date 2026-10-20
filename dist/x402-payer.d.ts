@@ -17,4 +17,4 @@ export interface X402PayerBinding {
 }
 /** The profile x402 policy binding of a payer, from local state only (no provider call). */
 export declare function x402PolicyBinding(context: RuntimeContext, profileHash: string, asset: X402Asset): Promise<ProfilePolicyBinding>;
-export declare function resolveX402Payer(context: RuntimeContext, profileHash: string, asset?: X402Asset): Promise<X402PayerBinding>;
+export declare function resolveX402Payer(context: RuntimeContext, profileHash: string, asset: X402Asset): Promise<X402PayerBinding>;

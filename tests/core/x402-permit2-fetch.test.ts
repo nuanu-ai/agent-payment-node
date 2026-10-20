@@ -1,4 +1,5 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { x402Asset } from "../../src/x402-network.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { recoverTypedDataAddress } from "viem";
@@ -6,6 +7,8 @@ import * as cliRuntime from "../../src/cli.js";
 import * as mcpRuntime from "../../src/mcp-server.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { decodePaymentSignatureHeader } from "../../src/x402-codec.js";
+import { canonicalJson, domainHash } from "../../src/canonical.js";
+import { validateUnusedExpiryEvidence } from "../../src/x402-evidence-validation.js";
 import { x402Eip2612TypedData, x402Permit2TypedData } from "../../src/x402-permit2-exact.js";
 import { x402Permit2Terms } from "../../src/x402-permit2-native.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY } from "../../src/x402-permit2/registry.js";
@@ -88,7 +91,7 @@ test("a short allowance is paid only through the seller's sponsored exact-amount
   const temporary = await temporaryState(); context.after(temporary.cleanup);
   const fixture = assetFixture(temporary.root, BASE_USDC); await admitAsset(fixture, BASE_USDC);
   fixture.rpc.permit2.allowanceAtomic = "0";
-  fixture.rpc.permit2.permit = { domainSeparator: tokenDomainSeparator("USD Coin", "2", 8453), nonce: "9" };
+  fixture.rpc.permit2.permit = { domainSeparator: tokenDomainSeparator("USD Coin", "2", x402Asset(8453)), nonce: "9" };
   fixture.http.outcomes[0] = permit2Challenge(BASE_USDC, { sponsor: true });
   const prepared = await fixture.core.execute(request(BASE_USDC));
   assert.equal(prepared.ok, true, JSON.stringify(prepared));
@@ -135,6 +138,30 @@ test("an authorized Permit2 payment never sent ends failed_expired_unused once t
   const expired = await fixture.core.execute({ command: "operation.resume", operationId });
   assert.equal((expired.operation as { state: string }).state, "failed_expired_unused", JSON.stringify(expired));
   assert.ok(fixture.rpc.x402Calls.includes("permit2:finalized")); assert.equal(fixture.http.calls.length, 1);
+});
+
+test("a finalized block stamped exactly at the Permit2 deadline does not prove expiry; the next second does", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const fixture = assetFixture(temporary.root, BASE_USDC); await admitAsset(fixture, BASE_USDC);
+  fixture.http.outcomes[0] = permit2Challenge(BASE_USDC);
+  const operationId = operationOf(await fixture.core.execute(request(BASE_USDC)));
+  await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  const deadline = BigInt((await fixture.state.findX402Operation(operationId))!.authorization.validBefore);
+  fixture.clock.advance(310000);
+  const observedAt = fixture.clock.now().toISOString();
+  // Permit2 reverts only when block.timestamp > deadline: a block at the deadline can still settle the witness transfer.
+  fixture.rpc.finalizedHead = { ...fixture.rpc.finalizedHead, number: "12346", hash: `0x${"d".repeat(64)}`, observedAt, timestamp: deadline.toString() };
+  const atDeadline = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.notEqual((atDeadline.operation as { state: string } | null)?.state, "failed_expired_unused", JSON.stringify(atDeadline));
+  assert.equal((await fixture.state.findX402Operation(operationId))!.unusedExpiryEvidence, undefined);
+  fixture.rpc.finalizedHead = { ...fixture.rpc.finalizedHead, number: "12347", hash: `0x${"e".repeat(64)}`, observedAt, timestamp: (deadline + 1n).toString() };
+  const past = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((past.operation as { state: string }).state, "failed_expired_unused", JSON.stringify(past));
+  // The validator holds stored evidence to the same rule: a Permit2 head stamped at the deadline proves nothing.
+  const expired = (await fixture.state.findX402Operation(operationId))!, evidence = expired.unusedExpiryEvidence as unknown as Record<string, unknown>;
+  const { evidenceHash: _hash, ...body } = { ...evidence, finalizedHead: { ...(evidence.finalizedHead as object), timestamp: deadline.toString() } } as Record<string, unknown>;
+  assert.throws(() => validateUnusedExpiryEvidence({ ...body, evidenceHash: domainHash("apn.x402.unused-expiry-evidence.v2", canonicalJson(body)) },
+    expired as unknown as Record<string, unknown>), /not past the authorization's last executable second/u);
 });
 
 test("CLI and MCP prepare, approve and settle the same unattended Permit2 operation", async (context) => {

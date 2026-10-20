@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { x402Asset } from "../../src/x402-network.js";
 import { access, readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { request as httpRequest } from "node:http";
@@ -104,7 +105,7 @@ test("standard v2 challenge keeps error and offer order while filtering unsuppor
   assert.deepEqual(decoded.accepts, challenge.accepts, "unsupported standard offers remain available for original-index binding");
   assert.equal(decoded.extensions, undefined, "unimplemented extension namespaces are safely ignored");
 
-  const candidates = inspectCandidates(decoded, X402_URL);
+  const candidates = inspectCandidates(decoded, X402_URL, x402Asset(8453));
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0]?.index, "2");
   assert.equal(candidates[0]?.asset, mixedAsset.toLowerCase());
@@ -133,7 +134,7 @@ test("unsupported-offer filtering retains standard envelope and selected-offer s
     ...X402_PAYMENT_REQUIRED,
     accepts: [permit2, malformedEip3009, malformedFlow, X402_REQUIREMENTS],
   }));
-  assert.deepEqual(inspectCandidates(decoded, X402_URL).map(({ index }) => index), ["3"]);
+  assert.deepEqual(inspectCandidates(decoded, X402_URL, x402Asset(8453)).map(({ index }) => index), ["3"]);
 
   for (const challenge of [
     { ...X402_PAYMENT_REQUIRED, error: 402 },
@@ -398,7 +399,7 @@ test("seller parser admits spec-valid headers above Node's default before APN ap
     assert.ok(name !== undefined && value !== undefined);
     rawHeaderPairs.push([name, value]);
   }
-  const result = await inspectX402(new TestHttp(challengeObservation({ rawHeaderPairs })), X402_URL);
+  const result = await inspectX402(new TestHttp(challengeObservation({ rawHeaderPairs })), X402_URL, undefined, x402Asset(8453));
   assert.equal(result.candidates.length, 1);
 
   const source = await readFile("src/x402-http.ts", "utf8");
@@ -406,7 +407,7 @@ test("seller parser admits spec-valid headers above Node's default before APN ap
 
   await assert.rejects(inspectX402(new TestHttp(challengeObservation({
     rawHeaderPairs: [["PAYMENT-REQUIRED", "A".repeat(64 * 1024 + 1)]],
-  })), X402_URL), ApnError);
+  })), X402_URL, undefined, x402Asset(8453)), ApnError);
 });
 
 test("public-address policy follows fail-closed IPv4 and IPv6 special-use boundaries", () => {

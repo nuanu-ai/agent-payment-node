@@ -27,14 +27,14 @@ export interface PrepareEvidenceContext {
 }
 export declare function canonicalPrepareUrl(value: string): URL;
 export declare function positiveCap(value: unknown): string;
-export declare function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest?: X402HttpRequestV1, asset?: X402Asset): Promise<FreshChallenge>;
+export declare function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest: X402HttpRequestV1 | undefined, asset: X402Asset): Promise<FreshChallenge>;
 export declare function candidatesWithinCap(challenge: FreshChallenge, capAtomic: string): readonly InspectCandidate[];
 export declare function selectPrepareOffer(challenge: FreshChallenge, underCap: readonly InspectCandidate[], evidence: X402PrepareEvidence, wallet: Address, context: PrepareEvidenceContext, transferMethod?: "eip3009" | "erc7710"): SelectedPrepareOffer;
-/** EIP-712 domain separator of an EIP-3009 token; a bare chain id means that chain's released USDC. */
-export declare function tokenDomainSeparator(name: string, version: string, asset?: {
+/** EIP-712 domain separator of an EIP-3009 token on its chain; the caller always names both. */
+export declare function tokenDomainSeparator(name: string, version: string, asset: {
     readonly chainId: number;
     readonly token: string;
-} | number): `0x${string}`;
+}): `0x${string}`;
 export declare function paymentIdentifierState(paymentRequired: PaymentRequired, operationId: string): X402OperationRecord["paymentIdentifier"] | undefined;
 export declare function materializePaymentIdentifier(paymentIdentifier: X402OperationRecord["paymentIdentifier"] | undefined): unknown | undefined;
 /** The observation fields every method's prepare evidence shares; only EIP-3009 carries a token domain separator. */

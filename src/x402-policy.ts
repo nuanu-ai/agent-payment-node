@@ -1,4 +1,4 @@
-import { releasedX402Pair, x402Asset, type X402Asset } from "./x402-network.js";
+import { releasedX402Pair, type X402Asset } from "./x402-network.js";
 import { encodeAbiParameters, keccak256, stringToHex } from "viem";
 import { canonicalJson, domainHash, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
@@ -51,7 +51,7 @@ export function positiveCap(value: unknown): string {
   return parseAtomic(value, { positive: true }).toString();
 }
 
-export async function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest?: X402HttpRequestV1, asset: X402Asset = x402Asset(8453)): Promise<FreshChallenge> {
+export async function freshChallenge(http: HttpPort, canonicalUrl: string, httpRequest: X402HttpRequestV1 | undefined, asset: X402Asset): Promise<FreshChallenge> {
   let captured: Awaited<ReturnType<HttpPort["get"]>> | undefined;
   const inspection = await inspectX402({
     async get(request) {
@@ -144,9 +144,9 @@ export function selectPrepareOffer(
     { reason: "x402_token_domain_mismatch", chain: context.asset.network, asset: context.asset.token });
 }
 
-/** EIP-712 domain separator of an EIP-3009 token; a bare chain id means that chain's released USDC. */
-export function tokenDomainSeparator(name: string, version: string, asset: { readonly chainId: number; readonly token: string } | number = 8453): `0x${string}` {
-  const selected = typeof asset === "number" ? x402Asset(asset) : asset;
+/** EIP-712 domain separator of an EIP-3009 token on its chain; the caller always names both. */
+export function tokenDomainSeparator(name: string, version: string, asset: { readonly chainId: number; readonly token: string }): `0x${string}` {
+  const selected = asset;
   return keccak256(encodeAbiParameters(
     [{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes32" }, { type: "uint256" }, { type: "address" }],
     [DOMAIN_TYPE_HASH, keccak256(stringToHex(name)), keccak256(stringToHex(version)), BigInt(selected.chainId), selected.token as Address],

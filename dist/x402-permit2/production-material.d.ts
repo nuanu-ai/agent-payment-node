@@ -17,6 +17,11 @@ export interface Permit2ProductionMaterial {
      * admission, which reconstruct with the released Avalanche USDT row.
      */
     readonly asset?: Permit2Asset;
+    /**
+     * The tag settlement is proven at, frozen from the chain's stack at prepare. Absent only on records prepared before
+     * 0.5.53 (Avalanche USDT), which were proven at `finalized` and keep it.
+     */
+    readonly proofTag?: "safe" | "finalized";
     /** Canonical decimal encoding of every bigint; reconstruction never revives arbitrary fields. */
     readonly preparedCanonicalJson: string;
     readonly typedDataDigest: string;

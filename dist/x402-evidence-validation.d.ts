@@ -7,4 +7,5 @@ export declare function validateTransactionHint(value: unknown): TransactionHint
 export declare function validateTransferMethodEvidence(method: "eip3009" | "erc7710" | "permit2", transactionHint: TransactionHint | undefined, authorizationUsedScan: AuthorizationUsedScan | undefined, settlementEvidence: SettlementEvidence | undefined, unusedExpiryEvidence: UnusedExpiryEvidence | undefined): void;
 export declare function validateAuthorizationUsedScan(value: unknown, operation: Record<string, unknown>): AuthorizationUsedScan;
 export declare function validateSettlementEvidence(value: unknown, operation?: Record<string, unknown>): SettlementEvidence;
-export declare function validateUnusedExpiryEvidence(value: unknown, operation?: Record<string, unknown>): UnusedExpiryEvidence;
+/** `transferMethod` names the method when no operation is at hand (a receipt); an operation's own resolved method wins. */
+export declare function validateUnusedExpiryEvidence(value: unknown, operation?: Record<string, unknown>, transferMethod?: unknown): UnusedExpiryEvidence;

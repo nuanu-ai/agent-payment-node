@@ -207,8 +207,7 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
 }
 
 /** Offers of exactly the selected network and token (a bare chain id: its released USDC); others are skipped, never repaired. */
-export function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, selection: X402Asset | number = 8453): readonly InspectCandidate[] {
-  const asset = typeof selection === "number" ? x402Asset(selection) : selection;
+export function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, asset: X402Asset): readonly InspectCandidate[] {
   if (paymentRequired.x402Version !== 2 || !resourceMatches(paymentRequired.resource.url, requestedUrl)) return [];
   const output: InspectCandidate[] = [];
   paymentRequired.accepts.forEach((requirements, index) => {

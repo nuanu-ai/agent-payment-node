@@ -1,5 +1,5 @@
 import { ApnError } from "./errors.js";
-import { isBaseUsdc, networkPolicyBinding, x402Asset, type X402Asset } from "./x402-network.js";
+import { isBaseUsdc, networkPolicyBinding, type X402Asset } from "./x402-network.js";
 import { policyBinding, type ProfilePolicyBinding } from "./profile-policy.js";
 import { LOCAL_PROVIDER_ID } from "./provider-profile.js";
 import { upgradeProviderProfile } from "./provider-profile-upgrade.js";
@@ -32,7 +32,7 @@ export async function x402PolicyBinding(context: RuntimeContext, profileHash: st
 export async function resolveX402Payer(
   context: RuntimeContext,
   profileHash: string,
-  asset: X402Asset = x402Asset(8453),
+  asset: X402Asset,
 ): Promise<X402PayerBinding> {
   let provider = context.profileRepository === undefined
     ? null

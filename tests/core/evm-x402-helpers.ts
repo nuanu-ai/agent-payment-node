@@ -6,7 +6,7 @@ import * as nativeRuntime from "../../src/local-wallet-native.js";
 import type { NativePort, NativeRequest } from "../../src/ports.js";
 import type { ProfilePolicyApprovalIntent } from "../../src/policy-approval.js";
 import { StateStore } from "../../src/state.js";
-import { x402Network } from "../../src/x402-network.js";
+import { x402Network, x402Asset } from "../../src/x402-network.js";
 import { tokenDomainSeparator } from "../../src/x402-policy.js";
 import type { X402OperationRecord } from "../../src/x402-state-integrity.js";
 import { EvmApproval, EvmWrappingSecret } from "./evm-helpers.js";
@@ -52,7 +52,7 @@ export function networkFixture(root: string, chainId: EvmChainId = 1, wrapNative
   const now = clock.now().toISOString(), timestamp = Math.floor(clock.now().getTime() / 1000).toString();
   rpc.safeHead = { ...rpc.safeHead, observedAt: now, timestamp };
   rpc.finalizedHead = { ...rpc.finalizedHead, observedAt: now, timestamp: (BigInt(timestamp) - 1n).toString() };
-  rpc.x402Evidence = { ...rpc.x402Evidence, observedAt: now, domainSeparator: tokenDomainSeparator("USD Coin", "2", chainId), block: { ...rpc.x402Evidence.block, timestamp } };
+  rpc.x402Evidence = { ...rpc.x402Evidence, observedAt: now, domainSeparator: tokenDomainSeparator("USD Coin", "2", x402Asset(chainId)), block: { ...rpc.x402Evidence.block, timestamp } };
   const originalEvidence = rpc.getX402PrepareEvidence.bind(rpc);
   rpc.getX402PrepareEvidence = async (address) => ({ ...await originalEvidence(address), address });
   const policyApprovals: ProfilePolicyApprovalIntent[] = [];

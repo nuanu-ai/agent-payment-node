@@ -203,8 +203,7 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(value, expected) {
     };
 }
 /** Offers of exactly the selected network and token (a bare chain id: its released USDC); others are skipped, never repaired. */
-export function inspectCandidates(paymentRequired, requestedUrl, selection = 8453) {
-    const asset = typeof selection === "number" ? x402Asset(selection) : selection;
+export function inspectCandidates(paymentRequired, requestedUrl, asset) {
     if (paymentRequired.x402Version !== 2 || !resourceMatches(paymentRequired.resource.url, requestedUrl))
         return [];
     const output = [];

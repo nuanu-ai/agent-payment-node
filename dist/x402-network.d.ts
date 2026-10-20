@@ -31,6 +31,11 @@ export interface X402Asset {
 }
 /** An EVM chain by number or exact `eip155:<id>`; the RPC's eth_chainId must later equal it. */
 export declare function x402Chain(value: unknown): number;
+/**
+ * Whether a block at `blockTimestamp` is past an authorization's last executable second: EIP-3009 executes only while
+ * block.timestamp < validBefore, Permit2 until block.timestamp == deadline (it reverts only when timestamp > deadline).
+ */
+export declare function x402ExpiredAt(method: unknown, blockTimestamp: bigint, validBefore: bigint): boolean;
 export declare function x402ProofTag(chainId: number): X402ProofTag;
 /** The selected network and token; without a token only the released USDC spelling of Base, Ethereum or Arbitrum. */
 export declare function x402Asset(chain?: unknown, token?: unknown): X402Asset;
