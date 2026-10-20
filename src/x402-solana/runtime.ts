@@ -1,5 +1,5 @@
 import { ChainAccountStore } from "../chain-account-store.js";
-import { chainDecimal } from "../chain-policy.js";
+import { chainDisplay } from "../chain-policy.js";
 import type { OperationAbandonApprovalPort } from "../operation-abandon-approval.js";
 import { MacOSLoginKeychainSecret } from "../macos-keychain.js";
 import type { RuntimeFactoryOptions } from "../runtime-factory-options.js";
@@ -36,7 +36,7 @@ export function x402SolanaPorts(root: string, options: RuntimeFactoryOptions): X
 export async function approveX402SolanaAbandon(port: OperationAbandonApprovalPort, record: X402SolanaRecord): Promise<void> {
   const t = record.terms;
   await port.approve({ operationId: record.operationId, fingerprint: record.fingerprint, profile: record.profile, providerId: "local",
-    walletAddress: t.payer, recipient: t.payee, amountAtomic: t.amountAtomic, amountDecimal: chainDecimal(t.amountAtomic, t.decimals),
+    walletAddress: t.payer, recipient: t.payee, amountAtomic: t.amountAtomic, amountDecimal: chainDisplay(t.amountAtomic, t.decimals),
     chainLabel: `Solana mainnet (${t.network})`, assetLabel: `${t.symbol} (${t.mint})`, unit: t.symbol,
     outcomeNote: "The seller's facilitator may have landed this payment before its blockhash lifetime ended; the price stays charged to the owner's daily cap." });
 }

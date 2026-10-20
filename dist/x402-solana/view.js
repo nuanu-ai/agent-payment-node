@@ -1,4 +1,4 @@
-import { chainDecimal } from "../chain-policy.js";
+import { chainDisplay } from "../chain-policy.js";
 import { X402_SOLANA_MECHANISM } from "./constants.js";
 /** The public projection CLI, MCP and `apn operation status` return. No signature bytes or signed transaction leave the record. */
 export function publicX402Solana(record, pending = null) {
@@ -8,7 +8,7 @@ export function publicX402Solana(record, pending = null) {
         state: record.state, terminal: record.terminal, pending_reason: pending,
         network: t.network, chain: t.chain, payer: t.payer, mint: t.mint, symbol: t.symbol, decimals: t.decimals,
         payee: t.payee, payee_token_account: t.destinationTokenAccount, fee_payer: t.feePayer,
-        amount_atomic: t.amountAtomic, amount_decimal: chainDecimal(t.amountAtomic, t.decimals), max_amount_atomic: t.maxAmountAtomic,
+        amount_atomic: t.amountAtomic, amount_decimal: chainDisplay(t.amountAtomic, t.decimals), max_amount_atomic: t.maxAmountAtomic,
         compute_unit_limit: t.computeUnitLimit, compute_unit_price_micro_lamports: t.computeUnitPriceMicroLamports,
         memo: t.memo, memo_source: t.memoSource,
         resource: { origin: t.origin, url_hash: t.urlHash, challenge_hash: t.challengeHash, offer_index: t.offerIndex, offer_hash: t.offerHash },
