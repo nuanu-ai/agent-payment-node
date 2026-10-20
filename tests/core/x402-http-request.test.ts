@@ -145,11 +145,14 @@ test("bounded seller metadata is opaque while payment-critical fields remain str
   };
   const decoded = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader(wire));
   assert.equal(inspectCandidates(decoded, X402_URL).length, 1);
-  for (const change of [{ network: "eip155:1" }, { amount: "-1" }, { payTo: "not-an-address" }, { scheme: "other" },
-    { extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "permit2" } }]) {
+  for (const change of [{ network: "eip155:1" }, { amount: "-1" }, { payTo: "not-an-address" }, { scheme: "other" }]) {
     const unsupported = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({ ...wire, accepts: [{ ...wire.accepts[0], ...change }] }));
     assert.equal(inspectCandidates(unsupported, X402_URL).length, 0);
   }
+  // Since 0.5.53 a Permit2 offer for the selected chain and token is a candidate of its own method, never an EIP-3009 one.
+  const permit2 = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({ ...wire,
+    accepts: [{ ...wire.accepts[0], extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "permit2" } }] }));
+  assert.deepEqual(inspectCandidates(permit2, X402_URL).map((candidate) => candidate.assetTransferMethod), ["permit2"]);
   assert.throws(() => decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({ ...wire,
     accepts: [{ ...wire.accepts[0], maxTimeoutSeconds: 60.5 }] })));
 });
