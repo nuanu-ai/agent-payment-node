@@ -165,7 +165,7 @@ export function validateSwapReceiptProof(value: unknown, chain: string, earliest
   const fail = (message: string): never => failure(mode, message);
   if (!isPlainRecord(value) || !exactKeys(value, ["receiptHash", "transactionHash", "observedAt", "finalized", ...(value.economics === undefined ? [] : ["economics"])]) ||
       typeof value.finalized !== "boolean" || typeof value.transactionHash !== "string" || value.transactionHash.length < 8 ||
-      value.transactionHash.length > 256 || (value.economics !== undefined && (!value.finalized || !validEconomics(value.economics)))) fail("Swap receipt proof is invalid.");
+      value.transactionHash.length > 256 || (value.economics !== undefined && (!value.finalized || !validSwapEconomics(value.economics)))) fail("Swap receipt proof is invalid.");
   const record = value as Record<string, unknown>;
   hash(record.receiptHash, mode); const observedAt = date(record.observedAt, mode);
   if (observedAt < earliestAt || observedAt > latestAt) fail("Swap receipt proof time binding is invalid.");
@@ -175,7 +175,7 @@ export function validateSwapReceiptProof(value: unknown, chain: string, earliest
   if (/^solana:/u.test(chain) && !/^[1-9A-HJ-NP-Za-km-z]{64,128}$/u.test(transactionHash)) fail("Swap Solana transaction signature is invalid.");
   return value as unknown as SwapReceiptProof;
 }
-function validEconomics(value: unknown): boolean {
+export function validSwapEconomics(value: unknown): value is SwapReceiptEconomics {
   const atomic = (x: unknown) => typeof x === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(x);
   return isPlainRecord(value) && exactKeys(value, ["inputAtomic", "outputAtomic", "networkFeeAtomic", "nativeDebitAtomic",
     ...(value.accountRentAtomic === undefined ? [] : ["accountRentAtomic"])]) && atomic(value.inputAtomic) &&

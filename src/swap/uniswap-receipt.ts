@@ -53,12 +53,7 @@ export function validateUniswapReceipt(evidence: UniswapReceiptEvidence, envelop
       transactionValue !== quantity(envelope.value) || transactionBlock !== receiptBlock ||
       tx.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() || beforeNative < afterNative || beforeNative - afterNative < inputAmount ||
       afterOutput < beforeOutput || afterOutput - beforeOutput < minimumOutput || finalizedBlock < receiptBlock) fail();
-  const recipientTopic = `0x${address(expected.recipient).slice(2).toLowerCase().padStart(64, "0")}`;
-  const outputToken = address(expected.outputToken);
-  // A pool Swap event carries several data words; only a one-word ERC-20 Transfer to the recipient counts as credit.
-  const credited = receipt.logs.filter((log) => address(log.address) === outputToken && log.topics.length === 3 && hexWord(log.data) &&
-    log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && log.topics[2]?.toLowerCase() === recipientTopic)
-    .reduce((sum, log) => sum + BigInt(log.data), 0n);
+  const credited = uniswapCredited(receipt.logs, expected.outputToken, expected.recipient);
   if (credited < minimumOutput) fail();
   const receiptHash = domainHash("apn.uniswap-receipt-proof.v1", canonicalJson({ evidence, envelope, expected }));
   // The exact input is the mined value (the router wraps and swaps exactly it); the output is this receipt's credit.
@@ -66,6 +61,14 @@ export function validateUniswapReceipt(evidence: UniswapReceiptEvidence, envelop
   return { receiptHash, transactionHash: expected.transactionHash, observedAt: evidence.observedAt, finalized: true,
     economics: { inputAtomic: transactionValue.toString(), outputAtomic: credited.toString(), networkFeeAtomic: fee?.toString() ?? null,
       nativeDebitAtomic: fee === null ? null : (transactionValue + fee).toString() } };
+}
+/** A pool Swap event carries several data words; only a one-word ERC-20 Transfer of the output token to the recipient counts. */
+export function uniswapCredited(logs: readonly { readonly address: string; readonly topics: readonly string[]; readonly data: string }[],
+  outputTokenValue: string, recipient: string): bigint {
+  const recipientTopic = `0x${address(recipient).slice(2).toLowerCase().padStart(64, "0")}`, outputToken = address(outputTokenValue);
+  return logs.filter((log) => address(log.address) === outputToken && log.topics.length === 3 && hexWord(log.data) &&
+    log.topics[0]?.toLowerCase() === TRANSFER_TOPIC.toLowerCase() && log.topics[2]?.toLowerCase() === recipientTopic)
+    .reduce((sum, log) => sum + BigInt(log.data), 0n);
 }
 function quantity(value: unknown): bigint {
   if (typeof value !== "string" || !/^(?:0|[1-9][0-9]{0,77})$/u.test(value)) fail();

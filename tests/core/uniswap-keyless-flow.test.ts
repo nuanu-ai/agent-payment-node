@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { parseTransaction } from "viem";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import type { TtyTransferApprovalOptions } from "../../src/tty-approval.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
-import type { SwapOperationRecord } from "../../src/swap/model.js";
+import { SWAP_OPERATION_SCHEMA, type SwapOperationRecord } from "../../src/swap/model.js";
+import { canonicalJson, domainHash } from "../../src/canonical.js";
+import { executeUniswapCommand } from "../../src/swap/uniswap-command-service.js";
 import { createUniswapKeylessRuntime } from "../../src/swap/uniswap-v3/runtime-factory.js";
 import { temporaryState } from "./helpers.js";
 import { ACCOUNT, AMOUNT_IN, KeylessRpc, MemoryWrapping, PROFILE, keylessPolicy, keylessWallet, quantity } from "./uniswap-keyless-helpers.js";
@@ -73,6 +75,34 @@ test("a finalized status-0 receipt becomes failed_confirmed_revert and releases 
   assert.deepEqual(reverted.receiptProof?.economics, { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: "21000000000000", nativeDebitAtomic: "21000000000000" });
   assert.equal((await f.usage()).amountAtomic, "0");
   assert.equal((await f.runtime.status(sent.operationId, f.clock.now())).integrityHash, reverted.integrityHash);
+});
+
+test("a swap sealed before economics were recorded: status reads its own receipt once, then answers from the sidecar", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await flow(temporary.root);
+  const prepared = await f.runtime.prepare({ profile: PROFILE, quoteHash: f.quoted.quoteHash, idempotencyKey: "keyless-flow-0009" }, f.clock.now());
+  const sent = await f.runtime.approveAndExecute(prepared.operationId, f.clock.now());
+  const tx = parseTransaction(f.rpc.sends[0]!);
+  f.rpc.gas = quantity(tx.gas!); f.rpc.maxFee = quantity(tx.maxFeePerGas!); f.rpc.priority = quantity(tx.maxPriorityFeePerGas!);
+  f.rpc.receipt = "revert"; f.rpc.minedAt = 102n; f.rpc.head = 200n; f.advance(12_000);
+  const reverted: SwapOperationRecord = await f.runtime.status(sent.operationId, f.clock.now());
+  // Reseal the record exactly as 0.5.51 wrote it: the same proof without economics.
+  const { economics: _economics, ...proof } = reverted.receiptProof!, { integrityHash: _hash, ...body } = { ...reverted, receiptProof: proof };
+  const old = { ...body, integrityHash: domainHash(SWAP_OPERATION_SCHEMA, canonicalJson(body)) };
+  await writeFile(join(f.state.root, "swap-operations", reverted.ownerProfileHash, `${reverted.operationId}.json`), canonicalJson(old));
+  const context = { uniswapRuntime: f.runtime, state: f.state, clock: f.clock } as never;
+  f.rpc.calls = [];
+  const first = await executeUniswapCommand({ command: "swap.uniswap.status", operationId: sent.operationId }, context);
+  const view = first.operation as Record<string, unknown>;
+  assert.equal(view.integrityHash, old.integrityHash, "the sealed record itself is unchanged");
+  assert.deepEqual(view.actualEconomics, { inputAtomic: "0", outputAtomic: null, networkFeeAtomic: "21000000000000", nativeDebitAtomic: "21000000000000" });
+  assert.equal(view.actualEconomicsSource, "receipt_facts");
+  assert.equal(f.rpc.calls.filter(method => method === "eth_getTransactionReceipt").length, 1);
+  f.rpc.calls = [];
+  const second = await executeUniswapCommand({ command: "swap.uniswap.status", operationId: sent.operationId }, context);
+  assert.deepEqual((second.operation as Record<string, unknown>).actualEconomics, view.actualEconomics);
+  assert.deepEqual(f.rpc.calls.filter(method => method === "eth_getTransactionReceipt"), [], "the sidecar answers; no RPC");
+  assert.equal(f.rpc.sends.length, 1);
 });
 
 test("a wrong code refuses before any reservation, and a pre-send guard refusal releases the reservation unsigned", async (t) => {

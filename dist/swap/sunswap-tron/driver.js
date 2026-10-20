@@ -80,6 +80,13 @@ export class SunSwapTronExecutionDriver {
             operation = await this.d.core.recordPossibleSend(operation, "unknown_finality", this.d.clock.now());
         return binding === null ? operation : await this.observeExact(operation, material);
     }
+    /** A swap solidified before its economics were recorded: one read of its own solidified record (observe only). */
+    async receiptEconomics(input) {
+        const read = this.d.observer.receiptEconomics;
+        if (read === undefined)
+            throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "This SunSwap observer cannot read receipt facts.", { reason: "receipt_facts_unsupported" });
+        return await read.call(this.d.observer, validateSwapOperation(input.operation), validateSunSwapPreparedMaterial(input.material, "stored"));
+    }
     /** The transaction id and expiration are fixed in the prepared material, signed or not. */
     async proveUnlanded(input) {
         validateSwapOperation(input.operation);

@@ -47,3 +47,9 @@ export declare function validateUniswapReceipt(evidence: UniswapReceiptEvidence,
     readonly minimumOutputAtomic: string;
     readonly outputToken: string;
 }): SwapReceiptProof;
+/** A pool Swap event carries several data words; only a one-word ERC-20 Transfer of the output token to the recipient counts. */
+export declare function uniswapCredited(logs: readonly {
+    readonly address: string;
+    readonly topics: readonly string[];
+    readonly data: string;
+}[], outputTokenValue: string, recipient: string): bigint;

@@ -131,7 +131,7 @@ export function validateSwapReceiptProof(value, chain, earliestAt, latestAt, mod
     const fail = (message) => failure(mode, message);
     if (!isPlainRecord(value) || !exactKeys(value, ["receiptHash", "transactionHash", "observedAt", "finalized", ...(value.economics === undefined ? [] : ["economics"])]) ||
         typeof value.finalized !== "boolean" || typeof value.transactionHash !== "string" || value.transactionHash.length < 8 ||
-        value.transactionHash.length > 256 || (value.economics !== undefined && (!value.finalized || !validEconomics(value.economics))))
+        value.transactionHash.length > 256 || (value.economics !== undefined && (!value.finalized || !validSwapEconomics(value.economics))))
         fail("Swap receipt proof is invalid.");
     const record = value;
     hash(record.receiptHash, mode);
@@ -147,7 +147,7 @@ export function validateSwapReceiptProof(value, chain, earliestAt, latestAt, mod
         fail("Swap Solana transaction signature is invalid.");
     return value;
 }
-function validEconomics(value) {
+export function validSwapEconomics(value) {
     const atomic = (x) => typeof x === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(x);
     return isPlainRecord(value) && exactKeys(value, ["inputAtomic", "outputAtomic", "networkFeeAtomic", "nativeDebitAtomic",
         ...(value.accountRentAtomic === undefined ? [] : ["accountRentAtomic"])]) && atomic(value.inputAtomic) &&

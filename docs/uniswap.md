@@ -97,7 +97,13 @@ that exact pin.
   price) and `nativeDebitAtomic`; a revert has input "0" and output null. The
   quote keeps its expected and minimum output. SunSwap, Orca and Jupiter fill the
   same fields from their own finalized records (fee in SUN or lamports; Orca adds
-  the rent of a token account it created). Proofs written before APN recorded them have none.
+  the rent of a token account it created). Status also shows the same facts as
+  `actualEconomics`. For a swap finalized before APN recorded them, status reads
+  its own finalized transaction once through the lane's RPC (bound to the hash
+  its record proved), keeps the facts in `receipt-facts/<operation>.swap.json`
+  bound to the record's integrity hash and never reads them again; a refused read
+  leaves `actualEconomics` null with `actualFactsRefusal` naming why. The
+  token-input lane shows its observed receipt in the same shape.
 - Run `status` within about 25 minutes of sending. If the first observation
   comes later, `status` fails with `APN_PROVIDER_UNAVAILABLE` /
   `uniswap_pre_state_unavailable`. Re-run it with a distinct archive reader in

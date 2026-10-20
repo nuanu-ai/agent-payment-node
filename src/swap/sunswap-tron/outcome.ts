@@ -1,7 +1,7 @@
 import { canonicalJson, domainHash, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { tronHex } from "../../tron/codec.js";
-import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
+import { validateSwapOperation, type SwapOperationRecord, type SwapReceiptEconomics, type SwapReceiptProof } from "../model.js";
 import { SUNSWAP_V2_ROUTER } from "./catalog.js";
 import { validateSunSwapPreparedMaterial, type SunSwapPreparedMaterial } from "./prepared.js";
 import { validateSunSwapReceipt, type SunSwapReceiptExpectation, type SunSwapReceiptValidation } from "./receipt.js";
@@ -44,20 +44,29 @@ export class SunSwapOutcomeObserver {
       ]);
     } catch { return conflict(); }
     if (empty(solidTx) || empty(solidInfo)) return null;
-    const expected: SunSwapReceiptExpectation = { transactionHash: txid, recipient: operation.quote.recipient,
-      inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic,
-      unsignedRawDataHex: material.execution.transaction.raw_data_hex, maximumFeeSun: material.execution.intent.feeLimitSun,
-      maximumBandwidthFeeSun: required(material.gasOrEnergy.maximumBandwidthFeeSun) };
+    const expected = expectation(operation, material);
     const solid = solidHead(head), succeeded = contractResult(solidTx) === "SUCCESS";
     const validate = succeeded ? validateSunSwapReceipt : validateSunSwapFailure;
     const full = validate(fullTx, fullInfo, solid, expected), finalized = validate(solidTx, solidInfo, solid, expected);
     if (full.receiptHash !== finalized.receiptHash) conflict();
     const observedAt = this.now();
     if (!(observedAt instanceof Date) || !Number.isFinite(observedAt.getTime())) conflict();
-    // The solidified record's own amounts: call value in, USDT Transfer out, energy plus bandwidth fee burned (SUN).
     return { outcome: succeeded ? "succeeded" : "reverted", proof: { receiptHash: finalized.receiptHash,
-      transactionHash: txid, observedAt: observedAt.toISOString(), finalized: true, economics: { inputAtomic: finalized.inputAmountAtomic,
-        outputAtomic: finalized.outputAmountAtomic, networkFeeAtomic: finalized.feeSun, nativeDebitAtomic: finalized.trxDebitSun } } };
+      transactionHash: txid, observedAt: observedAt.toISOString(), finalized: true, economics: economicsOf(finalized) } };
+  }
+
+  /** One read of a swap its record proved solidified: the solidified transaction, its info and the head (observe only). */
+  async receiptEconomics(operationValue: SwapOperationRecord, materialValue: SunSwapPreparedMaterial): Promise<SwapReceiptEconomics> {
+    const operation = validateSwapOperation(operationValue), material = validateSunSwapPreparedMaterial(materialValue, "stored");
+    const txid = material.execution.transaction.txID;
+    if (operation.receiptProof?.transactionHash !== txid || material.quote.quoteHash !== operation.quote.quoteHash) factsBinding();
+    let tx: unknown, info: unknown, head: unknown;
+    try {
+      [tx, info, head] = await Promise.all([this.rpc.call("walletsolidity/gettransactionbyid", { value: txid }),
+        this.rpc.call("walletsolidity/gettransactioninfobyid", { value: txid }), this.rpc.call("walletsolidity/getnowblock", {})]);
+    } catch { return conflict(); }
+    if (empty(tx) || empty(info)) factsBinding();
+    return sunSwapEconomicsFromSolidified(operation.state, tx, info, solidHead(head), expectation(operation, material));
   }
 
   /** Expiration passed at the solidified head and no solidified record of the exact transaction id. */
@@ -66,6 +75,27 @@ export class SunSwapOutcomeObserver {
     return await proveTronUnlanded(this.rpc, { transactionId: material.execution.transaction.txID,
       expirationMs: material.execution.intent.expirationMs });
   }
+}
+
+/** The economics of a solidified record already proven as this outcome, by the same validators that finalized it. */
+export function sunSwapEconomicsFromSolidified(state: string, transaction: unknown, info: unknown, solidifiedHeadNumber: string,
+  expected: SunSwapReceiptExpectation): SwapReceiptEconomics {
+  const succeeded = contractResult(transaction) === "SUCCESS";
+  if (succeeded !== (state === "finalized") || !["finalized", "failed_confirmed_revert"].includes(state)) factsBinding();
+  return economicsOf((succeeded ? validateSunSwapReceipt : validateSunSwapFailure)(transaction, info, solidifiedHeadNumber, expected));
+}
+/** The solidified record's own amounts: call value in, USDT Transfer out, energy plus bandwidth fee burned (SUN). */
+function economicsOf(v: Pick<SunSwapReceiptValidation, "inputAmountAtomic" | "feeSun" | "trxDebitSun"> & { readonly outputAmountAtomic: string | null }): SwapReceiptEconomics {
+  return { inputAtomic: v.inputAmountAtomic, outputAtomic: v.outputAmountAtomic, networkFeeAtomic: v.feeSun, nativeDebitAtomic: v.trxDebitSun };
+}
+function expectation(operation: SwapOperationRecord, material: SunSwapPreparedMaterial): SunSwapReceiptExpectation {
+  return { transactionHash: material.execution.transaction.txID, recipient: operation.quote.recipient,
+    inputAmountAtomic: operation.quote.inputAmountAtomic, minimumOutputAtomic: operation.quote.minimumOutputAtomic,
+    unsignedRawDataHex: material.execution.transaction.raw_data_hex, maximumFeeSun: material.execution.intent.feeLimitSun,
+    maximumBandwidthFeeSun: required(material.gasOrEnergy.maximumBandwidthFeeSun) };
+}
+function factsBinding(): never {
+  throw new ApnError("APN_RPC_PROTOCOL", "The solidified record read for the swap economics is not the one this record proved.", { reason: "receipt_facts_binding" });
 }
 
 /** A solidified failed call: exact bytes, one failed result on both records, fees within the frozen bounds, no logs. */

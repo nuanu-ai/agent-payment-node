@@ -68,3 +68,4 @@ export declare function validateSwapOperation(value: unknown): SwapOperationReco
 /** Every state a guarded swap record may hold (its validator refuses any other). */
 export declare const SWAP_OPERATION_STATES: readonly SwapOperationState[];
 export declare function validateSwapReceiptProof(value: unknown, chain: string, earliestAt: string, latestAt: string, mode?: "input" | "stored"): SwapReceiptProof;
+export declare function validSwapEconomics(value: unknown): value is SwapReceiptEconomics;
