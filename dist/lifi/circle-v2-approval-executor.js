@@ -26,14 +26,19 @@ export function publicCircleApproval(record) {
 }
 /**
  * What the approval leaves on chain. A completed one leaves the Base USDC allowance it set for the Circle V2 wrapper, which
- * `apn circle source submit` spends; APN has no command that revokes it. Every other outcome changed no allowance.
+ * `apn circle source submit` spends; whatever a burn leaves is cleared by `apn circle approval revoke`, the same approval
+ * with a zero cap. Every other outcome changed no allowance.
  */
 function circleApprovalAllowance(record) {
     const p = record.preparation;
+    if (record.phase === "completed" && p.approvalCapAtomic === "0")
+        return { effect: "allowance_revoked", token: p.token,
+            owner: p.transaction.from, spender: p.spender, approvedAtomic: "0", observedAtCompletionAtomic: record.observedAllowanceAtomic };
     if (record.phase === "completed")
         return { effect: "allowance_set", token: p.token, owner: p.transaction.from, spender: p.spender,
             approvedAtomic: p.approvalCapAtomic, observedAtCompletionAtomic: record.observedAllowanceAtomic, spentBy: "apn circle source submit",
-            revoke: "none_in_apn: the allowance stays until a Circle source transfer spends it or another approve from this wallet replaces it" };
+            revoke: `apn circle approval revoke --profile ${record.profile} --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> ` +
+                "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>" };
     return { effect: record.phase === "abandoned_unknown" ? "unknown_may_still_land"
             : CIRCLE_APPROVAL_RESOLVED_PHASES.includes(record.phase) ? "allowance_unchanged" : "unknown_until_resolved" };
 }
@@ -157,7 +162,7 @@ export class LocalCircleApprovalSigner {
             bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "circle_approval_signing_gate");
         const p = record.preparation, expectedData = encodeFunctionData({
             abi: parseAbi(["function approve(address spender,uint256 value) returns (bool)"]), functionName: "approve",
-            args: ["0x71f54F818671cD0D7ea140Da213e5C8b5C92a408", bridgeUint(p.approvalCapAtomic, true)],
+            args: ["0x71f54F818671cD0D7ea140Da213e5C8b5C92a408", bridgeUint(p.approvalCapAtomic)],
         });
         if (p.transaction.chainId !== 8453 || p.token !== "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" ||
             p.spender !== "0x71f54F818671cD0D7ea140Da213e5C8b5C92a408" || p.transaction.to !== p.token ||

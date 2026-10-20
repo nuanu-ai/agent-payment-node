@@ -86,11 +86,17 @@ test("rejects endpoint outage, payer, nonce, allowance, balance, fee and gas dri
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), async () => { throw Error("offline"); }, limits));
   for (const change of [
     (v: any) => { v.payer = refund; }, (v: any) => { v.pendingNonceAtomic = "8"; },
-    (v: any) => { v.usdcAllowanceAtomic = "1000000"; }, (v: any) => { v.usdcBalanceAtomic = "1019999"; },
-    (v: any) => { v.nativeBalanceWei = "199999999999999"; }, (v: any) => { v.gasLimitAtomic = "100001"; },
-    (v: any) => { v.maxFeePerGasWei = "2000000001"; }, (v: any) => { v.blockHash = `0x${"b".repeat(64)}`; },
-    (v: any) => { v.draftBlockHash = `0x${"b".repeat(64)}`; },
+    (v: any) => { v.usdcAllowanceAtomic = "1000000"; }, (v: any) => { v.blockHash = `0x${"b".repeat(64)}`; },
+    (v: any) => { v.draftBlockHash = `0x${"b".repeat(64)}`; }, (v: any) => { v.gasLimitAtomic = "0"; },
+    (v: any) => { v.maxPriorityFeePerGasWei = "2000000001"; v.maxFeePerGasWei = "2000000000"; },
   ]) await assert.rejects(prepared(change), { code: "APN_PROVIDER_PROTOCOL" });
+  // A well-formed read that does not fit the caller's limits or balances is an economic refusal (circle-v2-budget-refusals).
+  for (const [change, code] of [
+    [(v: any) => { v.usdcBalanceAtomic = "1019999"; }, "APN_INSUFFICIENT_USDC"],
+    [(v: any) => { v.nativeBalanceWei = "199999999999999"; }, "APN_INSUFFICIENT_GAS"],
+    [(v: any) => { v.gasLimitAtomic = "100001"; }, "APN_FEE_BUDGET_EXCEEDED"],
+    [(v: any) => { v.maxFeePerGasWei = "2000000001"; }, "APN_FEE_BUDGET_EXCEEDED"],
+  ] as const) await assert.rejects(prepared(change), { code });
 });
 test("accepts a bounded approval above debit, but rejects allowance beyond the frozen cap", async () => {
   const draft = await inspectCircleV2PreflightedDraft(await fixture(), harness());
@@ -124,7 +130,7 @@ test("rejects stale quote and gas prices in wrong units or beyond uint256 native
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(v => { v.expiry.expiresAtBlock = 99; }), state(), limits),
     { code: "APN_PROVIDER_PROTOCOL" });
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(),
-    { ...limits, maxFeePerGasWei: "2" }), { code: "APN_PROVIDER_PROTOCOL" });
+    { ...limits, maxFeePerGasWei: "2" }), { code: "APN_FEE_BUDGET_EXCEEDED" });
   await assert.rejects(prepareCircleV2BaseSourceReadOnly(draft, harness(), state(v => { (v as any).maxFeePerGasWei = ((1n << 256n) - 1n).toString(); }),
     { ...limits, maxFeePerGasWei: ((1n << 256n) - 1n).toString(), maxNativeDebitWei: ((1n << 256n) - 1n).toString() }),
     { code: "APN_PROVIDER_PROTOCOL" });

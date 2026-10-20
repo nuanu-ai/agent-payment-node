@@ -59,6 +59,15 @@ export declare function publicCircleApproval(record: CircleApprovalRecord): {
         spender: string;
         approvedAtomic: string;
         observedAtCompletionAtomic: string | null;
+        spentBy?: never;
+        revoke?: never;
+    } | {
+        effect: string;
+        token: string;
+        owner: string;
+        spender: string;
+        approvedAtomic: string;
+        observedAtCompletionAtomic: string | null;
         spentBy: string;
         revoke: string;
     } | {

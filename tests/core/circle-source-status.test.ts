@@ -51,14 +51,20 @@ async function burned(root: string): Promise<{ journal: NonEvmSourceJournal; has
   j = await repo.observeUnknown(j.profileHash, j.operationId, j.integrityHash, "response_lost", at(4));
   return { journal: j, hash: keccak256(raw) };
 }
-/** Base at the finalized tag: chain id, one receipt (or none), the finalized head; counts calls. */
-function base(receipt: Record<string, unknown> | null, finalized: bigint, chainId = 8453) {
+const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const word = (address: string) => address.slice(2).toLowerCase().padStart(64, "0");
+/** Base at the finalized tag: chain id, one receipt (or none), the finalized head, the payer's allowance to the wrapper; counts calls. */
+function base(receipt: Record<string, unknown> | null, finalized: bigint, chainId = 8453, allowance = 0n) {
   const calls: string[] = [];
   const rpc: FinalizedChainRead = { async call(method, params) {
     calls.push(method);
     if (method === "eth_chainId") return `0x${chainId.toString(16)}`;
     if (method === "eth_getTransactionReceipt") return receipt;
     if (method === "eth_getBlockByNumber") { assert.equal(params[0], "finalized"); return { number: `0x${finalized.toString(16)}` }; }
+    if (method === "eth_call") {
+      assert.deepEqual(params, [{ to: USDC, data: `0xdd62ed3e${word(ACCOUNT.address)}${word(BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES)}` }, "finalized"]);
+      return `0x${allowance.toString(16).padStart(64, "0")}`;
+    }
     throw new Error(`unexpected ${method}`);
   } };
   return { rpc, calls };
@@ -96,17 +102,36 @@ test("a finalized receipt is recorded once and ends the payer's claim inside the
   assert.equal(await held(temporary.root), true);
   const chain = base(receiptOf(hash, "0x0"), 100n), proved = await status(temporary.root, () => chain.rpc);
   assert.equal(proved.ok, true, JSON.stringify(proved.error));
-  const view = proved.operation as { outcome: string; sourceProof: { status: string; blockNumberAtomic: string; finalizedBlockNumberAtomic: string; nonceAtomic: string } };
+  const view = proved.operation as { outcome: string; residualAllowance: { allowanceAtomic: string }; sourceProof: { status: string; blockNumberAtomic: string; finalizedBlockNumberAtomic: string; nonceAtomic: string } };
   assert.deepEqual([view.outcome, view.sourceProof.status, view.sourceProof.blockNumberAtomic, view.sourceProof.finalizedBlockNumberAtomic,
-    view.sourceProof.nonceAtomic, proved.proof_class, proved.next_actions], ["reverted", "reverted", "100", "100", "7", "chain_verified_public_read", []]);
-  assert.deepEqual(chain.calls, ["eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber"]);
+    view.sourceProof.nonceAtomic, view.residualAllowance.allowanceAtomic, proved.proof_class, proved.next_actions],
+  ["reverted", "reverted", "100", "100", "7", "0", "chain_verified_public_read", []]);
+  assert.deepEqual(chain.calls, ["eth_chainId", "eth_getTransactionReceipt", "eth_getBlockByNumber", "eth_chainId", "eth_call"]);
   assert.equal(await exists(sidecar(temporary.root, journal)), true);
   assert.equal(await held(temporary.root), false, "the recorded proof released the payer before the signing window ended");
   assert.equal((await new OperationIndex(state).find(journal.operationId))?.state, "terminal");
   await rm(join(temporary.root, "operation-index"), { recursive: true, force: true });
   assert.equal((await new OperationIndex(state).find(journal.operationId))?.state, "terminal", "rm -r operation-index keeps the proof");
   const again = await status(temporary.root, () => chain.rpc);
-  assert.deepEqual([(again.operation as { outcome: string }).outcome, again.proof_class, chain.calls.length], ["reverted", "durable_public_state", 3]);
+  assert.deepEqual([(again.operation as { outcome: string }).outcome, again.proof_class, chain.calls.slice(5)],
+    ["reverted", "durable_public_state", ["eth_chainId", "eth_call"]], "a recorded proof is never re-read; only the residual allowance is");
+});
+
+test("a finished burn shows the payer's residual wrapper allowance at the finalized tag and names the revoke; an unreadable one is reported, never guessed", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { hash } = await burned(temporary.root);
+  const left = base(receiptOf(hash), 100n, 8453, 18870n), shown = await status(temporary.root, () => left.rpc);
+  assert.equal(shown.ok, true, JSON.stringify(shown.error));
+  assert.deepEqual((shown.operation as { residualAllowance: unknown }).residualAllowance, { token: USDC, owner: ACCOUNT.address,
+    spender: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES, blockTag: "finalized", allowanceAtomic: "18870" });
+  assert.deepEqual(shown.next_actions, ["apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> " +
+    "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>"]);
+  const unread = await status(temporary.root, environmentFinalizedReader({}));
+  assert.equal(unread.ok, true, JSON.stringify(unread.error));
+  const residual = (unread.operation as { residualAllowance: { allowanceAtomic: unknown; unreadReason: string } }).residualAllowance;
+  assert.equal(residual.allowanceAtomic, null);
+  assert.match(residual.unreadReason, /^APN_RPC_CONFIG: .*APN_BASE_RPC_URL/u);
+  assert.deepEqual(unread.next_actions, []);
 });
 
 test("a journal without a burn transaction reads no RPC; a missing Base RPC setting is named", async (t) => {

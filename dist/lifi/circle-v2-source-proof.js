@@ -49,23 +49,30 @@ export function circleSourceTerminal(root, journal) {
         return false;
     return new CircleSourceProofStore(root).load(journal).then(proof => proof !== null);
 }
+const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> " +
+    "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>";
 /**
  * `operation status` of a Circle CCTP V2 Base source burn: the saved journal and, when its burn transaction is known,
  * that transaction's receipt at the finalized tag (chain id, receipt, finalized head; no archive read). A receipt in a
  * finalized block is recorded once as the operation's proof; otherwise nothing is written and the status says why.
  */
 export async function circleSourceStatus(root, journal, read, now) {
-    const view = (proof, waitingFor, proofClass) => ({
+    const view = (proof, waitingFor, proofClass, residual) => ({
         schemaVersion: "apn.circle-v2-source-status.v1", operationId: journal.operationId, phase: journal.phase, outcome: proof?.status ?? null,
-        sourceProof: proof, waitingFor, journal, proofClass,
-        nextActions: proof === null && journal.transactionHash !== null ? [`apn operation status --operation ${journal.operationId}`] : []
+        sourceProof: proof, waitingFor, journal, proofClass, ...(residual === undefined ? {} : { residualAllowance: residual }),
+        nextActions: [...proof === null && journal.transactionHash !== null ? [`apn operation status --operation ${journal.operationId}`] : [],
+            ...residual !== undefined && residual.allowanceAtomic !== null && residual.allowanceAtomic !== "0" ? [REVOKE] : []]
     });
     const hash = journal.transactionHash, store = new CircleSourceProofStore(root);
-    if (hash === null)
-        return view(null, "no burn transaction was signed; nothing of this operation can land", "durable_public_state");
+    if (hash === null) {
+        const waiting = "no burn transaction was signed; nothing of this operation can land";
+        return circleSourceTerminal(root, journal) === true
+            ? view(null, waiting, "durable_public_state", await residualAllowance(read, journal)) : view(null, waiting, "durable_public_state");
+    }
     const existing = await store.load(journal);
     if (existing !== null)
-        return view(existing, null, "durable_public_state");
+        return view(existing, null, "durable_public_state", await residualAllowance(read, journal));
     if (read === undefined)
         throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "This runtime has no finalized-tag reader for the Base receipt.");
     const rpc = read(8453);
@@ -84,7 +91,33 @@ export async function circleSourceStatus(root, journal, read, now) {
         payer: journal.sourceCall.from, to: journal.sourceCall.to, transactionHash: hash, nonceAtomic: journal.nonceAtomic, status: receipt.status,
         blockNumberAtomic: receipt.blockNumber.toString(), blockHash: receipt.blockHash, blockTag: "finalized",
         finalizedBlockNumberAtomic: finalized.toString(), observedAt: new Date(now()).toISOString() };
-    return view(await store.create(journal, Object.freeze({ ...fields, integrityHash: hashObject(fields) })), null, "chain_verified_public_read");
+    const proof = await store.create(journal, Object.freeze({ ...fields, integrityHash: hashObject(fields) }));
+    return view(proof, null, "chain_verified_public_read", await residualAllowance(read, journal));
+}
+/**
+ * The allowance the payer still grants the wrapper once this operation can spend nothing more: the current value at the
+ * finalized tag (one eth_call; no state at an old block). A burn spends principal plus fee of whatever was approved, and
+ * the rest stays until `apn circle approval revoke` clears it. An unreadable value is reported as unread, never guessed.
+ */
+async function residualAllowance(read, journal) {
+    const owner = journal.sourceCall.from, spender = journal.sourceCall.to;
+    const base = { token: BASE_USDC, owner, spender, blockTag: "finalized" };
+    if (read === undefined)
+        return { ...base, allowanceAtomic: null, unreadReason: "This runtime has no finalized-tag reader for Base." };
+    try {
+        const rpc = read(8453);
+        await assertFinalizedChain(rpc, 8453);
+        const word = (address) => address.slice(2).toLowerCase().padStart(64, "0");
+        const value = await rpc.call("eth_call", [{ to: BASE_USDC, data: `0xdd62ed3e${word(owner)}${word(spender)}` }, "finalized"]);
+        if (typeof value !== "string" || !WORD.test(value.toLowerCase()))
+            throw new ApnError("APN_RPC_PROTOCOL", "The allowance read is malformed.");
+        return { ...base, allowanceAtomic: BigInt(value).toString() };
+    }
+    catch (error) {
+        if (!(error instanceof ApnError))
+            throw error;
+        return { ...base, allowanceAtomic: null, unreadReason: `${error.code}: ${error.message}` };
+    }
 }
 /** The receipt must be the journal's own burn: same hash, sent by the payer to the pinned messenger, in a block. */
 function receiptOf(value, journal) {

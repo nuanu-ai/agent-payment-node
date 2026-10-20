@@ -37,19 +37,23 @@ test("rejects wrong target, unbounded cap, nonce, balance, gas, and fee drift", 
   for (const invalid of [
     { ...input, spender: payer }, { ...input, token: payer }, { ...input, chainId: 1 as 8453 },
     { ...input, approvalCapAtomic: ((1n << 256n) - 1n).toString() },
-    { ...input, approvalCapAtomic: "434612" },
   ]) await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly(invalid, reader(), limits), { code: "APN_PROVIDER_PROTOCOL" });
+  await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly({ ...input, approvalCapAtomic: "434612" }, reader(), limits), { code: "APN_INSUFFICIENT_USDC" });
   for (const change of [
     (v: any) => { v.token = payer; }, (v: any) => { v.spender = payer; },
-    (v: any) => { v.pendingNonceAtomic = "8"; }, (v: any) => { v.usdcBalanceAtomic = "429999"; },
-    (v: any) => { v.usdcAllowanceAtomic = "430001"; }, (v: any) => { v.gasLimitAtomic = "100001"; },
-    (v: any) => { v.maxFeePerGasWei = "2000000001"; },
-    (v: any) => { v.nativeBalanceWei = "199999999999999"; },
-    (v: any) => { v.totalNativeDebitWei = "200000000000001"; },
+    (v: any) => { v.pendingNonceAtomic = "8"; }, (v: any) => { v.usdcAllowanceAtomic = "430001"; },
     (v: any) => { v.totalNativeDebitWei = "199999999999999"; },
   ]) await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly(input, reader(change), limits), { code: "APN_PROVIDER_PROTOCOL" });
+  // A well-formed read beyond the caller's limits or balances is an economic refusal (circle-v2-budget-refusals).
+  for (const [change, code] of [
+    [(v: any) => { v.usdcBalanceAtomic = "429999"; }, "APN_INSUFFICIENT_USDC"],
+    [(v: any) => { v.gasLimitAtomic = "100001"; }, "APN_FEE_BUDGET_EXCEEDED"],
+    [(v: any) => { v.maxFeePerGasWei = "2000000001"; }, "APN_FEE_BUDGET_EXCEEDED"],
+    [(v: any) => { v.nativeBalanceWei = "199999999999999"; }, "APN_INSUFFICIENT_GAS"],
+    [(v: any) => { v.totalNativeDebitWei = "200000000000001"; }, "APN_FEE_BUDGET_EXCEEDED"],
+  ] as const) await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly(input, reader(change), limits), { code });
   await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly(input, reader(), { ...limits, maxFeePerGasWei: "2" }),
-    { code: "APN_PROVIDER_PROTOCOL" });
+    { code: "APN_FEE_BUDGET_EXCEEDED" });
   await assert.rejects(prepareCircleV2BaseUsdcApprovalReadOnly(input, reader(v => {
     (v as any).maxFeePerGasWei = ((1n << 256n) - 1n).toString();
   }), { ...limits, maxFeePerGasWei: ((1n << 256n) - 1n).toString(), maxNativeDebitWei: ((1n << 256n) - 1n).toString() }),
