@@ -2,6 +2,7 @@ import { networkPolicyBinding, x402Network } from "./x402-network.js";
 import { ApnError } from "./errors.js";
 import { EVM_NETWORKS, evmUint, publicEvmAsset, type EvmAssetSelection } from "./evm-asset.js";
 import { directEvmChain, directEvmNetwork } from "./evm-direct-networks.js";
+import { directRpcChain } from "./rpc-requirement.js";
 import { requireEvmRpc } from "./evm-direct.js";
 import { formatAtomic } from "./money.js";
 import { policyBinding } from "./profile-policy.js";
@@ -25,7 +26,7 @@ export async function evmWalletBalance(context: RuntimeContext, profileInput: st
     return { wallet: loaded, policy: sharedNetwork === undefined ? undefined :
       await context.policy?.load(networkPolicyBinding(policyBinding(loaded), sharedNetwork.chainId)) };
   });
-  const snapshot = await requireEvmRpc(context.requireRpc()).balance(wallet.address, selection);
+  const snapshot = await requireEvmRpc(context.requireRpc(directRpcChain(chainId))).balance(wallet.address, selection);
   if (snapshot.address !== wallet.address || snapshot.asset.chainId !== selection.chainId) throw new ApnError("APN_ASSET_MISMATCH", "Asset balance belongs to a different wallet or chain.");
   const x402Token = sharedNetwork === undefined ? undefined : x402Network(sharedNetwork.chainId).token;
   const limit = snapshot.asset.kind === "native" ? policy?.maxBalanceEthWei :

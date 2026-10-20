@@ -1,4 +1,5 @@
 import { providerDirectReceipt, recoverProviderTerminalOperation } from "./provider-direct-receipt.js";
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { appendTransition, sealOperation } from "./state.js";
 import { hasExactTransfer } from "./transfer-policy.js";
 import { CoinbaseGaslessPolicy } from "./coinbase-gasless-policy.js";
@@ -30,7 +31,7 @@ export class ProviderDirectState {
         let receipt, origin;
         try {
             // Any Base endpoint may serve the receipt; its origin stays in the receipt as provenance only.
-            const rpc = this.context.requireRpc();
+            const rpc = this.context.requireRpc(BASE_RPC_CHAIN);
             origin = (await rpc.assertBaseChain()).rpcOrigin;
             receipt = await rpc.getReceipt(operation.transactionHash);
         }

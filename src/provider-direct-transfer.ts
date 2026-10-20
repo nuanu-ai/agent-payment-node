@@ -20,6 +20,7 @@ import {
 import { ProviderDirectState } from "./provider-direct-state.js";
 import { providerDirectExecutionInput } from "./provider-direct-execution-input.js";
 import type { RuntimeContext } from "./runtime.js";
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { appendTransition, sealOperation } from "./state.js";
 import {
   canonicalAddress,
@@ -72,7 +73,7 @@ export class ProviderDirectTransferService {
     const profileHash = state.profileHash(profile);
     const operationId = state.operationId(profile, idempotencyKey);
     const idempotencyHash = state.idempotencyHash(idempotencyKey);
-    const rpcBindingHash = sha256(`direct-rpc\0${this.context.requireRpcUrl()}`);
+    const rpcBindingHash = sha256(`direct-rpc\0${this.context.requireRpcUrl(BASE_RPC_CHAIN)}`);
     const initialBound = await requiredProviderDirectProfile(this.context, profileHash);
     return await state.withLocks([`profile:${profileHash}`, `provider-account:${initialBound.provider_id}:${initialBound.account_binding_hash}`,
       `operation:${operationId}`, `operation:idempotency:${idempotencyHash}`], async () => {
@@ -105,7 +106,7 @@ export class ProviderDirectTransferService {
       return await this.operations.admit({ kind: "direct_transfer", profileHash, operationId, idempotencyHash, requestHash },
         { domains: () => [evmConflictDomain(CHAIN_ID, bound.public_address)],
           provider: { providerId: bound.provider_id, accountBindingHash: bound.account_binding_hash, payer: bound.public_address } }, async () => {
-      const rpcIdentity = await this.context.requireRpc().assertBaseChain();
+      const rpcIdentity = await this.context.requireRpc(BASE_RPC_CHAIN).assertBaseChain();
       const preparedAt = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
       const expiresAt = new Date(preparedAt.getTime() + APPROVAL_WINDOW_MS);
       const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
@@ -126,7 +127,7 @@ export class ProviderDirectTransferService {
         }
         const delegated = await adapter.direct.prepare({
           operationId, profileHash, profileRevision: bound.revision, sender: bound.public_address,
-          recipient, amountAtomic: amount.atomic, amountDecimal, rpcUrl: this.context.requireRpcUrl(),
+          recipient, amountAtomic: amount.atomic, amountDecimal, rpcUrl: this.context.requireRpcUrl(BASE_RPC_CHAIN),
           preparedAt: preparedAt.toISOString(), expiresAt: expiresAt.toISOString(),
         });
         providerDirect = {
@@ -360,7 +361,7 @@ export class ProviderDirectTransferService {
       binding.policy.foregroundApprovalRequired !== true
     ) await this.failBeforeEffect(operation, "frozen_policy_changed");
     // The operation is bound to Base, not to one endpoint: any Base RPC may approve and observe it.
-    await (binding.coinbaseGasless === undefined ? this.context.requireRpc() : this.context.requireCoinbaseRpc()).assertBaseChain();
+    await (binding.coinbaseGasless === undefined ? this.context.requireRpc(BASE_RPC_CHAIN) : this.context.requireCoinbaseRpc()).assertBaseChain();
     const current = await this.context.requireProfileRepository().load(operation.profileHash);
     if (
       current === null || current.drift.state !== "bound" || current.capability_snapshot.direct.available !== true ||

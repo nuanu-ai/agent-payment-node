@@ -17,6 +17,7 @@ import { performance } from "node:perf_hooks";
 import { setTimeout as waitFor } from "node:timers/promises";
 import { NATIVE_IPC_VERSION } from "./constants.js";
 import { ApnError, type ErrorCode } from "./errors.js";
+import { BASE_RPC_CHAIN, rpcUrlRequired, type RpcChain } from "./rpc-requirement.js";
 import type { ClockPort, HttpPort, IdPort, NativePort, NativeRequest, RpcPort, WaitPort } from "./ports.js";
 import type { ProfilePolicyPort } from "./profile-policy.js";
 import type { StateStore } from "./state.js";
@@ -296,17 +297,16 @@ export class RuntimeContext {
     return this.keychainProbe;
   }
 
-  requireRpc(): RpcPort {
-    if (this.rpc === undefined) {
-      throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
-    }
+  /** The command's single `--rpc-url` endpoint; a missing one is refused naming the chain this command reads. */
+  requireRpc(chain: RpcChain): RpcPort {
+    if (this.rpc === undefined) throw rpcUrlRequired(chain);
     return this.rpc;
   }
 
   requireCoinbaseRpc(): RpcPort {
     if (this.coinbaseRpc !== undefined) return this.coinbaseRpc;
     if (this.coinbaseRpcFactory !== undefined) return this.coinbaseRpcInstance ??= this.coinbaseRpcFactory();
-    return this.requireRpc();
+    return this.requireRpc(BASE_RPC_CHAIN);
   }
 
   requireHttp(): HttpPort {
@@ -354,14 +354,14 @@ export class RuntimeContext {
     return this.transferApproval;
   }
 
-  requireRpcUrl(): string {
-    if (this.rpcUrl === undefined) throw new ApnError("APN_RPC_CONFIG", "This command requires an explicit HTTPS Base RPC endpoint.");
+  requireRpcUrl(chain: RpcChain): string {
+    if (this.rpcUrl === undefined) throw rpcUrlRequired(chain);
     return this.rpcUrl;
   }
 
   requireCoinbaseRpcUrl(): string {
     if (this.coinbaseRpcUrl !== undefined) return this.coinbaseRpcUrl;
-    return this.requireRpcUrl();
+    return this.requireRpcUrl(BASE_RPC_CHAIN);
   }
 
   requireProviderAuthorizationStore(): ProviderAuthorizationStorePort {
