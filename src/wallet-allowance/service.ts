@@ -11,10 +11,11 @@ import { admitOperation } from "../operation-index/admission.js";
 import { StateStore } from "../state.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { x402ProofTag } from "../x402-network.js";
-import { observeRevoke, readRevokePrepare, revokeData, verifyRevokeRaw, type WalletAllowanceRpc } from "./chain.js";
-import { newWalletAllowanceRevoke, transitionWalletAllowanceRevoke, WALLET_ALLOWANCE_REVOKE_FAMILY, walletAllowanceSlot,
-  type WalletAllowanceRevokeRecord } from "./model.js";
+import { observeRevoke, readRevokePrepare, revokeData, sendRefusedBeforeTransport, verifyRevokeRaw, type WalletAllowanceRpc } from "./chain.js";
+import { newWalletAllowanceRevoke, SEND_REFUSED_BEFORE_TRANSPORT, transitionWalletAllowanceRevoke, WALLET_ALLOWANCE_REVOKE_FAMILY,
+  WALLET_ALLOWANCE_REVOKE_JOURNAL_MAX, walletAllowanceSlot, type WalletAllowanceRevokeRecord } from "./model.js";
 import { WalletAllowanceRevokeRepository } from "./repository.js";
+import { walletAllowanceResendCommand } from "./view.js";
 
 export interface WalletAllowanceRevokeRequest {
   readonly profile: string; readonly chainId: number; readonly token: Address; readonly spender: Address;
@@ -96,15 +97,25 @@ export class WalletAllowanceRevokeService {
     }
     if (record.state === "submitted") return await this.observe(record.operationId);
     if (record.state !== "signed") return record;
-    record = await this.write(record.operationId, (current) => current.state === "signed", () => ({ state: "submitted", at: this.now().toISOString(),
-      reason: "single_send_started", submittedAt: this.now().toISOString() }));
+    // A refusal met before transport (this command's POST cap, the provider's cooldown) is read first: the record stays signed.
+    try { await this.ports.rpc.checkSend(); } catch (error) { throw error instanceof ApnError ? resendLater(error, record) : error; }
+    // A send started again after a refused one keeps the first start's submittedAt (written once).
+    record = await this.write(record.operationId, (current) => current.state === "signed", (current) => ({ state: "submitted",
+      at: this.now().toISOString(), reason: "single_send_started", ...(current.submittedAt === null ? { submittedAt: this.now().toISOString() } : {}) }));
+    const submitted = record;
     try {
       if (await this.ports.rpc.send(record.signed!.rawTransaction as Hex) !== record.signed!.transactionHash) {
         throw new ApnError("APN_RPC_AMBIGUOUS", "The RPC returned another transaction hash.");
       }
     } catch (error) {
-      // The send may have reached the network: the record stays submitted and only observation decides.
       if (!(error instanceof ApnError)) throw error;
+      // Refused before the bytes reached the node: back to signed while a restart and an exit still fit the journal, and the
+      // same command sends these same bytes later. Anything else may have reached the network: it stays submitted.
+      if (sendRefusedBeforeTransport(error) && submitted.journal.length + 3 <= WALLET_ALLOWANCE_REVOKE_JOURNAL_MAX) {
+        const back = await this.write(record.operationId, (current) => current.integrityHash === submitted.integrityHash,
+          () => ({ state: "signed", at: this.now().toISOString(), reason: SEND_REFUSED_BEFORE_TRANSPORT }));
+        throw resendLater(error, back);
+      }
     }
     return record;
   }
@@ -159,7 +170,8 @@ export async function observeWalletAllowanceRevoke(records: WalletAllowanceRevok
   if (seen.kind === "pending") return record;
   if (seen.kind === "never_lands") return await write({ state: "superseded", at, reason: "finalized_nonce_spent_elsewhere",
     outcome: { kind: "never_lands", finalizedNonce: seen.finalizedNonce, observedAt: at } });
-  if (record.state === "signed") throw new ApnError("APN_STATE_CORRUPT", "A sealed revoke that was never sent has a receipt.");
+  // A send the RPC refused before transport (back to signed) could only have landed if the provider forwarded it anyway.
+  if (record.state === "signed" && record.submittedAt === null) throw new ApnError("APN_STATE_CORRUPT", "A sealed revoke that was never sent has a receipt.");
   return await write({ state: seen.outcome.status === "success" ? "completed" : "reverted", at,
     reason: seen.outcome.status === "success" ? "receipt_at_proof_tag" : "reverted_at_proof_tag", outcome: seen.outcome });
 }
@@ -186,3 +198,8 @@ export async function localWalletAddress(state: StateStore, profile: string): Pr
   return walletEnvelopeIdentity(envelope, profile).address;
 }
 function refuse(reason: string, message: string): never { throw new ApnError("APN_OPERATION_BLOCKED", message, { reason }); }
+/** A send refused before transport, naming the same revoke command that sends the same sealed bytes once it clears. */
+function resendLater(error: ApnError, record: WalletAllowanceRevokeRecord): ApnError {
+  return new ApnError(error.code, error.message, { ...error.details, operationId: record.operationId, state: record.state,
+    nextActions: [walletAllowanceResendCommand(record)] });
+}

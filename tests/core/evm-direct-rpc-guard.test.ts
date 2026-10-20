@@ -114,3 +114,22 @@ test("direct Arbitrum guard treats HTTP 403 as terminal without retry", async t 
   assert.equal(attempts, 1);
   assert.equal(guard.physicalRequests, 1);
 });
+
+test("direct EVM guard names its pre-transport refusal without a POST: the provider family cooling down, then the cap spent", async t => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  let now = 3_000_000, attempts = 0;
+  const wait = async (ms: number) => { now += ms; }, endpoint = "https://ethereum-rpc.publicnode.com";
+  await assert.rejects(new EvmDirectRpcGuard(state, 24, () => now, wait).post("https://base-rpc.publicnode.com", async () => {
+    attempts += 1; throw new ApnError("APN_RPC_PROTOCOL", "HTTP failure", { httpStatus: 429 });
+  }), { code: "APN_RPC_RATE_LIMITED" });
+  const guard = new EvmDirectRpcGuard(state, 1, () => now, wait), cooling = { code: "APN_PROVIDER_UNAVAILABLE", details: { reason: "rpc_provider_cooldown" } };
+  await assert.rejects(guard.assertCanPost(endpoint), cooling);
+  await assert.rejects(guard.post(endpoint, async () => { attempts += 1; }), cooling, "post() refuses alike");
+  assert.deepEqual([attempts, guard.physicalRequests], [1, 0]);
+  now += 30_000;
+  await guard.assertCanPost(endpoint);
+  await guard.post(endpoint, async () => { attempts += 1; });
+  await assert.rejects(guard.assertCanPost(endpoint), { code: "APN_RPC_BUDGET_EXCEEDED", details: { physicalRequests: 1, maxPhysicalRequests: 1 } });
+  assert.deepEqual([attempts, guard.physicalRequests], [2, 1]);
+});

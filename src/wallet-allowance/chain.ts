@@ -10,6 +10,17 @@ export interface WalletAllowanceRpc {
   batch(calls: readonly { readonly method: string; readonly params: readonly unknown[] }[]): Promise<readonly unknown[]>;
   /** eth_sendRawTransaction, once; an unclear answer is ambiguous and the operation stays `submitted`. */
   send(raw: Hex): Promise<Hex>;
+  /** Throws the refusal a send would meet before reaching the node (this command's POST cap spent, the provider cooling down); sends nothing. */
+  checkSend(): Promise<void>;
+}
+
+/**
+ * A send refused before its bytes reached the node: the guard's POST cap (its own count), the provider family's cooldown
+ * (refused before transport), or the provider's HTTP 429. Anything else from a send may have reached the network.
+ */
+export function sendRefusedBeforeTransport(error: ApnError): boolean {
+  return error.code === "APN_RPC_BUDGET_EXCEEDED" && error.details?.maxPhysicalRequests !== undefined ||
+    error.code === "APN_PROVIDER_UNAVAILABLE" && error.details?.reason === "rpc_provider_cooldown" || error.details?.httpStatus === 429;
 }
 
 const APPROVAL_TOPIC = "0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925";

@@ -1,4 +1,5 @@
 import { type Hex } from "viem";
+import { ApnError } from "../errors.js";
 import type { Address } from "../model.js";
 import type { WalletAllowanceRevokeRecord, WalletAllowanceRevokeTerms } from "./model.js";
 export interface WalletAllowanceRpc {
@@ -9,7 +10,14 @@ export interface WalletAllowanceRpc {
     }[]): Promise<readonly unknown[]>;
     /** eth_sendRawTransaction, once; an unclear answer is ambiguous and the operation stays `submitted`. */
     send(raw: Hex): Promise<Hex>;
+    /** Throws the refusal a send would meet before reaching the node (this command's POST cap spent, the provider cooling down); sends nothing. */
+    checkSend(): Promise<void>;
 }
+/**
+ * A send refused before its bytes reached the node: the guard's POST cap (its own count), the provider family's cooldown
+ * (refused before transport), or the provider's HTTP 429. Anything else from a send may have reached the network.
+ */
+export declare function sendRefusedBeforeTransport(error: ApnError): boolean;
 /** The only call this family ever signs: approve(spender, 0). */
 export declare const revokeData: (spender: Address) => Hex;
 /** The allowance at one block: the latest header first, then the read pinned to it (EIP-1898). */

@@ -1,13 +1,13 @@
 import { sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { RpcHttpFailure, RpcProviderScheduler, type RpcProviderPacingCoordinator } from "./lifi/rpc-scheduler.js";
+import { RpcHttpFailure, rpcProviderFamily, RpcProviderScheduler, type RpcProviderPacingCoordinator } from "./lifi/rpc-scheduler.js";
 import type { StateStore } from "./state.js";
 
 /** One command's hard transport cap, with POST starts paced across processes by provider family. */
 export class EvmDirectRpcGuard {
   private physical = 0;
   private readonly scheduler: RpcProviderScheduler;
-  constructor(state: StateStore, private readonly limit = 24,
+  constructor(private readonly state: StateStore, private readonly limit = 24,
     private readonly now: () => number = Date.now,
     private readonly wait: (milliseconds: number) => Promise<void> = milliseconds =>
       new Promise(resolve => setTimeout(resolve, milliseconds)),
@@ -16,7 +16,7 @@ export class EvmDirectRpcGuard {
     const coordinator: RpcProviderPacingCoordinator = { coordinate: async <T>(family: string,
       work: (lastStart: number | null, saveStart: (value: number) => Promise<void>, cooldownUntil: number | null,
         saveCooldownUntil: (value: number) => Promise<void>) => Promise<T>) => {
-      const familyHash = sha256(`rpc-provider-family\0${family}`);
+      const familyHash = providerFamilyHash(family);
       return await state.withLocks([`rpc-provider-family:${familyHash}`], async () => await work(
         await state.loadRpcProviderPacing(familyHash), value => state.writeRpcProviderPacing(familyHash, value),
         await state.loadRpcProviderCooldown(familyHash), value => state.writeRpcProviderCooldown(familyHash, value)),
@@ -25,10 +25,19 @@ export class EvmDirectRpcGuard {
     this.scheduler = new RpcProviderScheduler(coordinator, now, "reject", "rate_limit");
   }
   get physicalRequests(): number { return this.physical; }
+  /**
+   * The refusal post() would meet before any transport, read without starting a POST: this command's cap spent, or the
+   * endpoint's provider family cooling down (read under the family lock, as the scheduler reads it).
+   */
+  async assertCanPost(endpoint: string): Promise<void> {
+    if (this.physical >= this.limit) throw this.budgetExceeded();
+    const familyHash = providerFamilyHash(rpcProviderFamily(endpoint));
+    const until = await this.state.withLocks([`rpc-provider-family:${familyHash}`], async () => await this.state.loadRpcProviderCooldown(familyHash));
+    if (until !== null && until > this.now()) throw new ApnError("APN_PROVIDER_UNAVAILABLE", "RPC provider is cooling down.", { reason: "rpc_provider_cooldown" });
+  }
   async post<T>(endpoint: string, task: () => Promise<T>): Promise<T> {
     // Reserve before scheduler entry so parallel logical reads cannot pass the cap.
-    if (this.physical >= this.limit) throw new ApnError("APN_RPC_BUDGET_EXCEEDED", "The direct EVM command exhausted its physical RPC POST budget.",
-      { physicalRequests: this.physical, maxPhysicalRequests: this.limit });
+    if (this.physical >= this.limit) throw this.budgetExceeded();
     this.physical += 1;
     let started = false;
     let rateLimit: ApnError | null = null;
@@ -50,4 +59,9 @@ export class EvmDirectRpcGuard {
       throw error;
     }
   }
+  private budgetExceeded(): ApnError {
+    return new ApnError("APN_RPC_BUDGET_EXCEEDED", "The direct EVM command exhausted its physical RPC POST budget.",
+      { physicalRequests: this.physical, maxPhysicalRequests: this.limit });
+  }
 }
+const providerFamilyHash = (family: string): string => sha256(`rpc-provider-family\0${family}`);

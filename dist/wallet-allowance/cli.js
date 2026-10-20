@@ -64,7 +64,8 @@ export function walletAllowanceRpc(chainId, state, options, environment = proces
         throw new ApnError("APN_RPC_CONFIG", `Reading or revoking an allowance on eip155:${chainId} needs ${rpcSetting}: set it.`, { reason: "wallet_allowance_rpc_required", chain: `eip155:${chainId}`, setting: rpcSetting });
     const rpc = new HttpsBaseRpc(url, { directGuardState: state });
     rpc.armEvmDirectRpcGuard();
-    return { rpcSetting, rpc: { batch: async (calls) => await rpc.batchCall(calls), send: async (raw) => await rpc.submitRawTransaction(raw) } };
+    return { rpcSetting, rpc: { batch: async (calls) => await rpc.batchCall(calls), send: async (raw) => await rpc.submitRawTransaction(raw),
+            checkSend: async () => await rpc.assertPostCapacity() } };
 }
 async function consent(record, options) {
     const t = record.terms;

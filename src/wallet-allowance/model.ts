@@ -11,16 +11,21 @@ export type WalletAllowanceRevokeState = "prepared" | "signed" | "submitted" | "
   "abandoned_unknown";
 /**
  * One owner-approved ERC-20 `approve(spender, 0)` from the profile's local wallet: it only removes a permission, so it
- * needs no asset admission. `prepared`: frozen and unsigned. `signed`: the exact transaction is sealed and was never sent.
- * `submitted`: the single send was started. Outcomes: a receipt at the chain's proof tag (completed or reverted), the
+ * needs no asset admission. `prepared`: frozen and unsigned. `signed`: the exact transaction is sealed and no send of it
+ * reached the node. `submitted`: the single send was started; a send the RPC refused before transport (its POST cap, the
+ * provider's cooldown, HTTP 429) goes back to `signed` (widened edge), so the same command sends the same bytes later.
+ * Outcomes: a receipt at the chain's proof tag (completed or reverted; from `signed` only after such a refused send), the
  * chain's proof that it can never land (superseded), never signed (failed_before_effect) or the owner's abandon.
  */
 const EDGES: Readonly<Record<WalletAllowanceRevokeState, readonly WalletAllowanceRevokeState[]>> = {
   prepared: ["signed", "failed_before_effect"],
-  signed: ["submitted", "superseded", "abandoned_unknown"],
-  submitted: ["completed", "reverted", "superseded", "abandoned_unknown"],
+  signed: ["submitted", "superseded", "abandoned_unknown", "completed", "reverted"],
+  submitted: ["completed", "reverted", "superseded", "abandoned_unknown", "signed"],
   completed: [], reverted: [], superseded: [], failed_before_effect: [], abandoned_unknown: [],
 };
+/** The journal bound (widened from 8 for refused sends); a refused send goes back to `signed` only while a restart and an exit still fit. */
+export const WALLET_ALLOWANCE_REVOKE_JOURNAL_MAX = 16;
+export const SEND_REFUSED_BEFORE_TRANSPORT = "send_refused_before_transport";
 export const WALLET_ALLOWANCE_REVOKE_STATES = Object.keys(EDGES) as readonly WalletAllowanceRevokeState[];
 export const WALLET_ALLOWANCE_REVOKE_TERMINAL_STATES: readonly WalletAllowanceRevokeState[] = WALLET_ALLOWANCE_REVOKE_STATES.filter((state) => EDGES[state].length === 0);
 
@@ -47,7 +52,7 @@ const recordSchema = z.strictObject({
   profileHash: hash, idempotencyHash: hash, requestHash: hash, terms: termsSchema, fingerprint: hash,
   signed: z.strictObject({ rawTransaction: z.string().regex(/^0x02[a-f0-9]+$/u).max(4096), transactionHash: word }).nullable(),
   submittedAt: iso.nullable(), outcome: outcomeSchema.nullable(),
-  state: stateSchema, terminal: z.boolean(), createdAt: iso, updatedAt: iso, journal: z.array(entrySchema).min(1).max(8), integrityHash: hash,
+  state: stateSchema, terminal: z.boolean(), createdAt: iso, updatedAt: iso, journal: z.array(entrySchema).min(1).max(WALLET_ALLOWANCE_REVOKE_JOURNAL_MAX), integrityHash: hash,
 });
 export type WalletAllowanceRevokeRecord = z.infer<typeof recordSchema>;
 export type WalletAllowanceRevokeTerms = WalletAllowanceRevokeRecord["terms"];
@@ -84,13 +89,14 @@ export function validateWalletAllowanceRevoke(value: unknown): WalletAllowanceRe
       record.journal[0]!.state !== "prepared" || record.journal[0]!.previousHash !== record.fingerprint || record.journal.at(-1)!.state !== record.state ||
       record.terms.priorAllowanceAtomic === "0" || record.terms.token === record.terms.spender) corrupt("The allowance revoke record does not bind itself.");
   record.journal.forEach((entry, index) => {
-    const { entryHash, ...rest } = entry;
-    if (hashObject(rest) !== entryHash || (index > 0 && (entry.previousHash !== record.journal[index - 1]!.entryHash ||
-        !EDGES[record.journal[index - 1]!.state].includes(entry.state)))) corrupt("The allowance revoke journal chain is broken.");
+    const { entryHash, ...rest } = entry, previous = record.journal[index - 1];
+    if (hashObject(rest) !== entryHash || (previous !== undefined && (entry.previousHash !== previous.entryHash || !EDGES[previous.state].includes(entry.state) ||
+        (previous.state === "submitted" && entry.state === "signed") !== (entry.reason === SEND_REFUSED_BEFORE_TRANSPORT)))) corrupt("The allowance revoke journal chain is broken.");
   });
   const passed = (state: WalletAllowanceRevokeState) => record.journal.some((entry) => entry.state === state);
   if ((record.signed !== null) !== passed("signed") || (record.submittedAt !== null) !== passed("submitted") ||
       (record.outcome !== null) !== ["completed", "reverted", "superseded"].includes(record.state) ||
+      (["completed", "reverted"].includes(record.state) && !passed("submitted")) ||
       (record.outcome?.kind === "never_lands") !== (record.state === "superseded")) corrupt("The allowance revoke fields disagree with its state.");
   return record;
 }

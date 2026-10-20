@@ -6,6 +6,7 @@ import { WALLET_ALLOWANCE_REVOKE_FAMILY, WALLET_ALLOWANCE_REVOKE_STORE, WALLET_A
 import { WalletAllowanceRevokeRepository } from "../../wallet-allowance/repository.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
+import { pastUnstartedDeadline } from "./family-claims.js";
 import { OPERATION_ABANDON, OPERATION_STATUS } from "./family-commands.js";
 
 const STORE: OperationStore = { directory: WALLET_ALLOWANCE_REVOKE_STORE, perProfile: false };
@@ -13,7 +14,10 @@ const STORE: OperationStore = { directory: WALLET_ALLOWANCE_REVOKE_STORE, perPro
 /**
  * The owner's revoke of one ERC-20 allowance of the local wallet: it holds the wallet on its chain from prepare until a
  * receipt at the chain's proof tag, the finalized never-lands proof, an unsigned expiry or the owner's abandon. Its status
- * is its observation (the chain's own APN_<CHAIN>_RPC_URL); it never signs or sends.
+ * is its observation (the chain's own APN_<CHAIN>_RPC_URL); it never signs or sends. A `prepared` revoke (never signed:
+ * execute writes `signed` only while its consent window holds, checked under the record lock) can never sign once that
+ * window plus the unstarted margin has passed, so it stops holding the wallet then, consented or not; its status records
+ * it `failed_before_effect`.
  */
 export const walletAllowanceRevokeAdapter: OperationFamilyAdapter<WalletAllowanceRevokeRecord> = {
   family: WALLET_ALLOWANCE_REVOKE_FAMILY,
@@ -21,7 +25,8 @@ export const walletAllowanceRevokeAdapter: OperationFamilyAdapter<WalletAllowanc
   async load(root, recordPath) { return await new WalletAllowanceRevokeRepository(root).find(requiredRecordPath(recordPath, STORE).operationId); },
   identity: standardIdentity,
   claims: (record) => readableClaims(() => domainClaims([evmConflictDomain(record.terms.chainId, record.terms.owner)])),
-  terminal: (record) => WALLET_ALLOWANCE_REVOKE_TERMINAL_STATES.includes(record.state),
+  terminal: (record) => WALLET_ALLOWANCE_REVOKE_TERMINAL_STATES.includes(record.state) ||
+    record.state === "prepared" && pastUnstartedDeadline(record.terms.expiresAt),
   state: (record) => record.state,
   salvage: (raw) => salvageRecord(raw, (value) => [salvageEvm(field(value, "terms", "chainId"), field(value, "terms", "owner"))]),
   view: async (record) => (await import("../../wallet-allowance/view.js")).publicWalletAllowanceRevoke(record),
