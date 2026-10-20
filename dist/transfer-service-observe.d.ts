@@ -43,6 +43,8 @@ export declare class TransferServiceObservation {
     recoverProviderRequest(operationIdInput: string, providerRequestId: string): Promise<unknown>;
     status(operationIdInput: string): Promise<unknown>;
     receipt(operationIdInput: string): Promise<unknown>;
+    /** A completed transfer's fee: recorded, or (records written before APN recorded it) its receipt-facts sidecar or one read. */
+    private actualFee;
     inspectReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord>;
     private observeReceipt;
     private classifyReceipt;

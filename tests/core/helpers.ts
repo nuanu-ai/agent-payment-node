@@ -268,6 +268,8 @@ export function exactReceipt(): RpcReceipt {
     blockNumberAtomic: "12350",
     observedAt: "2026-08-26T00:01:00.000Z",
     rpcOrigin: "https://rpc.example",
+    // Base: execution at the signed limit and max fee, plus the receipt's L1 data fee (the reader keeps these fields).
+    evmFeeFields: { gasUsed: "0xfde8", effectiveGasPrice: "0x77359400", l1Fee: "0x3e8" },
     logs: [{
       address: BASE_USDC,
       topics: [

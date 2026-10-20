@@ -161,6 +161,8 @@ export function publicOperation(operation: OperationRecord): unknown {
     ...(operation.evm === undefined ? {} : { asset: publicEvmAsset(operation.evm.asset), fee_budget: {
       max_fee_wei: operation.evm.maxFeeWei, enforcement: "pre_submission_quote", quote: operation.evm.feeQuote,
     }, ...publicEvmActualFee(operation.evmActualFee, operation.evm.asset, operation.amountAtomic, operation.state), policy: { identity: "apn.direct.foreground-approval.v1", chain: `eip155:${operation.chainId}`, asset: publicEvmAsset(operation.evm.asset), amount_atomic: operation.amountAtomic, foreground_approval_required: true } }),
+    // The Base USDC lane's local transfers report their actual fee too (null until proven).
+    ...(operation.evm !== undefined || operation.providerDirect !== undefined ? {} : publicEvmActualFee(operation.evmActualFee, undefined, operation.amountAtomic, operation.state)),
     ...(operation.allowlist === undefined ? {} : { allowlist: publicDirectAllowlist(operation.allowlist, operation.allowlistLease) }),
     wallet_address: operation.walletAddress,
     recipient: operation.recipient,
@@ -231,6 +233,7 @@ export function publicReceipt(receipt: ReceiptRecord): unknown {
   return {
     ...(receipt.evm === undefined ? {} : { asset: publicEvmAsset(receipt.evm.asset), amount_atomic: receipt.amountAtomic, fee_budget_wei: receipt.evm.maxFeeWei, ...(receipt.evm.feeQuote.feeModel === undefined ? {} : { fee_model: receipt.evm.feeQuote.feeModel }),
       ...publicEvmActualFee(receipt.evmActualFee, receipt.evm.asset, receipt.amountAtomic as string, receipt.state), chain_evidence: receipt.evmEvidence ?? null, finality: evmFinality }),
+    ...(receipt.evm !== undefined || receipt.evmActualFee === undefined ? {} : publicEvmActualFee(receipt.evmActualFee, undefined, "0", receipt.state)),
     operation_id: receipt.operationId,
     state: receipt.state,
     terminal: receipt.terminal,
