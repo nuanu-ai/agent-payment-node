@@ -3,6 +3,47 @@ import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../ev
 import { landedTokenCleanups } from "./token-operation.js";
 import { tokenBatch, tokenBlock, tokenQuantity } from "./token-rpc.js";
 /**
+ * The finalized chain's proof that no swap carrying any of `nonces` (a swap marker's, ascending) can land: a nonce a landed
+ * cleanup of this operation took is shown held by it (the cleanup at that nonce in a finalized block); every other nonce is
+ * shown unused by one read, the account's finalized nonce at or below the lowest of them at a block past the deadline.
+ * Null when either is not proven: the hold then stays.
+ */
+export async function proveSwapNoncesUnusable(op, nonces, reads) {
+    const landed = landedTokenCleanups(op), cleanups = [], open = [];
+    for (const nonce of nonces) {
+        const cleanup = landed.find((row) => row.nonce === nonce);
+        if (cleanup === undefined) {
+            open.push(nonce);
+            continue;
+        }
+        const held = await reads.swapNonceConsumed?.(op, cleanup) ?? null;
+        if (held === null)
+            return null;
+        cleanups.push({ swapNonce: nonce, cleanupTransactionHash: cleanup.transactionHash, cleanupBlockNumber: held.blockNumber,
+            cleanupBlockHash: held.blockHash, finalizedBlockNumber: held.finalizedBlockNumber, finalizedNonce: held.finalizedNonce });
+    }
+    const unused = open[0] === undefined ? null : await reads.swapNonceUnused?.(op, open[0]) ?? null;
+    return open.length > 0 && unused === null ? null : { swapNonces: [...nonces], cleanups, unused };
+}
+/**
+ * One primary batch, so one node answers both: the finalized block, then the account's nonce at the finalized tag. Proven
+ * only when that block's timestamp is past the route's deadline (the router refuses the swap in any later block) and the
+ * nonce is at or below `fromNonce` (nothing with it, or any higher nonce, was included up to that block). The block is
+ * asked first: a node whose finalized tag moves between the two answers can only answer the nonce at a later finalized
+ * block, whose nonce is no lower, so the proof still holds at the block read. No state is read at an old block.
+ */
+export async function readSwapNonceUnused(call, op, fromNonce) {
+    const [rawBlock, rawNonce] = await tokenBatch(call, "primary", [
+        { method: "eth_getBlockByNumber", params: ["finalized", false], cachePolicy: "none", decoder: tokenBlock },
+        { method: "eth_getTransactionCount", params: [op.account, "finalized"], cachePolicy: "none", decoder: tokenQuantity }
+    ]);
+    const block = evmRpcRecord(rawBlock), timestamp = evmRpcQuantity(block.timestamp), finalizedNonce = evmRpcQuantity(rawNonce);
+    if (timestamp <= BigInt(op.route.deadline) || finalizedNonce > BigInt(fromNonce))
+        return null;
+    return { fromNonce, finalizedNonce: finalizedNonce.toString(), finalizedBlockNumber: evmRpcQuantity(block.number).toString(),
+        finalizedBlockHash: evmRpcHex(block.hash, 32), finalizedBlockTimestamp: timestamp.toString() };
+}
+/**
  * How a cleaned swap whose principal is still held could prove that no swap of it can land: nothing to read when no swap
  * marker is left (never signed), the landed cleanup that reused a hashless swap marker's nonce otherwise; null when the
  * record holds no such proof (a bound or retired swap settles by its own observation, an unrelated nonce proves nothing).

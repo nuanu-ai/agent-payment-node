@@ -19,10 +19,13 @@ export const blockHash = (number: bigint) => `0x${"b".repeat(48)}${number.toStri
  */
 export function movingNode(input: { readonly account: string; readonly allowance: string; readonly pending: bigint }) {
   const node = { rpcNow: Date.now(), head: 1_000n, baseFee: 1n, allowance: input.allowance, allowanceAt: undefined as ((tag: string) => string | undefined) | undefined, pending: input.pending, finalizedNonce: 0n, finalizedLag: 64n,
+    /** Every block's timestamp (only the principal release's finalized read looks at it); a test sets the chain's time. */
+    blockTime: 0n,
     sends: [] as Hex[], txs: new Map<string, Record<string, unknown>>(), receipts: new Map<string, Record<string, unknown>>(), methods: [] as string[],
     hashes: new Map<bigint, string>(), calls: [] as unknown[][] };
   const hashOf = (number: bigint) => node.hashes.get(number) ?? blockHash(number);
-  const block = (number: bigint) => ({ number: hex(number), hash: hashOf(number), parentHash: hashOf(number - 1n), baseFeePerGas: hex(node.baseFee) });
+  const block = (number: bigint) => ({ number: hex(number), hash: hashOf(number), parentHash: hashOf(number - 1n), baseFeePerGas: hex(node.baseFee),
+    timestamp: hex(node.blockTime) });
   const value = (method: string, params: readonly unknown[]): unknown => {
     node.methods.push(method);
     if (method === "eth_chainId") return "0x1";

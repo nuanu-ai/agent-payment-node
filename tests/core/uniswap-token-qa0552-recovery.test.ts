@@ -133,12 +133,16 @@ test("867244e9…-shaped: a residual allowance takes one consented revoke at the
     op = await new UniswapTokenJournal(temporary.root).save(transitionUniswapToken(op, "submission_started", { swapAttempt: tokenAttempt(op, "swap", "10", now) }, now));
     assert.equal(await new UniswapTokenNonceStore(temporary.root).allocate(op, "swap", 10n), "10");
     now = new Date((op.route.deadline + 3_600) * 1000);
+    // The finalized chain, well past the deadline, holds only the approval (nonce 9): the freed marker's nonce 10 is unused.
+    chain.node.blockTime = BigInt(op.route.deadline + 3_000); chain.node.finalizedNonce = 10n;
     // Zero now (at the head, read pinned after the approval's block), while the approval's own block shows its allowance.
     if (!residual) chain.node.allowanceAt = (tag) => tag === "latest" || tag.includes("requireCanonical") ? "0" : undefined;
     op = await run(15).execute(op.operationId);
     if (!residual) {
       assert.deepEqual([op.phase, op.cleanupReason, op.usageState, op.principalRelease?.kind, chain.node.sends.length, await used()],
         ["cleaned", "zero_allowance_after_effect", "failed_before_effect", "swap_never_signed", 1, "0"]);
+      assert.deepEqual([op.freedSwapMarkers?.map((row) => row.nonce), op.principalRelease?.chainProof?.unused?.fromNonce,
+        op.principalRelease?.chainProof?.unused?.finalizedNonce], [["10"], "10", "10"]);
       continue;
     }
     assert.deepEqual([op.phase, op.cleanupReason, op.swapAttempt, op.usageState, chain.node.sends.length, await used()],
@@ -156,8 +160,13 @@ test("867244e9…-shaped: a residual allowance takes one consented revoke at the
     const revoke = parseTransaction(chain.node.sends[1]!);
     assert.deepEqual([revoke.nonce, revoke.to?.toLowerCase(), revoke.data], [10, UNISWAP_USDC.toLowerCase(), envelopeOf(op, "cleanup", "10").data]);
     chain.land(chain.node.sends[1]!, chain.node.head - 5n); chain.node.allowance = "0"; op = await run(11).status(op.operationId);
+    // Cleaned, but the revoke that took the freed nonce 10 is not final yet: the hold waits for the chain.
+    assert.deepEqual([op.phase, op.usageState, op.principalRelease, await used()], ["cleaned", "reserved", undefined, live.route.amountIn]);
+    chain.node.finalizedNonce = 11n; chain.node.finalizedLag = 1n; op = await run(11).status(op.operationId);
     assert.deepEqual([op.phase, op.usageState, op.principalRelease?.kind, op.accumulatedNativeDebitWei, await used(), chain.node.sends.length],
       ["cleaned", "failed_before_effect", "swap_never_signed", (BigInt(approvalGas) + 42_000n).toString(), "0", 2]);
+    assert.deepEqual(op.principalRelease?.chainProof?.cleanups.map((row) => [row.swapNonce, row.cleanupTransactionHash, row.finalizedNonce]),
+      [["10", op.cleanupAttempt?.transactionHash, "11"]]);
     assert.equal((await run(11).status(op.operationId)).integrityHash, op.integrityHash);
   }
 });
@@ -232,7 +241,11 @@ test("a new swap refused before signing, cleaned by one consented revoke, releas
   chain.node.baseFee = 1n; op = await run(14, "cleanup").cleanup(op.operationId);
   assert.deepEqual([op.phase, op.cleanupAttempt?.nonce, chain.node.sends.length], ["cleanup_submitted", "10", 2]);
   chain.land(chain.node.sends[1]!, chain.node.head - 5n); chain.node.allowance = "0"; op = await run(11).status(op.operationId);
+  // The refused swap's marker was freed at nonce 10, which the revoke took: the hold is released once that revoke is final.
+  assert.deepEqual([op.phase, op.usageState, op.principalRelease, op.freedSwapMarkers?.map((row) => row.nonce)], ["cleaned", "reserved", undefined, ["10"]]);
+  chain.node.finalizedNonce = 11n; chain.node.finalizedLag = 1n; op = await run(11).status(op.operationId);
   assert.deepEqual([op.phase, op.usageState, op.principalRelease?.kind, op.swapAttempt], ["cleaned", "failed_before_effect", "swap_never_signed", null]);
+  assert.deepEqual(op.principalRelease?.chainProof?.cleanups.map((row) => row.swapNonce), ["10"]);
   assert.equal(op.accumulatedNativeDebitWei, (BigInt(approvalGas) + 21_000n * 2n).toString(), "approval and cleanup gas stay charged");
   assert.deepEqual([await used(), chain.node.sends.length], ["0", 2]);
   const again = await run(11).status(op.operationId); assert.equal(again.integrityHash, op.integrityHash);

@@ -21,7 +21,9 @@ async function fixture(root: string, allowance = "0") {
     maximumNativeDebitWei: "600000", policyDigest: domainHash("p", "p"), mechanismDigest: domainHash("m", "m"), now: NOW }));
   const sends: TokenEffectKind[] = [], observations = new Map<string, TokenEffectObservation>(); let currentAllowance = allowance, currentNow = NOW,
     sendResult: "accepted" | "ambiguous" = "accepted", guardKind: TokenEffectKind | null = null, guardError: unknown = null, rejectSeal = false,
-    currentUsageState: AssetUsageState = "reserved", capacityCalls = 0, rejectCapacityAt = 0, failReleaseOnce = false, custodySigned = false;
+    currentUsageState: AssetUsageState = "reserved", capacityCalls = 0, rejectCapacityAt = 0, failReleaseOnce = false, custodySigned = false,
+    finalizedNonce: string | null = null;
+  const unusedReads: string[] = [];
   const released: string[] = [], committed: string[] = [], foregroundCalls: string[] = [];
   const ports = { now: () => currentNow, foregroundApprove: async () => { foregroundCalls.push("approve"); },
     foregroundCleanup: async () => { foregroundCalls.push("cleanup"); },
@@ -38,7 +40,11 @@ async function fixture(root: string, allowance = "0") {
     seal: async (_op: unknown, kind: TokenEffectKind) => { if (rejectSeal) throw new Error("sign failed"); return { transactionHash: kind === "approval" ? H("1") : kind === "swap" ? H("2") : H("3"), envelopeHash: "e".repeat(64) }; },
     probeSealed: async () => null,
     send: async (_op: unknown, kind: TokenEffectKind) => { sends.push(kind); return sendResult; },
-    observe: async (_op: unknown, _kind: TokenEffectKind, hash: string) => observations.get(hash) ?? null };
+    observe: async (_op: unknown, _kind: TokenEffectKind, hash: string) => observations.get(hash) ?? null,
+    // The finalized chain past the route's deadline (1_900_000_000): the account's nonce there, unused from it on unless a test says otherwise.
+    swapNonceUnused: async (_op: unknown, fromNonce: string) => { unusedReads.push(fromNonce); const nonce = finalizedNonce ?? fromNonce;
+      return BigInt(nonce) > BigInt(fromNonce) ? null : { fromNonce, finalizedNonce: nonce, finalizedBlockNumber: "100", finalizedBlockHash: H("f"),
+        finalizedBlockTimestamp: "1900000600" }; } };
   return { runtime: new UniswapTokenExecution(journal, ports), journal, operation, sends, observations,
     allowance: (v: string) => { currentAllowance = v; }, sendResult: (v: "accepted" | "ambiguous") => { sendResult = v; },
     /** The swap's signing guard (its revalidation at the signing block) refuses; approval and cleanup guards still pass. */
@@ -47,7 +53,9 @@ async function fixture(root: string, allowance = "0") {
     rejectCapacityOn: (call: number) => { rejectCapacityAt = call; },
     now: (value: Date) => { currentNow = value; }, failNextRelease: () => { failReleaseOnce = true; },
     /** Custody holds signed bytes the record has no hash for (a crash between wallet save and the public marker). */
-    custodySigned: () => { custodySigned = true; } };
+    custodySigned: () => { custodySigned = true; },
+    /** The account's nonce at the finalized tag (past the deadline); null: at the asked nonce, so it is unused. */
+    finalizedNonce: (value: string | null) => { finalizedNonce = value; }, unusedReads };
 }
 test("an expired route after a landed approval is cleaned only with no residual allowance; the hold is released with cleaned", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
@@ -282,11 +290,40 @@ test("zero allowance after a landed approval closes the swap without claiming no
   op = await f.runtime.execute(op.operationId); assert.equal(op.phase, "cleanup_required"); f.allowance("0");
   const persisted = await f.runtime.cleanup(op.operationId);
   assert.deepEqual([persisted.phase, persisted.cleanupReason, persisted.cleanupEvidence?.kind], ["cleaned", "zero_allowance_after_effect", "zero_allowance_after_effect"]);
-  // The swap's refused attempt left no marker (custody showed no signed bytes): its principal can never move, so the hold
-  // is released with that proof while the landed approval's gas and the zero-allowance evidence stay.
+  // The swap's refused attempt left no marker (custody showed no signed bytes), and the finalized chain shows its nonce 8
+  // unused past the deadline: its principal can never move, so the hold is released with that proof while the landed
+  // approval's gas and the zero-allowance evidence stay.
   assert.deepEqual([persisted.usageState, persisted.principalRelease?.kind, persisted.swapAttempt, persisted.accumulatedNativeDebitWei],
     ["failed_before_effect", "swap_never_signed", null, "100"]);
-  assert.deepEqual(f.sends, ["approval"]);
+  assert.deepEqual([persisted.freedSwapMarkers?.map((row) => row.nonce), persisted.principalRelease?.chainProof], [["8"], { swapNonces: ["8"], cleanups: [],
+    unused: { fromNonce: "8", finalizedNonce: "8", finalizedBlockNumber: "100", finalizedBlockHash: H("f"), finalizedBlockTimestamp: "1900000600" } }]);
+  assert.deepEqual([f.sends, f.unusedReads], [["approval"], ["8"]]);
+});
+test("a freed swap marker whose nonce the finalized chain shows taken keeps the principal held: local custody alone proves nothing", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); let op = await f.runtime.approve(f.operation.operationId);
+  f.observations.set(H("1"), { status: "success", transactionHash: H("1"), gasDebitWei: "100", allowanceAtomic: "1000000" }); f.allowance("1000000");
+  op = await f.runtime.execute(op.operationId); f.rejectRevalidation(); op = await f.runtime.execute(op.operationId); f.allowance("0");
+  f.finalizedNonce("9");
+  const held = await f.runtime.cleanup(op.operationId);
+  assert.deepEqual([held.phase, held.usageState, held.principalRelease, held.freedSwapMarkers?.map((row) => row.nonce)], ["cleaned", "reserved", undefined, ["8"]]);
+  assert.equal((await f.runtime.status(op.operationId)).integrityHash, held.integrityHash, "nothing to release until the chain proves it");
+  f.finalizedNonce(null);
+  const released = await f.runtime.status(op.operationId);
+  assert.deepEqual([released.usageState, released.principalRelease?.kind, released.principalRelease?.chainProof?.unused?.fromNonce],
+    ["failed_before_effect", "swap_never_signed", "8"]);
+  // A release of a record with a freed swap marker cannot be written without the chain's proof.
+  assert.throws(() => transitionUniswapToken(held, "cleaned", { principalRelease: { schemaVersion: "apn.uniswap-token-principal-release.v1",
+    kind: "swap_never_signed", observedAt: NOW.toISOString() } }, NOW), { code: "APN_STATE_CORRUPT" });
+});
+test("a no-effect cleanup with a freed swap marker keeps its hold until the finalized chain shows the marker's nonce unused", async (t) => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root, "1000000"); let op = await f.runtime.approve(f.operation.operationId);
+  assert.equal(op.phase, "approval_observed"); f.rejectRevalidation(); op = await f.runtime.execute(op.operationId);
+  assert.deepEqual([op.phase, op.swapAttempt, op.freedSwapMarkers?.map((row) => row.nonce)], ["cleanup_required", null, ["7"]]);
+  f.allowance("0"); f.finalizedNonce("8");
+  op = await f.runtime.cleanup(op.operationId);
+  assert.deepEqual([op.phase, op.cleanupReason, op.usageState, op.principalRelease], ["cleaned", "zero_allowance_no_effect", "reserved", undefined]);
+  f.finalizedNonce(null); op = await f.runtime.status(op.operationId);
+  assert.deepEqual([op.usageState, op.principalRelease?.kind, op.principalRelease?.chainProof?.unused?.fromNonce, f.sends], ["failed_before_effect", "swap_never_signed", "7", []]);
 });
 test("legacy terminal usage cannot prove no effect for a hashless marked attempt", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root); f.rejectGuard(); f.custodySigned();
