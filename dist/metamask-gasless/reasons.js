@@ -3,6 +3,10 @@ export const MM_REASON_CODES = {
     mm_gasless_input: "APN_INVALID_INPUT",
     mm_gasless_unsupported_chain: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
     mm_gasless_capability_unavailable: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+    /** MetaMask's relay network lists do not offer this chain (the refusal names which list). */
+    mm_gasless_relay_unsupported: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
+    /** MetaMask's fee quote answered without a token-fee list for this transfer: a provider answer, not a fault. */
+    mm_gasless_fee_unquoted: "APN_PROVIDER_CAPABILITY_UNAVAILABLE",
     mm_gasless_identity: "APN_PROFILE_DRIFT",
     mm_gasless_binding_changed: "APN_PROFILE_DRIFT",
     mm_gasless_session_unavailable: "APN_PROVIDER_SESSION_REQUIRED",
@@ -34,6 +38,8 @@ export const MM_REASON_CODES = {
     mm_gasless_provider_mfa_rejected: "APN_PROVIDER_EFFECT_UNAVAILABLE",
     mm_gasless_transaction_reverted: "APN_PROVIDER_EFFECT_UNAVAILABLE",
     mm_gasless_owner_abandoned: "APN_OPERATION_BLOCKED",
+    /** The delegator disabled the delegation on chain before any redemption: proved, no effect, nothing more can happen. */
+    mm_gasless_delegation_disabled: "APN_PROVIDER_EFFECT_UNAVAILABLE",
     mm_gasless_state_corrupt: "APN_STATE_CORRUPT",
     mm_gasless_state_security: "APN_STATE_SECURITY",
     mm_gasless_idempotency_conflict: "APN_IDEMPOTENCY_CONFLICT",

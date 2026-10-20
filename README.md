@@ -381,6 +381,7 @@ apn gasless balance --profile <profile> --chain <chain-id>
 apn gasless transfer quote --profile <profile> --chain 1 --owner <address> --to <address> --amount <gross-USDC> --max-fee <USDC> --min-received <USDC> --rpc-url <public-ethereum-rpc> [--rpc-max-batch-items <2-30>]
 apn gasless transfer prepare --profile <profile> --chain <chain-id> --to <address> (--amount <gross-USDC> --max-fee <USDC> --min-received <USDC> | --net-amount-atomic <net> --max-gross-atomic <gross-cap> --max-fee-atomic <fee-cap>) --idempotency-key <key>
 apn gasless transfer approve --operation <operation-id>
+apn gasless transfer revoke --operation <operation-id>
 apn gasless transfer approve-sealed --operation <operation-id>
 apn allowlist inventory
 apn allowlist resolve --chain <exact-network-identity> --kind <native|token> [--identifier <exact-token-identifier>]

@@ -69,7 +69,7 @@ test("gasless CLI and MCP project the same seven strict tools and canonical inpu
   assert.equal((requiredTool(tools, "apn_gasless_usdt_status").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
   assert.equal((requiredTool(tools, "apn_gasless_usdt_resume").inputSchema.properties.profile_hash as { pattern?: unknown }).pattern, "^[a-f0-9]{64}$");
   assert.deepEqual(projectMcpForegroundHandoff().commands.filter((command) => command.path[0] === "gasless").map((command) => command.path.join(" ")),
-    ["gasless transfer approve", "gasless transfer approve-sealed"]);
+    ["gasless transfer approve", "gasless transfer approve-sealed", "gasless transfer revoke"]);
 
   const input = prepareInput({ max_fee: "0", min_received: "10" });
   const cli = parseArgv(prepareArgv(input));
