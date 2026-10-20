@@ -36,7 +36,14 @@ export class BridgeService {
             },
         });
     }
-    async inventory() { return bridgeInventory(await this.dependencies().provider.inventory()); }
+    async inventory() {
+        try {
+            return bridgeInventory(await this.dependencies().provider.inventory());
+        }
+        catch (error) {
+            throw inventoryGuidance(error);
+        }
+    }
     async routes(profile, request) {
         return await this.preparation().routes(profile, request);
     }
@@ -118,5 +125,17 @@ export class BridgeService {
             return await work(current.record);
         }));
     }
+}
+/**
+ * Inventory is an anonymous read of the LI.FI public API: no wallet, profile or signature is involved, so an unanswered
+ * or refused read is retried as it is, never repaired by a wallet connect. The error itself is unchanged.
+ */
+function inventoryGuidance(error) {
+    if (!(error instanceof ApnError) || error.code !== "APN_PROVIDER_UNAVAILABLE")
+        return error;
+    return new ApnError(error.code, error.message, { ...error.details, nextActions: [
+            "Check network access to the LI.FI public API (https://li.quest/v1); this anonymous read uses no wallet or profile. Then rerun:",
+            "apn bridge inventory"
+        ] });
 }
 //# sourceMappingURL=service.js.map

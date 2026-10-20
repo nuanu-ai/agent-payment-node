@@ -53,7 +53,8 @@ export class MetaMaskGaslessObservationService {
             }
             catch (error) {
                 const classified = mmClassify(error, "mm_gasless_rpc_unavailable").reason;
-                if (classified === "mm_gasless_clock")
+                // A missing RPC setting observed nothing: the operation stays as it is and the error names the variable to set.
+                if (classified === "mm_gasless_clock" || classified === "mm_gasless_rpc_setting")
                     throw error;
                 const invalid = ["mm_gasless_rpc_binding", "mm_gasless_evidence_invalid"].includes(classified);
                 const reason = invalid ? classified : "mm_gasless_rpc_unavailable";

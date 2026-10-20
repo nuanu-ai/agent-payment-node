@@ -83,12 +83,13 @@ test("an ambiguous approval without a receipt stays open while the finalized non
   assert.deepEqual([f.chain.unlandedReads, f.sent.length], [reads, 1]);
 });
 
-test("status of a completed approval names the allowance it leaves, what spends it, and that APN has no revoke", async t => {
+test("status of a completed approval names the allowance it leaves, what spends it, and the revoke that clears it", async t => {
   const f = await setup(t); f.chain.ambiguous = false; f.chain.include = true;
   assert.equal((await f.execute()).phase, "completed");
   const done = await f.status();
   assert.deepEqual(done.allowance, { effect: "allowance_set", token, owner: account.address, spender, approvedAtomic: "430000", observedAtCompletionAtomic: "430000",
-    spentBy: "apn circle source submit", revoke: "none_in_apn: the allowance stays until a Circle source transfer spends it or another approve from this wallet replaces it" });
+    spentBy: "apn circle source submit", revoke: "apn circle approval revoke --profile test --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> " +
+      "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>" });
   assert.equal(f.chain.unlandedReads, 0);
 });
 

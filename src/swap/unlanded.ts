@@ -2,7 +2,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonica
 import { ApnError } from "../errors.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import { evmRpcBlock, evmRpcHex, evmRpcQuantity } from "../evm-rpc-codec.js";
-import { rpcArray, rpcAtomic, rpcRecord, solanaSignature, type SolanaRpcPort } from "../solana/rpc.js";
+import { readSolanaBlockHeight, rpcArray, rpcAtomic, rpcRecord, solanaSignature, type SolanaRpcPort } from "../solana/rpc.js";
 import type { SwapOperationRecord } from "./model.js";
 
 export const SWAP_UNLANDED_PROOF_SCHEMA = "apn.swap-expired-unlanded-proof.v1" as const;
@@ -56,10 +56,11 @@ export function swapUnlandedProofHash(operation: SwapOperationRecord, proof: Swa
  * the signature (when one was ever persisted) has no status with full history. The height is read first: a signature
  * persisted afterwards can only be sent into an expired lifetime. Two reads at most.
  */
-export async function proveSolanaUnlanded(rpc: Pick<SolanaRpcPort, "call">, input: { readonly lastValidBlockHeight: string;
+export async function proveSolanaUnlanded(rpc: Pick<SolanaRpcPort, "call" | "batch">, input: { readonly lastValidBlockHeight: string;
   readonly loadSignature: () => Promise<string | null> }): Promise<SwapUnlandedProof | null> {
   const lastValid = BigInt(input.lastValidBlockHeight);
-  const finalized = rpcAtomic(await rpc.call("getBlockHeight", [{ commitment: "finalized" }]));
+  // Checked against the finalized latest blockhash read in the same request: a slot answered as a height is refused.
+  const finalized = await readSolanaBlockHeight(rpc, "finalized");
   if (finalized <= lastValid) return null;
   const signature = await input.loadSignature();
   if (signature !== null) {

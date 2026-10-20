@@ -5,7 +5,8 @@ import { BridgeHttps } from "./lifi/https.js";
  * and first transaction (block data, never a whole body). No state is read at an old block (P1), so any keyless public
  * endpoint answers them.
  */
-export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getBlockByNumber" | "eth_getBlockTransactionCountByNumber" | "eth_getTransactionByBlockNumberAndIndex" | "eth_getBlockTransactionCountByHash" | "eth_getTransactionByBlockHashAndIndex";
+export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getBlockByNumber" | "eth_getBlockTransactionCountByNumber" | "eth_getTransactionByBlockNumberAndIndex" | "eth_getBlockTransactionCountByHash" | "eth_getTransactionByBlockHashAndIndex" | 
+/** Current state at the finalized tag only (a residual allowance), never state at an old block. */ "eth_call";
 export interface FinalizedChainRead {
     call(method: FinalizedReadMethod, params: readonly unknown[]): Promise<unknown>;
 }

@@ -13,7 +13,8 @@ import { parseRpcBatchResultEnvelope, parseRpcResultEnvelope } from "./rpc-envel
  */
 export type FinalizedReadMethod = "eth_chainId" | "eth_getTransactionCount" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" |
   "eth_getBlockByNumber" | "eth_getBlockTransactionCountByNumber" | "eth_getTransactionByBlockNumberAndIndex" |
-  "eth_getBlockTransactionCountByHash" | "eth_getTransactionByBlockHashAndIndex";
+  "eth_getBlockTransactionCountByHash" | "eth_getTransactionByBlockHashAndIndex" |
+  /** Current state at the finalized tag only (a residual allowance), never state at an old block. */ "eth_call";
 export interface FinalizedChainRead { call(method: FinalizedReadMethod, params: readonly unknown[]): Promise<unknown> }
 export interface FinalizedReadCall { readonly method: FinalizedReadMethod; readonly params: readonly unknown[] }
 /** One JSON-RPC batch: one POST, so one node answers every call in it. */
