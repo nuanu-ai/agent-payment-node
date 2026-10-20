@@ -26,6 +26,8 @@ export class RuntimeContext {
     orcaRuntime;
     /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
     orcaStableLegacy;
+    /** Solana x402 ports for the generic operation commands that delegate to `x402.solana.observe`. */
+    x402Solana;
     jupiterV1Runtime;
     facilitatorGasless;
     smartAccountGasless;
@@ -112,6 +114,8 @@ export class RuntimeContext {
             this.orcaRuntime = dependencies.orcaRuntime;
         if (dependencies.orcaStableLegacy !== undefined)
             this.orcaStableLegacy = dependencies.orcaStableLegacy;
+        if (dependencies.x402Solana !== undefined)
+            this.x402Solana = dependencies.x402Solana;
         if (dependencies.jupiterV1Runtime !== undefined)
             this.jupiterV1Runtime = dependencies.jupiterV1Runtime;
         if (dependencies.facilitatorGasless !== undefined)

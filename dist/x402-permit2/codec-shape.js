@@ -2,16 +2,17 @@ import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { planPermit2Authorization } from "./authorization.js";
 import { selectPermit2Offer } from "./offer.js";
+import { wirePermit2Asset } from "./registry.js";
 const UINT256 = (1n << 256n) - 1n;
 const ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const HALF_ORDER = ORDER >> 1n;
-/** Strict pinned Permit2 wire shape only; this boundary neither signs nor admits a payment. */
+/** Strict Permit2 wire shape only; this boundary neither signs nor admits a payment (the operation's frozen offer does). */
 export function validatePermit2PaymentPayload(value) {
     try {
         validate(value);
     }
     catch {
-        throw new ApnError("APN_HTTP_PROTOCOL", "PAYMENT-SIGNATURE pinned Permit2 shape is invalid.");
+        throw new ApnError("APN_HTTP_PROTOCOL", "PAYMENT-SIGNATURE Permit2 shape is invalid.");
     }
 }
 function validate(value) {
@@ -38,7 +39,7 @@ function validate(value) {
         invalid();
     if (typeof authorization.from !== "string")
         invalid();
-    const selection = selectPermit2Offer([wire.accepted], authorization.from);
+    const selection = selectPermit2Offer([wire.accepted], authorization.from, wirePermit2Asset);
     const nonce = uint(authorization.nonce), deadline = uint(authorization.deadline);
     const signingSecond = deadline - BigInt(selection.maxTimeoutSeconds);
     if (signingSecond < 1n || signingSecond > BigInt(Number.MAX_SAFE_INTEGER))

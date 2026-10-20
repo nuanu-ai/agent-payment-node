@@ -1,10 +1,10 @@
 import { exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { attributePermit2DirectTransaction, permit2FactHash, permit2FactQuantity, snapshotPermit2DirectTransaction } from "./production-proxy-call.js";
+import { attributePermit2DirectTransaction, permit2ChainQuantity, permit2FactHash, permit2FactQuantity, snapshotPermit2DirectTransaction } from "./production-proxy-call.js";
 import { ERC20_TRANSFER_TOPIC, PROXY_SETTLED_TOPIC, PROXY_SETTLED_WITH_PERMIT_TOPIC } from "./registry.js";
 /** Exact projected receipt facts. Never a settlement/failure finalizer or a chain-finality proof. */
 export async function inspectPermit2ProductionReceipt(record, signed, transaction, value) {
-    transaction = snapshotPermit2DirectTransaction(transaction);
+    transaction = snapshotPermit2DirectTransaction(transaction, permit2ChainQuantity(record));
     const receipt = snapshotReceipt(value);
     const attribution = await attributePermit2DirectTransaction(record, signed, transaction);
     if (receipt.transactionHash !== attribution.transactionHash || receipt.blockHash !== attribution.blockHash ||

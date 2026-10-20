@@ -165,7 +165,7 @@ export declare function publicMerchant(o: MerchantOperation): {
     feeRule?: "apn.merchant-mega-fee.v1" | "apn.merchant-mega-fee.v2";
     kind: "merchant_x402";
     operationId: string;
-    state: "unknown_finality" | "abandoned_unknown" | "failed_before_effect" | "failed_proven_superseded" | "prepared" | "signing_started" | "submission_started" | "reverted" | "payment_finalized" | "delivery_unknown" | "delivered" | "retired_unsent" | "delivery_failed";
+    state: "prepared" | "signing_started" | "submission_started" | "reverted" | "unknown_finality" | "failed_before_effect" | "abandoned_unknown" | "payment_finalized" | "delivery_unknown" | "delivered" | "retired_unsent" | "failed_proven_superseded" | "delivery_failed";
     terminal: boolean;
     mechanism: string;
     provider: {

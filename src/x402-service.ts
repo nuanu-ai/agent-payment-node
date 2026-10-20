@@ -1,5 +1,5 @@
-import { assertLocalNetworkProfile, x402Network } from "./x402-network.js";
-import { assertX402RpcChain, selectX402Rpc } from "./x402-service-rpc.js";
+import { assertLocalNetworkProfile, isBaseUsdc, releasedX402Pair, x402Asset, x402AssetOf } from "./x402-network.js";
+import { assertX402RpcChain, requireX402Rpc, selectX402Rpc } from "./x402-service-rpc.js";
 import { randomBytes } from "node:crypto";
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import type { CommandRequest } from "./commands.js";
@@ -15,14 +15,8 @@ import {
   requireProfilePolicy,
   x402PayeeAdmittedOffers,
 } from "./profile-policy.js";
-import {
-  candidatesWithinCap,
-  canonicalPrepareUrl,
-  freshChallenge,
-  paymentIdentifierState,
-  positiveCap,
-  selectPrepareOffer,
-} from "./x402-policy.js";
+import { candidatesWithinCap, canonicalPrepareUrl, freshChallenge, positiveCap } from "./x402-policy.js";
+import { readAndSelectX402Offer, x402PaymentIdentifier } from "./x402-prepare-select.js";
 import {
   appendX402Transition,
   publicX402Operation,
@@ -64,11 +58,11 @@ export class X402Service extends X402PaidRequest {
   }
 
   async prepare(request: X402PrepareRequest): Promise<unknown> {
-    const network = x402Network(request.chainId);
-    await assertLocalNetworkProfile(this.context, request.profile, network.chainId);
+    const network = x402Asset(request.chainId ?? 8453, request.asset);
+    await assertLocalNetworkProfile(this.context, request.profile, network);
     const httpRequest = optionalX402HttpRequest(request.url, request.httpRequest);
     const requestFields = httpRequest === undefined ? {} : { httpRequest };
-    if (network.chainId === 8453 && await this.providerX402.canHandle(request.profile)) return await this.providerX402.prepare(request);
+    if (isBaseUsdc(network) && await this.providerX402.canHandle(request.profile)) return await this.providerX402.prepare(request);
     const profile = canonicalProfile(request.profile);
     const idempotencyKey = canonicalIdempotencyKey(request.idempotencyKey);
     const callerCap = request.maxAmountAtomic === undefined ? undefined : positiveCap(request.maxAmountAtomic);
@@ -88,7 +82,7 @@ export class X402Service extends X402PaidRequest {
       const provisionalCap = callerCap === undefined
         ? existingAtExpectedId?.capAtomic ?? "0"
         : callerCap;
-      const provisionalRequestHash = x402RequestHash({ profile, canonicalUrl, capAtomic: provisionalCap, chainId: network.chainId, ...requestFields });
+      const provisionalRequestHash = x402RequestHash({ profile, canonicalUrl, capAtomic: provisionalCap, chainId: network.chainId, token: network.token, ...requestFields });
       const existing = await this.operations.resolvePrepare({
         kind: "x402_fetch",
         profileHash,
@@ -97,12 +91,12 @@ export class X402Service extends X402PaidRequest {
         requestHash: provisionalRequestHash,
       });
       if (existing !== null) return publicX402Operation(existing.record as X402OperationRecord);
-      const payer = await resolveX402Payer(this.context, profileHash, network.chainId);
+      const payer = await resolveX402Payer(this.context, profileHash, network);
       const profilePolicy = requireProfilePolicy(
         await this.context.requirePolicy().load(payer.policy),
       );
       const capAtomic = effectiveX402Cap(profilePolicy, callerCap);
-      const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic, chainId: network.chainId, ...requestFields });
+      const requestHash = x402RequestHash({ profile, canonicalUrl, capAtomic, chainId: network.chainId, token: network.token, ...requestFields });
       // The account claim is written before the seller challenge and any RPC read, and dropped if no operation is written.
       // EIP-3009 uses its own random nonce: purchases share the account, but nonce and EIP-7702 spenders still exclude them.
       return await this.operations.admit({ kind: "x402_fetch", profileHash, operationId, idempotencyHash, requestHash },
@@ -110,8 +104,8 @@ export class X402Service extends X402PaidRequest {
           : evmConflictDomain(network.chainId, payer.wallet)] }, async () => {
       const wallet = payer.wallet;
       const http = this.context.requireHttp();
-      const rpc = selectX402Rpc(this.context.requireRpc(), network.chainId);
-      const discovered = await freshChallenge(http, canonicalUrl, httpRequest, network.chainId);
+      const rpc = selectX402Rpc(requireX402Rpc(this.context, network), network);
+      const discovered = await freshChallenge(http, canonicalUrl, httpRequest, network);
       // The owner's optional payee pin narrows the offers before selection (checked again before signing and the first send).
       const underCap = x402PayeeAdmittedOffers(profilePolicy, candidatesWithinCap(discovered, capAtomic));
       const createdAtDate = new Date(Math.floor(this.context.clock.now().getTime() / 1000) * 1000);
@@ -119,14 +113,13 @@ export class X402Service extends X402PaidRequest {
       const createdAtUnix = Math.floor(createdAtDate.getTime() / 1000).toString();
       const invocationStartedAtMs = this.context.clock.now().getTime();
       const chain = await assertX402RpcChain(rpc, network.chainId);
-      const evidence = await rpc.getX402PrepareEvidence(wallet);
-      const invocationCompletedAtMs = this.context.clock.now().getTime();
-      const selected = selectPrepareOffer(discovered, underCap, evidence, wallet, {
-        rpcOriginHash: sha256(chain.rpcOrigin),
-        invocationStartedAtMs,
-        invocationCompletedAtMs,
-      }, payer.transferMethod);
-      assertUnattendedX402Balance(profilePolicy, evidence.usdcAtomic);
+      // The authorization nonce is drawn first: prepare proves it reads unused (EIP-3009 state or Permit2 nonce bit).
+      const nonce = `0x${randomBytes(32).toString("hex")}` as `0x${string}`;
+      const evidence = await readAndSelectX402Offer({ profile, rpc, rpcOrigin: chain.rpcOrigin, discovered, underCap, wallet, asset: network,
+        transferMethod: payer.transferMethod, permit2Signer: payer.providerSigner === undefined && payer.delegated === undefined, nonce,
+        startedAtMs: invocationStartedAtMs, nowMs: () => this.context.clock.now().getTime() });
+      const selected = evidence.selected;
+      assertUnattendedX402Balance(profilePolicy, evidence.balanceAtomic);
       const delegatedMaterial = payer.delegated === undefined ? undefined : await payer.delegated.port.prepare({
         profile,
         profileHash,
@@ -147,7 +140,7 @@ export class X402Service extends X402PaidRequest {
         maxTimeoutSeconds: selected.maxTimeoutSeconds,
         rpcOriginHash: sha256(chain.rpcOrigin),
       });
-      const paymentIdentifier = paymentIdentifierState(discovered.paymentRequired, operationId);
+      const paymentIdentifier = x402PaymentIdentifier(discovered.paymentRequired, operationId, selected.selectedOffer.resolved.assetTransferMethod);
       const resourceCanonicalJson = canonicalJson(discovered.paymentRequired.resource);
       const authorizationBase = {
         from: wallet,
@@ -156,7 +149,7 @@ export class X402Service extends X402PaidRequest {
         validAfter: "0" as const,
         validBefore: delegatedMaterial?.effectiveExpiryUnix ??
           (BigInt(createdAtUnix) + BigInt(selected.maxTimeoutSeconds)).toString(),
-        nonce: `0x${randomBytes(32).toString("hex")}` as `0x${string}`,
+        nonce,
         createdAt: createdAtUnix,
       };
       const resource = {
@@ -210,6 +203,8 @@ export class X402Service extends X402PaidRequest {
         amountAtomic: selected.amountAtomic,
         capAtomic,
         selectedOffer: selected.selectedOffer,
+        ...(releasedX402Pair(network.chainId, network.token) || evidence.decimals === undefined ? {}
+          : { tokenFacts: { decimals: evidence.decimals, proofTag: network.proofTag } }),
         ...(payer.providerSigner === undefined ? {} : { providerSigner: payer.providerSigner }),
         ...(delegatedMaterial === undefined ? {} : { delegatedMaterial }),
         preparedBlock: {
@@ -278,7 +273,7 @@ export class X402Service extends X402PaidRequest {
       }
       const remaining = remainingWaitMs(deadline as number, this.context.wait.nowMs());
       if (remaining < 1) return waitTimeout(waitSeconds, 0);
-      const waitRpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Network(found.record.network).chainId);
+      const waitRpc = boundedX402ReadPort(requireX402Rpc(this.context, x402AssetOf(found.record)), Math.min(20_000, remaining), x402AssetOf(found.record));
       try { await assertWaitRpcProvenance(waitRpc, found.record); }
       catch (error) {
         if (remainingWaitMs(deadline as number, this.context.wait.nowMs()) < 1) return waitTimeout(waitSeconds, 0);
@@ -335,12 +330,12 @@ export class X402Service extends X402PaidRequest {
       if (operation.terminal) return publicX402Operation(operation);
       const expiredUnexposed = await this.closeExpiredUnexposed(operation);
       if (expiredUnexposed !== null) return publicX402Operation(expiredUnexposed);
-      const rpc = this.context.requireRpc();
+      const rpc = requireX402Rpc(this.context, x402AssetOf(operation));
       const rpcRemaining = deadline === undefined ? undefined : remainingWaitMs(deadline, this.context.wait.nowMs());
       if (rpcRemaining !== undefined && rpcRemaining < 1) return publicX402Operation(operation);
       const x402Rpc = rpcRemaining === undefined
-        ? x402ReadPort(rpc, x402Network(operation.network).chainId)
-        : boundedX402ReadPort(rpc, Math.min(20_000, rpcRemaining), x402Network(operation.network).chainId);
+        ? x402ReadPort(rpc, x402AssetOf(operation))
+        : boundedX402ReadPort(rpc, Math.min(20_000, rpcRemaining), x402AssetOf(operation));
       let verified: X402SealedPaymentMaterial | undefined;
       let unusedAtSafe = false;
       try {
@@ -401,7 +396,7 @@ export class X402Service extends X402PaidRequest {
       // One resend of the byte-identical header after an ambiguous attempt, only while the nonce reads unused at safe.
       const paymentAttemptCount = operation.attempts.filter((attempt) => attempt.purpose === "payment").length;
       if (
-        operation.selectedOffer.resolved.assetTransferMethod === "eip3009" &&
+        operation.selectedOffer.resolved.assetTransferMethod !== "erc7710" &&
         operation.transactionHint === undefined && operation.settlementResponseObservation === undefined &&
         operation.settlementEvidence === undefined && operation.unusedExpiryEvidence === undefined && operation.resultLink === undefined &&
         unusedAtSafe && paymentAttemptCount === 1 && operation.attempts.length === 1 &&
@@ -453,7 +448,7 @@ export class X402Service extends X402PaidRequest {
       if (next.terminal) return publicX402Operation(next);
       const remaining = remainingWaitMs(deadline, this.context.wait.nowMs());
       if (remaining < 1) return publicX402Operation(next);
-      const x402Rpc = boundedX402ReadPort(this.context.requireRpc(), Math.min(20_000, remaining), x402Network(next.network).chainId);
+      const x402Rpc = boundedX402ReadPort(requireX402Rpc(this.context, x402AssetOf(next)), Math.min(20_000, remaining), x402AssetOf(next));
       try {
         next = (await reconcileX402Method(x402Rpc, this.context.clock, {
           persist: async (value) => await this.context.state.writeX402Operation(value),

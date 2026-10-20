@@ -6,10 +6,11 @@ APN accepts a nonempty, schema-valid x402 v2 offer list within its existing
 a supported offer; selection retains the offer's original index and exact
 requirements rather than rewriting the merchant challenge.
 
-The selected offer still has to match the selected network, canonical asset,
-supported payment mechanism, token domain, timeout, balance and explicit
-amount/policy caps. A larger list does not enable arbitrary x402 tokens,
-Gateway, credit bundles, SIWX or additional wallet-provider capabilities.
+The selected offer still has to match the selected network and owner-admitted
+asset, supported payment mechanism, on-chain token domain, timeout, balance and
+explicit amount/policy caps ([any seller](x402-any-seller.md)). A larger list does
+not enable unadmitted tokens, Gateway, credit bundles, SIWX or additional
+wallet-provider capabilities.
 Unknown optional extensions are not authorization to execute their protocols.
 
 Durable records retain the selected index, exact requirement and existing

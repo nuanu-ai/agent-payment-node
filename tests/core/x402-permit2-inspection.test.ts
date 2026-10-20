@@ -33,8 +33,11 @@ test("inspection retains canonical refusal reasons for unsupported offers", () =
   assert.throws(() => inspectPermit2Offer({ accepts: [], payer }), (error: unknown) =>
     error instanceof ApnError && error.code === "APN_X402_UNSUPPORTED_OFFER" && error.details?.reason === "x402_permit2_no_listed_offer");
 
-  assert.throws(() => inspectPermit2Offer({ accepts: [accepts[2]!], payer }), (error: unknown) =>
-    error instanceof ApnError && error.code === "APN_X402_UNSUPPORTED_OFFER" && error.details?.reason === "x402_permit2_facilitator_unavailable");
+  assert.throws(() => inspectPermit2Offer({ accepts: [accepts[0]!, accepts[3]!], payer }), (error: unknown) =>
+    error instanceof ApnError && error.code === "APN_X402_UNSUPPORTED_OFFER" && error.details?.reason === "x402_permit2_no_listed_offer");
+  // No network or token is blocked by a table any more: Ethereum USDT is a Permit2 offer like any other, payable once the
+  // owner admits it for Permit2 (whether the seller's facilitator settles is the seller's; an unsettled one expires unused).
+  assert.equal(inspectPermit2Offer({ accepts: [accepts[2]!], payer }).network, "eip155:1");
 });
 
 test("inspection keeps invalid payer refusal before any offer output", () => {

@@ -1,7 +1,7 @@
 import { COMMANDS } from "./command-catalog.js";
 import { cliHandoffDetails, createCliHandoff } from "./cli-handoff.js";
 import { ApnError } from "./errors.js";
-import { x402Network } from "./x402-network.js";
+import { x402Asset, x402Chain, X402_SOLANA_POLICY_NETWORK } from "./x402-network.js";
 import { X402_PAYEES_UNRESTRICTED, canonicalX402Payees } from "./profile-policy.js";
 export class RejectingMcpPolicyApproval {
     request;
@@ -12,8 +12,9 @@ export class RejectingMcpPolicyApproval {
     }
     async approve(intent) {
         if (intent.profile !== this.request.profile ||
-            (intent.x402Network?.chainId ?? 8453) !== (this.request.chainId ?? 8453) ||
-            (intent.x402Network !== undefined && intent.x402Network.token !== x402Network(this.request.chainId).token) ||
+            (intent.x402Solana?.mint ?? null) !== (this.request.solanaMint ?? null) ||
+            (this.request.solanaMint === undefined && (intent.x402Network?.chainId ?? 8453) !== (this.request.chainId ?? 8453)) ||
+            (intent.x402Network !== undefined && intent.x402Network.token !== x402Asset(this.request.chainId ?? 8453, this.request.asset).token) ||
             intent.maxBalanceUsdcAtomic !== this.request.maxBalanceUsdcAtomic ||
             intent.maxX402AmountAtomic !== this.request.maxX402AmountAtomic ||
             (this.request.maxBalanceEthWei !== undefined && intent.maxBalanceEthWei !== this.request.maxBalanceEthWei) ||
@@ -28,7 +29,8 @@ function policyHandoff(request) {
     if (definition === undefined)
         throw new ApnError("APN_INTERNAL", "The policy command is absent from the command manifest.");
     const values = {
-        "--chain": request.chainId === undefined ? undefined : x402Network(request.chainId).network,
+        "--chain": request.solanaMint !== undefined ? X402_SOLANA_POLICY_NETWORK : request.chainId === undefined ? undefined : `eip155:${x402Chain(request.chainId)}`,
+        "--asset": request.solanaMint ?? request.asset,
         "--profile": request.profile,
         "--max-balance-usdc-atomic": request.maxBalanceUsdcAtomic,
         "--max-x402-amount-atomic": request.maxX402AmountAtomic,

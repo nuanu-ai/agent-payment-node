@@ -1,6 +1,7 @@
 export { parseRpcResultEnvelope, parseRpcBatchResultEnvelope, parseRpcLogEnvelope, classifyX402LogAvailabilityMessage, acceptRpcHttpBody } from "./rpc-envelope.js";
 export { isPublicIp } from "./network-policy.js";
-import type { EvmChainId } from "./evm-asset.js";
+import { type X402Asset } from "./x402-network.js";
+import { type X402Permit2PrepareEvidence } from "./x402-permit2-rpc.js";
 import { EvmRpc } from "./evm-rpc.js";
 import type { StateStore } from "./state.js";
 import type { Address, Hex } from "./model.js";
@@ -16,7 +17,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private sequence;
     private readonly observationCounters;
     get observationMetrics(): Readonly<import("./rpc-observation-metrics.js").RpcObservationCounters>;
-    private readonly x402ChainId;
+    /** The x402 network and token every x402 read of this instance binds; none unless the caller selected one. */
+    private readonly x402;
     private pinnedAddresses;
     /** One eth_chainId per command invocation and endpoint, shared by every bounded or network-selected copy. */
     private chainIdCell;
@@ -26,10 +28,12 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     private readonly directGuardState;
     constructor(endpoint: string, options?: {
         readonly totalDeadlineMs?: number;
-        readonly x402ChainId?: EvmChainId;
+        readonly x402Asset?: X402Asset;
         readonly abortSignal?: AbortSignal;
         readonly directGuardState?: StateStore;
     });
+    /** The selected x402 asset; an instance built without one (direct transfers, relays, Permit2 reads) answers no x402 read. */
+    private bound;
     /** The first arm of an invocation sets its cap; direct EVM steps pass the cap derived from their read plan. */
     armEvmDirectRpcGuard(maxPhysicalRequests?: number): void;
     /** Relay uses a single cancellation signal for all POSTs in one execute invocation. */
@@ -37,9 +41,9 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     /** Resolve and validate public addresses before a caller reserves a physical POST start. */
     primePublicAddresses(): Promise<void>;
     withTotalTimeout(milliseconds: number): X402RpcPort;
-    forX402Network(chainId: EvmChainId): HttpsBaseRpc;
-    assertX402Chain(chainId: EvmChainId): Promise<{
-        readonly chainId: EvmChainId;
+    forX402Network(chainId: number, token?: Address): HttpsBaseRpc;
+    assertX402Chain(chainId: number): Promise<{
+        readonly chainId: number;
         readonly rpcOrigin: string;
     }>;
     /** Proven once per instance (its IP is pinned); later Base reads in the same invocation do not re-ask. */
@@ -49,11 +53,20 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
     }>;
     private endpointChainId;
     getBalances(address: Address): Promise<BalanceSnapshot>;
-    getX402PrepareEvidence(address: Address): Promise<X402PrepareEvidence>;
+    /**
+     * One header at the asset's proof tag, then one batch pinned to it (EIP-1898, no header recheck): balance and
+     * DOMAIN_SEPARATOR; for a token outside the released USDC pairs also decimals() and authorizationState(payer, nonce)
+     * of the fresh nonce, which proves the EIP-3009 state the settlement proof reads exists and answers.
+     */
+    getX402PrepareEvidence(address: Address, nonce?: Hex): Promise<X402PrepareEvidence>;
     getX402Head(tag: "safe" | "finalized"): Promise<X402RpcHead>;
     getX402Block(number: string): Promise<X402RpcBlock>;
     getX402Receipt(transactionHash: Hex): Promise<X402RpcReceipt | null>;
     getX402AuthorizationState(authorizer: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState>;
+    /** Prepare evidence of a Permit2 offer for this instance's asset (src/x402-permit2-rpc.ts). */
+    getX402Permit2PrepareEvidence(address: Address, nonce: Hex, permitNeeded: (allowanceAtomic: string) => boolean): Promise<X402Permit2PrepareEvidence>;
+    /** Permit2's nonce bit, read like `getX402AuthorizationState` at a tag's or a number's block. */
+    getX402Permit2NonceState(owner: Address, nonce: Hex, block: X402BlockReference): Promise<X402AuthorizationState>;
     getX402AuthorizationUsedLogs(input: {
         readonly authorizer: Address;
         readonly nonce: Hex;

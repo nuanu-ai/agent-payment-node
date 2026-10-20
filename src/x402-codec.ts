@@ -1,5 +1,4 @@
-import { x402Network, type X402Network } from "./x402-network.js";
-import type { EvmChainId } from "./evm-asset.js";
+import { isBaseUsdc, releasedX402Pair, x402Asset, type X402Asset, type X402Network } from "./x402-network.js";
 import {
   decodePaymentRequiredHeader as decodeOfficialPaymentRequiredHeader,
   decodePaymentResponseHeader as decodeOfficialPaymentResponseHeader,
@@ -15,6 +14,7 @@ import type { InspectCandidate } from "./x402-model.js";
 import { MAX_DECODED_X402_BYTES, decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
 import { isEip2612GasSponsoringDeclaration } from "./x402-permit2/extension.js";
 import { validatePermit2PaymentPayload } from "./x402-permit2/codec-shape.js";
+import { isSolanaAccepted, validateSolanaPaymentPayload } from "./x402-solana/codec.js";
 
 export type X402PaymentPayload = PaymentPayload;
 export type X402PaymentRequired = PaymentRequired;
@@ -122,7 +122,7 @@ export interface DecodedPaymentResponse {
 
 export function decodeAndNormalizePaymentResponseHeader(
   value: string,
-  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network | "eip155:43114" },
+  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network },
 ): DecodedPaymentResponse {
   try { return decodeAndNormalizePaymentResponseHeaderUnsafe(value, expected); }
   catch (error) {
@@ -133,7 +133,7 @@ export function decodeAndNormalizePaymentResponseHeader(
 
 function decodeAndNormalizePaymentResponseHeaderUnsafe(
   value: string,
-  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network | "eip155:43114" },
+  expected: { readonly payer: string; readonly amountAtomic: string; readonly network?: X402Network },
 ): DecodedPaymentResponse {
   const strict = decodeCanonicalBase64Json(value);
   const response = record(strict, "PAYMENT-RESPONSE");
@@ -206,18 +206,18 @@ function decodeAndNormalizePaymentResponseHeaderUnsafe(
   };
 }
 
-export function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, chainId: EvmChainId = 8453): readonly InspectCandidate[] {
+/** Offers of exactly the selected network and token (a bare chain id: its released USDC); others are skipped, never repaired. */
+export function inspectCandidates(paymentRequired: PaymentRequired, requestedUrl: string, asset: X402Asset): readonly InspectCandidate[] {
   if (paymentRequired.x402Version !== 2 || !resourceMatches(paymentRequired.resource.url, requestedUrl)) return [];
   const output: InspectCandidate[] = [];
   paymentRequired.accepts.forEach((requirements, index) => {
-    const candidate = inspectCandidate(requirements, index, chainId);
+    const candidate = inspectCandidate(requirements, index, asset);
     if (candidate !== null) output.push(candidate);
   });
   return output;
 }
 
-function inspectCandidate(requirements: PaymentRequirements, index: number, chainId: EvmChainId = 8453): InspectCandidate | null {
-  const selected = x402Network(chainId);
+function inspectCandidate(requirements: PaymentRequirements, index: number, selected: X402Asset): InspectCandidate | null {
   const extra = requirements.extra;
   if (
     requirements.scheme !== "exact" || requirements.network !== selected.network ||
@@ -238,8 +238,17 @@ function inspectCandidate(requirements: PaymentRequirements, index: number, chai
     offerHash: domainHash("apn.x402.offer.v1", declaredCanonicalJson),
     readiness: READINESS,
   };
+  if (extra.assetTransferMethod === "permit2") {
+    // Exactly the foreground Permit2 lane's offer shape: the method alone, or with the token's EIP-712 name and version.
+    const hinted = exactKeys(extra, ["assetTransferMethod", "name", "version"]);
+    if (!exactKeys(extra, ["assetTransferMethod"]) && !(hinted && typeof extra.name === "string" && extra.name.length > 0 &&
+      Buffer.byteLength(extra.name, "utf8") <= 128 && typeof extra.version === "string" && extra.version.length > 0 &&
+      Buffer.byteLength(extra.version, "utf8") <= 128)) return null;
+    return { ...base, assetTransferMethod: "permit2", paymentFlow: "permit2WitnessTransfer",
+      ...(hinted ? { tokenName: extra.name as string, tokenVersion: extra.version as string } : {}) };
+  }
   if (extra.assetTransferMethod === "erc7710") {
-    if (chainId !== 8453) return null;
+    if (!isBaseUsdc(selected)) return null;
     const facilitatorAddresses = canonicalErc7710Facilitators(extra);
     if (facilitatorAddresses === null) return null;
     return {
@@ -254,7 +263,9 @@ function inspectCandidate(requirements: PaymentRequirements, index: number, chai
     Buffer.byteLength(extra.name, "utf8") > 128 ||
     typeof extra.version !== "string" || extra.version.length === 0 ||
     Buffer.byteLength(extra.version, "utf8") > 128 ||
-    (extra.decimals !== undefined && extra.decimals !== 6) ||
+    // A declared decimals hint must be USDC's 6 on the released pairs; elsewhere prepare compares it with the token's own.
+    (extra.decimals !== undefined && (releasedX402Pair(selected.chainId, selected.token) ? extra.decimals !== 6
+      : typeof extra.decimals !== "number" || !Number.isSafeInteger(extra.decimals) || extra.decimals < 0 || extra.decimals > 255)) ||
     (extra.assetTransferMethod !== undefined && extra.assetTransferMethod !== "eip3009") ||
     (extra.paymentFlow !== undefined && extra.paymentFlow !== "authorization")
   ) return null;
@@ -288,9 +299,14 @@ function validatePaymentPayload(value: unknown): asserts value is PaymentPayload
   if (paymentPayload.x402Version !== 2) throw protocol("Only x402Version 2 PaymentPayload is supported.");
   validateResource(paymentPayload.resource);
   validateRequirements(paymentPayload.accepted);
+  if (isSolanaAccepted(paymentPayload.accepted)) return validateSolanaPaymentPayload(paymentPayload);
   const accepted = paymentPayload.accepted as PaymentRequirements;
-  const candidate = inspectCandidate(accepted, 0, x402Network(accepted.network).chainId);
+  let acceptedAsset: X402Asset;
+  try { acceptedAsset = x402Asset(accepted.network, accepted.asset); }
+  catch { throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported."); }
+  const candidate = inspectCandidate(accepted, 0, acceptedAsset);
   if (candidate === null) throw protocol("PAYMENT-SIGNATURE accepted requirements are unsupported.");
+  if (candidate.assetTransferMethod === "permit2") return validatePermit2PaymentPayload(value);
   const payload = record(paymentPayload.payload, "exact-EVM payload");
   if (candidate.assetTransferMethod === "erc7710") {
     if (!isStrictErc7710Payload(payload)) throw protocol("PAYMENT-SIGNATURE ERC-7710 payload shape is invalid.");

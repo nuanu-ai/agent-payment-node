@@ -47,8 +47,9 @@ export interface Permit2CheckedReadPort extends Permit2PrepareReadPort {
 }
 /**
  * Production read adapter for the existing unsigned prepare boundary. It never creates an operation or reservation.
- * Two POSTs: chain id with the finalized header, then balance, allowance, token domain, EIP-2612 nonce, the Permit2
- * nonce word and both pinned runtime codes in one batch pinned by EIP-1898 {blockHash, requireCanonical}. No facilitator
- * read gates it: the seller picks the facilitator, and one that cannot settle leaves the signature to expire unused.
+ * Two POSTs: chain id with the latest header, then balance, allowance, the Permit2 nonce word and both runtime codes in
+ * one batch pinned by EIP-1898 {blockHash, requireCanonical}; a third pinned POST (token domain, EIP-2612 nonce) only for
+ * a sponsored permit. No facilitator read gates it: the seller picks the facilitator, and one that cannot settle leaves
+ * the signature to expire unused.
  */
 export declare function createPermit2ProductionReadPort(options: Permit2ProductionReadOptions): Permit2CheckedReadPort;

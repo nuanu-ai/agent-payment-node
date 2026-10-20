@@ -13,7 +13,7 @@ import * as mcpRuntime from "../../src/mcp-server.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { normalizeX402HttpRequest } from "../../src/x402-http-request.js";
-import { x402Network } from "../../src/x402-network.js";
+import { x402Network, x402Asset } from "../../src/x402-network.js";
 import type { EvmChainId } from "../../src/evm-asset.js";
 import type { X402OperationRecord } from "../../src/x402-state-integrity.js";
 import { testRuntime } from "./installed-runtime.js";
@@ -59,15 +59,15 @@ test("the original schema-valid Quicknode21 response preserves all offers and or
   assert.deepEqual(decoded.accepts, quicknode.accepts);
   assert.deepEqual(decoded.resource, quicknode.resource);
   assert.equal(decoded.extensions, undefined);
-  const candidates = inspectCandidates(decoded, quicknode.resource!.url, 8453);
+  const candidates = inspectCandidates(decoded, quicknode.resource!.url, x402Asset(8453));
   assert.equal(candidates.length, 2);
   assert.deepEqual(candidates.map(candidate => candidate.amountAtomic).sort(), ["1000", "10000000"]);
   assert.ok(candidates.every(candidate => candidate.assetTransferMethod === "eip3009"));
   for (const candidate of candidates) {
     assert.equal(candidate.offerHash, domainHash("apn.x402.offer.v1", canonicalJson(quicknode.accepts[Number(candidate.index)])));
   }
-  assert.deepEqual(inspectCandidates(decoded, quicknode.resource!.url, 1), []);
-  assert.deepEqual(inspectCandidates(decoded, quicknode.resource!.url, 42161), []);
+  assert.deepEqual(inspectCandidates(decoded, quicknode.resource!.url, x402Asset(1)), []);
+  assert.deepEqual(inspectCandidates(decoded, quicknode.resource!.url, x402Asset(42161)), []);
 });
 
 for (const index of [16, 20, 63, 99]) {
@@ -76,7 +76,7 @@ for (const index of [16, 20, 63, 99]) {
     assert.ok(Buffer.byteLength(JSON.stringify(challenge)) < 48 * 1024);
     const decoded = decodePaymentRequiredHeader(encodeCanonicalBase64Json(challenge));
     assert.equal(decoded.accepts.length, index + 1);
-    const candidates = inspectCandidates(decoded, X402_URL, 1);
+    const candidates = inspectCandidates(decoded, X402_URL, x402Asset(1));
     assert.equal(candidates.length, 1);
     assert.equal(candidates[0]?.index, String(index));
     assert.equal(candidates[0]?.offerHash, domainHash("apn.x402.offer.v1", canonicalJson(challenge.accepts[index])));
@@ -97,8 +97,9 @@ test("larger lists retain byte, schema, supported-mechanism and selected-network
     extra: { ...X402_REQUIREMENTS.extra, assetTransferMethod: "permit2" },
   });
   const decoded = decodePaymentRequiredHeader(encodeCanonicalBase64Json(challenge));
-  assert.deepEqual(inspectCandidates(decoded, X402_URL, 1).map(candidate => candidate.index), ["20"]);
-  assert.deepEqual(inspectCandidates(decoded, X402_URL, 8453), []);
+  // The same token's Permit2 offer is a candidate of its own method; EIP-3009 is still paid first when both are offered.
+  assert.deepEqual(inspectCandidates(decoded, X402_URL, x402Asset(1)).map(candidate => [candidate.index, candidate.assetTransferMethod]), [["20", "eip3009"], ["21", "permit2"]]);
+  assert.deepEqual(inspectCandidates(decoded, X402_URL, x402Asset(8453)), []);
 });
 
 for (const chainId of [8453, 1, 42161] as const) {

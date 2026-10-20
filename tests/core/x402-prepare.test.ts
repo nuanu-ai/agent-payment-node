@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { x402Asset } from "../../src/x402-network.js";
 import { access, mkdir, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -461,7 +462,7 @@ test("prepare binds current-invocation safe evidence without inventing a block-a
 });
 
 test("production prepare reads chain ID once, one safe header and one batch pinned to its hash", async (t) => {
-  const rpc = new HttpsBaseRpc("https://rpc.example");
+  const rpc = new HttpsBaseRpc("https://rpc.example", { x402Asset: x402Asset(8453) });
   const hash = `0x${"b".repeat(64)}`;
   const posts: string[] = [];
   const calls: [string, readonly unknown[]][] = [];
@@ -471,7 +472,7 @@ test("production prepare reads chain ID once, one safe header and one batch pinn
     if (method === "eth_getBlockByNumber") return { number: "0x3039", hash, timestamp: "0x6a91d200" };
     const data = (params[0] as { readonly data?: string }).data;
     if (data?.startsWith("0x70a08231")) return encodeAbiParameters([{ type: "uint256" }], [50_000_000n]);
-    if (data === "0x3644e515") return encodeAbiParameters([{ type: "bytes32" }], [tokenDomainSeparator("USD Coin", "2")]);
+    if (data === "0x3644e515") return encodeAbiParameters([{ type: "bytes32" }], [tokenDomainSeparator("USD Coin", "2", x402Asset(8453))]);
     throw new Error(`unexpected RPC read ${method} ${String(data)}`);
   };
   type Batch = readonly { method: string; params: readonly unknown[] }[];
@@ -486,7 +487,7 @@ test("production prepare reads chain ID once, one safe header and one batch pinn
   const evidence = await rpc.getX402PrepareEvidence(WALLET);
   await rpc.assertBaseChain();
   assert.deepEqual(posts, ["eth_chainId", "eth_getBlockByNumber", "batch"], "chain ID once, safe header and one pinned batch: 3 POSTs (was 8)");
-  assert.equal(evidence.usdcAtomic, "50000000"); assert.equal(evidence.domainSeparator, tokenDomainSeparator("USD Coin", "2"));
+  assert.equal(evidence.usdcAtomic, "50000000"); assert.equal(evidence.domainSeparator, tokenDomainSeparator("USD Coin", "2", x402Asset(8453)));
   assert.deepEqual(evidence.block, { number: "12345", hash, timestamp: String(0x6a91d200) });
   const pinned = { blockHash: hash, requireCanonical: true };
   assert.deepEqual(calls.filter(([method]) => method === "eth_call").map(([, params]) => params[1]), [pinned, pinned]);
@@ -497,7 +498,7 @@ test("production prepare reads chain ID once, one safe header and one batch pinn
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative() }));
-  const refused = new HttpsBaseRpc("https://rpc.example");
+  const refused = new HttpsBaseRpc("https://rpc.example", { x402Asset: x402Asset(8453) });
   wire(refused, async () => { throw new ApnError("APN_RPC_PROTOCOL", "header not found or not canonical"); });
   const failed = await makeCore({ root: temporary.root, rpc: refused, http: challenge() }).execute({ ...PREPARE_REQUEST, idempotencyKey: "pinned-002" });
   assert.equal(failed.error?.code, "APN_RPC_PROTOCOL");

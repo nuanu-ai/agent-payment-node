@@ -1,5 +1,5 @@
 import { canonicalJson, domainHash, isPlainRecord, sha256 } from "./canonical.js";
-import { validX402Tuple, x402Network } from "./x402-network.js";
+import { isBaseUsdc, releasedX402Pair, validX402Tuple, x402ProofTag } from "./x402-network.js";
 import { parseAtomic } from "./money.js";
 import { MAX_DECODED_X402_BYTES } from "./x402-strict-json.js";
 import { frozenOfferTimeout } from "./x402-frozen-offer.js";
@@ -18,7 +18,7 @@ export function validateX402OperationUnsafe(value) {
         "proofClass", "nextActions", "createdAt", "updatedAt", "transitions", "integrityHash",
     ];
     const optional = [
-        "paymentIdentifier", "providerSigner", "delegatedMaterial", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "paymentContextHash", "settlementResponseObservation",
+        "paymentIdentifier", "tokenFacts", "providerSigner", "delegatedMaterial", "signatureHash", "paymentPayloadHash", "paymentHeaderHash", "paymentContextHash", "settlementResponseObservation",
         "transactionHint", "authorizationUsedScan", "settlementEvidence", "unusedExpiryEvidence", "resultLink", "receiptLink",
     ];
     allowedKeys(operation, required, optional);
@@ -36,8 +36,14 @@ export function validateX402OperationUnsafe(value) {
     hash(sellerWire.resourceHash);
     if (sellerWire.resourceHash !== domainHash("apn.x402.resource.v1", sellerWire.resourceCanonicalJson))
         stateCorrupt("x402 seller resource hash is invalid.");
-    if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (operation.chainId !== "8453" && (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined)))
+    if (!validX402Tuple(operation.chainId, operation.network, operation.token) || (!isBaseUsdc({ chainId: Number(operation.chainId), token: String(operation.token) }) &&
+        (operation.providerSigner !== undefined || operation.delegatedMaterial !== undefined)))
         stateCorrupt("x402 chain or token binding is invalid.");
+    // Released USDC records carry no token facts; every other token carries its on-chain decimals and the frozen proof tag.
+    if (releasedX402Pair(operation.chainId, operation.token) ? operation.tokenFacts !== undefined
+        : !validTokenFacts(operation.tokenFacts, Number(operation.chainId))) {
+        stateCorrupt("x402 token facts are invalid.");
+    }
     address(operation.wallet);
     address(operation.payee);
     const amount = parseAtomic(operation.amountAtomic, { positive: true });
@@ -52,8 +58,14 @@ export function validateX402OperationUnsafe(value) {
     const resolvedRecord = record(selectedOffer.resolved);
     const resolved = resolvedRecord.assetTransferMethod === "erc7710"
         ? exactRecord(resolvedRecord, ["assetTransferMethod", "paymentFlow", "facilitatorAddresses"])
-        : exactRecord(resolvedRecord, ["tokenName", "tokenVersion", "assetTransferMethod", "paymentFlow"]);
-    if (resolved.assetTransferMethod === "erc7710") {
+        : resolvedRecord.assetTransferMethod === "permit2" ? exactRecord(resolvedRecord, ["assetTransferMethod", "paymentFlow", "eip2612"])
+            : exactRecord(resolvedRecord, ["tokenName", "tokenVersion", "assetTransferMethod", "paymentFlow"]);
+    if (resolved.assetTransferMethod === "permit2") {
+        if (resolved.paymentFlow !== "permit2WitnessTransfer" || !validPermit2Sponsorship(resolved.eip2612) ||
+            operation.providerSigner !== undefined || operation.paymentIdentifier !== undefined)
+            stateCorrupt("x402 Permit2 resolved offer is invalid.");
+    }
+    else if (resolved.assetTransferMethod === "erc7710") {
         if (resolved.paymentFlow !== "delegatedErc20Transfer" || !Array.isArray(resolved.facilitatorAddresses) ||
             resolved.facilitatorAddresses.length === 0 || resolved.facilitatorAddresses.length > 16 ||
             new Set(resolved.facilitatorAddresses).size !== resolved.facilitatorAddresses.length) {
@@ -136,7 +148,7 @@ export function validateX402OperationUnsafe(value) {
     hash(authorization.intentHash);
     if (authorization.from !== operation.wallet || authorization.to !== operation.payee || authorization.value !== operation.amountAtomic ||
         authorization.validAfter !== "0" ||
-        (resolved.assetTransferMethod === "eip3009"
+        (resolved.assetTransferMethod !== "erc7710"
             ? BigInt(authorization.validBefore) !== BigInt(authorization.createdAt) + maxTimeoutSeconds
             : BigInt(authorization.validBefore) !== BigInt(operation.delegatedMaterial === undefined ? "0" : String(record(operation.delegatedMaterial).effectiveExpiryUnix)) ||
                 BigInt(authorization.validBefore) > BigInt(authorization.createdAt) + maxTimeoutSeconds))
@@ -195,7 +207,7 @@ export function validateX402OperationUnsafe(value) {
         stateCorrupt("x402 transition timestamps do not bind the operation summary.");
     }
     const typed = operation;
-    if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic, chainId: x402Network(typed.network).chainId,
+    if (typed.requestHash !== x402RequestHash({ profile: typed.profile, canonicalUrl: typed.resource.canonicalUrl, capAtomic: typed.capAtomic, chainId: Number(typed.chainId), token: typed.token,
         ...(resource.httpRequest === undefined ? {} : { httpRequest: resource.httpRequest }) }))
         stateCorrupt("x402 request hash is invalid.");
     if (typed.fingerprint !== x402Fingerprint(typed))
@@ -394,5 +406,24 @@ export function validateStateSummary(operation, evidence) {
             evidence.transactionHint.transactionHash !== candidate.transactionHash)
             stateCorrupt("x402 authorization-used transaction hint is not a completed full-range unique scan proof.");
     }
+}
+/** The proof tag must be the one the chain's stack prescribes (a record can never weaken its own proof). */
+function validTokenFacts(value, chainId) {
+    if (typeof value !== "object" || value === null || Array.isArray(value))
+        return false;
+    const facts = value;
+    return Object.keys(facts).length === 2 && Number.isSafeInteger(facts.decimals) && facts.decimals >= 0 &&
+        facts.decimals <= 255 && facts.proofTag === x402ProofTag(chainId);
+}
+/** A Permit2 operation's sponsored permit: null, or the token's non-empty EIP-712 name/version and a canonical permit nonce. */
+function validPermit2Sponsorship(value) {
+    if (value === null)
+        return true;
+    if (typeof value !== "object" || Array.isArray(value))
+        return false;
+    const permit = value;
+    return Object.keys(permit).length === 3 && typeof permit.tokenName === "string" && permit.tokenName.length > 0 &&
+        typeof permit.tokenVersion === "string" && permit.tokenVersion.length > 0 &&
+        typeof permit.nonce === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(permit.nonce);
 }
 //# sourceMappingURL=x402-operation-validation.js.map

@@ -12,7 +12,7 @@ export async function inspectCheckedPermit2Challenge(http, request, payer) {
             // The existing inspector validates exactly one control header before this value is consumed.
             header = observed.rawHeaderPairs.find(([name]) => name.toLowerCase() === "payment-required")?.[1];
             return observed;
-        } }, exact.url, exact, undefined, payer);
+        } }, exact.url, exact, null, payer);
     if (header === undefined)
         throw new ApnError("APN_HTTP_PROTOCOL", "Checked challenge header is missing.");
     return checkPermit2Challenge(decodePaymentRequiredHeader(header), exact);

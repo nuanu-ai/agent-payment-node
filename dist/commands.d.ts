@@ -1,6 +1,6 @@
 import type { CircleFundingParameters } from "./circle-v2-evm/funding-binding.js";
 import type { Address } from "./model.js";
-import type { EvmAssetSelection, EvmChainId } from "./evm-asset.js";
+import type { EvmAssetSelection } from "./evm-asset.js";
 import type { ErrorDetails } from "./errors.js";
 import type { X402HttpRequestV1 } from "./x402-http-request.js";
 import type { ChainProvider } from "./direct-rail-ports.js";
@@ -88,6 +88,29 @@ export type CommandRequest = {
 } | {
     readonly command: "x402.permit2.status";
     readonly profile: string;
+    readonly operationId: string;
+} | {
+    readonly command: "x402.solana.pay";
+    readonly profile: string;
+    readonly url: string;
+    readonly mint: string;
+    readonly maxAmountAtomic: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "x402.solana.observe" | "x402.solana.status";
+    readonly operationId: string;
+} | {
+    readonly command: "x402.permit2.allowance.set" | "x402.permit2.allowance.revoke";
+    readonly profile: string;
+    readonly chainId: number;
+    readonly token: Address;
+    readonly amountAtomic: string;
+    readonly maxGasLimit: string;
+    readonly maxFeePerGasWei: string;
+    readonly maxPriorityFeePerGasWei: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "x402.permit2.allowance.observe" | "x402.permit2.allowance.status";
     readonly operationId: string;
 } | {
     readonly command: "relay.prepare";
@@ -556,12 +579,18 @@ export type CommandRequest = {
 } | {
     readonly command: "wallet.policy.show";
     readonly profile: string;
-    readonly chainId?: EvmChainId;
+    readonly chainId?: number;
+    readonly asset?: Address;
+    readonly solanaMint?: string;
 } | {
     readonly command: "wallet.policy.set";
     /** Omitted keeps the current x402 payee pin; null removes it; a list sets it. */
     readonly x402Payees?: readonly string[] | null;
-    readonly chainId?: EvmChainId;
+    readonly chainId?: number;
+    /** The x402 token the policy admits; omitted means the released USDC of the chain (Base, Ethereum, Arbitrum). */
+    readonly asset?: Address;
+    /** Solana x402 (`--chain solana:5eykt4…`): the SPL mint whose balance and per-request caps this policy sets. */
+    readonly solanaMint?: string;
     readonly profile: string;
     readonly maxBalanceUsdcAtomic: string;
     readonly maxX402AmountAtomic: string;
@@ -570,11 +599,13 @@ export type CommandRequest = {
     readonly command: "x402.inspect";
     readonly url: string;
     readonly httpRequest?: X402HttpRequestV1;
-    readonly chainId?: EvmChainId;
+    readonly chainId?: number;
+    readonly asset?: Address;
     readonly payer?: Address;
 } | {
     readonly command: "x402.fetch.prepare";
-    readonly chainId?: EvmChainId;
+    readonly chainId?: number;
+    readonly asset?: Address;
     readonly httpRequest?: X402HttpRequestV1;
     readonly profile: string;
     readonly url: string;

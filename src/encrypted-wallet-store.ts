@@ -47,6 +47,8 @@ export interface X402EffectMaterial {
   readonly authorization: Readonly<Record<string, string>>;
   readonly signature: Hex;
   readonly signatureHash: string;
+  /** Permit2 witness transfers only: the seller-sponsored exact-amount EIP-2612 permit to Permit2. */
+  readonly eip2612Signature?: Hex;
 }
 
 export interface WalletSecretState {
@@ -283,7 +285,9 @@ function parseX402Effects(value: unknown): Record<string, X402EffectMaterial> {
   for (const [slot, item] of Object.entries(value)) {
     if (
       !HASH.test(slot) || !isPlainRecord(item) ||
-      !exactKeys(item, ["createPayloadHash", "recoveryBindingHash", "authorization", "signature", "signatureHash"]) ||
+      !exactKeys(item, ["createPayloadHash", "recoveryBindingHash", "authorization", "signature", "signatureHash",
+        ...(item.eip2612Signature === undefined ? [] : ["eip2612Signature"])]) ||
+      item.eip2612Signature !== undefined && (typeof item.eip2612Signature !== "string" || !SIGNATURE.test(item.eip2612Signature)) ||
       typeof item.createPayloadHash !== "string" || !HASH.test(item.createPayloadHash) ||
       typeof item.recoveryBindingHash !== "string" || !HASH.test(item.recoveryBindingHash) ||
       typeof item.signature !== "string" || !SIGNATURE.test(item.signature) ||

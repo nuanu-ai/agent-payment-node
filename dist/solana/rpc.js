@@ -70,7 +70,7 @@ export class SolanaRpcBudget {
 }
 const READ_METHODS = new Set([
     "getGenesisHash", "getMultipleAccounts", "getAccountInfo", "getLatestBlockhash", "getBlockHeight", "getFeeForMessage",
-    "getMinimumBalanceForRentExemption", "getSignatureStatuses", "getTransaction", "getBlock",
+    "getMinimumBalanceForRentExemption", "getSignatureStatuses", "getTransaction", "getBlock", "getSignaturesForAddress",
 ]);
 /** Preserve input order for test/alternate ports that do not expose JSON-RPC batch. */
 export async function solanaReadBatch(rpc, reads) {

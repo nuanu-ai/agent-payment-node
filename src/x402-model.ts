@@ -64,7 +64,15 @@ export interface Erc7710InspectCandidate extends InspectCandidateBase {
   readonly facilitatorAddresses: readonly string[];
 }
 
-export type InspectCandidate = Eip3009InspectCandidate | Erc7710InspectCandidate;
+/** A Permit2 witness-transfer offer; `tokenName`/`tokenVersion` only when the seller hints the token's EIP-712 domain. */
+export interface Permit2InspectCandidate extends InspectCandidateBase {
+  readonly assetTransferMethod: "permit2";
+  readonly paymentFlow: "permit2WitnessTransfer";
+  readonly tokenName?: string;
+  readonly tokenVersion?: string;
+}
+
+export type InspectCandidate = Eip3009InspectCandidate | Erc7710InspectCandidate | Permit2InspectCandidate;
 
 export interface InspectResult {
   readonly kind: "x402_inspection";

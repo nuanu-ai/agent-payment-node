@@ -3,11 +3,14 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical
 import { ApnError } from "./errors.js";
 import { encodePaymentSignatureHeader } from "./x402-codec.js";
 import { materializePaymentIdentifier } from "./x402-policy.js";
+import { verifyX402Permit2Material, x402Permit2NativeRequest } from "./x402-permit2-native.js";
 const SIGNATURE = /^0x[0-9a-f]{130}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
 const SECP256K1_ORDER = 0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141n;
 const SECP256K1_HALF_ORDER = 0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0n;
 export function x402NativeRequest(requestId, operation, kind) {
+    if (operation.selectedOffer.resolved.assetTransferMethod === "permit2")
+        return x402Permit2NativeRequest(requestId, operation, kind);
     const payload = kind === "create"
         ? x402NativeCreatePayload(operation)
         : x402NativeRecoveryPayload(operation, operation.signatureHash);
@@ -71,6 +74,8 @@ export async function requestX402Authorization(native, request, operation) {
     return await verifyAndConstructX402PaymentMaterial(await native.request(request), operation);
 }
 export async function verifyAndConstructX402PaymentMaterial(value, operation) {
+    if (operation.selectedOffer.resolved.assetTransferMethod === "permit2")
+        return await verifyX402Permit2Material(value, operation);
     const resolved = eip3009Resolved(operation);
     const native = parseNativeMaterial(value);
     if (canonicalJson(native.authorization) !== canonicalJson(publicAuthorization(operation))) {

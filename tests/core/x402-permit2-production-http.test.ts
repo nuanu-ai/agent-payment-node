@@ -9,7 +9,6 @@ import { setImmediate as nextTurn } from "node:timers/promises";
 import { StateStore } from "../../src/state.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
 import { walletCustodyLock } from "../../src/encrypted-wallet-store.js";
-import { HttpsX402Http } from "../../src/x402-http.js";
 import { Permit2ProductionSigningFence } from "../../src/x402-permit2/production-signing-fence.js";
 import { Permit2ProductionJournal } from "../../src/x402-permit2/production-journal.js";
 import { sendPermit2Production } from "../../src/x402-permit2/production-send.js";
@@ -73,11 +72,12 @@ test("actual paid first grant sends exactly stored request/header once only afte
   assert.deepEqual([f.keys(), f.signatures(), f.batches.length], before); await held(f); await resend(f); assert.equal(mock.requests.length, 1);
 });
 
-test("a changed origin cannot mark or send; the generic transport still rejects Permit2", async t => {
-  const f = await first(t), mock = wire(t), saved = (await f.records.findOperation(f.id))!, origin = f.signed.origin, other = "f".repeat(64);
+// Since 0.5.53 the generic x402 transport carries Permit2 PAYMENT-SIGNATURE headers for `x402 fetch`; the production
+// lane's single request stays bound to its own journal, fence and approval, which is what this test proves.
+test("a changed origin cannot mark or send", async t => {
+  const f = await first(t), mock = wire(t), origin = f.signed.origin, other = "f".repeat(64);
   for (const changed of [{ ...origin, signedHash: other }, { ...origin, leaseDigest: other }, { ...origin, approval: { ...origin.approval, completedAt: 0 } }])
     await assert.rejects(sendPermit2Production(f.journal, f.fence, changed, f.now));
-  await assert.rejects(new HttpsX402Http().get({ url: saved.material.checked.request.url, paymentSignature: saved.exposureJournal!.signed!.paymentSignatureHeader }));
   assert.equal(mock.requests.length, 0); assert.equal(mock.calls(), 0); assert.equal((await f.records.findOperation(f.id))!.exposureJournal!.request, null);
 });
 for (const binding of ["id", "root", "fence"] as const) test(`wrong ${binding} refuses before the marker without HTTPS`, async t => {

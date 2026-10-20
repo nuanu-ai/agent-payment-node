@@ -42,7 +42,7 @@ export declare class CircleFundingEvmService {
         external_destination_fee_payer?: `0x${string}`;
         operation_id: string;
         kind: string;
-        state: "completed" | "abandoned_unknown" | "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled";
+        state: "awaiting_source" | "source_unknown" | "awaiting_mint" | "mint_unknown" | "awaiting_finality" | "cleanup_required" | "completed" | "cleaned" | "cancelled_unsubmitted" | "external_fulfilled" | "abandoned_unknown";
         terminal: boolean;
         source_profile: string;
         destination_profile: string;

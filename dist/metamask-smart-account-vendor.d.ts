@@ -21,11 +21,11 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     [x: `bytes18[${string}]`]: undefined;
     [x: `bytes6[${string}]`]: undefined;
     [x: `bytes11[${string}]`]: undefined;
-    [x: `bytes8[${string}]`]: undefined;
     [x: `bytes15[${string}]`]: undefined;
     [x: `bytes22[${string}]`]: undefined;
     [x: `bytes5[${string}]`]: undefined;
     [x: `bytes7[${string}]`]: undefined;
+    [x: `bytes8[${string}]`]: undefined;
     [x: `bytes9[${string}]`]: undefined;
     [x: `bytes13[${string}]`]: undefined;
     [x: `bytes14[${string}]`]: undefined;
@@ -47,8 +47,8 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     [x: `int64[${string}]`]: undefined;
     [x: `int256[${string}]`]: undefined;
     [x: `int56[${string}]`]: undefined;
-    [x: `int8[${string}]`]: undefined;
     [x: `int40[${string}]`]: undefined;
+    [x: `int8[${string}]`]: undefined;
     [x: `int24[${string}]`]: undefined;
     [x: `int48[${string}]`]: undefined;
     [x: `int72[${string}]`]: undefined;
@@ -78,8 +78,8 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     [x: `uint16[${string}]`]: undefined;
     [x: `uint64[${string}]`]: undefined;
     [x: `uint56[${string}]`]: undefined;
-    [x: `uint8[${string}]`]: undefined;
     [x: `uint40[${string}]`]: undefined;
+    [x: `uint8[${string}]`]: undefined;
     [x: `uint24[${string}]`]: undefined;
     [x: `uint48[${string}]`]: undefined;
     [x: `uint72[${string}]`]: undefined;
@@ -121,11 +121,11 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     bytes18?: never;
     bytes6?: never;
     bytes11?: never;
-    bytes8?: never;
     bytes15?: never;
     bytes22?: never;
     bytes5?: never;
     bytes7?: never;
+    bytes8?: never;
     bytes9?: never;
     bytes13?: never;
     bytes14?: never;
@@ -147,8 +147,8 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     int64?: never;
     int256?: never;
     int56?: never;
-    int8?: never;
     int40?: never;
+    int8?: never;
     int24?: never;
     int48?: never;
     int72?: never;
@@ -178,8 +178,8 @@ export declare const SIGNABLE_DELEGATION_TYPED_DATA: {
     uint16?: never;
     uint64?: never;
     uint56?: never;
-    uint8?: never;
     uint40?: never;
+    uint8?: never;
     uint24?: never;
     uint48?: never;
     uint72?: never;

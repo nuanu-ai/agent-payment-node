@@ -1,4 +1,4 @@
-import type { EvmChainId } from "./evm-asset.js";
+import type { X402Asset } from "./x402-network.js";
 import type { HttpGetRequest, HttpObservation, HttpPort, InspectResult } from "./x402-model.js";
 import type { X402HttpObservation } from "./x402-state-integrity.js";
 import { type X402HttpRequestV1 } from "./x402-http-request.js";
@@ -12,7 +12,16 @@ export declare class HttpsX402Http implements HttpPort {
     private readonly request;
     get(request: HttpGetRequest): Promise<HttpObservation>;
 }
-export declare function inspectX402(http: HttpPort, value: string, request?: X402HttpRequestV1, chainId?: EvmChainId, payer?: Address): Promise<InspectResult>;
+export declare function inspectX402(http: HttpPort, value: string, request: X402HttpRequestV1 | undefined, 
+/** The network and token whose EIP-3009/Permit2 offers become candidates; null inspects only the Permit2 offer for `payer`. */
+asset: X402Asset | null, payer?: Address): Promise<InspectResult>;
+/** One unpaid request to a canonical public HTTPS URL that must answer 402 with exactly one strict PAYMENT-REQUIRED header. */
+export declare function readX402Challenge(http: HttpPort, value: string, request?: X402HttpRequestV1): Promise<{
+    endpoint: URL;
+    canonicalUrl: string;
+    header: string;
+    paymentRequired: import("@x402/core/types").PaymentRequired;
+}>;
 export interface PaidHttpResult {
     readonly observation: X402HttpObservation;
     readonly paymentResponseHeader?: string;

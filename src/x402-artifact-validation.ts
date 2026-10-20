@@ -50,14 +50,14 @@ export function validateX402ReceiptUnsafe(value: unknown): X402ReceiptRecord {
   const resource = exactRecord(receipt.resource, ["origin", "path", "urlHash"]);
   if (typeof resource.origin !== "string" || new URL(resource.origin).origin !== resource.origin || !resource.origin.startsWith("https://") || typeof resource.path !== "string" || !resource.path.startsWith("/")) stateCorrupt("x402 receipt resource is invalid.");
   hash(resource.urlHash); hash(receipt.fingerprint); hash(receipt.offerHash); address(receipt.payer); address(receipt.payee); positive(receipt.amountAtomic);
-  if (receipt.transferMethod !== undefined && receipt.transferMethod !== "eip3009" && receipt.transferMethod !== "erc7710") {
+  if (receipt.transferMethod !== undefined && receipt.transferMethod !== "eip3009" && receipt.transferMethod !== "erc7710" && receipt.transferMethod !== "permit2") {
     stateCorrupt("x402 receipt transfer method is invalid.");
   }
   if (receipt.transferMethod === "erc7710" && receipt.network !== "eip155:8453") stateCorrupt("ERC-7710 receipt network is unsupported.");
   if (receipt.paymentIdentifier !== undefined && (typeof receipt.paymentIdentifier !== "string" || !/^apn_[a-f0-9]{64}$/u.test(receipt.paymentIdentifier))) stateCorrupt("x402 receipt payment identifier is invalid.");
   if (receipt.settlementResponseHash !== undefined) hash(receipt.settlementResponseHash);
   const settlementEvidence = receipt.settlementEvidence === undefined ? undefined : validateSettlementEvidence(receipt.settlementEvidence);
-  const unusedExpiryEvidence = receipt.unusedExpiryEvidence === undefined ? undefined : validateUnusedExpiryEvidence(receipt.unusedExpiryEvidence);
+  const unusedExpiryEvidence = receipt.unusedExpiryEvidence === undefined ? undefined : validateUnusedExpiryEvidence(receipt.unusedExpiryEvidence, undefined, receipt.transferMethod);
   if ([settlementEvidence, unusedExpiryEvidence].some((evidence) => evidence !== undefined && (evidence.network !== receipt.network || evidence.token !== receipt.token))) stateCorrupt("Receipt evidence belongs to another network or token.");
   if (
     (settlementEvidence?.schemaVersion === "apn.x402.erc7710-settlement-evidence.v1" && receipt.transferMethod !== "erc7710") ||

@@ -44,7 +44,8 @@ for (const sponsor of [false, true]) {
     assert.deepEqual(decoded.payload, { signature: f.permit2Signature, permit2Authorization: f.prepared.plan.authorization });
     assert.equal(f.signed.headerHash, sha256(f.signed.paymentSignatureHeader));
     assert.deepEqual(await validatePermit2ProductionSigned(JSON.parse(JSON.stringify(f.signed)), f.record), f.signed);
-    assert.throws(() => decodePaymentSignatureHeader(f.signed.paymentSignatureHeader));
+    // Since 0.5.53 the generic codec accepts Permit2 wires (`x402 fetch` pays them) and reads this one exactly as the pinned codec does.
+    assert.deepEqual(decodePaymentSignatureHeader(f.signed.paymentSignatureHeader), decoded);
     const publicValue = await publicPermit2ProductionSigned(f.signed, f.record);
     assert.equal(JSON.stringify(publicValue).includes("private"), false);
     assert.equal(JSON.stringify(publicValue).includes(f.permit2Signature), false);

@@ -22,13 +22,17 @@ export async function encodePermit2ProductionProxyCall(record, value) {
                 s: `0x${signature.slice(66, 130)}`, v: Number.parseInt(signature.slice(130), 16),
             }, permit, a.from, witness, signed.permit2Signature] });
 }
+/** The operation's chain id as the RPC quantity a transaction carries. */
+export function permit2ChainQuantity(record) {
+    return `0x${BigInt(reconstructPermit2ProductionMaterial(record.material).chain.slice(7)).toString(16)}`;
+}
 /** Own the complete flat projection before any asynchronous signature recovery. */
-export function snapshotPermit2DirectTransaction(value) {
+export function snapshotPermit2DirectTransaction(value, chainQuantity) {
     if (!isPlainRecord(value) || !exactKeys(value, ["chainId", "to", "value", "input", "hash", "blockHash", "blockNumber"]))
         fail();
     const snapshot = { chainId: value.chainId, to: value.to, value: value.value, input: value.input,
         hash: value.hash, blockHash: value.blockHash, blockNumber: value.blockNumber };
-    if (snapshot.chainId !== "0xa86a" || typeof snapshot.to !== "string" ||
+    if (snapshot.chainId !== chainQuantity || typeof snapshot.to !== "string" ||
         snapshot.to.toLowerCase() !== X402_EXACT_PERMIT2_PROXY.toLowerCase() || snapshot.value !== "0x0" ||
         typeof snapshot.input !== "string" || !hash(snapshot.hash) || !hash(snapshot.blockHash) || !quantity(snapshot.blockNumber))
         fail();
@@ -37,11 +41,12 @@ export function snapshotPermit2DirectTransaction(value) {
 /** Binds all calldata bytes to the saved signatures/plan. Unknown batchers and builder suffixes refuse. */
 export async function attributePermit2DirectTransaction(record, signed, value) {
     record = validatePermit2ProductionRecord(JSON.parse(canonicalJson(record)));
-    value = snapshotPermit2DirectTransaction(value);
+    const chainQuantity = permit2ChainQuantity(record);
+    value = snapshotPermit2DirectTransaction(value, chainQuantity);
     signed = await validatePermit2ProductionSigned(signed, record);
     const expected = await encodePermit2ProductionProxyCall(record, signed);
     if (!isPlainRecord(value) || !exactKeys(value, ["chainId", "to", "value", "input", "hash", "blockHash", "blockNumber"]) ||
-        value.chainId !== "0xa86a" || typeof value.to !== "string" || value.to.toLowerCase() !== X402_EXACT_PERMIT2_PROXY.toLowerCase() ||
+        value.chainId !== chainQuantity || typeof value.to !== "string" || value.to.toLowerCase() !== X402_EXACT_PERMIT2_PROXY.toLowerCase() ||
         value.value !== "0x0" || value.input !== expected || !hash(value.hash) || !hash(value.blockHash) || !quantity(value.blockNumber))
         fail();
     try {

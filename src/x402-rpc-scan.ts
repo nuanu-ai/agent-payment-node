@@ -1,4 +1,5 @@
 import type { X402RpcLog } from "./ports.js";
+import { PROXY_SETTLED_TOPIC, PROXY_SETTLED_WITH_PERMIT_TOPIC, X402_EXACT_PERMIT2_PROXY } from "./x402-permit2/registry.js";
 import type { X402OperationRecord } from "./x402-state-integrity.js";
 
 const AUTHORIZATION_USED_TOPIC = "0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5";
@@ -21,4 +22,10 @@ export function matchingTransfer(log: X402RpcLog, operation: X402OperationRecord
 
 function paddedAddress(address: `0x${string}`): `0x${string}` {
   return `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;
+}
+
+/** The x402 exact Permit2 proxy's own settlement event (with or without the sponsored permit). */
+export function matchingPermit2Settled(log: X402RpcLog): boolean {
+  return log.address.toLowerCase() === X402_EXACT_PERMIT2_PROXY.toLowerCase() && log.topics.length === 1 && log.data === "0x" &&
+    (log.topics[0]?.toLowerCase() === PROXY_SETTLED_TOPIC || log.topics[0]?.toLowerCase() === PROXY_SETTLED_WITH_PERMIT_TOPIC);
 }
