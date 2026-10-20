@@ -29,7 +29,7 @@ export async function prepareCircleV2BaseSourceReadOnly(draft, transport, readBa
     const preflight = await inspectCircleV2Preflight({ payer, quoteEndpoint: copy.quoteEndpoint,
         quoteRequest: copy.quoteRequest, quoteResponse: copy.quoteResponse, transaction: { from: payer, to: tx.to, chainId: 8453,
             data: tx.data, valueAtomic: tx.valueAtomic, refundAddress: tx.refundAddress }, recipientWallet: copy.recipientWallet,
-        amountAtomic: copy.amountAtomic, maxSourceFeeAtomic: copy.maxSourceFeeAtomic, recipientSetup: copy.recipientSetup }, transport);
+        amountAtomic: copy.amountAtomic, maxSourceFeeAtomic: copy.maxSourceFeeAtomic, recipientSetup: copy.recipientSetup }, transport, now);
     const oldNumber = quantity(copy.preflight.blockNumber), newNumber = quantity(preflight.blockNumber);
     if (newNumber < oldNumber || newNumber - oldNumber > 20n ||
         (newNumber === oldNumber && bridgeHex(copy.preflight.blockHash, 32, 32) !== bridgeHex(preflight.blockHash, 32, 32)))
