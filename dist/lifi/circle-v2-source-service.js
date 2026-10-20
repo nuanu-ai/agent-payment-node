@@ -261,7 +261,7 @@ async function submitCircleV2BaseSourceBurnLive(intent, ports) {
     if (bridgeAddress(input.payer) !== payer || input.recipientWallet !== intent.solanaWalletOwner ||
         input.recipientSetup !== intent.recipientSetup)
         blocked("recipient_or_payer");
-    const draft = await inspectCircleV2PreflightedDraft(input, ports.preflight);
+    const draft = await inspectCircleV2PreflightedDraft(input, ports.preflight, now);
     const burnTerms = circleV2BurnTermsFromQuote(input.quoteResponse);
     if (draft.recipientAta !== intent.solanaRecipientAta)
         blocked("recipient_ata");
