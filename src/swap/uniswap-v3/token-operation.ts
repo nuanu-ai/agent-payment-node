@@ -52,6 +52,10 @@ export interface UniswapTokenZeroAllowanceEvidence { readonly schemaVersion: "ap
  */
 export interface UniswapTokenRetiredEffect { readonly kind: "approval" | "swap" | "cleanup"; readonly attempt: UniswapTokenAttempt;
     readonly reason: "never_landed" | "reverted" | "landed_allowance_nonzero"; readonly finalizedNonceAtomic: string | null; readonly observedAt: string; }
+/** The owner's own cleanup fee caps replaced the frozen ones at a fresh, consented fee quote (this cleanup only). */
+export interface UniswapTokenCleanupFeeQuote { readonly schemaVersion: "apn.uniswap-token-cleanup-fee-quote.v1"; readonly blockNumber: string;
+    readonly blockHash: string; readonly baseFeePerGasWei: string; readonly priorityFeePerGasWei: string; readonly previousCleanupGas: TokenGasEnvelope;
+    readonly previousMaximumNativeDebitWei: string; readonly quotedAt: string; }
 export interface UniswapTokenFailureDiagnostic { readonly code: string | null; readonly reason: string | null;
     readonly rpcMethod: string | null; readonly endpointRole: string | null; readonly phase: UniswapTokenPhase; }
 type FailureDiagnosticField = "code" | "reason" | "rpcMethod" | "endpointRole";
@@ -96,6 +100,8 @@ export interface UniswapTokenOperation {
     readonly cleanupReason: string | null;
     readonly cleanupEvidence?: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | UniswapTokenZeroAllowanceEvidence | null;
     readonly preSignFailure?: UniswapTokenFailureDiagnostic | null;
+    /** Present only once the owner re-quoted the cleanup fee caps. */
+    readonly cleanupFeeQuote?: UniswapTokenCleanupFeeQuote;
     /** Present only once an attempt was retired (v2 records without it read as before). */
     readonly retiredEffects?: readonly UniswapTokenRetiredEffect[];
     readonly receipt: UniswapTokenReceipt | null;
@@ -119,7 +125,8 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
         "approvalAttempt", "swapAttempt", "cleanupAttempt", "cleanupReason", "receipt", "previousIntegrityHash", "integrityHash"];
     if (!isPlainRecord(value) || value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA && value.schemaVersion !== UNISWAP_TOKEN_OPERATION_SCHEMA_V1 ||
         !exactKeys(value, value.schemaVersion === UNISWAP_TOKEN_OPERATION_SCHEMA ? [...common, "cleanupEvidence", "preSignFailure",
-          ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : [])] : common))
+          ...(Object.hasOwn(value, "retiredEffects") ? ["retiredEffects"] : []), ...(Object.hasOwn(value, "quoteBlock") ? ["quoteBlock"] : []),
+          ...(Object.hasOwn(value, "cleanupFeeQuote") ? ["cleanupFeeQuote"] : [])] : common))
         corrupt("Uniswap token operation schema is invalid.");
     const op = value as unknown as UniswapTokenOperation, { integrityHash, ...body } = op, route = validateUniswapTokenRoute(op.route);
     if (!UNISWAP_TOKEN_PHASES.includes(op.phase) || canonicalAddress(op.account) !== op.account || op.approvalCapAtomic !== route.amountIn ||
@@ -165,6 +172,7 @@ export function validateUniswapTokenOperation(value: unknown): UniswapTokenOpera
         corrupt("Uniswap token usage release has no never-landed swap.");
     // The diagnostic is the history of why cleanup became required: it stays through the owner's cleanup and its outcome.
     if (failure !== null && !PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase)) corrupt("Uniswap token pre-sign diagnostic phase is invalid.");
+    if (op.cleanupFeeQuote !== undefined) validateCleanupFeeQuote(op);
     if (op.phase === "observed" && op.receipt === null || op.phase !== "observed" && op.receipt !== null)
         corrupt("Uniswap token receipt phase is invalid.");
     if (op.receipt !== null)
@@ -251,6 +259,14 @@ function validateCleanupEvidence(v: UniswapTokenCleanupEvidence | UniswapTokenEx
         v.schemaVersion !== "apn.uniswap-token-cleanup-evidence.v1" || v.kind !== "zero_allowance_no_effect" ||
         !["current_allowance", "legacy_usage_reconciliation"].includes(v.source as string) || v.observedAllowanceAtomic !== "0" ||
         !canonicalInstant(v.observedAt as string)) corrupt("Uniswap token cleanup evidence is invalid."); }
+function validateCleanupFeeQuote(op: UniswapTokenOperation) { const q = op.cleanupFeeQuote as unknown;
+    if (!PRE_SIGN_DIAGNOSTIC_PHASES.includes(op.phase) || !isPlainRecord(q) || !exactKeys(q, ["schemaVersion", "blockNumber", "blockHash", "baseFeePerGasWei",
+        "priorityFeePerGasWei", "previousCleanupGas", "previousMaximumNativeDebitWei", "quotedAt"]) || q.schemaVersion !== "apn.uniswap-token-cleanup-fee-quote.v1" ||
+        !/^0x[a-f0-9]{64}$/u.test(q.blockHash as string) || !canonicalInstant(q.quotedAt as string) || (q.quotedAt as string) > op.updatedAt)
+        corrupt("Uniswap token cleanup fee quote is invalid.");
+    uint(q.blockNumber); uint(q.baseFeePerGasWei); uint(q.priorityFeePerGasWei); validateGas(q.previousCleanupGas);
+    if ((q.previousCleanupGas as TokenGasEnvelope).gasLimit !== op.cleanupGas.gasLimit || uint(q.previousMaximumNativeDebitWei) > uint(op.maximumNativeDebitWei))
+        corrupt("Uniswap token cleanup fee quote is invalid."); }
 function validateFailureDiagnostic(v: UniswapTokenFailureDiagnostic | null | undefined) { if (v === null) return;
     if (!isPlainRecord(v) || !exactKeys(v, ["code", "reason", "rpcMethod", "endpointRole", "phase"]) || !UNISWAP_TOKEN_PHASES.includes(v.phase as UniswapTokenPhase) ||
         (["code", "reason", "rpcMethod", "endpointRole"] as const).some((field) => v[field] !== null && sanitizeUniswapTokenFailureField(field, v[field]) !== v[field]))

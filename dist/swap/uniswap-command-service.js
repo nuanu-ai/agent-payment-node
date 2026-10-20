@@ -16,7 +16,7 @@ export async function executeUniswapCommand(request, context) {
         if (request.command === "swap.uniswap-token.execute")
             return tokenOutcome(await runtime.execute(request.operationId));
         if (request.command === "swap.uniswap-token.cleanup")
-            return tokenOutcome(await runtime.cleanup(request.operationId));
+            return tokenOutcome(await runtime.cleanup(request.operationId, request.cleanupFees));
         if (request.command === "swap.uniswap-token.inventory")
             return data(runtime.inventory(), "exact_token_route_inventory");
         if (request.command === "swap.uniswap-token.quote")
@@ -62,7 +62,14 @@ export async function executeUniswapCommand(request, context) {
     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Uniswap signing and sending are dormant until a complete exact single-send adapter is installed.", { reason: "uniswap_execution_dormant" });
 }
 function tokenOutcome(value) {
-    return { proofClass: value.phase, data: null, operation: value, receipt: value.receipt, nextActions: [] };
+    return { proofClass: value.phase, data: null, operation: value, receipt: value.receipt, nextActions: uniswapTokenNextActions(value) };
+}
+/** A cleanup the fee cap refused before signing: retry it as frozen, or re-quote its own caps under fresh consent. */
+export function uniswapTokenNextActions(op) {
+    if (op.phase !== "cleanup_required" || op.preSignFailure?.reason !== "uniswap_token_fee_cap")
+        return [];
+    const cleanup = `apn swap ethereum uniswap-token cleanup --operation ${op.operationId}`;
+    return [cleanup, `${cleanup} --max-fee-per-gas <wei> --max-priority-fee-per-gas <wei>`];
 }
 function data(value, proofClass) {
     return { proofClass, data: value, operation: null, receipt: null, nextActions: [] };

@@ -95,7 +95,7 @@ export class InstalledUniswapTokenRuntime {
         }, async () => await this.execution.execute(id));
     }
     async status(id) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"], async () => await this.execution.status(id)); }
-    async cleanup(id) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"], async () => await this.execution.cleanup(id)); }
+    async cleanup(id, fees) { return await this.budgeted(id, "swap.uniswap-token.cleanup", async () => [0, this.poolCap(14), "recovery"], async () => await this.execution.cleanup(id, fees)); }
     async budgeted(id, command, budget, work) {
         return await this.journal.withLocks([`uniswap-token-runtime:${id}`], async () => {
             const [cap, requestSessionCap, budgetClass] = await budget();

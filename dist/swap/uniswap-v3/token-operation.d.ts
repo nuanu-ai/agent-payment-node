@@ -67,6 +67,17 @@ export interface UniswapTokenRetiredEffect {
     readonly finalizedNonceAtomic: string | null;
     readonly observedAt: string;
 }
+/** The owner's own cleanup fee caps replaced the frozen ones at a fresh, consented fee quote (this cleanup only). */
+export interface UniswapTokenCleanupFeeQuote {
+    readonly schemaVersion: "apn.uniswap-token-cleanup-fee-quote.v1";
+    readonly blockNumber: string;
+    readonly blockHash: string;
+    readonly baseFeePerGasWei: string;
+    readonly priorityFeePerGasWei: string;
+    readonly previousCleanupGas: TokenGasEnvelope;
+    readonly previousMaximumNativeDebitWei: string;
+    readonly quotedAt: string;
+}
 export interface UniswapTokenFailureDiagnostic {
     readonly code: string | null;
     readonly reason: string | null;
@@ -107,6 +118,8 @@ export interface UniswapTokenOperation {
     readonly cleanupReason: string | null;
     readonly cleanupEvidence?: UniswapTokenCleanupEvidence | UniswapTokenExpiredApprovalEvidence | UniswapTokenZeroAllowanceEvidence | null;
     readonly preSignFailure?: UniswapTokenFailureDiagnostic | null;
+    /** Present only once the owner re-quoted the cleanup fee caps. */
+    readonly cleanupFeeQuote?: UniswapTokenCleanupFeeQuote;
     /** Present only once an attempt was retired (v2 records without it read as before). */
     readonly retiredEffects?: readonly UniswapTokenRetiredEffect[];
     readonly receipt: UniswapTokenReceipt | null;
