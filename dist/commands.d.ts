@@ -414,7 +414,7 @@ export type CommandRequest = {
     readonly request: GaslessCommandRequest;
     readonly idempotencyKey: string;
 } | {
-    readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed";
+    readonly command: "gasless.transfer.approve" | "gasless.transfer.approve-sealed" | "gasless.transfer.revoke";
     readonly operationId: string;
 } | {
     readonly command: "gasless.usdt.status" | "gasless.usdt.resume";

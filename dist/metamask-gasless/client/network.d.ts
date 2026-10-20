@@ -1,4 +1,4 @@
-import type { ReadNetwork, ReadValidationPredicate, TokenFeesKind } from "./read-diagnostic.js";
+import type { ReadNetwork, ReadValidationPredicate, RelaySupportFacts, SentinelFeeFacts, TokenFeesKind } from "./read-diagnostic.js";
 import { type MetaMaskGaslessIntent, type MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 export interface FetchExchangeRequest {
@@ -46,14 +46,10 @@ export declare class HelperNetworkPolicy {
     private lastClockMs;
     private deadlineFailure;
     private sessionFailure;
+    /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
+    relaySupportFacts(): RelaySupportFacts | undefined;
     /** Transient fixed metadata, never response content or permission. */
-    readFailureContext(error: unknown): {
-        readonly network: ReadNetwork;
-        readonly httpStatus: number | null;
-        readonly validationFailed: boolean;
-        readonly validationPredicate?: ReadValidationPredicate;
-        readonly tokenFeesShape?: TokenFeesKind;
-    };
+    readFailureContext(error: unknown): ReadFailure;
     constructor(context: ModeContext, exchange?: FetchExchange);
     /** Only the exact failed original quote exchange may supply this private one-use capture. */
     takeSponsoredQuote(error: unknown): MetaMaskGaslessQuote | undefined;
@@ -64,8 +60,18 @@ export declare class HelperNetworkPolicy {
     assertQuoteInventories(): void;
     assertComplete(): void;
     private handle;
+    /** Both bodies already passed `validateResponse`; only the quoted chain's row is read, as the SDK reads it. */
+    private recordRelayFacts;
     private assertSubmitDeadline;
     private classify;
+}
+interface ReadFailure {
+    readonly network: ReadNetwork;
+    readonly httpStatus: number | null;
+    readonly validationFailed: boolean;
+    readonly validationPredicate?: ReadValidationPredicate;
+    readonly tokenFeesShape?: TokenFeesKind;
+    readonly feeFacts?: SentinelFeeFacts;
 }
 export declare class HttpsFetchExchange implements FetchExchange {
     request(request: FetchExchangeRequest): Promise<FetchExchangeResponse>;

@@ -67,8 +67,13 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
     const failure = fixedFailure ? mmFailure(fixedFailure) : mmClassify(error, fallback(request.mode));
     if (request.mode === "inspect" || request.mode === "quote") {
       const context = policy?.readFailureContext(error);
+      const invariant = context?.validationFailed ? "network_validation" : error instanceof ApnError ? "closed_failure" : "unclassified_exception";
+      // Relay facts accompany only APN's own closed relay refusal, fee facts only a classified missing fee list.
+      const relay = failure.reason === "mm_gasless_relay_unsupported" && phase.stage === "relay_support" &&
+        invariant === "closed_failure" && context?.network === "none" ? policy?.relaySupportFacts() : undefined;
       return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage,
-        context?.validationFailed ? "network_validation" : error instanceof ApnError ? "closed_failure" : "unclassified_exception", context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate, context?.tokenFeesShape) };
+        invariant, context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate, context?.tokenFeesShape,
+        { ...context?.feeFacts, ...relay }) };
     }
     return { version: MM_HELPER_VERSION, ok: false, failure };
   } finally {
@@ -119,7 +124,7 @@ async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], 
     logger: logger() });
   const relay = { host: PROXY_URL, env: "prod" as const, getHeaders: () => ({ Authorization: `Bearer ${state.token}` }) };
   phase.stage = "relay_support";
-  if (!await service.isGaslessRelaySupported({ chainId: input.chainId, relay })) mmFail("mm_gasless_capability_unavailable");
+  if (!await service.isGaslessRelaySupported({ chainId: input.chainId, relay })) mmFail("mm_gasless_relay_unsupported");
   phase.stage = "fee_quote";
   let raw: unknown;
   try {

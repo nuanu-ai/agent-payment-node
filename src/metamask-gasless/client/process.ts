@@ -8,6 +8,7 @@ import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProf
 import type { MetaMaskGaslessProviderPort, MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
 import { mmClassify, mmError, mmFail } from "../reasons.js";
 import { helperResponse, MM_HELPER_VERSION, type HelperRequest } from "./protocol.js";
+import { withMetaMaskProviderRefusal } from "./provider-refusal.js";
 
 const MAX_IO = 1024 * 1024;
 const HELPER_ENTRY = fileURLToPath(new URL("./helper-bootstrap.js", import.meta.url));
@@ -61,7 +62,8 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
       throw error;
     }
     if (!response.ok) {
-      if (response.diagnostic !== undefined) throw readFailureError(response.failure.reason, response.diagnostic);
+      if (response.diagnostic !== undefined) throw withMetaMaskProviderRefusal(readFailureError(response.failure.reason,
+        response.diagnostic), response.diagnostic, request.mode === "quote" ? request.input.chainId : undefined);
       throw mmError(response.failure.reason);
     }
     return response.result;

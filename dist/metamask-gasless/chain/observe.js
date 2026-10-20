@@ -23,6 +23,10 @@ export async function observeMetaMaskGasless(context, intent, cursorInput, provi
     const scan = await scanSafely(context, intent, cursor, inspected);
     if (scan.inspection?.kind === "success")
         return result(scan.cursor, scan.candidate, scan.inspection, context.clock);
+    // Never redeemed up to that finality block and refused by the manager from then on: no hinted or future transaction
+    // can redeem it, whatever the provider reports.
+    if (scan.disabled !== undefined)
+        return makeObservation(scan.cursor, "disabled", "mm_gasless_delegation_disabled", null, null, scan.disabled.finality, scan.disabled.evidenceHash, null, context.clock);
     if (scan.inspection?.kind === "reverted") {
         return result(scan.cursor, scan.candidate, scan.inspection, context.clock);
     }
@@ -141,7 +145,8 @@ async function scanSafely(context, intent, cursor, memo) {
     try {
         const scanned = await scanMetaMaskRedemption({ row: context.deployment.row, call: context.call }, intent, cursor);
         if (scanned.kind === "progress")
-            return { cursor: scanned.cursor, candidate: null, inspection: null, evidenceHash: scanned.evidenceHash };
+            return { cursor: scanned.cursor, candidate: null, inspection: null, evidenceHash: scanned.evidenceHash,
+                ...(scanned.disabled === undefined ? {} : { disabled: scanned.disabled }) };
         if (scanned.kind === "stopped")
             return { cursor: scanned.cursor, candidate: null,
                 inspection: { kind: "unavailable", evidenceHash: null, reason: scanned.reason }, evidenceHash: null };

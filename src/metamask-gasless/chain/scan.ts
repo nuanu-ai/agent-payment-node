@@ -22,14 +22,20 @@ const MAX_SCAN_CANDIDATES = 8;
 export const MM_SCAN_STOP_REASONS: readonly MetaMaskGaslessFailureReason[] =
   ["mm_gasless_rpc_unavailable", "mm_gasless_rpc_log_range", "mm_gasless_rpc_rate_limited"];
 
+/** The pinned manager's own record that this delegation can no longer be redeemed, read at one finality block. */
+export interface MetaMaskDelegationDisabled { readonly finality: MetaMaskGaslessBlock; readonly evidenceHash: string }
 export interface MetaMaskScanContext {
   readonly row: MetaMaskGaslessDeploymentRow;
   readonly call: MmRpcCall;
 }
 
 export type MetaMaskScanResult =
-  /** No redemption is possible up to `cursor`; the scan may still have unscanned blocks before finality. */
-  | { readonly kind: "progress"; readonly cursor: MetaMaskGaslessCursor; readonly evidenceHash: string }
+  /**
+   * No redemption is possible up to `cursor`; the scan may still have unscanned blocks before finality. `disabled` is
+   * the proof that none is possible after it either: at that finality block the count is 0 and the delegation disabled.
+   */
+  | { readonly kind: "progress"; readonly cursor: MetaMaskGaslessCursor; readonly evidenceHash: string;
+      readonly disabled?: MetaMaskDelegationDisabled }
   /** The RPC stopped answering after `cursor`, which only covers fully verified blocks. */
   | { readonly kind: "stopped"; readonly cursor: MetaMaskGaslessCursor; readonly reason: MetaMaskGaslessFailureReason }
   /** Counter logs inside the window that starts at `cursor`; the caller inspects them and then rechecks `recheck`. */
@@ -66,9 +72,12 @@ export async function scanMetaMaskRedemption(context: MetaMaskScanContext, inten
   }
   const counter = await mmRedemptionCount(context, intent.delegationHash, finality);
   if (counter === 0n) {
+    const disabled = await mmDelegationDisabled(context, intent.delegationHash, finality);
     return { kind: "progress", cursor: { startBlock: cursor.startBlock, nextBlockAtomic: (last + 1n).toString(),
       previousEndBlock: finality }, evidenceHash: hashObject({ purpose: "apn.metamask-gasless.counter-scan.v1",
-      cursor, finality, delegationHash: intent.delegationHash, counterAtomic: "0" }) };
+      cursor, finality, delegationHash: intent.delegationHash, counterAtomic: "0" }),
+    ...(disabled ? { disabled: { finality, evidenceHash: hashObject({ purpose: "apn.metamask-gasless.delegation-disabled.v1",
+      delegationHash: intent.delegationHash, manager: context.row.protocol.manager, finality, counterAtomic: "0", disabled: true }) } } : {}) };
   }
   return await scanLogs(context, intent, cursor, finality);
 }
@@ -84,6 +93,24 @@ export async function mmRedemptionCount(context: MetaMaskScanContext, delegation
   if (code === "0x" || keccak256(code) !== enforcer.codeHash) mmEvidenceFail("mm_gasless_evidence_invalid", "protocol_code_pin", "eth_getCode");
   if (count > 1n) mmEvidenceFail("mm_gasless_evidence_invalid", "counter", "eth_call");
   return count;
+}
+
+/**
+ * `disabledDelegations(delegationHash)` on the pinned DelegationManager at one canonical block pinned by hash, against
+ * the manager's pinned code. Only the delegator itself can set it (`disableDelegation`, `onlyDeleGator`), and every
+ * `redeemDelegations` refuses a disabled hash (`CannotUseADisabledDelegation`). With the count read 0 at the same block,
+ * the delegation was never redeemed and cannot be from then on unless that same wallet calls `enableDelegation`.
+ */
+export async function mmDelegationDisabled(context: MetaMaskScanContext, delegationHash: Hex, at: MetaMaskGaslessBlock): Promise<boolean> {
+  const pinned = { blockHash: at.hash, requireCanonical: true } as const, manager = context.row.protocol.manager;
+  const [code, flag] = await Promise.all([
+    context.call("eth_getCode", [manager.address, pinned]).then(value => rpcHex(value, 256 * 1024)),
+    context.call("eth_call", [{ to: manager.address, data: callData("disabledDelegations(bytes32)", [delegationHash]) }, pinned])
+      .then(value => rpcWord(value)),
+  ]);
+  if (code === "0x" || keccak256(code) !== manager.codeHash) mmEvidenceFail("mm_gasless_evidence_invalid", "protocol_code_pin", "eth_getCode");
+  if (flag > 1n) mmEvidenceFail("mm_gasless_evidence_invalid", "disabled_flag", "eth_call");
+  return flag === 1n;
 }
 
 /**

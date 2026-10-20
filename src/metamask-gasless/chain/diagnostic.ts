@@ -1,9 +1,10 @@
 import { ApnError } from "../../errors.js";
 import { mmError, type MetaMaskGaslessFailureReason } from "../reasons.js";
 
-export const MM_EVIDENCE_PREDICATES = ["rpc_method", "rpc_json", "rpc_envelope", "rpc_record", "rpc_quantity", "rpc_hex", "header_identity", "header_recheck", "protocol_code_pin", "token_proxy_code_pin", "token_decimals", "token_implementation_address", "token_implementation_code_pin", "owner_designation", "snapshot_block_order", "snapshot_state_binding", "counter", "balance", "snapshot_owner_code", "snapshot_shape"] as const;
+export const MM_EVIDENCE_PREDICATES = ["rpc_method", "rpc_json", "rpc_envelope", "rpc_record", "rpc_quantity", "rpc_hex", "header_identity", "header_recheck", "protocol_code_pin", "token_proxy_code_pin", "token_decimals", "token_implementation_address", "token_implementation_code_pin", "owner_designation", "snapshot_block_order", "snapshot_state_binding", "counter", "disabled_flag", "balance", "snapshot_owner_code", "snapshot_shape"] as const;
 export type MmEvidencePredicate = typeof MM_EVIDENCE_PREDICATES[number];
-export type MmEvidenceMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getCode" | "eth_getStorageAt" | "eth_call" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getLogs";
+export type MmEvidenceMethod = "eth_chainId" | "eth_getBlockByNumber" | "eth_getCode" | "eth_getStorageAt" | "eth_call" | "eth_getTransactionByHash" | "eth_getTransactionReceipt" | "eth_getLogs" |
+  "eth_getTransactionCount" | "eth_estimateGas" | "eth_maxPriorityFeePerGas" | "eth_getBalance";
 /** Closed metadata only. No response bodies, URLs, credentials or unsigned material. */
 export function mmEvidenceFail(reason: MetaMaskGaslessFailureReason, predicate: MmEvidencePredicate,
   method?: MmEvidenceMethod): never {

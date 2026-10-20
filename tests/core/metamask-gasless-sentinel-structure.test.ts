@@ -3,13 +3,15 @@ import test from "node:test";
 import { executeHelperRequest } from "../../src/metamask-gasless/client/service.js";
 import { MM_HELPER_VERSION, helperResponse } from "../../src/metamask-gasless/client/protocol.js";
 import { readDiagnostic, readFailureError, validateReadDiagnostic } from "../../src/metamask-gasless/client/read-diagnostic.js";
+import { withMetaMaskProviderRefusal } from "../../src/metamask-gasless/client/provider-refusal.js";
 import { NOW, SECRET, SdkExchange, syntheticHome, quoteInput, expectedQuote } from "./metamask-gasless-client-fixtures/sdk.js";
 
 const cases = [
   ["missing", false, undefined], ["null", true, null], ["object", true, { secret: SECRET }],
   ["string", true, SECRET], ["number", true, 42], ["boolean", true, false],
 ] as const;
-test("normal pinned quote classifies raw nonarray tokenFees without exposing content or changing refusal", async t => {
+const absentFacts = { sentinelSimulation: "absent", sentinelFeeError: "absent", sentinelSponsorship: "absent" } as const;
+test("normal pinned quote classifies raw nonarray tokenFees without exposing content; a missing list is MetaMask's answer", async t => {
   for (const [kind, present, value] of cases) await t.test(kind, async t => {
     const home = await syntheticHome(); t.after(home.cleanup); const exchange = new SdkExchange(8453);
     const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
@@ -21,12 +23,22 @@ test("normal pinned quote classifies raw nonarray tokenFees without exposing con
         return { status: 200, body: JSON.stringify(body) };
       } } });
     assert.equal(result.ok, false); if (result.ok) return;
-    assert.deepEqual(result.failure, { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" });
+    const answered = kind === "missing" || kind === "null";
+    assert.deepEqual(result.failure, answered ? { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "mm_gasless_fee_unquoted" }
+      : { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" });
     assert.deepEqual(result.diagnostic, { mode: "quote", stage: "fee_quote", invariant: "network_validation",
       network: "sentinel-quote", httpStatus: 200, exitCode: null, signal: "none", timedOut: false,
-      validationPredicate: "sentinel_token_fees", tokenFeesKind: kind });
-    const error = readFailureError(result.failure.reason, result.diagnostic!);
+      validationPredicate: "sentinel_token_fees", tokenFeesKind: kind, ...absentFacts });
+    const error = withMetaMaskProviderRefusal(readFailureError(result.failure.reason, result.diagnostic!), result.diagnostic!, 8453);
     assert.equal(error.details?.mm_read_token_fees_kind, kind);
+    assert.equal(error.details?.mm_read_sentinel_simulation, "absent");
+    if (answered) {
+      assert.equal(error.message, "MetaMask quoted no USDC relay fee for this transfer on Base (chain 8453): its fee quote answered " +
+        `HTTP 200 with result.transactions[-1].fees[0].tokenFees ${kind === "missing" ? "missing" : "set to null"}. The pinned MetaMask ` +
+        "client reads this answer as: Insufficient balance to cover the transfer and gasless relay fee.");
+      assert.equal(error.details?.provider_endpoint, "https://agentic-proxy.workers.cx.metamask.io/proxy/prd/tx-sentinel-base-mainnet");
+      assert.equal(error.details?.provider_missing_field, "result.transactions[-1].fees[0].tokenFees");
+    } else assert.equal(error.message, "MetaMask gasless operation could not advance safely.");
     assert.equal(JSON.stringify(result).includes(SECRET), false);
     assert.equal(exchange.requests.length, 5); assert.equal(exchange.beforeSends, 0);
   });

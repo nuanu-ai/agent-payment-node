@@ -5,6 +5,7 @@ import { mmPrivateHash } from "../identity.js";
 import { MM_RECEIPT_VERSION, type MetaMaskGaslessOperationRecord, type MetaMaskGaslessPublicOperation,
   type MetaMaskGaslessReceipt } from "../operation-model.js";
 import { mmFail } from "../reasons.js";
+import { MM_CLOSED_PROVIDER_STATUSES } from "../model.js";
 import { mmRegistry } from "../registry.js";
 import { mmExact, mmHash, mmSame } from "../validation.js";
 import { metaMaskGaslessAtTransition } from "./transitions.js";
@@ -19,6 +20,17 @@ const RECEIPT_KEYS = ["schema_version", "kind", "operation_id", "profile", "prof
 function corrupt(): never { return mmFail("mm_gasless_state_corrupt"); }
 
 /**
+ * Dispatched and unproved, after the provider closed its request, the relay reverted or the owner abandoned it: the
+ * delegation may still be redeemed, and its own wallet can disable it (`apn gasless transfer revoke`).
+ */
+export function metaMaskGaslessDisableExit(op: MetaMaskGaslessOperationRecord): boolean {
+  return op.submissionAttempts === 1 && op.settlement === null && (op.state === "failed_effects_pending" ||
+    op.state === "abandoned_unknown" || (!op.terminal && (MM_CLOSED_PROVIDER_STATUSES as readonly string[]).includes(op.providerObservation?.status ?? "")));
+}
+
+/**
+ * Receipts are pure projections that must reproduce what released versions wrote, so the disable exit is not part of
+ * them: it is added only to the live status and resume output (`liveMetaMaskGaslessOperation`).
  * `legacy` reproduces the next actions of releases that never carried the observation RPC option, so receipts they
  * wrote for an operation observed through a named RPC still validate as exact historical derivatives.
  */
@@ -52,7 +64,7 @@ export function metaMaskGaslessNextActions(operation: MetaMaskGaslessOperationRe
 export function metaMaskGaslessProofClass(operation: MetaMaskGaslessOperationRecord): MetaMaskGaslessPublicOperation["proof_class"] {
   const op = validateMetaMaskGaslessOperation(operation);
   if (op.state === "abandoned_unknown") return "owner_acknowledgement_only";
-  if (op.state === "completed") return mmRegistry(op.intent.request.chainId).row.finalityTag === "finalized"
+  if (op.state === "completed" || op.state === "revoked_unused") return mmRegistry(op.intent.request.chainId).row.finalityTag === "finalized"
     ? "rpc_finalized_correlated" : "rpc_safe_correlated";
   return op.submissionAttempts === 1 ? "effect_observation_pending" : "durable_pre_effect";
 }
@@ -87,7 +99,8 @@ export function publicMetaMaskGaslessOperation(operation: MetaMaskGaslessOperati
     permission: { initial_designation: intent.initialSnapshot.safeState.designation,
       observed_designation: settlement?.designation ?? null, designation_persists: true,
       delegation_hash: intent.delegationHash, signing_digest: intent.signingDigest,
-      one_use_status: settlement !== null ? "consumed" : op.submissionAttempts === 1 ? "possibly_live" : "not_dispatched",
+      one_use_status: settlement !== null ? "consumed" : op.state === "revoked_unused" ? "disabled_unused" :
+        op.submissionAttempts === 1 ? "possibly_live" : "not_dispatched",
       onchain_expiry: false, guard_held: !op.terminal },
     provider_binding: intent.binding, provider_request_id_hash: mmPrivateHash("request-id", intent.requestId),
     submission_attempts: op.submissionAttempts, transaction_hash: transactionHash, settlement,
@@ -96,6 +109,13 @@ export function publicMetaMaskGaslessOperation(operation: MetaMaskGaslessOperati
     created_at: op.createdAt, updated_at: op.updatedAt, expires_at: intent.expiresAt,
     next_actions: metaMaskGaslessNextActions(op, legacyNextActions),
   };
+}
+
+/** The public operation of status and resume output: the receipt projection plus the delegation-disable exit. */
+export function liveMetaMaskGaslessOperation(operation: MetaMaskGaslessOperationRecord): MetaMaskGaslessPublicOperation {
+  const op = validateMetaMaskGaslessOperation(operation), view = publicMetaMaskGaslessOperation(op);
+  return metaMaskGaslessDisableExit(op)
+    ? { ...view, next_actions: [...view.next_actions, `apn gasless transfer revoke --operation ${op.operationId}`] } : view;
 }
 
 export function metaMaskGaslessReceipt(operation: MetaMaskGaslessOperationRecord, legacyNextActions = false): MetaMaskGaslessReceipt {
