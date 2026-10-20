@@ -22,7 +22,22 @@ export interface RelaySupportFacts {
     /** `GET tx-sentinel-ethereum-mainnet/networks`: the chain row's `relayTransactions` flag. */
     readonly relaySentinelFlag: "enabled" | "disabled" | "absent";
 }
-export type ReadFacts = Partial<SentinelFeeFacts & RelaySupportFacts>;
+/**
+ * The same answer's low fee tier, when its own numbers prove a native gas shortfall (decimal strings): the gas it
+ * simulated, its maximum fee per gas in wei, `balanceNeeded` = their product in wei, and the lower `currentBalance`.
+ */
+export interface NativeGasFacts {
+    readonly nativeGasUnits: string;
+    readonly nativeMaxFeePerGasWei: string;
+    readonly nativeRequiredWei: string;
+    readonly nativeCurrentWei: string;
+}
+/** APN's validated `balanceOf` read below the net amount plus MetaMask's quoted USDC relay fee (USDC atoms). */
+export interface UsdcShortfallFacts {
+    readonly usdcCurrentAtomic: string;
+    readonly usdcRequiredAtomic: string;
+}
+export type ReadFacts = Partial<SentinelFeeFacts & RelaySupportFacts & NativeGasFacts & UsdcShortfallFacts>;
 export interface MetaMaskReadDiagnostic extends ReadFacts {
     readonly tokenFeesKind?: TokenFeesKind;
     readonly validationPredicate?: ReadValidationPredicate;
