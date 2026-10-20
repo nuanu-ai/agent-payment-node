@@ -4,7 +4,7 @@ import { canonicalJson, domainHash } from "../../canonical.js";
 import { EncryptedWalletStore, walletCustodyLock } from "../../encrypted-wallet-store.js";
 import { ApnError } from "../../errors.js";
 import { assertExclusiveEvmRawSigner, evmAddressLock } from "../../evm-address-ownership.js";
-import { evmRpcHex, evmRpcQuantity } from "../../evm-rpc-codec.js";
+import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js";
 import { UniswapTokenEffectJournal } from "./token-effects.js";
 import { tokenEffectRound, UniswapTokenJournal } from "./token-operation.js";
 import { encodeUniswapTokenApproval } from "./token-route.js";
@@ -49,14 +49,16 @@ export class UniswapTokenCustody {
             .map((operation) => BigInt(operation.economics.nonceAtomic));
         return await this.nonces.allocate(op, kind, pending, occupied);
     }
-    /** True when custody holds no signed bytes for the effect (its reservation is free); false when a signed effect committed it. */
+    /**
+     * True when custody holds no signed bytes for the effect and its reservation is free; false when a signed effect committed
+     * it, found now or committed earlier (a committed reservation counts as signed even when its bytes are not here).
+     */
     async releaseNonce(op, kind, nonce) {
         if (await this.probeSealed(op, kind, nonce) !== null || await this.effects.load(op, kind) !== null) {
             await this.nonces.commit(op, kind, nonce);
             return false;
         }
-        await this.nonces.release(op, kind, nonce);
-        return true;
+        return await this.nonces.release(op, kind, nonce);
     }
     async commitNonce(op, kind, nonce) { await this.nonces.commit(op, kind, nonce); }
     async reconcileNonceReservations(account) {
@@ -81,9 +83,28 @@ export class UniswapTokenCustody {
             return "reserved";
         });
     }
-    async currentAllowance(op) {
+    /**
+     * The allowance at the latest block. With `landed` (a transaction of this account that landed, e.g. the approval), one node
+     * first shows its head and that transaction at or below it, and the read is then pinned to that head by hash (EIP-1898,
+     * requireCanonical): a node behind the transaction's block would answer the allowance from before it, so it is refused.
+     */
+    async currentAllowance(op, landed) {
         const data = encodeFunctionData({ abi: ERC20, functionName: "allowance", args: [op.account, op.route.router] });
         const rpc = this.call;
+        if (landed !== undefined) {
+            const [, rawHead, rawTransaction] = await tokenBatch(rpc, "primary", [
+                { method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain },
+                { method: "eth_getBlockByNumber", params: ["latest", false], cachePolicy: "none", decoder: tokenBlock },
+                { method: "eth_getTransactionByHash", params: [landed], cachePolicy: "none", decoder: (value) => value === null ? value : evmRpcRecord(value) }
+            ]);
+            const head = evmRpcRecord(rawHead), transaction = rawTransaction === null ? null : evmRpcRecord(rawTransaction);
+            if (transaction === null || transaction.blockNumber === null || transaction.blockNumber === undefined || evmRpcHex(transaction.hash, 32) !== landed.toLowerCase() ||
+                evmRpcQuantity(transaction.blockNumber) > evmRpcQuantity(head.number))
+                throw new ApnError("APN_RPC_PROTOCOL", "The RPC head does not include the swap's landed transaction yet; an allowance read there could predate it.", { reason: "uniswap_token_allowance_head_behind_effect" });
+            const [pinned] = await tokenBatch(rpc, "primary", [{ method: "eth_call", params: [{ to: op.route.inputToken, data },
+                        { blockHash: evmRpcHex(head.hash, 32), requireCanonical: true }], cachePolicy: "none", decoder: tokenHex(32) }]);
+            return BigInt(evmRpcHex(pinned, 32)).toString();
+        }
         if (rpc.primaryPoolEnabled?.() !== true)
             return BigInt(evmRpcHex(await this.call("eth_call", [{ to: op.route.inputToken, data }, "latest"]), 32)).toString();
         const values = await tokenBatch(rpc, "primary", [

@@ -79,7 +79,7 @@ export class UniswapTokenExecution {
         await this.ports.foregroundCleanup(requoted ?? op);
         if (requoted !== null)
             op = await this.persist(requoted);
-        if (await this.ports.currentAllowance(op) === "0") {
+        if (await this.zeroAllowance(op)) {
             // Every attempt is a bound transaction that landed or was retired: the residual allowance is already gone.
             const attempts = [op.approvalAttempt, op.swapAttempt, op.cleanupAttempt].filter((row) => row !== null);
             if ((attempts.length > 0 || (op.retiredEffects ?? []).length > 0) && attempts.every((row) => row.transactionHash !== null)) {
@@ -210,7 +210,7 @@ export class UniswapTokenExecution {
         // needs the owner's consented revoke (the cleanup command), and the hold is released once that cleanup is observed; an
         // allowance already zero closes now, the hold released with it. Approval gas stays charged either way.
         const now = this.ports.now();
-        if (await this.ports.currentAllowance(op) !== "0")
+        if (!await this.zeroAllowance(op))
             return await this.cleanupRequired(op, "deadline_expired_after_approval");
         return await this.settlePrincipal(await this.persist(transitionUniswapToken(op, "cleaned", { cleanupReason: "zero_allowance_after_effect",
             cleanupEvidence: { schemaVersion: "apn.uniswap-token-zero-allowance-evidence.v1", kind: "zero_allowance_after_effect", observedAllowanceAtomic: "0",
@@ -398,6 +398,17 @@ export class UniswapTokenExecution {
                     blocked("A durable token effect forbids no-effect cleanup.", "uniswap_cleanup_effect_exists");
                 blocked("A started token effect cannot prove no-effect cleanup.", "uniswap_token_public_effect_missing");
             }
+    }
+    /**
+     * "No residual allowance" (the cleaned decision): a zero latest read, confirmed once an approval landed at a head one node
+     * shows including it, pinned by hash, since a node behind the approval reads the zero from before it. A nonzero read needs
+     * no pin: the cleanup it leads to is re-read by the signing guard at its own block. Only a zero costs the second read.
+     */
+    async zeroAllowance(op) {
+        if (await this.ports.currentAllowance(op) !== "0")
+            return false;
+        const landed = op.approvalAttempt?.transactionHash ?? null;
+        return landed === null || await this.ports.currentAllowance(op, landed) === "0";
     }
     async feeQuote(op) {
         if (this.ports.cleanupFeeQuote === undefined)
