@@ -105,6 +105,11 @@ export interface JupiterV1PreparedMaterial extends GuardedSwapPreparedMaterial {
 }
 export declare function jupiterV1MaterialDigest(value: Omit<JupiterV1ResolvedMaterial, "materialDigest">): string;
 export declare function validateJupiterV1Material(value: unknown): JupiterV1ResolvedMaterial;
+/**
+ * True when two v0 messages are byte-identical except for the 32-byte recent blockhash: same header, static accounts,
+ * instructions, data and lookup-table indexes. The approval re-freezes only the lifetime of the quoted message.
+ */
+export declare function jupiterV1SameMessageExceptLifetime(quotedMessageBase64: string, messageBase64: string): boolean;
 export declare function assertJupiterV1FreshMaterial(material: JupiterV1ResolvedMaterial): void;
 export declare function validateJupiterV1PreparedMaterial(value: unknown): JupiterV1PreparedMaterial;
 /** Materials are chunked below the shared store's 1 MiB per-file cap; byte-pinned historical ones held whole ProgramData. */

@@ -2,9 +2,10 @@ import { canonicalJson } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import type { GuardedSwapApprovalIntent } from "../runtime.js";
 import { guardJupiterV1WhirlpoolMaterial } from "./v1-guard.js";
-import type { JupiterV1PreparedMaterial } from "./v1-material.js";
+import type { JupiterV1PreparedMaterial, JupiterV1ResolvedMaterial } from "./v1-material.js";
 import { solanaSwapCommandRequests } from "../solana-read-plan.js";
-export async function jupiterV1ApprovalScreen(material:JupiterV1PreparedMaterial,intent:GuardedSwapApprovalIntent):Promise<readonly string[]>{
+/** `fresh` is the approval's re-resolved material: the quoted message with the lifetime this approval froze, the one signed. */
+export async function jupiterV1ApprovalScreen(material:JupiterV1PreparedMaterial,intent:GuardedSwapApprovalIntent,fresh:JupiterV1ResolvedMaterial):Promise<readonly string[]>{
  const q=material.quote,g=await guardJupiterV1WhirlpoolMaterial(material.execution,{deadline:intent.deadline});
  if(q.profile!==intent.profile||q.quoteHash!==intent.quoteHash||q.account!==intent.account||q.recipient!==intent.recipient||
  q.inputAmountAtomic!==intent.inputAmountAtomic||q.expectedOutputAtomic!==intent.expectedOutputAtomic||q.minimumOutputAtomic!==intent.minimumOutputAtomic||
@@ -16,11 +17,11 @@ export async function jupiterV1ApprovalScreen(material:JupiterV1PreparedMaterial
  "Simulation and the actual finalized receipt must each satisfy both minima. The floor is client arithmetic, with no deployed-source attestation.",
  `Temporary own WSOL account: ${g.sourceTokenAccount}; wrap input exactly, then close to the same payer`,
  `Pool: ${g.pool}; slippage: ${intent.slippageBps} bps; platform fee and token approval cap: 0`,
- `Network fee: ${material.execution.networkFeeLamports} lamports; temporary token rent: ${material.execution.tokenAccountRentLamports} lamports`,
+ `Network fee: ${fresh.networkFeeLamports} lamports; temporary token rent: ${fresh.tokenAccountRentLamports} lamports`,
  `Maximum native expense: ${g.maximumNativeExpenseLamports} lamports (input, rent, base fee and priority fee)`,
  `RPC reads: at most ${solanaSwapCommandRequests("swap.jupiter.approve")} requests for this approval, paced per provider; no read budget carries over to another command.`,
- `Exact message: ${material.execution.messageHash}; frozen blockhash: ${material.execution.lifetime.blockhash}; last valid height: ${material.execution.lifetime.lastValidBlockHeight}`,
- ...(material.execution.quoteRpcLifetime === undefined ? [] : [`Blockhash source: configured mainnet RPC before quote freeze; confirmed context ${material.execution.quoteRpcLifetime.contextSlot}; original official build hash ${material.execution.rawBuildResponseHash}`]),
+ `Exact message: ${fresh.messageHash}; frozen blockhash: ${fresh.lifetime.blockhash}; last valid height: ${fresh.lifetime.lastValidBlockHeight}`,
+ ...(fresh.quoteRpcLifetime === undefined ? [] : [`Blockhash source: configured mainnet RPC at this approval; confirmed context ${fresh.quoteRpcLifetime.contextSlot}; quoted message ${material.execution.messageHash}; original official build hash ${material.execution.rawBuildResponseHash}`]),
  `Quote: ${intent.quoteHash}; policy: ${intent.policyDigest}; mechanism: ${intent.mechanismDigest}`,
  `Deadline: ${intent.deadline}`,
  `Programs as deployed now: ${material.execution.programPins.filter(p=>p.deploymentSlot!==null).map(p=>`${p.programId} slot ${p.deploymentSlot}, ${p.upgradeAuthority===null?"immutable":`upgrade authority ${p.upgradeAuthority}`}`).join("; ")}`,

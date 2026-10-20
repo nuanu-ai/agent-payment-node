@@ -77,7 +77,7 @@ export declare class JupiterV1LocalSigner {
     constructor(root: string, wrappingSecret: WrappingSecretPort);
     publicOwner(profile: string, expected?: string): Promise<import("../../direct-rail-ports.js").ChainAccount>;
     /** The intent is detached synchronously before the first await. No returned artifact alone authorizes signing. */
-    approve(operationValue: SwapOperationRecord, materialValue: JupiterV1PreparedMaterial, admissionValue: JupiterV1OwnerBinding): Promise<GuardedSwapApprovalArtifact>;
+    approve(operationValue: SwapOperationRecord, materialValue: JupiterV1PreparedMaterial, admissionValue: JupiterV1OwnerBinding, freshValue: JupiterV1ResolvedMaterial): Promise<GuardedSwapApprovalArtifact>;
     sign(operationValue: SwapOperationRecord, bindingValue: JupiterV1ExecutionBinding, materialValue: JupiterV1PreparedMaterial, admissionValue: JupiterV1OwnerBinding): Promise<RailSignedEffect>;
     private assertWrappingFence;
     assertDispatchAdmission(operation: SwapOperationRecord, binding: JupiterV1ExecutionBinding): Promise<void>;
