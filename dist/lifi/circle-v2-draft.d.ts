@@ -33,4 +33,4 @@ export interface CircleV2PreflightedDraft {
     readonly blockers: readonly string[];
 }
 /** The returned data is an unsubmitted inspection record; callers must re-preflight before any later submission. */
-export declare function inspectCircleV2PreflightedDraft(input: CircleV2DraftInput, transport: CircleV2PreflightTransport): Promise<CircleV2PreflightedDraft>;
+export declare function inspectCircleV2PreflightedDraft(input: CircleV2DraftInput, transport: CircleV2PreflightTransport, now: () => number): Promise<CircleV2PreflightedDraft>;

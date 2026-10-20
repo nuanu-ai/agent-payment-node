@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { Hex } from "../../src/model.js";
 import { BASE_USDC } from "../../src/constants.js";
+import { readEvmReceiptFeeFields } from "../../src/evm-direct-actual-fee.js";
 import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 import { CanonicalDirectTestNative as TestNative } from "./canonical-direct-native-fixture.js";
 import {
@@ -279,6 +280,27 @@ test("ambiguous submission completes from an exact receipt without a second send
   assert.equal(safeReceipt.proof_class, "confirmed_receipt_and_exact_transfer_log");
   assert.equal(safeReceipt.exact_transfer_log, true);
   assert.equal(JSON.stringify(receipt).includes(RAW_TRANSACTION), false);
+});
+
+test("the Base USDC lane records its actual OP-stack fee with the outcome and shows it in status and receipt", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
+  const rpc = new TestRpc();
+  const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), "legacy-fee-001");
+  // QA 0.5.51 DIRECT-RECEIPT-FEE-001: execution (gasUsed x price) plus the receipt's own L1 data fee and operator fee.
+  rpc.receipt = { ...exactReceipt(), evmFeeFields: readEvmReceiptFeeFields({ gasUsed: "0xb411", effectiveGasPrice: "0x3b9aca00", l1Fee: "0x2710",
+    operatorFeeScalar: "0x0", operatorFeeConstant: "0x0" }) };
+  const approved = operationRecord(await makeCore({ root: temporary.root, rpc, native: new TestNative(temporary.root) }).execute({ command: "transfer.approve", operationId }));
+  assert.equal(approved.state, "completed");
+  const fee = approved.actual_network_fee as Record<string, unknown>;
+  assert.deepEqual([fee.status, fee.fee_model, fee.execution_atomic, fee.l1_data_atomic, fee.operator_atomic, fee.total_atomic],
+    ["complete", "op-stack", "46097000000000", "10000", "0", "46097000010000"]);
+  assert.equal(approved.actual_sender_native_debit_atomic, "46097000010000", "a USDC transfer debits only the fee in ETH");
+  const receipt = await makeCore({ root: temporary.root }).execute({ command: "receipt.get", operationId });
+  assert.equal(receipt.ok, true, JSON.stringify(receipt));
+  assert.deepEqual((receipt.receipt as Record<string, unknown>).actual_network_fee, fee);
+  assert.deepEqual(operationRecord(await makeCore({ root: temporary.root }).execute({ command: "operation.status", operationId })).actual_network_fee, fee);
 });
 
 test("ambiguous submission with unavailable receipt stays unknown without nonce proof or resend", async (t) => {

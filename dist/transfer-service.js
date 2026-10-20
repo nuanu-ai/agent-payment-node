@@ -322,6 +322,7 @@ export class TransferService {
                 ...(operation.evm?.asset.kind === "native" ? {} : { exactTransferLog: hasExactTransfer(rpcReceipt, operation) }),
                 ...(rpcReceipt.evmEvidence === undefined ? {} : { evmEvidence: rpcReceipt.evmEvidence }),
             }),
+            ...(operation.evmActualFee === undefined ? {} : { evmActualFee: operation.evmActualFee }),
             createdAt: operation.evm === undefined ? this.context.clock.now().toISOString() : operation.transitions.at(-1).at,
             operationIntegrityHash: operation.integrityHash,
         };

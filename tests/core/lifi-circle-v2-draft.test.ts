@@ -14,6 +14,8 @@ const refund = "0x000000000000000000000000000000000000dEaD";
 const payer = "0x000000000000000000000000000000000000bEEF";
 const quote = "0x01020304";
 const hash = `0x${"a".repeat(64)}`;
+/** One injected clock: the Base block timestamps below and the freshness check read the same instant. */
+const NOW = Date.parse("2026-10-20T00:00:00.000Z"), clock = () => NOW;
 const hook = "0x636374702d666f72776172640000000000000000000000000000000000000000";
 async function fixture(): Promise<CircleV2DraftInput> {
   const recipient = `0x${Buffer.from(getBase58Encoder().encode(await associatedUsdc(wallet))).toString("hex")}` as `0x${string}`;
@@ -28,7 +30,7 @@ async function fixture(): Promise<CircleV2DraftInput> {
 }
 function harness(change?: (response: any) => void, options?: { reorg?: boolean; revert?: boolean; stale?: boolean }): CircleV2PreflightTransport {
   // One block, one timestamp: a per-read clock made the pinned re-read differ across a second boundary.
-  let reads = 0; const timestamp = options?.stale ? "0x1" : `0x${Math.floor(Date.now() / 1000).toString(16)}`;
+  let reads = 0; const timestamp = options?.stale ? "0x1" : `0x${Math.floor(NOW / 1000).toString(16)}`;
   return async request => {
     if (request.target === "circle") {
       const response = { signedQuote: quote, feeTotalAmount: "20000", feeToken: usdc, nonce: "0", claimable: true, failedChecks: [],
@@ -47,8 +49,8 @@ function harness(change?: (response: any) => void, options?: { reorg?: boolean; 
 }
 test("produces a deterministic non-executable draft bound to quote, payer, calldata, ATA, fee, and fresh Base hash", async () => {
   const input = await fixture();
-  const a = await inspectCircleV2PreflightedDraft(input, harness());
-  const b = await inspectCircleV2PreflightedDraft(input, harness());
+  const a = await inspectCircleV2PreflightedDraft(input, harness(), clock);
+  const b = await inspectCircleV2PreflightedDraft(input, harness(), clock);
   assert.equal(a.integrityDigest, b.integrityDigest);
   assert.equal(a.state, "preflighted_unsubmitted");
   assert.equal(a.executionAdmitted, false);
@@ -65,18 +67,18 @@ test("produces a deterministic non-executable draft bound to quote, payer, calld
 });
 test("binds all supplied quote fields, payer, and fee ceiling in digest", async () => {
   const original = await fixture();
-  const base = await inspectCircleV2PreflightedDraft(original, harness());
+  const base = await inspectCircleV2PreflightedDraft(original, harness(), clock);
   const quote = await fixture();
   (quote.quoteResponse as any).opaqueProviderField = "changed";
-  assert.notEqual((await inspectCircleV2PreflightedDraft(quote, harness())).integrityDigest, base.integrityDigest);
+  assert.notEqual((await inspectCircleV2PreflightedDraft(quote, harness(), clock)).integrityDigest, base.integrityDigest);
   const ceiling = await fixture();
   (ceiling as any).maxSourceFeeAtomic = "25001";
-  assert.notEqual((await inspectCircleV2PreflightedDraft(ceiling, harness())).integrityDigest, base.integrityDigest);
+  assert.notEqual((await inspectCircleV2PreflightedDraft(ceiling, harness(), clock)).integrityDigest, base.integrityDigest);
 });
 test("rejects payer, signed quote, fee, calldata, executable flags, stale and reverted preflight", async () => {
   const mutate = async (change: (value: any) => void) => {
     const value = await fixture(); change(value);
-    await assert.rejects(inspectCircleV2PreflightedDraft(value, harness()), { code: "APN_PROVIDER_PROTOCOL" });
+    await assert.rejects(inspectCircleV2PreflightedDraft(value, harness(), clock), { code: "APN_PROVIDER_PROTOCOL" });
   };
   await mutate(v => { v.transaction.from = refund; });
   await mutate(v => { v.quoteResponse.signedQuote = "0xdead"; });
@@ -84,7 +86,7 @@ test("rejects payer, signed quote, fee, calldata, executable flags, stale and re
   await mutate(v => { v.transaction.data = `0x00000000${v.transaction.data.slice(10)}`; });
   await mutate(v => { v.executable = true; });
   await mutate(v => { v.transaction.executable = true; });
-  await assert.rejects(inspectCircleV2PreflightedDraft(await fixture(), harness(v => { v.claimable = false; })), { code: "APN_PROVIDER_PROTOCOL" });
+  await assert.rejects(inspectCircleV2PreflightedDraft(await fixture(), harness(v => { v.claimable = false; }), clock), { code: "APN_PROVIDER_PROTOCOL" });
   for (const options of [{ stale: true }, { reorg: true }, { revert: true }])
-    await assert.rejects(inspectCircleV2PreflightedDraft(await fixture(), harness(undefined, options)), { code: "APN_PROVIDER_PROTOCOL" });
+    await assert.rejects(inspectCircleV2PreflightedDraft(await fixture(), harness(undefined, options), clock), { code: "APN_PROVIDER_PROTOCOL" });
 });
