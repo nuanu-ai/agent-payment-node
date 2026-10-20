@@ -11,7 +11,12 @@ payment acceptance require separate evidence.
 | MetaMask smart account | Unavailable | Unavailable |
 | MetaMask agent wallet | Unavailable | Unavailable |
 
-Solana x402 is unavailable. No provider refusal switches to a local signer.
+Solana x402 `exact` is available on the local software profile only: a classic SPL mint the owner admitted
+(allowlist x402 row with the `x402-exact-svm` mechanism pin and `wallet policy set --chain
+solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp --asset <mint>`), `APN_SOLANA_RPC_URL` set, the seller's facilitator as fee
+payer. Native SOL offers and Token-2022 mints are refused. Commands: `x402 solana pay|observe|status`; details in
+[x402-any-seller.md](x402-any-seller.md). The Coinbase and MetaMask profiles have no Solana x402. No provider
+refusal switches to a local signer.
 
 ## Account and RPC
 

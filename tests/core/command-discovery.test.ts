@@ -204,7 +204,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  apn wallet status [--profile <profile>] — Read wallet presence and public identity.",
     "  apn wallet ensure-solana --profile <profile> --provider <local-or-coinbase-awal> [--accept-risk true] — Ensure a separate local ed25519 wallet or link an existing authenticated awal Solana account.",
     "  apn wallet balance-solana --profile <profile> --asset <sol-usdc-or-usdt> — Read SOL, canonical USDC or pinned USDT and the separate SOL fee balance through APN_SOLANA_RPC_URL.",
-    "  apn wallet capabilities-solana [--profile <profile>] — Inspect all four provider capabilities, fee-contract gates and unavailable Solana x402.",
+    "  apn wallet capabilities-solana [--profile <profile>] — Inspect all four provider capabilities, fee-contract gates and the local Solana x402 exact (SPL) lane.",
     "  apn wallet ensure-tron --profile <profile> --provider local --accept-risk true — Ensure a separate encrypted local secp256k1 TRON wallet without funding or activation.",
     "  apn wallet balance-tron --profile <profile> --asset <trx-or-usdt> — Read solidified TRX or canonical USDT and the separate TRX fee balance through APN_TRON_RPC_URL.",
     "  apn wallet capabilities-tron [--profile <profile>] — Inspect all four provider capabilities and unavailable TRON x402, sponsorship and bridge execution.",
