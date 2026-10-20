@@ -7,7 +7,12 @@ import type { MetaMaskGaslessReason } from "./reasons.js";
 export const MM_OPERATION_VERSION = "apn.metamask-gasless-operation.v1" as const;
 export const MM_OPERATION_KIND = "metamask_gasless_transfer" as const;
 export const MM_RECEIPT_VERSION = "apn.metamask-gasless-receipt.v1" as const;
-export const MM_TERMINAL: readonly MetaMaskGaslessState[] = ["completed", "failed_before_effect", "abandoned_unknown"];
+export const MM_TERMINAL: readonly MetaMaskGaslessState[] = ["completed", "failed_before_effect", "abandoned_unknown", "revoked_unused"];
+/**
+ * The owner's abandonment is an acknowledgement, not an outcome: a later chain proof (the redemption, or its disabled
+ * delegation never redeemed) still replaces it. No other terminal state moves.
+ */
+export const MM_PROVED_AFTER_ABANDON: readonly MetaMaskGaslessState[] = ["completed", "revoked_unused"];
 export const MM_HISTORY_LIMIT = 96;
 /**
  * Nonterminal transitions stop one short of the limit, so the final slot is always free for the one terminal
@@ -76,7 +81,7 @@ export interface MetaMaskGaslessPublicOperation {
   readonly permission: {
     readonly initial_designation: "empty" | "pinned"; readonly observed_designation: "pinned" | null;
     readonly designation_persists: true; readonly delegation_hash: Hex; readonly signing_digest: Hex;
-    readonly one_use_status: "not_dispatched" | "possibly_live" | "consumed";
+    readonly one_use_status: "not_dispatched" | "possibly_live" | "consumed" | "disabled_unused";
     readonly onchain_expiry: false; readonly guard_held: boolean;
   };
   readonly provider_binding: MetaMaskGaslessBinding;

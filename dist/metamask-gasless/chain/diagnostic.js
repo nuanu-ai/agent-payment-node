@@ -1,6 +1,6 @@
 import { ApnError } from "../../errors.js";
 import { mmError } from "../reasons.js";
-export const MM_EVIDENCE_PREDICATES = ["rpc_method", "rpc_json", "rpc_envelope", "rpc_record", "rpc_quantity", "rpc_hex", "header_identity", "header_recheck", "protocol_code_pin", "token_proxy_code_pin", "token_decimals", "token_implementation_address", "token_implementation_code_pin", "owner_designation", "snapshot_block_order", "snapshot_state_binding", "counter", "balance", "snapshot_owner_code", "snapshot_shape"];
+export const MM_EVIDENCE_PREDICATES = ["rpc_method", "rpc_json", "rpc_envelope", "rpc_record", "rpc_quantity", "rpc_hex", "header_identity", "header_recheck", "protocol_code_pin", "token_proxy_code_pin", "token_decimals", "token_implementation_address", "token_implementation_code_pin", "owner_designation", "snapshot_block_order", "snapshot_state_binding", "counter", "disabled_flag", "balance", "snapshot_owner_code", "snapshot_shape"];
 /** Closed metadata only. No response bodies, URLs, credentials or unsigned material. */
 export function mmEvidenceFail(reason, predicate, method) {
     const base = mmError(reason);

@@ -4,6 +4,8 @@ import type { MetaMaskGaslessBalance, MetaMaskGaslessBinding, MetaMaskGaslessCha
   MetaMaskGaslessQuote, MetaMaskGaslessRpcObservation, MetaMaskGaslessSnapshot, MetaMaskGaslessUnsignedResult } from "./model.js";
 import type { MetaMaskGaslessOperationRecord, MetaMaskGaslessReceipt } from "./operation-model.js";
 import type { MmDeploymentView } from "./recorded.js";
+import type { MetaMaskDisableCall } from "./revocation/call.js";
+import type { MetaMaskRevocationChain } from "./revocation/chain.js";
 
 export interface MetaMaskGaslessQuoteInput {
   readonly binding: MetaMaskGaslessBinding;
@@ -38,6 +40,8 @@ export interface MetaMaskGaslessRpcPort {
   snapshot(input: { readonly owner: Address; readonly delegationHash: Hex; readonly grossAtomic: string; readonly feeMode?: "sponsored" }): Promise<MetaMaskGaslessSnapshot>;
   observe(intent: MetaMaskGaslessIntent, cursor: MetaMaskGaslessCursor,
     provider: MetaMaskGaslessProviderObservation | null): Promise<MetaMaskGaslessRpcObservation>;
+  /** Chain facts for the owner's disable of this dispatched delegation (absent on observation-only test doubles). */
+  revocation?(intent: MetaMaskGaslessIntent, disable: MetaMaskDisableCall, operationId: string): Promise<MetaMaskRevocationChain>;
 }
 export type MetaMaskGaslessRpcFactory = (chainId: MetaMaskGaslessChainId) => MetaMaskGaslessRpcPort;
 export type MetaMaskGaslessObservationRpcFactory = (chainId: MetaMaskGaslessChainId, environmentName: string) => MetaMaskGaslessRpcPort;

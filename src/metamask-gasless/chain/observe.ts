@@ -12,7 +12,7 @@ import { parseReceiptLogs, quantity, receiptHash, rpcAddress, rpcBlock, rpcHex, 
   sameBlock, type MmRpcCall } from "./abi.js";
 import { verifyRedemption } from "./delegation.js";
 import { verifyMetaMaskReceiptAccounting } from "./receipt.js";
-import { MM_SCAN_STOP_REASONS, mmRedemptionCount, scanMetaMaskRedemption } from "./scan.js";
+import { MM_SCAN_STOP_REASONS, mmRedemptionCount, scanMetaMaskRedemption, type MetaMaskDelegationDisabled } from "./scan.js";
 import { mmProtocolPins } from "../single-protocol.js";
 import { verifyMetaMaskOuterTransaction } from "./transaction.js";
 
@@ -43,6 +43,10 @@ export async function observeMetaMaskGasless(context: MetaMaskObservationContext
 
   const scan = await scanSafely(context, intent, cursor, inspected);
   if (scan.inspection?.kind === "success") return result(scan.cursor, scan.candidate, scan.inspection, context.clock);
+  // Never redeemed up to that finality block and refused by the manager from then on: no hinted or future transaction
+  // can redeem it, whatever the provider reports.
+  if (scan.disabled !== undefined) return makeObservation(scan.cursor, "disabled", "mm_gasless_delegation_disabled", null, null,
+    scan.disabled.finality, scan.disabled.evidenceHash, null, context.clock);
   if (scan.inspection?.kind === "reverted") {
     return result(scan.cursor, scan.candidate, scan.inspection, context.clock);
   }
@@ -153,10 +157,11 @@ async function inspectCandidate(context: MetaMaskObservationContext, intent: Met
 
 async function scanSafely(context: MetaMaskObservationContext, intent: MetaMaskGaslessIntent,
   cursor: MetaMaskGaslessCursor, memo: Map<Hex, Inspection>): Promise<{ readonly cursor: MetaMaskGaslessCursor; readonly candidate: Hex | null;
-    readonly inspection: Inspection | null; readonly evidenceHash: string | null }> {
+    readonly inspection: Inspection | null; readonly evidenceHash: string | null; readonly disabled?: MetaMaskDelegationDisabled }> {
   try {
     const scanned = await scanMetaMaskRedemption({ row: context.deployment.row, call: context.call }, intent, cursor);
-    if (scanned.kind === "progress") return { cursor: scanned.cursor, candidate: null, inspection: null, evidenceHash: scanned.evidenceHash };
+    if (scanned.kind === "progress") return { cursor: scanned.cursor, candidate: null, inspection: null, evidenceHash: scanned.evidenceHash,
+      ...(scanned.disabled === undefined ? {} : { disabled: scanned.disabled }) };
     if (scanned.kind === "stopped") return { cursor: scanned.cursor, candidate: null,
       inspection: { kind: "unavailable", evidenceHash: null, reason: scanned.reason }, evidenceHash: null };
     const inspections: Array<{ readonly hash: Hex; readonly result: Inspection }> = [];

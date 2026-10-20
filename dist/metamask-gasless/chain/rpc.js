@@ -12,9 +12,12 @@ import { mmAddress, mmChain, mmHex, mmUint } from "../validation.js";
 import { observeMetaMaskGasless } from "./observe.js";
 import { recheckBlock, rpcBlock, rpcQuantity, rpcRecord } from "./abi.js";
 import { readMetaMaskChainState, validateMetaMaskGaslessSnapshot } from "./snapshot.js";
+import { readMetaMaskRevocationChain } from "../revocation/chain.js";
 export { validateMetaMaskGaslessSnapshot } from "./snapshot.js";
 const READ_METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getCode",
     "eth_getStorageAt", "eth_call", "eth_getTransactionByHash", "eth_getTransactionReceipt", "eth_getLogs"]);
+/** The disable pricing reads join the set only for `revocation`; observation and snapshots never use them. */
+const REVOCATION_METHODS = new Set(["eth_getTransactionCount", "eth_estimateGas", "eth_maxPriorityFeePerGas", "eth_getBalance"]);
 const MAX_RESPONSE = 4 * 1024 * 1024;
 /** Lazy environment binding. Merely creating the factory performs no DNS, RPC, provider, or state I/O. */
 export function metaMaskGaslessRpcFactory(environment, clock, transport) {
@@ -118,6 +121,13 @@ export class MetaMaskGaslessRpc {
         return await observeMetaMaskGasless({ deployment: mmObservedDeployment(intent, this.deployment), call: this.callRpc,
             clock: this.clock }, intent, cursor, provider);
     }
+    /** Chain facts for the owner's disable of this exact dispatched delegation, against the deployment it froze. */
+    async revocation(intent, disable, operationId) {
+        this.assertIntent(intent);
+        await this.assertChain();
+        const call = async (method, params) => await this.call(method, params, REVOCATION_METHODS.has(method));
+        return await readMetaMaskRevocationChain(call, mmObservedDeployment(intent, this.deployment), intent, disable, operationId);
+    }
     /**
      * Observation proves a saved operation against the deployment it froze (token, manager and enforcers from the
      * record, code pins from its prepare snapshot), never against today's registry: a later pin change refuses new
@@ -137,8 +147,8 @@ export class MetaMaskGaslessRpc {
         if (rpcQuantity(await this.callRpc("eth_chainId", [])) !== BigInt(this.chainId))
             mmFail("mm_gasless_rpc_binding");
     }
-    async call(method, params) {
-        if (!READ_METHODS.has(method))
+    async call(method, params, pricing = false) {
+        if (!READ_METHODS.has(method) && !pricing)
             mmEvidenceFail("mm_gasless_evidence_invalid", "rpc_method", method);
         const id = (++this.sequence).toString(), body = canonicalJson({ jsonrpc: "2.0", id, method, params });
         let response;

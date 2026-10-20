@@ -7,6 +7,7 @@ import { mmRegistry } from "../metamask-gasless/registry.js";
 import { GASLESS_TERMINAL } from "./operation-model.js";
 import { SA_TERMINAL } from "../smart-account-gasless/operation-model.js";
 import { FACILITATOR_TERMINAL } from "../facilitator-gasless/operation-model.js";
+import { MM_TERMINAL } from "../metamask-gasless/operation-model.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[], required = true): CommandOption => ({
   name, type, constraints, required, default: { kind: "none" }, sensitivity: "operator_input",
@@ -18,7 +19,7 @@ const profileHash = option("--profile-hash", "string", ["64_lowercase_hex_charac
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
   success: "USDC gross, fee budget, recipient amount, permission state and independently verified settlement.",
   failures: ["Classified APN error with no automatic fallback or replacement signature."] } as const;
-const states = { terminal: [...new Set([...GASLESS_TERMINAL, ...SA_TERMINAL, ...FACILITATOR_TERMINAL])],
+const states = { terminal: [...new Set([...GASLESS_TERMINAL, ...SA_TERMINAL, ...FACILITATOR_TERMINAL, ...MM_TERMINAL])],
   non_terminal: ["awaiting_approval", "execution_pending", "bootstrap_pending", "user_operation_pending", "submitted_pending",
     "included_success", "included_revert", "unknown_finality", "failed_effects_pending", "dispatch_pending",
     "material_pending", "material_sealed", "exposure_pending", "verified_pending",
@@ -105,6 +106,13 @@ export const GASLESS_COMMANDS: readonly CommandDefinition[] = [
     recovery: [{ command_path: ["operation", "resume"], when: "Continue an approved unattempted phase or observe the original operation; omit --wait-seconds." },
       { command_path: ["receipt", "get"], when: "Read saved delivery, fees and remaining permissions." }],
     examples: ["apn gasless transfer approve --operation <operation-id>"] },
+  { path: ["gasless", "transfer", "revoke"], synopsis: "apn gasless transfer revoke --operation <operation-id>",
+    summary: "Disable the delegation of a MetaMask gasless transfer whose outcome is still unproved, from its own server wallet.",
+    options: [operation], effect: { class: "payment_submit", summary: "Hands one DelegationManager.disableDelegation of exactly the dispatched delegation to the MetaMask Agent Wallet, which signs it and pays its native gas after its own Guard policy and MFA. Moves no USDC. Refuses before any send when the delegation is redeemed, already disabled, hashes differently on the pinned manager, or the wallet's native balance is below the maximum gas cost." },
+    approval: { class: "foreground_tty", when: "Every disable; MCP always returns a CLI handoff." }, output,
+    states: { terminal: ["revoked_unused", "completed"], non_terminal: ["submitted_pending", "unknown_finality", "failed_effects_pending", "abandoned_unknown"] },
+    recovery: [{ command_path: ["operation", "resume"], when: "Prove the outcome: the delegation disabled with no redemption (revoked_unused), or the redemption that landed first (completed)." }],
+    examples: ["apn gasless transfer revoke --operation <operation-id>"] },
   { path: ["gasless", "transfer", "approve-sealed"], synopsis: "apn gasless transfer approve-sealed --operation <operation-id>",
     summary: "Approve the first submission of an expired, already sealed local Circle USDC operation.",
     options: [operation], effect: { class: "payment_submit", summary: "Rechecks the unchanged owner policy, charged lease, original signed bytes and current chain state. Fresh foreground consent permits one first send within 120 seconds; never signs or repeats an estimate or attempted send." },
@@ -147,6 +155,7 @@ export function bindGaslessCommand(path: string, o: Readonly<Record<string, stri
   }
   if (path === "gasless transfer approve-sealed") return { command: "gasless.transfer.approve-sealed", operationId: o["--operation"]! };
   if (path === "gasless transfer approve") return { command: "gasless.transfer.approve", operationId: o["--operation"]! };
+  if (path === "gasless transfer revoke") return { command: "gasless.transfer.revoke", operationId: o["--operation"]! };
   if (!/^[1-9][0-9]{0,5}$/u.test(o["--chain"] ?? "")) gaslessFailure("APN_INVALID_INPUT", "gasless_chain_identity");
   const chainId = gaslessCommandChain(Number(o["--chain"]));
   if (path === "gasless balance") return { command: "gasless.balance", profile: o["--profile"]!, chainId };

@@ -4,7 +4,10 @@ export declare function newMetaMaskGaslessOperation(identityInput: MetaMaskGasle
 export declare function advanceMetaMaskGaslessOperation(operation: MetaMaskGaslessOperationRecord, patch: Partial<MetaMaskGaslessMutable>, atInput: string): MetaMaskGaslessOperationRecord;
 export declare function metaMaskGaslessAtTransition(operation: MetaMaskGaslessOperationRecord, index: number): MetaMaskGaslessOperationRecord;
 export declare function assertMetaMaskGaslessDispatchCapacity(operation: MetaMaskGaslessOperationRecord): void;
-/** A dispatched, unresolved operation is the only kind an observation may read for. */
+/**
+ * A dispatched, unresolved operation is the only kind an observation may read for, and a dispatched one the owner
+ * abandoned, whose outcome only a chain proof can still replace.
+ */
 export declare function assertMetaMaskGaslessObservable(operation: MetaMaskGaslessOperationRecord): void;
 /**
  * Whether a nonterminal observation can still be saved. It never gates a read or a terminal transition: once only

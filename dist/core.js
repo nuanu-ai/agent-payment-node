@@ -360,6 +360,7 @@ export class ApnCore {
                 }
                 return operationOutcome(await this.context.gaslessUsdt.forProfile(request.profileHash).statusBound(request.operationId));
             case "gasless.transfer.approve-sealed": return operationOutcome(await this.gasless.approveSealed(request.operationId));
+            case "gasless.transfer.revoke": return dataOutcome(await this.metaMaskGasless.revoke(request.operationId), "owner_wallet_handoff_unproven");
             case "gasless.transfer.approve": {
                 const stored = await this.operations.required(request.operationId), { kind } = stored;
                 if (kind === "direct_transfer" && stored.record.providerDirect?.coinbaseGasless !== undefined) {

@@ -37,6 +37,8 @@ export const MM_REASON_CODES = {
   mm_gasless_provider_mfa_rejected: "APN_PROVIDER_EFFECT_UNAVAILABLE",
   mm_gasless_transaction_reverted: "APN_PROVIDER_EFFECT_UNAVAILABLE",
   mm_gasless_owner_abandoned: "APN_OPERATION_BLOCKED",
+  /** The delegator disabled the delegation on chain before any redemption: proved, no effect, nothing more can happen. */
+  mm_gasless_delegation_disabled: "APN_PROVIDER_EFFECT_UNAVAILABLE",
   mm_gasless_state_corrupt: "APN_STATE_CORRUPT",
   mm_gasless_state_security: "APN_STATE_SECURITY",
   mm_gasless_idempotency_conflict: "APN_IDEMPOTENCY_CONFLICT",

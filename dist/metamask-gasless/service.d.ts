@@ -4,12 +4,15 @@ import type { RuntimeContext } from "../runtime.js";
 import type { MetaMaskGaslessChainId } from "./model.js";
 import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcFactory } from "./ports.js";
 import { MetaMaskGaslessPreparation } from "./prepare.js";
+import { type MetaMaskRevocationDependencies } from "./revocation/service.js";
 export interface MetaMaskGaslessDependencies {
     readonly rpcFor: MetaMaskGaslessRpcFactory;
     readonly observationRpcFor?: MetaMaskGaslessObservationRpcFactory;
     readonly provider: MetaMaskGaslessProviderPort;
     readonly approval?: MetaMaskGaslessApprovalPort;
     readonly records?: MetaMaskGaslessRepositoryPort;
+    /** Foreground consent and the owner's wallet CLI, present only for `gasless transfer revoke`. */
+    readonly revocation?: MetaMaskRevocationDependencies;
 }
 export declare class MetaMaskGaslessService {
     private readonly context;
@@ -42,10 +45,15 @@ export declare class MetaMaskGaslessService {
     private sessionGuidance;
     approve(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     resume(operationId: string, observationRpcEnv?: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
+    /** The owner's on-chain disable of a disclosed delegation whose outcome is still unproved (no journal write). */
+    revoke(operationId: string): Promise<Readonly<Record<string, unknown>>>;
     status(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     receipt(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessReceipt>;
     private project;
     private dependencies;
     private execution;
+    /** Observation only; an owner-named RPC replaces the frozen endpoint for the read, never for approval or dispatch. */
+    private observation;
+    private readonly save;
     private locked;
 }

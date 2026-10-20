@@ -185,7 +185,8 @@ export interface MetaMaskGaslessCursor {
 }
 export interface MetaMaskGaslessObservation {
   readonly observedAt: string;
-  readonly phase: "pending" | "unavailable" | "invalid" | "reorg" | "reverted" | "success";
+  /** `disabled`: at `finalityBlock` the count is 0 and the manager refuses the delegation (proof of no effect). */
+  readonly phase: "pending" | "unavailable" | "invalid" | "reorg" | "reverted" | "success" | "disabled";
   readonly reason: MetaMaskGaslessReason;
   readonly candidateTxHash: Hex | null;
   readonly transactionBlock: MetaMaskGaslessBlock | null;
@@ -225,7 +226,9 @@ export interface MetaMaskGaslessRpcObservation {
   readonly settlement: MetaMaskGaslessSettlement | null;
 }
 export type MetaMaskGaslessState = "awaiting_approval" | "execution_pending" | "dispatch_pending" |
-  "submitted_pending" | "unknown_finality" | "failed_effects_pending" | "completed" | "failed_before_effect" | "abandoned_unknown";
+  "submitted_pending" | "unknown_finality" | "failed_effects_pending" | "completed" | "failed_before_effect" | "abandoned_unknown" |
+  /** Dispatched, never redeemed, and disabled on chain by its own delegator: proved to have no effect. */
+  "revoked_unused";
 export interface MetaMaskGaslessMutable {
   readonly state: MetaMaskGaslessState;
   readonly approval: MetaMaskGaslessApproval | null;
