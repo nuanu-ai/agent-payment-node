@@ -25,6 +25,8 @@ export type CommandRequest =
   | { readonly command: "x402.permit2.preflight"; readonly profile: string; readonly paymentRequired: string;
       readonly expectedChallengeHash: string; readonly expectedIndex: string; readonly expectedTerms: string }
   | { readonly command: "x402.permit2.status"; readonly profile: string; readonly operationId: string }
+  | { readonly command: "x402.solana.pay"; readonly profile: string; readonly url: string; readonly mint: string; readonly maxAmountAtomic: string; readonly idempotencyKey: string }
+  | { readonly command: "x402.solana.observe" | "x402.solana.status"; readonly operationId: string }
   | { readonly command: "relay.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.base.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.arbitrum.prepare"; readonly profile: string; readonly owner: string; readonly recipient: string; readonly amountAtomic: string;

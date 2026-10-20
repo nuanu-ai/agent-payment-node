@@ -14,6 +14,7 @@ import type { InspectCandidate } from "./x402-model.js";
 import { MAX_DECODED_X402_BYTES, decodeCanonicalBase64, parseJsonWithDuplicateRejection } from "./x402-strict-json.js";
 import { isEip2612GasSponsoringDeclaration } from "./x402-permit2/extension.js";
 import { validatePermit2PaymentPayload } from "./x402-permit2/codec-shape.js";
+import { isSolanaAccepted, validateSolanaPaymentPayload } from "./x402-solana/codec.js";
 
 export type X402PaymentPayload = PaymentPayload;
 export type X402PaymentRequired = PaymentRequired;
@@ -299,6 +300,7 @@ function validatePaymentPayload(value: unknown): asserts value is PaymentPayload
   if (paymentPayload.x402Version !== 2) throw protocol("Only x402Version 2 PaymentPayload is supported.");
   validateResource(paymentPayload.resource);
   validateRequirements(paymentPayload.accepted);
+  if (isSolanaAccepted(paymentPayload.accepted)) return validateSolanaPaymentPayload(paymentPayload);
   const accepted = paymentPayload.accepted as PaymentRequirements;
   let acceptedAsset: X402Asset;
   try { acceptedAsset = x402Asset(accepted.network, accepted.asset); }

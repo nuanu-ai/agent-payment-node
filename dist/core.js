@@ -96,6 +96,9 @@ export class ApnCore {
             case "x402.permit2.preflight":
             case "x402.permit2.approve":
             case "x402.permit2.observe":
+            case "x402.solana.pay":
+            case "x402.solana.observe":
+            case "x402.solana.status":
                 throw new ApnError("APN_UNSUPPORTED_COMMAND", "This provider command requires its dedicated bounded CLI path.");
             case "x402.permit2.status":
                 return dataOutcome(await readPermit2ProductionStatus(this.context.state.root, request.profile, request.operationId), "local_permit2_operation_status");

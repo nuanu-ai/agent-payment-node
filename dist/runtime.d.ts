@@ -1,4 +1,5 @@
 import type { CircleFundingEvmService } from "./circle-v2-evm/funding-runtime.js";
+import type { X402SolanaPorts } from "./x402-solana/service.js";
 import type { GaszipFundingService } from "./lifi/gaszip-direct-service.js";
 import type { RelayUnsignedPrepareService } from "./relay/prepare.js";
 import type { RelayRetireService } from "./relay/retire.js";
@@ -90,6 +91,8 @@ export interface CoreDependencies {
     readonly orcaRuntime?: OrcaRuntimeSelector;
     /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
     readonly orcaStableLegacy?: OrcaStableLegacyFinisher;
+    /** Solana x402 ports for the generic operation commands that delegate to `x402.solana.observe`. */
+    readonly x402Solana?: X402SolanaPorts;
     readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.jupiter.quote";
     }>>;
@@ -162,6 +165,8 @@ export declare class RuntimeContext {
     readonly orcaRuntime?: OrcaRuntimeSelector;
     /** Finish-only exits of stable USDC to USDT operations a released version prepared (SWAP-10). */
     readonly orcaStableLegacy?: OrcaStableLegacyFinisher;
+    /** Solana x402 ports for the generic operation commands that delegate to `x402.solana.observe`. */
+    readonly x402Solana?: X402SolanaPorts;
     readonly jupiterV1Runtime?: GuardedSwapRuntime<Extract<CommandRequest, {
         readonly command: "swap.jupiter.quote";
     }>>;

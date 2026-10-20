@@ -16,6 +16,7 @@ import { installLegacyCase } from "./legacy-corpus-readers.js";
 import { metaMaskNative, NoSecret, unexecutedUsdt, WP2_FAMILY_RECORDS } from "./operation-commands-families.js";
 import { ExactX402Native, QueuedHttp, RecoveryRpc, X402_TEST_ACCOUNT, challengeObservation } from "./x402-helpers.js";
 import { journalFixture } from "./x402-permit2-production-journal-fixture.js";
+import { preparedSolanaRecord } from "./x402-solana-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_URL, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
 /**
@@ -131,6 +132,9 @@ const FIXTURES: Readonly<Record<string, (t: TestContext) => Promise<Case>>> = {
   // Closed before any effect: its owner exit refuses (only an unknown outcome past its quote can be abandoned).
   metamask_native: async t => ({ ...await WP2_FAMILY_RECORDS.metamask_native(t), cli: true, status: "ok", resume: "ok",
     abandon: { code: "APN_OPERATION_BLOCKED", message: /unknown outcome/u }, receipt: NO_RECEIPT }),
+  // Prepared and never exposed: resume observes its open approval window; only an exposed payment can be abandoned.
+  x402_solana: async t => { const state = await root(t); return { root: state, id: await preparedSolanaRecord(state), cli: true, status: "ok", resume: "ok",
+    abandon: { code: "APN_OPERATION_BLOCKED", reason: "x402_solana_not_exposed", family: true }, receipt: NO_RECEIPT }; },
 };
 
 function check(result: OutputEnvelope, expected: Answer, id: string, label: string): void {

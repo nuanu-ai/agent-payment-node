@@ -8,7 +8,7 @@ import { parsePublicHttpsUrl } from "../network-policy.js";
 import { solanaHttpsFetch } from "./https.js";
 import type { SolanaRpcPacer } from "./pacing.js";
 
-export type SolanaMethod = "getGenesisHash" | "getMultipleAccounts" | "getAccountInfo" | "getLatestBlockhash" | "getBlockHeight" | "getFeeForMessage" | "getMinimumBalanceForRentExemption" | "simulateTransaction" | "sendTransaction" | "getSignatureStatuses" | "getTransaction" | "getBlock";
+export type SolanaMethod = "getGenesisHash" | "getMultipleAccounts" | "getAccountInfo" | "getLatestBlockhash" | "getBlockHeight" | "getFeeForMessage" | "getMinimumBalanceForRentExemption" | "simulateTransaction" | "sendTransaction" | "getSignatureStatuses" | "getTransaction" | "getBlock" | "getSignaturesForAddress";
 export type SolanaReadMethod = Exclude<SolanaMethod, "simulateTransaction" | "sendTransaction">;
 export interface SolanaBatchRead { readonly method: SolanaReadMethod; readonly params: readonly unknown[]; }
 export interface SolanaRpcBudgetOptions {
@@ -76,7 +76,7 @@ export class SolanaRpcBudget {
 }
 const READ_METHODS: ReadonlySet<string> = new Set<SolanaReadMethod>([
   "getGenesisHash", "getMultipleAccounts", "getAccountInfo", "getLatestBlockhash", "getBlockHeight", "getFeeForMessage",
-  "getMinimumBalanceForRentExemption", "getSignatureStatuses", "getTransaction", "getBlock",
+  "getMinimumBalanceForRentExemption", "getSignatureStatuses", "getTransaction", "getBlock", "getSignaturesForAddress",
 ]);
 export interface SolanaRpcPort {
   readonly originHash: string;

@@ -90,6 +90,16 @@ export type CommandRequest = {
     readonly profile: string;
     readonly operationId: string;
 } | {
+    readonly command: "x402.solana.pay";
+    readonly profile: string;
+    readonly url: string;
+    readonly mint: string;
+    readonly maxAmountAtomic: string;
+    readonly idempotencyKey: string;
+} | {
+    readonly command: "x402.solana.observe" | "x402.solana.status";
+    readonly operationId: string;
+} | {
     readonly command: "relay.prepare";
     readonly profile: string;
     readonly recipient: string;
