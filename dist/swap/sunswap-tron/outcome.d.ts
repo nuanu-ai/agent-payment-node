@@ -1,6 +1,6 @@
 import { type SwapOperationRecord, type SwapReceiptProof } from "../model.js";
 import { type SunSwapPreparedMaterial } from "./prepared.js";
-import { type SunSwapReceiptExpectation } from "./receipt.js";
+import { type SunSwapReceiptExpectation, type SunSwapReceiptValidation } from "./receipt.js";
 import { type SwapUnlandedProof } from "../unlanded.js";
 export type SunSwapObservationMethod = "wallet/gettransactionbyid" | "wallet/gettransactioninfobyid" | "walletsolidity/gettransactionbyid" | "walletsolidity/gettransactioninfobyid" | "walletsolidity/getnowblock";
 export interface SunSwapObservationRpcPort {
@@ -24,6 +24,6 @@ export declare class SunSwapOutcomeObserver {
     proveUnlanded(materialValue: SunSwapPreparedMaterial): Promise<SwapUnlandedProof | null>;
 }
 /** A solidified failed call: exact bytes, one failed result on both records, fees within the frozen bounds, no logs. */
-export declare function validateSunSwapFailure(transactionValue: unknown, infoValue: unknown, solidifiedHeadNumber: string, expected: SunSwapReceiptExpectation): {
-    readonly receiptHash: string;
+export declare function validateSunSwapFailure(transactionValue: unknown, infoValue: unknown, solidifiedHeadNumber: string, expected: SunSwapReceiptExpectation): Pick<SunSwapReceiptValidation, "receiptHash" | "inputAmountAtomic" | "feeSun" | "trxDebitSun"> & {
+    readonly outputAmountAtomic: null;
 };

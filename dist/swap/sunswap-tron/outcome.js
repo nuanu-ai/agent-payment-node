@@ -54,8 +54,10 @@ export class SunSwapOutcomeObserver {
         const observedAt = this.now();
         if (!(observedAt instanceof Date) || !Number.isFinite(observedAt.getTime()))
             conflict();
+        // The solidified record's own amounts: call value in, USDT Transfer out, energy plus bandwidth fee burned (SUN).
         return { outcome: succeeded ? "succeeded" : "reverted", proof: { receiptHash: finalized.receiptHash,
-                transactionHash: txid, observedAt: observedAt.toISOString(), finalized: true } };
+                transactionHash: txid, observedAt: observedAt.toISOString(), finalized: true, economics: { inputAtomic: finalized.inputAmountAtomic,
+                    outputAtomic: finalized.outputAmountAtomic, networkFeeAtomic: finalized.feeSun, nativeDebitAtomic: finalized.trxDebitSun } } };
     }
     /** Expiration passed at the solidified head and no solidified record of the exact transaction id. */
     async proveUnlanded(materialValue) {
@@ -88,7 +90,8 @@ export function validateSunSwapFailure(transactionValue, infoValue, solidifiedHe
         conflict();
     const body = { transactionHash: expected.transactionHash, blockNumber: block.toString(), solidifiedHeadNumber: solid.toString(),
         contractResult: result, inputAmountAtomic: "0", feeSun: fee.toString(), trxDebitSun: fee.toString(), finalized: true };
-    return { receiptHash: domainHash("apn.sunswap-tron-v2-failed-call.v1", canonicalJson(normalizeTronEvidence({ transaction, info, ...body }))) };
+    return { receiptHash: domainHash("apn.sunswap-tron-v2-failed-call.v1", canonicalJson(normalizeTronEvidence({ transaction, info, ...body }))),
+        inputAmountAtomic: body.inputAmountAtomic, outputAmountAtomic: null, feeSun: body.feeSun, trxDebitSun: body.trxDebitSun };
 }
 function contractResult(value) {
     const ret = record(value).ret;

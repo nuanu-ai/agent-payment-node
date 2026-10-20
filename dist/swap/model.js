@@ -104,6 +104,10 @@ function validateStateBindings(op) {
         corrupt("Swap receipt proof phase is invalid.");
     if (op.state === "finalized" && (op.receiptProof === null || !op.receiptProof.finalized))
         corrupt("Finalized swap lacks final receipt proof.");
+    const economics = op.receiptProof?.economics;
+    if (economics !== undefined && (op.state === "finalized" ? economics.outputAtomic === null :
+        op.state !== "failed_confirmed_revert" || economics.outputAtomic !== null || economics.inputAtomic !== "0"))
+        corrupt("Swap receipt economics contradict the swap outcome.");
     if (op.failureProofHash !== null)
         hash(op.failureProofHash, "stored");
     const failed = op.state === "failed_before_effect" || op.state === "failed_confirmed_revert" || op.state === "expired_unlanded" ||
@@ -125,9 +129,9 @@ function validateStateBindings(op) {
 }
 export function validateSwapReceiptProof(value, chain, earliestAt, latestAt, mode = "input") {
     const fail = (message) => failure(mode, message);
-    if (!isPlainRecord(value) || !exactKeys(value, ["receiptHash", "transactionHash", "observedAt", "finalized"]) ||
+    if (!isPlainRecord(value) || !exactKeys(value, ["receiptHash", "transactionHash", "observedAt", "finalized", ...(value.economics === undefined ? [] : ["economics"])]) ||
         typeof value.finalized !== "boolean" || typeof value.transactionHash !== "string" || value.transactionHash.length < 8 ||
-        value.transactionHash.length > 256)
+        value.transactionHash.length > 256 || (value.economics !== undefined && (!value.finalized || !validEconomics(value.economics))))
         fail("Swap receipt proof is invalid.");
     const record = value;
     hash(record.receiptHash, mode);
@@ -142,6 +146,13 @@ export function validateSwapReceiptProof(value, chain, earliestAt, latestAt, mod
     if (/^solana:/u.test(chain) && !/^[1-9A-HJ-NP-Za-km-z]{64,128}$/u.test(transactionHash))
         fail("Swap Solana transaction signature is invalid.");
     return value;
+}
+function validEconomics(value) {
+    const atomic = (x) => typeof x === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(x);
+    return isPlainRecord(value) && exactKeys(value, ["inputAtomic", "outputAtomic", "networkFeeAtomic", "nativeDebitAtomic",
+        ...(value.accountRentAtomic === undefined ? [] : ["accountRentAtomic"])]) && atomic(value.inputAtomic) &&
+        (value.outputAtomic === null || atomic(value.outputAtomic)) && (value.networkFeeAtomic === null ? value.nativeDebitAtomic === null :
+        atomic(value.networkFeeAtomic) && atomic(value.nativeDebitAtomic)) && (value.accountRentAtomic === undefined || atomic(value.accountRentAtomic));
 }
 function approval(value, input, mode) {
     try {

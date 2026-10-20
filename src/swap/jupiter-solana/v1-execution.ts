@@ -124,7 +124,9 @@ export class JupiterV1ExecutionDriver implements GuardedSwapExecutionDriver {
   // A finalized receipt is always recorded. One clock read is both the transition instant and the proof's observedAt:
   // two reads could straddle a millisecond and fail the receipt time binding (observedAt after the transition).
   const at=this.d.clock.now();
-  return await this.d.core.finalize(op,at,{receiptHash:receipt.receiptHash,transactionHash:receipt.signature,observedAt:at.toISOString(),finalized:true});
+  // The finalized receipt proved spend = exact input + fee - closed wSOL refund; its own output, fee and spend are the facts.
+  return await this.d.core.finalize(op,at,{receiptHash:receipt.receiptHash,transactionHash:receipt.signature,observedAt:at.toISOString(),finalized:true,
+   economics:{inputAtomic:guarded.inputAtomic,outputAtomic:receipt.recipientOutputAtomic,networkFeeAtomic:receipt.feeLamports,nativeDebitAtomic:receipt.nativeSpendLamports}});
  });}
  async proveUnlanded(input:GuardedSwapObservationInput):Promise<SwapUnlandedProof|null>{return await proveJupiterV1Unlanded(this.d,input);}
 }
