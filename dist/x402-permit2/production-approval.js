@@ -14,8 +14,10 @@ export function permit2ApprovalPurpose(value) {
 export function permit2ApprovalDisplay(record, purpose = "sign-only") {
     const p = reconstructPermit2ProductionMaterial(record.material), r = record.material.checked.request;
     const approvedPurpose = permit2ApprovalPurpose(purpose);
-    const body = { purpose: approvedPurpose, operationId: record.operationId, profile: record.material.wallet.profile, payer: p.payer, chain: "eip155:43114",
-        token: p.token, payTo: p.payTo, amountAtomic: p.amountAtomic, spender: PERMIT2_ADDRESS, proxy: X402_EXACT_PERMIT2_PROXY,
+    const body = { purpose: approvedPurpose, operationId: record.operationId, profile: record.material.wallet.profile, payer: p.payer, chain: p.chain,
+        token: p.token, payTo: p.payTo, amountAtomic: p.amountAtomic,
+        ...(record.material.asset === undefined ? {} : { tokenUnit: `${record.material.asset.symbol}, ${record.material.asset.decimals} decimals` }),
+        spender: PERMIT2_ADDRESS, proxy: X402_EXACT_PERMIT2_PROXY,
         tokenPermit: p.plan.eip2612 === null ? "not_requested" : "requested",
         permit2Deadline: p.plan.authorization.deadline, eip2612Deadline: p.plan.eip2612?.info.deadline ?? null,
         origin: new URL(r.url).origin, urlHash: sha256(r.url), requestHash: record.material.checked.requestHash,
@@ -34,8 +36,8 @@ export class TtyPermit2ForegroundApproval {
     }
     async approve(d) {
         await exactChainConsent([
-            "Agent Payment Node Avalanche USDT Permit2 approval", `Operation: ${d.operationId}`, `Profile: ${d.profile}`,
-            `Chain: ${d.chain}`, `Local payer: ${d.payer}`, `Token: ${d.token}`, `Payee: ${d.payTo}`, `Maximum token debit: ${d.amountAtomic} atomic USDT`,
+            "Agent Payment Node x402 Permit2 approval", `Operation: ${d.operationId}`, `Profile: ${d.profile}`,
+            `Chain: ${d.chain}`, `Local payer: ${d.payer}`, `Token: ${d.token}${d.tokenUnit === undefined ? " (USDT, 6 decimals)" : ` (${d.tokenUnit})`}`, `Payee: ${d.payTo}`, `Maximum token debit: ${d.amountAtomic} atomic units`,
             `Permit2 spender: ${d.spender}`, `Exact proxy: ${d.proxy}`, `Token permit: ${d.tokenPermit}`,
             `Permit2 deadline: ${d.permit2Deadline}`, `Token permit deadline: ${d.eip2612Deadline ?? "none"}`,
             `Merchant origin: ${d.origin}`, `Whole URL hash: ${d.urlHash}`, `Request hash: ${d.requestHash}`,

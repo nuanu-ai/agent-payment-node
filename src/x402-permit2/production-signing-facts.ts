@@ -10,7 +10,7 @@ import { observerNonceCalls, type Permit2ObservedBlock } from "./production-obse
 const TOKEN = parseAbi(["function balanceOf(address owner) view returns (uint256)",
   "function allowance(address owner,address spender) view returns (uint256)"]);
 /**
- * One batch pinned to the finalized block: payer code, the Permit2 nonce word, balance, allowance and (sponsored) the
+ * One batch pinned to the latest block the fence read: payer code, the Permit2 nonce word, balance, allowance and (sponsored) the
  * EIP-2612 nonce. The proxy and Permit2 runtime codes and the token domain were proven at prepare and are not re-read:
  * both contracts are immutable at fixed addresses, and the signature binds the frozen domain.
  */

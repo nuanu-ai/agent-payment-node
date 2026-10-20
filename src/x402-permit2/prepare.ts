@@ -4,13 +4,18 @@ import { ApnError } from "../errors.js";
 import type { Address, Hex } from "../model.js";
 import type { X402PaymentRequired } from "../x402-codec.js";
 import { planPermit2Authorization, type Permit2SigningPlan } from "./authorization.js";
+import { tokenDomainSeparator } from "../x402-policy.js";
 import { isEip2612GasSponsoringDeclaration } from "./extension.js";
 import { selectPermit2Offer, type Permit2Requirement } from "./offer.js";
-import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "./registry.js";
+import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_EXACT_PERMIT2_PROXY_CODE_HASH, X402_PERMIT2_MECHANISM,
+  type Permit2Asset, type Permit2AssetResolver } from "./registry.js";
 
 const PREPARE_DOMAIN = "apn.x402-permit2.prepare.v1";
 const UINT256 = (1n << 256n) - 1n;
-const asset = X402_PERMIT2_ASSETS[0]!;
+/** The resolver that admits exactly one asset: the operation's own. */
+export function onlyPermit2Asset(asset: Permit2Asset): Permit2AssetResolver {
+  return (network, token) => network === asset.chain && token.toLowerCase() === asset.token.toLowerCase() ? asset : undefined;
+}
 
 /** Values must come from the current, authenticated owner policy and local wallet binding. */
 export interface Permit2OwnerAdmission {
@@ -33,7 +38,8 @@ export interface Permit2PrepareEvidence {
   readonly observedAtSeconds: number;
   readonly balanceAtomic: string;
   readonly allowanceAtomic: string;
-  readonly tokenDomainSeparator: Hex;
+  /** Read only when a sponsored EIP-2612 permit is needed; null otherwise. */
+  readonly tokenDomainSeparator: Hex | null;
   readonly proxyCodeHash: Hex;
   readonly permit2Deployed: boolean;
   readonly nonceBitmapWordIndex: string;
@@ -60,6 +66,8 @@ export interface Permit2PrepareInput {
   readonly expected: { readonly index: number; readonly requirement: Permit2Requirement; readonly challengeHash: string };
   readonly owner: Permit2OwnerAdmission;
   readonly evidence: Permit2PrepareEvidence;
+  /** The admitted asset the evidence was read for; the only offer asset this prepare may pay. */
+  readonly asset: Permit2Asset;
   readonly nowSeconds: number;
   /** Random nonce supplied by the caller; this function never signs or sends. */
   readonly nonce: bigint;
@@ -70,7 +78,7 @@ export interface Permit2PreparedMaterial {
   readonly offerHash: string;
   readonly policyDigest: string;
   readonly payer: Address;
-  readonly chain: "eip155:43114";
+  readonly chain: `eip155:${number}`;
   readonly token: Address;
   readonly payTo: Address;
   readonly amountAtomic: string;
@@ -84,7 +92,8 @@ export function preparePermit2Payment(input: Permit2PrepareInput): Permit2Prepar
   if (input.localWallet !== true) blocked("A local EVM wallet is required.", "x402_permit2_local_wallet_required");
   const sellerSponsorsEip2612 = validateChallenge(input.challenge);
   const challengeHash = hashChallenge(input.challenge);
-  const selection = selectPermit2Offer(input.challenge.accepts, input.payer);
+  const asset = input.asset;
+  const selection = selectPermit2Offer(input.challenge.accepts, input.payer, onlyPermit2Asset(asset));
   if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
       canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) {
     blocked("The merchant challenge or selected terms changed.", "x402_permit2_merchant_terms_mismatch");
@@ -106,8 +115,9 @@ export function preparePermit2Payment(input: Permit2PrepareInput): Permit2Prepar
   if (evidence.chainId !== asset.chainId || !same(evidence.account, input.payer) ||
       !Number.isSafeInteger(evidence.observedAtSeconds) || evidence.observedAtSeconds > input.nowSeconds ||
       input.nowSeconds - evidence.observedAtSeconds > 30 ||
-      evidence.tokenDomainSeparator?.toLowerCase() !== asset.tokenDomainSeparator.toLowerCase() ||
-      evidence.proxyCodeHash?.toLowerCase() !== asset.proxyCodeHash.toLowerCase() || evidence.permit2Deployed !== true) {
+      (evidence.tokenDomainSeparator?.toLowerCase() ?? null) !== (asset.tokenDomainSeparator?.toLowerCase() ?? null) ||
+      evidence.proxyCodeHash?.toLowerCase() !== X402_EXACT_PERMIT2_PROXY_CODE_HASH || asset.proxyCodeHash !== X402_EXACT_PERMIT2_PROXY_CODE_HASH ||
+      evidence.permit2Deployed !== true) {
     blocked("Pinned chain, token domain or contract evidence is missing.", "x402_permit2_chain_evidence_required");
   }
   const facilitator = evidence.facilitator;
@@ -134,8 +144,13 @@ export function preparePermit2Payment(input: Permit2PrepareInput): Permit2Prepar
   const plan = planPermit2Authorization(selection, { payer: input.payer, nowSeconds: input.nowSeconds,
     nonce: input.nonce, permit2AllowanceAtomic: allowance.toString(), eip2612Nonce,
     sellerSponsorsEip2612: sellerSponsorsEip2612 && facilitator.eip2612GasSponsoring });
+  // A sponsored permit signs the token's own EIP-712 domain: its name/version must recompute the on-chain separator.
+  if (plan.eip2612 !== null && (asset.tokenDomain === null || asset.tokenDomainSeparator === null ||
+      tokenDomainSeparator(asset.tokenDomain.name, asset.tokenDomain.version, asset) !== asset.tokenDomainSeparator.toLowerCase())) {
+    blocked("The token's EIP-712 name and version do not recompute its on-chain DOMAIN_SEPARATOR.", "x402_permit2_token_domain_mismatch");
+  }
   const body = { challengeHash, offerHash: selection.offerHash, policyDigest: owner.policyDigest, payer: input.payer,
-    chain: "eip155:43114" as const, token: asset.token, payTo: selection.payTo, amountAtomic: selection.amountAtomic,
+    chain: asset.chain, token: asset.token, payTo: selection.payTo, amountAtomic: selection.amountAtomic,
     expiresAtUnix: plan.authorization.deadline, planHash: plan.planHash };
   return deepFreeze({ ...body, plan, prepareHash: domainHash(PREPARE_DOMAIN, canonicalJson(body)) });
 }
@@ -144,6 +159,9 @@ export function hashChallenge(challenge: Permit2PrepareInput["challenge"]): stri
   validateChallenge(challenge);
   return domainHash("apn.x402-permit2.challenge.v1", canonicalJson(challenge));
 }
+
+/** True when the checked 402 declares a valid EIP-2612 gas-sponsoring extension. */
+export function permit2SellerSponsorsEip2612(challenge: X402PaymentRequired): boolean { return validateChallenge(challenge); }
 
 function validateChallenge(challenge: X402PaymentRequired): boolean {
   if (!isPlainRecord(challenge) || challenge.x402Version !== 2 || !isPlainRecord(challenge.resource) ||
@@ -158,30 +176,40 @@ function validateChallenge(challenge: X402PaymentRequired): boolean {
   return true;
 }
 
+/** The read for one admitted (chain, token): the asset as selected, before its chain facts were read. */
+export interface Permit2PrepareReadRequest {
+  readonly payer: Address; readonly asset: Permit2Asset;
+  readonly challengeHash: string; readonly offerHash: string; readonly amountAtomic: string; readonly nowSeconds: number;
+  readonly nonceBitmapWordIndex: string;
+  /** True when the seller's 402 declares EIP-2612 gas sponsoring; only then may a short allowance read the token domain. */
+  readonly sellerSponsorsEip2612: boolean;
+  /** The selected offer's payee; an owner recipient pin on the x402 row must list it. */
+  readonly payTo: Address;
+}
 /** Adapter port for serial integration; implementations must return authenticated, fresh reads. */
 export interface Permit2PrepareReadPort {
-  read(input: { readonly payer: Address; readonly chainId: 43114; readonly token: Address;
-    readonly challengeHash: string; readonly offerHash: string; readonly amountAtomic: string; readonly nowSeconds: number;
-    readonly nonceBitmapWordIndex: string;
-    /** The selected offer's payee; an owner recipient pin on the x402 row must list it. */
-    readonly payTo: Address }): Promise<{ readonly owner: Permit2OwnerAdmission; readonly evidence: Permit2PrepareEvidence }>;
+  read(input: Permit2PrepareReadRequest): Promise<{ readonly owner: Permit2OwnerAdmission; readonly evidence: Permit2PrepareEvidence;
+    readonly asset: Permit2Asset }>;
 }
 
+/** `assets` admits the offers the owner's active policy admits; the lowest-index admitted Permit2 offer is prepared. */
 export async function preparePermit2WithPort(
   port: Permit2PrepareReadPort,
-  input: Omit<Permit2PrepareInput, "owner" | "evidence" | "nonce">,
+  input: Omit<Permit2PrepareInput, "owner" | "evidence" | "nonce" | "asset"> & { readonly assets: Permit2AssetResolver },
 ): Promise<Permit2PreparedMaterial> {
   const challengeHash = hashChallenge(input.challenge);
-  const selection = selectPermit2Offer(input.challenge.accepts, input.payer);
+  const sellerSponsorsEip2612 = validateChallenge(input.challenge);
+  const selection = selectPermit2Offer(input.challenge.accepts, input.payer, input.assets);
   if (input.expected.challengeHash !== challengeHash || input.expected.index !== selection.index ||
       canonicalJson(input.expected.requirement) !== canonicalJson(selection.requirement)) {
     blocked("The merchant challenge or selected terms changed.", "x402_permit2_merchant_terms_mismatch");
   }
   const nonce = BigInt(`0x${randomBytes(32).toString("hex")}`);
-  const read = await port.read({ payer: input.payer, chainId: 43114, token: asset.token, challengeHash,
+  const read = await port.read({ payer: input.payer, asset: selection.listAsset, challengeHash,
     offerHash: selection.offerHash, amountAtomic: selection.amountAtomic, nowSeconds: input.nowSeconds,
-    nonceBitmapWordIndex: (nonce >> 8n).toString(), payTo: selection.payTo });
-  return preparePermit2Payment({ ...input, owner: read.owner, evidence: read.evidence, nonce });
+    nonceBitmapWordIndex: (nonce >> 8n).toString(), sellerSponsorsEip2612, payTo: selection.payTo });
+  const { assets: _assets, ...rest } = input;
+  return preparePermit2Payment({ ...rest, owner: read.owner, evidence: read.evidence, asset: read.asset, nonce });
 }
 
 function quantity(value: unknown): bigint {

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { ApnError } from "../../src/errors.js";
 import { decodePaymentRequiredHeader } from "../../src/x402-codec.js";
-import { hashChallenge, preparePermit2Payment, preparePermit2WithPort, type Permit2PrepareInput } from "../../src/x402-permit2/prepare.js";
+import { hashChallenge, onlyPermit2Asset, preparePermit2Payment, preparePermit2WithPort, type Permit2PrepareInput } from "../../src/x402-permit2/prepare.js";
 import { selectPermit2Offer } from "../../src/x402-permit2/offer.js";
 import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, X402_PERMIT2_MECHANISM } from "../../src/x402-permit2/registry.js";
 import type { PaymentRequired } from "@x402/core/types";
@@ -20,7 +20,7 @@ const sponsoringDeclaration = {
 };
 const challenge: PaymentRequired = { x402Version: 2, resource: { url: "https://seller.example/data" },
   accepts: accepts as PaymentRequired["accepts"] };
-const selection = selectPermit2Offer(accepts, payer);
+const selection = selectPermit2Offer(accepts, payer, onlyPermit2Asset(asset));
 const base: Permit2PrepareInput = {
   payer, localWallet: true, challenge,
   expected: { index: selection.index, requirement: selection.requirement, challengeHash: hashChallenge(challenge) },
@@ -34,7 +34,7 @@ const base: Permit2PrepareInput = {
     facilitator: { available: true, network: asset.chain, scheme: "exact", asset: asset.token,
       assetTransferMethod: "permit2", permit2Address: PERMIT2_ADDRESS, exactProxy: X402_EXACT_PERMIT2_PROXY,
       eip2612GasSponsoring: false } },
-  nowSeconds: 1_789_720_000, nonce: 7n,
+  asset, nowSeconds: 1_789_720_000, nonce: 7n,
 };
 
 function refused(input: Permit2PrepareInput, reason: string): void {
@@ -65,10 +65,10 @@ test("read port receives the exact nonce word before it supplies authenticated o
     assert.equal(request.offerHash, selection.offerHash);
     assert.equal(request.amountAtomic, selection.amountAtomic);
     assert.equal(request.nowSeconds, base.nowSeconds);
-    assert.equal(request.chainId, 43114);
-    assert.equal(request.token, asset.token);
-    return { owner: base.owner, evidence: { ...base.evidence, nonceBitmapWordIndex: request.nonceBitmapWordIndex } };
-  } }, { payer, localWallet: true, challenge, expected: base.expected, nowSeconds: base.nowSeconds });
+    assert.equal(request.asset.chainId, 43114);
+    assert.equal(request.asset.token, asset.token);
+    return { owner: base.owner, asset, evidence: { ...base.evidence, nonceBitmapWordIndex: request.nonceBitmapWordIndex } };
+  } }, { payer, localWallet: true, challenge, expected: base.expected, nowSeconds: base.nowSeconds, assets: onlyPermit2Asset(asset) });
   assert.equal(called, true);
   assert.equal(result.plan.authorization.nonce, String(result.plan.permit2.message.nonce));
 });
@@ -78,8 +78,8 @@ test("read port extra keys cannot override payer, challenge, expected terms, or 
     localWallet: false, challenge: { ...challenge, accepts: [] }, expected: { ...base.expected, challengeHash: "b".repeat(64) },
     nowSeconds: 0 };
   const result = await preparePermit2WithPort({ read: async (request) => ({
-    ...poisoned, evidence: { ...poisoned.evidence, nonceBitmapWordIndex: request.nonceBitmapWordIndex },
-  }) }, { payer, localWallet: true, challenge, expected: base.expected, nowSeconds: base.nowSeconds });
+    ...poisoned, asset, evidence: { ...poisoned.evidence, nonceBitmapWordIndex: request.nonceBitmapWordIndex },
+  }) }, { payer, localWallet: true, challenge, expected: base.expected, nowSeconds: base.nowSeconds, assets: onlyPermit2Asset(asset) });
   assert.equal(result.payer, payer);
   assert.equal(result.challengeHash, base.expected.challengeHash);
   assert.equal(result.amountAtomic, "10000");

@@ -10,7 +10,7 @@ export declare function readPermit2ProductionStatus(root: string, requestedProfi
     state: "prepared" | "reserved" | "released_unsubmitted" | "settled" | "reserving" | "release_pending" | "exposure_unknown" | "request_pending" | "terminal_pending" | "expired_no_effect";
     terminal: boolean;
     capability: string;
-    chain: "eip155:43114";
+    chain: `eip155:${number}`;
     payer: `0x${string}`;
     token: `0x${string}`;
     recipient: `0x${string}`;

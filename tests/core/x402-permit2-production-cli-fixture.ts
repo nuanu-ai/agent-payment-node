@@ -44,7 +44,7 @@ export function cliWire(t: TestContext, f: Awaited<ReturnType<typeof permit2CliF
     calls.push(c.method);
     const w = f.wire;
     if (c.method === "eth_chainId") return w.chain;
-    if (c.method === "eth_getBlockByNumber") return c.params[0] === "finalized" || c.params[0] === w.finalized.number ? w.finalized : w.block;
+    if (c.method === "eth_getBlockByNumber") return c.params[0] === "finalized" || c.params[0] === "latest" || c.params[0] === w.finalized.number ? w.finalized : w.block;
     if (c.method === "eth_getTransactionByHash") return options.settle ? w.tx : null;
     if (c.method === "eth_getTransactionReceipt") return options.settle ? w.receipt : null;
     if (c.method === "eth_getCode") return c.params[0] === f.record.material.wallet.account ? w.payerCode : c.params[0].toLowerCase() === PERMIT2_ADDRESS.toLowerCase() ? w.permit2Code : w.proxyCode;

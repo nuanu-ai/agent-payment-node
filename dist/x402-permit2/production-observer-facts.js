@@ -9,8 +9,11 @@ export function observerBlock(value, tag) {
     const block = evmRpcBlockResult(value, tag), timestamp = evmRpcQuantity(block.raw.timestamp);
     return Object.freeze({ tag: block.tag, number: block.number, hash: block.hash, timestamp });
 }
-export function assertObserverChain(value) { if (evmRpcQuantity(value) !== 43114n)
-    mismatch(); }
+/** The RPC must serve the operation's own chain (the owner admission's network). */
+export function assertObserverChain(value, material) {
+    if (evmRpcQuantity(value) !== BigInt(reconstructPermit2ProductionMaterial(material).chain.slice(7)))
+        mismatch();
+}
 export function observerNonceCalls(material, block) {
     const p = reconstructPermit2ProductionMaterial(material), pinned = { blockHash: block.hash, requireCanonical: true };
     return [{ method: "eth_call", params: [{ to: PERMIT2_ADDRESS, data: encodeFunctionData({ abi: PERMIT2,

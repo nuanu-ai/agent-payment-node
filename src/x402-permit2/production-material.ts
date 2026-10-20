@@ -1,4 +1,5 @@
 import { selectPermit2Offer } from "./offer.js";
+import { onlyPermit2Asset } from "./prepare.js";
 import { getAddress, hashTypedData } from "viem";
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
@@ -7,10 +8,9 @@ import { validatePermit2CheckedChallenge, type Permit2CheckedChallenge } from ".
 import { preparePermit2Payment, type Permit2OwnerAdmission, type Permit2PrepareEvidence, type Permit2PreparedMaterial } from "./prepare.js";
 import type { Permit2ReadCheckpoint } from "./read-port.js";
 import type { Permit2WalletBinding } from "./owner-binding.js";
-import { X402_PERMIT2_ASSETS } from "./registry.js";
+import { legacyPermit2Asset, type Permit2Asset } from "./registry.js";
 
 export const PERMIT2_PRODUCTION_SCHEMA = "apn.x402-permit2-production.v2";
-const asset = X402_PERMIT2_ASSETS[0]!;
 const HASH = /^[a-f0-9]{64}$/u;
 export interface Permit2ProductionMaterial {
   readonly checked: Permit2CheckedChallenge;
@@ -20,6 +20,11 @@ export interface Permit2ProductionMaterial {
   readonly evidence: Permit2PrepareEvidence;
   readonly signingSecond: number;
   readonly nonce: string;
+  /**
+   * The admitted asset (owner row, chain facts) this operation pays. Absent only on records prepared before generic
+   * admission, which reconstruct with the released Avalanche USDT row.
+   */
+  readonly asset?: Permit2Asset;
   /** Canonical decimal encoding of every bigint; reconstruction never revives arbitrary fields. */
   readonly preparedCanonicalJson: string;
   readonly typedDataDigest: string;
@@ -43,22 +48,20 @@ export function reconstructPermit2ProductionMaterial(value: Permit2ProductionMat
 }
 function reconstruct(value: Omit<Permit2ProductionMaterial, "preparedCanonicalJson" | "typedDataDigest" | "eip2612Digest" | "materialHash">): Permit2PreparedMaterial {
   const checked = validatePermit2CheckedChallenge(value.checked);
-  // Selection is independently reconstructed; no stored seller selection object becomes authority.
+  // Selection is independently reconstructed; no stored seller selection object becomes authority. The asset must be the
+  // owner admission's own chain and token (prepare re-proves both against the record's evidence).
   const challenge = checked.challenge;
-  const selection = selectPermit2Offer(challenge.accepts, value.wallet.account);
-  const prepared = preparePermit2Payment({ payer: value.wallet.account, localWallet: true, challenge,
+  const asset = value.asset ?? legacyPermit2Asset(value.owner?.chain, value.owner?.token ?? "");
+  if (asset === undefined || asset.chain !== value.owner.chain || asset.token.toLowerCase() !== String(value.owner.token).toLowerCase()) corrupt();
+  const selection = selectPermit2Offer(challenge.accepts, value.wallet.account, onlyPermit2Asset(asset));
+  return preparePermit2Payment({ payer: value.wallet.account, localWallet: true, challenge,
     expected: { index: selection.index, requirement: selection.requirement, challengeHash: checked.challengeHash },
-    owner: value.owner, evidence: value.evidence, nowSeconds: value.signingSecond, nonce: BigInt(value.nonce) });
-  if (prepared.plan.eip2612 !== null && (selection.requirement.extra.name !== asset.tokenDomain.name ||
-      selection.requirement.extra.version !== asset.tokenDomain.version)) {
-    throw new ApnError("APN_OPERATION_BLOCKED", "Sponsored production Permit2 requires matching merchant token domain hints.");
-  }
-  return prepared;
+    owner: value.owner, evidence: value.evidence, asset, nowSeconds: value.signingSecond, nonce: BigInt(value.nonce) });
 }
 export function validatePermit2ProductionMaterial(value: unknown): Permit2ProductionMaterial {
   try {
     if (!isPlainRecord(value) || !exactKeys(value, ["checked", "wallet", "checkpoint", "owner", "evidence", "signingSecond", "nonce",
-      "preparedCanonicalJson", "typedDataDigest", "eip2612Digest", "materialHash"])) corrupt();
+      ...(value.asset === undefined ? [] : ["asset"]), "preparedCanonicalJson", "typedDataDigest", "eip2612Digest", "materialHash"])) corrupt();
     const v = value as unknown as Permit2ProductionMaterial;
     const { materialHash, ...body } = v;
     if (!HASH.test(materialHash) || materialHash !== domainHash(`${PERMIT2_PRODUCTION_SCHEMA}.material`, canonicalJson(body)) ||

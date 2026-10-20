@@ -287,8 +287,8 @@ export class AssetUsageLedger extends SecureStateStore {
     }
     /** Atomic cancellation in the existing schema; a delayed reserve can only replay the released row. */
     async cancelUnsubmittedReservation(input) {
-        if (input.chain !== "eip155:43114" || input.asset.kind !== "token" ||
-            input.asset.identifier !== "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7" ||
+        if (!/^eip155:[1-9][0-9]{0,15}$/u.test(input.chain) || input.asset.kind !== "token" ||
+            !/^0x[0-9a-fA-F]{40}$/u.test(input.asset.identifier) ||
             input.rail !== "x402" || !/^x402-permit2-production\.v2:[a-f0-9]{64}$/u.test(input.idempotencyKey) ||
             typeof input.registryVersion !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/u.test(input.registryVersion)) {
             throw invalid("Unsigned cancellation is restricted to a frozen Permit2 production lease.");

@@ -72,11 +72,12 @@ export class Permit2ProductionSigningFence {
                 const context = await this.#owner(id, selected, scope);
                 open(rpc.signal);
                 freeze(context);
-                // Two POSTs: chain id with the finalized header, then one batch pinned by EIP-1898 to that canonical block, so no
-                // header recheck follows it (was four POSTs with a chain/header recheck and re-downloaded immutable code).
-                const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["finalized", false] }]);
-                assertObserverChain(first[0]);
-                const block = observerBlock(first[1], "finalized");
+                // Two POSTs: chain id with the latest header, then one batch pinned by EIP-1898 to that canonical block, so no
+                // header recheck follows it. Pre-sign facts predict settlement and cannot move money (the signature binds token,
+                // amount, payee, nonce and deadline); settlement and expiry stay finalized proofs in the observer.
+                const first = await rpc.batch([{ method: "eth_chainId", params: [] }, { method: "eth_getBlockByNumber", params: ["latest", false] }]);
+                assertObserverChain(first[0], context.record.material);
+                const block = observerBlock(first[1], "latest");
                 assertSigningTime(context.record, this.#now(), block);
                 assertSigningReads(context.record, await rpc.batch(signingCalls(context.record, block)));
                 await this.#owner(id, selected, scope, permit2SavedIdentity(context.record, context.lease));

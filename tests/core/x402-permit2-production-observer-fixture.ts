@@ -7,7 +7,7 @@ import type { TestContext } from "node:test";
 import { StateStore } from "../../src/state.js";
 import { keccak256, type Hex } from "viem";
 import { encodePermit2ProductionProxyCall } from "../../src/x402-permit2/production-proxy-call.js";
-import { PERMIT2_ADDRESS, PERMIT2_CODE_HASH, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS,
+import { PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY, X402_PERMIT2_ASSETS, canonicalPermit2Code,
   ERC20_TRANSFER_TOPIC, PROXY_SETTLED_TOPIC, PROXY_SETTLED_WITH_PERMIT_TOPIC } from "../../src/x402-permit2/registry.js";
 import { protocolFixture, protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
 import { temporaryState } from "./helpers.js";
@@ -21,7 +21,8 @@ export async function observerFixture(t: TestContext, sponsor = false, maxTimeou
   const proxyCode = readFileSync("tests/fixtures/x402-permit2/original-proxy-runtime.hex", "utf8").trim() as Hex;
   const permit2Code = readFileSync("tests/fixtures/x402-permit2/avalanche-permit2-runtime.hex", "utf8").trim() as Hex;
   assert.equal(keccak256(proxyCode), X402_PERMIT2_ASSETS[0]!.proxyCodeHash);
-  assert.equal(keccak256(permit2Code), PERMIT2_CODE_HASH);
+  assert.equal(keccak256(permit2Code), "0x081beff14e75c5a5c1e60740445f58d54ba0fef228148a11d3e4287dc3551cbb");
+  assert.equal(canonicalPermit2Code(permit2Code, 43114), true);
   const block = { number: "0x2a", hash: factHash("b"), timestamp: `0x${protocolSecond.toString(16)}` };
   const finalized = { number: "0x2b", hash: factHash("c"), timestamp: `0x${(protocolSecond + 61).toString(16)}` };
   const tx = { chainId: "0xa86a", to: X402_EXACT_PERMIT2_PROXY, from: "0x3333333333333333333333333333333333333333",
@@ -54,7 +55,8 @@ export async function observerFixture(t: TestContext, sponsor = false, maxTimeou
           let result: unknown;
           if (call.method === "eth_chainId") result = wire.chain;
           else if (call.method === "eth_getBlockByNumber") {
-            if (call.params[0] === "finalized") result = wire.finalized;
+            // The signing fence reads the newest block (pre-sign facts); the observer reads the finalized one.
+            if (call.params[0] === "finalized" || call.params[0] === "latest") result = wire.finalized;
             else if (call.params[0] === wire.finalized.number) result = wire.headReorg ? { ...wire.finalized, hash: factHash("f") } : wire.finalized;
             else { blockReads++; result = wire.reorg && blockReads > 1 ? { ...wire.block, hash: factHash("f") } : wire.block; }
           } else if (call.method === "eth_getTransactionByHash") result = wire.missing ? null : wire.tx;
