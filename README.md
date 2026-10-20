@@ -350,6 +350,7 @@ apn bridge routes --profile <profile> --from-chain <caip2> --to-chain <caip2> --
 apn bridge prepare --profile <profile> --quote <snapshot-hash> --route <route-id> --idempotency-key <key>
 apn bridge approve --operation <operation-id>
 apn circle approval prepare --profile <profile> --cap-atomic <USDC atomic> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>
+apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>
 apn circle approval execute --operation <approval-id>
 apn circle approval status --operation <approval-id>
 apn circle source submit --profile <profile> --expected-payer <base-address> --recipient-owner <solana-address> --recipient-setup <existing_ata|create_ata> --amount-atomic <uint> --max-source-fee-atomic <uint> --max-allowance-atomic <uint> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei> --idempotency-key <key>
