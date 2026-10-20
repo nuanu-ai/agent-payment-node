@@ -122,6 +122,11 @@ export type DirectEvmChainId = DirectEvmNetworkRow["chainId"];
 export type DirectEvmQuoteFeeModel = "arbitrum-inclusive" | "monad-gas-limit";
 export declare function directEvmChain(value: unknown): DirectEvmChainId;
 export declare function directEvmNetwork(chainId: DirectEvmChainId): DirectEvmNetworkRow;
+/**
+ * The native currency an owner-facing line names for an EVM chain: the symbol of APN's pinned network row, or, for a chain
+ * APN has no row for, the neutral "native coin of chain <id>" (never ETH by assumption).
+ */
+export declare function evmNativeCurrencyLabel(chainId: number): string;
 export declare function directEvmNetworkByCaip2(chain: string): DirectEvmNetworkRow | undefined;
 export declare function directEvmQuoteFeeModel(chainId: DirectEvmChainId): DirectEvmQuoteFeeModel | undefined;
 export declare function directEvmRequiresSafeHead(chainId: DirectEvmChainId): boolean;

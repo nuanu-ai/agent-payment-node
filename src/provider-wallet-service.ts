@@ -19,6 +19,7 @@ import type {
 import { permissionBalance, publicProfile } from "./provider-wallet-output.js";
 import { previewProviderProfile, upgradeProviderProfile } from "./provider-profile-upgrade.js";
 import type { RuntimeContext } from "./runtime.js";
+import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
 import { assertWalletLifecycleAvailable, walletLifecycleMutable } from "./wallet-lifecycle-guard.js";
@@ -211,15 +212,15 @@ export class ProviderWalletService {
           throw new ApnError("APN_PROFILE_DRIFT", "Provider identity or capabilities changed; balance remains unavailable until a new foreground identity is created.");
         }
         const [owner, session] = await Promise.all([
-          this.context.requireRpc().getBalances(permission.owner_address),
-          this.context.requireRpc().getBalances(permission.session_address),
+          this.context.requireRpc(BASE_RPC_CHAIN).getBalances(permission.owner_address),
+          this.context.requireRpc(BASE_RPC_CHAIN).getBalances(permission.session_address),
         ]);
         validateBalance(owner, permission.owner_address);
         validateBalance(session, permission.session_address);
         return permissionBalance(profile, bound, permission, owner, session);
       }
       const snapshot = await (bound.provider_id === "coinbase-agentic-wallet"
-        ? this.context.requireCoinbaseRpc() : this.context.requireRpc()).getBalances(bound.public_address);
+        ? this.context.requireCoinbaseRpc() : this.context.requireRpc(BASE_RPC_CHAIN)).getBalances(bound.public_address);
       validateBalance(snapshot, bound.public_address);
       const rebindCommand = `apn wallet connect --profile ${profile} --provider ${bound.provider_id} --expected-revision ${bound.revision}`;
       return {

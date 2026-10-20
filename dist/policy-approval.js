@@ -3,6 +3,9 @@ import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { loadAllowlistInventory } from "./allowlist-inventory.js";
+import { DIRECT_EVM_NETWORKS, evmNativeCurrencyLabel } from "./evm-direct-networks.js";
+import { formatAtomic } from "./money.js";
+import { x402TokenUnit } from "./x402-token-unit.js";
 import { releasedX402Pair, X402_SOLANA_POLICY_NETWORK } from "./x402-network.js";
 const POLICY_APPROVAL_DEADLINE_MS = 60_000;
 const MAX_APPROVAL_INPUT_BYTES = 128;
@@ -45,7 +48,8 @@ export class TtyProfilePolicyApproval {
                 `Wallet: ${intent.walletAddress}`,
                 `Maximum wallet ${unit.symbol}: ${intent.maxBalanceUsdcAtomic} atomic`,
                 `Maximum unattended x402: ${intent.maxX402AmountAtomic} atomic`,
-                `Maximum wallet ETH: ${intent.maxBalanceEthWei ?? "not configured"} wei`,
+                // A Solana binding carries no native cap; an EVM one names its chain's own native currency in 18-decimal wei.
+                ...(intent.x402Solana !== undefined ? [] : [nativeCapLine(intent.x402Network?.chainId ?? CHAIN_ID, intent.maxBalanceEthWei)]),
                 intent.x402Payees === undefined ? "x402 payees: not restricted" : `x402 payees pinned (${intent.x402Payees.length}): ${intent.x402Payees.join(", ")}`,
                 "These values are owner policy, not product defaults.",
                 `Fingerprint: ${intent.fingerprint}`,
@@ -66,10 +70,17 @@ export class TtyProfilePolicyApproval {
 function x402Unit(network) {
     if (network === undefined || releasedX402Pair(network.chainId, network.token))
         return { symbol: "USDC", note: "" };
-    const listed = loadAllowlistInventory().assets.find((row) => row.chain === `eip155:${network.chainId}` &&
-        row.identifier?.toLowerCase() === network.token.toLowerCase());
-    return listed === undefined ? { symbol: "token", note: " (not in APN's token list: verify this contract yourself)" }
+    const listed = x402TokenUnit(network.chainId, network.token);
+    return listed === null ? { symbol: "token", note: " (not in APN's token list: verify this contract yourself)" }
         : { symbol: listed.symbol, note: ` (${listed.symbol}, ${listed.decimals} decimals, APN token list)` };
+}
+/** The native cap in the chain's own currency (QA 0.5.54: Sei showed "ETH"); the atomic value and its field stay as they are. */
+export function nativeCapLine(chainId, maxBalanceWei) {
+    const native = evmNativeCurrencyLabel(chainId), pinned = DIRECT_EVM_NETWORKS.some((row) => row.chainId === chainId);
+    if (maxBalanceWei === undefined)
+        return `Maximum wallet ${native}: not configured`;
+    // A pinned row knows its 18 decimals; for any other chain only the base unit the balance read compares is exact.
+    return `Maximum wallet ${native}: ${maxBalanceWei} wei ${pinned ? `(${formatAtomic(maxBalanceWei, 18)} ${native}, 18 decimals)` : "(base units)"}`;
 }
 function solanaUnit(network) {
     const listed = loadAllowlistInventory().assets.find((row) => row.chain.startsWith("solana:") && row.identifier === network.mint);

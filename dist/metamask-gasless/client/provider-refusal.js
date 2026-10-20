@@ -1,8 +1,8 @@
 import { ApnError } from "../../errors.js";
 import { directEvmNetwork } from "../../evm-direct-networks.js";
+import { formatAtomic } from "../../money.js";
+import { mmUsdcShortfallMessage } from "../refusals.js";
 import { mmSentinelQuoteEndpoint, MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT } from "./provider-endpoints.js";
-/** The pinned SDK's own words for a low fee tier without `tokenFees` (vendor chunk-IFNW6LVK.mjs, function O). */
-export const MM_SDK_MISSING_TOKEN_FEES_READING = "Insufficient balance to cover the transfer and gasless relay fee.";
 /** Parent side only: restate a classified read failure as the provider's answer when it is one. */
 export function withMetaMaskProviderRefusal(error, d, chainId) {
     const reason = error.details?.reason;
@@ -11,21 +11,33 @@ export function withMetaMaskProviderRefusal(error, d, chainId) {
 }
 /**
  * A provider answer, not an APN fault, stated as exactly what MetaMask said: which provider read, which network and
- * which field. Only closed facts and APN's own constants appear; no provider text crosses the helper boundary.
+ * which field. Only closed facts, proven numbers and APN's own constants appear; no provider text crosses the helper
+ * boundary. A missing relay fee is never read as a USDC shortfall: the cause is named only when the answer's own
+ * numbers prove it (METAMASK-FEE-REFUSAL-ASSET-GUIDANCE-001), or APN's own balance read does.
  */
 export function metaMaskProviderRefusal(reason, d, chainId) {
     if (chainId === undefined)
         return undefined;
-    const network = directEvmNetwork(chainId).name;
+    const network = directEvmNetwork(chainId).name, where = `on ${network} (chain ${chainId})`;
     if (reason === "mm_gasless_fee_unquoted" && d.tokenFeesKind !== undefined && d.sentinelSimulation !== undefined) {
-        const sdkReading = d.tokenFeesKind === "missing" || d.tokenFeesKind === "null";
-        return { message: `MetaMask quoted no USDC relay fee for this transfer on ${network} (chain ${chainId}): its fee quote answered ` +
-                `HTTP ${String(d.httpStatus)} with result.transactions[-1].fees[0].tokenFees ${d.tokenFeesKind === "missing" ? "missing" : `set to ${d.tokenFeesKind}`}.` +
-                (sdkReading ? ` The pinned MetaMask client reads this answer as: ${MM_SDK_MISSING_TOKEN_FEES_READING}` : ""),
-            details: { provider_read: "metamask-tx-sentinel fee quote", provider_endpoint: mmSentinelQuoteEndpoint(chainId),
-                provider_method: "infura_simulateTransactions", provider_missing_field: "result.transactions[-1].fees[0].tokenFees",
-                chain_id: chainId, network,
-                ...(sdkReading ? { provider_client_reading: MM_SDK_MISSING_TOKEN_FEES_READING } : {}) } };
+        const field = `result.transactions[-1].fees[0].tokenFees ${d.tokenFeesKind === "missing" ? "missing" : `set to ${d.tokenFeesKind}`}`;
+        const read = { provider_read: "metamask-tx-sentinel fee quote", provider_endpoint: mmSentinelQuoteEndpoint(chainId),
+            provider_method: "infura_simulateTransactions", provider_missing_field: "result.transactions[-1].fees[0].tokenFees",
+            chain_id: chainId, network };
+        const answer = `MetaMask quoted no USDC relay fee for this transfer ${where}: its fee quote answered HTTP ${String(d.httpStatus)} with ${field}`;
+        if (d.nativeRequiredWei === undefined || d.nativeCurrentWei === undefined) {
+            return { message: `${answer} and named no cause APN can verify. APN does not read a missing relay fee as a USDC or native gas shortfall.`,
+                details: { ...read, provider_cause: "unverified" } };
+        }
+        const symbol = directEvmNetwork(chainId).nativeSymbol, native = (wei) => `${wei} wei (${formatAtomic(wei, 18)} ${symbol})`;
+        return { message: `${answer}. Its simulation of the transfer needs native ${symbol} for gas: required ${native(d.nativeRequiredWei)} = ` +
+                `${d.nativeGasUnits} gas x ${d.nativeMaxFeePerGasWei} wei per gas, current server-wallet balance ${native(d.nativeCurrentWei)}. ` +
+                "MetaMask reported a native gas shortfall, not a USDC one.",
+            details: { ...read, provider_cause: "native_gas_below_required", native_symbol: symbol } };
+    }
+    if (reason === "mm_gasless_balance" && d.usdcCurrentAtomic !== undefined && d.usdcRequiredAtomic !== undefined) {
+        return { message: mmUsdcShortfallMessage(chainId, d.usdcCurrentAtomic, d.usdcRequiredAtomic, "at the fee quote"),
+            details: { chain_id: chainId, network, usdc_current_atomic: d.usdcCurrentAtomic, usdc_required_atomic: d.usdcRequiredAtomic } };
     }
     if (reason === "mm_gasless_relay_unsupported" && d.relayServerWalletNetwork !== undefined && d.relaySentinelFlag !== undefined) {
         const missing = [

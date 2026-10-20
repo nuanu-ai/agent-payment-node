@@ -13,6 +13,7 @@ import { OperationService } from "./operation-service.js";
 import { appendTransition, sealOperation, sealReceipt } from "./state.js";
 import { canonicalAddress, canonicalIdempotencyKey, canonicalOperationId, hasExactTransfer, parseEffect, publicOperation, requireFunding, transferData, validateBalance, validateEconomics, verifyEffect, withInvocationRpc, } from "./transfer-policy.js";
 import { reportingRateLimits } from "./rpc-rate-limit.js";
+import { BASE_RPC_CHAIN, directRpcChain } from "./rpc-requirement.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { ProviderDirectTransferService } from "./provider-direct-transfer.js";
 import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
@@ -93,7 +94,7 @@ export class TransferService {
                 // Owner caps come from the active allowlist policy and the shared usage ledger, as for every direct transfer, before any RPC.
                 const allowlist = await this.allowlist.admit(evmAllowlistSubject({ profile, operationId, walletAddress: wallet.address,
                     chainId: CHAIN_ID, token: BASE_USDC, amountAtomic: amount.atomic, recipient }));
-                const rpc = this.context.requireRpc();
+                const rpc = this.context.requireRpc(BASE_RPC_CHAIN);
                 rpc.armEvmDirectRpcGuard?.();
                 await rpc.assertBaseChain();
                 const data = transferData(recipient, amount.atomic);
@@ -192,7 +193,7 @@ export class TransferService {
             // 0.5.41 let an Arbitrum native transfer to profile "default" bypass an unsettled Circle source; that rider is retired.
             if (operation.evm?.circleNativeAdmission !== undefined)
                 await this.failBeforeEffect(operation, "circle_native_admission_retired");
-            const rpc = this.context.requireRpc();
+            const rpc = this.context.requireRpc(directRpcChain(operation.chainId));
             // A listed-asset transfer's cap is derived from its read plan; the legacy Base-USDC path keeps its own fixed cap.
             if (operation.evm !== undefined)
                 armDirectEvmStep(rpc, operation.evm.asset.chainId, "approve");

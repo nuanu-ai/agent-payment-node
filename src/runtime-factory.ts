@@ -92,7 +92,7 @@ import { x402SolanaPorts } from "./x402-solana/runtime.js";
 import { executePermit2AllowanceCli } from "./x402-permit2/allowance/cli.js";
 import { executeWalletAllowanceCli } from "./wallet-allowance/cli.js";
 import { TtyOrcaStableConsent } from "./legacy/orca-stable/recovery-consent.js";
-import { permit2CurrentOwnerPreflight, permit2PublicRpc } from "./x402-permit2/preflight.js";
+import { permit2CurrentOwnerPreflight, permit2PreflightRpcRequired, permit2PublicRpc } from "./x402-permit2/preflight.js";
 import { executePermit2ProductionCli } from "./x402-permit2/production-cli.js";
 import { successEnvelope, failureEnvelope } from "./output.js";
 import { randomUUID } from "node:crypto";
@@ -405,7 +405,7 @@ async function executeBound(bound: BoundCommand, options: RuntimeFactoryOptions,
   if (bound.request.command === "x402.permit2.preflight") {
     const requestId = randomUUID();
     try {
-      if (bound.rpcUrl === undefined) throw new ApnError("APN_RPC_CONFIG", "Avalanche RPC URL is required.");
+      if (bound.rpcUrl === undefined) throw permit2PreflightRpcRequired(bound.request.expectedTerms);
       // Parse the public URL even when synthetic ports are injected, matching the CLI contract.
       new HttpsBaseRpc(bound.rpcUrl);
       const stateRoot = options.stateRoot ?? effectiveStateRoot();

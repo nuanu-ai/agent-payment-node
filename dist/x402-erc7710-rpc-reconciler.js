@@ -110,8 +110,9 @@ export class X402Erc7710RpcReconciler {
     }
     canProveExpiredUnused(operation) {
         return operation.state === "effect_unknown" && operation.transactionHint === undefined &&
+            // A body kept without a settlement answer settles nothing: the scan still decides whether the transfer happened.
             operation.settlementResponseObservation === undefined && operation.settlementEvidence === undefined &&
-            operation.resultLink === undefined && operation.signatureHash !== undefined &&
+            operation.signatureHash !== undefined &&
             operation.paymentContextHash !== undefined &&
             operation.attempts.some((attempt) => attempt.purpose === "payment" && attempt.phase !== "pending");
     }

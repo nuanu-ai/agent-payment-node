@@ -81,8 +81,11 @@ export class InstalledUniswapTokenRuntime implements UniswapTokenCommandRuntime 
       return phase === "approved" || phase === "approval_observed" ? [cap, cap, "swap_effect"] as const : [0, cap, "recovery"] as const;
     }, async () => await this.execution.execute(id)); }
     async status(id: string) { return await this.budgeted(id, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"] as const, async () => await this.execution.status(id)); }
+    /** The live allowance where one may still stand on a terminal record: an expired approval cleaned without a swap, or an owner abandon. */
     async residualAllowance(op: import("./token-operation.js").UniswapTokenOperation) {
-      if (op.phase !== "cleaned" || op.cleanupEvidence?.kind !== "expired_approval_no_swap") return null;
+      const standing = op.phase === "cleaned" && op.cleanupEvidence?.kind === "expired_approval_no_swap" ||
+        op.phase === "abandoned_unknown" && (op.approvalAttempt?.transactionHash != null || op.allowanceAtPrepare !== "0");
+      if (!standing) return null;
       return await this.budgeted(op.operationId, "swap.uniswap-token.status", async () => [0, this.poolCap(11), "recovery"] as const,
         async () => await this.ports.currentAllowance(op));
     }

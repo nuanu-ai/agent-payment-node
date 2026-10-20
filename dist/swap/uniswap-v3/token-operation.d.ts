@@ -82,11 +82,14 @@ export interface UniswapTokenCleanupFeeQuote {
  * Why a cleaned swap's principal hold was released although an approval of it landed (R4 exit 2): no swap of it was ever
  * signed (no swap marker is left; a marker is dropped only when custody showed no signed bytes for it), or the hashless
  * swap marker's nonce is consumed in the finalized chain by this operation's own landed cleanup, so no swap of it can
- * ever land. Spent gas and every attempt stay in the record.
+ * ever land. Spent gas and every attempt stay in the record. An owner-abandoned swap (QA 0.5.54, 867244e9…) keeps its
+ * hashless marker and names it: custody, opened under the account lock, held no signed bytes for it and freed its nonce.
  */
 export type UniswapTokenPrincipalRelease = {
     readonly schemaVersion: "apn.uniswap-token-principal-release.v1";
     readonly kind: "swap_never_signed";
+    readonly swapNonce?: string;
+    readonly swapMarkerHash?: string;
     readonly observedAt: string;
 } | {
     readonly schemaVersion: "apn.uniswap-token-principal-release.v1";

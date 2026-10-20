@@ -16,6 +16,7 @@ import { StateStore } from "../../src/state.js";
 import { evmAddressLock } from "../../src/evm-address-ownership.js";
 import { TtyStargateTokenApproval } from "../../src/stargate-v2/token-tty.js";
 import { temporaryState } from "./helpers.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 import { KEY, ACCOUNT, OWNER, BLOCK, DEST_BLOCK, GUID, AMOUNT, DROP, FEE, NATIVE_CAP, PACKET_NONCE, packetPayload, unreleasedV1TokenFixture, unreleasedV2TokenFixture, unreleasedV3TokenFixture, seedTokenFixture, MemoryJournal, setup, request } from "./stargate-token-support.js";
 test("Type-3 native-drop bytes and pinned contracts are exact", () => { const encoded = encodeStargateNativeDrop(DROP.toString(), OWNER); assert.equal(encoded, `0x000301003102${DROP.toString(16).padStart(32,"0")}${OWNER.slice(2).toLowerCase().padStart(64,"0")}`); assert.equal(STARGATE_TOKEN_SOURCE_EXECUTOR, getAddress("0x2D2ea0697bdbede3F01553D2Ae4B8d0c486B666e")); });
 test("prepare freezes staged simulation and a budget-bounded gas ceiling without simulating sendToken at zero allowance", async () => { const s=setup(), op=await prepareStargateV2Token(request(),s.ports,s.journal); assert.equal(op.schemaVersion,"apn.stargate-v2-token-operation.v5"); assert.equal(op.approvalFinalityWindowMs,1_800_000); assert.deepEqual(op.feeApproval,{provenance:"exact_snapshot",quotedMaxFeePerGasWei:"2",quotedMaxPriorityFeePerGasWei:"1",approvedMaxFeePerGasWei:"2",approvedMaxPriorityFeePerGasWei:"1"}); assert.equal(op.finalityPolicyProvenance,"pinned_v2"); assert.equal(op.allowanceRequired,true); assert.deepEqual(op.bridgeSimulation,{mode:"pending_post_approval",prepareStatus:"pending_post_approval",gasCeilingAtomic:op.sendEnvelope.gasLimitAtomic}); assert.equal(op.approvalEnvelope?.nonceAtomic,"7"); assert.equal(op.sendEnvelope.nonceAtomic,"8"); assert.equal(op.sendEnvelope.valueAtomic,FEE.toString()); assert.deepEqual(op.finalityPolicy,{version:"apn.stargate-v2-finality.v1",source:{chainId:10,blockTag:"safe"},destination:{chainId:137,blockTag:"finalized"}}); const approval=decodeFunctionData({abi:STARGATE_ERC20_ABI,data:op.approvalEnvelope!.data}); assert.deepEqual(approval.args,[STARGATE_TOKEN_SOURCE_POOL,AMOUNT]); const send=decodeFunctionData({abi:STARGATE_SEND_ABI,data:op.sendEnvelope.data}); assert.equal(send.functionName,"sendToken"); if (send.functionName !== "sendToken") throw new Error("unexpected"); assert.equal(send.args[0].extraOptions,op.options); assert.deepEqual(s.simulations(),{preparedApprovals:1,preparedBridges:0,bridgeEstimates:0,bridgeCalls:0}); assert.ok(BigInt(op.maximumDebitAtomic)<=BigInt(op.maxNativeDebitAtomic)); assert.equal(s.counts().sends,0); });
@@ -335,16 +336,24 @@ test("distinct operations for one owner serialize through preflight and only one
 
 test("BRDG-35: the owner lock is the kernel evmAddressLock shared with every EVM family; different owners still proceed concurrently", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root); await state.initialize();
-  const journal = new FileStargateTokenJournal(temporary.root, state);
-  const other = getAddress("0x2222222222222222222222222222222222222222"); let active = 0, peak = 0;
-  const work = async () => { active++; peak = Math.max(peak, active); await new Promise(resolve => setTimeout(resolve, 20)); active--; };
-  await Promise.all([journal.withOwnerLock(OWNER, work), journal.withOwnerLock(other, work)]);
-  assert.equal(peak, 2);
-  const order: string[] = []; let release!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
-  const family = state.withLocks([evmAddressLock(OWNER)], async () => { order.push("other-family"); await held; order.push("other-family-done"); });
-  await new Promise(resolve => setTimeout(resolve, 20));
-  const stargate = journal.withOwnerLock(OWNER, async () => { order.push("stargate"); });
-  await new Promise(resolve => setTimeout(resolve, 50)); release(); await Promise.all([family, stargate]);
+  const journal = new FileStargateTokenJournal(temporary.root, state), locks = lockRefusals(t);
+  // Events, not sleeps (a fixed pause failed this test once under a loaded full suite). Another owner's lock is taken and
+  // released while this owner's is still held: a shared lock would never let it in.
+  const other = getAddress("0x2222222222222222222222222222222222222222");
+  let releaseFirst!: () => void, firstIn!: () => void; const firstHeld = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const firstInside = new Promise<void>(resolve => { firstIn = resolve; });
+  const first = journal.withOwnerLock(OWNER, async () => { firstIn(); await firstHeld; });
+  await firstInside; let otherRan = false;
+  await journal.withOwnerLock(other, async () => { otherRan = true; });
+  assert.equal(otherRan, true); releaseFirst(); await first;
+  // The other family is inside the kernel lock before Stargate starts; Stargate is seen refused on that very lock before it lets go.
+  const order: string[] = []; let release!: () => void, entered!: () => void; const held = new Promise<void>(resolve => { release = resolve; });
+  const inside = new Promise<void>(resolve => { entered = resolve; });
+  const family = state.withLocks([evmAddressLock(OWNER)], async () => { order.push("other-family"); entered(); await held; order.push("other-family-done"); });
+  await inside;
+  const blocked = locks.refused(evmAddressLock(OWNER)), stargate = journal.withOwnerLock(OWNER, async () => { order.push("stargate"); });
+  await blocked; assert.deepEqual(order, ["other-family"]);
+  release(); await Promise.all([family, stargate]);
   assert.deepEqual(order, ["other-family", "other-family-done", "stargate"]);
 });
 

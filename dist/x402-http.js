@@ -5,17 +5,13 @@ import { rootCertificates } from "node:tls";
 import { canonicalJson, domainHash, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { isPublicIp, parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, unbracket, } from "./network-policy.js";
-import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader, inspectCandidates, } from "./x402-codec.js";
+import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader, } from "./x402-codec.js";
+import { CONTROL_HEADERS, optionalSingleHeader, pairRawHeaders, paymentResponseHeader, requireAsciiControl, singleControlHeader, validateRawHeaders } from "./x402-http-headers.js";
+import { inspectOffers, unsupportedOfferError } from "./x402-offer-inspect.js";
 import { decodeX402RequestBody, optionalX402HttpRequest } from "./x402-http-request.js";
 import { observedPaidResult } from "./x402-opaque-result.js";
 import { inspectPermit2Offer } from "./x402-permit2/inspection.js";
-const MAX_HEADER_PAIRS = 64;
-const MAX_HEADER_NAME_BYTES = 256;
-const MAX_CONTROL_VALUE_BYTES = 64 * 1024;
-const MAX_AGGREGATE_HEADER_BYTES = 96 * 1024;
 const MAX_BODY_BYTES = 256 * 1024;
-const PAYMENT_RESPONSE_HEADERS = new Set(["payment-response", "x-payment-response"]);
-const CONTROL_HEADERS = new Set(["payment-required", "payment-signature", ...PAYMENT_RESPONSE_HEADERS]);
 export const SELLER_RESPONSE_MAX_HEADER_BYTES = 128 * 1024;
 export class HttpsX402Http {
     nowMs = () => performance.now();
@@ -50,16 +46,15 @@ export async function inspectX402(http, value, request,
 asset, payer) {
     const { endpoint, canonicalUrl, paymentRequired } = await readX402Challenge(http, value, request);
     const permit2 = payer === undefined ? undefined : inspectPermit2Offer({ accepts: paymentRequired.accepts, payer });
-    const candidates = asset === null ? [] : inspectCandidates(paymentRequired, canonicalUrl, asset);
+    const inspected = asset === null ? undefined : inspectOffers(paymentRequired, canonicalUrl, asset);
     if (asset === null && permit2 === undefined) {
         throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no Permit2 offer this payer can inspect.", { reason: "x402_offer_asset_not_offered" });
     }
-    if (asset !== null && candidates.length === 0 && permit2 === undefined) {
-        // Name what the seller does offer, so the caller can select another admitted network and token.
-        const offered = offeredX402Assets(paymentRequired.accepts);
-        throw new ApnError("APN_X402_UNSUPPORTED_OFFER", `Seller challenge has no supported x402 offer for ${asset.token} on ${asset.network}.`, { reason: "x402_offer_asset_not_offered", chain: asset.network, asset: asset.token,
-            offered: offered.map((offer) => `${offer.network} ${offer.asset} ${offer.method}`) });
+    // Each offer of this network and token that APN cannot sign is named with the field that decided it.
+    if (asset !== null && inspected !== undefined && inspected.candidates.length === 0 && permit2 === undefined) {
+        throw unsupportedOfferError(asset, paymentRequired, inspected);
     }
+    const candidates = inspected?.candidates ?? [];
     return {
         kind: "x402_inspection",
         x402Version: "2",
@@ -84,23 +79,6 @@ export async function readX402Challenge(http, value, request) {
     const header = singleControlHeader(observation.rawHeaderPairs, "payment-required");
     return { endpoint, canonicalUrl, header, paymentRequired: decodePaymentRequiredHeader(header) };
 }
-/** The seller's EVM `exact` offers as (network, lowercase asset, method), at most 16, for a refusal's details. */
-function offeredX402Assets(accepts) {
-    const out = [];
-    for (const offer of accepts) {
-        if (out.length >= 16 || typeof offer !== "object" || offer === null)
-            continue;
-        const { scheme, network, asset, extra } = offer;
-        if (scheme !== "exact" || typeof network !== "string" || !/^eip155:[1-9][0-9]{0,15}$/u.test(network) ||
-            typeof asset !== "string" || !/^0x[0-9a-fA-F]{40}$/u.test(asset))
-            continue;
-        const declared = typeof extra === "object" && extra !== null ? extra.assetTransferMethod : undefined;
-        const method = declared === undefined ? "eip3009" : typeof declared === "string" && declared.length <= 32 ? declared : "unknown";
-        if (!out.some((row) => row.network === network && row.asset === asset.toLowerCase() && row.method === method))
-            out.push({ network, asset: asset.toLowerCase(), method });
-    }
-    return out;
-}
 export function observePaidX402Response(raw, input) {
     const endpoint = new URL(input.canonicalUrl);
     if (raw.status < 100 || raw.status > 599 || !Number.isInteger(raw.status) ||
@@ -114,7 +92,7 @@ export function observePaidX402Response(raw, input) {
     const selectedFamily = isIP(raw.selectedAddress);
     if (selectedFamily !== 4 && selectedFamily !== 6)
         throw httpError("APN_HTTP_PROTOCOL", "Paid seller selected address is invalid.");
-    validateRawHeaders(raw.rawHeaderPairs);
+    validateRawHeaders(raw.rawHeaderPairs, true);
     if (optionalSingleHeader(raw.rawHeaderPairs, "payment-signature") !== undefined) {
         throw httpError("APN_HTTP_PROTOCOL", "Seller response must not echo PAYMENT-SIGNATURE.");
     }
@@ -125,9 +103,8 @@ export function observePaidX402Response(raw, input) {
         requireAsciiControl(paymentRequiredHeader, "PAYMENT-REQUIRED");
         decodePaymentRequiredHeader(paymentRequiredHeader);
     }
-    const paymentResponseHeader = optionalPaymentResponseHeader(raw.rawHeaderPairs);
-    if (paymentResponseHeader !== undefined)
-        requireAsciiControl(paymentResponseHeader, "PAYMENT-RESPONSE");
+    // Copies that differ or a malformed value are no settlement hint; the paid body below is kept either way.
+    const paymentResponse = paymentResponseHeader(raw.rawHeaderPairs);
     const result = observedPaidResult(raw, input.opaqueResult === true, MAX_BODY_BYTES);
     const observation = {
         attemptNumber: input.attemptNumber,
@@ -138,8 +115,8 @@ export function observePaidX402Response(raw, input) {
         ...(paymentRequiredHeader === undefined ? {} : {
             paymentRequiredHeaderHash: domainHash("apn.x402.payment-required-header.v1", Buffer.from(paymentRequiredHeader, "ascii")),
         }),
-        ...(paymentResponseHeader === undefined ? {} : {
-            paymentResponseHeaderHash: domainHash("apn.x402.payment-response-header.v1", Buffer.from(paymentResponseHeader, "ascii")),
+        ...(paymentResponse === undefined ? {} : {
+            paymentResponseHeaderHash: domainHash("apn.x402.payment-response-header.v1", Buffer.from(paymentResponse, "ascii")),
         }),
         bodyHash: domainHash("apn.x402.result-body.v1", raw.bodyBytes),
         bodyByteLength: raw.bodyBytes.byteLength.toString(),
@@ -152,7 +129,7 @@ export function observePaidX402Response(raw, input) {
     };
     return {
         observation,
-        ...(paymentResponseHeader === undefined ? {} : { paymentResponseHeader }),
+        ...(paymentResponse === undefined ? {} : { paymentResponseHeader: paymentResponse }),
         ...(result === undefined ? {} : { result }),
     };
 }
@@ -240,7 +217,7 @@ async function getOnce(endpoint, addresses, paymentSignature, httpRequest, deadl
                 let rawHeaderPairs;
                 try {
                     rawHeaderPairs = pairRawHeaders(response.rawHeaders);
-                    validateRawHeaders(rawHeaderPairs);
+                    validateRawHeaders(rawHeaderPairs, paymentSignature !== undefined);
                     const contentEncoding = optionalSingleHeader(rawHeaderPairs, "content-encoding");
                     if (contentEncoding !== undefined && contentEncoding !== "identity")
                         throw httpError("APN_HTTP_PROTOCOL", "Compressed seller responses are forbidden.");
@@ -335,74 +312,6 @@ function remainingMs(deadlineMs, nowMs) {
     return remaining;
 }
 function remainingBudgetMs(deadlineMs, nowMs) { return Math.floor(deadlineMs - nowMs()); }
-function pairRawHeaders(values) {
-    if (values.length % 2 !== 0)
-        throw httpError("APN_HTTP_PROTOCOL", "Seller raw headers are malformed.");
-    const pairs = [];
-    for (let index = 0; index < values.length; index += 2) {
-        const name = values[index];
-        const value = values[index + 1];
-        if (name === undefined || value === undefined)
-            throw httpError("APN_HTTP_PROTOCOL", "Seller raw headers are malformed.");
-        pairs.push([name, value]);
-    }
-    return pairs;
-}
-function validateRawHeaders(pairs) {
-    if (pairs.length > MAX_HEADER_PAIRS)
-        throw httpError("APN_HTTP_PROTOCOL", "Seller returned too many headers.");
-    let aggregate = 0;
-    const controlCounts = new Map();
-    for (const [name, value] of pairs) {
-        const nameBytes = Buffer.byteLength(name, "ascii");
-        const valueBytes = Buffer.byteLength(value, "utf8");
-        aggregate += nameBytes + valueBytes;
-        if (nameBytes === 0 || nameBytes > MAX_HEADER_NAME_BYTES || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name)) {
-            throw httpError("APN_HTTP_PROTOCOL", "Seller header name is invalid.");
-        }
-        const normalizedName = name.toLowerCase();
-        if (CONTROL_HEADERS.has(normalizedName)) {
-            if (valueBytes > MAX_CONTROL_VALUE_BYTES)
-                throw httpError("APN_HTTP_PROTOCOL", "x402 control header exceeds the size limit.");
-            if (value.trim() !== value || value.includes(","))
-                throw httpError("APN_HTTP_PROTOCOL", "x402 control header is folded or non-canonical.");
-            const semanticName = PAYMENT_RESPONSE_HEADERS.has(normalizedName) ? "payment-response" : normalizedName;
-            const count = (controlCounts.get(semanticName) ?? 0) + 1;
-            if (count > 1)
-                throw httpError("APN_HTTP_PROTOCOL", `Seller response contains duplicate ${semanticName} headers.`);
-            controlCounts.set(semanticName, count);
-        }
-    }
-    if (aggregate > MAX_AGGREGATE_HEADER_BYTES)
-        throw httpError("APN_HTTP_PROTOCOL", "Seller headers exceed the aggregate size limit.");
-}
-function singleControlHeader(pairs, name) {
-    const value = optionalSingleHeader(pairs, name);
-    if (value === undefined)
-        throw httpError("APN_HTTP_PROTOCOL", `Seller response requires exactly one ${name.toUpperCase()} header.`);
-    if (value.trim() !== value || value.includes(","))
-        throw httpError("APN_HTTP_PROTOCOL", "x402 control header is folded or non-canonical.");
-    return value;
-}
-function optionalSingleHeader(pairs, name) {
-    const values = pairs.filter(([candidate]) => candidate.toLowerCase() === name).map(([, value]) => value);
-    if (values.length > 1)
-        throw httpError("APN_HTTP_PROTOCOL", `Seller response contains duplicate ${name} headers.`);
-    return values[0];
-}
-function optionalPaymentResponseHeader(pairs) {
-    const values = pairs
-        .filter(([candidate]) => PAYMENT_RESPONSE_HEADERS.has(candidate.toLowerCase()))
-        .map(([, value]) => value);
-    if (values.length > 1) {
-        throw httpError("APN_HTTP_PROTOCOL", "Seller response contains duplicate payment-response headers.");
-    }
-    return values[0];
-}
-function requireAsciiControl(value, name) {
-    if (!/^[\x20-\x7e]+$/u.test(value))
-        throw httpError("APN_HTTP_PROTOCOL", `${name} must be exact ASCII.`);
-}
 function httpError(code, message) {
     return new ApnError(code, message);
 }

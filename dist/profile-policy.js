@@ -84,7 +84,7 @@ export function canonicalPolicyInput(input) {
     const maxX402AmountAtomic = canonicalPositive(input.maxX402AmountAtomic, "per-x402 limit");
     const maxBalanceEthWei = input.maxBalanceEthWei === undefined
         ? undefined
-        : canonicalPositive(input.maxBalanceEthWei, "selected-network ETH balance limit");
+        : canonicalPositive(input.maxBalanceEthWei, "selected-network native balance limit");
     const x402Payees = input.x402Payees === undefined || input.x402Payees === null ? input.x402Payees : x402PayeeList(input.x402Payees);
     if (x402Payees === null && input.x402Payees !== null) {
         throw new ApnError("APN_INVALID_INPUT", `The x402 payee pin must list 1 to ${MAX_X402_PAYEES} unique non-zero EVM addresses.`);

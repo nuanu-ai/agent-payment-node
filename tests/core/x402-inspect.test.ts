@@ -20,6 +20,7 @@ import {
   encodePaymentSignatureHeader,
   inspectCandidates,
 } from "../../src/x402-codec.js";
+import { inspectOffers } from "../../src/x402-offer-inspect.js";
 import { HttpsX402Http, inspectX402, SELLER_RESPONSE_MAX_HEADER_BYTES } from "../../src/x402-http.js";
 import type { InspectResult } from "../../src/x402-model.js";
 import { challengeObservation, TestHttp } from "./x402-helpers.js";
@@ -105,12 +106,12 @@ test("standard v2 challenge keeps error and offer order while filtering unsuppor
   assert.deepEqual(decoded.accepts, challenge.accepts, "unsupported standard offers remain available for original-index binding");
   assert.equal(decoded.extensions, undefined, "unimplemented extension namespaces are safely ignored");
 
+  // An `extra` key APN does not understand (here `permit2Address`) is the seller's own: carried, never a reason to refuse.
   const candidates = inspectCandidates(decoded, X402_URL, x402Asset(8453));
-  assert.equal(candidates.length, 1);
-  assert.equal(candidates[0]?.index, "2");
-  assert.equal(candidates[0]?.asset, mixedAsset.toLowerCase());
-  assert.equal(candidates[0]?.payTo, mixedPayTo.toLowerCase());
-  assert.equal(candidates[0]?.offerHash, domainHash("apn.x402.offer.v1", canonicalJson(supported)));
+  assert.deepEqual(candidates.map(({ index, assetTransferMethod }) => [index, assetTransferMethod]), [["1", "permit2"], ["2", "eip3009"]]);
+  assert.equal(candidates[1]?.asset, mixedAsset.toLowerCase());
+  assert.equal(candidates[1]?.payTo, mixedPayTo.toLowerCase());
+  assert.equal(candidates[1]?.offerHash, domainHash("apn.x402.offer.v1", canonicalJson(supported)));
 });
 
 test("unsupported-offer filtering retains standard envelope and selected-offer strictness", () => {
@@ -134,7 +135,10 @@ test("unsupported-offer filtering retains standard envelope and selected-offer s
     ...X402_PAYMENT_REQUIRED,
     accepts: [permit2, malformedEip3009, malformedFlow, X402_REQUIREMENTS],
   }));
-  assert.deepEqual(inspectCandidates(decoded, X402_URL, x402Asset(8453)).map(({ index }) => index), ["3"]);
+  assert.deepEqual(inspectCandidates(decoded, X402_URL, x402Asset(8453)).map(({ index }) => index), ["0", "3"]);
+  // Keys APN understands stay strict, and each refusal names its field.
+  assert.deepEqual(inspectOffers(decoded, X402_URL, x402Asset(8453)).refused.map(({ index, reason, field }) => [index, reason, field]),
+    [["1", "x402_token_decimals_mismatch", "extra.decimals"], ["2", "x402_offer_extra_invalid", "extra.paymentFlow"]]);
 
   for (const challenge of [
     { ...X402_PAYMENT_REQUIRED, error: 402 },

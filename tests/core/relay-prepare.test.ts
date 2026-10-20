@@ -23,6 +23,7 @@ import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
+import { lockRefusals } from "./lock-refusal-events.js";
 
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14";
 const recipient = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7";
@@ -125,9 +126,10 @@ test("provider rebind waits for both old and new owner locks", async t => {
   const lock = state.withLocks([evmAddressLock(recipient)], async () => { entered(); await gate; });
   await held;
   let saved = false;
+  const blocked = lockRefusals(t).refused(evmAddressLock(recipient));
   const pending = repository.save({ ...old, public_address: payer,
     account_binding_hash: accountBindingHash(old.provider_id, payer), revision: 2 }).then(() => { saved = true; });
-  await new Promise(resolve => setTimeout(resolve, 30));
+  await blocked; // the rebind is seen refused by the old owner's held lock
   assert.equal(saved, false);
   release(); await Promise.all([lock, pending]);
   assert.equal((await repository.load(old.profile_hash))?.public_address, payer);

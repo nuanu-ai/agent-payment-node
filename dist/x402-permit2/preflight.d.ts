@@ -1,3 +1,4 @@
+import { ApnError } from "../errors.js";
 import { HttpsBaseRpc } from "../rpc.js";
 import { type Permit2ReadRpcSource, type Permit2UsageReader } from "./read-port.js";
 export interface Permit2PreflightRequest {
@@ -20,3 +21,8 @@ export declare function permit2CurrentOwnerPreflight(root: string, request: Perm
  * command keeps the DNS pin; each batch races the caller's abort signal.
  */
 export declare function permit2PublicRpc(url: string, stateRoot: string, transport?: Pick<HttpsBaseRpc, "batchCall">): Permit2ReadRpcSource;
+/**
+ * A preflight without --rpc-url is refused naming the chain its own expected terms select (any owner-admitted Permit2
+ * network, not only Avalanche); terms that name no EVM network are refused as invalid before any RPC is named.
+ */
+export declare function permit2PreflightRpcRequired(expectedTerms: string): ApnError;

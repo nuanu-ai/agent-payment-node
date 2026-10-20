@@ -1,5 +1,6 @@
-import type { ReadNetwork, ReadValidationPredicate, RelaySupportFacts, SentinelFeeFacts, TokenFeesKind } from "./read-diagnostic.js";
-import { type MetaMaskGaslessIntent, type MetaMaskGaslessQuote } from "../model.js";
+import type { ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
+import { type SentinelFailure } from "./sentinel.js";
+import type { MetaMaskGaslessIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
 export interface FetchExchangeRequest {
     readonly url: string;
@@ -20,7 +21,7 @@ export interface FetchExchangeResponse {
 export interface FetchExchange {
     request(request: FetchExchangeRequest): Promise<FetchExchangeResponse>;
 }
-type ModeContext = {
+export type ModeContext = {
     readonly mode: "inspect" | "buildUnsigned";
 } | {
     readonly mode: "quote";
@@ -48,6 +49,12 @@ export declare class HelperNetworkPolicy {
     private sessionFailure;
     /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
     relaySupportFacts(): RelaySupportFacts | undefined;
+    /**
+     * APN's own proof that the server wallet's USDC does not cover the quote: the validated `balanceOf` read is below the
+     * net amount plus the validated Sentinel fee, raised as the pinned SDK raises it before funding (5% on Ethereum,
+     * vendor chunk-6XX5MONG.mjs `quoteGaslessTransfer`). Without both reads there is no proof and no fact.
+     */
+    usdcShortfall(): UsdcShortfallFacts | undefined;
     /** Transient fixed metadata, never response content or permission. */
     readFailureContext(error: unknown): ReadFailure;
     constructor(context: ModeContext, exchange?: FetchExchange);
@@ -62,16 +69,15 @@ export declare class HelperNetworkPolicy {
     private handle;
     /** Both bodies already passed `validateResponse`; only the quoted chain's row is read, as the SDK reads it. */
     private recordRelayFacts;
+    /** Both bodies already passed `validateResponse`; only the owner's balance word and the matching fee entry are read. */
+    private recordUsdcFacts;
     private assertSubmitDeadline;
     private classify;
 }
-interface ReadFailure {
+interface ReadFailure extends Partial<SentinelFailure> {
     readonly network: ReadNetwork;
     readonly httpStatus: number | null;
     readonly validationFailed: boolean;
-    readonly validationPredicate?: ReadValidationPredicate;
-    readonly tokenFeesShape?: TokenFeesKind;
-    readonly feeFacts?: SentinelFeeFacts;
 }
 export declare class HttpsFetchExchange implements FetchExchange {
     request(request: FetchExchangeRequest): Promise<FetchExchangeResponse>;

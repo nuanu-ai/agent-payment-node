@@ -199,15 +199,21 @@ export function landedTokenCleanups(op) {
 }
 function validatePrincipalRelease(op) {
     const v = op.principalRelease;
-    if (op.phase !== "cleaned" || op.receipt !== null || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
+    if (op.phase !== "cleaned" && op.phase !== "abandoned_unknown" || op.receipt !== null || !["reserved", "failed_before_effect"].includes(op.usageState ?? "") ||
         (op.retiredEffects ?? []).some((row) => row.kind === "swap") || !isPlainRecord(v) || v.schemaVersion !== "apn.uniswap-token-principal-release.v1" ||
         typeof v.observedAt !== "string" || !canonicalInstant(v.observedAt) || v.observedAt > op.updatedAt)
         corrupt("Uniswap token principal release is invalid.");
+    // An owner-abandoned swap keeps its hashless marker as history; the release names the marker custody proved unsigned.
+    const marker = op.phase === "abandoned_unknown" ? op.swapAttempt : null;
     if (v.kind === "swap_never_signed") {
-        if (!exactKeys(v, ["schemaVersion", "kind", "observedAt"]) || op.swapAttempt !== null)
+        if (marker === null ? !exactKeys(v, ["schemaVersion", "kind", "observedAt"]) || op.swapAttempt !== null
+            : !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "swapMarkerHash", "observedAt"]) || marker.transactionHash !== null ||
+                v.swapNonce !== marker.nonce || v.swapMarkerHash !== marker.markerHash)
             corrupt("Uniswap token principal release is invalid.");
         return;
     }
+    if (op.phase !== "cleaned")
+        corrupt("Uniswap token principal release is invalid.");
     const swap = op.swapAttempt, cleanup = landedTokenCleanups(op).find((row) => row.transactionHash === v.cleanupTransactionHash);
     if (v.kind !== "swap_nonce_consumed_by_cleanup" || !exactKeys(v, ["schemaVersion", "kind", "swapNonce", "cleanupTransactionHash", "cleanupBlockNumber",
         "cleanupBlockHash", "finalizedBlockNumber", "finalizedNonce", "observedAt"]) || swap === null || swap.transactionHash !== null ||

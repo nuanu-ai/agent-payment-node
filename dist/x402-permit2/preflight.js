@@ -11,6 +11,7 @@ import { createPermit2ProductionReadPort } from "./read-port.js";
 import { preparePermit2WithPort } from "./prepare.js";
 import { admittedPermit2Assets } from "./admission.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { rpcUrlRequired } from "../rpc-requirement.js";
 /** An unsigned CLI read with no payment-state persistence; only RPC pacing metadata may be written. */
 export async function permit2CurrentOwnerPreflight(root, request, ports) {
     const profile = canonicalProfile(request.profile);
@@ -87,4 +88,22 @@ export function permit2PublicRpc(url, stateRoot, transport) {
 }
 function aborted() { throw new ApnError("APN_RPC_PROTOCOL", "Permit2 RPC read was aborted."); }
 function invalid() { throw new ApnError("APN_INVALID_INPUT", "Expected Permit2 selection is invalid."); }
+/**
+ * A preflight without --rpc-url is refused naming the chain its own expected terms select (any owner-admitted Permit2
+ * network, not only Avalanche); terms that name no EVM network are refused as invalid before any RPC is named.
+ */
+export function permit2PreflightRpcRequired(expectedTerms) {
+    let network;
+    try {
+        const terms = decodeCanonicalBase64Json(expectedTerms);
+        network = isPlainRecord(terms) ? terms.network : undefined;
+    }
+    catch {
+        return invalid();
+    }
+    const match = typeof network === "string" ? /^eip155:([1-9][0-9]{0,15})$/u.exec(network) : null;
+    if (match === null || !Number.isSafeInteger(Number(match[1])))
+        return invalid();
+    return rpcUrlRequired({ chainId: Number(match[1]), name: network });
+}
 //# sourceMappingURL=preflight.js.map

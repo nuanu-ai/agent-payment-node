@@ -21,6 +21,18 @@ export function principalReleaseCandidate(op: UniswapTokenOperation): { readonly
 }
 
 /**
+ * R4 for an owner-abandoned swap: its abandon keeps the principal held only while an effect of it could still land. With no
+ * swap marker nothing of the swap was ever bound; a hashless marker still needs custody to show it never signed (the forward
+ * command checks it under the account lock). A bound or retired swap, a receipt or a recorded release: null.
+ */
+export function abandonedPrincipalCandidate(op: UniswapTokenOperation): { readonly swap: UniswapTokenAttempt | null } | null {
+  if (op.phase !== "abandoned_unknown" || op.usageState !== "reserved" || op.principalRelease !== undefined || op.receipt !== null ||
+    (op.retiredEffects ?? []).some((row) => row.kind === "swap")) return null;
+  const swap = op.swapAttempt;
+  return swap === null || swap.transactionHash === null ? { swap } : null;
+}
+
+/**
  * One primary batch, so one node answers all three: the account's nonce at the finalized tag, the cleanup transaction by
  * its own hash, and the finalized head. Proven only when that node has the cleanup (signed by the account, chain 1, the
  * swap marker's nonce) in a block at or below the finalized head, the finalized nonce is past it, and the canonical block

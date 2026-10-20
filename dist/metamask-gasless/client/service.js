@@ -66,10 +66,12 @@ export async function executeHelperRequest(input, options = {}) {
         if (request.mode === "inspect" || request.mode === "quote") {
             const context = policy?.readFailureContext(error);
             const invariant = context?.validationFailed ? "network_validation" : error instanceof ApnError ? "closed_failure" : "unclassified_exception";
-            // Relay facts accompany only APN's own closed relay refusal, fee facts only a classified missing fee list.
-            const relay = failure.reason === "mm_gasless_relay_unsupported" && phase.stage === "relay_support" &&
-                invariant === "closed_failure" && context?.network === "none" ? policy?.relaySupportFacts() : undefined;
-            return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage, invariant, context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate, context?.tokenFeesShape, { ...context?.feeFacts, ...relay }) };
+            // Relay facts accompany only APN's own closed relay refusal, fee facts only a classified missing fee list and
+            // USDC facts only APN's own closed balance refusal at the fee quote.
+            const closed = invariant === "closed_failure" && context?.network === "none";
+            const relay = failure.reason === "mm_gasless_relay_unsupported" && phase.stage === "relay_support" && closed ? policy?.relaySupportFacts() : undefined;
+            const usdc = failure.reason === "mm_gasless_balance" && phase.stage === "fee_quote" && closed ? policy?.usdcShortfall() : undefined;
+            return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage, invariant, context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate, context?.tokenFeesShape, { ...context?.feeFacts, ...relay, ...usdc }) };
         }
         return { version: MM_HELPER_VERSION, ok: false, failure };
     }
@@ -137,8 +139,13 @@ async function quote(input, state, policy, phase) {
     }
     catch (error) {
         const sponsored = policy.takeSponsoredQuote(error);
-        if (sponsored === undefined)
+        if (sponsored === undefined) {
+            // The pinned SDK refuses a balance below the transfer plus its fee after reading it; APN names that refusal only
+            // from its own two validated reads, never from the SDK's words.
+            if (policy.usdcShortfall() !== undefined)
+                mmFail("mm_gasless_balance");
             throw error;
+        }
         if (resolverCalls !== 0 || hydrated.writes() !== 0)
             mmFail("mm_gasless_state_security");
         phase.stage = "quote_output";

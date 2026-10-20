@@ -187,10 +187,8 @@ test("local SOL approval leaves money-operation locks available during paced sen
   const approving = s.core.rails.approve(id);
   await entered;
   try {
-    await Promise.race([
-      s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => true),
-      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("approval held money-operation locks during paced wait")), 2000)),
-    ]);
+    // Acquired while the operation waits: proves "approval held money-operation locks during paced wait" false; a held lock ends in APN_STATE_BUSY, never a wall-clock deadline.
+    await s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => true);
   } finally { release(); }
   await approving;
   assert.equal(s.rpc.submissions.length, 1);
@@ -294,12 +292,10 @@ test("local SOL signer RPC read releases money locks and policy drift prevents s
   await started;
   try {
     const { policyHash: _old, ...body } = policy;
-    await Promise.race([
-      s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => {
-        await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
-      }),
-      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("signer RPC held money-operation locks")), 2000)),
-    ]);
+    // Acquired while the operation waits: proves "signer RPC held money-operation locks" false; a held lock ends in APN_STATE_BUSY, never a wall-clock deadline.
+    await s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => {
+      await s.core.rails.policies.policies.write(sealChainPolicy({ ...body, dailyLimitAtomic: "4000000000" }));
+    });
   } finally { release(); }
   await assert.rejects(approving);
   const current = (await findStored(s.core.rails.records, id))!;
@@ -321,10 +317,8 @@ test("local SOL first submit releases money locks and a concurrent resume does n
   await started;
   try {
     assert.equal((await findStored(s.core.rails.records, id))!.state, "submitting");
-    await Promise.race([
-      s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => true),
-      new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("submit held money-operation locks")), 2000)),
-    ]);
+    // Acquired while the operation waits: proves "submit held money-operation locks" false; a held lock ends in APN_STATE_BUSY, never a wall-clock deadline.
+    await s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${id}`], async () => true);
     const resumed = s.core.rails.resume(id);
     release();
     const [a, b] = await Promise.all([approving, resumed]) as [{ state: string }, { state: string }];
@@ -439,11 +433,9 @@ test("duplicate local SOL prepare shares one claim and leaves money-operation lo
   const first = s.core.rails.prepare(input);
   await started;
   assert.deepEqual(await readdir(join(temporary.root, "rail-prepare-claims")), [`${idempotencyHash}.json`]);
-  await Promise.race([
-    s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${operationId}`,
-      `operation:idempotency:${idempotencyHash}`], async () => true),
-    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("prepare held money-operation locks during RPC")), 2000)),
-  ]);
+  // Acquired while the operation waits: proves "prepare held money-operation locks during RPC" false; a held lock ends in APN_STATE_BUSY, never a wall-clock deadline.
+  await s.core.context.state.withLocks([`profile:${s.account.profileHash}`, `operation:${operationId}`,
+    `operation:idempotency:${idempotencyHash}`], async () => true);
   const second = s.core.rails.prepare(input);
   release();
   const [a, b] = await Promise.all([first, second]);
@@ -669,14 +661,12 @@ test("local SOL resume releases locks during saved-effect observation and discar
   const resumed = s.core.rails.resume(id);
   await inspectEntered;
   // This writer needs the same profile and operation locks. It can advance while RPC waits.
-  await Promise.race([
-    s.core.context.state.withLocks([`profile:${frozen.profileHash}`, `operation:${id}`], async () => {
-      const current = (await findStored(s.core.rails.records, id))!;
-      await s.core.rails.records.persist(transitionRail(current, { state: "unknown_finality", at: s.now.toISOString(),
-        reason: "concurrent_observation_update", proofClass: "effect_outcome_unknown" }));
-    }),
-    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("resume held locks during inspection")), 2000)),
-  ]);
+  // Acquired while the operation waits: proves "resume held locks during inspection" false; a held lock ends in APN_STATE_BUSY, never a wall-clock deadline.
+  await s.core.context.state.withLocks([`profile:${frozen.profileHash}`, `operation:${id}`], async () => {
+    const current = (await findStored(s.core.rails.records, id))!;
+    await s.core.rails.records.persist(transitionRail(current, { state: "unknown_finality", at: s.now.toISOString(),
+      reason: "concurrent_observation_update", proofClass: "effect_outcome_unknown" }));
+  });
   releaseInspect();
   const stale = await resumed as { state: string; reason: string };
   assert.equal(stale.state, "unknown_finality");

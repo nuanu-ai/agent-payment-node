@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setTimeout as pause } from "node:timers/promises";
 import { hashObject } from "../../src/canonical.js";
 import { StateStore } from "../../src/state.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy-store.js";
@@ -13,6 +12,7 @@ import type { CircleFundingOperationV2 } from "../../src/circle-v2-evm/funding-o
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { lockRefusals } from "./lock-refusal-events.js";
 async function temporaryState() { const root = await realpath(await mkdtemp(join(tmpdir(), "circle-policy-lock-"))); return { root, cleanup: () => rm(root, { recursive: true, force: true }) }; }
 const now = new Date("2026-10-09T01:00:00.000Z");
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
@@ -50,10 +50,10 @@ for (const decision of ["revoked", "active"] as const) test(`${decision} waits f
   const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143), entered = deferred(), release = deferred();
   let completed = false;
   const reader = f.usage.withPolicyLocks([f.op.destinationProfile, f.op.profile], async () => { await f.usage.policies(f.op); entered.resolve(); await release.promise; await f.usage.policies(f.op); });
-  await entered.promise; const head = f.heads.get(f.op.destinationProfile)!;
+  await entered.promise; const head = f.heads.get(f.op.destinationProfile)!, blocked = lockRefusals(t).refused();
   const writer = f.store.appendDecision(f.op.destinationProfile, head.entryDigest, { status: decision, revision: head.revision, stagedRecordDigest: head.stagedRecordDigest,
     policyDigest: head.policyDigest, ...(decision === "active" ? { registry: head.registry! } : {}), approvalFingerprint: hashObject(decision), decidedAt: now.toISOString() }).then(() => { completed = true; });
-  await pause(25); assert.equal(completed, false); release.resolve(); await Promise.all([reader, writer]); assert.equal(completed, true);
+  await blocked; assert.equal(completed, false); release.resolve(); await Promise.all([reader, writer]); assert.equal(completed, true);
 });
 test("changed activation before acquisition refuses the frozen grant; absence cannot grant legacy dispatch", { timeout: 10000 }, async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143);
@@ -67,8 +67,10 @@ test("changed activation before acquisition refuses the frozen grant; absence ca
 });
 test("opposite profile ordering shares canonical locks without deadlock or concurrent scopes", { timeout: 10000 }, async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143), other = new CircleUsage(f.state, () => now.getTime());
-  let active = 0, maximum = 0;
-  const read = (usage: CircleUsage, profiles: string[]) => usage.withPolicyLocks(profiles, async () => { maximum = Math.max(maximum, ++active); await usage.policies(f.op); await pause(10); --active; });
+  // The first scope stays open until the other is seen refused by the shared canonical locks (an event, not a pause).
+  let active = 0, maximum = 0, first = true; const contended = lockRefusals(t).refused();
+  const read = (usage: CircleUsage, profiles: string[]) => usage.withPolicyLocks(profiles, async () => { maximum = Math.max(maximum, ++active); await usage.policies(f.op);
+    if (first) { first = false; await contended; } --active; });
   await Promise.all([read(f.usage, [f.op.profile, f.op.destinationProfile]), read(other, [f.op.destinationProfile, f.op.profile])]); assert.equal(maximum, 1);
 });
 
@@ -76,8 +78,8 @@ test("policy expiration while waiting for locks refuses before any financial con
   const temporary = await temporaryState(); t.after(temporary.cleanup); const expires = now.getTime() + 1000, f = await fixture(temporary.root, 143, new Date(expires).toISOString());
   let clock = now.getTime(), effects = 0; const usage = new CircleUsage(f.state, () => clock), entered = deferred(), release = deferred();
   const blocker = f.state.withLocks([`profile:${allowlistProfileHash(f.op.profile)}`], async () => { entered.resolve(); await release.promise; }); await entered.promise;
-  const waiting = usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => { await usage.policies(f.op); effects++; });
-  const refused = assert.rejects(waiting, /active allowlist policy has expired/u); await pause(25); clock = expires; release.resolve(); await Promise.all([blocker, refused]); assert.equal(effects, 0);
+  const blocked = lockRefusals(t).refused(), waiting = usage.withPolicyLocks([f.op.profile, f.op.destinationProfile], async () => { await usage.policies(f.op); effects++; });
+  const refused = assert.rejects(waiting, /active allowlist policy has expired/u); await blocked; clock = expires; release.resolve(); await Promise.all([blocker, refused]); assert.equal(effects, 0);
 });
 test("async work inherited from an ended scope cannot perform policy reads", { timeout: 10000 }, async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const f = await fixture(temporary.root, 143), release = deferred(); let late!: Promise<unknown>;
