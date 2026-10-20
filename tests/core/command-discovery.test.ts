@@ -38,13 +38,14 @@ import { X402_PAYMENT_REQUIRED, canonicalPaymentRequiredHeader } from "./x402-ve
 const isolated = await temporaryState(), temporaryRoot = isolated.base;
 after(isolated.cleanup);
 
-const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "x402", "x402 merchant", "x402 permit2", "x402 solana", "x402 permit2 allowance", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
+const EXPECTED_GROUPS = ["allowlist", "allowlist policy", "swap", "swap ethereum", "swap ethereum uniswap", "swap ethereum uniswap-token", "swap tron", "swap tron sunswap", "swap solana", "swap solana jupiter", "swap solana orca", "relay", "mega", "mega funding", "sei", "sei funding", "stargate", "stargate native", "stargate token", "gasless", "gasless transfer", "bridge", "oneclick", "oneclick source", "circle", "circle approval", "circle source", "circle evm", "policy", "mcp", "doctor", "wallet", "wallet permission", "wallet metamask", "wallet policy", "wallet allowance", "x402", "x402 merchant", "x402 permit2", "x402 solana", "x402 permit2 allowance", "x402 fetch", "pay", "pay transfer", "operation", "receipt"];
 const EXPECTED_COMMANDS = [
   "x402 permit2 approve", "x402 permit2 observe",
   "x402 permit2 preflight",
   "x402 permit2 status",
   "x402 solana pay", "x402 solana observe", "x402 solana status",
   "x402 permit2 allowance set", "x402 permit2 allowance revoke", "x402 permit2 allowance observe", "x402 permit2 allowance status",
+  "wallet allowance revoke", "wallet allowance status",
   "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant retire-unsent", "x402 merchant status",
   "relay prepare", "relay execute", "relay observe", "relay retire", "relay status",
   "stargate native prepare", "stargate native execute", "stargate native observe", "stargate native status", "stargate native receipt",
@@ -193,6 +194,7 @@ test("group help renders exact subgroup usages and complete leaf synopses", () =
     "  apn wallet permission <command> [options] — Inspect and manage bounded provider permission state.",
     "  apn wallet metamask <command> [options] — Guarded MetaMask Agent Wallet USDC transfer that pays its network fee in the native coin.",
     "  apn wallet policy <command> [options] — Inspect or change owner-approved wallet policy.",
+    "  apn wallet allowance <command> [options] — Read or revoke an ERC-20 allowance the local wallet granted.",
     "",
     "Commands:",
     "  apn wallet balance --profile <profile> [--chain <caip2> --asset <native-or-contract> [--decimals <integer>]] --rpc-url <https-url> — Read one profile's EVM balances: with --chain and --asset one selected asset plus native gas, without them Base ETH and canonical Base USDC.",

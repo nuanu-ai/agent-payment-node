@@ -90,6 +90,8 @@ export declare class HttpsBaseRpc implements RpcPort, X402RpcPort {
         readonly to: Address;
         readonly data: Hex;
     }): Promise<FeeEstimate>;
+    /** The pre-transport refusal a guarded POST would meet now (cap spent, provider cooling down); sends nothing. */
+    assertPostCapacity(): Promise<void>;
     submitRawTransaction(rawTransaction: Hex, beforeSend?: () => void): Promise<Hex>;
     getReceipt(transactionHash: Hex): Promise<RpcReceipt | null>;
     coinbaseGaslessCall(method: Parameters<NonNullable<RpcPort["coinbaseGaslessCall"]>>[0], params: readonly unknown[]): Promise<unknown>;

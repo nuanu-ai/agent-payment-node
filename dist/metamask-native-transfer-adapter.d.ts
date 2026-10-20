@@ -1,6 +1,7 @@
 import { type Address } from "viem";
 import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import type { Hex } from "./model.js";
+import { type MetaMaskMfaNotice } from "./metamask-process-output.js";
 import { type MetaMaskNativeFeeChainId } from "./metamask-native-fee-evidence.js";
 import { type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
 /** What the vendor CLI reported for the selected wallet; `vendorPolicyHash` pins the policy bytes between prepare and send. */
@@ -12,6 +13,10 @@ export interface MetaMaskNativeVendorPolicy {
     readonly outflowLimitsUsd: Readonly<Record<string, string>>;
     readonly observedAt: string;
 }
+/** A verified AWAITING_MFA notice (or request status) for the very request stored, with the SHA-256 of the vendor output. */
+export interface MetaMaskNativeMfaEvidence extends MetaMaskMfaNotice {
+    readonly evidenceHash: string;
+}
 export type MetaMaskNativeSubmission = ({
     readonly disposition: "acknowledged";
     readonly transactionHash: Hex;
@@ -20,11 +25,13 @@ export type MetaMaskNativeSubmission = ({
     readonly disposition: "pending";
     readonly requestId: string;
     readonly transactionHash?: never;
+    readonly mfa?: MetaMaskNativeMfaEvidence;
 } | {
     readonly disposition: "unknown";
     readonly reason: string;
     readonly transactionHash?: Hex;
     readonly requestId?: string;
+    readonly mfa?: MetaMaskNativeMfaEvidence;
 }) & {
     readonly diagnostic?: MetaMaskNativeDiagnostic;
 };
@@ -65,6 +72,7 @@ type RequestHint = {
     readonly requestId: string;
     readonly chainId?: MetaMaskNativeFeeChainId;
     readonly transactionHash?: never;
+    readonly mfa?: MetaMaskNativeMfaEvidence;
 } | {
     readonly disposition: "unknown";
     readonly reason: string;

@@ -4,6 +4,7 @@ import { type ActiveAssetPolicy } from "./allowlist-active-policy.js";
 import { type AssetUsageReservation } from "./asset-usage-ledger.js";
 import { validateProviderProfile } from "./provider-profile.js";
 import { type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import type { MetaMaskMfaNotice } from "./metamask-process-output.js";
 import { type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeReceiptEvidence } from "./metamask-native-fee-evidence.js";
 declare const V1 = "apn.metamask-native-operation.v1", V2 = "apn.metamask-native-operation.v2";
 /** Outcomes after which a native transfer can no longer sign, hand off or land. */
@@ -50,9 +51,27 @@ export interface MetaMaskNativeOperation {
     readonly createdAt: string;
     readonly updatedAt: string;
     readonly diagnostic?: MetaMaskNativeDiagnostic;
+    readonly mfaTask?: MetaMaskNativeMfaTask;
     readonly recordHash: string;
 }
 export declare const METAMASK_NATIVE_OPERATION_SCHEMA = "apn.metamask-native-operation.v2";
+/**
+ * The owner's MetaMask approval this transfer waits on: a verified AWAITING_MFA notice (or request status) for its own
+ * stored request, from the hand-off (`send`) or a no-send watch (`watch`); `evidenceHash` is the SHA-256 of that vendor
+ * output. Metadata only, kept apart from the financial state: it is never a payment, an outcome or a reason to release a
+ * hold, and it goes when a transaction hash or the provider's own record shows the request past the approval.
+ */
+export interface MetaMaskNativeMfaTask {
+    readonly requestId: string;
+    readonly expiresAt: string | null;
+    readonly authMethod: string | null;
+    readonly observedAt: string;
+    readonly source: "send" | "watch";
+    readonly evidenceHash: string;
+}
+export declare function metaMaskNativeMfaTask(requestId: string, evidence: MetaMaskMfaNotice & {
+    readonly evidenceHash: string;
+}, source: MetaMaskNativeMfaTask["source"], now?: Date): MetaMaskNativeMfaTask;
 /**
  * A transfer whose foreground command ended before its effect marker (still `prepared`: nothing was handed off or signed)
  * and whose consent deadline has passed (plus the unstarted margin) can never start: the hand-off needs that consent.
@@ -79,8 +98,45 @@ export declare function metaMaskNativeRequestHash(request: {
     readonly amountAtomic: string;
 }): string;
 export declare function metaMaskNativeRequestMatches(op: MetaMaskNativeOperation, request: Parameters<typeof metaMaskNativeRequestHash>[0]): boolean;
-export declare function patchMetaMaskNativeOperation(op: MetaMaskNativeOperation, fields: Partial<MetaMaskNativeOperation>): Omit<MetaMaskNativeOperation, "recordHash">;
-export declare function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation): {
+/** A field given as undefined (the MFA task once the request is past it) leaves the record. */
+export declare function patchMetaMaskNativeOperation(op: MetaMaskNativeOperation, fields: Partial<Omit<MetaMaskNativeOperation, "mfaTask">> & {
+    readonly mfaTask?: MetaMaskNativeMfaTask | undefined;
+}): Omit<MetaMaskNativeOperation, "recordHash">;
+/** The family's own no-send observer: it reads the stored request or transaction and never signs or sends again. */
+export declare const metaMaskNativeObserveCommand: (id: string) => string;
+export declare function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation, now?: Date): {
+    next_actions: string[];
+    mfa_task?: never;
+    receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    diagnostic?: MetaMaskNativeDiagnostic;
+    operation_id: string;
+    state: string;
+    chain_id: 1 | 10 | 59144 | 143 | 1329;
+    profile: string;
+    sender: `0x${string}`;
+    recipient: `0x${string}`;
+    token: `0x${string}`;
+    usdc_atomic: string;
+    usdc: string;
+    maximum_native_fee_atomic: string;
+    transaction_hash: `0x${string}` | null;
+    effect_attempts: 0 | 1;
+    proof_class: string;
+} | {
+    next_actions: string[];
+    mfa_task: {
+        status: string;
+        provider: string;
+        provider_state: string;
+        request_id: string;
+        auth_method: string | null;
+        expires_at: string | null;
+        observed_at: string;
+        source: "send" | "watch";
+        evidence_hash: string;
+        owner_action: string;
+        observe_command: string;
+    };
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;

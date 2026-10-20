@@ -30,6 +30,9 @@ export type CommandRequest =
   | { readonly command: "x402.permit2.allowance.set" | "x402.permit2.allowance.revoke"; readonly profile: string; readonly chainId: number; readonly token: Address;
       readonly amountAtomic: string; readonly maxGasLimit: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string; readonly idempotencyKey: string }
   | { readonly command: "x402.permit2.allowance.observe" | "x402.permit2.allowance.status"; readonly operationId: string }
+  | { readonly command: "wallet.allowance.revoke"; readonly profile: string; readonly chainId: number; readonly token: Address; readonly spender: Address;
+      readonly maxGasLimit: string; readonly maxFeePerGasWei: string; readonly maxPriorityFeePerGasWei: string }
+  | { readonly command: "wallet.allowance.status"; readonly profile: string; readonly chainId: number; readonly token: Address; readonly spender: Address }
   | { readonly command: "relay.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.base.prepare"; readonly profile: string; readonly recipient: string; readonly amountAtomic: string; readonly minOutputAtomic: string; readonly maxApprovalNetworkFeeWei: string; readonly maxDepositNetworkFeeWei: string; readonly idempotencyKey: string }
   | { readonly command: "relay.arbitrum.prepare"; readonly profile: string; readonly owner: string; readonly recipient: string; readonly amountAtomic: string;
