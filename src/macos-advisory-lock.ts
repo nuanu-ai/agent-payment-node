@@ -5,8 +5,8 @@ const LOCKF = "/usr/bin/lockf";
 const LOCKF_ARGS = ["-s", "-t", "0", "3"] as const;
 const LOCKF_BUSY_EXIT = 75;
 /** The helper only spawns and tries the lock once (`-t 0`); the bound covers a slow spawn on a loaded machine. A helper that
- * does not answer within it still fails closed, and a strict caller deadline still bounds each attempt itself. */
-const LOCKF_TIMEOUT_MS = 5_000;
+ * does not answer within it still fails closed; a strict caller deadline bounds each attempt by its remaining time. */
+export const LOCKF_TIMEOUT_MS = 5_000;
 
 export interface AdvisoryLockPort {
   tryAcquire(fd: number, timeoutMs?: number, boundedWait?: boolean): Promise<boolean>;
