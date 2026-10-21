@@ -215,6 +215,10 @@ export class AssetUsageLedger extends SecureStateStore {
         BigInt(consumedAtomic) > BigInt(current.amountAtomic))) {
         throw blocked("Confirmed-revert consumption exceeds or conflicts with the reservation.");
       }
+      if (input.effectAt !== undefined && input.state !== "finalized") throw invalid("Only a finalized spend carries a proven effect time.");
+      // A proven effect is never stamped before the hold's own last write (R9) nor after this one.
+      const proven = input.effectAt === undefined ? at : instant(new Date(input.effectAt));
+      const effectAt = Date.parse(proven) < Date.parse(current.updatedAt) ? current.updatedAt : Date.parse(proven) > Date.parse(at) ? at : proven;
       if (current.state === input.state) {
         if (current.outcomeDigest !== outcomeDigest || current.consumedAtomic !== consumedAtomic) {
           throw blocked("The idempotent usage transition outcome does not match.");
@@ -226,7 +230,7 @@ export class AssetUsageLedger extends SecureStateStore {
         ...withoutDigest(current),
         state: input.state,
         updatedAt: at,
-        effectAt: input.state === "finalized" || consumedAtomic !== undefined ? at : null,
+        effectAt: input.state === "finalized" ? effectAt : consumedAtomic !== undefined ? at : null,
         outcomeDigest,
         ...(consumedAtomic === undefined ? {} : { consumedAtomic }),
       };

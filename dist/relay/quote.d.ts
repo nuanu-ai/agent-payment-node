@@ -90,5 +90,7 @@ export interface RelayQuoteTransaction {
     readonly maximumNetworkFeeWei: string;
 }
 export declare function validateRelayQuote(value: unknown, intent: RelayQuoteIntent): Promise<ValidatedRelayQuote>;
+/** The read and the one revoke that clear an existing depository allowance; the same prepare then quotes both steps. */
+export declare function withRelayAllowanceActions(error: unknown, profile: string): unknown;
 /** One POST, no API key, no retry. The caller receives a validated unsigned envelope only. */
 export declare function requestRelayQuote(intent: RelayQuoteIntent, fetcher?: typeof fetch, now?: () => number): Promise<ValidatedRelayQuote>;
