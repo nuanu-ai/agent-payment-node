@@ -145,12 +145,17 @@ export interface StargateNativeExecutionPorts {
         blockNumberAtomic: string;
         blockHash: Hex;
     }>>;
+    /** `debit` splits `valueAtomic` into the bridged principal and LayerZero fee, for a funds refusal's numbers only. */
     readonly prepareEnvelope: (transaction: Readonly<{
         chainId: 1;
         from: Address;
         to: Address;
         data: Hex;
         valueAtomic: string;
+        debit?: Readonly<{
+            principalAtomic: string;
+            messagingFeeAtomic: string;
+        }>;
     }>) => Promise<StargatePreparedEnvelopeEvidence>;
     readonly signer: Readonly<{
         kind: "imported_evm_signer";
