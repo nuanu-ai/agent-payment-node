@@ -2,6 +2,7 @@
 import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import { hashObject } from "../canonical.js";
+import { ApnError } from "../errors.js";
 export const ETHEREUM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 export const BNB_NATIVE = "0x0000000000000000000000000000000000000000";
 export const BASE_NATIVE = BNB_NATIVE;
@@ -174,6 +175,11 @@ export async function validateRelayQuote(value, intent) {
         fail("clock");
     const quote = object(value, "quote");
     const steps = array(quote.steps, "steps");
+    // Relay leaves the approval out when the payer's allowance to the depository already covers the amount (an approval-only
+    // retirement leaves one). This route sends its own approval, so that allowance is revoked before it is quoted again.
+    if (steps.length === 1 && object(steps[0], "step").id === "deposit") {
+        throw new ApnError("APN_OPERATION_BLOCKED", "Relay quoted a deposit without an approval: the payer's USDC allowance to the Relay depository already covers the amount.", { reason: "relay_existing_allowance", chain: "eip155:1", asset: ETHEREUM_USDC, spender: ETHEREUM_DEPOSITORY });
+    }
     if (steps.length !== 2)
         fail("unsupported steps");
     const statusLocator = quoteStatusLocator(quote, steps);
@@ -301,6 +307,15 @@ export async function validateRelayQuote(value, intent) {
         minimumOutputWei: minimum.toString(), deadline: deadline,
         approval: projectedTransaction(approval), deposit: projectedTransaction(deposit) };
     return frozen({ ...projection, quoteDigest: hashObject(projection) });
+}
+/** The read and the one revoke that clear an existing depository allowance; the same prepare then quotes both steps. */
+export function withRelayAllowanceActions(error, profile) {
+    if (!(error instanceof ApnError) || error.details?.reason !== "relay_existing_allowance")
+        return error;
+    const target = `--profile ${profile} --chain eip155:1 --asset ${ETHEREUM_USDC} --spender ${ETHEREUM_DEPOSITORY}`;
+    return new ApnError(error.code, error.message, { ...error.details, nextActions: [`apn wallet allowance status ${target}`,
+            `apn wallet allowance revoke ${target} --max-gas-limit <gas-limit> --max-fee-per-gas-wei <wei> --max-priority-fee-per-gas-wei <wei>`,
+            "After the revoke is final, rerun the same apn relay prepare command."] });
 }
 /** One POST, no API key, no retry. The caller receives a validated unsigned envelope only. */
 export async function requestRelayQuote(intent, fetcher = fetch, now = () => Math.floor(Date.now() / 1000)) {

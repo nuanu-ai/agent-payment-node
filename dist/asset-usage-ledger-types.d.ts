@@ -74,6 +74,9 @@ export interface AssetUsageTransitionInput extends AssetUsageIdentity {
     readonly outcomeDigest?: string;
     /** Exact asset consumed on a confirmed revert, such as a gasless USDC fee. */
     readonly consumedAtomic?: string;
+    /** A finalized spend proven before this write: the instant of its durable proof. It is stored no earlier than the
+     * hold's last write and no later than this one, so the spend counts on the day it was proven, not on every later day. */
+    readonly effectAt?: string;
     /** Optional compare-and-transition guard, checked atomically while the bucket lock is held. */
     readonly expectedCurrentStates?: readonly AssetUsageState[];
 }

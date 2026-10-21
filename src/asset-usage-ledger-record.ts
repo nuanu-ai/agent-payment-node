@@ -71,7 +71,7 @@ function validateBody(value: Record<string, unknown>): void {
   if (updatedAt < reservedAt) corrupt("The usage reservation timestamps are invalid.");
   if (value.state === "finalized") {
     const effectAt = storedInstant(value.effectAt);
-    if (effectAt !== updatedAt) corrupt("The finalized usage effect timestamp is invalid.");
+    if (effectAt < reservedAt || effectAt > updatedAt) corrupt("The finalized usage effect timestamp is invalid.");
     digest(value.outcomeDigest, "Outcome digest", true);
   } else if (value.state === "failed_before_effect" || value.state === "released_unsubmitted" || value.state === "failed_confirmed_revert") {
     if (value.state === "failed_confirmed_revert" && value.consumedAtomic !== undefined) {

@@ -6,6 +6,7 @@ import { evmRpcQuantity } from "../evm-rpc-codec.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { pastUnstartedDeadline } from "../unstarted-deadline.js";
 import { CIRCLE_V2_SOURCE_TTL_MS } from "./circle-v2-source-service.js";
+import { settleCircleSourceUsage } from "./circle-v2-source-usage.js";
 export const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 const PROOF_KEYS = ["blockHash", "blockNumberAtomic", "blockTag", "chainId", "finalizedBlockNumberAtomic", "integrityHash", "nonceAtomic",
     "observedAt", "operationId", "payer", "profileHash", "schemaVersion", "status", "to", "transactionHash"];
@@ -55,15 +56,17 @@ const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-a
 /**
  * `operation status` of a Circle CCTP V2 Base source burn: the saved journal and, when its burn transaction is known,
  * that transaction's receipt at the finalized tag (chain id, receipt, finalized head; no archive read). A receipt in a
- * finalized block is recorded once as the operation's proof; otherwise nothing is written and the status says why.
+ * finalized block is recorded once as the operation's proof and settles the payer's daily-cap hold of the burn;
+ * otherwise nothing is written and the status says why.
  * Once nothing of the operation can still spend the payer's wrapper allowance, its residual is read once, at that same
  * finalized head, and stored (circle-v2-residual-allowance.ts); later statuses read no chain unless `refreshAllowance`.
  */
 export async function circleSourceStatus(root, journal, read, now, refreshAllowance = false) {
     const residual = async (proven, head) => await circleResidualAllowance(root, journal, read, refreshAllowance, now, proven, head);
-    const view = (proof, waitingFor, proofClass, left) => ({
+    const view = (proof, waitingFor, proofClass, left, usage) => ({
         schemaVersion: "apn.circle-v2-source-status.v1", operationId: journal.operationId, phase: journal.phase, outcome: proof?.status ?? null,
         sourceProof: proof, waitingFor, journal, proofClass, ...(left === undefined ? {} : { residualAllowance: left }),
+        ...(usage === undefined || usage === null ? {} : { sourceUsage: usage }),
         nextActions: [...proof === null && journal.transactionHash !== null ? [`apn operation status --operation ${journal.operationId}`] : [],
             ...left !== undefined && left.allowanceAtomic !== null && left.allowanceAtomic !== "0" ? [REVOKE] : []]
     });
@@ -74,8 +77,10 @@ export async function circleSourceStatus(root, journal, read, now, refreshAllowa
             ? view(null, waiting, "durable_public_state", await residual()) : view(null, waiting, "durable_public_state");
     }
     const existing = await store.load(journal);
+    // Every status of a recorded burn settles its hold, so a write interrupted after the proof is completed on the next one.
+    const settled = async (proof) => await settleCircleSourceUsage(root, journal, proof, new Date(now()));
     if (existing !== null)
-        return view(existing, null, "durable_public_state", await residual());
+        return view(existing, null, "durable_public_state", await residual(), await settled(existing));
     if (read === undefined)
         throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "This runtime has no finalized-tag reader for the Base receipt.");
     const rpc = read(8453);
@@ -93,7 +98,7 @@ export async function circleSourceStatus(root, journal, read, now, refreshAllowa
         blockNumberAtomic: receipt.blockNumber.toString(), blockHash: receipt.blockHash, blockTag: "finalized",
         finalizedBlockNumberAtomic: finalized.toString(), observedAt: new Date(now()).toISOString() };
     const proof = await store.create(journal, Object.freeze({ ...fields, integrityHash: hashObject(fields) }));
-    return view(proof, null, "chain_verified_public_read", await residual(rpc, head));
+    return view(proof, null, "chain_verified_public_read", await residual(rpc, head), await settled(proof));
 }
 /** The receipt must be the journal's own burn: same hash, sent by the payer to the pinned messenger, in a block. */
 function receiptOf(value, journal) {

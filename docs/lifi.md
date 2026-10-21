@@ -933,6 +933,16 @@ residuals to 0 at its own fresh-read block, without another read. Revoke
 refuses when the allowance is already 0.
 Every other outcome changed no allowance.
 
+The same status settles the burn's hold on the payer's Base USDC daily cap.
+A successful burn becomes a finalized spend counted on the UTC day its
+finalized receipt was recorded (never before the hold's last write, never
+after this status), so it no longer counts against later days. A reverted burn moved no
+USDC and releases its hold. Every status of a recorded burn repeats the
+settlement, so an interrupted one completes on the next status, and the result
+shows the hold as `sourceUsage`. Only the hold this operation reserved, for the
+principal of its own burn call, is touched; a burn without a recorded receipt
+keeps its hold.
+
 ## Stargate fee refusal and funding checkpoint, 2026-10-08
 
 A correctly reconciled Stargate LayerZero fee above `maxNativeDebitWei` is now

@@ -73,7 +73,7 @@ function validateBody(value) {
         corrupt("The usage reservation timestamps are invalid.");
     if (value.state === "finalized") {
         const effectAt = storedInstant(value.effectAt);
-        if (effectAt !== updatedAt)
+        if (effectAt < reservedAt || effectAt > updatedAt)
             corrupt("The finalized usage effect timestamp is invalid.");
         digest(value.outcomeDigest, "Outcome digest", true);
     }
