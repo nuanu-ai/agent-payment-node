@@ -5,6 +5,7 @@ import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import { observeMetaMaskProcess } from "./metamask-process-observation.js";
 import { METAMASK_FOREGROUND_TIMEOUT_MS, METAMASK_PROCESS_TIMEOUT_MS, resolveMetaMaskBin, } from "./metamask-package.js";
 const MAX_JSON_BYTES = 1024 * 1024;
 const nativeFailureDiagnostics = new WeakMap();
@@ -13,6 +14,15 @@ export function takeMetaMaskNativeProcessFailureDiagnostic(error) {
         return undefined;
     const value = nativeFailureDiagnostics.get(error);
     nativeFailureDiagnostics.delete(error);
+    return value;
+}
+const failureObservations = new WeakMap();
+/** One-use shape of the child's streams for this runner's rejected invocation (timeout, start, oversize). */
+export function takeMetaMaskProcessFailureObservation(error) {
+    if (!(error instanceof ApnError))
+        return undefined;
+    const value = failureObservations.get(error);
+    failureObservations.delete(error);
     return value;
 }
 const nativeFailureIdentifiers = new WeakMap();
@@ -199,6 +209,16 @@ export class NodeMetaMaskProcessRunner {
                     bytes.fill(0);
                 }
             };
+            const observe = (outcome, exitCode, signal) => {
+                const out = Buffer.concat(chunks), err = Buffer.concat(stderrChunks);
+                try {
+                    return observeMetaMaskProcess({ outcome, exitCode, signal, durationMs: Math.min(86400000, Math.max(0, Math.floor(performance.now() - started))), stdout: { bytes: out, total: size }, stderr: { bytes: err, total: stderrSize } });
+                }
+                finally {
+                    out.fill(0);
+                    err.fill(0);
+                }
+            };
             let settled = false;
             const zero = () => { for (const chunk of [...chunks, ...stderrChunks])
                 chunk.fill(0); };
@@ -225,8 +245,9 @@ export class NodeMetaMaskProcessRunner {
                         bytes.fill(0);
                     }
                 }
-                const stderr = stderrObservation();
-                nativeFailureDiagnostics.set(error, diagnostic(stage, absoluteDeadline !== undefined && remaining() < 1 ? "deadline" : error.message.includes("timed out") ? "timeout" : error.code === "APN_PROVIDER_PROTOCOL" ? "protocol" : "start", null, null, stderr.stderrClass, stderr.providerCode));
+                const stderr = stderrObservation(), failure = diagnostic(stage, absoluteDeadline !== undefined && remaining() < 1 ? "deadline" : error.message.includes("timed out") ? "timeout" : error.code === "APN_PROVIDER_PROTOCOL" ? "protocol" : "start", null, null, stderr.stderrClass, stderr.providerCode);
+                nativeFailureDiagnostics.set(error, failure);
+                failureObservations.set(error, observe(failure.code, null, null));
                 zero();
                 reject(error);
             };
@@ -264,8 +285,9 @@ export class NodeMetaMaskProcessRunner {
                 const stdout = Buffer.concat(chunks);
                 const signal = ["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP", "SIGABRT", "SIGSEGV", "SIGPIPE"].includes(rawSignal ?? "") ? rawSignal : null;
                 const stderr = stderrObservation(), nativeDiagnostic = diagnostic(stage, signal !== null ? "signal" : code === 0 ? "ok" : "exit", code, signal, stderr.stderrClass, stderr.providerCode);
+                const observation = observe(signal !== null ? "signal" : "exit", code, signal);
                 zero();
-                resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }) });
+                resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }), observation });
             };
             const timeout = setTimeout(() => {
                 fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."), true);

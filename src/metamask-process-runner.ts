@@ -5,6 +5,7 @@ import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, parseMetaMaskProcessOutput, type MetaMaskMfaNotice } from "./metamask-process-output.js";
+import { observeMetaMaskProcess, type MetaMaskProcessObservation } from "./metamask-process-observation.js";
 import type { Hex } from "./model.js";
 import {
   METAMASK_FOREGROUND_TIMEOUT_MS,
@@ -25,6 +26,12 @@ interface NativeFailureIdentifiers {
 const nativeFailureDiagnostics = new WeakMap<ApnError,MetaMaskNativeDiagnostic>();
 export function takeMetaMaskNativeProcessFailureDiagnostic(error:unknown):MetaMaskNativeDiagnostic|undefined {
   if(!(error instanceof ApnError))return undefined;const value=nativeFailureDiagnostics.get(error);nativeFailureDiagnostics.delete(error);return value;
+}
+const failureObservations = new WeakMap<ApnError, MetaMaskProcessObservation>();
+/** One-use shape of the child's streams for this runner's rejected invocation (timeout, start, oversize). */
+export function takeMetaMaskProcessFailureObservation(error: unknown): MetaMaskProcessObservation | undefined {
+  if (!(error instanceof ApnError)) return undefined;
+  const value = failureObservations.get(error); failureObservations.delete(error); return value;
 }
 const nativeFailureIdentifiers = new WeakMap<ApnError, NativeFailureIdentifiers>();
 /** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */
@@ -119,6 +126,8 @@ export interface MetaMaskProcessResult {
   readonly exitCode: number;
   readonly stdout: Buffer;
   readonly nativeDiagnostic?: MetaMaskNativeDiagnostic;
+  /** Taken from both streams before they are zeroed; the caller decides whether to show it. */
+  readonly observation?: MetaMaskProcessObservation;
 }
 
 export interface MetaMaskProcessRunnerPort {
@@ -189,6 +198,11 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
           const providerCode=code==="POLICY_VIOLATION"||code==="POLICY_REJECTED"?"policy":code==="MFA_REQUIRED"?"mfa":code==="UNAUTHORIZED"||code==="AUTH_REQUIRED"?"auth":code==="INSUFFICIENT_FUNDS"?"funds":code==="RATE_LIMITED"?"rate_limit":"other";return {stderrClass:"json_error",providerCode};
         }catch{return {stderrClass:"unclassified",providerCode:"other"};}finally{bytes.fill(0);}
       };
+      const observe=(outcome:MetaMaskProcessObservation["outcome"],exitCode:number|null,signal:MetaMaskNativeDiagnostic["signal"]):MetaMaskProcessObservation=>{
+        const out=Buffer.concat(chunks),err=Buffer.concat(stderrChunks);
+        try {return observeMetaMaskProcess({outcome,exitCode,signal,durationMs:Math.min(86400000,Math.max(0,Math.floor(performance.now()-started))),stdout:{bytes:out,total:size},stderr:{bytes:err,total:stderrSize}});}
+        finally {out.fill(0);err.fill(0);}
+      };
       let settled = false;
       const zero = (): void => { for (const chunk of [...chunks,...stderrChunks]) chunk.fill(0); };
       const cleanup = (): void => {
@@ -209,7 +223,8 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
             if (observation !== undefined) nativeFailureIdentifiers.set(error, observation);
           } finally {bytes.fill(0);}
         }
-        const stderr=stderrObservation();nativeFailureDiagnostics.set(error,diagnostic(stage,absoluteDeadline!==undefined&&remaining()<1?"deadline":error.message.includes("timed out")?"timeout":error.code==="APN_PROVIDER_PROTOCOL"?"protocol":"start",null,null,stderr.stderrClass,stderr.providerCode));
+        const stderr=stderrObservation(),failure=diagnostic(stage,absoluteDeadline!==undefined&&remaining()<1?"deadline":error.message.includes("timed out")?"timeout":error.code==="APN_PROVIDER_PROTOCOL"?"protocol":"start",null,null,stderr.stderrClass,stderr.providerCode);
+        nativeFailureDiagnostics.set(error,failure);failureObservations.set(error,observe(failure.code as MetaMaskProcessObservation["outcome"],null,null));
         zero();
         reject(error);
       };
@@ -237,8 +252,9 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
         const stdout = Buffer.concat(chunks);
         const signal=["SIGTERM","SIGKILL","SIGINT","SIGHUP","SIGABRT","SIGSEGV","SIGPIPE"].includes(rawSignal??"")?rawSignal as MetaMaskNativeDiagnostic["signal"]:null;
         const stderr=stderrObservation(),nativeDiagnostic=diagnostic(stage,signal!==null?"signal":code===0?"ok":"exit",code,signal,stderr.stderrClass,stderr.providerCode);
+        const observation=observe(signal!==null?"signal":"exit",code,signal);
         zero();
-        resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }) });
+        resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }), observation });
       };
       const timeout = setTimeout(() => {
         fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."), true);

@@ -85,7 +85,9 @@ export interface StargateNativeExecutionPorts {
   readonly sourcePrepareBatch?: StargateReadBatch;
   readonly destinationPrepareBatch?: StargateReadBatch;
   readonly destinationBalance: (recipient: Address, finalityTag: StargateV2FinalityTag) => Promise<Readonly<{ balanceAtomic: string; blockNumberAtomic: string; blockHash: Hex }>>;
-  readonly prepareEnvelope: (transaction: Readonly<{ chainId: 1; from: Address; to: Address; data: Hex; valueAtomic: string }>) => Promise<StargatePreparedEnvelopeEvidence>;
+  /** `debit` splits `valueAtomic` into the bridged principal and LayerZero fee, for a funds refusal's numbers only. */
+  readonly prepareEnvelope: (transaction: Readonly<{ chainId: 1; from: Address; to: Address; data: Hex; valueAtomic: string;
+    debit?: Readonly<{ principalAtomic: string; messagingFeeAtomic: string }> }>) => Promise<StargatePreparedEnvelopeEvidence>;
   readonly signer: Readonly<{ kind: "imported_evm_signer"; address: Address; signTransaction: (tx: StargateNativeEnvelope) => Promise<Hex> }>;
   readonly signerIdentity: () => Promise<Readonly<{ profile: string; address: Address }>>;
   readonly approve: (operation: StargateNativeOperation) => Promise<void>;
@@ -174,7 +176,8 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
   if (value > cap) stargateFundsRefusal("max_native_debit_exceeded", { required: value, limit: cap, principal: amount, messagingFee: finalFee });
   const data = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken",
     args: [sendParam, { nativeFee: finalFee, lzTokenFee: 0n }, owner] });
-  const prepared = await ports.prepareEnvelope({ chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString() });
+  const prepared = await ports.prepareEnvelope({ chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString(),
+    debit: { principalAtomic: amount.toString(), messagingFeeAtomic: finalFee.toString() } });
   const gasUpper = uint(prepared.gasLimitAtomic, true) * uint(prepared.maxFeePerGasAtomic, true), maximumDebit = value + gasUpper;
   if (uint(prepared.maxPriorityFeePerGasAtomic) > uint(prepared.maxFeePerGasAtomic, true)) fail("APN_RPC_PROTOCOL", "priority_fee");
   const debit = { required: maximumDebit, principal: amount, messagingFee: finalFee, gas: gasUpper };
