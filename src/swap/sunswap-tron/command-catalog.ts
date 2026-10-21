@@ -24,9 +24,9 @@ export const SUNSWAP_COMMAND_GROUPS: readonly CommandGroup[] = [
 export const SUNSWAP_COMMANDS: readonly CommandDefinition[] = [
   command("inventory", [], "Read the immutable SunSwap pin catalog and keyless mechanism pin without admitting them.", "none"),
   command("quote", [profile, account, option("--to", "string", ["canonical_tron_base58check_recipient_equal_to_account"]),
-    option("--amount", "wei", ["positive_native_sun"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
+    option("--amount", "sun", ["positive_native_sun"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
     option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"]),
-    option("--fee-limit-sun", "wei", ["positive_owner_fee_limit_sun_no_default"]),
+    option("--fee-limit-sun", "sun", ["positive_owner_fee_limit_sun_no_default"]),
     option("--deadline", "string", ["unix_seconds_within_10_minutes_no_default"])],
     "Quote from the pinned router and pair on-chain, encode locally, and exactly simulate one unsigned transaction. Uses APN_TRON_RPC_URL.",
     "network_read"),

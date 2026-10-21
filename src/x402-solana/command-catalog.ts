@@ -20,7 +20,7 @@ export const X402_SOLANA_COMMANDS: readonly CommandDefinition[] = [
     [option("--profile", "profile", true, noDefault, ["matches_[a-z0-9][a-z0-9._-]{0,63}"], "public"),
       option("--url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "canonical_whatwg_serialization", "maximum_2048_utf8_bytes"], "operator_input"),
       option("--asset", "string", true, noDefault, ["canonical_solana_mint_address", "owner_allowlist_x402_row_with_x402-exact-svm_pin"], "public"),
-      option("--max-amount", "wei", true, noDefault, ["positive_atomic_units_of_the_mint", "at_most_the_owner_per_payment_cap_applies"], "operator_input"),
+      option("--max-amount", "atomic", true, noDefault, ["positive_atomic_units_of_the_mint", "at_most_the_owner_per_payment_cap_applies"], "operator_input"),
       option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_200_safe_ascii_characters"], "operator_input")],
     "payment_submit", `Selects the lowest-index exact offer for the mint within the explicit maximum, the owner's policy and allowlist caps and payee pin, freezes it, binds a fresh blockhash, simulates, reserves the owner cap, signs one transaction of exactly two compute budget instructions, one SPL TransferChecked and the spec's Memo (the seller's facilitator pays the fee), and sends one paid GET. A replay never sends again. ${rpc}`,
     "prior_profile_policy", "Unattended (CLI or MCP) under the owner's Solana x402 policy for this mint (`wallet policy set --chain solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp --asset <mint>`): its per-payment cap and wallet balance cap, plus the allowlist x402 row.",

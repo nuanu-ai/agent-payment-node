@@ -186,7 +186,10 @@ function scalarPattern(option: CommandOption): string | undefined {
     case "provider_auth_method": return "^[a-z][a-z0-9-]{0,31}$";
     case "positive_integer": return "^[1-9][0-9]*$";
     case "atomic_usdc":
-    case "wei": return "^[1-9][0-9]*$";
+    case "wei":
+    case "lamports":
+    case "sun":
+    case "atomic": return "^[1-9][0-9]*$";
     case "address": return "^0x[0-9a-fA-F]{40}$";
     case "decimal_usdc": return "^(?:[1-9][0-9]*(?:\\.[0-9]{0,5}[1-9])?|0\\.[0-9]{0,5}[1-9])$";
     case "idempotency_key": return "^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$";

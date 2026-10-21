@@ -11,6 +11,10 @@ export type ScalarType =
   | "decimal_usdc"
   | "atomic_usdc"
   | "wei"
+  /** Positive integers in a non-EVM chain's or an asset's own smallest unit; validated exactly like wei. */
+  | "lamports"
+  | "sun"
+  | "atomic"
   | "operation_id"
   | "transaction_hash"
   | "provider_request_id"
