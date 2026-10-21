@@ -97,7 +97,8 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
             stargateFundsRefusal("max_native_debit_exceeded", { required: value, limit: cap, principal: amount, messagingFee: finalFee });
         const data = encodeFunctionData({ abi: STARGATE_SEND_ABI, functionName: "sendToken",
             args: [sendParam, { nativeFee: finalFee, lzTokenFee: 0n }, owner] });
-        const prepared = await ports.prepareEnvelope({ chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString() });
+        const prepared = await ports.prepareEnvelope({ chainId: SOURCE_CHAIN, from: owner, to: SOURCE_POOL, data, valueAtomic: value.toString(),
+            debit: { principalAtomic: amount.toString(), messagingFeeAtomic: finalFee.toString() } });
         const gasUpper = uint(prepared.gasLimitAtomic, true) * uint(prepared.maxFeePerGasAtomic, true), maximumDebit = value + gasUpper;
         if (uint(prepared.maxPriorityFeePerGasAtomic) > uint(prepared.maxFeePerGasAtomic, true))
             fail("APN_RPC_PROTOCOL", "priority_fee");

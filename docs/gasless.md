@@ -866,6 +866,18 @@ a second disable reverts (`AlreadyDisabled`). Nothing is written to the
 operation: the chain is the record. `operation resume` then proves the outcome:
 `revoked_unused` when the delegation is disabled with no redemption, or
 `completed` when the redemption landed first. MCP returns the CLI handoff.
+
+`submission` is `acknowledged` (transaction hash), `pending` (MetaMask waits on
+the owner's MFA) or `unknown`. An unknown answer is never a reason to disable
+again: `operation resume` reads the chain. Its `reason` says what APN saw
+(`provider_response_empty` when `mm` wrote nothing to stdout,
+`provider_response_malformed`, `provider_handoff_outcome_unknown`), and
+`provider` records the `mm` child process as APN received it, before its bytes
+are zeroed: the admitted package version and shasum, outcome, exit code or
+signal, duration, and for stdout and stderr the byte count, SHA-256 of a
+complete capture and each JSON frame's keys and value types. Values are shown
+only for `ok`, `code`, `kind`, `status`, `mode` and `chainNamespace`; ids,
+addresses, hashes and messages never appear.
 These operations list `apn gasless transfer revoke` among their next actions;
 receipts written before that action existed remain valid.
 
