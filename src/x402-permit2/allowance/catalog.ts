@@ -31,7 +31,7 @@ export const PERMIT2_ALLOWANCE_GROUPS: readonly CommandGroup[] = [
 export const PERMIT2_ALLOWANCE_COMMANDS: readonly CommandDefinition[] = [
   command(["x402", "permit2", "allowance", "set"], synopsis("set", " --amount <atomic>"),
     "Approve an owner-specified amount of the token to the canonical Permit2 contract from the local wallet: one transaction, sent once.",
-    [...shared.slice(0, 3), option("--amount", "wei", true, none, ["positive_atomic_units", "at_most_the_owner_x402_balance_cap_or_allowlist_daily_cap"], "operator_input"),
+    [...shared.slice(0, 3), option("--amount", "atomic", true, none, ["positive_atomic_units", "at_most_the_owner_x402_balance_cap_or_allowlist_daily_cap"], "operator_input"),
       ...shared.slice(3)], "payment_submit",
     "Reads the chain (nonce with nothing pending, allowance, balance, estimate), freezes the approve and the owner's gas caps, takes foreground consent, seals, marks and sends once. Never unlimited.",
     "foreground_tty", "The owner approves the exact chain, token, spender, amount and gas caps in the foreground TTY; MCP returns the CLI handoff.",
