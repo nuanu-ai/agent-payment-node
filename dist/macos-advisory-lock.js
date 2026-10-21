@@ -3,7 +3,9 @@ import { ApnError } from "./errors.js";
 const LOCKF = "/usr/bin/lockf";
 const LOCKF_ARGS = ["-s", "-t", "0", "3"];
 const LOCKF_BUSY_EXIT = 75;
-const LOCKF_TIMEOUT_MS = 1_000;
+/** The helper only spawns and tries the lock once (`-t 0`); the bound covers a slow spawn on a loaded machine. A helper that
+ * does not answer within it still fails closed, and a strict caller deadline still bounds each attempt itself. */
+const LOCKF_TIMEOUT_MS = 5_000;
 export class MacosAdvisoryLock {
     spawnLockf;
     timeoutMs;
