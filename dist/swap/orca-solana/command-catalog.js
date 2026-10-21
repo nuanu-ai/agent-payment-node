@@ -23,7 +23,7 @@ export const ORCA_COMMANDS = [
     command("inventory", [], "Read the pinned Whirlpool program, every pinned pool and its keyless mechanism pin and route without admitting them.", "none"),
     command("quote", [option("--pool", "string", ["sol-usdc_or_usdc-usdt"]), profile,
         option("--account", "string", ["canonical_32_byte_base58_solana_address_of_the_profile"]),
-        option("--amount", "wei", ["positive_atomic_units_of_the_pool_input_lamports_or_usdc"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
+        option("--amount", "atomic", ["positive_atomic_units_of_the_pool_input_lamports_or_usdc"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
         option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"]),
         option("--compute-unit-limit", "string", ["integer_1_through_1400000"]),
         option("--compute-unit-price", "string", ["micro_lamports_per_compute_unit"])], "Quote from the named pinned pool's on-chain state, build the instructions locally, and simulate the exact unsigned transaction. Uses APN_SOLANA_RPC_URL.", "network_read"),

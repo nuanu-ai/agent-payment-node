@@ -32,6 +32,8 @@ export declare class SolanaAwalAdapter implements DirectRailPort {
     inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<RailInspection>;
     private currentAccount;
     private providerAddress;
+    /** Every awal Solana call here answers public JSON (address, balance, a transaction hash): the runner keeps its stdout.
+     * Authentication never runs through this adapter, so no secret output can reach it. */
     private run;
     private feeContract;
 }

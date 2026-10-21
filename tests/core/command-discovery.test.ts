@@ -708,7 +708,10 @@ function validValue(type: ScalarType): string {
     case "address": return "0x1111111111111111111111111111111111111111";
     case "decimal_usdc": return "0.01";
     case "atomic_usdc": return "100";
-    case "wei": return "100";
+    case "wei":
+    case "lamports":
+    case "sun":
+    case "atomic": return "100";
     case "operation_id": return "a".repeat(64);
     case "transaction_hash": return `0x${"b".repeat(64)}`;
     case "provider_request_id": return "provider-request-01234567";
