@@ -2,7 +2,7 @@ import { isPlainRecord, sha256 } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { isMetaMaskEvmNamespace } from "../../metamask-namespace.js";
 import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "../../metamask-process-output.js";
-import { NodeMetaMaskProcessRunner } from "../../metamask-process-runner.js";
+import { NodeMetaMaskProcessRunner, takeMetaMaskProcessFailureObservation } from "../../metamask-process-runner.js";
 const PENDING = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING"]);
 const TOKEN = /^[A-Za-z0-9._:-]{1,256}$/u;
 /**
@@ -32,21 +32,25 @@ export class MetaMaskCliRevocationWallet {
             result = await this.runner.runJson(["wallet", "send-transaction", "--chain-id", String(input.chainId),
                 "--payload", JSON.stringify(input.payload), "--intent", input.intent, "--json"]);
         }
-        catch {
-            return { disposition: "unknown", reason: "provider_handoff_outcome_unknown" };
+        catch (error) {
+            return withProvider({ disposition: "unknown", reason: "provider_handoff_outcome_unknown" }, takeMetaMaskProcessFailureObservation(error));
         }
         try {
-            return submission(result.exitCode, result.stdout, input.from);
+            return withProvider(submission(result.exitCode, result.stdout, input.from), result.observation);
         }
         finally {
             result.stdout.fill(0);
         }
     }
 }
+function withProvider(answer, provider) {
+    return answer.disposition === "unknown" && provider !== undefined ? { ...answer, provider } : answer;
+}
 function submission(exitCode, stdout, from) {
     const parsed = parseMetaMaskProcessOutput(stdout);
-    if (parsed === null)
-        return { disposition: "unknown", reason: "provider_response_malformed" };
+    if (parsed === null) {
+        return { disposition: "unknown", reason: stdout.toString("utf8").trim().length === 0 ? "provider_response_empty" : "provider_response_malformed" };
+    }
     const notice = classifyMetaMaskPendingNotices(parsed.notices), data = parsed.envelope?.data;
     const hash = isPlainRecord(data) && typeof data.hash === "string" && /^0x[a-fA-F0-9]{64}$/u.test(data.hash) ? data.hash.toLowerCase() : undefined;
     const token = isPlainRecord(data) && typeof data.pollingId === "string" && TOKEN.test(data.pollingId) ? data.pollingId

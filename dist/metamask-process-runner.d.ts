@@ -1,5 +1,6 @@
 import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { type MetaMaskMfaNotice } from "./metamask-process-output.js";
+import { type MetaMaskProcessObservation } from "./metamask-process-observation.js";
 import type { Hex } from "./model.js";
 interface NativeFailureIdentifiers {
     readonly requestId?: string;
@@ -13,6 +14,8 @@ interface NativeFailureIdentifiers {
     };
 }
 export declare function takeMetaMaskNativeProcessFailureDiagnostic(error: unknown): MetaMaskNativeDiagnostic | undefined;
+/** One-use shape of the child's streams for this runner's rejected invocation (timeout, start, oversize). */
+export declare function takeMetaMaskProcessFailureObservation(error: unknown): MetaMaskProcessObservation | undefined;
 /** Internal one-use observation of this runner's rejected invocation. Never exposes captured output or changes rejection. */
 export declare function takeMetaMaskNativeProcessFailureIdentifiers(error: unknown): NativeFailureIdentifiers | undefined;
 interface CapturedStream {
@@ -47,6 +50,8 @@ export interface MetaMaskProcessResult {
     readonly exitCode: number;
     readonly stdout: Buffer;
     readonly nativeDiagnostic?: MetaMaskNativeDiagnostic;
+    /** Taken from both streams before they are zeroed; the caller decides whether to show it. */
+    readonly observation?: MetaMaskProcessObservation;
 }
 export interface MetaMaskProcessRunnerPort {
     runJson(argv: readonly string[], timeoutMs?: number, absoluteDeadline?: MetaMaskNativeDeadlineInput): Promise<MetaMaskProcessResult>;

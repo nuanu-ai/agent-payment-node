@@ -101,7 +101,8 @@ export async function stargateNativeEnvelope(source: Pick<StargateJsonRpc, "call
   if (quantity(chain) !== 1n) throw new ApnError("APN_CHAIN_MISMATCH", "Ethereum RPC identity changed.");
   const block = record(head);
   // The balance is read before the estimate: an unfunded value is the owner's shortfall, not a node failure.
-  if (quantity(balance) < BigInt(tx.valueAtomic)) stargateFundsRefusal("insufficient_native_balance", { required: BigInt(tx.valueAtomic), limit: quantity(balance) });
+  if (quantity(balance) < BigInt(tx.valueAtomic)) stargateFundsRefusal("insufficient_native_balance", { required: BigInt(tx.valueAtomic), limit: quantity(balance),
+    ...(tx.debit === undefined ? {} : { principal: BigInt(tx.debit.principalAtomic), messagingFee: BigInt(tx.debit.messagingFeeAtomic) }) });
   const rpcTx = { from: tx.from, to: tx.to, data: tx.data, value: `0x${BigInt(tx.valueAtomic).toString(16)}` };
   const [nonce, gas, tip] = prepareBatch ? await source.batchCall([
     { method: "eth_getTransactionCount", params: [tx.from, "pending"] },
