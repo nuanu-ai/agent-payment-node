@@ -5,7 +5,7 @@ import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } f
 import { canonicalJson, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { atomicTemporaryPrefix, releasePublishedTemporary, withoutAtomicTemporaries } from "./atomic-write-temporaries.js";
-import { MacosAdvisoryLock } from "./macos-advisory-lock.js";
+import { LOCKF_TIMEOUT_MS, MacosAdvisoryLock } from "./macos-advisory-lock.js";
 const FILE_MODE = 0o600;
 const DIRECTORY_MODE = 0o700;
 const MAX_STATE_BYTES = 1024 * 1024;
@@ -445,7 +445,7 @@ export class SecureStateStore {
                     await handle.close();
                     break;
                 }
-                const attemptTimeoutMs = Math.max(1, Math.min(1_000, waitMs - elapsed || 1));
+                const attemptTimeoutMs = Math.max(1, Math.min(LOCKF_TIMEOUT_MS, waitMs - elapsed || 1));
                 if (await this.lockPort.tryAcquire(handle.fd, strictDeadline ? attemptTimeoutMs : undefined, strictDeadline)) {
                     await this.validateOpenedLock(path, handle);
                     return { handle };
