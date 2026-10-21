@@ -2,6 +2,7 @@ import { type FinalizedReader } from "../evm-finalized-proof.js";
 import { type CircleResidualView } from "./circle-v2-residual-allowance.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
+import { type CircleSourceUsage } from "./circle-v2-source-usage.js";
 export declare const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 /** The Base receipt of a CCTP V2 source burn, read once at the finalized tag (no archive state). */
 export interface CircleSourceProof {
@@ -46,11 +47,14 @@ export interface CircleSourceStatus {
     readonly nextActions: readonly string[];
     /** Once nothing of the operation can still spend it: the payer's allowance left on the wrapper, stored with its block. */
     readonly residualAllowance?: CircleResidualView;
+    /** The payer's Base USDC daily-cap hold of this burn, settled from the recorded receipt (circle-v2-source-usage.ts). */
+    readonly sourceUsage?: CircleSourceUsage;
 }
 /**
  * `operation status` of a Circle CCTP V2 Base source burn: the saved journal and, when its burn transaction is known,
  * that transaction's receipt at the finalized tag (chain id, receipt, finalized head; no archive read). A receipt in a
- * finalized block is recorded once as the operation's proof; otherwise nothing is written and the status says why.
+ * finalized block is recorded once as the operation's proof and settles the payer's daily-cap hold of the burn;
+ * otherwise nothing is written and the status says why.
  * Once nothing of the operation can still spend the payer's wrapper allowance, its residual is read once, at that same
  * finalized head, and stored (circle-v2-residual-allowance.ts); later statuses read no chain unless `refreshAllowance`.
  */
