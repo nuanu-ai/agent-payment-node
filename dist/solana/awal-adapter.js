@@ -104,8 +104,10 @@ export class SolanaAwalAdapter {
             providerProtocol();
         return solanaAddress(result.address);
     }
+    /** Every awal Solana call here answers public JSON (address, balance, a transaction hash): the runner keeps its stdout.
+     * Authentication never runs through this adapter, so no secret output can reach it. */
     async run(argv) {
-        const result = await this.runner.run(argv, true);
+        const result = await this.runner.run(argv, false);
         try {
             if (result.exitCode !== 0 || result.optionalFailure !== undefined || result.stdout.length > 65_536)
                 providerProtocol();

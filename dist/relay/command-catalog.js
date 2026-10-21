@@ -21,7 +21,7 @@ export const RELAY_COMMANDS = [
         option("--asset", "string", true, noDefault, ["usdc_from_eip155:1_or_eip155:42161", "native_from_eip155:56_or_eip155:8453"], "public"),
         option("--destination-chain", "string", true, noDefault, ["eip155:56_or_eip155:8453_from_ethereum_usdc", "eip155:137_or_eip155:143_from_bnb", "eip155:137_or_eip155:4326_from_base", "eip155:1_from_arbitrum_usdc"], "public"),
         option("--recipient", "address", true, noDefault, ["canonical_nonzero_evm_address"], "public"),
-        positive("--amount-atomic", "wei", "source_asset_atomic_units"), positive("--min-output-atomic", "wei", "destination_asset_atomic_units"),
+        positive("--amount-atomic", "atomic", "source_asset_atomic_units"), positive("--min-output-atomic", "atomic", "destination_asset_atomic_units"),
         positive("--max-deposit-network-fee-wei", "wei", "on_base_the_full_op_stack_fee_budget"),
         routeOnly("--max-approval-network-fee-wei", "wei", "positive_integer", "required_for_usdc_sources", "refused_for_native_sources"),
         routeOnly("--payer", "address", "canonical_evm_address", "required_for_arbitrum_usdc_only", "must_equal_the_policy_account"),

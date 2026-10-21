@@ -422,13 +422,13 @@ apn swap ethereum uniswap-token approve --operation <operation_id>
 apn swap ethereum uniswap-token execute --operation <operation_id>
 apn swap ethereum uniswap-token cleanup --operation <operation_id> [--max-fee-per-gas <wei>] [--max-priority-fee-per-gas <wei>]
 apn swap tron sunswap inventory
-apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <wei> --deadline <string>
+apn swap tron sunswap quote --profile <profile> --account <string> --to <string> --amount <sun> --slippage-bps <string> --owner-slippage-cap-bps <string> --fee-limit-sun <sun> --deadline <string>
 apn swap tron sunswap prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
 apn swap tron sunswap status --operation <operation_id>
 apn swap tron sunswap approve --operation <operation_id>
 apn swap tron sunswap execute --operation <operation_id>
 apn swap solana jupiter inventory
-apn swap solana jupiter quote --profile <profile> --account <string> --to <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string>
+apn swap solana jupiter quote --profile <profile> --account <string> --to <string> --amount <lamports> --slippage-bps <string> --owner-slippage-cap-bps <string>
 apn swap solana jupiter prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
 apn swap solana jupiter status --operation <operation_id>
 apn swap solana jupiter approve --operation <operation_id>
@@ -438,7 +438,7 @@ apn swap solana orca stable-release --operation <operation_id>
 apn swap solana orca stable-recover-no-send --operation <operation_id>
 apn swap solana orca stable-observe --operation <operation_id>
 apn swap solana orca inventory
-apn swap solana orca quote --pool <string> --profile <profile> --account <string> --amount <wei> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
+apn swap solana orca quote --pool <string> --profile <profile> --account <string> --amount <atomic> --slippage-bps <string> --owner-slippage-cap-bps <string> --compute-unit-limit <string> --compute-unit-price <string>
 apn swap solana orca prepare --profile <profile> --quote <string> --idempotency-key <idempotency_key>
 apn swap solana orca status --operation <operation_id>
 apn swap solana orca approve --operation <operation_id>

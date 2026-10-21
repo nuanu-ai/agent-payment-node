@@ -18,7 +18,7 @@ export const JUPITER_COMMAND_GROUPS = [
 export const JUPITER_COMMANDS = [
     command("inventory", [], "Read the immutable Jupiter identities without admitting them.", "none"),
     command("quote", [profile, account, option("--to", "string", ["canonical_32_byte_base58_solana_recipient"]),
-        option("--amount", "wei", ["positive_native_lamports"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
+        option("--amount", "lamports", ["positive_native_lamports"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
         option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"])], "Build and save one runtime-pinned V1 Whirlpool SOL to USDC quote after active owner policy checks.", "local_write"),
     command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]),
         option("--idempotency-key", "idempotency_key", ["global_payment_key"])], "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
