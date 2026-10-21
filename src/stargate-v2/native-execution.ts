@@ -23,6 +23,7 @@ import { stargateV2RouteFinalityPolicy, type StargateV2FinalityPolicyProvenance,
   type StargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct, type StargateReadBatch, type StargateV2QuoteEvidence } from "./quote.js";
 import { stargateFundsRefusal } from "./funds.js";
+import { recordObservedSourceFee, withSourceFee } from "./native-source-fee.js";
 export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality" |
   "failed_confirmed_revert";
 export type StargateNativeUsageTarget = "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
@@ -56,6 +57,8 @@ export interface StargateNativeOperation {
 export interface StargateSourceReceipt {
   readonly transactionHash: Hex; readonly blockNumberAtomic: string; readonly blockHash: Hex; readonly finality: StargateV2FinalityTag;
   readonly guid: Hex; readonly amountSentAtomic: string; readonly amountReceivedAtomic: string;
+  /** The receipt's own numbers (native-source-fee.ts); absent from records observed before they were kept. */
+  readonly gasUsedAtomic?: string; readonly effectiveGasPriceAtomic?: string;
 }
 export type StargateDestinationEvidence = Readonly<{
   mode: "oft_received"; emitter: Address; sourceTransactionHash: Hex; guid: Hex; sourceEid: 30101;
@@ -78,6 +81,7 @@ export interface StargateRawLog { readonly address: Address; readonly topics: re
 export interface StargateConfirmedReceipt {
   readonly transactionHash: Hex; readonly status: "success" | "reverted"; readonly blockNumberAtomic: string;
   readonly blockHash: Hex; readonly finality: StargateV2FinalityTag; readonly logs: readonly StargateRawLog[];
+  readonly gasUsedAtomic?: string; readonly effectiveGasPriceAtomic?: string;
 }
 export interface StargateNativeExecutionPorts {
   readonly sourceCall: EvmRpcCall;
@@ -225,7 +229,8 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   journal: StargateNativeJournal): Promise<StargateNativeOperation> {
   let operation = await journal.load(operationId); if (operation === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
   if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase)) return await observeOnly(operation, ports, journal);
-  if (STARGATE_NATIVE_TERMINAL_PHASES.includes(operation.phase)) return await followPhaseUsage(operation, ports);
+  // The usage hold settles first; the fee of an older observed record is read after it and cannot hold the settlement back.
+  if (STARGATE_NATIVE_TERMINAL_PHASES.includes(operation.phase)) return await recordObservedSourceFee(await followPhaseUsage(operation, ports), ports, journal);
   if (operation.policy === undefined) fail("APN_REPREPARE_REQUIRED", "owner_policy_binding_required");
   const now = ports.now ?? Date.now;
   // Nothing was marked for sending, so an expired operation releases any hold an interrupted earlier run took.
@@ -299,7 +304,7 @@ async function observeOnly(input: StargateNativeOperation, ports: StargateNative
     operation = transition(operation, "failed_confirmed_revert", "source_reverted_at_finality", (ports.now ?? Date.now)()); await journal.save(operation);
     return await followPhaseUsage(operation, ports);
   }
-  const source = sourceReceipt(operation, receipt);
+  const source = withSourceFee(sourceReceipt(operation, receipt), receipt);
   const destination = await ports.observeDestination({ sourceTransactionHash: source.transactionHash, guid: source.guid,
     recipient: operation.recipient, sourceEid: SOURCE_EID,
     destinationPool: DESTINATION_POOL, minimumAmountAtomic: source.amountReceivedAtomic,

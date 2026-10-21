@@ -82,6 +82,9 @@ export interface StargateSourceReceipt {
     readonly guid: Hex;
     readonly amountSentAtomic: string;
     readonly amountReceivedAtomic: string;
+    /** The receipt's own numbers (native-source-fee.ts); absent from records observed before they were kept. */
+    readonly gasUsedAtomic?: string;
+    readonly effectiveGasPriceAtomic?: string;
 }
 export type StargateDestinationEvidence = Readonly<{
     mode: "oft_received";
@@ -134,6 +137,8 @@ export interface StargateConfirmedReceipt {
     readonly blockHash: Hex;
     readonly finality: StargateV2FinalityTag;
     readonly logs: readonly StargateRawLog[];
+    readonly gasUsedAtomic?: string;
+    readonly effectiveGasPriceAtomic?: string;
 }
 export interface StargateNativeExecutionPorts {
     readonly sourceCall: EvmRpcCall;

@@ -1,3 +1,4 @@
+import { ApnError } from "./errors.js";
 declare const NATIVE_DIAGNOSTIC_STAGES: readonly ["sdk_resolver", "sdk_read", "sdk_send", "owner_guard", "rpc_balance", "rpc_nonce", "post_handoff"];
 declare const NATIVE_DIAGNOSTIC_CODES: readonly ["ok", "deadline", "refused", "timeout", "exit", "signal", "protocol", "start", "internal"];
 export interface MetaMaskNativeDiagnostic {
@@ -19,6 +20,8 @@ export interface MetaMaskNativeDeadline {
 export type MetaMaskNativeDeadlineInput = string | MetaMaskNativeDeadline;
 /** Read-only timing bound, never a consent or financial authority. */
 export declare function nativeDeadlineRemaining(deadline: MetaMaskNativeDeadlineInput): number;
+/** True only for the refusal of a well-formed deadline that had already passed (not a malformed or too distant one). */
+export declare function nativeDeadlineExpired(error: unknown): error is ApnError;
 export declare function nativeContextDeadline(context: {
     readonly consentExpiresAt: string;
     readonly quote: {
