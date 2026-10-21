@@ -1,9 +1,12 @@
 import { canonicalJson, hashObject, sha256 } from "./canonical.js";
 import { BASE_USDC, CHAIN_CAIP2, TRANSFER_TOPIC } from "./constants.js";
 import { ApnError } from "./errors.js";
+import { x402Asset } from "./x402-network.js";
+import { selectX402Rpc } from "./x402-service-rpc.js";
 const MAX_UPPER_READS = 4;
+/** Provider evidence is Base USDC: the port is bound to exactly that network and token in every branch that reads it. */
 export function providerX402ReadPort(rpc) {
-    const value = rpc;
+    const value = selectX402Rpc(rpc, x402Asset(8453, BASE_USDC));
     if (typeof value.getX402Head !== "function" || typeof value.getX402Block !== "function" ||
         typeof value.getX402Receipt !== "function" || typeof value.getX402TransferLogs !== "function")
         throw new ApnError("APN_RPC_CONFIG", "Provider x402 requires the bounded read-only Base evidence surface.");

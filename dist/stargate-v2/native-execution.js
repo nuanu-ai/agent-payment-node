@@ -12,6 +12,7 @@ import { STARGATE_QUOTE_ABI, STARGATE_QUOTE_SEND_OUTPUT, STARGATE_SEND_ABI } fro
 import { stargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
 import { stargateFundsRefusal } from "./funds.js";
+import { recordObservedSourceFee, withSourceFee } from "./native-source-fee.js";
 export class LocalStargateNativeSigner {
     state;
     wallets;
@@ -157,8 +158,9 @@ async function executeLocked(operationId, ports, journal) {
         fail("APN_OPERATION_BLOCKED", "operation_missing");
     if (["submission_started", "submitted", "unknown_finality"].includes(operation.phase))
         return await observeOnly(operation, ports, journal);
+    // The usage hold settles first; the fee of an older observed record is read after it and cannot hold the settlement back.
     if (STARGATE_NATIVE_TERMINAL_PHASES.includes(operation.phase))
-        return await followPhaseUsage(operation, ports);
+        return await recordObservedSourceFee(await followPhaseUsage(operation, ports), ports, journal);
     if (operation.policy === undefined)
         fail("APN_REPREPARE_REQUIRED", "owner_policy_binding_required");
     const now = ports.now ?? Date.now;
@@ -249,7 +251,7 @@ async function observeOnly(input, ports, journal) {
         await journal.save(operation);
         return await followPhaseUsage(operation, ports);
     }
-    const source = sourceReceipt(operation, receipt);
+    const source = withSourceFee(sourceReceipt(operation, receipt), receipt);
     const destination = await ports.observeDestination({ sourceTransactionHash: source.transactionHash, guid: source.guid,
         recipient: operation.recipient, sourceEid: SOURCE_EID,
         destinationPool: DESTINATION_POOL, minimumAmountAtomic: source.amountReceivedAtomic,

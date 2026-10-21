@@ -235,8 +235,13 @@ export async function confirmedStargateSourceReceipt(rpc, transactionHash, final
         return { address: getAddress(String(log.address)),
             topics: log.topics.map(hash), data: String(log.data) };
     }) : blocked("receipt_logs");
+    // The send's actual fee is shown only: a number the RPC omits or malforms leaves it unknown, never estimated, and never
+    // holds back the observation.
+    const shown = (value) => typeof value === "string" && /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(value) ? BigInt(value).toString() : undefined;
+    const gasUsed = shown(receipt.gasUsed), price = shown(receipt.effectiveGasPrice);
+    const fee = gasUsed === undefined || price === undefined ? {} : { gasUsedAtomic: gasUsed, effectiveGasPriceAtomic: price };
     return { transactionHash: hash(receipt.transactionHash), status: quantity(receipt.status) === 1n ? "success" : "reverted",
-        blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: finalityTag, logs };
+        blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: finalityTag, logs, ...fee };
 }
 /** BRDG-30: the GUID- and recipient-filtered OFTReceived is found by a resumable windowed scan up to the finality head,
  * never one ever-growing range from the prepare block. */

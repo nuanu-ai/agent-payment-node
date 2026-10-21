@@ -54,6 +54,19 @@ export interface StargateNativeCanonicalReceipt {
     readonly quoteHash: string;
     readonly source: StargateSourceReceipt;
     readonly destination: StargateDestinationEvidence;
+    /** From the send's own canonical receipt; null when the record does not hold it (never the gas envelope). */
+    readonly actualSourceFee: StargateNativeActualSourceFee | null;
     readonly evidenceHash: string;
 }
+export interface StargateNativeActualSourceFee {
+    readonly gasUsedAtomic: string;
+    readonly effectiveGasPriceAtomic: string;
+    /** gasUsed × effectiveGasPrice of the send itself. */
+    readonly networkFeeAtomic: string;
+    /** The send's value (principal + quoted LayerZero fee) plus that network fee; a LayerZero refund in the same
+     * transaction, if any, is not subtracted. */
+    readonly sourceDebitAtomic: string;
+}
+/** Null unless both numbers are present and inside the signed envelope (gas limit, max fee per gas). */
+export declare function nativeActualSourceFee(operation: StargateNativeOperation): StargateNativeActualSourceFee | null;
 export declare function stargateV2NativeCanonicalReceipt(operationInput: StargateNativeOperation): StargateNativeCanonicalReceipt;

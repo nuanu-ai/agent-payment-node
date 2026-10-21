@@ -4,6 +4,8 @@ import { ApnError } from "./errors.js";
 import type { Address } from "./model.js";
 import type { RpcPort, X402RpcBlock, X402RpcLog, X402RpcPort } from "./ports.js";
 import type { ProviderX402OperationRecord, ProviderX402SettlementEvidence } from "./provider-x402-model.js";
+import { x402Asset } from "./x402-network.js";
+import { selectX402Rpc } from "./x402-service-rpc.js";
 
 const MAX_UPPER_READS = 4;
 
@@ -12,8 +14,9 @@ export type ProviderSettlementObservation =
   | { readonly kind: "ambiguous"; readonly reason: string; readonly upperBlock?: X402RpcBlock }
   | { readonly kind: "verified"; readonly upperBlock: X402RpcBlock; readonly evidence: ProviderX402SettlementEvidence };
 
+/** Provider evidence is Base USDC: the port is bound to exactly that network and token in every branch that reads it. */
 export function providerX402ReadPort(rpc: RpcPort): X402RpcPort {
-  const value = rpc as Partial<X402RpcPort>;
+  const value = selectX402Rpc(rpc, x402Asset(8453, BASE_USDC)) as Partial<X402RpcPort>;
   if (
     typeof value.getX402Head !== "function" || typeof value.getX402Block !== "function" ||
     typeof value.getX402Receipt !== "function" || typeof value.getX402TransferLogs !== "function"

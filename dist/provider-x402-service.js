@@ -336,7 +336,7 @@ export class ProviderX402Service {
             return operation;
         const rpc = remaining === undefined
             ? providerX402ReadPort(this.context.requireRpc(BASE_RPC_CHAIN))
-            : boundedX402ReadPort(this.context.requireRpc(BASE_RPC_CHAIN), Math.min(20_000, remaining), x402Asset(8453));
+            : boundedX402ReadPort(this.context.requireRpc(BASE_RPC_CHAIN), Math.min(20_000, remaining), x402Asset(8453, BASE_USDC));
         const observation = await observeProviderSettlement(operation, rpc, this.context.clock.now().getTime());
         if (observation.kind === "pending")
             return operation;

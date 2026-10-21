@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { nativeDeadlineExpired, nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
@@ -123,10 +123,19 @@ export class NodeMetaMaskProcessRunner {
         if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 305_000)
             throw providerProtocol();
         const started = performance.now();
+        // A deadline that passed before this call is the resolver stage's deadline too: no child, and the same diagnostic.
+        let entryRemaining;
         if (absoluteDeadline !== undefined)
-            nativeDeadlineRemaining(absoluteDeadline);
+            try {
+                entryRemaining = nativeDeadlineRemaining(absoluteDeadline);
+            }
+            catch (error) {
+                if (nativeDeadlineExpired(error))
+                    nativeFailureDiagnostics.set(error, validateMetaMaskNativeDiagnostic({ stage: "sdk_resolver", code: "deadline", exitCode: null, signal: null, durationMs: 0, remainingMs: 0, stderrClass: "none", providerCode: "none" }));
+                throw error;
+            }
         const utc = absoluteDeadline === undefined ? undefined : typeof absoluteDeadline === "string" ? absoluteDeadline : absoluteDeadline.utcExpiresAt;
-        const monotonicEnd = absoluteDeadline === undefined ? undefined : typeof absoluteDeadline === "string" ? started + nativeDeadlineRemaining(absoluteDeadline) : absoluteDeadline.monotonicDeadlineMs;
+        const monotonicEnd = absoluteDeadline === undefined ? undefined : typeof absoluteDeadline === "string" ? started + entryRemaining : absoluteDeadline.monotonicDeadlineMs;
         const rawRemaining = () => absoluteDeadline === undefined ? 0 : Math.min(Date.parse(utc) - Date.now(), monotonicEnd - performance.now());
         const remaining = () => Math.max(0, Math.min(60000, Math.floor(rawRemaining())));
         const diagnostic = (stage, code, exitCode = null, signal = null, stderrClass = "none", providerCode = "none") => validateMetaMaskNativeDiagnostic({ stage, code, exitCode, signal, durationMs: Math.min(86400000, Math.max(0, Math.floor(performance.now() - started))), remainingMs: remaining(), stderrClass, providerCode });
