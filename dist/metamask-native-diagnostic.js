@@ -22,10 +22,18 @@ export function nativeDeadlineRemaining(deadline) {
     const utc = typeof deadline === "string" ? deadline : deadline.utcExpiresAt, expires = Date.parse(utc);
     const wall = Math.floor(expires - Date.now()), mono = typeof deadline === "string" ? wall : Math.floor(deadline.monotonicDeadlineMs - performance.now());
     const remaining = Math.min(wall, mono);
-    if (!Number.isFinite(expires) || new Date(expires).toISOString() !== utc || !Number.isFinite(mono) || remaining < 1 || wall > 60000 || mono > 60000)
+    if (!Number.isFinite(expires) || new Date(expires).toISOString() !== utc || !Number.isFinite(mono) || wall > 60000 || mono > 60000)
         throw new ApnError("APN_OPERATION_BLOCKED", "Native transfer deadline reached.");
+    if (remaining < 1) {
+        const error = new ApnError("APN_OPERATION_BLOCKED", "Native transfer deadline reached.");
+        expiredDeadlines.add(error);
+        throw error;
+    }
     return remaining;
 }
+const expiredDeadlines = new WeakSet();
+/** True only for the refusal of a well-formed deadline that had already passed (not a malformed or too distant one). */
+export function nativeDeadlineExpired(error) { return error instanceof ApnError && expiredDeadlines.has(error); }
 export function nativeContextDeadline(context) {
     return new Date(Math.min(Date.parse(context.consentExpiresAt), Date.parse(context.quote.expiresAt))).toISOString();
 }

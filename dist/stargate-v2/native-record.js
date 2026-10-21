@@ -120,6 +120,18 @@ export function validateAdvance(previous, next) {
         (previous.transactionHash !== undefined && previous.transactionHash !== next.transactionHash))
         fail("APN_STATE_CORRUPT", "journal_rewrite");
 }
+/** Null unless both numbers are present and inside the signed envelope (gas limit, max fee per gas). */
+export function nativeActualSourceFee(operation) {
+    const source = operation.sourceReceipt, uint = /^(?:0|[1-9][0-9]*)$/u;
+    if (source?.gasUsedAtomic === undefined || source.effectiveGasPriceAtomic === undefined ||
+        !uint.test(source.gasUsedAtomic) || !uint.test(source.effectiveGasPriceAtomic) ||
+        BigInt(source.gasUsedAtomic) > BigInt(operation.envelope.gasLimitAtomic) ||
+        BigInt(source.effectiveGasPriceAtomic) > BigInt(operation.envelope.maxFeePerGasAtomic))
+        return null;
+    const fee = BigInt(source.gasUsedAtomic) * BigInt(source.effectiveGasPriceAtomic);
+    return { gasUsedAtomic: source.gasUsedAtomic, effectiveGasPriceAtomic: source.effectiveGasPriceAtomic,
+        networkFeeAtomic: fee.toString(), sourceDebitAtomic: (BigInt(operation.totalValueAtomic) + fee).toString() };
+}
 export function stargateV2NativeCanonicalReceipt(operationInput) {
     const operation = validateRecord(operationInput);
     if (operation.phase !== "observed" || operation.sourceReceipt === undefined || operation.destinationEvidence === undefined) {
@@ -131,7 +143,7 @@ export function stargateV2NativeCanonicalReceipt(operationInput) {
         owner: operation.owner, recipient: operation.recipient, principalAtomic: operation.amountAtomic, finalityPolicy: operation.finalityPolicy,
         nativeMessageFeeAtomic: operation.quote.quote.nativeMessageFeeAtomic, totalValueAtomic: operation.totalValueAtomic,
         maximumDebitAtomic: operation.maximumDebitAtomic, quoteHash: operation.quote.quoteHash,
-        source: operation.sourceReceipt, destination: operation.destinationEvidence };
+        source: operation.sourceReceipt, destination: operation.destinationEvidence, actualSourceFee: nativeActualSourceFee(operation) };
     return Object.freeze({ ...body, evidenceHash: hashObject(body) });
 }
 //# sourceMappingURL=native-record.js.map

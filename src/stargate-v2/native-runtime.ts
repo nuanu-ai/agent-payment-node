@@ -201,8 +201,13 @@ export async function confirmedStargateSourceReceipt(rpc: Pick<StargateJsonRpc, 
   if (hash(canonical.hash) !== hash(receipt.blockHash)) throw new ApnError("APN_RPC_PROTOCOL", "Stargate source receipt is not in the canonical safe chain.");
   const logs = Array.isArray(receipt.logs) ? receipt.logs.map(value => { const log = record(value); return { address: getAddress(String(log.address)),
     topics: (log.topics as unknown[]).map(hash), data: String(log.data) as Hex }; }) : blocked("receipt_logs");
+  // The send's actual fee is shown only: a number the RPC omits or malforms leaves it unknown, never estimated, and never
+  // holds back the observation.
+  const shown = (value: unknown) => typeof value === "string" && /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(value) ? BigInt(value).toString() : undefined;
+  const gasUsed = shown(receipt.gasUsed), price = shown(receipt.effectiveGasPrice);
+  const fee = gasUsed === undefined || price === undefined ? {} : { gasUsedAtomic: gasUsed, effectiveGasPriceAtomic: price };
   return { transactionHash: hash(receipt.transactionHash), status: quantity(receipt.status) === 1n ? "success" : "reverted",
-    blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: finalityTag, logs };
+    blockNumberAtomic: quantity(receipt.blockNumber).toString(), blockHash: hash(receipt.blockHash), finality: finalityTag, logs, ...fee };
 }
 
 /** BRDG-30: the GUID- and recipient-filtered OFTReceived is found by a resumable windowed scan up to the finality head,
