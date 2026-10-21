@@ -1,5 +1,5 @@
 import { performance } from "node:perf_hooks";
-import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { nativeDeadlineExpired, nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic, type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
@@ -149,9 +149,14 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
   async runJson(argv: readonly string[], timeoutMs = this.jsonTimeoutMs, absoluteDeadline?:MetaMaskNativeDeadlineInput): Promise<MetaMaskProcessResult> {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 305_000) throw providerProtocol();
     const started=performance.now();
-    if(absoluteDeadline!==undefined)nativeDeadlineRemaining(absoluteDeadline);
+    // A deadline that passed before this call is the resolver stage's deadline too: no child, and the same diagnostic.
+    let entryRemaining:number|undefined;
+    if(absoluteDeadline!==undefined)try{entryRemaining=nativeDeadlineRemaining(absoluteDeadline);}catch(error){
+      if(nativeDeadlineExpired(error))nativeFailureDiagnostics.set(error,validateMetaMaskNativeDiagnostic({stage:"sdk_resolver",code:"deadline",exitCode:null,signal:null,durationMs:0,remainingMs:0,stderrClass:"none",providerCode:"none"}));
+      throw error;
+    }
     const utc=absoluteDeadline===undefined?undefined:typeof absoluteDeadline==="string"?absoluteDeadline:absoluteDeadline.utcExpiresAt;
-    const monotonicEnd=absoluteDeadline===undefined?undefined:typeof absoluteDeadline==="string"?started+nativeDeadlineRemaining(absoluteDeadline):absoluteDeadline.monotonicDeadlineMs;
+    const monotonicEnd=absoluteDeadline===undefined?undefined:typeof absoluteDeadline==="string"?started+entryRemaining!:absoluteDeadline.monotonicDeadlineMs;
     const rawRemaining=()=>absoluteDeadline===undefined?0:Math.min(Date.parse(utc!)-Date.now(),monotonicEnd!-performance.now());
     const remaining=()=>Math.max(0,Math.min(60000,Math.floor(rawRemaining())));
     const diagnostic=(stage:MetaMaskNativeDiagnostic["stage"],code:MetaMaskNativeDiagnostic["code"],exitCode:number|null=null,signal:MetaMaskNativeDiagnostic["signal"]=null,stderrClass:MetaMaskNativeDiagnostic["stderrClass"]="none",providerCode:MetaMaskNativeDiagnostic["providerCode"]="none")=>validateMetaMaskNativeDiagnostic({stage,code,exitCode,signal,durationMs:Math.min(86400000,Math.max(0,Math.floor(performance.now()-started))),remainingMs:remaining(),stderrClass,providerCode});

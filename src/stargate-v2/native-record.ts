@@ -95,7 +95,28 @@ export interface StargateNativeCanonicalReceipt {
   readonly owner: Address; readonly recipient: Address; readonly principalAtomic: string; readonly nativeMessageFeeAtomic: string;
   readonly finalityPolicy: StargateV2RouteFinalityPolicy;
   readonly totalValueAtomic: string; readonly maximumDebitAtomic: string; readonly quoteHash: string;
-  readonly source: StargateSourceReceipt; readonly destination: StargateDestinationEvidence; readonly evidenceHash: string;
+  readonly source: StargateSourceReceipt; readonly destination: StargateDestinationEvidence;
+  /** From the send's own canonical receipt; null when the record does not hold it (never the gas envelope). */
+  readonly actualSourceFee: StargateNativeActualSourceFee | null; readonly evidenceHash: string;
+}
+export interface StargateNativeActualSourceFee {
+  readonly gasUsedAtomic: string; readonly effectiveGasPriceAtomic: string;
+  /** gasUsed × effectiveGasPrice of the send itself. */
+  readonly networkFeeAtomic: string;
+  /** The send's value (principal + quoted LayerZero fee) plus that network fee; a LayerZero refund in the same
+   * transaction, if any, is not subtracted. */
+  readonly sourceDebitAtomic: string;
+}
+/** Null unless both numbers are present and inside the signed envelope (gas limit, max fee per gas). */
+export function nativeActualSourceFee(operation: StargateNativeOperation): StargateNativeActualSourceFee | null {
+  const source = operation.sourceReceipt, uint = /^(?:0|[1-9][0-9]*)$/u;
+  if (source?.gasUsedAtomic === undefined || source.effectiveGasPriceAtomic === undefined ||
+    !uint.test(source.gasUsedAtomic) || !uint.test(source.effectiveGasPriceAtomic) ||
+    BigInt(source.gasUsedAtomic) > BigInt(operation.envelope.gasLimitAtomic) ||
+    BigInt(source.effectiveGasPriceAtomic) > BigInt(operation.envelope.maxFeePerGasAtomic)) return null;
+  const fee = BigInt(source.gasUsedAtomic) * BigInt(source.effectiveGasPriceAtomic);
+  return { gasUsedAtomic: source.gasUsedAtomic, effectiveGasPriceAtomic: source.effectiveGasPriceAtomic,
+    networkFeeAtomic: fee.toString(), sourceDebitAtomic: (BigInt(operation.totalValueAtomic) + fee).toString() };
 }
 
 export function stargateV2NativeCanonicalReceipt(operationInput: StargateNativeOperation): StargateNativeCanonicalReceipt {
@@ -109,6 +130,6 @@ export function stargateV2NativeCanonicalReceipt(operationInput: StargateNativeO
     owner: operation.owner, recipient: operation.recipient, principalAtomic: operation.amountAtomic, finalityPolicy: operation.finalityPolicy,
     nativeMessageFeeAtomic: operation.quote.quote.nativeMessageFeeAtomic, totalValueAtomic: operation.totalValueAtomic,
     maximumDebitAtomic: operation.maximumDebitAtomic, quoteHash: operation.quote.quoteHash,
-    source: operation.sourceReceipt, destination: operation.destinationEvidence };
+    source: operation.sourceReceipt, destination: operation.destinationEvidence, actualSourceFee: nativeActualSourceFee(operation) };
   return Object.freeze({ ...body, evidenceHash: hashObject(body) });
 }
