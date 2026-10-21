@@ -103,6 +103,12 @@ have failed before any effect, or a token route whose only sent effect is a conf
 abandonment needs foreground consent; the approval stays on chain and the principal hold is released). It never retires
 a signing marker, signed-but-unsent bytes or an unresolved send.
 
+An allowance left on the Relay depository changes the next Ethereum USDC quote: when it already covers the amount,
+Relay quotes the deposit alone. Ethereum USDC routes always send their own approval, so `relay prepare` refuses that
+quote with `APN_OPERATION_BLOCKED`, reason `relay_existing_allowance`, and names `apn wallet allowance status` and
+`apn wallet allowance revoke` for the exact chain, USDC and depository. After the revoke is final, the same prepare
+command quotes the approval and the deposit again.
+
 ## Locks
 
 Base native execution holds wallet custody outermost through consent, wallet reads, signing and the send response;

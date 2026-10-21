@@ -16,7 +16,7 @@ import { freezeRelayUnsignedOperation, publicRelayUnsignedOperation } from "../r
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
 import { assertExclusiveEvmOwner, evmAddressLock } from "../evm-address-ownership.js";
-import { ETHEREUM_USDC, requestRelayQuote, type RelayQuoteIntent, type ValidatedRelayQuote } from "./quote.js";
+import { ETHEREUM_USDC, requestRelayQuote, withRelayAllowanceActions, type RelayQuoteIntent, type ValidatedRelayQuote } from "./quote.js";
 import { requestRelayNativeQuote, type RelayNativeQuoteIntent, type ValidatedRelayNativeQuote } from "./native-quote.js";
 import { relayNativeRouteFor } from "./native-routes.js";
 import { createRelayArbitrumSourceDraft } from "./arbitrum-usdc-source-draft.js";
@@ -126,7 +126,8 @@ export class RelayUnsignedPrepareService {
     const intent: RelayQuoteIntent = { payer, recipient: input.recipient.toLowerCase(), amountAtomic: input.amountAtomic,
       minimumOutputWei: input.minOutputAtomic, nowSeconds: Math.floor(now.getTime() / 1000),
       ...(route === "base" ? { destinationChainId: 8453 as const } : {}) };
-    const quote = await (this.ports.quote?.(intent) ?? requestRelayQuote(intent));
+    const quote = await (this.ports.quote?.(intent) ?? requestRelayQuote(intent))
+      .catch((error: unknown) => { throw withRelayAllowanceActions(error, input.profile); });
     const { quoteDigest, ...projection } = quote;
     if (hashObject(projection) !== quoteDigest || quote.payer !== payer || quote.recipient !== intent.recipient ||
       quote.orderData.output.chainId !== route || quote.routeReference !== (route === "base" ? RELAY_BASE_ROUTE_REFERENCE : undefined) ||
