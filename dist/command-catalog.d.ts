@@ -8,7 +8,7 @@ export declare const COMMANDS: readonly CommandDefinition[];
 export declare const COMMAND_MANIFEST: {
     readonly schema_version: "apn.command-manifest.v2";
     readonly product: "agent-payment-node";
-    readonly product_version: "0.5.59";
+    readonly product_version: "0.5.60";
     readonly cli_envelope_version: "apn.cli.v1";
     readonly compatibility: {
         readonly additive_optional_within_version: true;
