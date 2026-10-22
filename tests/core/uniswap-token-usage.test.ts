@@ -94,12 +94,12 @@ function grant(state: StateStore, account: string, profile: string, now = NOW): 
     delegation_manager: observed.delegationManager, permission_response: response };
 }
 
-async function setup(root: string, daily = "1500000", account = ACCOUNT) {
+async function setup(root: string, daily = "1500000", account = ACCOUNT, now = NOW) { // the policy starts on the caller's clock
   const admissions = [UNISWAP_USDC, ETHEREUM_USDT].map((identifier) => ({ chain: "eip155:1", kind: "token" as const,
     identifier, rail: "swap" as const, maximumPerTransferAtomic: "1000000", dailyLimitAtomic: daily,
     mechanism: UNISWAP_TOKEN_MECHANISM_PIN }));
-  const policy = await activateDirectPolicy(root, "token-swap", { accounts: { evm: account }, admissions, now: NOW });
-  const ledger = new AssetUsageLedger(root), usage = new UniswapTokenUsage(new StateStore(root), clock, ledger);
+  const policy = await activateDirectPolicy(root, "token-swap", { accounts: { evm: account }, admissions, now });
+  const ledger = new AssetUsageLedger(root), usage = new UniswapTokenUsage(new StateStore(root), { now: () => now }, ledger);
   return { ledger, usage, policy };
 }
 
@@ -238,7 +238,7 @@ test("ledger-terminal hashless marked recovery refuses unproven no-effect cleanu
 test("journal-only sealed or send-started evidence blocks no-effect cleanup and usage release", async (t) => {
   for (const phase of ["sealed", "send_started"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
-      account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "0"),
+      account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account, now), p = await production(temporary.root, now, account, key, "0"),
       journal = new UniswapTokenJournal(temporary.root), base = await journal.save(operation(s.policy.policyDigest, phase === "sealed" ? "b" : "c", account)), usage = await s.usage.reserve(base),
       approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)),
       started = await journal.save(transitionUniswapToken(approved, "approval_submission_started", { approvalAttempt: tokenAttempt(approved, "approval", "7", now) }, now)),
@@ -253,7 +253,7 @@ test("journal-only sealed or send-started evidence blocks no-effect cleanup and 
 });
 test("wallet-only signed crash evidence blocks no-effect cleanup and usage release", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
-    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "0"),
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account, now), p = await production(temporary.root, now, account, key, "0"),
     journal = new UniswapTokenJournal(temporary.root), base = await journal.save(operation(s.policy.policyDigest, "d", account)), usage = await s.usage.reserve(base),
     approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)),
     started = await journal.save(transitionUniswapToken(approved, "approval_submission_started", { approvalAttempt: tokenAttempt(approved, "approval", "7", now) }, now)),
@@ -289,7 +289,7 @@ test("restart reclaims pre-marker nonce but never reuses a committed ambiguous n
 
 test("production token runtime allows explicit cleanup after owner policy revocation while new approval stays blocked", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
-    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account);
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account, now);
   const state = new StateStore(temporary.root), master = Buffer.alloc(32, 73), wrapping = { load: async () => Buffer.from(master), create: async () => Buffer.from(master) };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("token-swap", key, account);
   const journal = new UniswapTokenJournal(temporary.root), prepared = await journal.save(operation(s.policy.policyDigest, "8", account)), usage = await s.usage.reserve(prepared);
@@ -322,7 +322,7 @@ test("production token runtime allows explicit cleanup after owner policy revoca
 
 test("production execute durably routes non-exact live allowance drift into explicit cleanup", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
-    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "2");
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account, now), p = await production(temporary.root, now, account, key, "2");
   const journal = new UniswapTokenJournal(temporary.root), prepared = await journal.save(operation(s.policy.policyDigest, "4", account)), usage = await s.usage.reserve(prepared);
   const approved = await journal.save(transitionUniswapToken(prepared, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now));
   const runtime = createUniswapTokenRuntime({ ...p, clock: { now: () => now }, foreground: "cleanup", verifyPins: async () => undefined });
@@ -336,7 +336,7 @@ test("production execute durably routes non-exact live allowance drift into expl
 });
 test("execute from approved reserves the swap cap when exact allowance can skip approval", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
-    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "1000000"),
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account, now), p = await production(temporary.root, now, account, key, "1000000"),
     journal = new UniswapTokenJournal(temporary.root), base = await journal.save(operation(s.policy.policyDigest, "e", account)), usage = await s.usage.reserve(base),
     approved = await journal.save(transitionUniswapToken(base, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)), call = p.sessionCall(15),
     runtime = createUniswapTokenRuntime({ ...p, call, clock: { now: () => now }, foreground: "refuse", verifyPins: async () => undefined });
@@ -378,7 +378,7 @@ test("concurrent status cannot advance a cap-zero execute into an unreserved swa
 
 test("production token RPC phases stay within exact physical budgets through finalized swap", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const at = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
-    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, at, account, key, "0");
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account, at), p = await production(temporary.root, at, account, key, "0");
   const pins = async (call: TokenRpcCall, tag: Hex) => { let cursor = 0;
     await tokenBatch(call, "archive", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: (value) => value },
       ...Array.from({ length: 2 }, () => ({ method: "eth_getCode", params: [`0x${String(++cursor).padStart(40, "0")}`, tag], cachePolicy: "immutable" as const, decoder: (value: unknown) => value }))]);
@@ -425,8 +425,8 @@ test("production token RPC phases stay within exact physical budgets through fin
 test("four Base Smart Account profiles and grants coexist with a prepared Ethereum token approval", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const key = `0x${"0".repeat(63)}1` as Hex, account = privateKeyToAccount(key).address;
-  await setup(temporary.root, "3000000", account);
-  const at = new Date(), p = await production(temporary.root, at, account, key, "0");
+  const at = new Date(); await setup(temporary.root, "3000000", account, at);
+  const p = await production(temporary.root, at, account, key, "0");
   const runtime = (call: TokenRpcCall) => createUniswapTokenRuntime({ state: p.state, wrapping: p.wrapping,
     clock: { now: () => at }, call, foreground: "approve", tty: p.tty, verifyPins: async () => undefined });
   const quote = await runtime(p.sessionCall(8)).quote({ ...quoteRequest(), account, recipient: account,
@@ -532,7 +532,7 @@ for (const collision of ["local-wallet", "encrypted-envelope"] as const) {
 
 test("single-primary pooled quote and prepare use eight and nine physical requests with bounded pin batches", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const at = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
-    account = privateKeyToAccount(key).address; await setup(temporary.root, "3000000", account);
+    account = privateKeyToAccount(key).address; await setup(temporary.root, "3000000", account, at);
   const p = await production(temporary.root, at, account, key, "0", true);
   const pins = async (call: TokenRpcCall, tag: Hex) => { let cursor = 0;
     for (const size of [3, 3, 3]) await tokenBatch(call, "archive", Array.from({ length: size }, () => ({
@@ -554,7 +554,7 @@ test("single-primary pooled quote and prepare use eight and nine physical reques
 
 test("post-wallet-save failure recovery observes public journal without broadcasting cached effect", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date(), key = `0x${"0".repeat(63)}1` as Hex,
-    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account), p = await production(temporary.root, now, account, key, "0"),
+    account = privateKeyToAccount(key).address, s = await setup(temporary.root, "3000000", account, now), p = await production(temporary.root, now, account, key, "0"),
     effects = new FailOnceEffectJournal(temporary.root), journal = new UniswapTokenJournal(temporary.root), prepared = await journal.save(operation(s.policy.policyDigest, "5", account)),
     usage = await s.usage.reserve(prepared), approved = await journal.save(transitionUniswapToken(prepared, "approved", { usageReservationId: usage.reservationId, usageState: usage.state }, now)),
     firstCustody = new UniswapTokenCustody(p.state, p.wrapping, p.call, () => now, effects);

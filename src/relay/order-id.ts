@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = new URL("../../vendor/relay-order-id/", import.meta.url);
-const MANIFEST_SHA256 = "f57f014e75d831c1bf8496f99b0bf718c2c6573158ff2698b084977f1b6d38fb";
+const MANIFEST_SHA256 = "884ea5e965e946f7975492207f6b93b9cd769024ba1865c713477b1190cc46a3";
 const MAX_BYTES = 12 * 1024 * 1024;
 const entries = new Set(["order-id"]);
 let verified = false;
