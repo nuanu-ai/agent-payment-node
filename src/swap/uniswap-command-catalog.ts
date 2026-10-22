@@ -4,6 +4,7 @@ import { exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { getAddress } from "viem";
 import { slippageAboveCap } from "./slippage-refusal.js";
+import { requiredOptionsExample } from "../command-example.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
   ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
@@ -14,6 +15,10 @@ const states = { terminal: ["finalized", "failed_before_effect", "failed_confirm
   "reserved", "submitting", "submitted", "unknown_finality"] } as const;
 const profile = option("--profile", "profile", ["existing_profile_name"]), account = option("--account", "address", ["checksummed_ethereum_address"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
+const EXAMPLE_VALUES = { "--profile": "<profile>", "--account": "<account-address>", "--to": "<recipient-address>",
+  "--output-token": "<usdc-usdt-or-wbtc-address>", "--amount": "1000000000000000", "--slippage-bps": "50", "--owner-slippage-cap-bps": "100",
+  "--deadline": "<unix-seconds-within-30-minutes>", "--max-gas-limit": "300000", "--max-fee-per-gas": "30000000000",
+  "--max-priority-fee-per-gas": "1000000000", "--quote": "<quote-hash>", "--idempotency-key": "swap-0001", "--operation": "<operation-id>" };
 export const UNISWAP_COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["swap"], summary: "Separately admitted guarded swaps.", kind: "group" },
   { path: ["swap", "ethereum"], summary: "Ethereum guarded swaps.", kind: "group" },
@@ -40,7 +45,7 @@ function command(name: string, options: readonly CommandOption[], summary: strin
   const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
   return { path: ["swap", "ethereum", "uniswap", name], synopsis: `apn swap ethereum uniswap ${name}${suffix}`, summary, options,
     effect: { class: effect, summary }, approval, output, states,
-    recovery: [], examples: [`apn swap ethereum uniswap ${name}`] };
+    recovery: [], examples: [requiredOptionsExample(["swap", "ethereum", "uniswap", name], options, EXAMPLE_VALUES)] };
 }
 export function bindUniswapCommand(path: string, o: Readonly<Record<string, string>>): CommandRequest {
   const action = path.slice("swap ethereum uniswap ".length);

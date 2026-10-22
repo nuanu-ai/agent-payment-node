@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 const root = new URL("../../vendor/tron-utils/", import.meta.url);
-const MANIFEST_SHA256 = "cbf69134172a065d967339f8c3f432df347e55b944b83bd64cc02459647228a6";
+const MANIFEST_SHA256 = "647efee5547554c97df76c20f8b9d940b001dd5f2089dc173ae1e80897e57dec";
 const MAX_BYTES = 4 * 1024 * 1024;
 const entries = new Set(["utils"]);
 let verified = false;

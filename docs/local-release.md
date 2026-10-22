@@ -17,19 +17,19 @@ node scripts/local-release.mjs verify --version 0.5.38 --commit "$COMMIT" --outp
 
 The source test command enables Node24's official module-mock API with `--experimental-test-module-mocks` directly on `node --test`; Node24 rejects that flag in `NODE_OPTIONS`. Compiler settings remain unchanged.
 
-Core test concurrency defaults to one worker. For the reviewed local release lane, set `APN_CORE_TEST_CONCURRENCY=4` on `prepare` to run the same complete core file list with four workers. Only `1` and `4` are accepted; an empty or different value refuses before the test child starts. The runner logs the selected concurrency and exact file list into gate-1 evidence, preserves the direct module-mock flag and propagates test failures. All seven preparation gates still run. The child environment retains task variables and removes only Node's internal `NODE_TEST_CONTEXT` marker, which would otherwise skip a nested runner; the requested files must actually execute.
+Core test concurrency defaults to one worker. For the reviewed local release lane, set `APN_CORE_TEST_CONCURRENCY=4` on `prepare` to run the same complete core file list with four workers. Only `1` and `4` are accepted; an empty or different value refuses before the test child starts. The runner logs the selected concurrency and exact file list into gate-1 evidence, preserves the direct module-mock flag and propagates test failures. All eight preparation gates still run. The child environment retains task variables and removes only Node's internal `NODE_TEST_CONTEXT` marker, which would otherwise skip a nested runner; the requested files must actually execute.
 
 ```sh
 APN_CORE_TEST_CONCURRENCY=4 node scripts/local-release.mjs prepare --version 0.5.38 --commit "$COMMIT" --output /tmp/apn-0.5.38-release
 ```
 
-Preparation runs the core/source build and tests, supply-chain/platform tests, all four exact vendor regeneration checks and production low-severity npm audit. It refuses source/dist drift after the build. It performs two script-free npm packs, retains and compares both archives, checks every packed member against reviewed source bytes, checks embedded package/version/macOS arm64 identity, generates the existing production SPDX 2.3 SBOM including emitted vendor packages/licenses, and creates/verifies the existing commit/version/SHA/size release manifest. A failed gate leaves an incomplete directory for inspection and cannot be used as a verified candidate.
+Preparation runs the core/source build and tests, supply-chain/platform tests, all four exact vendor regeneration checks, production low-severity npm audit and the same low-severity advisory check over the exact package versions each vendor bundle's provenance says it emitted (`scripts/audit-vendor-emitted.mjs`; the production audit reads the lockfile, which files those packages under dev). It refuses source/dist drift after the build. It performs two script-free npm packs, retains and compares both archives, checks every packed member against reviewed source bytes, checks embedded package/version/macOS arm64 identity, generates the existing production SPDX 2.3 SBOM including emitted vendor packages/licenses, and creates/verifies the existing commit/version/SHA/size release manifest. A failed gate leaves an incomplete directory for inspection and cannot be used as a verified candidate.
 
 The output directory contains the following concrete review material:
 
 - `nuanu-ai-apn-0.5.38.tgz`, `.spdx.json` and `.release.json`: the three publication assets.
 - `nuanu-ai-apn-0.5.38.local-provenance.json`: unsigned local verification metadata, not an Actions attestation.
-- `eligibility.json`, `gate-1.log` through `gate-7.log`, `pack-one.json`, `pack-two.json`, and both retained pack archives: audit and reproducibility evidence.
+- `eligibility.json`, `gate-1.log` through `gate-8.log`, `pack-one.json`, `pack-two.json`, and both retained pack archives: audit and reproducibility evidence.
 
 `verify` rechecks the release digests, exact SPDX closure, archive member bytes, source commit/version, retained pack equality, gate-log digests and honest local provenance flags. It accepts a separately fetched published Formula through `--formula`, requiring its exact immutable GitHub asset URL and archive SHA-256. Verification of an already published candidate does not require the tag to remain absent.
 

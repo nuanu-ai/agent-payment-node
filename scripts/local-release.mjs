@@ -95,7 +95,7 @@ async function verify(args) {
   for (const name of ["pack-one", "pack-two"]) {
     if (!(await readFile(resolve(output, name, basename(artifact)))).equals(await readFile(artifact))) throw new Error("retained double pack bytes differ");
   }
-  if (!Array.isArray(provenance.records) || provenance.records.length !== 7) throw new Error("local gate record set differs");
+  if (!Array.isArray(provenance.records) || provenance.records.length !== 8) throw new Error("local gate record set differs");
   for (const [index, record] of provenance.records.entries()) {
     if (record.result !== "passed" || record.log !== `gate-${index + 1}.log` || record.sha256 !== digest(await readFile(resolve(output, record.log)))) {
       throw new Error("retained local gate evidence digest differs");
@@ -120,6 +120,7 @@ async function main(args) {
     [process.execPath, ["--test", "tests/packaging/supply-chain.test.mjs", "tests/packaging/platform-support.test.mjs"]],
     ...["metamask-sdk", "tron-utils", "relay-order-id", "smart-account"].map(name => ["npm", ["run", `build:${name}:check`]]),
     ["npm", ["audit", "--omit=dev", "--audit-level=low", "--json"]],
+    [process.execPath, ["scripts/audit-vendor-emitted.mjs"]],
   ];
   const records = [];
   for (const [index, [command, argv]] of gates.entries()) {

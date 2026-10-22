@@ -3,6 +3,7 @@ import type { CommandRequest } from "../../commands.js";
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { tronAddress } from "../../tron/codec.js";
+import { requiredOptionsExample } from "../../command-example.js";
 import { slippageAboveCap } from "../slippage-refusal.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
@@ -15,6 +16,9 @@ const states = { terminal: ["finalized", "failed_before_effect", "failed_confirm
 const profile = option("--profile", "profile", ["existing_profile_name"]);
 const account = option("--account", "string", ["canonical_tron_base58check_address"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
+const EXAMPLE_VALUES = { "--profile": "<profile>", "--account": "<tron-address>", "--to": "<same-tron-address>", "--amount": "1000000",
+  "--slippage-bps": "50", "--owner-slippage-cap-bps": "100", "--fee-limit-sun": "50000000", "--deadline": "<unix-seconds-within-10-minutes>",
+  "--quote": "<quote-hash>", "--idempotency-key": "sunswap-0001", "--operation": "<operation-id>" };
 
 export const SUNSWAP_COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["swap", "tron"], summary: "TRON guarded swaps.", kind: "group" },
@@ -45,7 +49,7 @@ function command(name: string, options: readonly CommandOption[], summary: strin
   const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
   return { path: ["swap", "tron", "sunswap", name], synopsis: `apn swap tron sunswap ${name}${suffix}`, summary, options,
     effect: { class: effect, summary }, approval, output, states,
-    recovery: [], examples: [`apn swap tron sunswap ${name}`] };
+    recovery: [], examples: [requiredOptionsExample(["swap", "tron", "sunswap", name], options, EXAMPLE_VALUES)] };
 }
 
 export function bindSunSwapCommand(path: string, options: Readonly<Record<string, string>>): CommandRequest {

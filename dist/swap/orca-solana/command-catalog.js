@@ -2,6 +2,7 @@ import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { solanaAddress } from "../../solana/rpc.js";
 import { slippageAboveCap } from "../slippage-refusal.js";
+import { requiredOptionsExample } from "../../command-example.js";
 const option = (name, type, constraints) => ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
     success: "Pinned Orca inventory, unsigned quote, prepared operation, one-shot execution or durable status.",
@@ -10,6 +11,9 @@ const states = { terminal: ["finalized", "failed_before_effect", "failed_confirm
         "reserved", "submitting", "submitted", "unknown_finality"] };
 const profile = option("--profile", "profile", ["existing_profile_name"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
+const EXAMPLE_VALUES = { "--pool": "sol-usdc", "--profile": "<profile>", "--account": "<solana-address-of-the-profile>", "--amount": "10000000",
+    "--slippage-bps": "50", "--owner-slippage-cap-bps": "100", "--compute-unit-limit": "200000", "--compute-unit-price": "1000",
+    "--quote": "<quote-hash>", "--idempotency-key": "orca-0001", "--operation": "<operation-id>" };
 export const ORCA_COMMAND_GROUPS = [
     { path: ["swap", "solana", "orca"], summary: "Keyless Orca Whirlpool exact input against pinned pools: native SOL to USDC (sol-usdc) and USDC to USDT (usdc-usdt).", kind: "group" },
 ];
@@ -35,7 +39,7 @@ export const ORCA_COMMANDS = [
 function command(name, options, summary, effect, approval = { class: "none", when: "Never signs or broadcasts." }) {
     const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
     return { path: ["swap", "solana", "orca", name], synopsis: `apn swap solana orca ${name}${suffix}`, summary, options,
-        effect: { class: effect, summary }, approval, output, states, recovery: [], examples: [`apn swap solana orca ${name}`] };
+        effect: { class: effect, summary }, approval, output, states, recovery: [], examples: [requiredOptionsExample(["swap", "solana", "orca", name], options, EXAMPLE_VALUES)] };
 }
 export function bindOrcaCommand(path, options) {
     const action = path.slice("swap solana orca ".length);

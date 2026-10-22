@@ -51,7 +51,7 @@ export function createSpecialApnCore(bound, options, state) {
         const guard = new EvmDirectRpcGuard(state);
         const reader = new RelayArbitrumApprovalPreflightReader(url, state, options.relayArbitrumApprovalRpc, () => guard);
         return new ApnCore({ state, relayArbitrumApprovalDecision: options.relayArbitrumApprovalDecision ??
-                new RelayArbitrumApprovalDecisionService(state, reader) });
+                new RelayArbitrumApprovalDecisionService(state, reader, { now: () => options.clock?.now() ?? new Date() }) });
     }
     if (bound.request.command === "relay.arbitrum.approval-execute") {
         const url = bound.rpcUrl ?? "";

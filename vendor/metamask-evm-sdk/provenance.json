@@ -12113,26 +12113,26 @@
     {
       "bytes": 315,
       "file": "debug.js",
-      "identity": "follow-redirects@1.16.0",
+      "identity": "follow-redirects@1.16.1",
       "sha256": "8dbf7e71a9292be180e3469a6b7a164171d3c39dec79e5dbc4aa1c9f09509faf"
     },
     {
       "bytes": 37,
       "file": "http.js",
-      "identity": "follow-redirects@1.16.0",
+      "identity": "follow-redirects@1.16.1",
       "sha256": "754c0078c57625db7b55b4c3fb30ff5c207fc49284a5022742e81d0c595403c5"
     },
     {
       "bytes": 38,
       "file": "https.js",
-      "identity": "follow-redirects@1.16.0",
+      "identity": "follow-redirects@1.16.1",
       "sha256": "7a28e323ffd91094e083a8954fe027839c06d948603d7f2719ed17c446885272"
     },
     {
-      "bytes": 21194,
+      "bytes": 21539,
       "file": "index.js",
-      "identity": "follow-redirects@1.16.0",
-      "sha256": "bdd5d91f6f088a3b73a8703e6fcf09fe92c5f24e5ad8b6b5aff5b26a95a2ace3"
+      "identity": "follow-redirects@1.16.1",
+      "sha256": "656e169cc2e8043ec00b7d912f3ff523a01026a3fd38e04516b37fb39be94f14"
     },
     {
       "bytes": 15086,
@@ -34745,10 +34745,10 @@
       "name": "fast-safe-stringify",
       "version": "2.1.1"
     },
-    "follow-redirects@1.16.0": {
+    "follow-redirects@1.16.1": {
       "license": "MIT",
       "name": "follow-redirects",
-      "version": "1.16.0"
+      "version": "1.16.1"
     },
     "form-data@4.0.6": {
       "license": "MIT",
