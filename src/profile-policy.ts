@@ -2,8 +2,10 @@ import { getAddress } from "viem";
 import { canonicalJson, hashObject, isPlainRecord } from "./canonical.js";
 import { releasedX402Pair, solanaAccount, validPolicyNetwork, validSolanaPolicyNetwork, X402_SOLANA_POLICY_NETWORK, type X402Asset, type X402PolicyNetwork,
   type X402SolanaPolicyNetwork } from "./x402-network.js";
+import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { parseAtomic } from "./money.js";
+import { x402AssetLabel } from "./x402-token-unit.js";
 import type { Address, WalletRecord } from "./model.js";
 import type { ProviderProfileRecord } from "./provider-profile.js";
 
@@ -114,8 +116,8 @@ export function policyBinding(wallet: WalletRecord | ProviderProfileRecord): Pro
   };
 }
 
-export function canonicalPolicyInput(input: ProfilePolicySetInput): ProfilePolicySetInput {
-  const maxBalanceUsdcAtomic = canonicalPositive(input.maxBalanceUsdcAtomic, "selected-network USDC balance limit");
+export function canonicalPolicyInput(input: ProfilePolicySetInput, binding: ProfilePolicyBinding): ProfilePolicySetInput {
+  const maxBalanceUsdcAtomic = canonicalPositive(input.maxBalanceUsdcAtomic, "selected-asset balance limit");
   const maxX402AmountAtomic = canonicalPositive(input.maxX402AmountAtomic, "per-x402 limit");
   const maxBalanceEthWei = input.maxBalanceEthWei === undefined
     ? undefined
@@ -125,7 +127,9 @@ export function canonicalPolicyInput(input: ProfilePolicySetInput): ProfilePolic
     throw new ApnError("APN_INVALID_INPUT", `The x402 payee pin must list 1 to ${MAX_X402_PAYEES} unique non-zero EVM addresses.`);
   }
   if (BigInt(maxX402AmountAtomic) > BigInt(maxBalanceUsdcAtomic)) {
-    throw new ApnError("APN_INVALID_INPUT", "The per-x402 limit cannot exceed the selected-network USDC balance limit.");
+    const { chain, asset, label } = policyAsset(binding);
+    throw new ApnError("APN_INVALID_INPUT", `The per-x402 limit cannot exceed the balance limit of ${label} (both in its atomic units).`,
+      { reason: "x402_limit_exceeds_balance_limit", chain, asset, max_balance_atomic: maxBalanceUsdcAtomic, max_x402_amount_atomic: maxX402AmountAtomic });
   }
   return {
     maxBalanceUsdcAtomic,
@@ -165,7 +169,7 @@ export function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBin
       maxBalanceUsdcAtomic: policy.maxBalanceUsdcAtomic,
       maxX402AmountAtomic: policy.maxX402AmountAtomic,
       ...(policy.maxBalanceEthWei === undefined ? {} : { maxBalanceEthWei: policy.maxBalanceEthWei }),
-    });
+    }, policy);
   } catch {
     corrupt("Profile policy limits are invalid.");
   }
@@ -317,11 +321,22 @@ export function effectiveX402Cap(policy: ProfilePolicyRecord, callerCapInput?: s
 export function assertUnattendedX402Balance(policy: ProfilePolicyRecord, usdcAtomic: string): void {
   const balance = parseAtomic(usdcAtomic);
   if (balance > BigInt(policy.maxBalanceUsdcAtomic)) {
+    const { chain, asset, label } = policyAsset(policy);
     throw new ApnError(
       "APN_WALLET_OVERFUNDED_FOR_UNATTENDED_X402",
-      "The disposable wallet exceeds its owner-approved selected-network USDC balance limit; unattended x402 is blocked.",
+      `The disposable wallet holds more ${label} than its owner-approved balance limit; unattended x402 is blocked.`,
+      { reason: "x402_wallet_over_balance_limit", chain, asset, balance_atomic: balance.toString(), max_balance_atomic: policy.maxBalanceUsdcAtomic },
     );
   }
+}
+
+/** The asset a policy's balance limit counts, in its own atomic units: Base USDC unless the policy names another asset. */
+function policyAsset(binding: ProfilePolicyBinding): { readonly chain: string; readonly asset: string; readonly label: string } {
+  if (binding.x402Solana !== undefined) {
+    return { chain: X402_SOLANA_POLICY_NETWORK, asset: binding.x402Solana.mint, label: `${binding.x402Solana.mint} on ${X402_SOLANA_POLICY_NETWORK}` };
+  }
+  const { chainId, token } = binding.x402Network ?? { chainId: CHAIN_ID, token: BASE_USDC };
+  return { chain: `eip155:${chainId}`, asset: token, label: x402AssetLabel(chainId, token) };
 }
 
 export function policyIncrease(
