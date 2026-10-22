@@ -33,6 +33,8 @@ import type { BridgeOperationRepository } from "../../src/lifi/operation-reposit
 import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy.js";
 
+/** Test stores let a contender outwait a holder slowed by host load (QA 0.5.64: 1 s and 5 s waits ended in APN_STATE_BUSY); the store's maximum. */
+export const TEST_LOCK_WAIT_MS = 60_000;
 export const WALLET = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1" as Address;
 export const RECIPIENT = "0x2222222222222222222222222222222222222222" as Address;
 export const OTHER_RECIPIENT = "0x3333333333333333333333333333333333333333" as Address;
@@ -208,7 +210,7 @@ export function makeCore(input: {
 }): ApnCore {
   const policy = input.policy === null ? undefined : input.policy ?? new TestProfilePolicy();
   return new ApnCore({
-    state: new StateStore(input.root, { lockWaitMs: 1_000 }),
+    state: new StateStore(input.root, { lockWaitMs: TEST_LOCK_WAIT_MS }),
     ...(input.native === undefined ? {} : { native: input.native }),
     ...(input.rpc === undefined ? {} : { rpc: input.rpc }),
     ...(input.http === undefined ? {} : { http: input.http }),

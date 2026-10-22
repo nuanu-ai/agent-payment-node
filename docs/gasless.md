@@ -290,7 +290,9 @@ apn receipt get --operation <operation-id>
 Coinbase's CDP paymaster pays native gas. The exact successful accounting is
 `G = N`, `F = 0`: sender canonical-USDC debit and recipient credit both equal
 `--amount`, sender native debit is zero, and no token fee is deducted. Approval
-displays these values and requires the common foreground phrase.
+displays these values and requires the common foreground phrase. `receipt get`
+names the chain, Base USDC, its decimals, the sender and the recipient beside
+the settlement.
 
 APN writes `started` before exactly one `awal@2.12.1 send ... --chain base
 --asset usdc --json` child. A returned transaction hash or a single hash found

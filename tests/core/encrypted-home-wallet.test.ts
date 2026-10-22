@@ -17,7 +17,7 @@ import { StateStore } from "../../src/state.js";
 import type { TransferApprovalIntent, TransferApprovalPort } from "../../src/tty-approval.js";
 import { isExactTransferApproval, transferApprovalPhrase } from "../../src/tty-approval.js";
 import { x402AuthorizationIntentHash } from "../../src/x402-state-integrity.js";
-import { RECIPIENT, TestClock, TestProfilePolicy, TestRpc, activateBaseUsdcDirectPolicy, temporaryState } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, RECIPIENT, TestClock, TestProfilePolicy, TestRpc, activateBaseUsdcDirectPolicy, temporaryState } from "./helpers.js";
 import { QueuedHttp, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_URL, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
 
@@ -186,7 +186,7 @@ test("concurrent first use converges on one address and one encrypted envelope",
   t.after(temporary.cleanup);
   const wrapping = new TestWrappingSecret(null);
   const make = () => {
-    const state = new StateStore(temporary.root, { lockWaitMs: 2_000 });
+    const state = new StateStore(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
     return new ApnCore({ state, native: new LocalWalletNative(state, wrapping, new RecordingApproval()) });
   };
   const [left, right] = await Promise.all([

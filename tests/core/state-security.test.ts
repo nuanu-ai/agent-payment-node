@@ -10,7 +10,7 @@ import { LocalWalletNative } from "../../src/local-wallet-native.js";
 import { EvmWrappingSecret } from "./evm-helpers.js";
 import { StateStore } from "../../src/state.js";
 import { SecureStateStore } from "../../src/secure-state-store.js";
-import { WALLET, RECIPIENT, TestNative, TestRpc, activateBaseUsdcDirectPolicy, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, WALLET, RECIPIENT, TestNative, TestRpc, activateBaseUsdcDirectPolicy, ensureWallet, makeCore, prepareTransfer, temporaryState } from "./helpers.js";
 import { lockRefusals } from "./lock-refusal-events.js";
 
 test("state root rejects wrong mode and symlinked ancestors", async (t) => {
@@ -274,8 +274,8 @@ test("lock files reject symlinks, hard links, wrong modes, and path replacement"
 test("concurrent contenders serialize the protected action", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const left = new StateStore(temporary.root, { lockWaitMs: 1_000 });
-  const right = new StateStore(temporary.root, { lockWaitMs: 1_000 });
+  const left = new StateStore(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
+  const right = new StateStore(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   await left.initialize();
   await right.initialize();
   let active = 0;
