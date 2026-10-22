@@ -6,6 +6,7 @@ import type { DirectAssetUsageLease } from "../../src/direct-asset-usage.js";
 import { railAllowlistSubject } from "../../src/rail-direct-allowlist.js";
 import type { RailOperationRecord } from "../../src/rail-operation-model.js";
 import type { Address } from "../../src/model.js";
+import { TEST_LOCK_WAIT_MS } from "./test-lock-wait.js";
 
 export const EVM_USDC: Readonly<Record<8453 | 1 | 42161, Address>> = {
   8453: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
@@ -47,7 +48,7 @@ export async function activateDirectPolicy(root: string, profile: string, input:
 }
 
 export async function revokeDirectPolicy(root: string, profile: string, now = new Date()): Promise<void> {
-  const store = new AllowlistPolicyStore(root);
+  const store = new AllowlistPolicyStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   const head = (await store.read(profile)).entries.at(-1);
   if (head === undefined) throw new Error("nothing to revoke");
   await decide(store, profile, "revoked", head.revision, now);

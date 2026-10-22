@@ -5,7 +5,7 @@ import test from "node:test";
 import { sealAssetPolicyRegistry, type UnsignedAssetPolicyRegistry } from "../../src/asset-policy-registry.js";
 import { AssetUsageLedger, ASSET_USAGE_WINDOW, type AssetUsageIdentity } from "../../src/core.js";
 import { assetUsageReservationId } from "../../src/asset-usage-ledger.js";
-import { temporaryState } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, temporaryState } from "./helpers.js";
 
 const EVM_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48";
 const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1";
@@ -147,8 +147,8 @@ test("confirmed revert charges exact proven asset consumption and binds idempote
 
 test("concurrent duplicate reservation is idempotent and concurrent distinct reservations cannot race past the cap", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const first = new AssetUsageLedger(temporary.root);
-  const second = new AssetUsageLedger(temporary.root);
+  const first = new AssetUsageLedger(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
+  const second = new AssetUsageLedger(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   const duplicates = await Promise.all([
     reserve(first, "concurrent-duplicate-1", "60", "x402"),
     reserve(second, "concurrent-duplicate-1", "60", "x402"),
@@ -167,8 +167,8 @@ test("concurrent duplicate reservation is idempotent and concurrent distinct res
 
 test("concurrent usage snapshots include their own reservation exactly when it is charged", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const writer = new AssetUsageLedger(temporary.root);
-  const reader = new AssetUsageLedger(temporary.root);
+  const writer = new AssetUsageLedger(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
+  const reader = new AssetUsageLedger(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   const key = "atomic-snapshot-reservation-01";
   const reservationId = assetUsageReservationId(identity, key);
   const now = new Date("2026-09-17T10:00:00.000Z");

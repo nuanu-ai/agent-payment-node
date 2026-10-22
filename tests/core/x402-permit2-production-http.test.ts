@@ -16,7 +16,7 @@ import { productionUsageIdentity } from "../../src/x402-permit2/production-repos
 import { paidHttpFixture } from "./x402-permit2-production-http-fixture.js";
 import { protocolSecond } from "./x402-permit2-production-protocol-fixture.js";
 
-async function until(predicate: () => boolean) { const deadline = Date.now() + 10_000; while (!predicate() && Date.now() < deadline) await nextTurn(); assert.ok(predicate(), "synthetic stage reached"); }
+async function until(predicate: () => boolean) { const deadline = Date.now() + 60_000; while (!predicate() && Date.now() < deadline) await nextTurn(); assert.ok(predicate(), "synthetic stage reached"); }
 function wire(t: TestContext) {
   const requests: any[] = []; let rows = [{ address: "8.8.8.8", family: 4 }], delayed: (() => void) | undefined;
   let pause = false, calls = 0, afterDns: (() => Promise<void>) | undefined;

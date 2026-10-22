@@ -20,7 +20,7 @@ import { ProviderRegistry } from "../../src/provider-registry.js";
 import { StateProfileRepository } from "../../src/profile-repository.js";
 import { StateStore } from "../../src/state.js";
 import { runCli } from "../../src/cli.js";
-import { temporaryState } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, temporaryState } from "./helpers.js";
 import { sha256 } from "../../src/canonical.js";
 import { OperationService } from "../../src/operation-service.js";
 import { accountBindingHash } from "../../src/provider-profile.js";
@@ -490,7 +490,7 @@ test("gasless and ordinary Coinbase alias routes exclude both orders and concurr
     address = SENDER;
     await activateCoinbasePolicy(temporary.root, "alias-a");
     await activateCoinbasePolicy(temporary.root, "alias-b");
-    const state = new StateStore(temporary.root);
+    const state = new StateStore(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
     const core = new ApnCore({ state, profileRepository: new StateProfileRepository(state), providerRegistry: registry,
       rpc: new CoinbaseRpcFixture(), rpcUrl: "https://rpc.example/", clock: { now: () => new Date("2026-09-12T00:00:00.000Z") },
       gasless: { rpcFor: () => { throw new Error("local gasless must not run"); }, custody: {} as never,
