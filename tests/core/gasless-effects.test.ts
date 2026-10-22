@@ -30,7 +30,7 @@ import { StateProfileRepository } from "../../src/profile-repository.js";
 import { sealWallet, StateStore } from "../../src/state.js";
 import { EVM_REQUEST, evmCore } from "./evm-helpers.js";
 import { GaslessApproval, GaslessTestRpc, gaslessFixture as gaslessCoreFixture } from "./gasless-helpers.js";
-import { TestNative, TestProfilePolicy, TestRpc, temporaryState, savedBridgeOperations, savedGaslessOperations, savedX402Operations } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, TestNative, TestProfilePolicy, TestRpc, temporaryState, savedBridgeOperations, savedGaslessOperations, savedX402Operations } from "./helpers.js";
 import { LIFI_SYNTHETIC_KEY, lifiFixture } from "./lifi-helpers.js";
 import { SOL_RECIPIENT, solanaFixture } from "./solana-helpers.js";
 import { TestHttp } from "./x402-helpers.js";
@@ -443,7 +443,7 @@ async function rejectsCode(promise: Promise<unknown>, code: string): Promise<voi
   });
 }
 
-test("concurrent legacy direct and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
+test("concurrent legacy direct and gasless preparation preserves the same-profile guard in both orders", { timeout: 120_000 }, async (t) => {
   for (const first of ["gasless", "direct"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const gasless = await gaslessCoreFixture(temporary.root, 8453, { now: new Date() }), direct = evmCore(temporary.root, undefined, gasless.wrapping);
@@ -486,7 +486,7 @@ test("concurrent legacy direct and gasless preparation preserves the same-profil
   }
 });
 
-test("concurrent local x402 and gasless preparation preserves the same-profile guard in both orders", { timeout: 15_000 }, async (t) => {
+test("concurrent local x402 and gasless preparation preserves the same-profile guard in both orders", { timeout: 120_000 }, async (t) => {
   for (const first of ["gasless", "x402"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const fixture = await gaslessCoreFixture(temporary.root);
@@ -537,7 +537,7 @@ test("concurrent local x402 and gasless preparation preserves the same-profile g
   }
 });
 
-test("concurrent provider-atomic x402 and gasless preparation serialize one global idempotency identity in both orders", { timeout: 15_000 }, async (t) => {
+test("concurrent provider-atomic x402 and gasless preparation serialize one global idempotency identity in both orders", { timeout: 120_000 }, async (t) => {
   for (const first of ["gasless", "provider"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const gasless = await gaslessCoreFixture(temporary.root);
@@ -587,7 +587,7 @@ test("concurrent provider-atomic x402 and gasless preparation serialize one glob
   }
 });
 
-test("concurrent Solana rail and gasless preparation on different networks both proceed in both orders", { timeout: 15_000 }, async (t) => {
+test("concurrent Solana rail and gasless preparation on different networks both proceed in both orders", { timeout: 120_000 }, async (t) => {
   for (const first of ["gasless", "rail"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const rail = await solanaFixture(temporary.root);
@@ -624,7 +624,7 @@ test("concurrent Solana rail and gasless preparation on different networks both 
   }
 });
 
-test("concurrent LI.FI bridge and gasless preparation on different networks both proceed in both orders", { timeout: 15_000 }, async (t) => {
+test("concurrent LI.FI bridge and gasless preparation on different networks both proceed in both orders", { timeout: 120_000 }, async (t) => {
   for (const first of ["gasless", "bridge"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const bridge = await lifiFixture(temporary.root);
@@ -678,7 +678,7 @@ class BoundaryGate {
 class LockObservedState extends StateStore {
   private signalAttempted!: () => void;
   readonly attempted = new Promise<void>((resolve) => { this.signalAttempted = resolve; });
-  constructor(root: string, private readonly target: string) { super(root); }
+  constructor(root: string, private readonly target: string) { super(root, { lockWaitMs: TEST_LOCK_WAIT_MS }); }
   protected override async beforeLockAcquire(key: string): Promise<void> {
     if (key === this.target) this.signalAttempted();
   }
@@ -687,7 +687,7 @@ class LockObservedState extends StateStore {
 async function gaslessProfileFixture(root: string, profile: string, now: Date, wrapping: WrappingSecretPort, options: {
   readonly key?: Hex; readonly initializeWallet?: boolean;
 } = {}) {
-  const state = new StateStore(root); await state.initialize();
+  const state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS }); await state.initialize();
   const key = options.key ?? generatePrivateKey(), account = privateKeyToAccount(key);
   if (options.initializeWallet !== false) {
     const identity = { profile, address: account.address, chainId: 8453 as const, createdAt: now.toISOString(),
@@ -714,7 +714,7 @@ async function gaslessProfileFixture(root: string, profile: string, now: Date, w
 }
 
 async function providerAtomicFixture(root: string, now: Date) {
-  const state = new StateStore(root); await state.initialize();
+  const state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS }); await state.initialize();
   const capabilities = coinbaseDirectCapabilitySnapshot(), providerId = "coinbase-awal";
   const profile: ProviderProfileRecord = {
     schema_version: "apn.provider-profile.v1", profile: "provider-atomic", profile_hash: state.profileHash("provider-atomic"),

@@ -12,7 +12,7 @@ import { accountBindingHash, capabilityHash, metamaskDirectCapabilitySnapshot, t
 import { StateProfileRepository } from "../../src/profile-repository.js";
 import { evmAddressLock } from "../../src/evm-address-ownership.js";
 import { bindArgv } from "../../src/command-binder.js";
-import { temporaryState, TestNative } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, temporaryState, TestNative } from "./helpers.js";
 import { ApnCore } from "../../src/core.js";
 import { RelayRetireService } from "../../src/relay/retire.js";
 import { RelayEffectJournalRepository } from "../../src/relay/effect-journal.js";
@@ -318,7 +318,7 @@ test("Relay retirement preserves quote, unblocks a fresh key, and never calls a 
 
 test("Relay retirement refuses existing effects and corrupted marker; parallel retirement is idempotent", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const state = new StateStore(temporary.root), prepare = serviceFor(state, () => {});
+  const state = new StateStore(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS }), prepare = serviceFor(state, () => {});
   const first = await prepare.prepare(input);
   const retire = new RelayRetireService(state, { now: () => instant });
   const results = await Promise.all([retire.retire({ profile: "default", operationId: first.operationId }),
@@ -455,7 +455,7 @@ test("Relay retirement rejects foreign IDs, profile mismatch, and malformed prep
 
 test("Relay retire and fresh prepare serialize without losing the new operation", async t => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const state = new StateStore(temporary.root), prepare = serviceFor(state, () => {});
+  const state = new StateStore(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS }), prepare = serviceFor(state, () => {});
   const first = await prepare.prepare(input);
   const nextInput = { ...input, idempotencyKey: "relay-prepare-0002" };
   const [retired, concurrent] = await Promise.allSettled([

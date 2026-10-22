@@ -18,7 +18,7 @@ import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, relayStatusLocator, validateRelayQu
 import { RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
 import { StateStore } from "../../src/state.js";
 import { TtyRelayExecuteConfirmation } from "../../src/tty-approval.js";
-import { temporaryState } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, temporaryState } from "./helpers.js";
 
 const key = `0x${"1".repeat(64)}` as Hex;
 const owner = privateKeyToAccount(key).address;
@@ -32,7 +32,7 @@ const depositAbi = parseAbi(["function depositErc20(address depositor, address t
 
 async function setup(t: test.TestContext) {
   const temp = await temporaryState(); t.after(temp.cleanup);
-  const state = new StateStore(temp.root);
+  const state = new StateStore(temp.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   await state.initialize();
   const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
   const wallets = new EncryptedWalletStore(state, wrapping);

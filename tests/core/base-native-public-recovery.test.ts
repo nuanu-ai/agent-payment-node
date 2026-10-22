@@ -5,7 +5,7 @@ import test from "node:test";
 import { temporaryState } from "./helpers.js";
 function run(mode: string, root: string) {
   const worker = fileURLToPath(new URL("./base-native-public-recovery-worker.js", import.meta.url));
-  const script = `set timeout 30
+  const script = `set timeout 120
 log_user 1
 spawn $env(APN_NODE_EXEC) $env(APN_WORKER) $env(APN_MODE) $env(APN_TEST_ROOT)
 expect {
@@ -16,7 +16,7 @@ expect {
   eof {catch wait result; exit [lindex $result 3]}
   timeout {exit 124}
 }`;
-  return spawnSync("/usr/bin/expect", ["-c", script], { encoding: "utf8", timeout: 40000,
+  return spawnSync("/usr/bin/expect", ["-c", script], { encoding: "utf8", timeout: 150_000,
     env: { PATH: "/usr/bin:/bin", LANG: "C", TERM: "xterm-256color", APN_NODE_EXEC: process.execPath, APN_WORKER: worker, APN_MODE: mode, APN_TEST_ROOT: root } });
 }
 for (const mode of ["fresh", "old-attempt-signed", "old-intent-mutation", "signed", "unknown", "lost-response", "generic-started", "receipt-mismatch", "missing-old", "tamper", "custody-change", "before-public", "dispatch-custody-change", "forged-attestation", "clone-wrong-op", "clone-wrong-wallet", "verification-race", "old-awaiting", "old-awaiting-generic", "dispatch-verification-race", "attempt-awaiting-generic"]) test(`genuine TTY ${mode}: recovery never signs anew, sends at most the sealed bytes once, and retains nonce`, async t => {

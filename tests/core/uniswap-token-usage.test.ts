@@ -38,7 +38,7 @@ import { tokenPrimaryCandidates } from "../../src/swap/uniswap-v3/token-rpc-pool
 import { sealWallet, StateStore } from "../../src/state.js";
 import { activateDirectPolicy, revokeDirectPolicy } from "./direct-allowlist-helpers.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
-import { temporaryState } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, temporaryState } from "./helpers.js";
 /** The Relay execution owner check as production runs it: under the EVM owner lock (the test-only wrapper is gone). */
 async function assertExclusiveRelayExecutionOwner(state: StateStore, permissions: Pick<EncryptedSmartAccountPermissionStore, "listAll">,
   address: string, ownProfileHash: string): Promise<void> {
@@ -367,7 +367,7 @@ test("concurrent status cannot advance a cap-zero execute into an unreserved swa
       const row = (await budget.load(submitted.operationId))!.rows.at(-1)!; assert.deepEqual([row.cap, row.budgetClass], [0, "recovery"]);
       observeEntered(); await release; return { status: "success" as const, transactionHash: attempt.transactionHash!, gasDebitWei: "1", allowanceAtomic: "1000000" }; } };
   const rpc = { telemetry: () => null, effectAttempts: () => sends } as TokenRpcCall,
-    runtime = () => new InstalledUniswapTokenRuntime({} as any, {} as any, new UniswapTokenJournal(temporary.root), ports as any, budget, rpc);
+    runtime = () => new InstalledUniswapTokenRuntime({} as any, {} as any, new UniswapTokenJournal(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS }), ports as any, budget, rpc);
   const first = runtime().execute(submitted.operationId); await entered; let concurrentDone = false;
   const concurrent = runtime().status(submitted.operationId).then((value) => { concurrentDone = true; return value; });
   await new Promise<void>((resolve) => setImmediate(resolve)); assert.equal(concurrentDone, false); assert.equal(seals, 0); assert.equal(sends, 0);
