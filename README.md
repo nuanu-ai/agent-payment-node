@@ -142,7 +142,8 @@ apn receipt get --operation <operation-id>
 Prepare freezes recipient, amount, nonce, gas limit, fee envelope and expiry; the amount counts against the policy caps
 and approval reserves it in the shared usage ledger before signing. `--max-fee-wei` is the owner's pre-submission fee
 budget. Approval accepts fee movements that keep the frozen transaction executable; it never re-prices a signed
-transaction. Completion needs the exact receipt and Transfer log at the network's required finality. The same commands
+transaction. Completion needs the exact receipt and Transfer log at the network's required finality. `receipt get` names
+the frozen profile, chain, token, sender (`wallet_address`), recipient and amount, as `operation status` does. The same commands
 work for native coins (`--asset native`) and every listed token on the eleven direct EVM networks; see
 [EVM asset transfers](docs/evm-assets.md) and [direct transfers under the allowlist](docs/allowlist-direct-integration.md).
 Solana and TRON have their own `-solana`/`-tron` commands ([Solana](docs/solana.md), [TRON](docs/tron.md)).

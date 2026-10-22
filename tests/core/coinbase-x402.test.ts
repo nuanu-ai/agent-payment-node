@@ -66,7 +66,7 @@ import { policyBinding, type ProfilePolicyPort } from "../../src/profile-policy.
 import { StateStore } from "../../src/state.js";
 import { appendTransition, sealOperation } from "../../src/state-integrity.js";
 import type { HttpGetRequest, HttpObservation } from "../../src/x402-model.js";
-import { TestClock, TestNative, TestProfilePolicy, TestRpc, temporaryState, savedX402Operations } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, TestClock, TestNative, TestProfilePolicy, TestRpc, temporaryState, savedX402Operations } from "./helpers.js";
 import { challengeObservation, TestHttp } from "./x402-helpers.js";
 import {
   canonicalPaymentRequiredHeader,
@@ -324,7 +324,7 @@ async function setup(t: TestContext, input: {
 } = {}) {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
-  const state = new StateStore(temporary.root, { lockWaitMs: 1_000 });
+  const state = new StateStore(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   await state.initialize();
   const profileRepository = new StateProfileRepository(state);
   const capabilities = coinbaseDirectCapabilitySnapshot();
@@ -1956,7 +1956,7 @@ test("started persistence, same-operation races and exact spend without seller r
   };
   ambiguous.clock.advance(240_000);
   ambiguous.rpc.safeNumber = 1021n;
-  const restartedState = new StateStore(ambiguous.temporary.root, { lockWaitMs: 1_000 });
+  const restartedState = new StateStore(ambiguous.temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   const restarted = new ApnCore({
     state: restartedState,
     profileRepository: new StateProfileRepository(restartedState),

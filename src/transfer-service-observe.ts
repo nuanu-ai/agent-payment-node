@@ -268,7 +268,7 @@ export class TransferServiceObservation {
       throw new ApnError("APN_STATE_CORRUPT", "Receipt is not linked to the current operation transition.");
     }
     const facts = await this.actualFee(operation, async () => receipt);
-    const view = publicReceipt(facts.fee === undefined ? receipt : { ...receipt, evmActualFee: facts.fee }) as Record<string, unknown>;
+    const view = publicReceipt(facts.fee === undefined ? receipt : { ...receipt, evmActualFee: facts.fee }, operation) as Record<string, unknown>;
     return { ...view, ...(Object.hasOwn(view, "actual_network_fee") ? {} : { actual_network_fee: null, actual_sender_native_debit_atomic: null }),
       ...(facts.refusal === undefined ? {} : { actual_facts_refusal: facts.refusal }) };
   }

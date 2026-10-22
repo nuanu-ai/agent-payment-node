@@ -26,6 +26,7 @@ import { BNB_COMPOSITE } from "../../src/lifi/bnb-composite.js";
 import { activateDirectPolicy, WIDE_CAPS } from "./direct-allowlist-helpers.js";
 import { bridgeMechanism } from "../../src/lifi/allowlist.js";
 import { findStored } from "./stored-operations.js";
+import { TEST_LOCK_WAIT_MS } from "./helpers.js";
 
 export type LifiJson = Record<string, any>;
 export const LIFI_SYNTHETIC_KEY = `0x${"01".repeat(32)}` as Hex;
@@ -248,7 +249,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   policy?: false | { readonly maximumPerTransferAtomic?: string; readonly dailyLimitAtomic?: string;
     readonly provider?: string; readonly reference?: string };
 } = {}) {
-  const now = options.now ?? new Date(pair === "eth-bnb" ? "2026-09-20T16:23:00.000Z" : pair === "eth-linea" || pair === "eth-monad" ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z"), state = new StateStore(root), profile = "lifi-local";
+  const now = options.now ?? new Date(pair === "eth-bnb" ? "2026-09-20T16:23:00.000Z" : pair === "eth-linea" || pair === "eth-monad" ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z"), state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS }), profile = "lifi-local";
   const wrapping = options.wrapping ?? new LifiWrapping(), wallets = new EncryptedWalletStore(state, wrapping);
   await state.initialize();
   if (options.initializeWallet !== false) {

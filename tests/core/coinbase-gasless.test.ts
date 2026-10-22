@@ -601,6 +601,10 @@ test("common gasless prepare/approve/status/resume/receipt uses the provider-dir
   const receipt = await core.execute({ command: "receipt.get", operationId: preparedRow.operation_id });
   assert.equal((status.operation as any).state, "completed"); assert.equal((resumed.operation as any).state, "completed");
   assert.equal((receipt.receipt as any).coinbase_gasless_settlement.feeAtomic, "0"); assert.equal(sends, 1);
+  // QA 0.5.64: the AWAL receipt names Base USDC, its decimals and both parties, exactly as status does.
+  assert.deepEqual([(receipt.receipt as any).chain, (receipt.receipt as any).token, (receipt.receipt as any).wallet_address, (receipt.receipt as any).recipient,
+    (receipt.receipt as any).amount.decimals], ["eip155:8453", BASE_USDC, SENDER, RECIPIENT, 6]);
+  for (const key of ["profile", "chain", "token", "wallet_address", "recipient", "amount"]) assert.deepEqual((receipt.receipt as any)[key], (status.operation as any)[key], key);
   const callsBeforeReplay = rpc.callLog.length; rpc.unsupportedAccount = true;
   const replay = await core.execute(request); assert.equal((replay.operation as any).operation_id, preparedRow.operation_id); assert.equal(sends, 1);
   assert.equal(rpc.callLog.length, callsBeforeReplay, "saved same-key prepare returns without a live RPC snapshot");
