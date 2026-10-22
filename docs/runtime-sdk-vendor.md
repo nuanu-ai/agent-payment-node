@@ -8,8 +8,8 @@ Original package chains pulled in `bigint-buffer`, SPL decoders, old nested Axio
 |---|---|---|
 | `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `5b6e8667e4a0adb277c1c6803d87168eb7b9cd72f0ba9fc3d349ec8162fdfd25` |
 | `vendor/metamask-smart-account` | Smart Account kit 2.0.0 root/actions/contracts/utils/experimental, permission types 2.0.0, delegation core 3.0.0, MetaMask x402 1.0.0 | `ff253d54bfb8082ebb7e753d4125303aa84a421566dc11490936ece27448ddc3` |
-| `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `cbf69134172a065d967339f8c3f432df347e55b944b83bd64cc02459647228a6` |
-| `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `f57f014e75d831c1bf8496f99b0bf718c2c6573158ff2698b084977f1b6d38fb` |
+| `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `647efee5547554c97df76c20f8b9d940b001dd5f2089dc173ae1e80897e57dec` |
+| `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `884ea5e965e946f7975492207f6b93b9cd769024ba1865c713477b1190cc46a3` |
 
 Before the first entry import, each loader checks its pinned manifest and every declared executable/legal file's size and SHA256. File and bundle-directory symlinks refuse. Verification is cached for that process; concurrent filesystem changes after verification and unrelated installed dependency bytes are outside this check.
 
@@ -41,11 +41,17 @@ Initial failures remain in private evidence: deprecated builtin punycode also fa
 
 ## Advisory and license closure on 9 October 2026
 
-The original development graph still retains upstream advisory records. `elliptic@6.6.1` appears among analyzed EVM inputs, but contributed no executable bytes before or after this change. Its advisory is not claimed patched. Production npm audit alone cannot inspect vendored code.
+The original development graph still retains upstream advisory records. `elliptic@6.6.1` appears among analyzed EVM inputs, but contributed no executable bytes before or after this change. Its advisory is not claimed patched. Production npm audit alone cannot inspect vendored code; the release gate described below checks the emitted versions.
 
 The former EVM bundle emitted GPL-3.0 `@toruslabs/ffjavascript@6.0.0`, and the former Relay root emitted LGPL-3.0-only `rpc-websockets@9.3.9`. Official ESM selection and the narrower upstream Relay entry remove their executable contributions without replacing cryptographic functions. All four emitted package graphs now exclude elliptic, ffjavascript and rpc-websockets; generation rejects their reintroduction in every slice. Unused analyzed-input notices are excluded from the runtime inventory. APN's MIT license still does not replace licenses of the components it actually ships.
 
 The release SBOM includes each vendor root's emitted package versions and licenses with `CONTAINS` relationships, alongside the production installation graph. The SBOM namespace incorporates the lock and all four provenance bytes. Local verification, private installation, publication and paid acceptance remain distinct proof layers.
+
+## Emitted-code advisory gate on 22 October 2026
+
+The Relay and TRON bundles emitted `follow-redirects@1.16.0`, which GHSA-q3jh-wrc6-jgq8 (array-form headers kept credentials across origins) and GHSA-8r9p-f939-6h3c (unescaped sensitive-header names) cover. The lockfile files it under dev, so `npm audit --omit=dev` stayed clean. A root override now resolves it to 1.16.1. Regeneration changed only that package's code in both bundles, their manifests, provenance and licence file, and the EVM provenance, which lists it as an input that emits no code. APN calls only `getOrderId` and offline TRON address, signature and transaction helpers from these bundles, none of which sends an HTTP request.
+
+`scripts/audit-vendor-emitted.mjs` sends the exact emitted package versions from every vendor provenance to npm's bulk advisory service and fails on low or higher severity. Release preparation runs it after the production audit.
 
 
 The MetaMask package resolver uses the invocation's original absolute wall and
