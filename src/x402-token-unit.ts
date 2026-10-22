@@ -11,3 +11,9 @@ export function x402TokenUnit(chainId: number, token: string): { readonly symbol
     row.identifier?.toLowerCase() === token.toLowerCase());
   return listed === undefined ? null : { symbol: listed.symbol, decimals: listed.decimals };
 }
+
+/** How an error names an x402 asset: "MXNB (0xF197…, 6 decimals) on eip155:8453", or the bare address the list does not name. */
+export function x402AssetLabel(chainId: number, token: string): string {
+  const unit = x402TokenUnit(chainId, token);
+  return `${unit === null ? token : `${unit.symbol} (${token}, ${unit.decimals} decimals)`} on eip155:${chainId}`;
+}
