@@ -33,8 +33,8 @@ import type { BridgeOperationRepository } from "../../src/lifi/operation-reposit
 import { activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 import { AllowlistPolicyStore } from "../../src/allowlist-policy.js";
 
-/** Test stores let a contender outwait a holder slowed by host load (QA 0.5.64: 1 s and 5 s waits ended in APN_STATE_BUSY); the store's maximum. */
-export const TEST_LOCK_WAIT_MS = 60_000;
+import { TEST_LOCK_WAIT_MS } from "./test-lock-wait.js";
+export { TEST_LOCK_WAIT_MS };
 export const WALLET = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1" as Address;
 export const RECIPIENT = "0x2222222222222222222222222222222222222222" as Address;
 export const OTHER_RECIPIENT = "0x3333333333333333333333333333333333333333" as Address;

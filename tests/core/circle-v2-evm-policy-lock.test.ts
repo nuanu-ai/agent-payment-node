@@ -13,11 +13,12 @@ import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { lockRefusals } from "./lock-refusal-events.js";
+import { TEST_LOCK_WAIT_MS } from "./helpers.js";
 async function temporaryState() { const root = await realpath(await mkdtemp(join(tmpdir(), "circle-policy-lock-"))); return { root, cleanup: () => rm(root, { recursive: true, force: true }) }; }
 const now = new Date("2026-10-09T01:00:00.000Z");
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 async function fixture(root: string, chain: CircleDestinationChain, expiresAt?: string | Readonly<Record<string, string>>, destinationProfile?: string) {
-  const state = new StateStore(root), store = new AllowlistPolicyStore(root), route = circleRoute(chain, destinationProfile); await state.initialize();
+  const state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS }), store = new AllowlistPolicyStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS }), route = circleRoute(chain, destinationProfile); await state.initialize();
   // Only funding-v2 operations reach usage admission; the economics match the historical fixed route.
   const funding = circleFundingBinding(chain, { sourceProfile: "evm-live-buyer", sourceOwner: CIRCLE_SOURCE_OWNER, destinationProfile: route.gasPayerProfile, gasPayer: route.gasPayer },
     { recipient: CIRCLE_RECIPIENT, amountAtomic: "40100", maxFeeAtomic: "100", minMintAtomic: "40000" }), mechanism = funding.mechanism;

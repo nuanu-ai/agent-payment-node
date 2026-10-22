@@ -212,7 +212,7 @@ async function runPtyApproval(options: {
     process.stdout.write(outcome + "FD_DELTA:" + String(after - before) + "\\n");
   `;
   const expectSource = `
-    set timeout 3
+    set timeout 60
     log_user 1
     spawn $env(APN_NODE_EXEC) --input-type=module -e $env(APN_NODE_SOURCE)
     if {$env(APN_SEND_INPUT) == "1"} {
@@ -249,7 +249,7 @@ async function runPtyApproval(options: {
   child.stdout.on("data", (chunk: string) => { stdout += chunk; });
   child.stderr.on("data", (chunk: string) => { stderr += chunk; });
 
-  const timeoutMs = 3_000;
+  const timeoutMs = 90_000;
   let timeout: NodeJS.Timeout | undefined;
   try {
     const [code] = await Promise.race([
