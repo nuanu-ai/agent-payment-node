@@ -6,3 +6,5 @@ export declare function x402TokenUnit(chainId: number, token: string): {
     readonly symbol: string;
     readonly decimals: number;
 } | null;
+/** How an error names an x402 asset: "MXNB (0xF197…, 6 decimals) on eip155:8453", or the bare address the list does not name. */
+export declare function x402AssetLabel(chainId: number, token: string): string;

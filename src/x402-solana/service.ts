@@ -50,8 +50,9 @@ export class X402SolanaService {
   private async currentPolicy(record: X402SolanaRecord): Promise<ProfilePolicyRecord> {
     const policy = await requireSolanaPolicy(this.policyPort(), await solanaPolicyBinding(this.ports.accounts, record.profile, record.terms.mint));
     if (policy.integrityHash !== record.terms.policy.integrityHash) {
-      throw new ApnError("APN_PROFILE_DRIFT", "The owner's Solana x402 policy changed after preparation; prepare a new payment.",
-        { reason: "x402_solana_policy_changed" });
+      throw new ApnError("APN_PROFILE_DRIFT", "The owner's Solana x402 policy changed after preparation; this payment cannot continue. " +
+        "Observe it once it expires (that releases the account), then prepare a new payment.",
+        { reason: "x402_solana_policy_changed", nextActions: [`apn x402 solana observe --operation ${record.operationId}`] });
     }
     return policy;
   }
@@ -216,8 +217,9 @@ export class X402SolanaService {
     const owner = await x402SolanaOwnerRow(this.root, record.profile, record.terms.payer, record.terms.mint, this.now());
     const frozen = record.terms.admission;
     if (owner.active.digest !== frozen.policyDigest || owner.active.revision !== frozen.policyRevision || owner.active.activationDigest !== frozen.activationDigest) {
-      throw new ApnError("APN_ALLOWLIST_REFUSED", "The active owner allowlist policy changed after preparation; prepare a new payment.",
-        { reason: "allowlist_policy_changed", rail: "x402" });
+      throw new ApnError("APN_ALLOWLIST_REFUSED", "The active owner allowlist policy changed after preparation; this payment cannot continue. " +
+        "Observe it once it expires (that releases the account), then prepare a new payment.",
+        { reason: "allowlist_policy_changed", rail: "x402", nextActions: [`apn x402 solana observe --operation ${record.operationId}`] });
     }
   }
 }
