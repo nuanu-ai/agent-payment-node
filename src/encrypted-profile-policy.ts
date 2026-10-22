@@ -68,7 +68,7 @@ export class EncryptedProfilePolicy implements ProfilePolicyPort {
 
   async set(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): Promise<ProfilePolicyRecord> {
     const current = await this.loadForSet(binding);
-    const { x402Payees: suppliedPayees, ...supplied } = canonicalPolicyInput(input);
+    const { x402Payees: suppliedPayees, ...supplied } = canonicalPolicyInput(input, binding);
     // An omitted payee pin keeps the current one; null removes it.
     const x402Payees = suppliedPayees === undefined ? current?.x402Payees : suppliedPayees ?? undefined;
     const effective: Omit<ProfilePolicySetInput, "x402Payees"> & { readonly x402Payees?: readonly Address[] } = {

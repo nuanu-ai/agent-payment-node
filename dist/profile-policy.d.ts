@@ -54,7 +54,7 @@ export interface ProfilePolicyPort {
     set(binding: ProfilePolicyBinding, input: ProfilePolicySetInput): Promise<ProfilePolicyRecord>;
 }
 export declare function policyBinding(wallet: WalletRecord | ProviderProfileRecord): ProfilePolicyBinding;
-export declare function canonicalPolicyInput(input: ProfilePolicySetInput): ProfilePolicySetInput;
+export declare function canonicalPolicyInput(input: ProfilePolicySetInput, binding: ProfilePolicyBinding): ProfilePolicySetInput;
 export declare function sealProfilePolicy(value: Omit<ProfilePolicyRecord, "integrityHash">): ProfilePolicyRecord;
 export declare function validateProfilePolicy(value: unknown, binding?: ProfilePolicyBinding): ProfilePolicyRecord;
 export declare function publicProfilePolicy(profile: string, policy: ProfilePolicyRecord | null, asset?: X402Asset | X402SolanaPolicyNetwork): unknown;

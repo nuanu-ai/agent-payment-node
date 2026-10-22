@@ -43,7 +43,7 @@ export class EncryptedProfilePolicy {
     }
     async set(binding, input) {
         const current = await this.loadForSet(binding);
-        const { x402Payees: suppliedPayees, ...supplied } = canonicalPolicyInput(input);
+        const { x402Payees: suppliedPayees, ...supplied } = canonicalPolicyInput(input, binding);
         // An omitted payee pin keeps the current one; null removes it.
         const x402Payees = suppliedPayees === undefined ? current?.x402Payees : suppliedPayees ?? undefined;
         const effective = {

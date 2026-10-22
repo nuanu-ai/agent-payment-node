@@ -6,6 +6,7 @@ import { parseAtomic } from "./money.js";
 import { parsePublicHttpsUrl } from "./network-policy.js";
 import { decodePaymentRequiredHeader, inspectCandidates } from "./x402-codec.js";
 import { inspectX402 } from "./x402-http.js";
+import { x402AssetLabel } from "./x402-token-unit.js";
 const DOMAIN_TYPE_HASH = keccak256(stringToHex("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"));
 const HASH = /^[a-f0-9]{64}$/u;
 const BYTES32 = /^0x[0-9a-f]{64}$/u;
@@ -100,8 +101,9 @@ export function selectPrepareOffer(challenge, underCap, evidence, wallet, contex
     }
     if (!hasMatchingMethod)
         throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer matches the payer transfer method.");
-    if (!hasSufficientBalance)
-        throw new ApnError("APN_INSUFFICIENT_USDC", "USDC balance is insufficient for every offer within the explicit cap.");
+    if (!hasSufficientBalance) {
+        throw new ApnError("APN_INSUFFICIENT_USDC", `The balance of ${x402AssetLabel(context.asset.chainId, context.asset.token)} is insufficient for every offer within the explicit cap.`, { reason: "x402_selected_asset_balance_insufficient", chain: context.asset.network, asset: context.asset.token, balance_atomic: balance.toString() });
+    }
     if (decimalsMismatch) {
         throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's declared decimals differ from the token's on-chain decimals().", { reason: "x402_token_decimals_mismatch", chain: context.asset.network, asset: context.asset.token });
     }
