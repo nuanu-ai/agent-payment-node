@@ -444,7 +444,7 @@ test("independent services serialize competing same-key bindings through one ato
   assert.ok(winners.length > 0);
   assert.ok(losers.length > 0);
   assert.equal(new Set(winners.map(record => record.operationId)).size, 1);
-  assert.ok(losers.every(error => error.code === "APN_IDEMPOTENCY_CONFLICT"));
+  assert.deepEqual(losers.map(error => error.code).filter(code => code !== "APN_IDEMPOTENCY_CONFLICT"), []);
   const profile = join(temporary.root, "gasless-usdt-bound-operations", "a".repeat(64));
   assert.equal((await readdir(join(temporary.root, "gasless-usdt-bound-operations", "claims"))).filter(name => name.endsWith(".json")).length, 1);
   assert.equal((await readdir(profile)).filter(name => name.endsWith(".json")).length, 1);

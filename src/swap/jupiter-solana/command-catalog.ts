@@ -3,6 +3,7 @@ import type { CommandRequest } from "../../commands.js";
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { solanaAddress } from "../../solana/rpc.js";
+import { requiredOptionsExample } from "../../command-example.js";
 import { slippageAboveCap } from "../slippage-refusal.js";
 
 const option = (name: CommandOption["name"], type: CommandOption["type"], constraints: readonly string[]): CommandOption =>
@@ -15,6 +16,8 @@ const states = { terminal: ["finalized", "failed_before_effect", "failed_confirm
 const profile = option("--profile", "profile", ["existing_profile_name"]);
 const account = option("--account", "string", ["canonical_32_byte_base58_solana_address"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
+const EXAMPLE_VALUES = { "--profile": "<profile>", "--account": "<solana-address>", "--to": "<solana-recipient-address>", "--amount": "10000000",
+  "--slippage-bps": "50", "--owner-slippage-cap-bps": "100", "--quote": "<quote-hash>", "--idempotency-key": "jupiter-0001", "--operation": "<operation-id>" };
 
 export const JUPITER_COMMAND_GROUPS: readonly CommandGroup[] = [
   { path: ["swap", "solana"], summary: "Solana guarded swaps.", kind: "group" },
@@ -40,7 +43,7 @@ function command(name: string, options: readonly CommandOption[], summary: strin
   const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
   return { path: ["swap", "solana", "jupiter", name], synopsis: `apn swap solana jupiter ${name}${suffix}`, summary, options,
     effect: { class: effect, summary }, approval: { class: name === "approve" || name === "execute" ? "foreground_tty" : "none", when: name === "approve" || name === "execute" ? "Exact genuine TTY approval; MCP returns the foreground CLI handoff." : "No financial effect." }, output, states,
-    recovery: [], examples: [`apn swap solana jupiter ${name}`] };
+    recovery: [], examples: [requiredOptionsExample(["swap", "solana", "jupiter", name], options, EXAMPLE_VALUES)] };
 }
 
 export function bindJupiterCommand(path: string, options: Readonly<Record<string, string>>): CommandRequest {

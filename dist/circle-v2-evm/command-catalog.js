@@ -2,9 +2,13 @@ import { deriveCircleFundingParameters } from "./funding-binding.js";
 import { exactKeys, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { isCircleDestinationChain } from "./catalog.js";
+import { requiredOptionsExample } from "../command-example.js";
 const option = (name, type, constraints, required = true) => ({ name, type, required,
     default: { kind: "none" }, constraints, sensitivity: "operator_input" });
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
+const EXAMPLE_VALUES = { "--profile": "<source-profile>", "--destination-profile": "<destination-gas-profile>", "--destination-chain": "59144",
+    "--idempotency-key": "circle-0001", "--beneficiary": "<beneficiary-address>", "--gross-atomic": "1000000", "--max-issuer-fee-atomic": "1000",
+    "--min-mint-atomic": "999000", "--operation": "<operation-id>", "--transaction-hash": "<destination-mint-transaction-hash>" };
 export const CIRCLE_EVM_GROUPS = [{ path: ["circle", "evm"], summary: "CCTP V2 Fast Arbitrum USDC to Sei, Linea or Monad for any profile, with separate destination gas consent.", kind: "group" }];
 export const CIRCLE_EVM_COMMANDS = [
     command("prepare", [option("--profile", "profile", ["local_evm_custody_source_signer"]), option("--destination-profile", "profile", ["local_evm_custody_destination_gas_signer"]),
@@ -27,7 +31,7 @@ function command(action, options, summary, effect) {
         effect: { class: effect, summary }, approval: { class: foreground ? "foreground_tty" : "none", when: foreground ? "Exact physical foreground TTY consent before signing; MCP provides the CLI handoff." : "No financial effect." },
         output: { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1, success: "Checked Circle operation, receipts and usage state.", failures: ["Classified refusal; ambiguous effects hold all reservations and are never resent."] },
         states: { terminal: ["completed", "cleaned", "cancelled_unsubmitted", "nonce_retired", "external_fulfilled", "abandoned_unknown"], non_terminal: ["awaiting_source", "source_unknown", "awaiting_mint", "mint_unknown", "awaiting_finality", "cleanup_required"] },
-        recovery: [{ command_path: ["circle", "evm", "observe"], when: "Any prior effect marker exists." }], examples: [`apn circle evm ${action}`] };
+        recovery: [{ command_path: ["circle", "evm", "observe"], when: "Any prior effect marker exists." }], examples: [requiredOptionsExample(["circle", "evm", action], options, EXAMPLE_VALUES)] };
 }
 export function bindCircleEvmCommand(path, input) {
     const action = path.slice("circle evm ".length);

@@ -1,6 +1,7 @@
 import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { ApnError } from "../../errors.js";
 import { tronAddress } from "../../tron/codec.js";
+import { requiredOptionsExample } from "../../command-example.js";
 import { slippageAboveCap } from "../slippage-refusal.js";
 const option = (name, type, constraints) => ({ name, type, constraints, required: true, default: { kind: "none" }, sensitivity: "operator_input" });
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
@@ -11,6 +12,9 @@ const states = { terminal: ["finalized", "failed_before_effect", "failed_confirm
 const profile = option("--profile", "profile", ["existing_profile_name"]);
 const account = option("--account", "string", ["canonical_tron_base58check_address"]);
 const operation = option("--operation", "operation_id", ["64_lowercase_hex_characters"]);
+const EXAMPLE_VALUES = { "--profile": "<profile>", "--account": "<tron-address>", "--to": "<same-tron-address>", "--amount": "1000000",
+    "--slippage-bps": "50", "--owner-slippage-cap-bps": "100", "--fee-limit-sun": "50000000", "--deadline": "<unix-seconds-within-10-minutes>",
+    "--quote": "<quote-hash>", "--idempotency-key": "sunswap-0001", "--operation": "<operation-id>" };
 export const SUNSWAP_COMMAND_GROUPS = [
     { path: ["swap", "tron"], summary: "TRON guarded swaps.", kind: "group" },
     { path: ["swap", "tron", "sunswap"], summary: "Pinned SunSwap native TRX to USDT exact input.", kind: "group" },
@@ -32,7 +36,7 @@ function command(name, options, summary, effect, approval = { class: "none", whe
     const suffix = options.map((row) => ` ${row.name} <${row.type}>`).join("");
     return { path: ["swap", "tron", "sunswap", name], synopsis: `apn swap tron sunswap ${name}${suffix}`, summary, options,
         effect: { class: effect, summary }, approval, output, states,
-        recovery: [], examples: [`apn swap tron sunswap ${name}`] };
+        recovery: [], examples: [requiredOptionsExample(["swap", "tron", "sunswap", name], options, EXAMPLE_VALUES)] };
 }
 export function bindSunSwapCommand(path, options) {
     const action = path.slice("swap tron sunswap ".length);

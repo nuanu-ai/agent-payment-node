@@ -94,7 +94,7 @@ function grant(state: StateStore, account: string, profile: string, now = NOW): 
     delegation_manager: observed.delegationManager, permission_response: response };
 }
 
-async function setup(root: string, daily = "1500000", account = ACCOUNT, now = NOW) { // wall-clock tests pass their own instant: the 30-day policy starts with the runtime clock
+async function setup(root: string, daily = "1500000", account = ACCOUNT, now = NOW) { // the policy starts on the caller's clock
   const admissions = [UNISWAP_USDC, ETHEREUM_USDT].map((identifier) => ({ chain: "eip155:1", kind: "token" as const,
     identifier, rail: "swap" as const, maximumPerTransferAtomic: "1000000", dailyLimitAtomic: daily,
     mechanism: UNISWAP_TOKEN_MECHANISM_PIN }));
