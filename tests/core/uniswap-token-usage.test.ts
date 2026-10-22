@@ -710,13 +710,16 @@ test("token and native custody share nonce ownership and preserve both encrypted
   const tokenNonce = await custody.withAccountLock(token, async () => await custody.allocateNonce(token, "approval")); assert.equal(tokenNonce, "8");
   const started = transitionUniswapToken(token, "approval_submission_started", { usageReservationId: "b".repeat(64), usageState: "reserved",
     approvalAttempt: tokenAttempt(token, "approval", tokenNonce, NOW) }, NOW);
-  const [, sealed] = await Promise.all([native.core.transfer.approve(prepared.operation_id),
+  // The native transfer stays submitted while the token effect is sealed, so both signed effects are live in either order.
+  native.rpc.receiptEnabled = false; const [approved, sealed] = await Promise.all([native.core.transfer.approve(prepared.operation_id),
     custody.withAccountLock(started, async () => await custody.seal(started, "approval", tokenNonce))]);
-  assert.match(sealed.transactionHash, /^0x[a-f0-9]{64}$/u);
-  const restarted = await new EncryptedWalletStore(new StateStore(temporary.root), native.wrapping).describe("default"); assert.ok(restarted);
-  const effects = Object.values(restarted.secret.directEffects); assert.equal(effects.length, 2);
-  assert.deepEqual(effects.map((effect) => Number(parseTransaction(effect.rawTransaction).nonce)).sort(), [7, 8]);
-  new EncryptedWalletStore(new StateStore(temporary.root), native.wrapping).clear(restarted.secret);
+  assert.equal((approved as { terminal: boolean }).terminal, false); assert.match(sealed.transactionHash, /^0x[a-f0-9]{64}$/u);
+  const wallets = new EncryptedWalletStore(new StateStore(temporary.root), native.wrapping), nonces = async () => { const loaded = (await wallets.describe("default"))!;
+    try { return Object.values(loaded.secret.directEffects).map((effect) => Number(parseTransaction(effect.rawTransaction).nonce)).sort(); } finally { wallets.clear(loaded.secret); } };
+  assert.deepEqual(await nonces(), [7, 8]); native.rpc.receiptEnabled = true; // once completed, the next custody write releases only native material
+  assert.equal((await native.core.transfer.resume(prepared.operation_id) as { state: string }).state, "completed");
+  const loaded = (await wallets.describe("default"))!; await wallets.save(loaded.identity, loaded.secret); wallets.clear(loaded.secret);
+  assert.deepEqual(await nonces(), [8]); assert.equal(native.rpc.broadcastCount, 1);
 });
 
 test("a native prepare beside a sealed token swap is refused after restart and the sealed effect survives", async (t) => {

@@ -97,7 +97,7 @@ import {
   metamaskSmartAccountLegacyCapabilitySnapshot,
 } from "../../src/provider-profile.js";
 import type { TransferApprovalPort } from "../../src/tty-approval.js";
-import { RAW_TRANSACTION, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, RAW_TRANSACTION, TestProfilePolicy, TestRpc, temporaryState } from "./helpers.js";
 import { QueuedHttp, RecoveryRpc, challengeObservation, paidObservation, transferLog } from "./x402-helpers.js";
 import {
   X402_TRANSACTION,
@@ -2296,7 +2296,7 @@ async function makeFixture(options: {
   let now = NOW;
   const setNow = (value: number) => { now = value; };
   const build = (repositoryOverride?: ProviderProfileRepositoryPort) => {
-    const state = new StateStore(temporary.root, { lockWaitMs: 1_000 });
+    const state = new StateStore(temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
     const store = new EncryptedSmartAccountPermissionStore(state, wrapping);
     const adapter = new MetaMaskSmartAccountAdapter(store, consent, sessions, () => new Date(now * 1_000));
     const repository = repositoryOverride ?? new StateProfileRepository(state);
@@ -2362,7 +2362,7 @@ function directRuntime(
   engine: SmartAccountDelegationEnginePort,
   approval: TransferApprovalPort,
 ) {
-  const state = new StateStore(fixture.temporary.root, { lockWaitMs: 1_000 });
+  const state = new StateStore(fixture.temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   const permissions = new EncryptedSmartAccountPermissionStore(state, fixture.wrapping);
   const effects = new EncryptedSmartAccountDirectEffectStore(state, fixture.wrapping);
   const direct: DirectExecutionPort = new MetaMaskSmartAccountDirectAdapter(
@@ -2404,7 +2404,7 @@ function smartAccountX402Runtime(
     readonly approvedFacilitators?: readonly Address[];
   } = {},
 ) {
-  const state = new StateStore(fixture.temporary.root, { lockWaitMs: 1_000 });
+  const state = new StateStore(fixture.temporary.root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   const permissions = new EncryptedSmartAccountPermissionStore(state, fixture.wrapping);
   const materials = new EncryptedSmartAccountX402MaterialStore(state, fixture.wrapping);
   const x402 = new MetaMaskSmartAccountX402Adapter(

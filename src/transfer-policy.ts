@@ -156,8 +156,8 @@ export function publicOperation(operation: OperationRecord): unknown {
     terminal: operation.terminal,
     reason: operation.reason,
     proof_class: operation.proofClass,
-    chain: operation.evm === undefined ? CHAIN_CAIP2 : `eip155:${operation.chainId}`,
-    token: operation.evm?.asset.kind === "native" ? null : operation.token,
+    chain: publicChain(operation),
+    token: publicToken(operation),
     ...(operation.evm === undefined ? {} : { asset: publicEvmAsset(operation.evm.asset), fee_budget: {
       max_fee_wei: operation.evm.maxFeeWei, enforcement: "pre_submission_quote", quote: operation.evm.feeQuote,
     }, ...publicEvmActualFee(operation.evmActualFee, operation.evm.asset, operation.amountAtomic, operation.state), policy: { identity: "apn.direct.foreground-approval.v1", chain: `eip155:${operation.chainId}`, asset: publicEvmAsset(operation.evm.asset), amount_atomic: operation.amountAtomic, foreground_approval_required: true } }),
@@ -166,7 +166,7 @@ export function publicOperation(operation: OperationRecord): unknown {
     ...(operation.allowlist === undefined ? {} : { allowlist: publicDirectAllowlist(operation.allowlist, operation.allowlistLease) }),
     wallet_address: operation.walletAddress,
     recipient: operation.recipient,
-    amount: { atomic: operation.amountAtomic, decimal: operation.amountDecimal, decimals: operation.evm?.asset.decimals ?? USDC_DECIMALS },
+    amount: publicAmount(operation),
     ...(coinbaseGasless === undefined ? {} : { gasless_provider: "coinbase-agentic-wallet", transfer: {
       chain_id: coinbaseGasless.chainId, token: coinbaseGasless.token, sender: operation.walletAddress,
       recipient: operation.recipient, gross_atomic: coinbaseGasless.grossAtomic, recipient_atomic: coinbaseGasless.netAtomic,
@@ -221,7 +221,8 @@ export function publicOperation(operation: OperationRecord): unknown {
   };
 }
 
-export function publicReceipt(receipt: ReceiptRecord): unknown {
+/** A receipt names the parties and asset of the operation it is sealed to, so it can be audited without a status read. */
+export function publicReceipt(receipt: ReceiptRecord, operation: OperationRecord): unknown {
   const evidence = receipt.evmEvidence;
   const evmFinality = receipt.evm !== undefined && receipt.evmEvidence?.transactionVerified === true
     ? receipt.blockNumberAtomic !== undefined && directEvmRequiresSafeHead(receipt.evm.asset.chainId) &&
@@ -235,6 +236,12 @@ export function publicReceipt(receipt: ReceiptRecord): unknown {
       ...publicEvmActualFee(receipt.evmActualFee, receipt.evm.asset, receipt.amountAtomic as string, receipt.state), chain_evidence: receipt.evmEvidence ?? null, finality: evmFinality }),
     ...(receipt.evm !== undefined || receipt.evmActualFee === undefined ? {} : publicEvmActualFee(receipt.evmActualFee, undefined, "0", receipt.state)),
     operation_id: receipt.operationId,
+    profile: operation.profile,
+    chain: publicChain(operation),
+    token: publicToken(operation),
+    wallet_address: operation.walletAddress,
+    recipient: operation.recipient,
+    amount: publicAmount(operation),
     state: receipt.state,
     terminal: receipt.terminal,
     reason: receipt.reason,
@@ -250,6 +257,18 @@ export function publicReceipt(receipt: ReceiptRecord): unknown {
 }
 
 export { canonicalAddress, validateBalance };
+
+function publicChain(operation: OperationRecord): string {
+  return operation.evm === undefined ? CHAIN_CAIP2 : `eip155:${operation.chainId}`;
+}
+
+function publicToken(operation: OperationRecord): Address | null {
+  return operation.evm?.asset.kind === "native" ? null : operation.token;
+}
+
+function publicAmount(operation: OperationRecord) {
+  return { atomic: operation.amountAtomic, decimal: operation.amountDecimal, decimals: operation.evm?.asset.decimals ?? USDC_DECIMALS };
+}
 
 function addressTopic(address: Address): string {
   return `0x${address.slice(2).toLowerCase().padStart(64, "0")}`;

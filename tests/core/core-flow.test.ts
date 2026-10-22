@@ -300,7 +300,13 @@ test("the Base USDC lane records its actual OP-stack fee with the outcome and sh
   const receipt = await makeCore({ root: temporary.root }).execute({ command: "receipt.get", operationId });
   assert.equal(receipt.ok, true, JSON.stringify(receipt));
   assert.deepEqual((receipt.receipt as Record<string, unknown>).actual_network_fee, fee);
-  assert.deepEqual(operationRecord(await makeCore({ root: temporary.root }).execute({ command: "operation.status", operationId })).actual_network_fee, fee);
+  const status = operationRecord(await makeCore({ root: temporary.root }).execute({ command: "operation.status", operationId }));
+  assert.deepEqual(status.actual_network_fee, fee);
+  // QA 0.5.64: the receipt names the lane's asset and both parties, as status does.
+  const shown = receipt.receipt as Record<string, unknown>;
+  assert.deepEqual([shown.chain, shown.token, shown.wallet_address, shown.recipient, (shown.amount as { decimals: number }).decimals],
+    ["eip155:8453", BASE_USDC, WALLET, RECIPIENT, 6]);
+  for (const key of ["profile", "chain", "token", "wallet_address", "recipient", "amount"]) assert.deepEqual(shown[key], status[key], key);
 });
 
 test("ambiguous submission with unavailable receipt stays unknown without nonce proof or resend", async (t) => {
