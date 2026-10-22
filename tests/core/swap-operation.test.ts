@@ -12,7 +12,7 @@ import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { assertActiveSwapPolicyUnchanged, assertOperationProtocolRegistry } from "../../src/swap/family-guards.js";
 import type { GuardedSwapApprovalIntent } from "../../src/swap/runtime.js";
 import { guardedSwapApprovalCode } from "../../src/swap/tty-consent.js";
-import { temporaryState } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, temporaryState } from "./helpers.js";
 
 const ACCOUNT = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1", RECIPIENT = "0x2222222222222222222222222222222222222222";
 const USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", H = (letter: string) => letter.repeat(64);
@@ -34,7 +34,7 @@ const quote: SwapQuoteInput = { profile: "swap-op", account: ACCOUNT, recipient:
     blockNumber: "100", blockHash: `0x${H("1")}`, headBlockNumber: "101", maxHeadDrift: 2, gasEstimate: "100000" } };
 
 async function fixture(root: string) {
-  const operations = new SwapOperationRepository(root), usage = new AssetUsageLedger(root), service = new GuardedSwapService(operations, usage);
+  const operations = new SwapOperationRepository(root, { lockWaitMs: TEST_LOCK_WAIT_MS }), usage = new AssetUsageLedger(root, { lockWaitMs: TEST_LOCK_WAIT_MS }), service = new GuardedSwapService(operations, usage);
   const compiled = compileAllowlistPolicyOverlay(overlay).registry;
   const policy = sealAssetPolicyRegistry({ schemaVersion: compiled.schemaVersion, registryVersion: compiled.registryVersion,
     publishedAt: compiled.publishedAt, effectiveDate: compiled.effectiveDate,

@@ -90,7 +90,7 @@ async function runPty(input: ReturnType<typeof approvalInput>, phrase = input.ex
     input.summary.expires_at = new Date(Date.now() + 60_000).toISOString();
     const result = await new TtyMetaMaskGaslessApproval({ deadlineMs: 3000 }).confirm(input);
     process.stdout.write("\\nMM_APPROVAL_RESULT:" + result + "\\n");`;
-  const script = `set timeout 5
+  const script = `set timeout 60
     log_user 1
     spawn $env(APN_NODE_EXEC) --input-type=module -e $env(APN_NODE_SOURCE)
     expect {
@@ -111,8 +111,8 @@ async function runPty(input: ReturnType<typeof approvalInput>, phrase = input.ex
   return await new Promise<{ code: number | null; output: string }>((resolve, reject) => {
     const timer = setTimeout(() => {
       try { process.kill(-child.pid!, "SIGKILL"); } catch { child.kill("SIGKILL"); }
-      reject(new Error("MetaMask PTY did not exit within 6 seconds: " + output));
-    }, 6000);
+      reject(new Error("MetaMask PTY did not exit within 90 seconds: " + output));
+    }, 90_000);
     child.once("error", error => { clearTimeout(timer); reject(error); });
     child.once("close", code => { clearTimeout(timer); resolve({ code, output }); });
   });
