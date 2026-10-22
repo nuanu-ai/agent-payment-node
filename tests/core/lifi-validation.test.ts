@@ -203,7 +203,7 @@ test("LI.FI concurrent preparation has one materialization and blocks every othe
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   const quote = await s.core.execute({ command: "bridge.routes", profile: s.profile, request: s.request });
   const input = { command: "bridge.prepare", profile: s.profile, quote: (quote.data as any).quote_hash, route: "route-across", idempotencyKey: "race-bridge-0001" } as const;
-  const results = await Promise.all([s.core.execute(input), s.core.execute(input)]); assert.ok(results.every((r) => r.ok));
+  const results = await Promise.all([s.core.execute(input), s.core.execute(input)]); assert.ok(results.every((r) => r.ok), JSON.stringify(results.map((r) => r.error)));
   assert.deepEqual(results[0]!.operation, results[1]!.operation); assert.equal(s.provider.materializeCalls, 1);
   const [op] = await savedBridgeOperations(s.core.bridges.records); assert.ok(op);
   const service = new OperationService(s.state);

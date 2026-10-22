@@ -12,7 +12,7 @@ import type { Address, Hex } from "../../src/model.js";
 import type { NativePort } from "../../src/ports.js";
 import { StateStore } from "../../src/state.js";
 import type { TransferApprovalIntent, TransferApprovalPort } from "../../src/tty-approval.js";
-import { RECIPIENT, TestClock, TestRpc } from "./helpers.js";
+import { TEST_LOCK_WAIT_MS, RECIPIENT, TestClock, TestRpc } from "./helpers.js";
 import { activateDirectPolicy, evmDirectAdmissions } from "./direct-allowlist-helpers.js";
 
 const { ApnError } = await testRuntime(errorRuntime, "errors.js");
@@ -114,7 +114,7 @@ function quoteFeeModel(chainId: DirectEvmChainId) {
 }
 
 export function evmCore(root: string, rpc = new EvmTestRpc(), wrapping = new EvmWrappingSecret(), approval = new EvmApproval(), wrapNative?: (native: NativePort) => NativePort) {
-  const state = new StateStore(root), clock = new TestClock();
+  const state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS }), clock = new TestClock();
   clock.value = new Date();
   const local = new LocalWalletNative(state, wrapping, approval);
   const native = wrapNative?.(local) ?? local;

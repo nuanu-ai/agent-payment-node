@@ -20,6 +20,7 @@ import { gaslessDeployment, gaslessProtocolHash } from "../../src/gasless/regist
 import { gaslessPolicyChain, localGaslessMechanism } from "../../src/gasless/asset-policy.js";
 import { gaslessFailure } from "../../src/gasless/validation.js";
 import { findStored } from "./stored-operations.js";
+import { TEST_LOCK_WAIT_MS } from "./helpers.js";
 
 export const GASLESS_TEST_RECIPIENT = getAddress("0x4444444444444444444444444444444444444444");
 export const GASLESS_TEST_OUTER = getAddress("0x5555555555555555555555555555555555555555");
@@ -140,7 +141,7 @@ export async function gaslessFixture(root: string, chainId: GaslessChainId = 845
   delegation?: "empty" | "expected"; custody?: GaslessCustodyPort; abandonApproval?: OperationAbandonApprovalPort;
 } = {}) {
   const now = options.now ?? new Date("2026-09-09T00:00:00.000Z"), key = options.key ?? generatePrivateKey();
-  const account = privateKeyToAccount(key), profile = "gasless-local", state = new StateStore(root);
+  const account = privateKeyToAccount(key), profile = "gasless-local", state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   const wrapping = options.wrapping ?? new GaslessWrapping(), wallets = new EncryptedWalletStore(state, wrapping);
   await state.initialize();
   if (options.initializeWallet !== false) {

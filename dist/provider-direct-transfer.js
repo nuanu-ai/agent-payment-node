@@ -337,7 +337,7 @@ export class ProviderDirectTransferService {
             // A terminal provider transfer's receipt must prove its exact terminal state (checked here, not on every load).
             if (operation.terminal)
                 assertDirectTerminalReceiptAuthority(operation, receipt);
-            return publicReceipt(receipt);
+            return publicReceipt(receipt, operation);
         });
     }
     async assertFrozenPreconditions(operation, binding) {

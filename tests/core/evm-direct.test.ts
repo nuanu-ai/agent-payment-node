@@ -524,7 +524,7 @@ for (const [chainId, feeModel] of [[42161, "arbitrum-inclusive"], [56, undefined
   const stored = (await setup.state.findOperation(prepared.operation_id))!;
   const record = (await setup.state.loadReceipt(stored.profileHash, stored.operationId))!;
   const { safeBlockNumberAtomic: _safeNumber, safeBlockHash: _safeHash, ...withoutSafe } = record.evmEvidence!;
-  assert.equal((publicReceipt({ ...record, evmEvidence: withoutSafe }) as { finality: string }).finality, "inclusion_only");
+  assert.equal((publicReceipt({ ...record, evmEvidence: withoutSafe }, stored) as { finality: string }).finality, "inclusion_only");
   const { assertDirectTerminalReceiptAuthority } = await import("../../src/direct-terminal-receipt.js");
   for (const override of [{ safeBlockNumberAtomic: undefined, safeBlockHash: undefined }, { safeBlockNumberAtomic: "1" }, { safeBlockHash: `0x${"c".repeat(64)}` }]) {
     assert.throws(() => assertDirectTerminalReceiptAuthority(stored, { ...record, evmEvidence: { ...record.evmEvidence!, ...override } } as typeof record), { code: "APN_STATE_CORRUPT" });
