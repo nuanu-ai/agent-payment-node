@@ -18,17 +18,24 @@ type WorkerMessage =
 
 const workerPath = fileURLToPath(new URL("./tron-interruption-worker.js", import.meta.url));
 
+/** What a worker wrote to stderr, so a death before the expected SIGKILL reports its own cause. */
+const stderrOf = new WeakMap<ChildProcess, string[]>();
+const childError = (child: ChildProcess) => (stderrOf.get(child) ?? []).join("");
+
 function worker(mode: "first" | "resume", root: string, operationId?: string): ChildProcess {
-  return fork(workerPath, [mode, root, ...(operationId === undefined ? [] : [operationId])], {
+  const child = fork(workerPath, [mode, root, ...(operationId === undefined ? [] : [operationId])], {
     stdio: ["ignore", "ignore", "pipe", "ipc"], serialization: "advanced",
   });
+  const chunks: string[] = []; stderrOf.set(child, chunks);
+  child.stderr?.setEncoding("utf8"); child.stderr?.on("data", (chunk: string) => { chunks.push(chunk); });
+  return child;
 }
 
 async function nextMessage(child: ChildProcess): Promise<WorkerMessage> {
   return await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => finish(new Error("TRON interruption worker timed out.")), 10_000);
     const message = (value: WorkerMessage) => finish(value.kind === "error" ? new Error(value.message) : null, value);
-    const exit = (code: number | null, signal: NodeJS.Signals | null) => finish(new Error(`TRON interruption worker exited ${code ?? signal} before reporting.`));
+    const exit = (code: number | null, signal: NodeJS.Signals | null) => finish(new Error(`TRON interruption worker exited ${code ?? signal} before reporting. stderr: ${childError(child)}`));
     const error = (reason: Error) => finish(reason);
     function finish(reason: Error | null, value?: WorkerMessage): void {
       clearTimeout(timeout); child.off("message", message); child.off("exit", exit); child.off("error", error);
@@ -62,7 +69,7 @@ test("TRON real SIGKILL after received broadcast restarts as observation only", 
   const killed = once(first, "exit");
   assert.equal(first.kill("SIGKILL"), true);
   const [code, signal] = await killed;
-  assert.equal(code, null);
+  assert.equal(code, null, `the worker died before SIGKILL; stderr: ${childError(first)}`);
   assert.equal(signal, "SIGKILL");
   assert.equal(first.signalCode, "SIGKILL");
 
