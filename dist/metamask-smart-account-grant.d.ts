@@ -1,3 +1,4 @@
+import { ApnError } from "./errors.js";
 import type { Address, Hex } from "./model.js";
 export interface SmartAccountPermissionRequestShape {
     readonly sessionAddress: Address;
@@ -23,6 +24,11 @@ export interface ValidatedSmartAccountGrant {
     readonly permissionResponse: Readonly<Record<string, unknown>>;
 }
 export declare const BASE_CHAIN_HEX: "0x2105";
+/**
+ * The account is MetaMask's own but its official Base Smart Account is not enabled yet: a setup step the owner takes, not an
+ * unsupported path, so the next step is to enable it and retry the same intent, never another custody (QA 0.5.70).
+ */
+export declare function smartAccountInactive(): ApnError;
 export declare function smartAccountEnvironment(): import("@metamask/smart-accounts-kit").SmartAccountsEnvironment;
 export declare function validateSmartAccountObservation(value: unknown, request: SmartAccountPermissionRequestShape): ValidatedSmartAccountGrant;
 export declare function assertSmartAccountPreflight(value: unknown): SmartAccountProviderObservation;
