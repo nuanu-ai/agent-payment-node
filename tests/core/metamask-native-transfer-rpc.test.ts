@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { getAddress, toHex } from "viem";
 import { EvmRpc } from "../../src/evm-rpc.js";
 import { prepareWithRpc, observeWithRpc, fundingWithRpc } from "../../src/metamask-native-transfer-rpc.js";
-import { metaMaskNativeQuoteTransfer, type MetaMaskNativeFeeChainId, type MetaMaskNativeFeeQuote } from "../../src/metamask-native-fee-evidence.js";
+import { metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote, type MetaMaskNativeFeeChainId, type MetaMaskNativeFeeQuote } from "../../src/metamask-native-fee-evidence.js";
+import { withNativeFeeCeiling } from "../../src/metamask-native-transfer-owner.js";
+import { ApnError } from "../../src/errors.js";
+import { failureEnvelope } from "../../src/output.js";
 import type { Hex } from "../../src/model.js";
 
 const HASH = `0x${"a".repeat(64)}` as Hex, BLOCKHASH = `0x${"b".repeat(64)}` as Hex, ORIGIN = "https://fixed.example";
@@ -83,7 +86,10 @@ test("funding reads balances and the pending nonce on one endpoint with one chai
 });
 test("wrong chain and ceiling refuse before accepted quote", async () => {
   const w=new Wire(1);w.wrongChain=true;await assert.rejects(w.prepare(),{code:"APN_CHAIN_MISMATCH"});
-  const x=new Wire(1);await assert.rejects(prepareWithRpc(x.rpc(),{chainId:1,maximumNativeFeeWei:"299",sender:SENDER,recipient:RECIPIENT,amountAtomic:"2500"}),{code:"APN_STATE_CORRUPT"});
+  // QA 0.5.71: a fresh quote above the owner's ceiling is a fee-budget refusal with both values, not a corrupt record.
+  const x=new Wire(1);await assert.rejects(prepareWithRpc(x.rpc(),{chainId:1,maximumNativeFeeWei:"299",sender:SENDER,recipient:RECIPIENT,amountAtomic:"2500"}),
+    (error:any)=>error.code==="APN_FEE_BUDGET_EXCEEDED"&&error.details.reason==="native_fee_quote_above_owner_cap"&&error.details.chain==="eip155:1"&&
+      error.details.native_symbol==="ETH"&&error.details.quoted_fee_wei==="300"&&error.details.fee_cap_wei==="299");
 });
 test("pending and missing execution or OP data never complete payment", async () => {
   for (const condition of ["pending","missingFee","missingL1"] as const) {
@@ -141,4 +147,18 @@ test("the explicit payer binds nonce, estimate and the canonical receipt",async(
   assert.equal((captured.find(c=>c.method==="eth_estimateGas")?.params[0] as {from:string}).from,SENDER);
   assert.equal((await w.observe()).kind,"accepted");
   w.mutateTx={from:"0xf41170df51aab52aaa04fbc3ff325cf051644aca"};await assert.rejects(w.observe());
+});
+
+test("QA 0.5.71: the owner ceiling bounds a fresh quote exactly, names both limits when it refuses, and a stored quote above its cap stays corrupt", async () => {
+  const input = { chainId: 1 as const, sender: SENDER, recipient: RECIPIENT, amountAtomic: "2500" };
+  const exact = await prepareWithRpc(new Wire(1).rpc(), { ...input, maximumNativeFeeWei: "300" });
+  assert.equal(exact.feeQuote.totalQuoteWei, "300");
+  assert.throws(() => validateMetaMaskNativeFeeQuote({ ...exact, nativeFeeCapAtomic: "299" }, new Date(exact.feeQuote.observedAt)), { code: "APN_STATE_CORRUPT" });
+  const refused = await prepareWithRpc(new Wire(1).rpc(), { ...input, maximumNativeFeeWei: "299" }).then(() => assert.fail("prepared"), (error: unknown) => error as ApnError);
+  const named = withNativeFeeCeiling(refused, { perTransferWei: "299", dailyRemainingWei: "4000" }, "mm-owned-test") as ApnError;
+  assert.deepEqual(named.details, { ...refused.details, per_transfer_cap_wei: "299", daily_remaining_wei: "4000",
+    nextActions: ["apn allowlist policy status --profile mm-owned-test"] });
+  assert.match(named.message, /0\.0000000000000003 ETH\) exceeds the owner's native fee ceiling/u);
+  assert.deepEqual(failureEnvelope("wallet.metamask.native-transfer", "request", named).next_actions, ["apn allowlist policy status --profile mm-owned-test"]);
+  const other = new ApnError("APN_RPC_PROTOCOL", "unrelated"); assert.equal(withNativeFeeCeiling(other, { perTransferWei: "1", dailyRemainingWei: "1" }, "p"), other);
 });

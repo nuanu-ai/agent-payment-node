@@ -4,7 +4,8 @@ import { getAddress, type Address } from "viem";
 import { hashObject } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { evmUint } from "./evm-asset.js";
-import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
+import { chainDisplay } from "./chain-policy.js";
+import { directEvmRequiresSafeHead, evmNativeCurrencyLabel } from "./evm-direct-networks.js";
 import { EvmRpc } from "./evm-rpc.js";
 import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "./evm-rpc-codec.js";
 import { decodeRelayBaseReceiptFee } from "./relay/source-fee-proof.js";
@@ -82,6 +83,11 @@ export async function prepareWithRpc(rpc: EvmRpc, input: MetaMaskNativeQuoteInpu
   const estimated = await rpc.estimate({ chainId, from: sender, to, data, valueAtomic: "0" });
   const economics = { nonceAtomic, ...estimated, maximumGasCostAtomic: (evmUint(estimated.gasLimitAtomic, true) * evmUint(estimated.maxFeePerGasAtomic, true)).toString() };
   const feeQuote = await rpc.feeQuote(chainId, economics);
+  // A fresh quote above the owner's ceiling is a budget refusal before anything is prepared, not a damaged record (QA 0.5.71).
+  if (evmUint(feeQuote.totalQuoteWei, true) > BigInt(cap)) throw new ApnError("APN_FEE_BUDGET_EXCEEDED",
+    `The current network-fee quote (${chainDisplay(feeQuote.totalQuoteWei, 18)} ${evmNativeCurrencyLabel(chainId)}) exceeds the owner's native fee ceiling ` +
+    `for this transfer (${chainDisplay(cap, 18)} ${evmNativeCurrencyLabel(chainId)}).`, { reason: "native_fee_quote_above_owner_cap", chain: `eip155:${chainId}`,
+      native_symbol: evmNativeCurrencyLabel(chainId), quoted_fee_wei: feeQuote.totalQuoteWei, fee_cap_wei: cap });
   const body = { schemaVersion: METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2, chainId, sender, token: to, tokenDecimals: 6 as const,
     recipient, amountAtomic, nativeFeeCapAtomic: cap, transaction: { type: 2 as const, to, data, valueAtomic: "0" as const,
       nonceAtomic, gasLimitAtomic: estimated.gasLimitAtomic, maxFeePerGasAtomic: estimated.maxFeePerGasAtomic,

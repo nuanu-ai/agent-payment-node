@@ -23,6 +23,11 @@ export declare function assertMetaMaskNativeOwnedScope(scope: MetaMaskNativeOwne
 /** The last guard before the hand-off, never a caller supplied callback: local custody, the vendor Guard policy, funds and nonce. */
 export declare function assertMetaMaskNativeOwnedContextCurrent(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<void>;
 /** One foreground command: admission, vendor Guard check, quote, consent, the single hand-off and its durable outcome. */
+/** A quote above the owner's native ceiling names both limits that ceiling came from, and where the owner reviews them. */
+export declare function withNativeFeeCeiling(error: unknown, caps: {
+    readonly perTransferWei: string;
+    readonly dailyRemainingWei: string;
+}, profile: string): unknown;
 export declare function runMetaMaskNativeTransfer(stateRoot: string, input: MetaMaskNativeTransferInput): Promise<{
     next_actions: string[];
     mfa_task?: never;
