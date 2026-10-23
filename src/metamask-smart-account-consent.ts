@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import type { Address } from "./model.js";
 import { ApnError } from "./errors.js";
-import { BASE_CHAIN_HEX, smartAccountEnvironment } from "./metamask-smart-account-grant.js";
+import { BASE_CHAIN_HEX, smartAccountEnvironment, smartAccountInactive } from "./metamask-smart-account-grant.js";
 
 export interface SmartAccountConsentRequest {
   readonly sessionAddress: Address;
@@ -306,7 +306,7 @@ function rejectHttp(response: ServerResponse, reject: (error: unknown) => void):
 function browserFailure(code: BrowserFailure): ApnError {
   if (code === "user_rejected") return new ApnError("APN_PROVIDER_SESSION_REQUIRED", "MetaMask permission consent was rejected; retry the same connect intent if desired.", { retryable: true });
   if (code === "missing_provider") return new ApnError("APN_PROVIDER_UNAVAILABLE", "No injected MetaMask provider was available in the foreground browser.", { retryable: true });
-  if (code === "inactive_account") return new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Enable the official MetaMask Smart Account on Base, then retry the same connect intent.", { retryable: true });
+  if (code === "inactive_account") return smartAccountInactive();
   if (code === "unsupported_permission") return new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The selected MetaMask account does not support Base ERC-7715 allowance permissions.", { retryable: false });
   if (code === "changed_account") return new ApnError("APN_PROFILE_DRIFT", "The selected MetaMask account changed during foreground consent.", { retryable: false });
   if (code === "wrong_chain") return new ApnError("APN_CHAIN_MISMATCH", "MetaMask did not remain on Base chain 8453.", { retryable: true });
