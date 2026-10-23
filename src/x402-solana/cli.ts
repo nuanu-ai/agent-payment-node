@@ -40,19 +40,21 @@ export async function executeX402SolanaCli(bound: BoundCommand, options: Runtime
     // else the payment's actions (a prepared payment holds its claim: the same-key pay, then the no-send observe; QA 0.5.65).
     // After exposure (a seller HTTP error, a transport error, a malformed response) the payment may well have landed; the
     // first action is the no-send observe and nothing here or in a replay sends again.
-    if (operationId !== undefined) {
-      try {
-        const saved = await new X402SolanaService(root, x402SolanaPorts(root, options)).records.find(operationId);
-        if (saved !== null) {
-          const operation = publicX402Solana(saved) as { readonly next_actions: readonly string[] };
-          const classified = asApnError(asRateLimited(error)), own = failureEnvelope(request.command, requestId, classified).next_actions;
-          const nextActions = saved.exposure === null && own.length > 0 ? own : operation.next_actions;
-          return { ...failureEnvelope(request.command, requestId, new ApnError(classified.code, classified.message,
-            { ...classified.details, operation_id: saved.operationId, state: saved.state, signed: saved.signed !== null,
-              exposed: saved.exposure !== null, nextActions })), operation };
-        }
-      } catch { /* The original refusal is answered. */ }
-    }
+    try {
+      // A failure after prepare saved the record (a derived-index write, QA 0.5.67) still names it: the key fixes the id.
+      const service = new X402SolanaService(root, x402SolanaPorts(root, options));
+      const id = operationId ?? (request.command === "x402.solana.pay" ? service.operationIdFor(request.profile, request.idempotencyKey) : undefined);
+      const saved = id === undefined ? null : await service.records.find(id);
+      if (saved !== null) {
+        operationId = saved.operationId;
+        const operation = publicX402Solana(saved) as { readonly next_actions: readonly string[] };
+        const classified = asApnError(asRateLimited(error)), own = failureEnvelope(request.command, requestId, classified).next_actions;
+        const nextActions = saved.exposure === null && own.length > 0 ? own : operation.next_actions;
+        return { ...failureEnvelope(request.command, requestId, new ApnError(classified.code, classified.message,
+          { ...classified.details, operation_id: saved.operationId, state: saved.state, signed: saved.signed !== null,
+            exposed: saved.exposure !== null, nextActions })), operation };
+      }
+    } catch { /* The original refusal is answered. */ }
     return failureEnvelope(request.command, requestId, error);
   } finally {
     if (operationId !== undefined) await refreshOperationIndex(root, operationId);
