@@ -163,6 +163,13 @@ function amountInput(value) {
     return evmUint(value, true).toString();
 }
 /** One foreground command: admission, vendor Guard check, quote, consent, the single hand-off and its durable outcome. */
+/** A quote above the owner's native ceiling names both limits that ceiling came from, and where the owner reviews them. */
+export function withNativeFeeCeiling(error, caps, profile) {
+    if (!(error instanceof ApnError) || error.details?.reason !== "native_fee_quote_above_owner_cap")
+        return error;
+    return new ApnError(error.code, error.message, { ...error.details, per_transfer_cap_wei: caps.perTransferWei,
+        daily_remaining_wei: caps.dailyRemainingWei, nextActions: [`apn allowlist policy status --profile ${profile}`] });
+}
 export async function runMetaMaskNativeTransfer(stateRoot, input) {
     const profileName = canonicalProfile(input.profile), chainId = chain(input.chainId), key = canonicalIdempotencyKey(input.idempotencyKey);
     const recipient = recipientInput(input.recipient), amountAtomic = amountInput(input.amountAtomic), state = new StateStore(stateRoot), journal = new MetaMaskNativeJournal(stateRoot);
@@ -200,7 +207,9 @@ export async function runMetaMaskNativeTransfer(stateRoot, input) {
             const vendor = await readMetaMaskNativeVendorPolicy(chainId, sender, recipient);
             if (vendor.selectedAddress.toLowerCase() !== payer || vendor.tradingMode !== "guard" || !/^[a-f0-9]{64}$/.test(vendor.vendorProjectHash))
                 blocked("MetaMask vendor wallet or Guard mode differs from the paying profile.");
-            const prepared = await prepareMetaMaskNativeQuote({ chainId, maximumNativeFeeWei: cap, sender, recipient, amountAtomic });
+            const prepared = await prepareMetaMaskNativeQuote({ chainId, maximumNativeFeeWei: cap, sender, recipient, amountAtomic }).catch((error) => {
+                throw withNativeFeeCeiling(error, { perTransferWei: admission.caps.maximumPerTransferAtomic, dailyRemainingWei: admission.dailyRemainingAtomic }, profileName);
+            });
             const quote = freeze(structuredClone(validateMetaMaskNativeFeeQuote(prepared.quote, new Date()))), transfer = metaMaskNativeQuoteTransfer(quote);
             if (quote.sender.toLowerCase() !== payer || quote.nativeFeeCapAtomic !== cap || transfer.recipient !== recipient || transfer.amountAtomic !== amountAtomic)
                 blocked("MetaMask native quote differs from the requested transfer or the current policy ceiling.");
