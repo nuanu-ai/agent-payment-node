@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { BASE_CHAIN_HEX, smartAccountEnvironment } from "./metamask-smart-account-grant.js";
+import { BASE_CHAIN_HEX, smartAccountEnvironment, smartAccountInactive } from "./metamask-smart-account-grant.js";
 const CALLBACK_PATH = "/callback";
 const MAX_BODY_BYTES = 256 * 1024;
 const DEADLINE_MS = 5 * 60_000;
@@ -258,7 +258,7 @@ function browserFailure(code) {
     if (code === "missing_provider")
         return new ApnError("APN_PROVIDER_UNAVAILABLE", "No injected MetaMask provider was available in the foreground browser.", { retryable: true });
     if (code === "inactive_account")
-        return new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Enable the official MetaMask Smart Account on Base, then retry the same connect intent.", { retryable: true });
+        return smartAccountInactive();
     if (code === "unsupported_permission")
         return new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The selected MetaMask account does not support Base ERC-7715 allowance permissions.", { retryable: false });
     if (code === "changed_account")
