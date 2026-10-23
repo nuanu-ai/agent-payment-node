@@ -2,7 +2,8 @@ import type { X402OperationRecord, X402ReceiptRecord, X402ResultRecord } from ".
 export * from "./x402-state-model.js";
 export declare function validateX402Operation(value: unknown): X402OperationRecord;
 export interface X402SettlementWaitProjection {
-    readonly outcome: "completed" | "timeout" | "interrupted";
+    /** `not_exposed`: the payment was never sent, so nothing settles; the operation's own state and actions say what follows. */
+    readonly outcome: "completed" | "timeout" | "interrupted" | "not_exposed";
     readonly requestedSeconds: string;
     readonly observationCount: string;
 }

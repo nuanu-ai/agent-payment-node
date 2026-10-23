@@ -402,6 +402,10 @@ export class X402Service extends X402PaidRequest {
             if (current.record.terminal)
                 return waitOutcome("completed", waitSeconds, observations);
             if (!isPostExposureWaitState(current.record)) {
+                // Nothing was sent (an expired authorization waits for FINALIZED to prove it unused, QA 0.5.67): there is no
+                // settlement to wait for, so the operation answers as a plain resume does, with its id, state and next actions.
+                if (!current.record.attempts.some((attempt) => attempt.purpose === "payment"))
+                    return waitOutcome("not_exposed", waitSeconds, observations);
                 throw new ApnError("APN_OPERATION_BLOCKED", "x402 operation has no proven post-exposure state to observe.");
             }
             await this.reconcileOnly(current.record, deadline);

@@ -63,11 +63,17 @@ export class X402SolanaService {
     return await this.records.persistLocked(transitionX402Solana(record, next));
   }
 
+  /** The one operation a profile's idempotency key names, whether or not it was saved yet. */
+  operationIdFor(profileInput: string, keyInput: string): string {
+    const profileHash = this.records.profileHash(canonicalProfile(profileInput)), key = canonicalIdempotencyKey(keyInput);
+    return domainHash("apn.x402-solana.operation-id.v1", canonicalJson({ profileHash, key }));
+  }
+
   /** Freeze one admitted payment (or replay the one this key already names); nothing is reserved or signed here. */
   async prepare(input: X402SolanaPayRequest): Promise<X402SolanaRecord> {
     const profile = canonicalProfile(input.profile), key = canonicalIdempotencyKey(input.idempotencyKey);
     const profileHash = this.records.profileHash(profile);
-    const operationId = domainHash("apn.x402-solana.operation-id.v1", canonicalJson({ profileHash, key }));
+    const operationId = this.operationIdFor(profile, key);
     const requestHash = domainHash("apn.x402-solana.request.v1", canonicalJson({ profileHash, url: input.url, mint: input.mint, maxAmountAtomic: input.maxAmountAtomic }));
     await this.records.ready();
     const saved = await this.records.find(operationId);
