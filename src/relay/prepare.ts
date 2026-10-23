@@ -68,6 +68,10 @@ export interface RelayArbitrumPrepareInput {
   readonly quoteFile: string;
   readonly idempotencyKey: string;
 }
+/** A quote this prepare cannot freeze: one reason, the compared public values and, where the owner can act, the next step. */
+function quoteRefused(reason: string, message: string, compared: Readonly<Record<string, string | number>> = {}, nextActions?: readonly string[]): never {
+  throw new ApnError("APN_OPERATION_BLOCKED", message, { reason, ...compared, ...(nextActions === undefined ? {} : { nextActions }) });
+}
 function refuse(reason: string): never {
   throw new ApnError("APN_ALLOWLIST_REFUSED", "Relay unsigned prepare is not admitted by the active owner policy.", { reason });
 }
@@ -131,12 +135,20 @@ export class RelayUnsignedPrepareService {
     const { quoteDigest, ...projection } = quote;
     if (hashObject(projection) !== quoteDigest || quote.payer !== payer || quote.recipient !== intent.recipient ||
       quote.orderData.output.chainId !== route || quote.routeReference !== (route === "base" ? RELAY_BASE_ROUTE_REFERENCE : undefined) ||
-      quote.principalAtomic !== input.amountAtomic || BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic) ||
-      quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60 ||
-      (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) ||
-      BigInt(quote.approval.maximumNetworkFeeWei) > BigInt(input.maxApprovalNetworkFeeWei) ||
-      BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei)) {
-      throw new ApnError("APN_OPERATION_BLOCKED", "Relay quote identity, deadline, or fee ceiling changed.");
+      quote.principalAtomic !== input.amountAtomic) quoteRefused("relay_quote_identity_changed", "The Relay quote does not bind this exact payer, recipient, route and amount.");
+    if (BigInt(quote.minimumOutputWei) < BigInt(input.minOutputAtomic)) quoteRefused("relay_quote_output_below_minimum",
+      "The Relay quote's minimum output is below the requested minimum.", { quoted_minimum_output_wei: quote.minimumOutputWei, requested_minimum_output_wei: input.minOutputAtomic });
+    const deadline = new Date(quote.deadline * 1000).toISOString();
+    if (quote.deadline <= Math.floor(this.clock.now().getTime() / 1000) + 60) quoteRefused("relay_quote_expires_too_soon",
+      "The Relay quote expires within a minute.", { quote_deadline: deadline });
+    if (active.registry.expiresAt !== undefined && quote.deadline * 1000 > Date.parse(active.registry.expiresAt)) quoteRefused("relay_quote_outlives_policy",
+      "The Relay quote stays valid after the owner's allowlist policy expires; the owner must extend the policy first.",
+      { quote_deadline: deadline, policy_expires_at: active.registry.expiresAt, policy_revision: active.revision },
+      [`apn allowlist policy status --profile ${input.profile}`]);
+    for (const [leg, quoted, ceiling] of [["approval", quote.approval.maximumNetworkFeeWei, input.maxApprovalNetworkFeeWei],
+      ["deposit", quote.deposit.maximumNetworkFeeWei, input.maxDepositNetworkFeeWei]] as const) {
+      if (BigInt(quoted) > BigInt(ceiling)) quoteRefused(`relay_${leg}_fee_above_ceiling`,
+        `The Relay ${leg} network fee quote exceeds the caller's ceiling.`, { quoted_fee_wei: quoted, fee_ceiling_wei: ceiling });
     }
     const operation = freezeRelayUnsignedOperation({ schemaVersion: "apn.relay-unsigned-operation.v1",
       kind: "relay_unsigned", state: "prepared", terminal: false, profileHash, operationId, idempotencyHash,
