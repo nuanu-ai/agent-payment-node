@@ -6,6 +6,16 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "./canonical
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 export const BASE_CHAIN_HEX = "0x2105";
+/**
+ * The account is MetaMask's own but its official Base Smart Account is not enabled yet: a setup step the owner takes, not an
+ * unsupported path, so the next step is to enable it and retry the same intent, never another custody (QA 0.5.70).
+ */
+export function smartAccountInactive() {
+    return new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Enable the official MetaMask Smart Account on Base, then retry the same connect intent.", {
+        retryable: true, reason: "smart_account_inactive", nextActions: ["Enable the official MetaMask Smart Account on Base in MetaMask, then rerun the same " +
+                "`apn wallet connect` with the same profile, provider, permission cap, expiry and idempotency key."]
+    });
+}
 export function smartAccountEnvironment() {
     return getSmartAccountsEnvironment(CHAIN_ID);
 }
@@ -62,9 +72,8 @@ function assertPreflight(observation) {
     canonicalAddress(observation.owner_address, "owner");
     const implementation = requiredAddress(smartAccountEnvironment().implementations.EIP7702StatelessDeleGatorImpl);
     const expectedCode = `0xef0100${implementation.slice(2)}`.toLowerCase();
-    if (observation.account_code.toLowerCase() !== expectedCode) {
-        throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Enable the official MetaMask Smart Account on Base, then retry the same connect intent.", { retryable: true });
-    }
+    if (observation.account_code.toLowerCase() !== expectedCode)
+        throw smartAccountInactive();
     const supported = observation.supported_permissions;
     if (!isPlainRecord(supported))
         mismatch("MetaMask did not return supported execution permissions.");
