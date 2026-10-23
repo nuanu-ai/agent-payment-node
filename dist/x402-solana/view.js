@@ -1,4 +1,5 @@
 import { chainDisplay } from "../chain-policy.js";
+import { createCliHandoff } from "../cli-handoff.js";
 import { sellerValue } from "../x402-offer-terms.js";
 import { X402_SOLANA_MECHANISM } from "./constants.js";
 /** The public projection CLI, MCP and `apn operation status` return. No signature bytes or signed transaction leave the record. */
@@ -36,9 +37,10 @@ function nextActions(record) {
     const observe = `apn x402 solana observe --operation ${record.operationId}`;
     if (record.terminal)
         return [];
+    // The seller URL is one shell argument (its `?` and `&` would glob or split in zsh, QA 0.5.66); only the key placeholder stays bare.
     if (record.state === "prepared")
-        return [`apn x402 solana pay --profile ${record.profile} --url ${record.terms.url} --asset ${record.terms.mint} ` +
-                `--max-amount ${record.terms.maxAmountAtomic} --idempotency-key <the same key>`, observe];
+        return [`${createCliHandoff(["apn", "x402", "solana", "pay", "--profile", record.profile, "--url", record.terms.url,
+                "--asset", record.terms.mint, "--max-amount", record.terms.maxAmountAtomic, "--idempotency-key"]).shell} <the same key>`, observe];
     if (record.state === "exposed")
         return [observe, `apn operation abandon --operation ${record.operationId}`];
     return [observe];
