@@ -27,8 +27,7 @@ export async function executeX402SolanaCli(bound: BoundCommand, options: Runtime
       ({ record, pending } = await service.observe(request.operationId));
     }
     else {
-      const { command: _command, ...input } = request as Extract<typeof request, { readonly command: "x402.solana.pay" }>;
-      const prepared = await service.prepare(input);
+      const prepared = await service.prepare(payInput(request));
       operationId = prepared.operationId;
       record = await service.pay(prepared.operationId);
     }
@@ -41,10 +40,11 @@ export async function executeX402SolanaCli(bound: BoundCommand, options: Runtime
     // After exposure (a seller HTTP error, a transport error, a malformed response) the payment may well have landed; the
     // first action is the no-send observe and nothing here or in a replay sends again.
     try {
-      // A failure after prepare saved the record (a derived-index write, QA 0.5.67) still names it: the key fixes the id.
+      // A failure after prepare saved the record (a derived-index write, QA 0.5.67) still names it: the key fixes the id,
+      // and only a record of exactly this request answers (a key naming another payment stays a bare conflict).
       const service = new X402SolanaService(root, x402SolanaPorts(root, options));
-      const id = operationId ?? (request.command === "x402.solana.pay" ? service.operationIdFor(request.profile, request.idempotencyKey) : undefined);
-      const saved = id === undefined ? null : await service.records.find(id);
+      const saved = operationId !== undefined ? await service.records.find(operationId)
+        : request.command === "x402.solana.pay" ? await service.savedFor(payInput(request)) : null;
       if (saved !== null) {
         operationId = saved.operationId;
         const operation = publicX402Solana(saved) as { readonly next_actions: readonly string[] };
@@ -59,6 +59,11 @@ export async function executeX402SolanaCli(bound: BoundCommand, options: Runtime
   } finally {
     if (operationId !== undefined) await refreshOperationIndex(root, operationId);
   }
+}
+
+function payInput(request: BoundCommand["request"]) {
+  const { command: _command, ...input } = request as Extract<typeof request, { readonly command: "x402.solana.pay" }>;
+  return input;
 }
 
 function proofClass(record: X402SolanaRecord): string {

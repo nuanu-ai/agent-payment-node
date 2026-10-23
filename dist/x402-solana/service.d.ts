@@ -32,8 +32,10 @@ export declare class X402SolanaService {
     private currentPolicy;
     private locked;
     private write;
-    /** The one operation a profile's idempotency key names, whether or not it was saved yet. */
-    operationIdFor(profileInput: string, keyInput: string): string;
+    /** The id this profile's key names and the hash of this exact request (url, mint, cap), as prepare freezes them. */
+    private identity;
+    /** The saved payment of exactly this request, or null: a key that names a different payment is a conflict, never this one. */
+    savedFor(input: X402SolanaPayRequest): Promise<X402SolanaRecord | null>;
     /** Freeze one admitted payment (or replay the one this key already names); nothing is reserved or signed here. */
     prepare(input: X402SolanaPayRequest): Promise<X402SolanaRecord>;
     /**

@@ -17,7 +17,7 @@ export function validateX402Operation(value: unknown): X402OperationRecord {
 }
 
 export interface X402SettlementWaitProjection {
-  /** `not_exposed`: the payment was never sent, so nothing settles; the operation's own state and actions say what follows. */
+  /** `not_exposed`: an authorization APN never sent and no settlement shows; the wait ends at once and the operation's state and actions say what follows. */
   readonly outcome: "completed" | "timeout" | "interrupted" | "not_exposed";
   readonly requestedSeconds: string;
   readonly observationCount: string;
