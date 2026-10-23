@@ -38,7 +38,7 @@
         "@metamask/x402": "1.0.0",
         "@modelcontextprotocol/client": "2.3.1",
         "@relay-protocol/settlement-sdk": "0.0.143",
-        "@toruslabs/ethereum-controllers": "9.12.0",
+        "@toruslabs/ethereum-controllers": "9.13.0",
         "@types/node": "24.5.2",
         "esbuild": "0.28.2",
         "tronweb": "6.5.0",
@@ -2549,6 +2549,176 @@
         "@babel/runtime": "7.x"
       }
     },
+    "node_modules/@metamask/agent-sdk/node_modules/@metamask/7715-permission-types": {
+      "version": "0.6.0",
+      "resolved": "https://registry.npmjs.org/@metamask/7715-permission-types/-/7715-permission-types-0.6.0.tgz",
+      "integrity": "sha512-FLhT+O5sm27HQwKVWVe6sW3SzLuj6odaP1QqVeKW1PpwueBPprJLH89bRRU/hcb67webDoBaPrxL6tJsRKCkIw==",
+      "dev": true,
+      "license": "(MIT-0 OR Apache-2.0)",
+      "engines": {
+        "node": "^18.18 || >=20"
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/@metamask/delegation-abis": {
+      "version": "1.1.0",
+      "resolved": "https://registry.npmjs.org/@metamask/delegation-abis/-/delegation-abis-1.1.0.tgz",
+      "integrity": "sha512-n7XgRAM+pKUqmw4X+nAxM9a9HTBGe049WCAbpnHV6WoT6JnHhurMSUiqpAwMh69RhEykBtJPYSVPTVlJu6pEPg==",
+      "dev": true,
+      "license": "(MIT-0 OR Apache-2.0)",
+      "engines": {
+        "node": "^18.18 || >=20"
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/@metamask/delegation-core": {
+      "version": "2.2.1",
+      "resolved": "https://registry.npmjs.org/@metamask/delegation-core/-/delegation-core-2.2.1.tgz",
+      "integrity": "sha512-fpB25AgmBxTJYhHj92tFS4dJe63x6wz71c8dPTwUin12dAvFMWM3PH+rm4C34iPb5ZrQzkAPi4e9z2njmwEZUA==",
+      "dev": true,
+      "license": "(MIT-0 OR Apache-2.0)",
+      "dependencies": {
+        "@metamask/abi-utils": "^3.0.0",
+        "@metamask/utils": "^11.4.0",
+        "@noble/hashes": "^1.8.0"
+      },
+      "engines": {
+        "node": "^18.18 || >=20"
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/@metamask/delegation-deployments": {
+      "version": "1.3.0",
+      "resolved": "https://registry.npmjs.org/@metamask/delegation-deployments/-/delegation-deployments-1.3.0.tgz",
+      "integrity": "sha512-3KX7w8r2NISqLaF5y0pE0seb+BB7c8NC1d9DJjQQby3S2RbrjOK1S/GcUnbm42sO+r3ztfCJ7TvsN7oajaJfWg==",
+      "dev": true,
+      "license": "(MIT-0 OR Apache-2.0)",
+      "engines": {
+        "node": "^18.18 || >=20"
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/@metamask/smart-accounts-kit": {
+      "version": "1.4.0",
+      "resolved": "https://registry.npmjs.org/@metamask/smart-accounts-kit/-/smart-accounts-kit-1.4.0.tgz",
+      "integrity": "sha512-mVgRVNlW/9S8Efoq0Lfjhsw4ozAfcJoyi0x4NPgWOFlqDPUFhKyMJMwCdvlkLqM35dj6lAZKXfPXbl0GT1eFeQ==",
+      "dev": true,
+      "license": "(MIT-0 OR Apache-2.0)",
+      "dependencies": {
+        "@metamask/7715-permission-types": "^0.6.0",
+        "@metamask/delegation-abis": "^1.0.0",
+        "@metamask/delegation-core": "^2.0.0",
+        "@metamask/delegation-deployments": "^1.3.0",
+        "openapi-fetch": "^0.13.5",
+        "ox": "0.8.1"
+      },
+      "engines": {
+        "node": "^18.18 || >=20"
+      },
+      "peerDependencies": {
+        "viem": "^2.31.4"
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/@metamask/smart-accounts-kit/node_modules/ox": {
+      "version": "0.8.1",
+      "resolved": "https://registry.npmjs.org/ox/-/ox-0.8.1.tgz",
+      "integrity": "sha512-e+z5epnzV+Zuz91YYujecW8cF01mzmrUtWotJ0oEPym/G82uccs7q0WDHTYL3eiONbTUEvcZrptAKLgTBD3u2A==",
+      "dev": true,
+      "funding": [
+        {
+          "type": "github",
+          "url": "https://github.com/sponsors/wevm"
+        }
+      ],
+      "license": "MIT",
+      "dependencies": {
+        "@adraffy/ens-normalize": "^1.11.0",
+        "@noble/ciphers": "^1.3.0",
+        "@noble/curves": "^1.9.1",
+        "@noble/hashes": "^1.8.0",
+        "@scure/bip32": "^1.7.0",
+        "@scure/bip39": "^1.6.0",
+        "abitype": "^1.0.8",
+        "eventemitter3": "5.0.1"
+      },
+      "peerDependencies": {
+        "typescript": ">=5.4.0"
+      },
+      "peerDependenciesMeta": {
+        "typescript": {
+          "optional": true
+        }
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/@toruslabs/ethereum-controllers": {
+      "version": "9.12.0",
+      "resolved": "https://registry.npmjs.org/@toruslabs/ethereum-controllers/-/ethereum-controllers-9.12.0.tgz",
+      "integrity": "sha512-4gQ9GOKDydUrCVUMc/axugZQFKwjK+nyMSmfPmX6arGHKFBN8237CyL4U+wsI4Fsa7dIYHmAHVNIH3ubcpX5bQ==",
+      "dev": true,
+      "license": "ISC",
+      "dependencies": {
+        "@metamask/delegation-core": "2.2.1",
+        "@metamask/delegation-deployments": "1.3.0",
+        "@metamask/smart-accounts-kit": "~1.4.0",
+        "@toruslabs/base-controllers": "^9.12.0",
+        "@toruslabs/http-helpers": "^9.0.0",
+        "@toruslabs/metadata-helpers": "^8.2.0",
+        "@web3auth/auth": "^11.8.1",
+        "async-mutex": "^0.5.0",
+        "bignumber.js": "^10.0.2",
+        "deepmerge": "^4.3.1",
+        "ethereum-cryptography": "^3.2.0",
+        "fast-json-patch": "^3.1.1",
+        "fast-safe-stringify": "^2.1.1",
+        "jsonschema": "^1.5.0",
+        "loglevel": "^1.9.2",
+        "ox": "^0.11.3",
+        "permissionless": "^0.3.5",
+        "uuid": "^13.0.0"
+      },
+      "engines": {
+        "node": ">=22.x",
+        "npm": ">=10.x"
+      },
+      "peerDependencies": {
+        "@babel/runtime": "7.x",
+        "viem": ">=2.45.0"
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/@toruslabs/ethereum-controllers/node_modules/@toruslabs/http-helpers": {
+      "version": "9.0.0",
+      "resolved": "https://registry.npmjs.org/@toruslabs/http-helpers/-/http-helpers-9.0.0.tgz",
+      "integrity": "sha512-7DKhuajJp5jOrhH9Ixdk0hSVGIZ8jAWA/aS+4rctfScxVRGQwBQXFQNL8msTK3zITTJf3EfJA9S1UQx4gR2qOw==",
+      "dev": true,
+      "license": "MIT",
+      "dependencies": {
+        "deepmerge": "^4.3.1",
+        "loglevel": "^1.9.2"
+      },
+      "engines": {
+        "node": ">=22.x",
+        "npm": ">=10.x"
+      },
+      "peerDependencies": {
+        "@babel/runtime": "^7.x",
+        "@sentry/core": "^10.x"
+      },
+      "peerDependenciesMeta": {
+        "@sentry/core": {
+          "optional": true
+        }
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/@toruslabs/ethereum-controllers/node_modules/uuid": {
+      "version": "13.0.2",
+      "resolved": "https://registry.npmjs.org/uuid/-/uuid-13.0.2.tgz",
+      "integrity": "sha512-vzi9uRZ926x4XV73S/4qQaTwPXM2JBj6/6lI/byHH1jOpCzb0zDbfytgA9LcN/hzb2l7WQSQnxITOVx5un/wGw==",
+      "dev": true,
+      "funding": [
+        "https://github.com/sponsors/broofa",
+        "https://github.com/sponsors/ctavan"
+      ],
+      "license": "MIT",
+      "bin": {
+        "uuid": "dist-node/bin/uuid"
+      }
+    },
     "node_modules/@metamask/agent-sdk/node_modules/@toruslabs/http-helpers": {
       "version": "7.0.1",
       "resolved": "https://registry.npmjs.org/@toruslabs/http-helpers/-/http-helpers-7.0.1.tgz",
@@ -2569,6 +2739,60 @@
       },
       "peerDependenciesMeta": {
         "@sentry/types": {
+          "optional": true
+        }
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/bignumber.js": {
+      "version": "10.0.2",
+      "resolved": "https://registry.npmjs.org/bignumber.js/-/bignumber.js-10.0.2.tgz",
+      "integrity": "sha512-E8Wp9O06QA6lneJ4aRUXKYf/1GIomqUEmUMwtIOMtDxf1U52ffJY+y7JBk/8wRafA8qOIqLnXQGqonYXZdBnFQ==",
+      "dev": true,
+      "license": "MIT"
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/ox": {
+      "version": "0.11.3",
+      "resolved": "https://registry.npmjs.org/ox/-/ox-0.11.3.tgz",
+      "integrity": "sha512-1bWYGk/xZel3xro3l8WGg6eq4YEKlaqvyMtVhfMFpbJzK2F6rj4EDRtqDCWVEJMkzcmEi9uW2QxsqELokOlarw==",
+      "dev": true,
+      "funding": [
+        {
+          "type": "github",
+          "url": "https://github.com/sponsors/wevm"
+        }
+      ],
+      "license": "MIT",
+      "dependencies": {
+        "@adraffy/ens-normalize": "^1.11.0",
+        "@noble/ciphers": "^1.3.0",
+        "@noble/curves": "1.9.1",
+        "@noble/hashes": "^1.8.0",
+        "@scure/bip32": "^1.7.0",
+        "@scure/bip39": "^1.6.0",
+        "abitype": "^1.2.3",
+        "eventemitter3": "5.0.1"
+      },
+      "peerDependencies": {
+        "typescript": ">=5.4.0"
+      },
+      "peerDependenciesMeta": {
+        "typescript": {
+          "optional": true
+        }
+      }
+    },
+    "node_modules/@metamask/agent-sdk/node_modules/permissionless": {
+      "version": "0.3.7",
+      "resolved": "https://registry.npmjs.org/permissionless/-/permissionless-0.3.7.tgz",
+      "integrity": "sha512-r1UGWkVMqFzzJ0UcKEVHh6XvOm7+SfTvy7AoGA7ZlxpE96XR+zbtb+rRAA3DOQuq6/ifov5NvUyt1xf4zxbR0g==",
+      "dev": true,
+      "license": "MIT",
+      "peerDependencies": {
+        "ox": "^0.11.3",
+        "viem": "^2.44.4"
+      },
+      "peerDependenciesMeta": {
+        "ox": {
           "optional": true
         }
       }
@@ -11465,19 +11689,19 @@
       }
     },
     "node_modules/@toruslabs/ethereum-controllers": {
-      "version": "9.12.0",
-      "resolved": "https://registry.npmjs.org/@toruslabs/ethereum-controllers/-/ethereum-controllers-9.12.0.tgz",
-      "integrity": "sha512-4gQ9GOKDydUrCVUMc/axugZQFKwjK+nyMSmfPmX6arGHKFBN8237CyL4U+wsI4Fsa7dIYHmAHVNIH3ubcpX5bQ==",
+      "version": "9.13.0",
+      "resolved": "https://registry.npmjs.org/@toruslabs/ethereum-controllers/-/ethereum-controllers-9.13.0.tgz",
+      "integrity": "sha512-5jabJrfIXf2eM/tek4uNsyT86Zxux6K0xNS8Is54Gm4jwLNA6FVjYAPEyOiW079TEVUBZJ2oxR6zsEjTpJzWXQ==",
       "dev": true,
       "license": "ISC",
       "dependencies": {
-        "@metamask/delegation-core": "2.2.1",
-        "@metamask/delegation-deployments": "1.3.0",
-        "@metamask/smart-accounts-kit": "~1.4.0",
-        "@toruslabs/base-controllers": "^9.12.0",
+        "@metamask/delegation-core": "3.0.0",
+        "@metamask/delegation-deployments": "2.1.0",
+        "@metamask/smart-accounts-kit": "~2.0.0",
+        "@toruslabs/base-controllers": "^9.13.0",
         "@toruslabs/http-helpers": "^9.0.0",
         "@toruslabs/metadata-helpers": "^8.2.0",
-        "@web3auth/auth": "^11.8.1",
+        "@web3auth/auth": "^11.8.3",
         "async-mutex": "^0.5.0",
         "bignumber.js": "^10.0.2",
         "deepmerge": "^4.3.1",
@@ -11487,7 +11711,7 @@
         "jsonschema": "^1.5.0",
         "loglevel": "^1.9.2",
         "ox": "^0.11.3",
-        "permissionless": "^0.3.5",
+        "permissionless": "^0.4.1",
         "uuid": "^13.0.0"
       },
       "engines": {
@@ -11499,76 +11723,46 @@
         "viem": ">=2.45.0"
       }
     },
-    "node_modules/@toruslabs/ethereum-controllers/node_modules/@metamask/7715-permission-types": {
-      "version": "0.6.0",
-      "resolved": "https://registry.npmjs.org/@metamask/7715-permission-types/-/7715-permission-types-0.6.0.tgz",
-      "integrity": "sha512-FLhT+O5sm27HQwKVWVe6sW3SzLuj6odaP1QqVeKW1PpwueBPprJLH89bRRU/hcb67webDoBaPrxL6tJsRKCkIw==",
-      "dev": true,
-      "license": "(MIT-0 OR Apache-2.0)",
-      "engines": {
-        "node": "^18.18 || >=20"
-      }
-    },
-    "node_modules/@toruslabs/ethereum-controllers/node_modules/@metamask/delegation-abis": {
-      "version": "1.1.0",
-      "resolved": "https://registry.npmjs.org/@metamask/delegation-abis/-/delegation-abis-1.1.0.tgz",
-      "integrity": "sha512-n7XgRAM+pKUqmw4X+nAxM9a9HTBGe049WCAbpnHV6WoT6JnHhurMSUiqpAwMh69RhEykBtJPYSVPTVlJu6pEPg==",
-      "dev": true,
-      "license": "(MIT-0 OR Apache-2.0)",
-      "engines": {
-        "node": "^18.18 || >=20"
-      }
-    },
-    "node_modules/@toruslabs/ethereum-controllers/node_modules/@metamask/delegation-core": {
-      "version": "2.2.1",
-      "resolved": "https://registry.npmjs.org/@metamask/delegation-core/-/delegation-core-2.2.1.tgz",
-      "integrity": "sha512-fpB25AgmBxTJYhHj92tFS4dJe63x6wz71c8dPTwUin12dAvFMWM3PH+rm4C34iPb5ZrQzkAPi4e9z2njmwEZUA==",
-      "dev": true,
-      "license": "(MIT-0 OR Apache-2.0)",
-      "dependencies": {
-        "@metamask/abi-utils": "^3.0.0",
-        "@metamask/utils": "^11.4.0",
-        "@noble/hashes": "^1.8.0"
-      },
-      "engines": {
-        "node": "^18.18 || >=20"
-      }
-    },
     "node_modules/@toruslabs/ethereum-controllers/node_modules/@metamask/delegation-deployments": {
-      "version": "1.3.0",
-      "resolved": "https://registry.npmjs.org/@metamask/delegation-deployments/-/delegation-deployments-1.3.0.tgz",
-      "integrity": "sha512-3KX7w8r2NISqLaF5y0pE0seb+BB7c8NC1d9DJjQQby3S2RbrjOK1S/GcUnbm42sO+r3ztfCJ7TvsN7oajaJfWg==",
+      "version": "2.1.0",
+      "resolved": "https://registry.npmjs.org/@metamask/delegation-deployments/-/delegation-deployments-2.1.0.tgz",
+      "integrity": "sha512-uBl02XH8nUF0vgqVBRy9W2FKsrc5g5rDHY48VNamGdQRxr5vcUYcNFfhfZ5p/o0DP3aH6gPgMRo/SKSkahlXnQ==",
       "dev": true,
       "license": "(MIT-0 OR Apache-2.0)",
       "engines": {
-        "node": "^18.18 || >=20"
+        "node": ">=20"
       }
     },
-    "node_modules/@toruslabs/ethereum-controllers/node_modules/@metamask/smart-accounts-kit": {
-      "version": "1.4.0",
-      "resolved": "https://registry.npmjs.org/@metamask/smart-accounts-kit/-/smart-accounts-kit-1.4.0.tgz",
-      "integrity": "sha512-mVgRVNlW/9S8Efoq0Lfjhsw4ozAfcJoyi0x4NPgWOFlqDPUFhKyMJMwCdvlkLqM35dj6lAZKXfPXbl0GT1eFeQ==",
+    "node_modules/@toruslabs/ethereum-controllers/node_modules/@toruslabs/base-controllers": {
+      "version": "9.13.0",
+      "resolved": "https://registry.npmjs.org/@toruslabs/base-controllers/-/base-controllers-9.13.0.tgz",
+      "integrity": "sha512-8BckGrNpscrx758xC66UJ/MMyKNw/CHCN6PXbI17tIhmNOxUZzuTah4wWAfnshN/3pjWnTIj07PGk362S6tVBw==",
       "dev": true,
-      "license": "(MIT-0 OR Apache-2.0)",
+      "license": "ISC",
       "dependencies": {
-        "@metamask/7715-permission-types": "^0.6.0",
-        "@metamask/delegation-abis": "^1.0.0",
-        "@metamask/delegation-core": "^2.0.0",
-        "@metamask/delegation-deployments": "^1.3.0",
-        "openapi-fetch": "^0.13.5",
-        "ox": "0.8.1"
+        "@toruslabs/broadcast-channel": "^13.3.0",
+        "@toruslabs/http-helpers": "^9.0.0",
+        "@toruslabs/metadata-helpers": "^8.2.0",
+        "@web3auth/auth": "^11.8.3",
+        "async-mutex": "^0.5.0",
+        "bowser": "^2.14.1",
+        "events": "^3.3.0",
+        "jwt-decode": "^4.0.0",
+        "loglevel": "^1.9.2",
+        "viem": "^2.57.0"
       },
       "engines": {
-        "node": "^18.18 || >=20"
+        "node": ">=22.x",
+        "npm": ">=10.x"
       },
       "peerDependencies": {
-        "viem": "^2.31.4"
+        "@babel/runtime": "7.x"
       }
     },
-    "node_modules/@toruslabs/ethereum-controllers/node_modules/@metamask/smart-accounts-kit/node_modules/ox": {
-      "version": "0.8.1",
-      "resolved": "https://registry.npmjs.org/ox/-/ox-0.8.1.tgz",
-      "integrity": "sha512-e+z5epnzV+Zuz91YYujecW8cF01mzmrUtWotJ0oEPym/G82uccs7q0WDHTYL3eiONbTUEvcZrptAKLgTBD3u2A==",
+    "node_modules/@toruslabs/ethereum-controllers/node_modules/@toruslabs/base-controllers/node_modules/ox": {
+      "version": "0.14.56",
+      "resolved": "https://registry.npmjs.org/ox/-/ox-0.14.56.tgz",
+      "integrity": "sha512-Feinlj+deWEam6RIwurRE+eHZ2N3hoUb3AAjQ10BmxRCYIymfqNkv0eZ+4ln4GkgDmSGLD2rGtTMqsFYSVDC6w==",
       "dev": true,
       "funding": [
         {
@@ -11580,15 +11774,46 @@
       "dependencies": {
         "@adraffy/ens-normalize": "^1.11.0",
         "@noble/ciphers": "^1.3.0",
-        "@noble/curves": "^1.9.1",
+        "@noble/curves": "1.9.1",
         "@noble/hashes": "^1.8.0",
         "@scure/bip32": "^1.7.0",
         "@scure/bip39": "^1.6.0",
-        "abitype": "^1.0.8",
+        "abitype": "^1.2.3",
         "eventemitter3": "5.0.1"
       },
       "peerDependencies": {
         "typescript": ">=5.4.0"
+      },
+      "peerDependenciesMeta": {
+        "typescript": {
+          "optional": true
+        }
+      }
+    },
+    "node_modules/@toruslabs/ethereum-controllers/node_modules/@toruslabs/base-controllers/node_modules/viem": {
+      "version": "2.57.7",
+      "resolved": "https://registry.npmjs.org/viem/-/viem-2.57.7.tgz",
+      "integrity": "sha512-x3UqqrcQuESaRVK6a0BvNmoNP0SVhu913uxEAxYLJx1lNYnj6ylTntfUdakCUKjk1+T+63gkdwFGJQ2O5C/nRw==",
+      "dev": true,
+      "funding": [
+        {
+          "type": "github",
+          "url": "https://github.com/sponsors/wevm"
+        }
+      ],
+      "license": "MIT",
+      "dependencies": {
+        "@noble/curves": "1.9.1",
+        "@noble/hashes": "1.8.0",
+        "@scure/bip32": "1.7.0",
+        "@scure/bip39": "1.6.0",
+        "abitype": "1.2.3",
+        "isows": "1.0.7",
+        "ox": "0.14.56",
+        "ws": "8.21.0"
+      },
+      "peerDependencies": {
+        "typescript": ">=5.0.4"
       },
       "peerDependenciesMeta": {
         "typescript": {
@@ -11635,9 +11860,9 @@
       }
     },
     "node_modules/@toruslabs/ethereum-controllers/node_modules/permissionless": {
-      "version": "0.3.7",
-      "resolved": "https://registry.npmjs.org/permissionless/-/permissionless-0.3.7.tgz",
-      "integrity": "sha512-r1UGWkVMqFzzJ0UcKEVHh6XvOm7+SfTvy7AoGA7ZlxpE96XR+zbtb+rRAA3DOQuq6/ifov5NvUyt1xf4zxbR0g==",
+      "version": "0.4.1",
+      "resolved": "https://registry.npmjs.org/permissionless/-/permissionless-0.4.1.tgz",
+      "integrity": "sha512-RhSLhA3Aw3gc1il6unWYfo1K+GBQNGBMSEVwv2gJQN6Ryxv6VoYtutRyIIQ279bPHu6WlRutbw/IxRC8giNamQ==",
       "dev": true,
       "license": "MIT",
       "peerDependencies": {
@@ -11662,6 +11887,28 @@
       "license": "MIT",
       "bin": {
         "uuid": "dist-node/bin/uuid"
+      }
+    },
+    "node_modules/@toruslabs/ethereum-controllers/node_modules/ws": {
+      "version": "8.21.0",
+      "resolved": "https://registry.npmjs.org/ws/-/ws-8.21.0.tgz",
+      "integrity": "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==",
+      "dev": true,
+      "license": "MIT",
+      "engines": {
+        "node": ">=10.0.0"
+      },
+      "peerDependencies": {
+        "bufferutil": "^4.0.1",
+        "utf-8-validate": ">=5.0.2"
+      },
+      "peerDependenciesMeta": {
+        "bufferutil": {
+          "optional": true
+        },
+        "utf-8-validate": {
+          "optional": true
+        }
       }
     },
     "node_modules/@toruslabs/fetch-node-details": {
