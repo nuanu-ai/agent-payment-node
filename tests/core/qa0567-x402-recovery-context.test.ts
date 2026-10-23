@@ -58,6 +58,16 @@ for (const via of ["cli", "mcp"] as const) test(`a derived-index failure after t
   assert.equal(f.seller.calls.filter((call) => call.paymentSignature !== undefined).length, 1);
 });
 
+test("the same key with a different URL stays a bare conflict: the other payment is never offered to pay", async (context) => {
+  const f = await readySolanaFixture(context, runCli); f.rpc.simulateError = { InstructionError: [2n, { Custom: 1n }] };
+  assert.equal((await runCli([...PAY_ARGS, "--idempotency-key", "qa0567-conflict"], {}, f.options)).error?.details?.state, "prepared");
+  const other = PAY_ARGS.map((value) => value === X402_URL ? `${X402_URL}&other=1` : value);
+  const conflict = await runCli([...other, "--idempotency-key", "qa0567-conflict"], {}, f.options);
+  assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT", JSON.stringify(conflict));
+  assert.equal(conflict.operation, null); assert.equal(conflict.error?.details?.operation_id, undefined);
+  assert.equal(conflict.next_actions.some((action) => action.includes("x402 solana pay")), false);
+});
+
 test("a Solana pay that fails before any record is saved names no operation", async (context) => {
   const f = await readySolanaFixture(context, runCli);
   const refused = await runCli(["x402", "solana", "pay", "--profile", "nobody", ...PAY_ARGS.slice(5), "--idempotency-key", "qa0567-none"], {}, f.options);
@@ -89,8 +99,25 @@ for (const via of ["cli", "mcp"] as const) test(`a wait on an expired, never-sen
   const after = (await new StateStore(temporary.root).findX402Operation(id))!;
   assert.deepEqual([after.attempts.length, after.integrityHash], [0, before.integrityHash]);
   assert.equal(f.http.calls.filter((call) => call.paymentSignature !== undefined).length, 0);
+  assert.deepEqual(view.nextActions, (approved.operation as { nextActions: readonly string[] }).nextActions);
   // Once FINALIZED reaches the expiry, a plain resume of the same operation closes it unused.
   f.rpc.finalizedHead = { ...f.rpc.finalizedHead, timestamp: before.authorization.validBefore, observedAt: f.clock.value.toISOString() };
   const closed = await runCli(["operation", "resume", "--operation", id, "--rpc-url", f.rpc.rpcOrigin], {}, options as never);
   assert.equal((closed.operation as { state: string }).state, "failed_expired_unused", JSON.stringify(closed));
+});
+
+test("an authorization whose nonce the chain shows used is never answered as not exposed", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const spec = { label: "Base USDC", chainId: 8453, token: BASE_USDC, name: "USD Coin", version: "2", decimals: 6 };
+  const f = assetFixture(temporary.root, spec); await admitAsset(f, spec);
+  let wall = 0; const wait = { nowMs: () => wall, wait: async (ms: number) => { wall += ms; return "elapsed" as const; } };
+  const options = { stateRoot: temporary.root, rpc: f.rpc, clock: f.clock, policy: f.policy, native: f.native, http: f.http, wrappingSecret: f.wrapping, wait };
+  const prepared = await runCli(["x402", "fetch", "prepare", "--profile", "default", "--url", X402_URL, "--idempotency-key", "qa0567-used-nonce",
+    "--rpc-url", f.rpc.rpcOrigin], {}, options as never);
+  const id = (prepared.operation as { operationId: string }).operationId;
+  await runCli(["x402", "fetch", "approve", "--operation", id, "--rpc-url", f.rpc.rpcOrigin], {}, options as never);
+  const before = (await new StateStore(temporary.root).findX402Operation(id))!;
+  f.clock.value = new Date(Number(before.authorization.validBefore) * 1000 + 1000); f.rpc.authorizationStateValue = true;
+  const waited = await runCli(["operation", "resume", "--operation", id, "--rpc-url", f.rpc.rpcOrigin, "--wait-seconds", "1"], {}, options as never);
+  assert.notEqual((waited.operation as { settlementWait?: { outcome: string } } | null)?.settlementWait?.outcome, "not_exposed", JSON.stringify(waited));
 });
