@@ -1,4 +1,5 @@
 import { ApnError } from "../errors.js";
+import { directEvmNetwork } from "../evm-direct-networks.js";
 import { exactChainConsent } from "../tty-approval.js";
 export class TtyBridgeApproval {
     options;
@@ -44,7 +45,7 @@ export class TtyBridgeApproval {
             ...(native ? ["Native principal: sent as the bridge transaction value; no approval effect; approval cap 0."]
                 : ["A separate included approval costs gas even if the bridge cannot proceed.",
                     ...(from.approval === "zero_first" ? ["This token approves only from a zero allowance; APN approves exactly the principal and never resets."] : [])]),
-            "Base total native fee is checked before sending; L1/operator fees have no transaction-level on-chain cap.",
+            sourceFeeNote(s.transfer.fromChainId),
             ...s.effects.flatMap((e) => [`${e.role}: target ${e.to}; native value ${e.value_atomic} wei; nonce ${e.economics.nonceAtomic}`,
                 `${e.role}: gas ceiling ${e.economics.gasLimitAtomic}; maxFeePerGas ${e.economics.maxFeePerGasAtomic}; maxPriorityFeePerGas ${e.economics.maxPriorityFeePerGasAtomic}`,
                 `${e.role}: total gas quote ${e.fee_quote.totalQuoteWei} wei; provisional bridge ceiling ${e.gas_ceiling_provisional_at_consent}`]),
@@ -61,6 +62,16 @@ export class TtyBridgeApproval {
                 return false;
             throw error;
         }
+    }
+}
+/** What the pre-send fee check bounds on the source network, by its fee model (QA 0.5.68: the line named Base for every source). */
+export function sourceFeeNote(chainId) {
+    const network = directEvmNetwork(chainId), name = `${network.name} (${network.caip2})`;
+    switch (network.feeModel) {
+        case "op-stack": return `${name} total native fee is checked before sending; its L1 data and operator fees have no transaction-level on-chain cap.`;
+        case "arbitrum-inclusive": return `${name} total native fee is checked before sending; its L1 component is charged as gas, so gas limit x maxFeePerGas caps it on-chain.`;
+        case "monad-gas-limit": return `${name} charges the full gas limit; the total native fee is checked before sending and gas limit x maxFeePerGas caps it on-chain.`;
+        case "eip1559": return `${name} native fee is checked before sending; gas limit x maxFeePerGas caps it on-chain.`;
     }
 }
 //# sourceMappingURL=tty.js.map

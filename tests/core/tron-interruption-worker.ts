@@ -6,6 +6,9 @@ import { findStored } from "./stored-operations.js";
 
 const [mode, root, operationId] = process.argv.slice(2);
 assert.ok(root);
+// The paused broadcast stays reachable until the parent's SIGKILL. An unreachable pending continuation lets GC collect the
+// lock's open FileHandle, and Node 25 then exits 1 with ERR_INVALID_STATE before the kill (QA 0.5.68).
+const held: unknown[] = [];
 
 async function send(message: unknown): Promise<void> {
   await new Promise<void>((resolve, reject) => {
@@ -23,7 +26,7 @@ async function firstProcess(): Promise<void> {
     if (method === "wallet/broadcasttransaction") {
       await send({ kind: "broadcast_received", transaction: fixture.rpc.submissions[0],
         broadcastCalls: fixture.rpc.calls.filter((call) => call === "wallet/broadcasttransaction").length });
-      await new Promise<never>(() => { setInterval(() => undefined, 60_000); });
+      await new Promise<never>((resolve) => { held.push(resolve); setInterval(() => undefined, 60_000); });
     }
     return result;
   };
