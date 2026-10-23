@@ -56,6 +56,12 @@ instead) and writes an immutable unsigned operation. It never signs. The quote v
 order ID with the vendored official SDK, recovers the pinned solver and re-encodes the exact deposit; it refuses extra
 steps or output calls, changed currencies or recipients, lower outputs and changed refund rows.
 
+A quote the Ethereum USDC routes cannot freeze is refused with `APN_OPERATION_BLOCKED` and one reason:
+`relay_quote_identity_changed`, `relay_quote_output_below_minimum` (quoted and requested minimum),
+`relay_quote_expires_too_soon` (quote deadline), `relay_quote_outlives_policy` (quote deadline, policy expiry and revision;
+the owner extends the policy first) or `relay_approval_fee_above_ceiling` / `relay_deposit_fee_above_ceiling` (quoted fee
+and the caller's ceiling). Nothing is saved.
+
 Native BNB routes refuse a quote whose deposit fee exceeds `--max-deposit-network-fee-wei`. On Base that value is the full
 OP Stack fee budget: L2 gas, the GasPriceOracle L1 fee upper bound for at most 512 signed bytes and the operator fee.
 
