@@ -1,6 +1,6 @@
 import { ApnError } from "./errors.js";
 import { findPendingProviderPermission } from "./provider-permission-discovery.js";
-import { publicPendingPermissionProfile, publicPermissionProfile } from "./provider-permission-output.js";
+import { pendingPermissionNextActions, publicPendingPermissionProfile, publicPermissionProfile } from "./provider-permission-output.js";
 import { previewProviderProfile, upgradeProviderProfile } from "./provider-profile-upgrade.js";
 import { canonicalProfile } from "./wallet-policy.js";
 import { assertWalletLifecycleAvailable, walletLifecycleMutable } from "./wallet-lifecycle-guard.js";
@@ -26,15 +26,14 @@ export class ProviderPermissionService {
                     throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The profile has no provider permission lifecycle.", { nextActions: permissionLifecycleActions(profile) });
                 }
                 if (request.command === "wallet.permission.list") {
-                    return publicPendingPermissionProfile(profile, pending.adapter, pending.permission);
+                    return publicPendingPermissionProfile(profile, pending.adapter, pending.permission, Math.floor(this.context.clock.now().getTime() / 1000));
                 }
                 if (request.command === "wallet.permission.forget") {
                     assertPendingExpectedRevision(pending.permission.revision, request.expectedRevision);
                     const forgotten = await pending.lifecycle.forget(profileHash, request.expectedRevision);
                     return forgottenOutput(profile, pending.adapter.provider_id, forgotten.warning);
                 }
-                throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The provider permission is pending consent; retry the exact connect intent or forget the current revision first.", { nextActions: ["Retry the exact wallet connect intent that started this permission, or forget its current revision:",
-                        `apn wallet permission forget --profile ${profile} --expected-revision ${pending.permission.revision}`] });
+                throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "The provider permission is pending consent; retry the exact connect intent while it is live, or forget the current revision first.", { nextActions: pendingPermissionNextActions(profile, pending.permission, Math.floor(this.context.clock.now().getTime() / 1000)) });
             }
             const adapter = this.context.requireProviderRegistry().resolve(bound.provider_id);
             bound = mutable ? await upgradeProviderProfile(adapter, bound, repository) : await previewProviderProfile(adapter, bound);
