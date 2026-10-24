@@ -23,7 +23,18 @@ Core test concurrency defaults to one worker. For the reviewed local release lan
 APN_CORE_TEST_CONCURRENCY=4 node scripts/local-release.mjs prepare --version 0.5.38 --commit "$COMMIT" --output /tmp/apn-0.5.38-release
 ```
 
-Preparation runs the core/source build and tests, supply-chain/platform tests, all four exact vendor regeneration checks, production low-severity npm audit and the same low-severity advisory check over the exact package versions each vendor bundle's provenance says it emitted (`scripts/audit-vendor-emitted.mjs`; the production audit reads the lockfile, which files those packages under dev). It refuses source/dist drift after the build. It performs two script-free npm packs, retains and compares both archives, checks every packed member against reviewed source bytes, checks embedded package/version/macOS arm64 identity, generates the existing production SPDX 2.3 SBOM including emitted vendor packages/licenses, and creates/verifies the existing commit/version/SHA/size release manifest. A failed gate leaves an incomplete directory for inspection and cannot be used as a verified candidate.
+Preparation runs the core/source build and tests, supply-chain/platform tests, all four exact vendor regeneration checks, production low-severity npm audit (`scripts/audit-production.mjs`: `npm audit --omit=dev` failing at low, except the owner-approved dated exceptions listed below) and the same low-severity advisory check over the exact package versions each vendor bundle's provenance says it emitted (`scripts/audit-vendor-emitted.mjs`; the production audit reads the lockfile, which files those packages under dev). It refuses source/dist drift after the build. It performs two script-free npm packs, retains and compares both archives, checks every packed member against reviewed source bytes, checks embedded package/version/macOS arm64 identity, generates the existing production SPDX 2.3 SBOM including emitted vendor packages/licenses, and creates/verifies the existing commit/version/SHA/size release manifest. A failed gate leaves an incomplete directory for inspection and cannot be used as a verified candidate.
+
+## Owner-approved audit exceptions
+
+`scripts/audit-production.mjs` fails on every production finding at low or above except these, each limited to the named
+package, major version and install paths, and refused after its expiry:
+
+- GHSA-mrhx-c7xc-m3w5 (npm advisory 1243066, zod `<4.6.6`, memory exhaustion validating oversized constrained
+  collections), approved 2026-10-24, expires 2026-11-23: zod 3.x under `node_modules/awal/` and `node_modules/@x402/`.
+  APN's own zod is 4.6.7. awal 2.12.x and @x402/* 2.x require zod `^3`, which has no fixed release, and zod 4 breaks their
+  APIs. The affected code runs in the awal child process; a hostile seller response could exhaust that child's memory,
+  not APN's process or funds. Remove the exception when upstream ships a fix.
 
 The output directory contains the following concrete review material:
 
