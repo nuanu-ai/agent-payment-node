@@ -75,6 +75,7 @@ const control = {
   mode: "normal",
   hostPlatform: "darwin",
   calls: [],
+  spawns: [],
   copySecret() { return secret === null ? null : Buffer.from(secret); },
   setSecret(value) {
     if (secret !== null) secret.fill(0);
@@ -90,8 +91,8 @@ globalThis.__APN_MM_STORAGE_CONTROL__ = control;
 os.platform = () => control.hostPlatform;
 os.userInfo = () => ({ uid: process.geteuid(), gid: process.getegid(), username: "apn-storage-fixture",
   homedir: home, shell: "/bin/zsh" });
-childProcess.spawn = function(executable, args = [], options = {}) {
-  if (executable !== "/usr/bin/security") return originalSpawn.call(childProcess, executable, args, options);
+// One security(1) command, from argv or from one line of an interactive (-i) session read on stdin.
+function securityCommand(args, channel, env) {
   const shape = [...args];
   const passwordIndex = args[0] === "add-generic-password" ? args.indexOf("-w") + 1 : -1;
   let passwordBytes = null;
@@ -103,30 +104,49 @@ childProcess.spawn = function(executable, args = [], options = {}) {
     if (passwordBytes === 32 && control.mode === "normal") control.setSecret(decoded);
     decoded.fill(0);
   }
-  control.calls.push({ executable, shape, passwordBytes, env: { ...options.env } });
+  control.calls.push({ executable: "/usr/bin/security", channel, shape, passwordBytes, env: { ...env } });
+  if (args[0] === "find-generic-password") {
+    if (control.mode === "locked") return { code: 36 };
+    if (control.mode === "denied") return { code: 128 };
+    if (control.mode === "malformed") return { code: 0, output: Buffer.from("not-canonical-base64\n", "utf8") };
+    if (control.mode === "absent" || secret === null) return { code: 44 };
+    return { code: 0, output: Buffer.from(secret.toString("base64") + "\n", "utf8") };
+  }
+  return { code: args[0] === "add-generic-password" && passwordBytes === 32 && control.mode === "normal" ? 0 : 1 };
+}
 
+// security -i tokenizes bare and double-quoted words; APN refuses anything that would need escaping.
+function sessionLines(script) {
+  return script.split("\n").filter(line => line.length > 0)
+    .map(line => line.match(/"[^"]*"|[^\s"]+/gu).map(word => word.startsWith("\"") ? word.slice(1, -1) : word));
+}
+
+childProcess.spawn = function(executable, args = [], options = {}) {
+  if (executable !== "/usr/bin/security") return originalSpawn.call(childProcess, executable, args, options);
+  control.spawns.push({ argv: [...args] });
   const child = new EventEmitter();
   child.stdin = new PassThrough();
   child.stdout = new PassThrough();
   child.stderr = new PassThrough();
   child.kill = () => true;
-  process.nextTick(() => {
-    let code = 0;
-    let output = Buffer.alloc(0);
-    if (args[0] === "find-generic-password") {
-      if (control.mode === "locked") code = 36;
-      else if (control.mode === "denied") code = 128;
-      else if (control.mode === "malformed") output = Buffer.from("not-canonical-base64\n", "utf8");
-      else if (control.mode === "absent" || secret === null) code = 44;
-      else output = Buffer.from(secret.toString("base64") + "\n", "utf8");
-    } else if (args[0] !== "add-generic-password" || passwordBytes !== 32 || control.mode !== "normal") {
-      code = 1;
-    }
-    if (output.length > 0) child.stdout.write(output);
-    output.fill(0);
+  const input = [];
+  child.stdin.on("data", chunk => { input.push(Buffer.from(chunk)); });
+  child.stdin.on("end", () => {
+    const script = Buffer.concat(input);
+    for (const chunk of input) chunk.fill(0);
+    const interactive = args.length === 1 && args[0] === "-i";
+    const results = interactive ? sessionLines(script.toString("utf8")).map(line => securityCommand(line, "stdin", options.env))
+      : [securityCommand([...args], "argv", options.env)];
+    script.fill(0);
+    const outputs = results.flatMap(result => result.output === undefined ? [] : [result.output]);
+    // Like a real child, close follows the drained stdout; the emitted bytes are zeroed once read.
+    child.stdout.once("end", () => {
+      for (const output of outputs) output.fill(0);
+      child.emit("close", interactive ? 0 : results[0].code, null);
+    });
+    for (const output of outputs) child.stdout.write(output);
     child.stdout.end();
     child.stderr.end();
-    child.emit("close", code, null);
   });
   return child;
 };
@@ -231,12 +251,20 @@ assert.equal(repeated.identity.bindingHash, firstBinding);
 assert.equal(repeated.identity.createdAt, firstCreatedAt);
 assert.deepEqual(await readFile(envelopePath), originalBytes);
 assert.equal(control.calls.filter(call => call.shape[0] === "add-generic-password").length, 1);
+// A Keychain secret instance serves one command: a repeated read inside that command spawns no further security(1).
+const spawnsBeforeCachedRead = control.spawns.length;
+const cachedRead = await restarted.describe("default");
+assert.equal(cachedRead.identity.address, firstAddress);
+assert.equal(control.spawns.length, spawnsBeforeCachedRead);
+restarted.clear(cachedRead.secret);
 
+// Every negative check below is a separate command, so each one reads the synthetic Keychain afresh.
+const command = () => new EncryptedWalletStore(new StateStore(stateRoot), new MacOSLoginKeychainSecret());
 const negativeCodes = {};
 const originalWrapping = control.copySecret();
 const wrong = randomBytes(32);
 control.setSecret(wrong);
-negativeCodes.wrong_secret = await rejectsCode(() => restarted.describe("default"), "APN_STATE_CORRUPT");
+negativeCodes.wrong_secret = await rejectsCode(() => command().describe("default"), "APN_STATE_CORRUPT");
 control.setSecret(originalWrapping);
 
 const tampered = JSON.parse(originalText);
@@ -244,28 +272,28 @@ const tamperedTag = Buffer.from(tampered.cipher.tag, "base64");
 tamperedTag[0] ^= 1;
 tampered.cipher.tag = tamperedTag.toString("base64");
 await writeFile(envelopePath, canonicalJson(tampered) + "\n", { mode: 0o600 });
-negativeCodes.tag_tamper = await rejectsCode(() => restarted.describe("default"), "APN_STATE_CORRUPT");
+negativeCodes.tag_tamper = await rejectsCode(() => command().describe("default"), "APN_STATE_CORRUPT");
 await writeFile(envelopePath, originalBytes, { mode: 0o600 });
 
 for (const mode of ["locked", "denied", "malformed"]) {
   control.mode = mode;
-  negativeCodes["keychain_" + mode] = await rejectsCode(() => restarted.describe("default"), "APN_NATIVE_REJECTED");
+  negativeCodes["keychain_" + mode] = await rejectsCode(() => command().describe("default"), "APN_NATIVE_REJECTED");
 }
 control.mode = "absent";
-negativeCodes.no_environment_fallback = await rejectsCode(() => restarted.describe("default"), "APN_STATE_CORRUPT");
+negativeCodes.no_environment_fallback = await rejectsCode(() => command().describe("default"), "APN_STATE_CORRUPT");
 control.mode = "normal";
 
 await writeFile(envelopePath, canonicalJson({ privateKey: "plaintext-fallback-canary" }) + "\n", { mode: 0o600 });
-negativeCodes.plaintext_fallback = await rejectsCode(() => restarted.describe("default"), "APN_STATE_CORRUPT");
+negativeCodes.plaintext_fallback = await rejectsCode(() => command().describe("default"), "APN_STATE_CORRUPT");
 await writeFile(envelopePath, originalBytes, { mode: 0o600 });
 
 await chmod(envelopePath, 0o644);
-negativeCodes.unsafe_mode = await rejectsCode(() => restarted.describe("default"), "APN_STATE_SECURITY");
+negativeCodes.unsafe_mode = await rejectsCode(() => command().describe("default"), "APN_STATE_SECURITY");
 await chmod(envelopePath, 0o600);
 const backupPath = join(fixtureRoot, "encrypted-wallet-backup.json");
 await rename(envelopePath, backupPath);
 await symlink(backupPath, envelopePath);
-negativeCodes.symlink_entry = await rejectsCode(() => restarted.describe("default"), "APN_STATE_SECURITY");
+negativeCodes.symlink_entry = await rejectsCode(() => command().describe("default"), "APN_STATE_SECURITY");
 await unlink(envelopePath);
 await rename(backupPath, envelopePath);
 
@@ -292,6 +320,12 @@ const finds = control.calls.filter(call => call.shape[0] === "find-generic-passw
 assert.equal(adds.length, 1);
 assert.deepEqual(adds[0].shape, addShape);
 assert.equal(adds[0].passwordBytes, 32);
+// The new secret reaches security(1) only on stdin of one -i session that reads it back; argv never carries it.
+assert.equal(adds[0].channel, "stdin");
+const sessions = control.spawns.filter(spawn => spawn.argv.length === 1 && spawn.argv[0] === "-i");
+assert.equal(sessions.length, 1);
+for (const spawn of control.spawns) if (spawn !== sessions[0]) assert.deepEqual(spawn.argv, findShape);
+assert.deepEqual(control.calls.filter(call => call.channel === "stdin").map(call => call.shape), [addShape, findShape]);
 assert.ok(finds.length >= 7);
 for (const call of finds) assert.deepEqual(call.shape, findShape);
 for (const call of control.calls) {
@@ -319,7 +353,8 @@ const evidence = {
     owner_match: true, single_link: true, real_lockf_acquired: true },
   keychain: { executable: "/usr/bin/security", keychain: "<synthetic-home>/Library/Keychains/login.keychain-db",
     service: "ai.nuanu.apn.wrapping-secret.v1", account: "default", find_calls: finds.length,
-    add_calls: adds.length, generated_secret_bytes: 32 },
+    add_calls: adds.length, add_channel: "interactive_session_stdin", security_spawns: control.spawns.length,
+    generated_secret_bytes: 32 },
   behavior: { stable_identity: true, stable_envelope_bytes: true, add_idempotent: true, negative_codes: negativeCodes },
   boundaries: { real_keychain_access: false, network_access: false, provider_access: false,
     payment_effect: false, external_login: false, os_boundary: "synthetic_preload", generated_keys_exported: false },
