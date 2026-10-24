@@ -70,7 +70,8 @@ test("MetaMask utils UUID override and production lock closure are exact", async
     },
     "axios@<0.34.0": "0.34.0",
     "axios@>=1.15.1 <1.20.0": "1.20.0",
-    "fast-uri@<3.1.8": "3.1.8",
+    "fast-uri@<3.1.9": "3.1.9",
+    "follow-redirects@<1.16.1": "1.16.1",
     "brace-expansion@>=4 <5.0.12": "5.0.12",
     "pbkdf2@<=3.1.6": "3.1.7"
 });
