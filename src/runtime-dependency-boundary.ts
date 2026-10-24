@@ -6,7 +6,7 @@ const blocked = new Set(["@metamask/fox-sdk/wallets/solana", "@solana/spl-token"
   "@solana/buffer-layout-utils", "bigint-buffer"]);
 const blockedPath = /(?:^|\/)node_modules\/(?:@metamask\/fox-sdk\/dist\/wallets\/solana|@solana\/(?:spl-token|buffer-layout-utils)|bigint-buffer)(?:\/|$)/u;
 const reviewedVersions = new Map([
-  ["axios", new Set(["0.34.0", "1.20.0"])], ["fast-uri", new Set(["3.1.8"])],
+  ["axios", new Set(["0.34.0", "1.20.0"])], ["fast-uri", new Set(["3.1.9"])],
   ["brace-expansion", new Set(["5.0.12"])], ["pbkdf2", new Set(["3.1.7"])],
 ]);
 const reviewedPackagePath = /^(.*\/node_modules\/(axios|fast-uri|brace-expansion|pbkdf2))\//u;

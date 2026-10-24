@@ -41,7 +41,7 @@ export async function installedPackage() {
   await stat(join(packageRoot, "dist/metamask-gasless/client/helper-bootstrap.js"));
   const vendor = join(packageRoot, "vendor/metamask-evm-sdk");
   const manifestBytes = await readFile(join(vendor, "manifest.json"));
-  assert.equal(hash(manifestBytes), "5b6e8667e4a0adb277c1c6803d87168eb7b9cd72f0ba9fc3d349ec8162fdfd25");
+  assert.equal(hash(manifestBytes), "05e9601a4ae684223b03efa3d6faa80b5e87c0c734c710baf6090d993539b948");
   const manifest = JSON.parse(manifestBytes);
   assert.equal(manifest.schemaVersion, "apn.metamask-evm-sdk.v1");
   assert.deepEqual(manifest.upstreamVersions, { agentSdk: "6.1.4", ethereumControllers: "9.12.0", foxSdk: "2.7.0" });

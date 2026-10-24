@@ -9,7 +9,7 @@ import test from "node:test";
 const guard = pathToFileURL(resolve(import.meta.dirname, "../../dist/runtime-dependency-boundary.js")).href;
 const refused = "APN dependency boundary rejected unreviewed package version";
 const versions = [["axios", "0.34.0", "0.33.0"], ["axios", "1.20.0", "1.18.0"],
-  ["fast-uri", "3.1.8", "3.1.6"], ["brace-expansion", "5.0.12", "5.0.9"], ["pbkdf2", "3.1.7", "3.1.6"]];
+  ["fast-uri", "3.1.9", "3.1.8"], ["brace-expansion", "5.0.12", "5.0.9"], ["pbkdf2", "3.1.7", "3.1.6"]];
 
 for (const [name, patched, old] of versions) test(`${name} allows reviewed version metadata and rejects consumer substitution before ESM/CJS evaluation`, async t => {
   const root = await mkdtemp(join(tmpdir(), "apn-reviewed-versions-"));
