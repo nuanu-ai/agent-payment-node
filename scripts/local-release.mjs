@@ -119,7 +119,7 @@ async function main(args) {
     ["npm", ["run", "test:core"]],
     [process.execPath, ["--test", "tests/packaging/supply-chain.test.mjs", "tests/packaging/platform-support.test.mjs"]],
     ...["metamask-sdk", "tron-utils", "relay-order-id", "smart-account"].map(name => ["npm", ["run", `build:${name}:check`]]),
-    ["npm", ["audit", "--omit=dev", "--audit-level=low", "--json"]],
+    [process.execPath, ["scripts/audit-production.mjs"]],
     [process.execPath, ["scripts/audit-vendor-emitted.mjs"]],
   ];
   const records = [];
