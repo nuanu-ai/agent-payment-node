@@ -47,14 +47,6 @@
       "bytes": 209325,
       "sha256": "e9e0faa96c0edffe0e69d30a8074a63f36316e007d499d8a01a156dba64a77c0"
     },
-    "chunk-6XX5MONG.mjs": {
-      "bytes": 456969,
-      "sha256": "f2d8e27324e48954f34f378215fdf31ac8bd10ce9244c0e40782c8b0d6716f1d"
-    },
-    "chunk-6XX5MONG.mjs.LEGAL.txt": {
-      "bytes": 250,
-      "sha256": "4feaf2e650e3d139cb1d2cd4e1a7a963788d26345062ac4b6b551a93a4dda530"
-    },
     "chunk-AI6UKPXV.mjs": {
       "bytes": 136810,
       "sha256": "990c11b6f2da15cbb073ab5ef4bc1271a8c6bc3cb1b0207386f9bd791ab2139c"
@@ -75,6 +67,14 @@
       "bytes": 9097,
       "sha256": "e49bf8e14866acb4d141d4055c3248000e66cbfd437dc217df8f57c0ed39bc27"
     },
+    "chunk-E433ALBJ.mjs": {
+      "bytes": 456969,
+      "sha256": "9004a125eed7191f987c2ed73f6a3296939f0d6adef6be7d75881de251197c7a"
+    },
+    "chunk-E433ALBJ.mjs.LEGAL.txt": {
+      "bytes": 250,
+      "sha256": "4feaf2e650e3d139cb1d2cd4e1a7a963788d26345062ac4b6b551a93a4dda530"
+    },
     "chunk-FXOPQFK3.mjs": {
       "bytes": 187355,
       "sha256": "6618ecc53a1693a76b00c661894a046dd4fe3c9003f78acd4a5d1c19198f118b"
@@ -82,10 +82,6 @@
     "chunk-GBOH3J37.mjs": {
       "bytes": 28456,
       "sha256": "8cc8d21bfa88919a180e1deb6cc4a26422217415c116fb668d62f114ff4a2789"
-    },
-    "chunk-IFNW6LVK.mjs": {
-      "bytes": 147340,
-      "sha256": "4b8b1dfbcf8f3c0b4a015f14692ea35e2bc37e272c1f9825c36b98929bc98457"
     },
     "chunk-ITJRA3TR.mjs": {
       "bytes": 222426,
@@ -95,23 +91,15 @@
       "bytes": 577,
       "sha256": "b27fb94e22be8a8df63a9c8258787104b611b471af08f21ed2ff156c7e0aa56f"
     },
-    "chunk-IXRUFS4W.mjs": {
-      "bytes": 201323,
-      "sha256": "ace37691688c122c69a7baebfb88952958d4ad3d02c325794bd0f382ae68c89f"
-    },
-    "chunk-IXRUFS4W.mjs.LEGAL.txt": {
-      "bytes": 1002,
-      "sha256": "a5d74760dda1fc3cdc016aad902408be5637b5855ac3822673e5d59278232918"
-    },
-    "chunk-JQEX5LXJ.mjs": {
+    "chunk-LLF67L57.mjs": {
       "bytes": 18032,
-      "sha256": "8bdae056a75b4ac4ab6f346d61a326f36b4432061d00626fa33fdbb9341fc1ca"
+      "sha256": "2f95dbcd17b12f6c574a92a466a105d4f9a71ffa94949fae33a4aa7a5f63f9aa"
     },
-    "chunk-JQH5VL7I.mjs": {
-      "bytes": 369416,
-      "sha256": "59518621e8541c2cbf950a0e88215524372a162e9f30ba54d63bf08f4cdd9af4"
+    "chunk-M2NCJOQH.mjs": {
+      "bytes": 369983,
+      "sha256": "b7d451bcdfa637edf3a91ddc9fba7f06d3fd6eb75238d73520afac025f9736c3"
     },
-    "chunk-JQH5VL7I.mjs.LEGAL.txt": {
+    "chunk-M2NCJOQH.mjs.LEGAL.txt": {
       "bytes": 149,
       "sha256": "7e5a2fa9f710ac6939dbf371ba57daa43cb5dbaf2001514d76f1b9470d1d95b0"
     },
@@ -131,6 +119,10 @@
       "bytes": 2794,
       "sha256": "789bbbbc59b8b2183b985b92cee694eccbbc5617b4aedce05b8ccf5bfd41ca76"
     },
+    "chunk-RV3JCRYH.mjs": {
+      "bytes": 147340,
+      "sha256": "f90af4928474cef9b263d9a5169426c44e81eb64e03cf700838ea353d54b4629"
+    },
     "chunk-VWOLN53K.mjs": {
       "bytes": 349,
       "sha256": "229e41348c0c10da08796dd7ad987164a67967d4998c28dff6857fa12de81476"
@@ -143,17 +135,25 @@
       "bytes": 242,
       "sha256": "9a86b9d315af398df6f4dfe6f13ff4f4cacee6110ef9e83d3e88da232d255210"
     },
+    "chunk-ZKSOCOTX.mjs": {
+      "bytes": 839882,
+      "sha256": "5ddcfc9b973ff573f2f45e56107de3dd55f0b5f2315720fb6690b649fa94853d"
+    },
+    "chunk-ZKSOCOTX.mjs.LEGAL.txt": {
+      "bytes": 1002,
+      "sha256": "a5d74760dda1fc3cdc016aad902408be5637b5855ac3822673e5d59278232918"
+    },
     "controller.mjs": {
       "bytes": 736,
       "sha256": "58feafeb6541f4bb8ed2aa582faaf4a86787edfe302c9ef81977df473df231b0"
     },
     "fox-evm.mjs": {
       "bytes": 1021,
-      "sha256": "8634ed2c87c7c40a2bd6a97b1dd026e619d5d9c0d1fc188279525127ba6a7bb3"
+      "sha256": "22433b610304182e6f52ee0e593439cfca09a9cac7ab30433d06fb9641362f7d"
     },
     "fox-keyring.mjs": {
       "bytes": 557,
-      "sha256": "a782e2535693ee5bf78aa47b269ffe80da1bce367542956a9a89cbf47870cb44"
+      "sha256": "f06fd140d1abc6aac4b9550e8eab7ad6e44c063a9e952278f68f77ae0d6a8d20"
     },
     "lib-HO5XJIPP.mjs": {
       "bytes": 155188,
@@ -165,15 +165,15 @@
     },
     "sdk-base.mjs": {
       "bytes": 959,
-      "sha256": "6c2e733515409bf1a5d022e4400415099158b4620f0bf4cae7c1d3a62c2f4c5c"
+      "sha256": "4e47182aa6c416445d3d2e775d4e301760c30337f5bafcabd55de06098b5e155"
     },
     "sdk-evm.mjs": {
       "bytes": 958,
-      "sha256": "ba90f4f4a2112cd177628ca606e50f366c70392eee37276c103288ffba862d15"
+      "sha256": "f35851fc694ea571c320398d0aa378b6d71209019e30b8d497eb0f320cd21e17"
     },
     "sdk-root.mjs": {
       "bytes": 1065,
-      "sha256": "c02f952987bc0b725306095613021368f28f8e2c5e08f9fb8fb032b4aed570c9"
+      "sha256": "47e73594becc24b8e3a399673adbe6783fcea449efd3c9114d2138469c8df5e9"
     },
     "secp256k1-TR54H6HX.mjs": {
       "bytes": 613,

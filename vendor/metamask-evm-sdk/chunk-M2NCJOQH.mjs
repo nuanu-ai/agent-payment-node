@@ -15,6 +15,7 @@ import {
   c,
   c2,
   d,
+  external_exports,
   h,
   i,
   m,
@@ -22,9 +23,8 @@ import {
   p,
   s,
   x,
-  y,
-  z
-} from "./chunk-IXRUFS4W.mjs";
+  y
+} from "./chunk-ZKSOCOTX.mjs";
 import {
   DEFAULT_SUPPORTED_NETWORKS,
   EIP_7702_PREFIX,
@@ -9549,7 +9549,7 @@ var Ze = (e, t) => `/v1/projects/${e}/transaction-requests/${t}`;
 var Qe = (e) => `/v1/projects/${e}/signature-requests`;
 var $e = (e, t) => `/v1/projects/${e}/signature-requests/${t}`;
 var et = (e, t) => `/v1/projects/${e}/approval/${t}`;
-var z2 = class {
+var z = class {
   #e;
   #t;
   constructor(e) {
@@ -9631,7 +9631,7 @@ var ct = class {
   #e = new KeyringController({ config: {}, state: {} });
   #t;
   constructor(e) {
-    this.#t = new z2(e);
+    this.#t = new z(e);
   }
   derivationPath(e) {
     return U(e), `m/44'/60'/0'/0/${e}`;
@@ -9714,7 +9714,7 @@ var lt = class {
   namespace = K.Evm;
   #e;
   constructor(e) {
-    this.#e = new z2(e);
+    this.#e = new z(e);
   }
   normalizeAddress(e) {
     return e.toLowerCase();
@@ -9776,16 +9776,16 @@ function X(e) {
 function ut(e) {
   return (t, n) => e.getCode({ address: t }).then((e2) => e2 ?? `0x`);
 }
-var dt = z.object({ address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The wallet address to check the balance for.`), tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).optional().describe(`Optional: The contract address of the ERC20 token. If omitted, the native currency balance is returned.`).transform((e) => e) });
-var ft = z.object({ recipient: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The recipient's EVM address.`).transform((e) => e), amountInBaseUnits: z.string().describe(`The amount of the token/native currency to send (in base units, e.g., '1000000000000000000').`), tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).optional().describe(`Optional: The contract address of the ERC20 token to send. If omitted, the native currency is sent.`).transform((e) => e) });
-var pt = z.object({ ticker: z.string().describe(`The ticker symbol of the token (e.g., 'ETH', 'USDC').`) });
-var mt = z.object({ amount: z.string().describe(`The amount to convert (in human-readable units).`), tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).optional().describe(`Optional: The contract address of the token. If omitted, native currency decimals are used.`).transform((e) => e) });
-var ht = z.object({ amount: z.string().regex(/^\d+$/, `Amount must be a non-negative integer string (base units).`).describe(`The amount to convert (in base units, e.g., wei).`), tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).optional().describe(`Optional: The contract address of the token. If omitted, native currency decimals are used.`).transform((e) => e) });
-var gt = z.object({ message: z.string(), intent: z.string().optional(), requestId: z.string().optional().describe(`Optional client correlation id for remote signing.`) });
-var _t = z.object({ domain: z.object({}).passthrough(), types: z.object({}).passthrough(), primaryType: z.string(), message: z.object({}).passthrough(), intent: z.string().optional(), requestId: z.string().optional().describe(`Optional client correlation id for remote signing.`) }).passthrough().describe(`The EIP-712 typed data structure to sign.`);
-var vt = z.object({ tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The contract address of the ERC20 token.`).transform((e) => e), owner: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The address of the token owner.`).transform((e) => e), spender: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The address of the potential spender.`).transform((e) => e) });
-var yt = z.object({ tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The contract address of the ERC20 token.`).transform((e) => e), spender: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The address to grant approval to.`).transform((e) => e), amount: z.string().regex(/^\d+$/, `Amount must be a non-negative integer string (base units).`).describe(`The amount of tokens to approve (in base units).`) });
-var bt = z.object({ tokenAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The contract address of the ERC20 token.`).transform((e) => e), spender: z.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The address whose approval should be revoked.`).transform((e) => e) });
+var dt = external_exports.object({ address: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The wallet address to check the balance for.`), tokenAddress: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).optional().describe(`Optional: The contract address of the ERC20 token. If omitted, the native currency balance is returned.`).transform((e) => e) });
+var ft = external_exports.object({ recipient: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The recipient's EVM address.`).transform((e) => e), amountInBaseUnits: external_exports.string().describe(`The amount of the token/native currency to send (in base units, e.g., '1000000000000000000').`), tokenAddress: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).optional().describe(`Optional: The contract address of the ERC20 token to send. If omitted, the native currency is sent.`).transform((e) => e) });
+var pt = external_exports.object({ ticker: external_exports.string().describe(`The ticker symbol of the token (e.g., 'ETH', 'USDC').`) });
+var mt = external_exports.object({ amount: external_exports.string().describe(`The amount to convert (in human-readable units).`), tokenAddress: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).optional().describe(`Optional: The contract address of the token. If omitted, native currency decimals are used.`).transform((e) => e) });
+var ht = external_exports.object({ amount: external_exports.string().regex(/^\d+$/, `Amount must be a non-negative integer string (base units).`).describe(`The amount to convert (in base units, e.g., wei).`), tokenAddress: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).optional().describe(`Optional: The contract address of the token. If omitted, native currency decimals are used.`).transform((e) => e) });
+var gt = external_exports.object({ message: external_exports.string(), intent: external_exports.string().optional(), requestId: external_exports.string().optional().describe(`Optional client correlation id for remote signing.`) });
+var _t = external_exports.object({ domain: external_exports.object({}).passthrough(), types: external_exports.object({}).passthrough(), primaryType: external_exports.string(), message: external_exports.object({}).passthrough(), intent: external_exports.string().optional(), requestId: external_exports.string().optional().describe(`Optional client correlation id for remote signing.`) }).passthrough().describe(`The EIP-712 typed data structure to sign.`);
+var vt = external_exports.object({ tokenAddress: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The contract address of the ERC20 token.`).transform((e) => e), owner: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The address of the token owner.`).transform((e) => e), spender: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The address of the potential spender.`).transform((e) => e) });
+var yt = external_exports.object({ tokenAddress: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The contract address of the ERC20 token.`).transform((e) => e), spender: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The address to grant approval to.`).transform((e) => e), amount: external_exports.string().regex(/^\d+$/, `Amount must be a non-negative integer string (base units).`).describe(`The amount of tokens to approve (in base units).`) });
+var bt = external_exports.object({ tokenAddress: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The contract address of the ERC20 token.`).transform((e) => e), spender: external_exports.string().regex(/^0x[a-fA-F0-9]{40}$/, `Invalid EVM address format`).describe(`The address whose approval should be revoked.`).transform((e) => e) });
 var Z = [{ constant: true, inputs: [], name: `name`, outputs: [{ name: ``, type: `string` }], stateMutability: `view`, type: `function` }, { constant: true, inputs: [], name: `symbol`, outputs: [{ name: ``, type: `string` }], stateMutability: `view`, type: `function` }, { constant: true, inputs: [], name: `decimals`, outputs: [{ name: ``, type: `uint8` }], stateMutability: `view`, type: `function` }, { constant: true, inputs: [{ name: `owner`, type: `address` }], name: `balanceOf`, outputs: [{ name: ``, type: `uint256` }], stateMutability: `view`, type: `function` }, { constant: false, inputs: [{ name: `to`, type: `address` }, { name: `value`, type: `uint256` }], name: `transfer`, outputs: [{ name: ``, type: `bool` }], stateMutability: `nonpayable`, type: `function` }, { constant: true, inputs: [{ name: `owner`, type: `address` }, { name: `spender`, type: `address` }], name: `allowance`, outputs: [{ name: ``, type: `uint256` }], stateMutability: `view`, type: `function` }, { constant: false, inputs: [{ name: `spender`, type: `address` }, { name: `value`, type: `uint256` }], name: `approve`, outputs: [{ name: ``, type: `bool` }], stateMutability: `nonpayable`, type: `function` }, { constant: false, inputs: [{ name: `from`, type: `address` }, { name: `to`, type: `address` }, { name: `value`, type: `uint256` }], name: `transferFrom`, outputs: [{ name: ``, type: `bool` }], stateMutability: `nonpayable`, type: `function` }, { constant: true, inputs: [], name: `totalSupply`, outputs: [{ type: `uint256`, name: `` }], stateMutability: `view`, type: `function` }];
 async function xt(e, t) {
   let [n, r, i2] = await Promise.all([e.read({ address: t, abi: Z, functionName: `decimals` }), e.read({ address: t, abi: Z, functionName: `name` }), e.read({ address: t, abi: Z, functionName: `symbol` })]);

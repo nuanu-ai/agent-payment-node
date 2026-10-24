@@ -4685,16 +4685,6 @@
         }
       }
     },
-    "node_modules/@metamask/fox-sdk/node_modules/zod": {
-      "version": "3.23.8",
-      "resolved": "https://registry.npmjs.org/zod/-/zod-3.23.8.tgz",
-      "integrity": "sha512-XBx9AXhXktjUqnepgTiE5flcKIYWi/rme0Eaj+5Y0lftuGBq+jyRu/md4WnuxqgP1ubdpNCsYEYPxrzVHD8d6g==",
-      "dev": true,
-      "license": "MIT",
-      "funding": {
-        "url": "https://github.com/sponsors/colinhacks"
-      }
-    },
     "node_modules/@metamask/gas-fee-controller": {
       "version": "26.3.2",
       "resolved": "https://registry.npmjs.org/@metamask/gas-fee-controller/-/gas-fee-controller-26.3.2.tgz",
