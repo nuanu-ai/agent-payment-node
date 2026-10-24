@@ -107,6 +107,9 @@
     "@metamask/delegation-core": "3.0.0"
   },
   "overrides": {
+    "@metamask/fox-sdk": {
+      "zod": "4.6.7"
+    },
     "@solana/web3.js": {
       "jayson": "5.0.0"
     },
