@@ -100,7 +100,7 @@
     "esbuild": "0.28.2",
     "tronweb": "6.5.0",
     "@relay-protocol/settlement-sdk": "0.0.143",
-    "@toruslabs/ethereum-controllers": "9.12.0",
+    "@toruslabs/ethereum-controllers": "9.13.0",
     "@metamask/7715-permission-types": "2.0.0",
     "@metamask/smart-accounts-kit": "2.0.0",
     "@metamask/x402": "1.0.0",
