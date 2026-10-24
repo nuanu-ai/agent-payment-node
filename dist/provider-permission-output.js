@@ -1,5 +1,24 @@
 import { capabilityHash } from "./provider-profile.js";
-export function publicPendingPermissionProfile(profile, adapter, permission) {
+/**
+ * What a pending consent intent allows next. While it is live: the exact retry, or cancelling it after a MetaMask review.
+ * Once expired the exact connect is refused before consent, so only the review, the local cancel and a new intent remain
+ * (QA 0.5.72). Forget removes only the local intent; MetaMask-side authority is reviewed and revoked there.
+ */
+export function pendingPermissionNextActions(profile, permission, nowUnix) {
+    const forget = `apn wallet permission forget --profile ${profile} --expected-revision ${permission.revision}`;
+    if (nowUnix < permission.expires_at_unix)
+        return [
+            "Retry wallet connect with the exact original provider, cap, expiry and idempotency key to reuse this session.",
+            `After reviewing MetaMask, cancel only the local pending intent with ${forget}.`,
+        ];
+    return [
+        `The intent expired at ${new Date(permission.expires_at_unix * 1000).toISOString()} and its exact connect is refused. In MetaMask, check whether ` +
+            `a permission for session ${permission.session_address} was granted, and revoke it there if it is not wanted.`,
+        `Then cancel only the local expired intent with ${forget}, and start a new wallet connect with a new expiry and idempotency key.`,
+    ];
+}
+export function publicPendingPermissionProfile(profile, adapter, permission, nowUnix) {
+    const expired = nowUnix >= permission.expires_at_unix;
     return {
         profile,
         provider: adapter.provider_id,
@@ -18,6 +37,7 @@ export function publicPendingPermissionProfile(profile, adapter, permission) {
             requested_cap_usdc_atomic: permission.requested_cap_atomic,
             starts_at_unix: permission.starts_at_unix,
             expires_at_unix: permission.expires_at_unix,
+            expired,
             state: "pending_consent",
             revision: permission.revision,
             revocation_freshness: permission.revocation_freshness,
@@ -25,11 +45,10 @@ export function publicPendingPermissionProfile(profile, adapter, permission) {
             session_custody: "encrypted_local_apn",
             provider_revoke: "unavailable_unproved",
         },
-        warning: "The local consent intent is pending. MetaMask-side authority may already exist after a timeout; review it before replacing the intent.",
-        next_actions: [
-            "Retry wallet connect with the exact original provider, cap, expiry and idempotency key to reuse this session.",
-            `After reviewing MetaMask, cancel only the local pending intent with apn wallet permission forget --profile ${profile} --expected-revision ${permission.revision}.`,
-        ],
+        warning: expired
+            ? "The local consent intent expired before consent was confirmed. MetaMask-side authority may still exist if consent finished after a timeout; review it before replacing the intent."
+            : "The local consent intent is pending. MetaMask-side authority may already exist after a timeout; review it before replacing the intent.",
+        next_actions: pendingPermissionNextActions(profile, permission, nowUnix),
     };
 }
 export function publicPermissionProfile(profile, permission, reused) {

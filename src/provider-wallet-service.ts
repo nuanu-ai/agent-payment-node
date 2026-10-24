@@ -142,7 +142,8 @@ export class ProviderWalletService {
       if (current === null) {
         if (this.context.providerRegistry === undefined) return null;
         const pending = await findPendingProviderPermission(this.context.requireProviderRegistry(), profileHash);
-        return pending === null ? null : publicPendingPermissionProfile(profile, pending.adapter, pending.permission);
+        return pending === null ? null : publicPendingPermissionProfile(profile, pending.adapter, pending.permission,
+          Math.floor(this.context.clock.now().getTime() / 1000));
       }
       const adapter = this.context.requireProviderRegistry().resolve(current.provider_id);
       current = mutable ? await upgradeProviderProfile(adapter, current, repository) : await previewProviderProfile(adapter, current);
