@@ -4,8 +4,11 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 
 // These public fixture keys exist only in the external test harness. They never
-// enter the package, a real provider, or APN's persistent wallet storage.
+// enter the package, a real provider, or an operator's APN wallet storage. Only the
+// retained local-wallet cases seal the owner key in their own synthetic state root
+// (synthetic wrapping secret) and never approve or sign with it there.
 const OWNER_KEY = `0x${"11".repeat(32)}`;
+export const syntheticOwnerKey = () => OWNER_KEY;
 const RELAYER_KEY = `0x${"33".repeat(32)}`;
 const types = {
   Caveat: [{ name: "enforcer", type: "address" }, { name: "terms", type: "bytes" }],

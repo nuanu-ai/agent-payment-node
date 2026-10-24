@@ -153,6 +153,14 @@ function rpcResult(f, method, params) {
       if (effect) assert.equal(`0x${data.slice(74)}`, effect.delegationHash);
       return word(proved && f.phase === "success" && number >= transactionNumber ? 1n : 0n);
     }
+    // Since 0.5.52 every zero redemption count is followed by disabledDelegations(bytes32) on the pinned manager for
+    // the operation's own delegation. No fixture disables it.
+    if (call.to.toLowerCase() === row.protocol.manager.address && data.slice(0, 10) === "0x2d40d052") {
+      assert.match(data, /^0x2d40d052[0-9a-f]{64}$/u);
+      const signed = effect ?? (({ dispatch, intent }) => dispatch ?? intent)(read(f.operationPath));
+      assert.equal(`0x${data.slice(10)}`, signed.delegationHash.toLowerCase());
+      return word(0n);
+    }
     throw new Error("unexpected call target or payload");
   }
   if (method === "eth_getTransactionByHash") return proved && params[0] === effect.transaction.hash ? effect.transaction : null;

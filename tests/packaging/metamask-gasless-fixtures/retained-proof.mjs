@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, relative } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { hash, loadModule, reinstall, scenario } from "./harness.mjs";
+import { syntheticOwnerKey } from "./signed-effect.mjs";
 
 const NOW = new Date("2026-09-09T00:00:00.000Z");
 const RPC_ORIGIN = "https://rpc.example";
@@ -69,9 +71,9 @@ export async function runInstalledRetainedProof(installed) {
     const after = await retainedSnapshot(s);
     assert.deepEqual(after.files.get(old.operationPath), before.files.get(old.operationPath), `${name}: old operation retained`);
     assert.deepEqual(after.files.get(old.profilePath), before.files.get(old.profilePath), `${name}: provider profile retained`);
-    if (sameDomain) assert.deepEqual(after, before, `${name}: blocked operation made no write`);
+    const derivedIndexFiles = sameDomain ? assertBlockedWroteNothing(after, before, old, s.fixture().owner, name) : null;
     reverse.push({ family: name, operationId: old.operationId, blockingState: sameDomain ? "awaiting_approval" : "different_conflict_domain",
-      sameKey: "APN_IDEMPOTENCY_CONFLICT", transportCalls: 0, providerPosts: 0 });
+      sameKey: "APN_IDEMPOTENCY_CONFLICT", transportCalls: 0, providerPosts: 0, derivedIndexFiles });
   }
 
   const pending = await scenario(installed);
@@ -79,10 +81,12 @@ export async function runInstalledRetainedProof(installed) {
   const before = await retainedSnapshot(pending), traceBefore = await pending.trace(), privateBefore = await pending.privateBytes();
   assert.notEqual(reinstalledRoot, undefined); pending.update({ packageRoot: reinstalledRoot });
   const lifecycle = [];
+  // Since 0.5.42 (PROV-01) wallet status and balance are reads that answer during an operation; the lifecycle guard
+  // stays on the commands that can move the bound profile.
   for (const [command, argv] of [
     ["wallet.ensure", ["wallet", "ensure", "--profile", pending.profile]],
-    ["wallet.status", ["wallet", "status", "--profile", pending.profile]],
-    ["wallet.balance", ["wallet", "balance", "--profile", pending.profile, "--rpc-url", pending.fixture().rpcUrl]],
+    ["wallet.connect", ["wallet", "connect", "--profile", pending.profile, "--provider", "metamask-agent-wallet"]],
+    ["wallet.permission.sync", ["wallet", "permission", "sync", "--profile", pending.profile, "--expected-revision", "1"]],
   ]) {
     const result = await pending.cli(argv);
     assert.equal(result.ok, false, JSON.stringify(result));
@@ -106,7 +110,7 @@ export async function runInstalledRetainedProof(installed) {
 async function installedModules(packageRoot) {
   const [core, state, canonical, constants, profiles, policy, profileRepository, providerRegistry, awal,
     providerX402Stage, providerX402State, providerX402Repository, chainAccount, chainPolicy, railModel, railRepository,
-    bridgeTransitions, bridgeRepository, bridgeEconomics, gaslessRegistry, allowlistPolicy, gaslessAssetPolicy] = await Promise.all([
+    bridgeTransitions, bridgeRepository, bridgeEconomics, gaslessRegistry, allowlistPolicy, gaslessAssetPolicy, walletStore] = await Promise.all([
     loadModule(packageRoot, "core.js"), loadModule(packageRoot, "state.js"), loadModule(packageRoot, "canonical.js"),
     loadModule(packageRoot, "constants.js"), loadModule(packageRoot, "provider-profile.js"),
     loadModule(packageRoot, "profile-policy.js"), loadModule(packageRoot, "profile-repository.js"),
@@ -119,15 +123,19 @@ async function installedModules(packageRoot) {
     loadModule(packageRoot, "lifi/economics.js"),
     loadModule(packageRoot, "gasless/registry.js"),
     loadModule(packageRoot, "allowlist-policy-store.js"), loadModule(packageRoot, "gasless/asset-policy.js"),
+    loadModule(packageRoot, "encrypted-wallet-store.js"),
   ]);
   return { ...core, ...state, ...canonical, ...constants, ...profiles, ...policy, ...profileRepository,
     ...providerRegistry, ...awal, ...providerX402Stage, ...providerX402State, ...providerX402Repository, ...chainAccount,
     ...chainPolicy, ...railModel, ...railRepository, ...bridgeTransitions, ...bridgeRepository, ...bridgeEconomics,
-    ...gaslessRegistry, ...allowlistPolicy, ...gaslessAssetPolicy };
+    ...gaslessRegistry, ...allowlistPolicy, ...gaslessAssetPolicy, ...walletStore };
 }
 
 async function buildLocalDirect(s, m) {
   const core = await localCore(s, m);
+  // Since 0.5.42 the local Base USDC prepare is admitted by the owner's active direct policy, like every direct transfer.
+  await activateOwnerPolicy(s, m, "retained-local-direct", { chain: "eip155:8453", kind: "token", identifier: m.BASE_USDC,
+    rail: "direct", maximumPerTransferAtomic: "10000000", dailyLimitAtomic: "20000000" });
   const idempotencyKey = "retained-local-direct-0001";
   const result = await core.execute({ command: "transfer.prepare", profile: s.profile,
     recipient: s.fixture().recipient, amount: "1", idempotencyKey });
@@ -211,19 +219,9 @@ async function buildBridge(s, m) {
 
 async function buildLocalGasless(s, m) {
   const state = new m.StateStore(s.stateRoot); await state.initialize(); await ensureLocalWallet(s, state, m);
-  const { getAddress } = createRequire(join(s.packageRoot, "package.json"))("viem");
-  // Synthetic owner admission uses the production policy store in this scenario's isolated state root.
-  const policy = new m.AllowlistPolicyStore(s.stateRoot);
-  const record = await policy.stage({ profile: s.profile, now: NOW,
-    policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: "retained-local-gasless.1",
-      accounts: { evm: getAddress(s.fixture().owner) }, effectiveAt: new Date(NOW.getTime() - 1_000).toISOString(),
-      admissions: [{ chain: "eip155:8453", kind: "token", identifier: m.gaslessDeployment(8453).token,
-        rail: "gasless", maximumPerTransferAtomic: "10000000", dailyLimitAtomic: "20000000",
-        mechanism: m.localGaslessMechanism(8453), recipient: "0x4444444444444444444444444444444444444444" }] } });
-  await policy.appendDecision(s.profile, null, { status: "active", revision: record.revision,
-    stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest,
-    registry: record.registry, approvalFingerprint: m.hashObject("retained-local-gasless-policy"),
-    decidedAt: NOW.toISOString() });
+  await activateOwnerPolicy(s, m, "retained-local-gasless", { chain: "eip155:8453", kind: "token",
+    identifier: m.gaslessDeployment(8453).token, rail: "gasless", maximumPerTransferAtomic: "10000000",
+    dailyLimitAtomic: "20000000", mechanism: m.localGaslessMechanism(8453), recipient: "0x4444444444444444444444444444444444444444" });
   const rpc = gaslessRpc(s, m);
   const forbiddenCustody = new Proxy({}, { get: (_target, property) => async () => {
     throw new Error(`unexpected retained gasless custody call: ${String(property)}`);
@@ -238,34 +236,59 @@ async function buildLocalGasless(s, m) {
   return prepared(s, result, idempotencyKey, "gasless-operations");
 }
 
+async function activateOwnerPolicy(s, m, name, admission) {
+  // Synthetic owner admission uses the production policy store in this scenario's isolated state root.
+  const policy = new m.AllowlistPolicyStore(s.stateRoot);
+  const record = await policy.stage({ profile: s.profile, now: NOW,
+    policy: { schemaVersion: "apn.allowlist-policy-file.v1", overlayVersion: `${name}.1`,
+      accounts: { evm: ownerChecksum(s) }, effectiveAt: new Date(NOW.getTime() - 1_000).toISOString(),
+      admissions: [admission] } });
+  await policy.appendDecision(s.profile, null, { status: "active", revision: record.revision,
+    stagedRecordDigest: record.recordDigest, policyDigest: record.registry.policyDigest,
+    registry: record.registry, approvalFingerprint: m.hashObject(`${name}-policy`), decidedAt: NOW.toISOString() });
+}
+
 async function localCore(s, m, overrides = {}) {
   const state = new m.StateStore(s.stateRoot); await state.initialize(); await ensureLocalWallet(s, state, m);
-  return new m.ApnCore({ state, profileRepository: new m.StateProfileRepository(state), native: localNative(s),
+  return new m.ApnCore({ state, profileRepository: new m.StateProfileRepository(state), native: localNative(s, state, m),
     rpc: overrides.rpc ?? evmRpc(s, m), policy: overrides.policy ?? profilePolicy(m),
     ...(overrides.http === undefined ? {} : { http: overrides.http }), clock: { now: () => new Date(NOW) } });
 }
 
 async function ensureLocalWallet(s, state, m) {
   await state.removeProviderProfile(state.profileHash(s.profile));
-  const core = new m.ApnCore({ state, profileRepository: new m.StateProfileRepository(state), native: localNative(s),
+  const core = new m.ApnCore({ state, profileRepository: new m.StateProfileRepository(state), native: localNative(s, state, m),
     clock: { now: () => new Date(NOW) } });
   const result = await core.execute({ command: "wallet.ensure", profile: s.profile });
   assert.equal(result.ok, true, JSON.stringify(result));
 }
 
-function localNative(s) {
+// Since 0.5.36 a local direct prepare cross-checks the public wallet against its encrypted envelope. As the shipped
+// local wallet native does, ensure seals the envelope through the installed store, here with the synthetic owner key
+// (the MetaMask account) under a synthetic wrapping secret in this scenario's state root; no Keychain, no signing.
+function localNative(s, state, m) {
   return { async request(request) {
-    if (request.operation === "wallet.ensure") return { profile: s.profile, address: s.fixture().owner,
-      createdAt: "2026-09-08T00:00:00.000Z", bindingHash: "a".repeat(64) };
-    if (request.operation === "wallet.describe") return { found: true, profile: s.profile, address: s.fixture().owner,
-      createdAt: "2026-09-08T00:00:00.000Z", bindingHash: "a".repeat(64) };
+    if (request.operation === "wallet.ensure") {
+      const wrapping = randomBytes(32), port = { load: async () => Buffer.from(wrapping), create: async () => Buffer.from(wrapping) };
+      try {
+        return publicIdentity(await new m.EncryptedWalletStore(state, port).importNew(s.profile, syntheticOwnerKey(), ownerChecksum(s)));
+      } finally { wrapping.fill(0); }
+    }
+    if (request.operation === "wallet.describe") {
+      return { found: true, ...publicIdentity(m.walletEnvelopeIdentity(await state.loadEncryptedWalletEnvelope(s.profile), s.profile)) };
+    }
     throw new Error(`unexpected retained native call: ${request.operation}`);
   } };
 }
 
+function publicIdentity({ profile, address, createdAt, bindingHash }) { return { profile, address, createdAt, bindingHash }; }
+function ownerChecksum(s) { return createRequire(join(s.packageRoot, "package.json"))("viem").getAddress(s.fixture().owner); }
+
 function evmRpc(s, m) {
   return {
     async assertBaseChain() { return { chainId: 8453, rpcOrigin: RPC_ORIGIN }; },
+    // Since 0.5.45 x402 proves its network only through this read; this single-network double serves Base alone.
+    async assertX402Chain(chainId) { assert.equal(chainId, 8453); return { chainId: 8453, rpcOrigin: RPC_ORIGIN }; },
     async getBalances(address) { return { address, ethAtomic: "1000000000000000000", usdcAtomic: "50000000",
       blockNumberAtomic: "12345", blockHash: `0x${"b".repeat(64)}`, observedAt: NOW.toISOString(), rpcOrigin: RPC_ORIGIN }; },
     async getPendingNonce() { return "7"; },
@@ -354,6 +377,29 @@ function retained(s, idempotencyKey, operationId, directory) {
   return { idempotencyKey, operationId,
     operationPath: relative(s.stateRoot, join(s.stateRoot, directory, profileHash, `${operationId}.json`)),
     profilePath: relative(s.stateRoot, join(s.stateRoot, "profiles", profileHash, "profile.json")) };
+}
+
+// Since 0.5.47 the operation index is derived from the family journals: the first walk after an upgrade indexes a record
+// that predates it (the records persisted directly above). Those derived files for the old operation, holding its claim on
+// the blocked account, are the only write a blocked prepare may leave; every other byte and existing index file is kept.
+function assertBlockedWroteNothing(after, before, old, owner, name) {
+  const derived = path => path === "operation-index" || path.startsWith("operation-index/");
+  const kept = directories => directories.filter(path => !derived(path));
+  assert.deepEqual(kept(after.directories), kept(before.directories), `${name}: blocked operation made no write`);
+  for (const path of before.directories) assert.ok(after.directories.includes(path), `${name}: blocked operation kept ${path}`);
+  for (const [path, bytes] of before.files) assert.deepEqual(after.files.get(path), bytes, `${name}: blocked operation kept ${path}`);
+  const added = [...after.files].filter(([path]) => !before.files.has(path));
+  for (const [path, bytes] of added) {
+    assert.ok(derived(path), `${name}: blocked operation made no write (${path})`);
+    const value = JSON.parse(bytes.toString("utf8"));
+    assert.deepEqual(value.operationIds ?? [value.operationId], [old.operationId], `${name}: ${path} indexes only the old operation`);
+  }
+  if (added.length > 0) {
+    const entry = JSON.parse(after.files.get(`operation-index/entries/${old.operationId}.json`).toString("utf8"));
+    assert.equal(entry.state, "active", name);
+    assert.ok(entry.claims.some(claim => claim.key === `evm:8453:${owner.toLowerCase()}`), `${name}: derived claim holds the account`);
+  }
+  return added.length;
 }
 
 async function retainedSnapshot(s) {
