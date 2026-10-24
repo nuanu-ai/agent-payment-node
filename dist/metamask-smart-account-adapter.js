@@ -4,6 +4,7 @@ import { ApnError } from "./errors.js";
 import { assertSmartAccountPreflight, validateSmartAccountObservation, } from "./metamask-smart-account-grant.js";
 import { assertMetaMaskSmartAccountPackageIdentity } from "./metamask-smart-account-package.js";
 import { isGrantedPermissionRecord, METAMASK_SMART_ACCOUNT_PROVIDER_ID, projectPendingPermissionBinding, projectPermissionBinding, SMART_ACCOUNT_PERMISSION_RECORD_VERSION, } from "./metamask-smart-account-record.js";
+import { pendingPermissionNextActions } from "./provider-permission-output.js";
 import { accountBindingHash, capabilityHash, metamaskSmartAccountCapabilitySnapshot, metamaskSmartAccountLegacyCapabilitySnapshot, metamaskSmartAccountX402CapabilitySnapshot, } from "./provider-profile.js";
 export { METAMASK_SMART_ACCOUNT_PROVIDER_ID } from "./metamask-smart-account-record.js";
 export class LocalSessionKeyFactory {
@@ -122,8 +123,10 @@ export class MetaMaskSmartAccountAdapter {
             const current = await this.materializeExpiry(record, instant);
             return projectPermissionBinding(current, instant.unix);
         }
-        if (instant.unix >= record.requested_expires_at_unix)
-            invalidInput("The pending permission intent expired before consent.");
+        if (instant.unix >= record.requested_expires_at_unix) {
+            throw new ApnError("APN_INVALID_INPUT", "The pending permission intent expired before consent.", { reason: "permission_intent_expired",
+                nextActions: pendingPermissionNextActions(intent.profile, projectPendingPermissionBinding(record), instant.unix) });
+        }
         await assertMetaMaskSmartAccountPackageIdentity();
         const pending = record;
         const observation = await this.consent.request({

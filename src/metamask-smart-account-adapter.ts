@@ -18,6 +18,7 @@ import {
   type SmartAccountPermissionRecord,
 } from "./metamask-smart-account-record.js";
 import type { SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
+import { pendingPermissionNextActions } from "./provider-permission-output.js";
 import type { SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
 import type {
   DirectExecutionPort,
@@ -156,7 +157,10 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
       const current = await this.materializeExpiry(record, instant);
       return projectPermissionBinding(current, instant.unix);
     }
-    if (instant.unix >= record.requested_expires_at_unix) invalidInput("The pending permission intent expired before consent.");
+    if (instant.unix >= record.requested_expires_at_unix) {
+      throw new ApnError("APN_INVALID_INPUT", "The pending permission intent expired before consent.", { reason: "permission_intent_expired",
+        nextActions: pendingPermissionNextActions(intent.profile, projectPendingPermissionBinding(record), instant.unix) });
+    }
     await assertMetaMaskSmartAccountPackageIdentity();
     const pending = record;
     const observation = await this.consent.request({
