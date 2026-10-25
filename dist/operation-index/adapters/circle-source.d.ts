@@ -5,6 +5,7 @@ import { type OperationFamilyAdapter } from "../adapter.js";
  * most CIRCLE_V2_SOURCE_TTL_MS after the journal was staged, and sends at most once in that same command. The payer is
  * held for that window plus the unstarted margin in every phase: after it, the burn either landed or its signed quote
  * expired, and no APN path signs or sends it again. `operation status` reads the burn's receipt at the finalized tag
- * once and records it; a recorded receipt ends the claim at once (R4 exit 1: proof).
+ * once and records it; a recorded receipt ends the claim at once (R4 exit 1: proof). A successful burn's receipt on
+ * Solana is read the same way until it is recorded (circle-v2-solana-delivery.ts).
  */
 export declare const circleSourceAdapter: OperationFamilyAdapter<NonEvmSourceJournal>;

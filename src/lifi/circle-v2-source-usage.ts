@@ -50,9 +50,15 @@ export async function settleCircleSourceUsage(root: string, journal: NonEvmSourc
   return { reservationId, state: hold.state, amountAtomic: hold.amountAtomic, effectAt: hold.effectAt };
 }
 
-function burnPrincipal(journal: NonEvmSourceJournal): string | null {
+/** The arguments of the journal's own burn call, or null when its calldata is not that call. */
+export function circleBurnCall(journal: NonEvmSourceJournal): { readonly amount: bigint; readonly destinationDomain: number;
+  readonly mintRecipient: Hex; readonly burnToken: string } | null {
   try {
     const decoded = decodeFunctionData({ abi: ABI, data: journal.sourceCall.data as Hex });
-    return decoded.functionName === "depositForBurnWithHookAndFees" ? decoded.args[0].toString() : null;
+    if (decoded.functionName !== "depositForBurnWithHookAndFees") return null;
+    const [amount, destinationDomain, mintRecipient, burnToken] = decoded.args;
+    return { amount, destinationDomain, mintRecipient: mintRecipient.toLowerCase() as Hex, burnToken: burnToken.toLowerCase() };
   } catch { return null; }
 }
+
+function burnPrincipal(journal: NonEvmSourceJournal): string | null { return circleBurnCall(journal)?.amount.toString() ?? null; }
