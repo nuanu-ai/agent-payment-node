@@ -40,7 +40,7 @@ export const ORCA_COMMANDS: readonly CommandDefinition[] = [
     option("--compute-unit-price", "string", ["micro_lamports_per_compute_unit"])],
     "Quote from the named pinned pool's on-chain state, build the instructions locally, and simulate the exact unsigned transaction. Uses APN_SOLANA_RPC_URL.",
     "network_read"),
-  command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"])],
+  command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]), option("--idempotency-key", "idempotency_key", ["global_payment_key", "8_to_200_safe_ascii_characters"])],
     "Prepare the saved quote of either pool, only after owner admission of both of its assets with that pool's keyless route.", "payment_prepare"),
   command("status", [operation], "Read one durable guarded swap operation and observe its exact signature without resending.", "local_read"),
   command("approve", [operation], "Show the exact swap screen, take the typed approval code, re-simulate with a fresh blockhash, sign locally and send once.",

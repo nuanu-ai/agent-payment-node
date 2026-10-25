@@ -18,7 +18,7 @@ export const ONECLICK_COMMANDS: readonly CommandDefinition[] = [
       option("--max-quoted-loss-atomic", "string", "usdc_input_minus_minimum_for_base_usdc_lane", "destination_quoted_minus_minimum_for_ethereum_lanes"),
       option("--max-gas-limit-atomic", "string"), option("--max-fee-per-gas-wei", "wei"),
       option("--max-priority-fee-per-gas-wei", "wei"), option("--max-native-debit-wei", "wei", "native_lanes_include_value"),
-      option("--idempotency-key", "idempotency_key")],
+      option("--idempotency-key", "idempotency_key", "8_to_128_safe_ascii_characters")],
     effect: { class: "payment_submit", summary: "After exact foreground approval, may send one Base USDC transfer or one plain Ethereum ETH value transfer to the fresh 1Click quote deposit address. Uses the lane's APN_BASE_RPC_URL or APN_ETHEREUM_RPC_URL." },
     approval: { class: "foreground_tty", when: "Before signing the exact saved deposit." }, output, states,
     recovery: [{ command_path: ["oneclick", "source", "status"], when: "Observe source and 1Click state without resending." }],

@@ -11,6 +11,7 @@ import { seal, transition } from "./token-journal.js";
 import { assertLane, readAllowance, readExecutorCap, readPoolConfig, readPoolFunctional, readTokenBalance, requoteSend, rpcEnvelope, sourceReceipt, validateDestination, verifySignedEnvelope, } from "./token-rpc.js";
 export { LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, encodeStargateNativeDrop, } from "./token-codec.js";
 import { stargateFundsRefusal } from "./funds.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 export { FileStargateTokenJournal, stargateV2TokenCanonicalReceipt } from "./token-journal.js";
 export async function prepareStargateV2Token(request, ports, journal) {
     const now = ports.now ?? Date.now, profile = canonicalProfile(request.profile), owner = address(request.owner), recipient = address(request.recipient);
@@ -26,7 +27,7 @@ export async function prepareStargateV2Token(request, ports, journal) {
     const requestedPriority = hasPriorityFee ? uint(request.maxPriorityFeePerGasWei, true) : undefined;
     if (requestedMaxFee !== undefined && requestedPriority > requestedMaxFee)
         fail("APN_INVALID_INPUT", "priority_fee_ceiling_exceeds_max_fee_ceiling");
-    if (!/^[A-Za-z0-9._:-]{8,128}$/u.test(request.idempotencyKey))
+    if (!isIdempotencyKey(request.idempotencyKey, 128))
         fail("APN_INVALID_INPUT", "idempotency_key");
     const ttl = request.ttlMs ?? 60_000;
     if (!Number.isSafeInteger(ttl) || ttl < 15_000 || ttl > MAX_TTL_MS)

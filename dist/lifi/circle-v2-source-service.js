@@ -20,6 +20,7 @@ import { circleV2BurnTermsFromQuote } from "./circle-v2-source-receipt.js";
 import { bridgeAddress, bridgeFailure, bridgeHex, bridgeRecord, bridgeUint, BRIDGE_MIN_REMAINING_MS } from "./validation.js";
 import { admitOperation } from "../operation-index/admission.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 const CIRCLE = "https://iris-api.circle.com";
 const USDC = getAddress("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
 const WRAPPER = getAddress("0x71f54F818671cD0D7ea140Da213e5C8b5C92a408");
@@ -56,9 +57,10 @@ export class CircleV2SourceService {
         const profile = canonicalProfile(request.profile), payer = bridgeAddress(request.expectedPayer);
         const amount = bridgeUint(request.amountAtomic, true);
         const feeCap = bridgeUint(request.maxSourceFeeAtomic);
-        if (feeCap >= amount || amount > 10000000000000n || request.idempotencyKey.length < 8 ||
-            request.idempotencyKey.length > 128)
+        if (feeCap >= amount || amount > 10000000000000n)
             fail("intent");
+        if (!isIdempotencyKey(request.idempotencyKey, 128))
+            fail("idempotency_key");
         const profileHash = this.state.profileHash(profile);
         const operationId = hash(`circle-v2-base-source\0${profileHash}\0${request.idempotencyKey}`);
         const transport = new BridgeHttps();

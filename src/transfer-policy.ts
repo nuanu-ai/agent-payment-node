@@ -6,6 +6,7 @@ import { BASE_USDC, CHAIN_CAIP2, CHAIN_ID, TRANSFER_TOPIC, USDC_DECIMALS } from 
 import { ApnError, assertInput } from "./errors.js";
 import { evmUint, MAX_DIRECT_TRANSACTION_BYTES, publicEvmAsset } from "./evm-asset.js";
 import { directEvmRequiresSafeHead } from "./evm-direct-networks.js";
+import { isIdempotencyKey } from "./idempotency-key-contract.js";
 import { publicEvmActualFee } from "./evm-direct-actual-fee.js";
 import { multiplyAtomic, parseAtomic } from "./money.js";
 import type { Address, Economics, Hex, OperationRecord, ReceiptRecord } from "./model.js";
@@ -13,7 +14,6 @@ import type { BalanceSnapshot, FeeEstimate, RpcReceipt } from "./ports.js";
 import { canonicalAddress, validateBalance } from "./wallet-policy.js";
 import { publicDirectAllowlist } from "./direct-allowlist-gate.js";
 
-const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const HEX = /^0x(?:[0-9a-fA-F]{2})+$/;
 const TRANSFER_ABI = [{
@@ -36,7 +36,7 @@ export function canonicalOperationId(value: unknown): string {
 }
 
 export function canonicalIdempotencyKey(value: unknown): string {
-  assertInput(typeof value === "string" && IDEMPOTENCY_KEY.test(value), "Idempotency key must be 8-200 safe ASCII characters.");
+  assertInput(isIdempotencyKey(value, 200), "Idempotency key must be 8-200 safe ASCII characters.");
   return value;
 }
 

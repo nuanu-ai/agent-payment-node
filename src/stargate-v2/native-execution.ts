@@ -24,6 +24,7 @@ import { stargateV2RouteFinalityPolicy, type StargateV2FinalityPolicyProvenance,
 import { quoteStargateV2Direct, type StargateReadBatch, type StargateV2QuoteEvidence } from "./quote.js";
 import { stargateFundsRefusal } from "./funds.js";
 import { recordObservedSourceFee, withSourceFee } from "./native-source-fee.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 export type StargateNativePhase = "prepared" | "approved" | "submission_started" | "submitted" | "observed" | "unknown_finality" |
   "failed_confirmed_revert";
 export type StargateNativeUsageTarget = "submitted" | "unknown_finality" | "finalized" | "failed_before_effect" | "failed_confirmed_revert";
@@ -150,7 +151,7 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
   if (owner !== recipient) fail("APN_OPERATION_BLOCKED", "first_lane_requires_self_recipient");
   if (ports.signer.kind !== "imported_evm_signer" || address(ports.signer.address) !== owner) fail("APN_OPERATION_BLOCKED", "signer_owner");
   const amount = uint(request.amountAtomic, true), cap = uint(request.maxNativeDebitAtomic, true);
-  if (!/^[A-Za-z0-9._:-]{8,128}$/u.test(request.idempotencyKey)) fail("APN_INVALID_INPUT", "idempotency_key");
+  if (!isIdempotencyKey(request.idempotencyKey, 128)) fail("APN_INVALID_INPUT", "idempotency_key");
   const ttl = request.ttlMs ?? 60_000; if (!Number.isSafeInteger(ttl) || ttl < 15_000 || ttl > MAX_TTL_MS) fail("APN_INVALID_INPUT", "ttl");
   const profileHash = hashObject({ profile }), idempotencyHash = hashObject({ idempotencyKey: request.idempotencyKey });
   const operationId = hashObject({ family: "stargate_v2_native", profileHash, idempotencyHash });

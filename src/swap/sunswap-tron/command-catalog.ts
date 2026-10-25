@@ -35,7 +35,7 @@ export const SUNSWAP_COMMANDS: readonly CommandDefinition[] = [
     "Quote from the pinned router and pair on-chain, encode locally, and exactly simulate one unsigned transaction. Uses APN_TRON_RPC_URL.",
     "network_read"),
   command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]),
-    option("--idempotency-key", "idempotency_key", ["global_payment_key"])],
+    option("--idempotency-key", "idempotency_key", ["global_payment_key", "8_to_200_safe_ascii_characters"])],
     "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
   command("status", [operation], "Read one durable guarded swap operation; after the marker it only observes, never resends.", "local_read"),
   command("approve", [operation], "Show the exact swap screen, take the typed approval code, then sign locally and broadcast exactly once.",
