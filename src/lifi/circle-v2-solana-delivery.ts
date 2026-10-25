@@ -232,20 +232,26 @@ function binding(reason: string): never {
 }
 /**
  * The receive among the successful finalized transactions naming the used-nonce account, oldest first. Anyone may name the
- * public account, so each is checked as a receipt and one that is not is skipped; only one transaction can receive a
- * message. A full page without a receipt is reported, never taken as "not received".
+ * public account, so each is checked as a receipt and a well-formed one that is not is skipped; only one transaction can
+ * receive a message. A candidate this node does not return or this reader cannot judge, or a full page, with no receipt
+ * found is reported as unread, never taken as "not received".
  */
 async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, message: CctpBurnMessage,
   usedNonce: string): Promise<{ readonly signature: string; readonly slot: bigint } | null> {
   const rows = rpcArray(await rpc.call("getSignaturesForAddress", [usedNonce, { commitment: "finalized", limit: NONCE_PAGE }]), NONCE_PAGE).map(rpcRecord);
+  let unjudged = false;
   for (const signature of rows.filter(row => row.err === null).map(row => solanaSignature(row.signature)).reverse()) {
     try {
       const slot = await solanaReceipt(rpc, terms, message, usedNonce, signature);
       if (slot !== null) return { signature, slot };
+      unjudged = true;
     } catch (error) {
-      if (!(error instanceof ApnError) || typeof error.details?.reason !== "string" || !error.details.reason.startsWith("circle_delivery_")) throw error;
+      if (!(error instanceof ApnError) || error.code !== "APN_RPC_PROTOCOL") throw error;
+      // A reason names a well-formed transaction that is not this receive; a bare protocol refusal is a shape not judged.
+      if (typeof error.details?.reason !== "string" || !error.details.reason.startsWith("circle_delivery_")) unjudged = true;
     }
   }
+  if (unjudged) binding("circle_delivery_nonce_unjudged");
   if (rows.length === NONCE_PAGE) binding("circle_delivery_nonce_history");
   return null;
 }
