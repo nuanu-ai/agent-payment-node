@@ -943,24 +943,38 @@ shows the hold as `sourceUsage`. Only the hold this operation reserved, for the
 principal of its own burn call, is touched; a burn without a recorded receipt
 keeps its hold.
 
-After a successful burn the same status follows its delivery on Solana. Circle's
-forwarding service receives the message there; APN only reads. It asks Circle's
-pinned issuer API for the burn's message (`/v2/messages/6?transactionHash=`),
-bound to this burn by domains 6 to 5, Base USDC, the journal's messenger,
-recipient token account and principal. Once Circle reports `forwardState`
-`COMPLETE` with a `forwardTxHash`, it reads that transaction at `finalized` on
-`APN_SOLANA_RPC_URL` only (no default endpoint; without the setting the status
-names it). The transaction must have succeeded, called MessageTransmitterV2
-(`CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC`), written that message's
-`used_nonce` account and credited the recipient's USDC account with exactly the
-principal minus Circle's executed fee. Then it is recorded once beside the
-journal (`<operation>.solana-delivery.json`) and `phase` reads `delivered`;
-later statuses read nothing. Until then `phase` is `source_finalized` and
-`delivery.state` names the step still awaited (`awaiting_issuer_message`,
-`awaiting_attestation`, `awaiting_forward` with Circle's `forwardState`,
-`awaiting_solana_rpc`, `awaiting_solana_finality`). A reverted burn shows
-`source_reverted` and reads no delivery. The journal itself is never rewritten:
-its own phase stays under `journal.phase`.
+After a successful burn the same status follows its delivery on Solana, on
+every status until the delivery is recorded (older burns included), then never
+again. Circle's forwarding service, or any payer, receives the message there;
+APN only reads. It asks Circle's pinned issuer API for the burn's message
+(`/v2/messages/6?transactionHash=`). Once Circle attests it, the attested
+message bytes themselves must be this burn's: domains 6 to 5, Base USDC, the
+journal's messenger, the recipient token account named by both the calldata and
+the admission, the principal, and an executed fee no larger than the attested
+max fee. The receiving transaction is the `forwardTxHash` Circle names or,
+without one (a failed forward received by someone else), the one successful
+finalized transaction that wrote the message's `used_nonce` account. It is read
+at `finalized` on `APN_SOLANA_RPC_URL` only (no default endpoint; without the
+setting the status names it). It must have succeeded, carry a MessageTransmitterV2
+(`CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC`) `receive_message` of exactly
+those bytes, write the `used_nonce` account (PDA `["used_nonce", nonce]`) and
+credit the recipient's USDC account with exactly the principal minus the
+executed fee. Then the message is claimed for this operation
+(`circle-solana-delivery-claims/<nonce>.json`, so one receipt never proves two
+operations), the proof is recorded once beside the journal
+(`<operation>.solana-delivery.json`) and `phase` reads `delivered`.
+
+Until then `phase` is `source_finalized` and `delivery.state` names the step
+still awaited: `awaiting_issuer_message`, `awaiting_attestation`,
+`awaiting_forward` (with Circle's `forwardState`), `forward_failed` (Circle's
+forwarding failed: any Solana payer may submit `receive_message` with the
+attested message; APN does not sign on Solana for this route),
+`awaiting_solana_rpc` or `awaiting_solana_finality` (an RPC that keeps no
+history that old returns nothing). A read that fails or an answer that is not
+this burn's leaves `delivery.state` `unread` with `unreadReason` (the error
+code, message and reason); the rest of the status still answers and nothing is
+recorded. A reverted burn shows `source_reverted` and reads no delivery. The
+journal itself is never rewritten: its own phase stays under `journal.phase`.
 
 ## Stargate fee refusal and funding checkpoint, 2026-10-08
 

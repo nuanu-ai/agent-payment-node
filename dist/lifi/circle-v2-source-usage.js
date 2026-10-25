@@ -44,14 +44,18 @@ export async function settleCircleSourceUsage(root, journal, proof, now) {
     }
     return { reservationId, state: hold.state, amountAtomic: hold.amountAtomic, effectAt: hold.effectAt };
 }
-/** The principal the journal's own burn call carries, or null when its calldata is not that call. */
-export function burnPrincipal(journal) {
+/** The arguments of the journal's own burn call, or null when its calldata is not that call. */
+export function circleBurnCall(journal) {
     try {
         const decoded = decodeFunctionData({ abi: ABI, data: journal.sourceCall.data });
-        return decoded.functionName === "depositForBurnWithHookAndFees" ? decoded.args[0].toString() : null;
+        if (decoded.functionName !== "depositForBurnWithHookAndFees")
+            return null;
+        const [amount, destinationDomain, mintRecipient, burnToken] = decoded.args;
+        return { amount, destinationDomain, mintRecipient: mintRecipient.toLowerCase(), burnToken: burnToken.toLowerCase() };
     }
     catch {
         return null;
     }
 }
+function burnPrincipal(journal) { return circleBurnCall(journal)?.amount.toString() ?? null; }
 //# sourceMappingURL=circle-v2-source-usage.js.map
