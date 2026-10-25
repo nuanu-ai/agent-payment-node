@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { getBase58Encoder } from "@solana/kit";
+import { getBase58Decoder, getBase58Encoder } from "@solana/kit";
 import { parseJsonWithBigInts } from "@solana/rpc-spec-types";
 import { encodeFunctionData, parseAbi, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -74,7 +74,7 @@ const base = (): ((chainId: number) => FinalizedChainRead) => () => ({ async cal
   if (method === "eth_call") return `0x${"0".repeat(64)}`;
   throw new Error(`unexpected ${method}`);
 } });
-interface Answers { iris?: { status: number; body: unknown }; transaction?: unknown; receivers?: unknown; solana?: null; fail?: ApnError }
+interface Answers { iris?: { status: number; body: unknown }; transaction?: unknown; transactions?: Record<string, unknown>; receivers?: unknown; solana?: null; fail?: ApnError }
 /** Circle and Solana as the case's fixtures answer them, each read logged. */
 function reader(burn: Case, calls: string[], answers: Answers = {}): CircleSolanaDeliveryReader {
   return {
@@ -83,7 +83,10 @@ function reader(burn: Case, calls: string[], answers: Answers = {}): CircleSolan
       calls.push(method);
       if (answers.fail !== undefined) throw answers.fail;
       if (method === "getGenesisHash") return SOLANA_GENESIS;
-      if (method === "getTransaction") return copy("transaction" in answers ? answers.transaction : (params[0] === burn.signature ? burn.receive : null));
+      if (method === "getTransaction") {
+        if ("transaction" in answers) return copy(answers.transaction);
+        return copy((answers.transactions ?? { [burn.signature]: burn.receive })[params[0] as string] ?? null);
+      }
       if (method === "getSignaturesForAddress") return copy(answers.receivers ?? burn.receivers);
       throw new Error(`unexpected ${method}`);
     } },
@@ -154,9 +157,35 @@ test("each step not finished yet is a waiting status that names it, with its own
 
 test("a message received by someone other than Circle's forwarder is found through its used-nonce account", async (t) => {
   const { root, journal } = await setup(t), calls: string[] = [];
-  const view = await status(root, journal, reader(SMALL, calls, { iris: iris(SMALL, m => { m.forwardState = "FAILED"; m.forwardTxHash = null; }) }));
+  const failed = () => iris(SMALL, m => { m.forwardState = "FAILED"; m.forwardTxHash = null; });
+  const view = await status(root, journal, reader(SMALL, calls, { iris: failed() }));
   assert.deepEqual([view.phase, view.delivery?.proof?.solanaSignature], ["delivered", SMALL.signature]);
   assert.deepEqual(calls.slice(1), ["getGenesisHash", "getSignaturesForAddress", "getTransaction"]);
+});
+
+test("anyone naming the public used-nonce account neither blocks nor fakes the receive found through it", async (t) => {
+  // A stranger's successful transaction that names the account but receives nothing; a failed row; a full page of strangers.
+  const strangerSignature = (n: number) => getBase58Decoder().decode(new Uint8Array(64).fill(n + 1));
+  const strangerTx = (signature: string) => { const value = copy(SMALL.receive); value.transaction.signatures[0] = signature;
+    value.transaction.message.instructions = value.transaction.message.instructions.slice(0, 2); return value; };
+  const row = (signature: string, err: unknown = null) => ({ ...SMALL.receivers[0], signature, err });
+  const stranger = strangerSignature(0), transactions = { [SMALL.signature]: SMALL.receive, [stranger]: strangerTx(stranger) };
+  const failed = () => iris(SMALL, m => { m.forwardState = "FAILED"; m.forwardTxHash = null; });
+  const { root, journal } = await setup(t);
+  const before = await status(root, journal, reader(SMALL, [], { iris: failed(), receivers: [row(stranger)], transactions }));
+  assert.deepEqual([before.delivery?.state, before.nextActions.length], ["forward_failed", 2], "a stranger before the receive is not a receipt");
+  const page = Array.from({ length: 16 }, (_, n) => row(strangerSignature(n)));
+  const flooded = await status(root, journal, reader(SMALL, [], { iris: failed(), receivers: page,
+    transactions: Object.fromEntries(page.map(entry => [entry.signature, strangerTx(entry.signature)])) }));
+  assert.deepEqual([flooded.delivery?.state, flooded.delivery?.unreadReason?.endsWith("(circle_delivery_nonce_history)")], ["unread", true]);
+  await absent(root);
+  for (const [label, receivers] of [["stranger after the receive", [row(stranger), row(SMALL.signature)]],
+    ["stranger before the receive", [row(SMALL.signature), row(stranger)]],
+    ["a failed attempt beside it", [row(LARGE.signature, { InstructionError: [3, { Custom: 0 }] }), row(SMALL.signature)]]] as const) {
+    const fresh = await setup(t);
+    const view = await status(fresh.root, fresh.journal, reader(SMALL, [], { iris: failed(), receivers, transactions }));
+    assert.deepEqual([view.phase, view.delivery?.proof?.solanaSignature], ["delivered", SMALL.signature], label);
+  }
 });
 
 test("an answer that is not this burn's, or a failed read, leaves the delivery unread with its reason and the status answering", async (t) => {
@@ -166,7 +195,6 @@ test("an answer that is not this burn's, or a failed read, leaves the delivery u
   const post = (r: Json) => (r.meta.postTokenBalances as Json[]).find(row => row.accountIndex === BigInt(ataIndex))!;
   const transmitter = (r: Json) => (r.transaction.message.instructions as Json[]).find(i => i.programId === "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC")!;
   const nonceKey = (r: Json) => (r.transaction.message.accountKeys as Json[]).find(key => key.pubkey === "HQmwr7wL8yWSYbArQ3fhPc2gsQfHKsQH3wnir8NYvvnM")!;
-  const success = SMALL.receivers[0];
   const cases: [string, Answers, RegExp][] = [
     ["two messages of this burn", { iris: iris(SMALL, (m, _b, body) => { body.messages.push(copy(m)); }) }, /APN_PROVIDER_PROTOCOL.*circle_delivery_messages/u],
     // Iris may not choose the fee: a fee above the attested max fee, or bytes the Solana receive does not carry, prove nothing.
@@ -186,7 +214,6 @@ test("an answer that is not this burn's, or a failed read, leaves the delivery u
     ["one atom short", { transaction: tx(r => { const row = post(r); row.uiTokenAmount.amount = (BigInt(row.uiTokenAmount.amount) - 1n).toString(); }) }, /circle_delivery_amount/u],
     ["another owner", { transaction: tx(r => { post(r).owner = ACCOUNT.address; }) }, /circle_delivery_balance/u],
     ["another mint", { transaction: tx(r => { post(r).mint = SMALL.owner; }) }, /circle_delivery_balance/u],
-    ["two receivers of one nonce", { iris: iris(SMALL, m => { m.forwardTxHash = null; }), receivers: [success, { ...success, signature: LARGE.signature }] }, /circle_delivery_nonce_receivers/u],
   ];
   for (const [label, answers, reason] of cases) {
     const view = await status(root, journal, reader(SMALL, [], answers));

@@ -22,6 +22,7 @@ const CLAIM_SCHEMA = "apn.circle-v2-solana-delivery-claim.v1";
 /** Circle's CCTP V2 message transmitter on Solana mainnet; a received message's nonce account is its PDA ["used_nonce", nonce]. */
 export const CIRCLE_SOLANA_MESSAGE_TRANSMITTER = "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC";
 export const CIRCLE_SOLANA_RPC_ACTION = "Set APN_SOLANA_RPC_URL to a Solana mainnet HTTPS endpoint, then rerun the same command.";
+const NONCE_PAGE = 16;
 const UINT = /^(?:0|[1-9][0-9]*)$/u, NONCE = /^0x[0-9a-f]{64}$/u, SHA = /^[0-9a-f]{64}$/u;
 const UNREAD = new Set(["APN_PROVIDER_UNAVAILABLE", "APN_PROVIDER_PROTOCOL", "APN_RPC_PROTOCOL", "APN_RPC_RATE_LIMITED", "APN_RPC_AMBIGUOUS",
   "APN_RPC_CONFIG", "APN_RPC_BUDGET_EXCEEDED", "APN_HTTP_CONFIG", "APN_HTTP_PROTOCOL", "APN_HTTP_AMBIGUOUS", "APN_CHAIN_MISMATCH"]);
@@ -90,7 +91,10 @@ export class CircleSolanaDeliveryStore extends SecureStateStore {
     await this.ensureDirectory("circle-solana-delivery-claims");
     try { await this.writeJson(path, claim, true); return; }
     catch (error) { if (!(error instanceof ApnError) || error.message !== "State target is already occupied.") throw error; }
-    if (canonicalJson(await this.readJson(path)) !== canonicalJson(claim)) issuerFailure("circle_delivery_message_claimed");
+    if (canonicalJson(await this.readJson(path)) !== canonicalJson(claim)) {
+      throw new ApnError("APN_PROVIDER_PROTOCOL", "Another local operation already holds this Circle message's Solana receipt.",
+        { reason: "circle_delivery_message_claimed" });
+    }
   }
   /** Publishes the proof once; a concurrent observer's file wins and is returned after the same validation. */
   async create(journal: NonEvmSourceJournal, delivery: CircleSolanaDelivery): Promise<CircleSolanaDelivery> {
@@ -157,13 +161,19 @@ async function observe(store: CircleSolanaDeliveryStore, journal: NonEvmSourceJo
   assertSolanaNetworkValue(await rpc.call("getGenesisHash", []));
   const [usedNonce] = await getProgramDerivedAddress({ programAddress: address(CIRCLE_SOLANA_MESSAGE_TRANSMITTER),
     seeds: ["used_nonce", Buffer.from(message.nonce.slice(2), "hex")] });
-  // Circle names its forwarding transaction; a message received by anyone else is found through its used-nonce account.
-  const signature = published.forwardTxHash ?? await nonceReceiver(rpc, usedNonce);
-  if (signature === null) return notForwarded(true);
-  const slot = await solanaReceipt(rpc, terms, message, usedNonce, signature);
-  if (slot === null) {
-    return waiting("awaiting_solana_finality", forwardState,
-      `the Solana transaction ${signature} at finalized on APN_SOLANA_RPC_URL (an RPC without that history returns none)`);
+  let signature: string, slot: bigint | null;
+  if (published.forwardTxHash !== null) {
+    signature = published.forwardTxHash;
+    slot = await solanaReceipt(rpc, terms, message, usedNonce, signature);
+    if (slot === null) {
+      return waiting("awaiting_solana_finality", forwardState,
+        `the Solana transaction ${signature} at finalized on APN_SOLANA_RPC_URL (an RPC without that history returns none)`);
+    }
+  } else {
+    // Without Circle's forwarding transaction, a message received by anyone else is found through its used-nonce account.
+    const found = await nonceReceiver(rpc, terms, message, usedNonce);
+    if (found === null) return notForwarded(true);
+    ({ signature, slot } = found);
   }
   await store.claim(journal, message.nonce, signature);
   const fields: Omit<CircleSolanaDelivery, "integrityHash"> = { schemaVersion: CIRCLE_SOLANA_DELIVERY_SCHEMA, operationId: journal.operationId,
@@ -220,12 +230,24 @@ function attested(published: IssuerMessage, terms: CircleBurnTerms): CctpBurnMes
 function binding(reason: string): never {
   throw new ApnError("APN_RPC_PROTOCOL", "The Solana transaction is not this burn's receipt.", { reason });
 }
-/** The one successful finalized transaction that wrote the message's used-nonce account, or null before any. */
-async function nonceReceiver(rpc: SolanaReadPort, usedNonce: string): Promise<string | null> {
-  const rows = rpcArray(await rpc.call("getSignaturesForAddress", [usedNonce, { commitment: "finalized", limit: 8 }]), 8).map(rpcRecord);
-  const succeeded = rows.filter(row => row.err === null).map(row => solanaSignature(row.signature));
-  if (succeeded.length > 1) binding("circle_delivery_nonce_receivers");
-  return succeeded[0] ?? null;
+/**
+ * The receive among the successful finalized transactions naming the used-nonce account, oldest first. Anyone may name the
+ * public account, so each is checked as a receipt and one that is not is skipped; only one transaction can receive a
+ * message. A full page without a receipt is reported, never taken as "not received".
+ */
+async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, message: CctpBurnMessage,
+  usedNonce: string): Promise<{ readonly signature: string; readonly slot: bigint } | null> {
+  const rows = rpcArray(await rpc.call("getSignaturesForAddress", [usedNonce, { commitment: "finalized", limit: NONCE_PAGE }]), NONCE_PAGE).map(rpcRecord);
+  for (const signature of rows.filter(row => row.err === null).map(row => solanaSignature(row.signature)).reverse()) {
+    try {
+      const slot = await solanaReceipt(rpc, terms, message, usedNonce, signature);
+      if (slot !== null) return { signature, slot };
+    } catch (error) {
+      if (!(error instanceof ApnError) || typeof error.details?.reason !== "string" || !error.details.reason.startsWith("circle_delivery_")) throw error;
+    }
+  }
+  if (rows.length === NONCE_PAGE) binding("circle_delivery_nonce_history");
+  return null;
 }
 
 /**

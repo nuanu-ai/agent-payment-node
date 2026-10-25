@@ -952,8 +952,11 @@ message bytes themselves must be this burn's: domains 6 to 5, Base USDC, the
 journal's messenger, the recipient token account named by both the calldata and
 the admission, the principal, and an executed fee no larger than the attested
 max fee. The receiving transaction is the `forwardTxHash` Circle names or,
-without one (a failed forward received by someone else), the one successful
-finalized transaction that wrote the message's `used_nonce` account. It is read
+without one (a failed forward received by someone else), found among the
+successful finalized transactions naming the message's `used_nonce` account:
+anyone may name that public account, so each (oldest first, one page of 16) is
+checked as a receipt and the one that proves it is taken; a full page without
+a receipt is reported as unread, never as "not received". It is read
 at `finalized` on `APN_SOLANA_RPC_URL` only (no default endpoint; without the
 setting the status names it). It must have succeeded, carry a MessageTransmitterV2
 (`CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC`) `receive_message` of exactly
