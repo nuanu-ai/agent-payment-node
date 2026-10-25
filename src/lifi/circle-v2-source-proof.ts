@@ -8,7 +8,7 @@ import { pastUnstartedDeadline } from "../unstarted-deadline.js";
 import { CIRCLE_V2_SOURCE_TTL_MS } from "./circle-v2-source-service.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
 import { settleCircleSourceUsage, type CircleSourceUsage } from "./circle-v2-source-usage.js";
-import { CIRCLE_SOLANA_RPC_ACTION, circleSolanaDelivery, type CircleSolanaDeliveryReader, type CircleSolanaDeliveryView } from "./circle-v2-solana-delivery.js";
+import { circleSolanaDelivery, type CircleSolanaDeliveryReader, type CircleSolanaDeliveryView } from "./circle-v2-solana-delivery.js";
 
 export const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 /** The Base receipt of a CCTP V2 source burn, read once at the finalized tag (no archive state). */
@@ -68,7 +68,7 @@ export interface CircleSourceStatus {
   /** The payer's Base USDC daily-cap hold of this burn, settled from the recorded receipt (circle-v2-source-usage.ts). */
   readonly sourceUsage?: CircleSourceUsage;
   /** For a successful burn: its receipt on Solana, or what that receipt still waits for (circle-v2-solana-delivery.ts). */
-  readonly delivery?: Omit<CircleSolanaDeliveryView, "recorded" | "waitingFor">;
+  readonly delivery?: Pick<CircleSolanaDeliveryView, "state" | "forwardState" | "proof" | "unreadReason">;
 }
 const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> " +
   "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>";
@@ -80,7 +80,8 @@ const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-a
  * otherwise nothing is written and the status says why.
  * Once nothing of the operation can still spend the payer's wrapper allowance, its residual is read once, at that same
  * finalized head, and stored (circle-v2-residual-allowance.ts); later statuses read no chain unless `refreshAllowance`.
- * A successful burn's delivery on Solana is read until its receipt is recorded, then never again.
+ * A successful burn's delivery on Solana is read on every status until its receipt is recorded, then never again; a failed
+ * delivery read is shown as `delivery.state: "unread"` with its reason, and the rest of the status still answers.
  */
 export async function circleSourceStatus(root: string, journal: NonEvmSourceJournal, read: FinalizedReader | undefined,
   now: () => number, refreshAllowance = false, deliveryReader?: CircleSolanaDeliveryReader): Promise<CircleSourceStatus> {
@@ -93,8 +94,9 @@ export async function circleSourceStatus(root: string, journal: NonEvmSourceJour
     phase: proof === null ? journal.phase : proof.status === "reverted" ? "source_reverted" : delivery?.state === "delivered" ? "delivered" : "source_finalized",
     outcome: proof?.status ?? null, sourceProof: proof, waitingFor, journal, proofClass, ...(left === undefined ? {} : { residualAllowance: left }),
     ...(usage === undefined || usage === null ? {} : { sourceUsage: usage }),
-    ...(delivery === undefined ? {} : { delivery: { state: delivery.state, forwardState: delivery.forwardState, proof: delivery.proof } }),
-    nextActions: [...delivery?.state === "awaiting_solana_rpc" ? [CIRCLE_SOLANA_RPC_ACTION] : [],
+    ...(delivery === undefined ? {} : { delivery: { state: delivery.state, forwardState: delivery.forwardState, proof: delivery.proof,
+      ...(delivery.unreadReason === undefined ? {} : { unreadReason: delivery.unreadReason }) } }),
+    nextActions: [...delivery?.nextActions ?? [],
       ...waitingFor !== null && journal.transactionHash !== null ? [statusAction] : [],
       ...left !== undefined && left.allowanceAtomic !== null && left.allowanceAtomic !== "0" ? [REVOKE] : []] });
   const recordedView = async (proof: CircleSourceProof, proofClass: string, left: CircleResidualView, usage: CircleSourceUsage | null) => {

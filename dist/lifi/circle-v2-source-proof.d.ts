@@ -52,7 +52,7 @@ export interface CircleSourceStatus {
     /** The payer's Base USDC daily-cap hold of this burn, settled from the recorded receipt (circle-v2-source-usage.ts). */
     readonly sourceUsage?: CircleSourceUsage;
     /** For a successful burn: its receipt on Solana, or what that receipt still waits for (circle-v2-solana-delivery.ts). */
-    readonly delivery?: Omit<CircleSolanaDeliveryView, "recorded" | "waitingFor">;
+    readonly delivery?: Pick<CircleSolanaDeliveryView, "state" | "forwardState" | "proof" | "unreadReason">;
 }
 /**
  * `operation status` of a Circle CCTP V2 Base source burn: the saved journal and, when its burn transaction is known,
@@ -61,6 +61,7 @@ export interface CircleSourceStatus {
  * otherwise nothing is written and the status says why.
  * Once nothing of the operation can still spend the payer's wrapper allowance, its residual is read once, at that same
  * finalized head, and stored (circle-v2-residual-allowance.ts); later statuses read no chain unless `refreshAllowance`.
- * A successful burn's delivery on Solana is read until its receipt is recorded, then never again.
+ * A successful burn's delivery on Solana is read on every status until its receipt is recorded, then never again; a failed
+ * delivery read is shown as `delivery.state: "unread"` with its reason, and the rest of the status still answers.
  */
 export declare function circleSourceStatus(root: string, journal: NonEvmSourceJournal, read: FinalizedReader | undefined, now: () => number, refreshAllowance?: boolean, deliveryReader?: CircleSolanaDeliveryReader): Promise<CircleSourceStatus>;

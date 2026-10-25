@@ -7,7 +7,7 @@ import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { pastUnstartedDeadline } from "../unstarted-deadline.js";
 import { CIRCLE_V2_SOURCE_TTL_MS } from "./circle-v2-source-service.js";
 import { settleCircleSourceUsage } from "./circle-v2-source-usage.js";
-import { CIRCLE_SOLANA_RPC_ACTION, circleSolanaDelivery } from "./circle-v2-solana-delivery.js";
+import { circleSolanaDelivery } from "./circle-v2-solana-delivery.js";
 export const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 const PROOF_KEYS = ["blockHash", "blockNumberAtomic", "blockTag", "chainId", "finalizedBlockNumberAtomic", "integrityHash", "nonceAtomic",
     "observedAt", "operationId", "payer", "profileHash", "schemaVersion", "status", "to", "transactionHash"];
@@ -61,7 +61,8 @@ const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-a
  * otherwise nothing is written and the status says why.
  * Once nothing of the operation can still spend the payer's wrapper allowance, its residual is read once, at that same
  * finalized head, and stored (circle-v2-residual-allowance.ts); later statuses read no chain unless `refreshAllowance`.
- * A successful burn's delivery on Solana is read until its receipt is recorded, then never again.
+ * A successful burn's delivery on Solana is read on every status until its receipt is recorded, then never again; a failed
+ * delivery read is shown as `delivery.state: "unread"` with its reason, and the rest of the status still answers.
  */
 export async function circleSourceStatus(root, journal, read, now, refreshAllowance = false, deliveryReader) {
     const residual = async (proven, head) => await circleResidualAllowance(root, journal, read, refreshAllowance, now, proven, head);
@@ -71,8 +72,9 @@ export async function circleSourceStatus(root, journal, read, now, refreshAllowa
         phase: proof === null ? journal.phase : proof.status === "reverted" ? "source_reverted" : delivery?.state === "delivered" ? "delivered" : "source_finalized",
         outcome: proof?.status ?? null, sourceProof: proof, waitingFor, journal, proofClass, ...(left === undefined ? {} : { residualAllowance: left }),
         ...(usage === undefined || usage === null ? {} : { sourceUsage: usage }),
-        ...(delivery === undefined ? {} : { delivery: { state: delivery.state, forwardState: delivery.forwardState, proof: delivery.proof } }),
-        nextActions: [...delivery?.state === "awaiting_solana_rpc" ? [CIRCLE_SOLANA_RPC_ACTION] : [],
+        ...(delivery === undefined ? {} : { delivery: { state: delivery.state, forwardState: delivery.forwardState, proof: delivery.proof,
+                ...(delivery.unreadReason === undefined ? {} : { unreadReason: delivery.unreadReason }) } }),
+        nextActions: [...delivery?.nextActions ?? [],
             ...waitingFor !== null && journal.transactionHash !== null ? [statusAction] : [],
             ...left !== undefined && left.allowanceAtomic !== null && left.allowanceAtomic !== "0" ? [REVOKE] : []]
     });
