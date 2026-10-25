@@ -12,7 +12,8 @@ const STORE: OperationStore = { directory: "non-evm-source-journals", perProfile
  * most CIRCLE_V2_SOURCE_TTL_MS after the journal was staged, and sends at most once in that same command. The payer is
  * held for that window plus the unstarted margin in every phase: after it, the burn either landed or its signed quote
  * expired, and no APN path signs or sends it again. `operation status` reads the burn's receipt at the finalized tag
- * once and records it; a recorded receipt ends the claim at once (R4 exit 1: proof).
+ * once and records it; a recorded receipt ends the claim at once (R4 exit 1: proof). A successful burn's receipt on
+ * Solana is read the same way until it is recorded (circle-v2-solana-delivery.ts).
  */
 export const circleSourceAdapter: OperationFamilyAdapter<NonEvmSourceJournal> = {
   family: "circle_source",
@@ -28,7 +29,7 @@ export const circleSourceAdapter: OperationFamilyAdapter<NonEvmSourceJournal> = 
   salvage: raw => salvageRecord(raw, value => [salvageEvm(8453, field(value, "sourceCall", "from"))]),
   view: async record => record,
   status: async (context, record, options) => operationOutcome(await circleSourceStatus(context.state.root, record, context.finalizedRead,
-    () => context.clock.now().getTime(), options?.refreshAllowance === true)),
+    () => context.clock.now().getTime(), options?.refreshAllowance === true, context.circleSourceDelivery)),
   refreshesAllowance: true,
   // The route has no observation or exit command of its own: the generic status is its observer.
   commands: { status: OPERATION_STATUS },

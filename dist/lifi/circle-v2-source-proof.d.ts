@@ -3,6 +3,7 @@ import { type CircleResidualView } from "./circle-v2-residual-allowance.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
 import { type CircleSourceUsage } from "./circle-v2-source-usage.js";
+import { type CircleSolanaDeliveryReader, type CircleSolanaDeliveryView } from "./circle-v2-solana-delivery.js";
 export declare const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 /** The Base receipt of a CCTP V2 source burn, read once at the finalized tag (no archive state). */
 export interface CircleSourceProof {
@@ -38,6 +39,7 @@ export declare function circleSourceTerminal(root: string, journal: NonEvmSource
 export interface CircleSourceStatus {
     readonly schemaVersion: "apn.circle-v2-source-status.v1";
     readonly operationId: string;
+    /** The journal's phase until the burn's finalized receipt is recorded; then `source_reverted`, `source_finalized` or `delivered`. */
     readonly phase: string;
     readonly outcome: CircleSourceProof["status"] | null;
     readonly sourceProof: CircleSourceProof | null;
@@ -49,6 +51,8 @@ export interface CircleSourceStatus {
     readonly residualAllowance?: CircleResidualView;
     /** The payer's Base USDC daily-cap hold of this burn, settled from the recorded receipt (circle-v2-source-usage.ts). */
     readonly sourceUsage?: CircleSourceUsage;
+    /** For a successful burn: its receipt on Solana, or what that receipt still waits for (circle-v2-solana-delivery.ts). */
+    readonly delivery?: Omit<CircleSolanaDeliveryView, "recorded" | "waitingFor">;
 }
 /**
  * `operation status` of a Circle CCTP V2 Base source burn: the saved journal and, when its burn transaction is known,
@@ -57,5 +61,6 @@ export interface CircleSourceStatus {
  * otherwise nothing is written and the status says why.
  * Once nothing of the operation can still spend the payer's wrapper allowance, its residual is read once, at that same
  * finalized head, and stored (circle-v2-residual-allowance.ts); later statuses read no chain unless `refreshAllowance`.
+ * A successful burn's delivery on Solana is read until its receipt is recorded, then never again.
  */
-export declare function circleSourceStatus(root: string, journal: NonEvmSourceJournal, read: FinalizedReader | undefined, now: () => number, refreshAllowance?: boolean): Promise<CircleSourceStatus>;
+export declare function circleSourceStatus(root: string, journal: NonEvmSourceJournal, read: FinalizedReader | undefined, now: () => number, refreshAllowance?: boolean, deliveryReader?: CircleSolanaDeliveryReader): Promise<CircleSourceStatus>;

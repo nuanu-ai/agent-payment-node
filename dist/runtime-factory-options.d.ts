@@ -50,6 +50,7 @@ import type { OrcaRuntimeSelector } from "./swap/orca-solana/runtime-factory.js"
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 import type { FinalizedReader } from "./evm-finalized-proof.js";
+import type { CircleSolanaDeliveryReader } from "./lifi/circle-v2-solana-delivery.js";
 export interface RuntimeFactoryOptions {
     readonly merchantTtyOptions?: TtyTransferApprovalOptions;
     /** Synthetic read-only preflight seam; production uses the bounded HTTPS source. */
@@ -151,4 +152,6 @@ export interface RuntimeFactoryOptions {
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
     /** Test seam for the finalized-tag reads of R4 proofs; production reads each chain's APN_*_RPC_URL. */
     readonly finalizedRead?: FinalizedReader;
+    /** Test seam for the Circle issuer and Solana reads of a Circle Base to Solana burn's delivery. */
+    readonly circleSourceDelivery?: CircleSolanaDeliveryReader;
 }

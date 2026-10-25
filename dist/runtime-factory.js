@@ -48,6 +48,7 @@ import { LocalBridgeCustody } from "./lifi/custody.js";
 import { LifiProvider } from "./lifi/provider.js";
 import { bridgeRpcFactory } from "./lifi/rpc.js";
 import { environmentFinalizedReader } from "./evm-finalized-proof.js";
+import { circleSolanaDeliveryReader } from "./lifi/circle-v2-solana-delivery.js";
 import { CircleV2ApprovalExecutor, LocalCircleApprovalSigner, circleApprovalRpcFromBridge } from "./lifi/circle-v2-approval-executor.js";
 import { OneClickSourceService } from "./lifi/near-oneclick-source-service.js";
 import { CircleV2SourceService } from "./lifi/circle-v2-source-service.js";
@@ -310,6 +311,8 @@ export function createApnCore(bound, options = {}, runtimeCommand = bound.reques
             ? { operationAbandonApproval: options.operationAbandonApproval ?? new TtyOperationAbandonApproval() }
             : {}),
         finalizedRead: options.finalizedRead ?? environmentFinalizedReader(process.env),
+        // A delivery is proven only on an explicitly configured Solana RPC, never on the public default the direct rails use.
+        circleSourceDelivery: options.circleSourceDelivery ?? circleSolanaDeliveryReader(options.solanaRpcUrl !== undefined || process.env.APN_SOLANA_RPC_URL ? solanaRpc : null),
     });
 }
 function isUniswapTokenCleanup(command) { return command === "swap.uniswap-token.cleanup"; }

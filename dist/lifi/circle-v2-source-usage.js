@@ -44,7 +44,8 @@ export async function settleCircleSourceUsage(root, journal, proof, now) {
     }
     return { reservationId, state: hold.state, amountAtomic: hold.amountAtomic, effectAt: hold.effectAt };
 }
-function burnPrincipal(journal) {
+/** The principal the journal's own burn call carries, or null when its calldata is not that call. */
+export function burnPrincipal(journal) {
     try {
         const decoded = decodeFunctionData({ abi: ABI, data: journal.sourceCall.data });
         return decoded.functionName === "depositForBurnWithHookAndFees" ? decoded.args[0].toString() : null;
