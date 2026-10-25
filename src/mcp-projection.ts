@@ -5,6 +5,7 @@ import {
 } from "./command-catalog.js";
 import { mcpFieldName } from "./command-binder.js";
 import { ApnError } from "./errors.js";
+import { declaredIdempotencyKeyMaximum, idempotencyKeyPattern } from "./idempotency-key-contract.js";
 import { projectForegroundHandoff, type ForegroundHandoffTool } from "./mcp-foreground-handoff.js";
 
 const SELECTED_PATHS = [
@@ -192,7 +193,7 @@ function scalarPattern(option: CommandOption): string | undefined {
     case "atomic": return "^[1-9][0-9]*$";
     case "address": return "^0x[0-9a-fA-F]{40}$";
     case "decimal_usdc": return "^(?:[1-9][0-9]*(?:\\.[0-9]{0,5}[1-9])?|0\\.[0-9]{0,5}[1-9])$";
-    case "idempotency_key": return "^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$";
+    case "idempotency_key": return idempotencyKeyPattern(declaredIdempotencyKeyMaximum(option.constraints));
     case "operation_id": return "^[a-f0-9]{64}$";
     case "transaction_hash": return "^0x[0-9a-fA-F]{64}$";
     case "provider_request_id": return "^[A-Za-z0-9._:-]{1,256}$";

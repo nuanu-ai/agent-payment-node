@@ -30,6 +30,7 @@ import { circleCommandMemo } from "./command-memo.js";
 import { circleBlocked, circleCorrupt } from "./operation-model.js";
 import { approveCircleFundingSource, approveCircleFundingMint, observeCircleFunding, refreshCircleFundingAttestation, cleanupCircleFunding, snapshotCircleFundingOperation, snapshotCircleFundingEffect } from "./funding-lifecycle.js";
 import { circleFundingBinding, quoteCircleFundingFee, assertCircleFundingFee } from "./funding-binding.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 import { advanceCircleFundingOperation as advanceCircle, sealCircleFundingOperation as sealCircle, validateCircleFundingOperation as validateCircle, circleFundingFingerprint, publicCircleFundingOperation as publicCircle } from "./funding-operation.js";
 const fundingRuntimeScope = new AsyncLocalStorage();
 /** Assertion only: authority is issued privately after production foreground consent inside the locked service. */
@@ -97,7 +98,7 @@ export class CircleFundingEvmService {
         const profile = canonicalProfile(input.profile), destinationProfile = canonicalProfile(input.destinationProfile);
         if (!isCircleDestinationChain(input.destinationChain))
             circleBlocked("unsupported_destination_chain");
-        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(input.idempotencyKey))
+        if (!isIdempotencyKey(input.idempotencyKey, 128))
             circleBlocked("idempotency_key");
         const route = circleRoute(input.destinationChain);
         await this.state.initialize();

@@ -24,7 +24,7 @@ export const JUPITER_COMMANDS = [
         option("--amount", "lamports", ["positive_native_lamports"]), option("--slippage-bps", "string", ["integer_0_through_owner_cap"]),
         option("--owner-slippage-cap-bps", "string", ["integer_0_through_10000"])], "Build and save one runtime-pinned V1 Whirlpool SOL to USDC quote after active owner policy checks.", "local_write"),
     command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]),
-        option("--idempotency-key", "idempotency_key", ["global_payment_key"])], "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
+        option("--idempotency-key", "idempotency_key", ["global_payment_key", "8_to_200_safe_ascii_characters"])], "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
     command("status", [operation], "Observe the same durable Jupiter signature and save proved finality without resending.", "local_write"),
     command("approve", [operation], "Confirm the exact V1 operation in a genuine foreground terminal, then sign locally and send once.", "payment_submit"),
     command("execute", [operation], "Require a fresh genuine foreground approval for the same unmarked V1 operation; marked operations observe only.", "payment_submit"),
