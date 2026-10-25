@@ -5,7 +5,7 @@ import * as cliRuntime from "../../src/cli.js";
 import * as mcpRuntime from "../../src/mcp-server.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { SOLANA_USDC } from "../../src/chain-policy.js";
-import { ApnError } from "../../src/errors.js";
+import * as errorRuntime from "../../src/errors.js";
 import type { HttpGetRequest, HttpObservation } from "../../src/x402-model.js";
 import { X402SolanaRepository } from "../../src/x402-solana/repository.js";
 import { validateX402Operation } from "../../src/x402-state-integrity.js";
@@ -18,6 +18,7 @@ import { X402_URL } from "./x402-vectors.js";
 
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
+const { ApnError } = await testRuntime(errorRuntime, "errors.js");
 const BASE_USDC: AssetCase = { label: "Base USDC", chainId: 8453, token: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", name: "USD Coin", version: "2", decimals: 6 };
 
 type Fault = "transport" | "echoed_signature" | "changed_target" | "http_500";

@@ -33,6 +33,7 @@ export {
   STARGATE_TOKEN_SOURCE_TOKEN, encodeStargateNativeDrop,
 } from "./token-codec.js";
 import { stargateFundsRefusal } from "./funds.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 export { FileStargateTokenJournal, stargateV2TokenCanonicalReceipt } from "./token-journal.js";
 export type * from "./token-model.js";
 
@@ -47,7 +48,7 @@ export async function prepareStargateV2Token(request: StargateTokenPreparationRe
   const requestedMaxFee = hasMaxFee ? uint(request.maxFeePerGasWei, true) : undefined;
   const requestedPriority = hasPriorityFee ? uint(request.maxPriorityFeePerGasWei, true) : undefined;
   if (requestedMaxFee !== undefined && requestedPriority! > requestedMaxFee) fail("APN_INVALID_INPUT", "priority_fee_ceiling_exceeds_max_fee_ceiling");
-  if (!/^[A-Za-z0-9._:-]{8,128}$/u.test(request.idempotencyKey)) fail("APN_INVALID_INPUT", "idempotency_key");
+  if (!isIdempotencyKey(request.idempotencyKey, 128)) fail("APN_INVALID_INPUT", "idempotency_key");
   const ttl = request.ttlMs ?? 60_000; if (!Number.isSafeInteger(ttl) || ttl < 15_000 || ttl > MAX_TTL_MS) fail("APN_INVALID_INPUT", "ttl");
   const profileHash = hashObject({ profile }), idempotencyHash = hashObject({ idempotencyKey: request.idempotencyKey });
   const operationId = hashObject({ family: "stargate_v2_token", profileHash, idempotencyHash });

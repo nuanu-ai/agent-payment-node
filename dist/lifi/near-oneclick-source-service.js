@@ -16,6 +16,7 @@ import { OneClickSourceJournal, oneClickRecordLane, oneClickSourceCall } from ".
 import { bridgeAddress, bridgeFailure, bridgeRecord, bridgeUint } from "./validation.js";
 import { admitOperation } from "../operation-index/admission.js";
 import { evmClaim } from "../operation-index/adapters/family-claims.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 export { assertOneClickPostApproval } from "./near-oneclick-evm-source.js";
 const ORIGIN = "https://1click.chaindefuser.com";
 /** The quote request deadline is set this far ahead; it also bounds how old an attributable destination credit may be. */
@@ -139,9 +140,10 @@ export class OneClickSourceService {
         const maxLoss = bridgeUint(input.maxQuotedLossAtomic), maxGas = bridgeUint(input.maxGasLimitAtomic, true);
         const maxFee = bridgeUint(input.maxFeePerGasWei, true), maxPriority = bridgeUint(input.maxPriorityFeePerGasWei);
         const maxNative = bridgeUint(input.maxNativeDebitWei, true);
-        if (amount > lane.origin.maxAmountAtomic || maxPriority > maxFee || input.idempotencyKey.length < 8 ||
-            input.idempotencyKey.length > 128)
+        if (amount > lane.origin.maxAmountAtomic || maxPriority > maxFee)
             fail("limits");
+        if (!isIdempotencyKey(input.idempotencyKey, 128))
+            fail("idempotency_key");
         const profileHash = this.state.profileHash(profile), operationId = oneClickOperationId(lane, profileHash, input.idempotencyKey);
         const journal = this.journal();
         if (await journal.load(operationId) !== null)

@@ -192,7 +192,7 @@ test("bound USDT key replays exact material and conflicts on a changed intent wi
   assert.equal(conflict.error?.code, "APN_IDEMPOTENCY_CONFLICT");
   const definition = COMMANDS.find(command => command.path.join(" ") === "gasless usdt prepare")!;
   assert.deepEqual(definition.options.find(option => option.name === "--idempotency-key")?.constraints,
-    ["gasless_usdt_bound_journal_only_across_profiles"]);
+    ["gasless_usdt_bound_journal_only_across_profiles", "8_to_128_safe_ascii_characters"]);
   const mcpKey = MCP_TOOLS.find(tool => tool.name === "apn_gasless_usdt_prepare")!.inputSchema.properties.idempotency_key;
   assert.match(JSON.stringify(mcpKey), /gasless_usdt_bound_journal_only_across_profiles/u);
 });

@@ -13,6 +13,7 @@ import { stargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
 import { stargateFundsRefusal } from "./funds.js";
 import { recordObservedSourceFee, withSourceFee } from "./native-source-fee.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 export class LocalStargateNativeSigner {
     state;
     wallets;
@@ -62,7 +63,7 @@ export async function prepareStargateV2NativeEth(request, ports, journal) {
     if (ports.signer.kind !== "imported_evm_signer" || address(ports.signer.address) !== owner)
         fail("APN_OPERATION_BLOCKED", "signer_owner");
     const amount = uint(request.amountAtomic, true), cap = uint(request.maxNativeDebitAtomic, true);
-    if (!/^[A-Za-z0-9._:-]{8,128}$/u.test(request.idempotencyKey))
+    if (!isIdempotencyKey(request.idempotencyKey, 128))
         fail("APN_INVALID_INPUT", "idempotency_key");
     const ttl = request.ttlMs ?? 60_000;
     if (!Number.isSafeInteger(ttl) || ttl < 15_000 || ttl > MAX_TTL_MS)

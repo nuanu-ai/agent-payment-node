@@ -12,7 +12,7 @@ const EXAMPLE_VALUES = { "--profile": "<source-profile>", "--destination-profile
 export const CIRCLE_EVM_GROUPS = [{ path: ["circle", "evm"], summary: "CCTP V2 Fast Arbitrum USDC to Sei, Linea or Monad for any profile, with separate destination gas consent.", kind: "group" }];
 export const CIRCLE_EVM_COMMANDS = [
     command("prepare", [option("--profile", "profile", ["local_evm_custody_source_signer"]), option("--destination-profile", "profile", ["local_evm_custody_destination_gas_signer"]),
-        option("--destination-chain", "string", ["1329_or_59144_or_143"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"]),
+        option("--destination-chain", "string", ["1329_or_59144_or_143"]), option("--idempotency-key", "idempotency_key", ["global_payment_key", "8_to_128_safe_ascii_characters"]),
         option("--beneficiary", "address", ["canonical_nonzero_address"]),
         option("--gross-atomic", "atomic_usdc", ["positive_uint256"]),
         option("--max-issuer-fee-atomic", "atomic_usdc", ["positive_less_than_gross"]),

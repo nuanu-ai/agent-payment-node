@@ -27,7 +27,7 @@ export const SUNSWAP_COMMANDS = [
         option("--fee-limit-sun", "sun", ["positive_owner_fee_limit_sun_no_default"]),
         option("--deadline", "string", ["unix_seconds_within_10_minutes_no_default"])], "Quote from the pinned router and pair on-chain, encode locally, and exactly simulate one unsigned transaction. Uses APN_TRON_RPC_URL.", "network_read"),
     command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]),
-        option("--idempotency-key", "idempotency_key", ["global_payment_key"])], "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
+        option("--idempotency-key", "idempotency_key", ["global_payment_key", "8_to_200_safe_ascii_characters"])], "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
     command("status", [operation], "Read one durable guarded swap operation; after the marker it only observes, never resends.", "local_read"),
     command("approve", [operation], "Show the exact swap screen, take the typed approval code, then sign locally and broadcast exactly once.", "payment_submit", { class: "foreground_tty", when: "Every guarded swap; MCP returns the exact CLI handoff only." }),
     command("execute", [operation], "Continue an approved reservation with its single broadcast, or observe an already marked swap without resending.", "payment_submit", { class: "foreground_tty", when: "Only an unexpired stored foreground approval; MCP returns the exact CLI handoff only." }),

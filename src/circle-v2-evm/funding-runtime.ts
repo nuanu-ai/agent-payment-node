@@ -33,6 +33,7 @@ import { circleCommandMemo } from "./command-memo.js";
 import { circleBlocked, circleCorrupt, type CircleEffect } from "./operation-model.js";
 import { approveCircleFundingSource, approveCircleFundingMint, observeCircleFunding, refreshCircleFundingAttestation, cleanupCircleFunding, snapshotCircleFundingOperation, snapshotCircleFundingEffect, type CircleFundingLifecyclePorts } from "./funding-lifecycle.js";
 import { circleFundingBinding, quoteCircleFundingFee, assertCircleFundingFee, type CircleFundingParameters } from "./funding-binding.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 import { advanceCircleFundingOperation as advanceCircle, sealCircleFundingOperation as sealCircle, validateCircleFundingOperation as validateCircle, circleFundingFingerprint, publicCircleFundingOperation as publicCircle, type CircleFundingOperationV2 } from "./funding-operation.js";
 interface FundingRuntimeScope { readonly state: StateStore; readonly fingerprint: string; readonly now: () => number; readonly grants: Map<string, { readonly deadline: number; readonly envelopes: ReadonlyMap<string, string> }>; active: boolean; }
 const fundingRuntimeScope = new AsyncLocalStorage<FundingRuntimeScope>();
@@ -65,7 +66,7 @@ export class CircleFundingEvmService {
     // payer is custody(--destination-profile). Admission is each profile's own active policy (usage.policies below).
     const profile = canonicalProfile(input.profile), destinationProfile = canonicalProfile(input.destinationProfile);
     if (!isCircleDestinationChain(input.destinationChain)) circleBlocked("unsupported_destination_chain");
-    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u.test(input.idempotencyKey)) circleBlocked("idempotency_key");
+    if (!isIdempotencyKey(input.idempotencyKey, 128)) circleBlocked("idempotency_key");
     const route = circleRoute(input.destinationChain);
     await this.state.initialize(); const [sourceCustody, destinationCustody] = await Promise.all([evmNativeCustody(this.state, profile), evmNativeCustody(this.state, destinationProfile)]);
     const funding = circleFundingBinding(route.chainId, { sourceProfile: profile, sourceOwner: sourceCustody.walletAddress, destinationProfile, gasPayer: destinationCustody.walletAddress }, input.funding);
