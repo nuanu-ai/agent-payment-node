@@ -943,6 +943,25 @@ shows the hold as `sourceUsage`. Only the hold this operation reserved, for the
 principal of its own burn call, is touched; a burn without a recorded receipt
 keeps its hold.
 
+After a successful burn the same status follows its delivery on Solana. Circle's
+forwarding service receives the message there; APN only reads. It asks Circle's
+pinned issuer API for the burn's message (`/v2/messages/6?transactionHash=`),
+bound to this burn by domains 6 to 5, Base USDC, the journal's messenger,
+recipient token account and principal. Once Circle reports `forwardState`
+`COMPLETE` with a `forwardTxHash`, it reads that transaction at `finalized` on
+`APN_SOLANA_RPC_URL` only (no default endpoint; without the setting the status
+names it). The transaction must have succeeded, called MessageTransmitterV2
+(`CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC`), written that message's
+`used_nonce` account and credited the recipient's USDC account with exactly the
+principal minus Circle's executed fee. Then it is recorded once beside the
+journal (`<operation>.solana-delivery.json`) and `phase` reads `delivered`;
+later statuses read nothing. Until then `phase` is `source_finalized` and
+`delivery.state` names the step still awaited (`awaiting_issuer_message`,
+`awaiting_attestation`, `awaiting_forward` with Circle's `forwardState`,
+`awaiting_solana_rpc`, `awaiting_solana_finality`). A reverted burn shows
+`source_reverted` and reads no delivery. The journal itself is never rewritten:
+its own phase stays under `journal.phase`.
+
 ## Stargate fee refusal and funding checkpoint, 2026-10-08
 
 A correctly reconciled Stargate LayerZero fee above `maxNativeDebitWei` is now

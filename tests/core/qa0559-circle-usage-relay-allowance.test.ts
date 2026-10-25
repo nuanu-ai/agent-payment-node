@@ -11,6 +11,7 @@ import { ApnError } from "../../src/errors.js";
 import type { FinalizedChainRead } from "../../src/evm-finalized-proof.js";
 import { CIRCLE_SOURCE_PROOF_SCHEMA, CircleSourceProofStore, circleSourceStatus, type CircleSourceProof } from "../../src/lifi/circle-v2-source-proof.js";
 import { BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES } from "../../src/lifi/circle-v2-source-receipt.js";
+import type { CircleSolanaDeliveryReader } from "../../src/lifi/circle-v2-solana-delivery.js";
 import { NonEvmSourceJournalRepository, type NonEvmSourceJournal } from "../../src/lifi/non-evm-source-journal.js";
 import { RelayUnsignedPrepareService, RELAY_ROUTE_REFERENCE } from "../../src/relay/prepare.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, validateRelayQuote } from "../../src/relay/quote.js";
@@ -77,18 +78,21 @@ function base(receipt: Record<string, unknown> | null = null): (chainId: number)
   return () => rpc;
 }
 const usage = async (ledger: AssetUsageLedger, when: Date) => (await ledger.usageReadOnly(identity, when)).amountAtomic;
+/** Circle has not published the burn's message yet: the delivery stays a waiting status and writes nothing. */
+const UNDELIVERED: CircleSolanaDeliveryReader = { solana: { originHash: "unused", async call() { throw new Error("no Solana read before Circle names one"); } },
+  async issuerMessages() { return { status: 404, body: null }; } };
 
 test("a burn proven final yesterday stops counting today: the next status settles it on its proof day, once", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const journal = await burned(temporary.root), { ledger, reservationId } = await hold(temporary.root, 1);
   const proof = await recorded(temporary.root, journal, "success", at(-DAY + 60_000));
   assert.equal(await usage(ledger, at(0)), "1000000", "0.5.59: the open hold still counts on every later day");
-  const view = await circleSourceStatus(temporary.root, journal, base(), () => Date.now());
+  const view = await circleSourceStatus(temporary.root, journal, base(), () => Date.now(), false, UNDELIVERED);
   assert.deepEqual(view.sourceUsage, { reservationId, state: "finalized", amountAtomic: "1000000", effectAt: proof.observedAt });
   assert.deepEqual([await usage(ledger, at(0)), await usage(ledger, at(-DAY + 120_000))], ["0", "1000000"]);
   const settled = await ledger.load(identity, reservationId);
   assert.equal(settled?.outcomeDigest, hashObject({ kind: "circle_v2_base_source_finalized_receipt", operationId: H("b"), proofIntegrityHash: proof.integrityHash }));
-  const again = await circleSourceStatus(temporary.root, journal, base(), () => Date.now());
+  const again = await circleSourceStatus(temporary.root, journal, base(), () => Date.now(), false, UNDELIVERED);
   assert.deepEqual([again.sourceUsage, (await ledger.load(identity, reservationId))?.reservationDigest], [view.sourceUsage, settled?.reservationDigest]);
 });
 
@@ -97,14 +101,14 @@ test("the status that records the receipt settles the hold in the same call; a r
   const journal = await burned(temporary.root), { ledger } = await hold(temporary.root, 0);
   const receipt = { transactionHash: journal.transactionHash, from: ACCOUNT.address.toLowerCase(), to: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES.toLowerCase(),
     blockNumber: "0x64", blockHash: `0x${H("e")}`, status: "0x1" };
-  const view = await circleSourceStatus(temporary.root, journal, base(receipt), () => Date.now());
+  const view = await circleSourceStatus(temporary.root, journal, base(receipt), () => Date.now(), false, UNDELIVERED);
   assert.deepEqual([view.sourceProof?.status, view.sourceUsage?.state, view.sourceUsage?.effectAt], ["success", "finalized", view.sourceProof?.observedAt]);
   assert.equal(await usage(ledger, at(0)), "1000000", "a spend proven today counts today");
   assert.equal(await usage(ledger, at(DAY)), "0");
   const reverted = await temporaryState(); t.after(reverted.cleanup);
   const failed = await burned(reverted.root), held = await hold(reverted.root, 1);
   await recorded(reverted.root, failed, "reverted", at(-DAY + 60_000));
-  const released = await circleSourceStatus(reverted.root, failed, base(), () => Date.now());
+  const released = await circleSourceStatus(reverted.root, failed, base(), () => Date.now(), false, UNDELIVERED);
   assert.deepEqual([released.sourceUsage?.state, released.sourceUsage?.effectAt], ["failed_confirmed_revert", null]);
   assert.deepEqual([await usage(held.ledger, at(0)), await usage(held.ledger, at(-DAY + 120_000))], ["0", "0"]);
 });
@@ -112,12 +116,12 @@ test("the status that records the receipt settles the hold in the same call; a r
 test("without a recorded receipt, or for a hold of another principal, the hold stays open", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const journal = await burned(temporary.root), { ledger, reservationId } = await hold(temporary.root, 1);
-  const waiting = await circleSourceStatus(temporary.root, journal, base(null), () => Date.now());
+  const waiting = await circleSourceStatus(temporary.root, journal, base(null), () => Date.now(), false, UNDELIVERED);
   assert.deepEqual([waiting.sourceProof, waiting.sourceUsage, await usage(ledger, at(0))], [null, undefined, "1000000"]);
   const other = await temporaryState(); t.after(other.cleanup);
   const mismatch = await burned(other.root), wrong = await hold(other.root, 1, "999999");
   await recorded(other.root, mismatch, "success", at(-DAY + 60_000));
-  const kept = await circleSourceStatus(other.root, mismatch, base(), () => Date.now());
+  const kept = await circleSourceStatus(other.root, mismatch, base(), () => Date.now(), false, UNDELIVERED);
   assert.deepEqual([kept.sourceUsage?.state, await usage(wrong.ledger, at(0))], ["submitted", "999999"]);
   assert.equal((await ledger.load(identity, reservationId))?.state, "submitted");
 });
@@ -126,7 +130,7 @@ test("two statuses of one recorded burn settle its hold once and both answer", a
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const journal = await burned(temporary.root), { ledger, reservationId } = await hold(temporary.root, 1);
   await recorded(temporary.root, journal, "success", at(-DAY + 60_000));
-  const views = await Promise.all([1, 2, 3].map(() => circleSourceStatus(temporary.root, journal, base(), () => Date.now())));
+  const views = await Promise.all([1, 2, 3].map(() => circleSourceStatus(temporary.root, journal, base(), () => Date.now(), false, UNDELIVERED)));
   assert.deepEqual(views.map(view => view.sourceUsage?.state), ["finalized", "finalized", "finalized"]);
   assert.deepEqual([(await ledger.load(identity, reservationId))?.state, await usage(ledger, at(0))], ["finalized", "0"]);
 });

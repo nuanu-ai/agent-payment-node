@@ -55,6 +55,7 @@ import type { OrcaStableLegacyFinisher } from "./legacy/orca-stable/finisher.js"
 import type { StargateNativeService } from "./stargate-v2/native-runtime.js";
 import type { StargateTokenService } from "./stargate-v2/token-runtime.js";
 import type { FinalizedReader } from "./evm-finalized-proof.js";
+import type { CircleSolanaDeliveryReader } from "./lifi/circle-v2-solana-delivery.js";
 
 export interface RelayExecutionConfirmationSummary {
   readonly operationId: string;
@@ -141,6 +142,8 @@ export interface CoreDependencies {
   readonly operationAbandonApproval?: OperationAbandonApprovalPort;
   /** Keyless public reads at a chain's finalized tag, for the R4 proofs of operations no family runtime observes. */
   readonly finalizedRead?: FinalizedReader;
+  /** Circle's issuer API and a Solana RPC, for the delivery of a Circle Base to Solana burn. */
+  readonly circleSourceDelivery?: CircleSolanaDeliveryReader;
 }
 
 export class RuntimeContext {
@@ -208,6 +211,7 @@ export class RuntimeContext {
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
   readonly operationAbandonApproval?: OperationAbandonApprovalPort;
   readonly finalizedRead?: FinalizedReader;
+  readonly circleSourceDelivery?: CircleSolanaDeliveryReader;
   private readonly coinbaseRpcFactory?: () => RpcPort;
   private coinbaseRpcInstance?: RpcPort;
   private initialized: Promise<void> | undefined;
@@ -276,6 +280,7 @@ export class RuntimeContext {
     if (dependencies.providerAuthorizationStore !== undefined) this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
     if (dependencies.operationAbandonApproval !== undefined) this.operationAbandonApproval = dependencies.operationAbandonApproval;
     if (dependencies.finalizedRead !== undefined) this.finalizedRead = dependencies.finalizedRead;
+    if (dependencies.circleSourceDelivery !== undefined) this.circleSourceDelivery = dependencies.circleSourceDelivery;
   }
 
   async ready(): Promise<void> {

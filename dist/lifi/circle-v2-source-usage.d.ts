@@ -12,3 +12,5 @@ export interface CircleSourceUsage {
  * operation reserved, for the principal its own burn call carries, is touched; anything else is left as it is.
  */
 export declare function settleCircleSourceUsage(root: string, journal: NonEvmSourceJournal, proof: CircleSourceProof, now: Date): Promise<CircleSourceUsage | null>;
+/** The principal the journal's own burn call carries, or null when its calldata is not that call. */
+export declare function burnPrincipal(journal: NonEvmSourceJournal): string | null;
