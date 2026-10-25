@@ -12,7 +12,7 @@ import * as mcpRuntime from "../../src/mcp-server.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { canonicalJson, domainHash } from "../../src/canonical.js";
 import { SOLANA_USDC } from "../../src/chain-policy.js";
-import { ApnError } from "../../src/errors.js";
+import * as errorRuntime from "../../src/errors.js";
 import { X402SolanaRepository } from "../../src/x402-solana/repository.js";
 import { testRuntime } from "./installed-runtime.js";
 import { temporaryState } from "./helpers.js";
@@ -22,6 +22,7 @@ import { X402_URL } from "./x402-vectors.js";
 
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
+const { ApnError } = await testRuntime(errorRuntime, "errors.js");
 const solanaId = (root: string, key: string) =>
   domainHash("apn.x402-solana.operation-id.v1", canonicalJson({ profileHash: new X402SolanaRepository(root).profileHash("default"), key }));
 

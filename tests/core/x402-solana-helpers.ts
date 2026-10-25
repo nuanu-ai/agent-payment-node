@@ -3,7 +3,8 @@ import { address, createKeyPairSignerFromPrivateKeyBytes, getBase58Decoder, getB
 import { getMintEncoder, getTokenEncoder, TOKEN_PROGRAM_ADDRESS } from "@solana-program/token";
 import type { TestContext } from "node:test";
 import { sha256 } from "../../src/canonical.js";
-import { ApnError } from "../../src/errors.js";
+import * as errorRuntime from "../../src/errors.js";
+import { testRuntime } from "./installed-runtime.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { temporaryState } from "./helpers.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
@@ -14,9 +15,11 @@ import { decodePaymentSignatureHeader, encodePaymentRequiredHeader } from "../..
 import type { HttpGetRequest, HttpObservation, HttpPort } from "../../src/x402-model.js";
 import { X402_SOLANA_MECHANISM, X402_SOLANA_NETWORK } from "../../src/x402-solana/constants.js";
 import { SOLANA_CHAIN, activateDirectPolicy } from "./direct-allowlist-helpers.js";
-import { SolanaWrapping } from "./solana-helpers.js";
+import { SolanaWrapping } from "./solana-wrapping.js";
 import { challengeObservation, paidObservation } from "./x402-helpers.js";
 import { X402_URL } from "./x402-vectors.js";
+
+const { ApnError } = await testRuntime(errorRuntime, "errors.js");
 
 export const SOL_PAYEE = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin";
 export const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";

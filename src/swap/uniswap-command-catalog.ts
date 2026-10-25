@@ -32,7 +32,7 @@ export const UNISWAP_COMMANDS: readonly CommandDefinition[] = [
     option("--deadline", "string", ["unix_seconds_within_30_minutes"]), option("--max-gas-limit", "wei", ["positive_bound"]),
     option("--max-fee-per-gas", "wei", ["positive_bound"]), option("--max-priority-fee-per-gas", "wei", ["positive_bound"])],
     "Quote from the pinned pool and QuoterV2 on-chain, encode locally, and exactly simulate one unsigned transaction. Uses APN_ETHEREUM_RPC_URL.", "network_read"),
-  command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]), option("--idempotency-key", "idempotency_key", ["global_payment_key"])],
+  command("prepare", [profile, option("--quote", "string", ["64_lowercase_hex_quote_hash"]), option("--idempotency-key", "idempotency_key", ["global_payment_key", "8_to_200_safe_ascii_characters"])],
     "Prepare only after separate owner admission of both assets and the exact mechanism.", "payment_prepare"),
   command("status", [operation], "Read one durable guarded swap operation without resending.", "local_read"),
   command("approve", [operation], "Show the exact swap screen, take the typed approval code, then sign locally and send exactly once.",

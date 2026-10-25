@@ -10,6 +10,7 @@ import { newSwapOperation, SWAP_TERMINAL_STATES, validateSwapOperation, validate
 import { SwapOperationRepository } from "./repository.js";
 import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 import { swapUnlandedProofHash, validateSwapUnlandedProof, type SwapUnlandedProof } from "./unlanded.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 
 export class GuardedSwapService {
   constructor(readonly operations: SwapOperationRepository, readonly usage: AssetUsageLedger) {}
@@ -171,7 +172,7 @@ export class GuardedSwapService {
 function usageIdentity(operation: SwapOperationRecord) { return { account: operation.quote.account, chain: operation.quote.sourceAsset.chain,
   asset: operation.quote.sourceAsset.kind === "native" ? { kind: "native" as const, identifier: null } :
     { kind: "token" as const, identifier: operation.quote.sourceAsset.identifier! } }; }
-export function swapIdempotencyHash(value: unknown): string { if (typeof value !== "string" || value.length < 8 || value.length > 256 || /[^\x21-\x7e]/u.test(value)) invalid("Swap idempotency key is invalid."); return sha256(`swap-idempotency\0${value}`); }
+export function swapIdempotencyHash(value: unknown): string { if (!isIdempotencyKey(value, 200)) invalid("Swap idempotency key is invalid."); return sha256(`swap-idempotency\0${value}`); }
 export function preparedSwapOperationId(profile: string, idempotencyKey: string): string {
   const profileHash = domainHash("apn.swap-quote.v1", `profile\0${profile}`);
   return domainHash("apn.swap-operation-id.v1", canonicalJson({ profileHash, idempotencyHash: swapIdempotencyHash(idempotencyKey) }));

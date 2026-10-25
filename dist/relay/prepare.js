@@ -21,6 +21,7 @@ import { relayNativeRouteFor } from "./native-routes.js";
 import { createRelayArbitrumSourceDraft } from "./arbitrum-usdc-source-draft.js";
 import { RELAY_ARBITRUM_USDC } from "./arbitrum-usdc-ethereum-quote.js";
 import { relayStatusLocator } from "./quote.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 export const RELAY_ROUTE_REFERENCE = "ethereum-usdc-bnb-native-v1";
 export const RELAY_BASE_ROUTE_REFERENCE = "ethereum-usdc-base-eth-v1";
 const POSITIVE = /^[1-9][0-9]*$/u;
@@ -47,7 +48,7 @@ export class RelayUnsignedPrepareService {
     async prepare(input, route = "bnb") {
         if (!ADDRESS.test(input.recipient) || /^0x0{40}$/u.test(input.recipient) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxApprovalNetworkFeeWei, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
-            !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
+            !isIdempotencyKey(input.idempotencyKey, 128)) {
             throw new ApnError("APN_INVALID_INPUT", "Relay prepare inputs are invalid.");
         }
         allowlistProfileHash(input.profile);
@@ -135,7 +136,7 @@ export class RelayUnsignedPrepareService {
         if (!ADDRESS.test(input.owner) || !ADDRESS.test(input.recipient) || /^0x0{40}$/u.test(input.recipient) || !isAbsolute(input.quoteFile) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxProviderFeeAtomic,
                 input.maxApprovalNetworkFeeWei, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
-            !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
+            !isIdempotencyKey(input.idempotencyKey, 128)) {
             throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum prepare inputs are invalid.");
         }
         const profileHash = this.state.profileHash(input.profile);
@@ -205,7 +206,7 @@ export class RelayUnsignedPrepareService {
         const source = EIP155.exec(input.sourceChain), destination = EIP155.exec(input.destinationChain);
         if (source === null || destination === null || !ADDRESS.test(input.recipient) || /^0x0{40}$/u.test(input.recipient) ||
             ![input.amountAtomic, input.minOutputAtomic, input.maxDepositNetworkFeeWei].every(v => POSITIVE.test(v)) ||
-            !/^[A-Za-z0-9._:-]{8,128}$/u.test(input.idempotencyKey)) {
+            !isIdempotencyKey(input.idempotencyKey, 128)) {
             throw new ApnError("APN_INVALID_INPUT", "Relay native prepare inputs are invalid.");
         }
         allowlistProfileHash(input.profile);

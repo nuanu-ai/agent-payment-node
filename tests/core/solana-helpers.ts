@@ -9,7 +9,6 @@ import { SOLANA_GENESIS, SOLANA_USDC } from "../../src/chain-policy.js";
 import { sha256 } from "../../src/canonical.js";
 import type { RailApprovalPort, RailPreparedTransfer } from "../../src/direct-rail-ports.js";
 import type { DirectAllowlistBinding } from "../../src/direct-allowlist-gate.js";
-import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { WaitPort } from "../../src/ports.js";
 import { ApnError } from "../../src/errors.js";
 import { StateStore } from "../../src/state.js";
@@ -18,14 +17,11 @@ import { SolanaLocalAdapter } from "../../src/solana/local-adapter.js";
 import type { SolanaBatchRead, SolanaMethod, SolanaRpcPort } from "../../src/solana/rpc.js";
 import { SOLANA_CHAIN, activateDirectPolicy, directAdmission } from "./direct-allowlist-helpers.js";
 import { findStored } from "./stored-operations.js";
+import { SolanaWrapping } from "./solana-wrapping.js";
 
 export const SOL_RECIPIENT = "So11111111111111111111111111111111111111112";
 export const SOL_BLOCKHASH = "11111111111111111111111111111111";
-export class SolanaWrapping implements WrappingSecretPort {
-  loads = 0; creates = 0; available = true;
-  async load(): Promise<Buffer | null> { this.loads++; return this.available ? Buffer.alloc(32, 73) : null; }
-  async create(): Promise<Buffer> { this.creates++; return Buffer.alloc(32, 73); }
-}
+export { SolanaWrapping };
 export class SolanaApproval implements RailApprovalPort {
   calls: Parameters<RailApprovalPort["approve"]>[0][] = [];
   allowlistBindings: (DirectAllowlistBinding | undefined)[] = [];

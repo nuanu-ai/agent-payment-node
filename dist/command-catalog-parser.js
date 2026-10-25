@@ -4,6 +4,7 @@ import { renderHelp } from "./command-help.js";
 import { containsRawControlCharacters } from "./cli-handoff.js";
 import { ApnError, asApnError } from "./errors.js";
 import { decodeX402RequestBody } from "./x402-http-request.js";
+import { declaredIdempotencyKeyMaximum, isIdempotencyKey } from "./idempotency-key-contract.js";
 import { removedV1Command, removedV1CommandMessage } from "./command-manifest-migration.js";
 export function parseCatalogArgv(argv) {
     const definition = longestCommandPrefix(argv);
@@ -204,7 +205,7 @@ function validateOptionValue(definition, value) {
                 invalid();
             return;
         case "idempotency_key":
-            if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,199}$/u.test(value))
+            if (!isIdempotencyKey(value, declaredIdempotencyKeyMaximum(definition.constraints)))
                 invalid();
             return;
         case "integer_seconds":

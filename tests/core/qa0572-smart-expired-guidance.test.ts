@@ -11,7 +11,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import * as cliRuntime from "../../src/cli.js";
 import * as mcpRuntime from "../../src/mcp-server.js";
 import type { OutputEnvelope } from "../../src/commands.js";
-import { ApnError } from "../../src/errors.js";
+import * as errorRuntime from "../../src/errors.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { Address, Hex } from "../../src/model.js";
 import { METAMASK_SMART_ACCOUNT_PROVIDER_ID } from "../../src/metamask-smart-account-adapter.js";
@@ -20,6 +20,7 @@ import { temporaryState } from "./helpers.js";
 
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
+const { ApnError } = await testRuntime(errorRuntime, "errors.js");
 const SESSION_KEY = `0x${"2".repeat(64)}` as Hex, SESSION = privateKeyToAccount(SESSION_KEY).address as Address;
 const NOW = 1_788_393_600, EXPIRY = NOW + 3_600, PROFILE = "smart-account", KEY = "smart-account-connect-0001";
 const CONNECT = ["wallet", "connect", "--profile", PROFILE, "--provider", METAMASK_SMART_ACCOUNT_PROVIDER_ID, "--auth-method", "browser",

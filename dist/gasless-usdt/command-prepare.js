@@ -14,6 +14,7 @@ import { attestUsdtSponsor } from "./sponsor-auth.js";
 import { UsdtCodePins, usdtSafeSnapshot, usdtSponsorPort } from "./rpc.js";
 import { GaslessUsdtOperationService } from "./service.js";
 import { OperationService } from "../operation-service.js";
+import { isIdempotencyKey } from "../idempotency-key-contract.js";
 /**
  * Read admissions derived from each command's steps, with explicit headroom. A safe snapshot is two POSTs (chain and
  * head, then the pinned state batch). Execute: the reservation guard, the submission guard and the sponsor attestation
@@ -86,6 +87,9 @@ export class GaslessUsdtCommandPrepare {
         this.options = options;
     }
     async prepare(input) {
+        if (!isIdempotencyKey(input.idempotencyKey, 128)) {
+            throw new ApnError("APN_INVALID_INPUT", "Gasless USDT binding refused: bound_key.", { reason: "bound_key", rail: "gasless_usdt" });
+        }
         const profileHash = allowlistProfileHash(input.profile);
         const saved = await this.operations.forProfile(profileHash).replayBound(input.idempotencyKey, input);
         if (saved !== null)

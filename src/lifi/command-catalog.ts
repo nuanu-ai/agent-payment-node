@@ -36,7 +36,7 @@ export const BRIDGE_COMMANDS: readonly CommandDefinition[] = [
     examples: ["apn bridge routes --profile default --from-chain eip155:1 --to-chain eip155:8453 --from-token <ethereum-usdc> --to-token <base-usdc> --amount 1 --to <recipient> --min-output 0.99 --max-native-debit-wei 1000000000000000 --max-route-fee 0.01 --slippage-bps 50"] },
   { path: ["bridge", "prepare"], synopsis: "apn bridge prepare --profile <profile> --quote <snapshot-hash> --route <route-id> --idempotency-key <key>",
     summary: "Materialize one selected route and freeze exact effects under shared money-operation locks.",
-    options: [profile, option("--quote", "string", ["64_lowercase_hex_snapshot_hash"]), option("--route", "string", ["bounded_selected_route_id"]), option("--idempotency-key", "idempotency_key", ["global_all_payment_kinds"])],
+    options: [profile, option("--quote", "string", ["64_lowercase_hex_snapshot_hash"]), option("--route", "string", ["bounded_selected_route_id"]), option("--idempotency-key", "idempotency_key", ["global_all_payment_kinds", "8_to_200_safe_ascii_characters"])],
     effect: { class: "payment_prepare", summary: "Materializes and independently verifies source and destination deployments, nonce, allowance and fees. Uses APN_ETHEREUM_RPC_URL, APN_BASE_RPC_URL and APN_ARBITRUM_RPC_URL for the selected pair." },
     approval: readApproval, output, states: bridgeStates, recovery: [{ command_path: ["bridge", "approve"], when: "After reviewing the exact intent before its expiry." }],
     examples: ["apn bridge prepare --profile default --quote <snapshot-hash> --route <route-id> --idempotency-key <key>"] },

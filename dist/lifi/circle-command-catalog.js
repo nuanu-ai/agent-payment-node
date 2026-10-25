@@ -1,8 +1,8 @@
 import { bridgeAddress, bridgeHash, bridgeUint } from "./validation.js";
 import { solanaAddress } from "../solana/rpc.js";
 import { ApnError } from "../errors.js";
-const option = (name, type) => ({
-    name, type, required: true, default: { kind: "none" }, constraints: ["explicit_bounded_input"], sensitivity: "operator_input",
+const option = (name, type, ...extra) => ({
+    name, type, required: true, default: { kind: "none" }, constraints: ["explicit_bounded_input", ...extra], sensitivity: "operator_input",
 });
 const profile = option("--profile", "profile"), operation = option("--operation", "operation_id");
 const output = { contract: "apn.cli.v1", success_exit: 0, failure_exit: 1,
@@ -39,7 +39,7 @@ export const CIRCLE_COMMANDS = [
         options: [profile, option("--expected-payer", "address"), option("--recipient-owner", "string"),
             option("--recipient-setup", "string"), option("--amount-atomic", "atomic_usdc"),
             option("--max-source-fee-atomic", "atomic_usdc"), option("--max-allowance-atomic", "atomic_usdc"), ...limits,
-            option("--idempotency-key", "idempotency_key")],
+            option("--idempotency-key", "idempotency_key", "8_to_128_safe_ascii_characters")],
         effect: { class: "payment_submit", summary: "After exact foreground approval, may send a Base CCTP V2 source effect once." },
         approval: { class: "foreground_tty", when: "Every new source operation." }, output,
         states: { terminal: ["completed", "failed_before_effect", "confirmed_revert"], non_terminal: ["prepared", "unknown_finality", "source_pending"] },
