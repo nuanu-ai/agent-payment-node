@@ -178,12 +178,21 @@ test("anyone naming the public used-nonce account neither blocks nor fakes the r
   const flooded = await status(root, journal, reader(SMALL, [], { iris: failed(), receivers: page,
     transactions: Object.fromEntries(page.map(entry => [entry.signature, strangerTx(entry.signature)])) }));
   assert.deepEqual([flooded.delivery?.state, flooded.delivery?.unreadReason?.endsWith("(circle_delivery_nonce_history)")], ["unread", true]);
+  // A candidate the node does not return, or one too large to judge, is not "not received": it stays unread.
+  const huge = getBase58Decoder().decode(new Uint8Array(64).fill(99)), oversized = strangerTx(huge);
+  oversized.transaction.message.accountKeys = Array.from({ length: 257 }, (_, n) => ({ pubkey: strangerSignature(n).slice(0, 44), signer: false, writable: false }));
+  for (const answers of [{ receivers: [row(stranger)], transactions: { [SMALL.signature]: SMALL.receive } },
+    { receivers: [row(huge)], transactions: { [huge]: oversized } }]) {
+    const unjudged = await status(root, journal, reader(SMALL, [], { iris: failed(), ...answers }));
+    assert.deepEqual([unjudged.delivery?.state, unjudged.delivery?.unreadReason?.endsWith("(circle_delivery_nonce_unjudged)")], ["unread", true]);
+  }
   await absent(root);
   for (const [label, receivers] of [["stranger after the receive", [row(stranger), row(SMALL.signature)]],
     ["stranger before the receive", [row(SMALL.signature), row(stranger)]],
-    ["a failed attempt beside it", [row(LARGE.signature, { InstructionError: [3, { Custom: 0 }] }), row(SMALL.signature)]]] as const) {
+    ["a failed attempt beside it", [row(LARGE.signature, { InstructionError: [3, { Custom: 0 }] }), row(SMALL.signature)]],
+    ["an unjudged stranger before it", [row(SMALL.signature), row(huge)]]] as const) {
     const fresh = await setup(t);
-    const view = await status(fresh.root, fresh.journal, reader(SMALL, [], { iris: failed(), receivers, transactions }));
+    const view = await status(fresh.root, fresh.journal, reader(SMALL, [], { iris: failed(), receivers, transactions: { ...transactions, [huge]: oversized } }));
     assert.deepEqual([view.phase, view.delivery?.proof?.solanaSignature], ["delivered", SMALL.signature], label);
   }
 });
