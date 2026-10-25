@@ -7,6 +7,7 @@ import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { pastUnstartedDeadline } from "../unstarted-deadline.js";
 import { CIRCLE_V2_SOURCE_TTL_MS } from "./circle-v2-source-service.js";
 import { settleCircleSourceUsage } from "./circle-v2-source-usage.js";
+import { circleSolanaDelivery } from "./circle-v2-solana-delivery.js";
 export const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 const PROOF_KEYS = ["blockHash", "blockNumberAtomic", "blockTag", "chainId", "finalizedBlockNumberAtomic", "integrityHash", "nonceAtomic",
     "observedAt", "operationId", "payer", "profileHash", "schemaVersion", "status", "to", "transactionHash"];
@@ -60,16 +61,29 @@ const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-a
  * otherwise nothing is written and the status says why.
  * Once nothing of the operation can still spend the payer's wrapper allowance, its residual is read once, at that same
  * finalized head, and stored (circle-v2-residual-allowance.ts); later statuses read no chain unless `refreshAllowance`.
+ * A successful burn's delivery on Solana is read on every status until its receipt is recorded, then never again; a failed
+ * delivery read is shown as `delivery.state: "unread"` with its reason, and the rest of the status still answers.
  */
-export async function circleSourceStatus(root, journal, read, now, refreshAllowance = false) {
+export async function circleSourceStatus(root, journal, read, now, refreshAllowance = false, deliveryReader) {
     const residual = async (proven, head) => await circleResidualAllowance(root, journal, read, refreshAllowance, now, proven, head);
-    const view = (proof, waitingFor, proofClass, left, usage) => ({
-        schemaVersion: "apn.circle-v2-source-status.v1", operationId: journal.operationId, phase: journal.phase, outcome: proof?.status ?? null,
-        sourceProof: proof, waitingFor, journal, proofClass, ...(left === undefined ? {} : { residualAllowance: left }),
+    const statusAction = `apn operation status --operation ${journal.operationId}`;
+    const view = (proof, waitingFor, proofClass, left, usage, delivery) => ({
+        schemaVersion: "apn.circle-v2-source-status.v1", operationId: journal.operationId,
+        phase: proof === null ? journal.phase : proof.status === "reverted" ? "source_reverted" : delivery?.state === "delivered" ? "delivered" : "source_finalized",
+        outcome: proof?.status ?? null, sourceProof: proof, waitingFor, journal, proofClass, ...(left === undefined ? {} : { residualAllowance: left }),
         ...(usage === undefined || usage === null ? {} : { sourceUsage: usage }),
-        nextActions: [...proof === null && journal.transactionHash !== null ? [`apn operation status --operation ${journal.operationId}`] : [],
+        ...(delivery === undefined ? {} : { delivery: { state: delivery.state, forwardState: delivery.forwardState, proof: delivery.proof,
+                ...(delivery.unreadReason === undefined ? {} : { unreadReason: delivery.unreadReason }) } }),
+        nextActions: [...delivery?.nextActions ?? [],
+            ...waitingFor !== null && journal.transactionHash !== null ? [statusAction] : [],
             ...left !== undefined && left.allowanceAtomic !== null && left.allowanceAtomic !== "0" ? [REVOKE] : []]
     });
+    const recordedView = async (proof, proofClass, left, usage) => {
+        if (proof.status === "reverted")
+            return view(proof, null, proofClass, left, usage);
+        const delivery = await circleSolanaDelivery(root, journal, proof, deliveryReader, now);
+        return view(proof, delivery.waitingFor, delivery.recorded ? "chain_verified_public_read" : proofClass, left, usage, delivery);
+    };
     const hash = journal.transactionHash, store = new CircleSourceProofStore(root);
     if (hash === null) {
         const waiting = "no burn transaction was signed; nothing of this operation can land";
@@ -80,7 +94,7 @@ export async function circleSourceStatus(root, journal, read, now, refreshAllowa
     // Every status of a recorded burn settles its hold, so a write interrupted after the proof is completed on the next one.
     const settled = async (proof) => await settleCircleSourceUsage(root, journal, proof, new Date(now()));
     if (existing !== null)
-        return view(existing, null, "durable_public_state", await residual(), await settled(existing));
+        return await recordedView(existing, "durable_public_state", await residual(), await settled(existing));
     if (read === undefined)
         throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "This runtime has no finalized-tag reader for the Base receipt.");
     const rpc = read(8453);
@@ -98,7 +112,7 @@ export async function circleSourceStatus(root, journal, read, now, refreshAllowa
         blockNumberAtomic: receipt.blockNumber.toString(), blockHash: receipt.blockHash, blockTag: "finalized",
         finalizedBlockNumberAtomic: finalized.toString(), observedAt: new Date(now()).toISOString() };
     const proof = await store.create(journal, Object.freeze({ ...fields, integrityHash: hashObject(fields) }));
-    return view(proof, null, "chain_verified_public_read", await residual(rpc, head), await settled(proof));
+    return await recordedView(proof, "chain_verified_public_read", await residual(rpc, head), await settled(proof));
 }
 /** The receipt must be the journal's own burn: same hash, sent by the payer to the pinned messenger, in a block. */
 function receiptOf(value, journal) {

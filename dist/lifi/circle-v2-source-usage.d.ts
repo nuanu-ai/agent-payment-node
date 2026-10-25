@@ -1,3 +1,5 @@
+/** Settles the Base USDC usage hold of a Circle CCTP V2 source burn from its recorded finalized receipt (OWNR-17). */
+import { type Hex } from "viem";
 import type { CircleSourceProof } from "./circle-v2-source-proof.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
 export interface CircleSourceUsage {
@@ -12,3 +14,10 @@ export interface CircleSourceUsage {
  * operation reserved, for the principal its own burn call carries, is touched; anything else is left as it is.
  */
 export declare function settleCircleSourceUsage(root: string, journal: NonEvmSourceJournal, proof: CircleSourceProof, now: Date): Promise<CircleSourceUsage | null>;
+/** The arguments of the journal's own burn call, or null when its calldata is not that call. */
+export declare function circleBurnCall(journal: NonEvmSourceJournal): {
+    readonly amount: bigint;
+    readonly destinationDomain: number;
+    readonly mintRecipient: Hex;
+    readonly burnToken: string;
+} | null;

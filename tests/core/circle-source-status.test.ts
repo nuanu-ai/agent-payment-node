@@ -9,6 +9,7 @@ import { bindArgv } from "../../src/command-binder.js";
 import { ApnError } from "../../src/errors.js";
 import { environmentFinalizedReader, type FinalizedChainRead } from "../../src/evm-finalized-proof.js";
 import { BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES } from "../../src/lifi/circle-v2-source-receipt.js";
+import type { CircleSolanaDeliveryReader } from "../../src/lifi/circle-v2-solana-delivery.js";
 import { NonEvmSourceJournalRepository, type NonEvmSourceJournal } from "../../src/lifi/non-evm-source-journal.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
@@ -74,8 +75,13 @@ function base(receipt: Record<string, unknown> | null, finalized: bigint, chainI
 }
 const receiptOf = (hash: string, status = "0x1", from: string = ACCOUNT.address) =>
   ({ transactionHash: hash, from: from.toLowerCase(), to: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES.toLowerCase(), blockNumber: "0x64", blockHash: `0x${H("e")}`, status });
+/** Circle has not published a successful burn's message yet: its delivery waits and nothing reaches the network. */
+const undelivered: CircleSolanaDeliveryReader = { solana: { originHash: "unused", async call() { throw new Error("no Solana read expected"); } },
+  async issuerMessages() { return { status: 404, body: null }; } };
+const STATUS = `apn operation status --operation ${H("b")}`;
 const status = async (root: string, read: (chainId: number) => FinalizedChainRead, id = H("b")) =>
-  await createApnCore(bindArgv(["operation", "status", "--operation", id]), { stateRoot: root, wrappingSecret: wrapping, finalizedRead: read })
+  await createApnCore(bindArgv(["operation", "status", "--operation", id]), { stateRoot: root, wrappingSecret: wrapping, finalizedRead: read,
+    circleSourceDelivery: undelivered })
     .execute(bindArgv(["operation", "status", "--operation", id]).request);
 const held = async (root: string) => await new OperationService(new StateStore(root)).assertEvmAccountAvailable(H("a"), 8453, ACCOUNT.address)
   .then(() => false, (error: { code?: string }) => error.code === "APN_OPERATION_BLOCKED");
@@ -123,7 +129,8 @@ test("a finalized receipt is recorded once and ends the payer's claim inside the
 const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> " +
   "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>";
 const refreshed = async (root: string, read: (chainId: number) => FinalizedChainRead, id = H("b")) =>
-  await createApnCore(bindArgv(["operation", "status", "--operation", id, "--refresh-allowance"]), { stateRoot: root, wrappingSecret: wrapping, finalizedRead: read })
+  await createApnCore(bindArgv(["operation", "status", "--operation", id, "--refresh-allowance"]), { stateRoot: root, wrappingSecret: wrapping, finalizedRead: read,
+    circleSourceDelivery: undelivered })
     .execute(bindArgv(["operation", "status", "--operation", id, "--refresh-allowance"]).request);
 
 test("the residual wrapper allowance is read once, at the finalized head that proved the burn, stored with its block and shown without reads", async (t) => {
@@ -135,14 +142,16 @@ test("the residual wrapper allowance is read once, at the finalized head that pr
     block: { numberAtomic: "100", hash: `0x${H("f")}` }, proof: "finalized_allowance_read", revokeOperationId: null };
   assert.deepEqual({ ...(shown.operation as { residualAllowance: Record<string, unknown> }).residualAllowance, observedAt: undefined },
     { ...stored, observedAt: undefined, readByThisStatus: true });
-  assert.deepEqual(shown.next_actions, [REVOKE]);
+  assert.deepEqual(shown.next_actions, [STATUS, REVOKE], "the delivery on Solana is still awaited");
+  assert.deepEqual([(shown.operation as { phase: string }).phase, (shown.operation as { delivery: { state: string } }).delivery.state],
+    ["source_finalized", "awaiting_issuer_message"], "the runtime passes its delivery reader to the status");
   assert.equal(await exists(join(temporary.root, "non-evm-source-journals", journal.profileHash, `${journal.operationId}.residual-allowance.json`)), true);
   // Later statuses show the stored value and block and read nothing, even with no RPC configured at all.
   left.chain.allowance = 0n; left.chain.finalized = 200n;
   for (const read of [() => left.rpc, environmentFinalizedReader({})]) {
     const later = await status(temporary.root, read);
     assert.deepEqual([(later.operation as { residualAllowance: { allowanceAtomic: string; readByThisStatus: boolean } }).residualAllowance.allowanceAtomic,
-      (later.operation as { residualAllowance: { readByThisStatus: boolean } }).residualAllowance.readByThisStatus, later.next_actions], ["18870", false, [REVOKE]]);
+      (later.operation as { residualAllowance: { readByThisStatus: boolean } }).residualAllowance.readByThisStatus, later.next_actions], ["18870", false, [STATUS, REVOKE]]);
   }
   assert.equal(left.calls.length, 4);
   // Only an explicit refresh reads again: one chain id, the finalized head, one eth_call; the new value replaces the stored one.
@@ -150,7 +159,7 @@ test("the residual wrapper allowance is read once, at the finalized head that pr
   assert.equal(fresh.ok, true, JSON.stringify(fresh.error));
   assert.deepEqual(left.calls.slice(4), ["eth_chainId", "eth_getBlockByNumber", "eth_call"]);
   const residual = (fresh.operation as { residualAllowance: { allowanceAtomic: string; block: unknown; readByThisStatus: boolean } }).residualAllowance;
-  assert.deepEqual([residual.allowanceAtomic, residual.block, residual.readByThisStatus, fresh.next_actions], ["0", { numberAtomic: "200", hash: `0x${H("f")}` }, true, []]);
+  assert.deepEqual([residual.allowanceAtomic, residual.block, residual.readByThisStatus, fresh.next_actions], ["0", { numberAtomic: "200", hash: `0x${H("f")}` }, true, [STATUS]]);
   assert.equal((await status(temporary.root, () => left.rpc)).ok, true); assert.equal(left.calls.length, 7);
 });
 
@@ -162,7 +171,7 @@ test("a residual that could not be read is reported with its reason, never guess
   assert.deepEqual((first.operation as { residualAllowance: Record<string, unknown> }).residualAllowance, { token: USDC, owner: ACCOUNT.address,
     spender: BASE_CCTP_V2_TOKEN_MESSENGER_WITH_FEES, allowanceAtomic: null, block: null, proof: null, revokeOperationId: null, observedAt: null,
     readByThisStatus: false, unreadReason: "APN_RPC_AMBIGUOUS: synthetic allowance read loss" });
-  assert.deepEqual(first.next_actions, []);
+  assert.deepEqual(first.next_actions, [STATUS]);
   const unread = await status(temporary.root, environmentFinalizedReader({}));
   assert.match((unread.operation as { residualAllowance: { unreadReason: string } }).residualAllowance.unreadReason, /^APN_RPC_CONFIG: .*APN_BASE_RPC_URL/u);
   const works = base(receiptOf(hash), 120n, 8453, 18870n), read = await status(temporary.root, () => works.rpc);
