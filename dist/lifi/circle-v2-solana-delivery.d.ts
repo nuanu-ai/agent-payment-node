@@ -1,9 +1,11 @@
+import type { FinalizedReader } from "../evm-finalized-proof.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import { type SolanaReadMethod } from "../solana/rpc.js";
 import type { CircleSourceProof } from "./circle-v2-source-proof.js";
 import { BridgeHttps } from "./https.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
-export declare const CIRCLE_SOLANA_DELIVERY_SCHEMA = "apn.circle-v2-solana-delivery.v1";
+/** v2 binds the message to the burn's own `MessageSent`; v1 records (0.5.76, without that binding) are never read. */
+export declare const CIRCLE_SOLANA_DELIVERY_SCHEMA = "apn.circle-v2-solana-delivery.v2";
 /** Circle's CCTP V2 message transmitter on Solana mainnet; a received message's nonce account is its PDA ["used_nonce", nonce]. */
 export declare const CIRCLE_SOLANA_MESSAGE_TRANSMITTER = "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC";
 export declare const CIRCLE_SOLANA_RPC_ACTION = "Set APN_SOLANA_RPC_URL to a Solana mainnet HTTPS endpoint, then rerun the same command.";
@@ -12,6 +14,10 @@ export interface CircleSolanaDelivery {
     readonly operationId: string;
     readonly profileHash: string;
     readonly sourceTransactionHash: string;
+    readonly sourceLogIndexAtomic: string;
+    readonly sourceMessageSha256: string;
+    readonly sourceBlockTimeAtomic: string;
+    readonly receiveBlockTimeAtomic: string;
     readonly eventNonce: string;
     readonly messageSha256: string;
     readonly recipientOwner: string;
@@ -55,7 +61,7 @@ export interface CircleSolanaDeliveryView {
     /** True only when this call read the chain and recorded the proof. */
     readonly recorded: boolean;
 }
-/** `non-evm-source-journals/<profileHash>/<operationId>.solana-delivery.json` and one claim per message nonce. */
+/** `non-evm-source-journals/<profileHash>/<operationId>.solana-delivery-v2.json` and one claim per message nonce. */
 export declare class CircleSolanaDeliveryStore extends SecureStateStore {
     private path;
     load(journal: NonEvmSourceJournal): Promise<CircleSolanaDelivery | null>;
@@ -66,6 +72,7 @@ export declare class CircleSolanaDeliveryStore extends SecureStateStore {
 }
 /**
  * The delivery of a burn whose finalized receipt succeeded. A recorded proof is returned without any read; otherwise one
- * issuer read and, once the message is attested, Solana reads at `finalized`. A failed read becomes `unread` with its reason.
+ * issuer read and, once the message is attested, the burn's Base receipt and Solana reads at `finalized`. A failed read
+ * becomes `unread` with its reason.
  */
-export declare function circleSolanaDelivery(root: string, journal: NonEvmSourceJournal, source: CircleSourceProof, reader: CircleSolanaDeliveryReader | undefined, now: () => number): Promise<CircleSolanaDeliveryView>;
+export declare function circleSolanaDelivery(root: string, journal: NonEvmSourceJournal, source: CircleSourceProof, reader: CircleSolanaDeliveryReader | undefined, read: FinalizedReader | undefined, now: () => number): Promise<CircleSolanaDeliveryView>;

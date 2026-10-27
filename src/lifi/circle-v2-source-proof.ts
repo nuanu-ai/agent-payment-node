@@ -101,7 +101,7 @@ export async function circleSourceStatus(root: string, journal: NonEvmSourceJour
       ...left !== undefined && left.allowanceAtomic !== null && left.allowanceAtomic !== "0" ? [REVOKE] : []] });
   const recordedView = async (proof: CircleSourceProof, proofClass: string, left: CircleResidualView, usage: CircleSourceUsage | null) => {
     if (proof.status === "reverted") return view(proof, null, proofClass, left, usage);
-    const delivery = await circleSolanaDelivery(root, journal, proof, deliveryReader, now);
+    const delivery = await circleSolanaDelivery(root, journal, proof, deliveryReader, read, now);
     return view(proof, delivery.waitingFor, delivery.recorded ? "chain_verified_public_read" : proofClass, left, usage, delivery);
   };
   const hash = journal.transactionHash, store = new CircleSourceProofStore(root);
