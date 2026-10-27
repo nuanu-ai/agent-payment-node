@@ -46,9 +46,11 @@ test("a receipt older than the burn is not its delivery, whatever Circle answers
     assert.deepEqual([view.phase, view.delivery?.state], ["source_finalized", "unread"]);
     assert.ok(view.delivery?.unreadReason?.endsWith("(circle_delivery_receipt_before_burn)"), view.delivery?.unreadReason);
   }
-  // Found through the used-nonce account instead of Circle's forward, the older receipt is not this burn's either.
+  // Found through the used-nonce account instead of Circle's forward, the older receive is final too: no resubmission is
+  // offered for a message already received.
   const failed = await statusOf({ iris: iris(SMALL, m => { m.forwardState = "FAILED"; m.forwardTxHash = null; }) });
-  assert.deepEqual([failed.phase, failed.delivery?.state], ["source_finalized", "forward_failed"]);
+  assert.deepEqual([failed.phase, failed.delivery?.state, failed.nextActions], ["source_finalized", "unread", [`apn operation status --operation ${H("c")}`]]);
+  assert.ok(failed.delivery?.unreadReason?.endsWith("(circle_delivery_receipt_before_burn)"), failed.delivery?.unreadReason);
   await assert.rejects(claims(root), { code: "ENOENT" });
   // The older burn's own status still proves its delivery.
   assert.equal((await status(root, journal, reader(SMALL, []))).phase, "delivered");

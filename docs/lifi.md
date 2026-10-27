@@ -965,10 +965,16 @@ hook) emit the same bytes, whoever pays. The receiving Solana transaction must
 therefore also be later than the burn's Base block (its `blockTime` against the
 block's timestamp, read by number and matched to the recorded block hash): a
 receive that happened before the burn, such as an older burn's of the same
-terms, is not its delivery, whatever Circle answers. Between burns of the same
-bytes in flight together, Circle's nonce is the only discriminator the protocol
-has; APN cannot check it on chain, and the per-message claim below still keeps
-one receipt to one operation. The receiving transaction is the `forwardTxHash` Circle names or,
+terms, is not its delivery, whatever Circle answers; found through the
+`used_nonce` account it is final too (a message is received once), so the status
+reads `unread` and offers no resubmission. Between burns of the same bytes in
+flight together, that is a repeat payment of the same amount to the same account
+landing before the first one's Solana receive (about 15 to 20 minutes at the
+route's standard finality), Circle's nonce is the only discriminator the
+protocol has; APN cannot check it on chain, and the per-message claim below still
+keeps one receipt to one operation. If Circle mislabeled such a pair, the later
+operation would read `delivered` with the earlier receive and the earlier one
+would stay `unread` (`circle_delivery_message_claimed`). The receiving transaction is the `forwardTxHash` Circle names or,
 without one (a failed forward received by someone else), found among the
 successful finalized transactions naming the message's `used_nonce` account:
 anyone may name that public account, so each (oldest first, one page of 16) is
