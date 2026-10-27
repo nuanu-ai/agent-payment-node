@@ -25,15 +25,19 @@ export const ACCOUNT = privateKeyToAccount(`0x${"11".repeat(32)}`), H = (c: stri
 export const BURN = parseAbi(["function depositForBurnWithHookAndFees(uint256 amount,uint32 destinationDomain,bytes32 mintRecipient,address burnToken,bytes32 destinationCaller,bytes hookData,(bytes signedQuote,address refundAddress) claim) payable"]);
 export const fixture = async (name: string, parse: (text: string) => unknown): Promise<Json> =>
   parse(await readFile(join(process.cwd(), `tests/fixtures/circle-solana-delivery/${name}.json`), "utf8")) as Json;
-/** Two real deliveries: to an existing token account, and one created by the receiving transaction (read without bigints). */
+/**
+ * Two real deliveries: to an existing token account, and one created by the receiving transaction (read without bigints).
+ * `burnTime` is the timestamp of the burn's Base block (52818409 and 52850828), 1029 s and 1087 s before the receive.
+ */
 export const SMALL = { amount: 170_000n, owner: "3C2rcV1uQpFX79cY7ALfKeJiD7JiLQFvSB2kZjjE11Yv", ata: "BJRwCA3CXCoPqBAutrJvcHoRgQmyfJv6xo7bupwubgqy",
   signature: "2M7FC4TwiVmJ9YKZ4nAiWVjffeZdUoow1guXk9tqjZAs3dKXVQwZtXuogY65rYffwBd8Led6nSHAvJ8P1opt5ppV",
   iris: await fixture("iris-message-170000", JSON.parse), receive: await fixture("solana-receive-170000", parseJsonWithBigInts),
-  receivers: await fixture("used-nonce-signatures-170000", parseJsonWithBigInts), receipt: await fixture("base-receipt-170000", JSON.parse) };
+  receivers: await fixture("used-nonce-signatures-170000", parseJsonWithBigInts), receipt: await fixture("base-receipt-170000", JSON.parse),
+  burnTime: 1_792_426_165n };
 export const LARGE = { amount: 1_000_000n, owner: "2i72eWcpDU862RVwGaGCos2PHoQgYTphjfJpxcv5W1EJ", ata: "gYgbhjCMBwLKvFa4Tn2dDW3dRY2a4CwPtkT27feuVr7",
   signature: "5kbzTzCCWMmeZ48a4Mp5rmMZRaZponimWj8UD7Ca1stBsRCat7RfpxYPr3FbMiPMAkRHNytqhz1SKWpqmqZUSmrg",
   iris: await fixture("iris-message-1000000", JSON.parse), receive: await fixture("solana-receive-1000000", JSON.parse), receivers: [] as Json,
-  receipt: await fixture("base-receipt-1000000", JSON.parse) };
+  receipt: await fixture("base-receipt-1000000", JSON.parse), burnTime: 1_792_491_003n };
 export type Case = typeof SMALL;
 export const copy = <T>(value: T): T => structuredClone(value);
 export const at = (ms: number) => new Date(Date.now() + ms).toISOString();
@@ -73,11 +77,14 @@ export function sourceReceipt(burn: Case, journal: NonEvmSourceJournal): Json {
   place(receipt); (receipt.logs as Json[]).forEach(place);
   return receipt;
 }
-/** Base at the finalized tag: the residual allowance and, until the delivery is recorded, the burn's receipt. */
-export const base = (receipt?: unknown): ((chainId: number) => FinalizedChainRead) => () => ({ async call(method) {
+/** The burn's block as its source proof recorded it (number 100), at `time`. */
+export const sourceBlock = (time: bigint): Json => ({ number: "0x64", hash: `0x${H("e")}`, timestamp: `0x${time.toString(16)}` });
+/** Base at the finalized tag: the residual allowance and, until the delivery is recorded, the burn's receipt and block. */
+export const base = (receipt?: unknown, block?: unknown): ((chainId: number) => FinalizedChainRead) => () => ({ async call(method, params) {
   if (method === "eth_getTransactionReceipt" && receipt !== undefined) return copy(receipt);
   if (method === "eth_chainId") return "0x2105";
-  if (method === "eth_getBlockByNumber") return { number: "0x64", hash: `0x${H("f")}` };
+  if (method === "eth_getBlockByNumber" && params[0] !== "finalized" && block !== undefined) return copy(block);
+  if (method === "eth_getBlockByNumber" && params[0] === "finalized") return { number: "0x64", hash: `0x${H("f")}` };
   if (method === "eth_call") return `0x${"0".repeat(64)}`;
   throw new Error(`unexpected ${method}`);
 } });
@@ -109,7 +116,8 @@ export async function setup(t: import("node:test").TestContext, burn: Case = SMA
   return { root: temporary.root, journal };
 }
 export const status = (root: string, journal: NonEvmSourceJournal, delivery?: CircleSolanaDeliveryReader, burn: Case = SMALL,
-  receipt: unknown = sourceReceipt(burn, journal)) => circleSourceStatus(root, journal, base(receipt), () => Date.now(), false, delivery);
+  receipt: unknown = sourceReceipt(burn, journal), block: unknown = sourceBlock(burn.burnTime)) =>
+  circleSourceStatus(root, journal, base(receipt, block), () => Date.now(), false, delivery);
 /** Circle's message with its decoded fields or its attested bytes changed. */
 export function iris(burn: Case, change: (message: Json, bytes: Buffer, body: Json) => void) {
   const body = copy(burn.iris), message = body.messages[0], bytes = Buffer.from(message.message.slice(2), "hex");

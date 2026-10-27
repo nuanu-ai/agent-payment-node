@@ -2,10 +2,12 @@
  * Delivery of a Circle CCTP V2 Base USDC to Solana burn. Circle's forwarding service (or any payer) receives the message
  * on Solana; APN only reads. Circle's issuer API locates the attested message and the receiving transaction; the record is
  * proven from the chains: the attested bytes are the message the burn transaction itself emitted on Base (its one
- * `MessageSent`, every byte but the attester's fields), and the finalized Solana transaction carries those exact bytes to
- * MessageTransmitterV2, writes the message's used-nonce account and credits the journal's recipient token account with
- * the principal minus the executed fee. Each message proves one operation only. A read that fails is shown with its
- * reason and never fails the status.
+ * `MessageSent`, every byte but the attester's fields), and the finalized Solana transaction, later than the burn's
+ * block, carries those exact bytes to MessageTransmitterV2, writes the message's used-nonce account and credits the
+ * journal's recipient token account with the principal minus the executed fee. Each message proves one operation only.
+ * CCTP V2 assigns nonces offchain and this route's message names no payer, so burns of one amount to one account emit
+ * the same bytes: between such burns in flight together, Circle's nonce is the only discriminator. A read that fails is
+ * shown with its reason and never fails the status.
  */
 import { createHash } from "node:crypto";
 import { address, getProgramDerivedAddress } from "@solana/kit";
@@ -36,14 +38,15 @@ const UNREAD = new Set(["APN_PROVIDER_UNAVAILABLE", "APN_PROVIDER_PROTOCOL", "AP
 export interface CircleSolanaDelivery {
   readonly schemaVersion: typeof CIRCLE_SOLANA_DELIVERY_SCHEMA; readonly operationId: string; readonly profileHash: string;
   readonly sourceTransactionHash: string; readonly sourceLogIndexAtomic: string; readonly sourceMessageSha256: string;
+  readonly sourceBlockTimeAtomic: string; readonly receiveBlockTimeAtomic: string;
   readonly eventNonce: string; readonly messageSha256: string;
   readonly recipientOwner: string; readonly recipientAta: string; readonly burnAtomic: string; readonly maxFeeAtomic: string;
   readonly feeExecutedAtomic: string; readonly mintedAtomic: string; readonly solanaSignature: string; readonly slotAtomic: string;
   readonly observedAt: string; readonly integrityHash: string;
 }
 const DELIVERY_KEYS = ["burnAtomic", "eventNonce", "feeExecutedAtomic", "integrityHash", "maxFeeAtomic", "messageSha256", "mintedAtomic",
-  "observedAt", "operationId", "profileHash", "recipientAta", "recipientOwner", "schemaVersion", "slotAtomic", "solanaSignature",
-  "sourceLogIndexAtomic", "sourceMessageSha256", "sourceTransactionHash"];
+  "observedAt", "operationId", "profileHash", "receiveBlockTimeAtomic", "recipientAta", "recipientOwner", "schemaVersion", "slotAtomic",
+  "solanaSignature", "sourceBlockTimeAtomic", "sourceLogIndexAtomic", "sourceMessageSha256", "sourceTransactionHash"];
 
 /** Solana reads only: no method that sends can be called through it. */
 export interface SolanaReadPort { readonly originHash: string; call(method: SolanaReadMethod, params: readonly unknown[]): Promise<unknown> }
@@ -157,8 +160,8 @@ async function observe(store: CircleSolanaDeliveryStore, journal: NonEvmSourceJo
     return waiting("awaiting_attestation", published.forwardState, `Circle to attest the message of burn ${hash} (status ${published.status})`);
   }
   const message = attested(published, terms), forwardState = published.forwardState;
-  // Circle's answer only locates the message; the burn's own event decides whose it is.
-  const emitted = await sourceMessage(read, source);
+  // Circle's answer only locates the message; the burn's own event and block bound whose it can be.
+  const emitted = await sourceBurn(read, source);
   if (!attestedFromSource(emitted.bytes, message.bytes)) issuerFailure("circle_delivery_source_message");
   const notForwarded = (solana: boolean) => forwardState === "FAILED"
     ? waiting("forward_failed", forwardState, "the attested message to be received on Solana; Circle's forwarding failed", [
@@ -173,27 +176,29 @@ async function observe(store: CircleSolanaDeliveryStore, journal: NonEvmSourceJo
   assertSolanaNetworkValue(await rpc.call("getGenesisHash", []));
   const [usedNonce] = await getProgramDerivedAddress({ programAddress: address(CIRCLE_SOLANA_MESSAGE_TRANSMITTER),
     seeds: ["used_nonce", Buffer.from(message.nonce.slice(2), "hex")] });
-  let signature: string, slot: bigint | null;
+  let signature: string, received: SolanaReceipt;
   if (published.forwardTxHash !== null) {
     signature = published.forwardTxHash;
-    slot = await solanaReceipt(rpc, terms, message, usedNonce, signature);
-    if (slot === null) {
+    const named = await solanaReceipt(rpc, terms, message, usedNonce, signature, emitted.time);
+    if (named === null) {
       return waiting("awaiting_solana_finality", forwardState,
         `the Solana transaction ${signature} at finalized on APN_SOLANA_RPC_URL (an RPC without that history returns none)`);
     }
+    received = named;
   } else {
     // Without Circle's forwarding transaction, a message received by anyone else is found through its used-nonce account.
-    const found = await nonceReceiver(rpc, terms, message, usedNonce);
+    const found = await nonceReceiver(rpc, terms, message, usedNonce, emitted.time);
     if (found === null) return notForwarded(true);
-    ({ signature, slot } = found);
+    ({ signature, ...received } = found);
   }
   await store.claim(journal, message.nonce, signature);
   const fields: Omit<CircleSolanaDelivery, "integrityHash"> = { schemaVersion: CIRCLE_SOLANA_DELIVERY_SCHEMA, operationId: journal.operationId,
     profileHash: journal.profileHash, sourceTransactionHash: hash, sourceLogIndexAtomic: emitted.logIndex.toString(),
-    sourceMessageSha256: createHash("sha256").update(emitted.bytes).digest("hex"), eventNonce: message.nonce, messageSha256: message.sha256,
+    sourceMessageSha256: createHash("sha256").update(emitted.bytes).digest("hex"), sourceBlockTimeAtomic: emitted.time.toString(),
+    receiveBlockTimeAtomic: received.blockTime.toString(), eventNonce: message.nonce, messageSha256: message.sha256,
     recipientOwner: terms.recipientOwner, recipientAta: terms.recipientAta, burnAtomic: message.amount.toString(),
     maxFeeAtomic: message.maxFee.toString(), feeExecutedAtomic: message.feeExecuted.toString(),
-    mintedAtomic: (message.amount - message.feeExecuted).toString(), solanaSignature: signature, slotAtomic: slot.toString(),
+    mintedAtomic: (message.amount - message.feeExecuted).toString(), solanaSignature: signature, slotAtomic: received.slot.toString(),
     observedAt: new Date(now()).toISOString() };
   const proof = await store.create(journal, Object.freeze({ ...fields, integrityHash: hashObject(fields) }));
   return { state: "delivered", forwardState: null, proof, waitingFor: null, nextActions: [], recorded: true };
@@ -242,14 +247,14 @@ function attested(published: IssuerMessage, terms: CircleBurnTerms): CctpBurnMes
 
 /**
  * The message the burn transaction emitted: the one `MessageSent` of Circle's Base transmitter in its receipt, in the
- * finalized block the source proof recorded.
+ * finalized block the source proof recorded, and that block's time.
  */
-async function sourceMessage(read: FinalizedReader, source: CircleSourceProof): Promise<{ readonly bytes: Buffer; readonly logIndex: bigint }> {
+async function sourceBurn(read: FinalizedReader, source: CircleSourceProof): Promise<{ readonly bytes: Buffer; readonly logIndex: bigint; readonly time: bigint }> {
   const fail = (reason: string): never => {
     throw new ApnError("APN_RPC_PROTOCOL", "The Base receipt does not carry this burn's Circle message.", { reason });
   };
   const same = (value: unknown, expected: string) => typeof value === "string" && value.toLowerCase() === expected.toLowerCase();
-  const receipt = await read(8453).call("eth_getTransactionReceipt", [source.transactionHash]);
+  const rpc = read(8453), receipt = await rpc.call("eth_getTransactionReceipt", [source.transactionHash]);
   if (!isPlainRecord(receipt) || !same(receipt.transactionHash, source.transactionHash) || !same(receipt.blockHash, source.blockHash) ||
     receipt.status !== "0x1" || !Array.isArray(receipt.logs) || receipt.logs.length > 1024) fail("circle_delivery_source_receipt");
   const sent = (receipt as { logs: unknown[] }).logs.filter((log): log is Record<string, unknown> => isPlainRecord(log) &&
@@ -258,7 +263,10 @@ async function sourceMessage(read: FinalizedReader, source: CircleSourceProof): 
   const log = sent[0]!, bytes = messageSentBytes(log.data);
   if (bytes === null || log.removed === true || (log.topics as unknown[]).length !== 1 || !same(log.transactionHash, source.transactionHash) ||
     !same(log.blockHash, source.blockHash)) fail("circle_delivery_source_event");
-  return { bytes: bytes!, logIndex: evmRpcQuantity(log.logIndex) };
+  const logIndex = evmRpcQuantity(log.logIndex), number = BigInt(source.blockNumberAtomic);
+  const block = await rpc.call("eth_getBlockByNumber", [`0x${number.toString(16)}`, false]);
+  if (!isPlainRecord(block) || !same(block.hash, source.blockHash) || evmRpcQuantity(block.number) !== number) fail("circle_delivery_source_block");
+  return { bytes: bytes!, logIndex, time: evmRpcQuantity((block as Record<string, unknown>).timestamp) };
 }
 
 function binding(reason: string): never {
@@ -270,14 +278,14 @@ function binding(reason: string): never {
  * receive a message. A candidate this node does not return or this reader cannot judge, or a full page, with no receipt
  * found is reported as unread, never taken as "not received".
  */
-async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, message: CctpBurnMessage,
-  usedNonce: string): Promise<{ readonly signature: string; readonly slot: bigint } | null> {
+async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, message: CctpBurnMessage, usedNonce: string,
+  burnTime: bigint): Promise<SolanaReceipt & { readonly signature: string } | null> {
   const rows = rpcArray(await rpc.call("getSignaturesForAddress", [usedNonce, { commitment: "finalized", limit: NONCE_PAGE }]), NONCE_PAGE).map(rpcRecord);
   let unjudged = false;
   for (const signature of rows.filter(row => row.err === null).map(row => solanaSignature(row.signature)).reverse()) {
     try {
-      const slot = await solanaReceipt(rpc, terms, message, usedNonce, signature);
-      if (slot !== null) return { signature, slot };
+      const received = await solanaReceipt(rpc, terms, message, usedNonce, signature, burnTime);
+      if (received !== null) return { signature, ...received };
       unjudged = true;
     } catch (error) {
       if (!(error instanceof ApnError) || error.code !== "APN_RPC_PROTOCOL") throw error;
@@ -290,17 +298,25 @@ async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, messag
   return null;
 }
 
+interface SolanaReceipt { readonly slot: bigint; readonly blockTime: bigint }
 /**
- * The named transaction at `finalized`, or null while the node does not return it there. It must have succeeded and carry
- * a `receive_message` of these exact bytes to the transmitter (top level or inner), write the used-nonce account and move
- * exactly the minted amount of USDC into the recipient token account owned by the recipient. Integers may be bigints.
+ * The named transaction at `finalized`, or null while the node does not return it there. It must be later than the burn's
+ * block (no receive before the burn delivers it), have succeeded and carry a `receive_message` of these exact bytes to
+ * the transmitter (top level or inner), write the used-nonce account and move exactly the minted amount of USDC into the
+ * recipient token account owned by the recipient. Integers may be bigints.
  */
 async function solanaReceipt(rpc: SolanaReadPort, terms: CircleBurnTerms, message: CctpBurnMessage, usedNonce: string,
-  signature: string): Promise<bigint | null> {
+  signature: string, burnTime: bigint): Promise<SolanaReceipt | null> {
   const value = await rpc.call("getTransaction", [signature, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
   if (value === null) return null;
   const tx = rpcRecord(value), meta = rpcRecord(tx.meta), transaction = rpcRecord(tx.transaction), body = rpcRecord(transaction.message);
   const slot = rpcAtomic(tx.slot);
+  // A node without the block's time cannot judge it: not a reason of a transaction that is not this receive.
+  if (tx.blockTime === null || tx.blockTime === undefined) {
+    throw new ApnError("APN_RPC_PROTOCOL", "The Solana RPC returned the transaction without its block time.", { reason: "solana_block_time_missing" });
+  }
+  const blockTime = rpcAtomic(tx.blockTime);
+  if (blockTime <= burnTime) binding("circle_delivery_receipt_before_burn");
   if (meta.err !== null) binding("circle_delivery_transaction_failed");
   if (rpcArray(transaction.signatures, 16)[0] !== signature) binding("circle_delivery_signature");
   const entries = rpcArray(body.accountKeys, 256).map(rpcRecord), keys = entries.map(entry => entry.pubkey);
@@ -323,7 +339,7 @@ async function solanaReceipt(rpc: SolanaReadPort, terms: CircleBurnTerms, messag
     return BigInt(amount);
   };
   if (balance(meta.postTokenBalances, true) - balance(meta.preTokenBalances, false) !== message.amount - message.feeExecuted) binding("circle_delivery_amount");
-  return slot;
+  return { slot, blockTime };
 }
 
 function deliveryCorrupt(): never {
@@ -332,13 +348,15 @@ function deliveryCorrupt(): never {
 function validateDelivery(value: unknown, journal: NonEvmSourceJournal): CircleSolanaDelivery {
   if (!isPlainRecord(value) || canonicalJson(Object.keys(value).sort()) !== canonicalJson(DELIVERY_KEYS)) deliveryCorrupt();
   const proof = value as unknown as CircleSolanaDelivery, { integrityHash, ...fields } = proof, terms = circleBurnTerms(journal);
-  const numbers = [proof.burnAtomic, proof.maxFeeAtomic, proof.feeExecutedAtomic, proof.mintedAtomic, proof.slotAtomic, proof.sourceLogIndexAtomic];
+  const numbers = [proof.burnAtomic, proof.maxFeeAtomic, proof.feeExecutedAtomic, proof.mintedAtomic, proof.slotAtomic, proof.sourceLogIndexAtomic,
+    proof.sourceBlockTimeAtomic, proof.receiveBlockTimeAtomic];
   if (terms === null || proof.schemaVersion !== CIRCLE_SOLANA_DELIVERY_SCHEMA || hashObject(fields) !== integrityHash ||
     proof.operationId !== journal.operationId || proof.profileHash !== journal.profileHash || proof.sourceTransactionHash !== journal.transactionHash ||
     proof.recipientOwner !== terms.recipientOwner || proof.recipientAta !== terms.recipientAta ||
     numbers.some(number => typeof number !== "string" || !UINT.test(number)) || BigInt(proof.burnAtomic) !== terms.amount ||
     BigInt(proof.feeExecutedAtomic) > BigInt(proof.maxFeeAtomic) || BigInt(proof.feeExecutedAtomic) >= BigInt(proof.burnAtomic) ||
     BigInt(proof.mintedAtomic) !== BigInt(proof.burnAtomic) - BigInt(proof.feeExecutedAtomic) ||
+    BigInt(proof.receiveBlockTimeAtomic) <= BigInt(proof.sourceBlockTimeAtomic) ||
     typeof proof.eventNonce !== "string" || !NONCE.test(proof.eventNonce) || typeof proof.messageSha256 !== "string" || !SHA.test(proof.messageSha256) ||
     typeof proof.sourceMessageSha256 !== "string" || !SHA.test(proof.sourceMessageSha256) ||
     typeof proof.observedAt !== "string" || !Number.isFinite(Date.parse(proof.observedAt)) ||
