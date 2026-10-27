@@ -269,6 +269,8 @@ async function sourceBurn(read: FinalizedReader, source: CircleSourceProof): Pro
   return { bytes: bytes!, logIndex, time: evmRpcQuantity((block as Record<string, unknown>).timestamp) };
 }
 
+/** A complete receive of these bytes older than the burn: a message is received once, so it is final, not skipped. */
+const RECEIVED_BEFORE_BURN = "circle_delivery_receipt_before_burn";
 function binding(reason: string): never {
   throw new ApnError("APN_RPC_PROTOCOL", "The Solana transaction is not this burn's receipt.", { reason });
 }
@@ -288,7 +290,7 @@ async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, messag
       if (received !== null) return { signature, ...received };
       unjudged = true;
     } catch (error) {
-      if (!(error instanceof ApnError) || error.code !== "APN_RPC_PROTOCOL") throw error;
+      if (!(error instanceof ApnError) || error.code !== "APN_RPC_PROTOCOL" || error.details?.reason === RECEIVED_BEFORE_BURN) throw error;
       // A reason names a well-formed transaction that is not this receive; a bare protocol refusal is a shape not judged.
       if (typeof error.details?.reason !== "string" || !error.details.reason.startsWith("circle_delivery_")) unjudged = true;
     }
@@ -311,12 +313,6 @@ async function solanaReceipt(rpc: SolanaReadPort, terms: CircleBurnTerms, messag
   if (value === null) return null;
   const tx = rpcRecord(value), meta = rpcRecord(tx.meta), transaction = rpcRecord(tx.transaction), body = rpcRecord(transaction.message);
   const slot = rpcAtomic(tx.slot);
-  // A node without the block's time cannot judge it: not a reason of a transaction that is not this receive.
-  if (tx.blockTime === null || tx.blockTime === undefined) {
-    throw new ApnError("APN_RPC_PROTOCOL", "The Solana RPC returned the transaction without its block time.", { reason: "solana_block_time_missing" });
-  }
-  const blockTime = rpcAtomic(tx.blockTime);
-  if (blockTime <= burnTime) binding("circle_delivery_receipt_before_burn");
   if (meta.err !== null) binding("circle_delivery_transaction_failed");
   if (rpcArray(transaction.signatures, 16)[0] !== signature) binding("circle_delivery_signature");
   const entries = rpcArray(body.accountKeys, 256).map(rpcRecord), keys = entries.map(entry => entry.pubkey);
@@ -339,6 +335,17 @@ async function solanaReceipt(rpc: SolanaReadPort, terms: CircleBurnTerms, messag
     return BigInt(amount);
   };
   if (balance(meta.postTokenBalances, true) - balance(meta.preTokenBalances, false) !== message.amount - message.feeExecuted) binding("circle_delivery_amount");
+  // Last, on an otherwise complete receive. A node without the block's time cannot judge it (not a reason of a transaction
+  // that is not this receive). The route's burns ask standard finality (2000, fixed by the source event), so a burn's own
+  // receive comes after Base finality, many minutes after its block; with fast finality the margin would be seconds.
+  if (tx.blockTime === null || tx.blockTime === undefined) {
+    throw new ApnError("APN_RPC_PROTOCOL", "The Solana RPC returned the transaction without its block time.", { reason: "solana_block_time_missing" });
+  }
+  const blockTime = rpcAtomic(tx.blockTime);
+  if (blockTime <= burnTime) {
+    throw new ApnError("APN_RPC_PROTOCOL", "The message was received on Solana before this burn: Circle's answer is another burn's.",
+      { reason: RECEIVED_BEFORE_BURN });
+  }
   return { slot, blockTime };
 }
 
