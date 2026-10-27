@@ -947,11 +947,23 @@ After a successful burn the same status follows its delivery on Solana, on
 every status until the delivery is recorded (older burns included), then never
 again. Circle's forwarding service, or any payer, receives the message there;
 APN only reads. It asks Circle's pinned issuer API for the burn's message
-(`/v2/messages/6?transactionHash=`). Once Circle attests it, the attested
-message bytes themselves must be this burn's: domains 6 to 5, Base USDC, the
-journal's messenger, the recipient token account named by both the calldata and
-the admission, the principal, and an executed fee no larger than the attested
-max fee. The receiving transaction is the `forwardTxHash` Circle names or,
+(`/v2/messages/6?transactionHash=`); that answer only locates it. Once Circle
+attests it, the attested message bytes themselves must be this burn's: domains 6
+to 5, Base USDC, the journal's messenger, the recipient token account named by
+both the calldata and the admission, the principal, and an executed fee no
+larger than the attested max fee. They must also be the message the burn
+transaction itself emitted: its finalized Base receipt (in the block the source
+proof recorded) carries exactly one `MessageSent(bytes)` from Circle's
+MessageTransmitterV2 (`0x81D40F21F12A8F0E3252Bccb954D722d4c464B64`), and the
+attested bytes equal that event's message in every byte except the four fields
+Circle's attestation service fills after the burn (nonce, executed finality,
+executed fee, expiration block), which the event leaves zero. CCTP V2 assigns
+nonces offchain, so this event is the chain's own anchor of the burn: a message
+of another burn that differs in any byte the burn fixed (max fee, minimum
+finality, destination caller, hook data, recipient, amount, sender) proves
+nothing here. Two burns that emitted byte-identical messages are told apart only
+by the nonce Circle assigned each; the per-message claim below still keeps one
+receipt to one operation. The receiving transaction is the `forwardTxHash` Circle names or,
 without one (a failed forward received by someone else), found among the
 successful finalized transactions naming the message's `used_nonce` account:
 anyone may name that public account, so each (oldest first, one page of 16) is
@@ -964,9 +976,13 @@ setting the status names it). It must have succeeded, carry a MessageTransmitter
 those bytes, write the `used_nonce` account (PDA `["used_nonce", nonce]`) and
 credit the recipient's USDC account with exactly the principal minus the
 executed fee. Then the message is claimed for this operation
-(`circle-solana-delivery-claims/<nonce>.json`, so one receipt never proves two
+(`circle-solana-delivery-claims-v2/<nonce>.json`, so one receipt never proves two
 operations), the proof is recorded once beside the journal
-(`<operation>.solana-delivery.json`) and `phase` reads `delivered`.
+(`<operation>.solana-delivery-v2.json`, with the source event's log index and
+the SHA-256 of its message) and `phase` reads `delivered`. Records of 0.5.76
+(`<operation>.solana-delivery.json`, `circle-solana-delivery-claims/`) were made
+without the source binding and are no longer read: the next status proves the
+delivery again and records v2 beside them; the old files stay as they are.
 
 Until then `phase` is `source_finalized` and `delivery.state` names the step
 still awaited: `awaiting_issuer_message`, `awaiting_attestation`,
