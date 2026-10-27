@@ -81,7 +81,7 @@ export async function circleSourceStatus(root, journal, read, now, refreshAllowa
     const recordedView = async (proof, proofClass, left, usage) => {
         if (proof.status === "reverted")
             return view(proof, null, proofClass, left, usage);
-        const delivery = await circleSolanaDelivery(root, journal, proof, deliveryReader, now);
+        const delivery = await circleSolanaDelivery(root, journal, proof, deliveryReader, read, now);
         return view(proof, delivery.waitingFor, delivery.recorded ? "chain_verified_public_read" : proofClass, left, usage, delivery);
     };
     const hash = journal.transactionHash, store = new CircleSourceProofStore(root);

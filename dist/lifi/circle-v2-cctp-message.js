@@ -4,14 +4,21 @@
  * Header: version, source and destination domain (u32), nonce, sender, recipient, destination caller (bytes32),
  * min and executed finality (u32). BurnMessageV2 body: version (u32), burn token, mint recipient (bytes32), amount
  * (uint256), message sender (bytes32), max fee, fee executed, expiration block (uint256), hook data.
+ * The burn transaction emits the same message on Base in `MessageSent(bytes message)` with the attester's fields left zero.
  */
 import { createHash } from "node:crypto";
 import { getBase58Encoder } from "@solana/kit";
+import { toEventSelector } from "viem";
 import { circleBurnCall } from "./circle-v2-source-usage.js";
 const BASE_USDC = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913";
 export const CCTP_BASE_DOMAIN = 6, CCTP_SOLANA_DOMAIN = 5;
 const HEADER = 148, BODY = 228;
 const RECEIVE_MESSAGE = createHash("sha256").update("global:receive_message").digest().subarray(0, 8);
+/** Circle's MessageTransmitterV2 on Base: the emitter of a burn's one `MessageSent`. */
+export const CCTP_BASE_MESSAGE_TRANSMITTER = "0x81d40f21f12a8f0e3252bccb954d722d4c464b64";
+export const CCTP_MESSAGE_SENT = toEventSelector("event MessageSent(bytes message)");
+/** What Circle's attestation service fills after the burn: nonce, executed finality, executed fee and expiration block. */
+const ATTESTER_FIELDS = [[12, 44], [144, 148], [HEADER + 164, HEADER + BODY]];
 const word = (bytes, at) => `0x${bytes.subarray(at, at + 32).toString("hex")}`;
 const uint = (bytes, at) => BigInt(word(bytes, at));
 /** A bytes32 that holds an EVM address: twelve zero bytes, then the address. */
@@ -56,6 +63,32 @@ export function messageBindsBurn(message, terms) {
     return message.sourceDomain === CCTP_BASE_DOMAIN && message.destinationDomain === CCTP_SOLANA_DOMAIN &&
         message.burnToken === BASE_USDC && message.messageSender === terms.messageSender && message.mintRecipient === terms.mintRecipient &&
         message.amount === terms.amount && message.feeExecuted <= message.maxFee && message.feeExecuted < message.amount;
+}
+/** The message of a `MessageSent` log's data: one canonically encoded ABI `bytes`; null for anything else. */
+export function messageSentBytes(data) {
+    if (typeof data !== "string" || data.length > 2 + 2 * (64 + 4128) || !/^0x(?:[0-9a-fA-F]{2})+$/u.test(data))
+        return null;
+    const bytes = Buffer.from(data.slice(2), "hex");
+    if (bytes.length < 64 || uint(bytes, 0) !== 32n || uint(bytes, 32) > 4096n)
+        return null;
+    const length = Number(uint(bytes, 32));
+    if (bytes.length !== 64 + Math.ceil(length / 32) * 32 || bytes.subarray(64 + length).some(byte => byte !== 0))
+        return null;
+    return bytes.subarray(64, 64 + length);
+}
+/**
+ * Whether attested bytes are the message the burn transaction emitted. CCTP V2 assigns nonces offchain, so the source event
+ * leaves the attester's fields zero; every other byte, the hook data included, must be the same.
+ */
+export function attestedFromSource(source, attested) {
+    const filled = (index) => ATTESTER_FIELDS.some(([from, to]) => index >= from && index < to);
+    if (source.length !== attested.length || source.length < HEADER + BODY)
+        return false;
+    for (let index = 0; index < source.length; index++) {
+        if (filled(index) ? source[index] !== 0 : source[index] !== attested[index])
+            return false;
+    }
+    return true;
 }
 /** The message bytes of a MessageTransmitterV2 `receive_message` instruction (Anchor: discriminator, two borsh vectors). */
 export function receiveMessageBytes(data) {
