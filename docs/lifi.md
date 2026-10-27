@@ -947,11 +947,34 @@ After a successful burn the same status follows its delivery on Solana, on
 every status until the delivery is recorded (older burns included), then never
 again. Circle's forwarding service, or any payer, receives the message there;
 APN only reads. It asks Circle's pinned issuer API for the burn's message
-(`/v2/messages/6?transactionHash=`). Once Circle attests it, the attested
-message bytes themselves must be this burn's: domains 6 to 5, Base USDC, the
-journal's messenger, the recipient token account named by both the calldata and
-the admission, the principal, and an executed fee no larger than the attested
-max fee. The receiving transaction is the `forwardTxHash` Circle names or,
+(`/v2/messages/6?transactionHash=`); that answer only locates it. Once Circle
+attests it, the attested message bytes themselves must be this burn's: domains 6
+to 5, Base USDC, the journal's messenger, the recipient token account named by
+both the calldata and the admission, the principal, and an executed fee no
+larger than the attested max fee. They must also be the message the burn
+transaction itself emitted: its finalized Base receipt (in the block the source
+proof recorded) carries exactly one `MessageSent(bytes)` from Circle's
+MessageTransmitterV2 (`0x81D40F21F12A8F0E3252Bccb954D722d4c464B64`), and the
+attested bytes equal that event's message in every byte except the four fields
+Circle's attestation service fills after the burn (nonce, executed finality,
+executed fee, expiration block), which the event leaves zero. CCTP V2 assigns
+nonces offchain and this route's message names no payer: its sender is the fee
+wrapper, its max fee is 0 and its hook is fixed by the recipient. So any two
+burns of one amount to one token account (with the same token-account creation
+hook) emit the same bytes, whoever pays. The receiving Solana transaction must
+therefore also be later than the burn's Base block (its `blockTime` against the
+block's timestamp, read by number and matched to the recorded block hash): a
+receive that happened before the burn, such as an older burn's of the same
+terms, is not its delivery, whatever Circle answers; found through the
+`used_nonce` account it is final too (a message is received once), so the status
+reads `unread` and offers no resubmission. Between burns of the same bytes in
+flight together, that is a repeat payment of the same amount to the same account
+landing before the first one's Solana receive (about 15 to 20 minutes at the
+route's standard finality), Circle's nonce is the only discriminator the
+protocol has; APN cannot check it on chain, and the per-message claim below still
+keeps one receipt to one operation. If Circle mislabeled such a pair, the later
+operation would read `delivered` with the earlier receive and the earlier one
+would stay `unread` (`circle_delivery_message_claimed`). The receiving transaction is the `forwardTxHash` Circle names or,
 without one (a failed forward received by someone else), found among the
 successful finalized transactions naming the message's `used_nonce` account:
 anyone may name that public account, so each (oldest first, one page of 16) is
@@ -964,9 +987,14 @@ setting the status names it). It must have succeeded, carry a MessageTransmitter
 those bytes, write the `used_nonce` account (PDA `["used_nonce", nonce]`) and
 credit the recipient's USDC account with exactly the principal minus the
 executed fee. Then the message is claimed for this operation
-(`circle-solana-delivery-claims/<nonce>.json`, so one receipt never proves two
+(`circle-solana-delivery-claims-v2/<nonce>.json`, so one receipt never proves two
 operations), the proof is recorded once beside the journal
-(`<operation>.solana-delivery.json`) and `phase` reads `delivered`.
+(`<operation>.solana-delivery-v2.json`, with the source event's log index, the
+SHA-256 of its message, the burn block's time and the receive's block time) and
+`phase` reads `delivered`. Records of 0.5.76
+(`<operation>.solana-delivery.json`, `circle-solana-delivery-claims/`) were made
+without the source binding and are no longer read: the next status proves the
+delivery again and records v2 beside them; the old files stay as they are.
 
 Until then `phase` is `source_finalized` and `delivery.state` names the step
 still awaited: `awaiting_issuer_message`, `awaiting_attestation`,

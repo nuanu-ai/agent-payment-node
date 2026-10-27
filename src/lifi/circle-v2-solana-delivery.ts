@@ -1,24 +1,32 @@
 /**
  * Delivery of a Circle CCTP V2 Base USDC to Solana burn. Circle's forwarding service (or any payer) receives the message
  * on Solana; APN only reads. Circle's issuer API locates the attested message and the receiving transaction; the record is
- * proven from the chain: the finalized transaction carries those exact message bytes to MessageTransmitterV2, writes the
- * message's used-nonce account and credits the journal's recipient token account with the principal minus the executed
- * fee. Each message proves one operation only. A read that fails is shown with its reason and never fails the status.
+ * proven from the chains: the attested bytes are the message the burn transaction itself emitted on Base (its one
+ * `MessageSent`, every byte but the attester's fields), and the finalized Solana transaction, later than the burn's
+ * block, carries those exact bytes to MessageTransmitterV2, writes the message's used-nonce account and credits the
+ * journal's recipient token account with the principal minus the executed fee. Each message proves one operation only.
+ * CCTP V2 assigns nonces offchain and this route's message names no payer, so burns of one amount to one account emit
+ * the same bytes: between such burns in flight together, Circle's nonce is the only discriminator. A read that fails is
+ * shown with its reason and never fails the status.
  */
+import { createHash } from "node:crypto";
 import { address, getProgramDerivedAddress } from "@solana/kit";
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { SOLANA_USDC } from "../chain-policy.js";
 import { ApnError } from "../errors.js";
+import { evmRpcQuantity } from "../evm-rpc-codec.js";
+import type { FinalizedReader } from "../evm-finalized-proof.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { assertSolanaNetworkValue, rpcArray, rpcAtomic, rpcRecord, solanaSignature, type SolanaReadMethod } from "../solana/rpc.js";
-import { circleBurnTerms, decodeCctpBurnMessage, messageBindsBurn, receiveMessageBytes, type CctpBurnMessage,
-  type CircleBurnTerms } from "./circle-v2-cctp-message.js";
+import { attestedFromSource, CCTP_BASE_MESSAGE_TRANSMITTER, CCTP_MESSAGE_SENT, circleBurnTerms, decodeCctpBurnMessage,
+  messageBindsBurn, messageSentBytes, receiveMessageBytes, type CctpBurnMessage, type CircleBurnTerms } from "./circle-v2-cctp-message.js";
 import type { CircleSourceProof } from "./circle-v2-source-proof.js";
 import { BridgeHttps } from "./https.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
 
-export const CIRCLE_SOLANA_DELIVERY_SCHEMA = "apn.circle-v2-solana-delivery.v1";
-const CLAIM_SCHEMA = "apn.circle-v2-solana-delivery-claim.v1";
+/** v2 binds the message to the burn's own `MessageSent`; v1 records (0.5.76, without that binding) are never read. */
+export const CIRCLE_SOLANA_DELIVERY_SCHEMA = "apn.circle-v2-solana-delivery.v2";
+const CLAIM_SCHEMA = "apn.circle-v2-solana-delivery-claim.v2", CLAIMS = "circle-solana-delivery-claims-v2";
 /** Circle's CCTP V2 message transmitter on Solana mainnet; a received message's nonce account is its PDA ["used_nonce", nonce]. */
 export const CIRCLE_SOLANA_MESSAGE_TRANSMITTER = "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC";
 export const CIRCLE_SOLANA_RPC_ACTION = "Set APN_SOLANA_RPC_URL to a Solana mainnet HTTPS endpoint, then rerun the same command.";
@@ -29,14 +37,16 @@ const UNREAD = new Set(["APN_PROVIDER_UNAVAILABLE", "APN_PROVIDER_PROTOCOL", "AP
 
 export interface CircleSolanaDelivery {
   readonly schemaVersion: typeof CIRCLE_SOLANA_DELIVERY_SCHEMA; readonly operationId: string; readonly profileHash: string;
-  readonly sourceTransactionHash: string; readonly eventNonce: string; readonly messageSha256: string;
+  readonly sourceTransactionHash: string; readonly sourceLogIndexAtomic: string; readonly sourceMessageSha256: string;
+  readonly sourceBlockTimeAtomic: string; readonly receiveBlockTimeAtomic: string;
+  readonly eventNonce: string; readonly messageSha256: string;
   readonly recipientOwner: string; readonly recipientAta: string; readonly burnAtomic: string; readonly maxFeeAtomic: string;
   readonly feeExecutedAtomic: string; readonly mintedAtomic: string; readonly solanaSignature: string; readonly slotAtomic: string;
   readonly observedAt: string; readonly integrityHash: string;
 }
 const DELIVERY_KEYS = ["burnAtomic", "eventNonce", "feeExecutedAtomic", "integrityHash", "maxFeeAtomic", "messageSha256", "mintedAtomic",
-  "observedAt", "operationId", "profileHash", "recipientAta", "recipientOwner", "schemaVersion", "slotAtomic", "solanaSignature",
-  "sourceTransactionHash"];
+  "observedAt", "operationId", "profileHash", "receiveBlockTimeAtomic", "recipientAta", "recipientOwner", "schemaVersion", "slotAtomic",
+  "solanaSignature", "sourceBlockTimeAtomic", "sourceLogIndexAtomic", "sourceMessageSha256", "sourceTransactionHash"];
 
 /** Solana reads only: no method that sends can be called through it. */
 export interface SolanaReadPort { readonly originHash: string; call(method: SolanaReadMethod, params: readonly unknown[]): Promise<unknown> }
@@ -74,11 +84,11 @@ export interface CircleSolanaDeliveryView {
   readonly recorded: boolean;
 }
 
-/** `non-evm-source-journals/<profileHash>/<operationId>.solana-delivery.json` and one claim per message nonce. */
+/** `non-evm-source-journals/<profileHash>/<operationId>.solana-delivery-v2.json` and one claim per message nonce. */
 export class CircleSolanaDeliveryStore extends SecureStateStore {
   private path(journal: NonEvmSourceJournal): string {
     stateIdentifier(journal.profileHash, "Circle delivery profile"); stateIdentifier(journal.operationId, "Circle delivery operation");
-    return `non-evm-source-journals/${journal.profileHash}/${journal.operationId}.solana-delivery.json`;
+    return `non-evm-source-journals/${journal.profileHash}/${journal.operationId}.solana-delivery-v2.json`;
   }
   async load(journal: NonEvmSourceJournal): Promise<CircleSolanaDelivery | null> {
     const value = await this.readJson(this.path(journal));
@@ -87,8 +97,8 @@ export class CircleSolanaDeliveryStore extends SecureStateStore {
   /** The message's one operation: a create-only claim; a message another operation claimed proves nothing here. */
   async claim(journal: NonEvmSourceJournal, nonce: string, signature: string): Promise<void> {
     const claim = { schemaVersion: CLAIM_SCHEMA, eventNonce: nonce, operationId: journal.operationId, profileHash: journal.profileHash, solanaSignature: signature };
-    const path = `circle-solana-delivery-claims/${nonce.slice(2)}.json`;
-    await this.ensureDirectory("circle-solana-delivery-claims");
+    const path = `${CLAIMS}/${nonce.slice(2)}.json`;
+    await this.ensureDirectory(CLAIMS);
     try { await this.writeJson(path, claim, true); return; }
     catch (error) { if (!(error instanceof ApnError) || error.message !== "State target is already occupied.") throw error; }
     if (canonicalJson(await this.readJson(path)) !== canonicalJson(claim)) {
@@ -112,17 +122,18 @@ export class CircleSolanaDeliveryStore extends SecureStateStore {
 
 /**
  * The delivery of a burn whose finalized receipt succeeded. A recorded proof is returned without any read; otherwise one
- * issuer read and, once the message is attested, Solana reads at `finalized`. A failed read becomes `unread` with its reason.
+ * issuer read and, once the message is attested, the burn's Base receipt and Solana reads at `finalized`. A failed read
+ * becomes `unread` with its reason.
  */
 export async function circleSolanaDelivery(root: string, journal: NonEvmSourceJournal, source: CircleSourceProof,
-  reader: CircleSolanaDeliveryReader | undefined, now: () => number): Promise<CircleSolanaDeliveryView> {
+  reader: CircleSolanaDeliveryReader | undefined, read: FinalizedReader | undefined, now: () => number): Promise<CircleSolanaDeliveryView> {
   if (source.status !== "success") throw new ApnError("APN_INTERNAL", "A reverted Circle burn has no delivery.");
   const store = new CircleSolanaDeliveryStore(root), existing = await store.load(journal);
   if (existing !== null) return { state: "delivered", forwardState: null, proof: existing, waitingFor: null, nextActions: [], recorded: false };
-  if (reader === undefined) {
-    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "This runtime has no Circle issuer and Solana readers for the burn's delivery.");
+  if (reader === undefined || read === undefined) {
+    throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "This runtime has no Circle issuer, Base and Solana readers for the burn's delivery.");
   }
-  try { return await observe(store, journal, source.transactionHash, reader, now); }
+  try { return await observe(store, journal, source, reader, read, now); }
   catch (error) {
     if (!(error instanceof ApnError) || !UNREAD.has(error.code)) throw error;
     const reason = typeof error.details?.reason === "string" ? ` (${error.details.reason})` : "";
@@ -132,8 +143,9 @@ export async function circleSolanaDelivery(root: string, journal: NonEvmSourceJo
   }
 }
 
-async function observe(store: CircleSolanaDeliveryStore, journal: NonEvmSourceJournal, hash: string,
-  reader: CircleSolanaDeliveryReader, now: () => number): Promise<CircleSolanaDeliveryView> {
+async function observe(store: CircleSolanaDeliveryStore, journal: NonEvmSourceJournal, source: CircleSourceProof,
+  reader: CircleSolanaDeliveryReader, read: FinalizedReader, now: () => number): Promise<CircleSolanaDeliveryView> {
+  const hash = source.transactionHash;
   const waiting = (state: CircleSolanaDeliveryState, forwardState: string | null, waitingFor: string, nextActions: readonly string[] = []) =>
     ({ state, forwardState, proof: null, waitingFor, nextActions, recorded: false });
   const answer = await reader.issuerMessages(hash);
@@ -148,6 +160,9 @@ async function observe(store: CircleSolanaDeliveryStore, journal: NonEvmSourceJo
     return waiting("awaiting_attestation", published.forwardState, `Circle to attest the message of burn ${hash} (status ${published.status})`);
   }
   const message = attested(published, terms), forwardState = published.forwardState;
+  // Circle's answer only locates the message; the burn's own event and block bound whose it can be.
+  const emitted = await sourceBurn(read, source);
+  if (!attestedFromSource(emitted.bytes, message.bytes)) issuerFailure("circle_delivery_source_message");
   const notForwarded = (solana: boolean) => forwardState === "FAILED"
     ? waiting("forward_failed", forwardState, "the attested message to be received on Solana; Circle's forwarding failed", [
       `Any Solana payer may submit MessageTransmitterV2 receive_message with the message and attestation of https://iris-api.circle.com/v2/messages/6?transactionHash=${hash}; APN does not sign on Solana for this route. Then rerun the same command.`,
@@ -161,26 +176,29 @@ async function observe(store: CircleSolanaDeliveryStore, journal: NonEvmSourceJo
   assertSolanaNetworkValue(await rpc.call("getGenesisHash", []));
   const [usedNonce] = await getProgramDerivedAddress({ programAddress: address(CIRCLE_SOLANA_MESSAGE_TRANSMITTER),
     seeds: ["used_nonce", Buffer.from(message.nonce.slice(2), "hex")] });
-  let signature: string, slot: bigint | null;
+  let signature: string, received: SolanaReceipt;
   if (published.forwardTxHash !== null) {
     signature = published.forwardTxHash;
-    slot = await solanaReceipt(rpc, terms, message, usedNonce, signature);
-    if (slot === null) {
+    const named = await solanaReceipt(rpc, terms, message, usedNonce, signature, emitted.time);
+    if (named === null) {
       return waiting("awaiting_solana_finality", forwardState,
         `the Solana transaction ${signature} at finalized on APN_SOLANA_RPC_URL (an RPC without that history returns none)`);
     }
+    received = named;
   } else {
     // Without Circle's forwarding transaction, a message received by anyone else is found through its used-nonce account.
-    const found = await nonceReceiver(rpc, terms, message, usedNonce);
+    const found = await nonceReceiver(rpc, terms, message, usedNonce, emitted.time);
     if (found === null) return notForwarded(true);
-    ({ signature, slot } = found);
+    ({ signature, ...received } = found);
   }
   await store.claim(journal, message.nonce, signature);
   const fields: Omit<CircleSolanaDelivery, "integrityHash"> = { schemaVersion: CIRCLE_SOLANA_DELIVERY_SCHEMA, operationId: journal.operationId,
-    profileHash: journal.profileHash, sourceTransactionHash: hash, eventNonce: message.nonce, messageSha256: message.sha256,
+    profileHash: journal.profileHash, sourceTransactionHash: hash, sourceLogIndexAtomic: emitted.logIndex.toString(),
+    sourceMessageSha256: createHash("sha256").update(emitted.bytes).digest("hex"), sourceBlockTimeAtomic: emitted.time.toString(),
+    receiveBlockTimeAtomic: received.blockTime.toString(), eventNonce: message.nonce, messageSha256: message.sha256,
     recipientOwner: terms.recipientOwner, recipientAta: terms.recipientAta, burnAtomic: message.amount.toString(),
     maxFeeAtomic: message.maxFee.toString(), feeExecutedAtomic: message.feeExecuted.toString(),
-    mintedAtomic: (message.amount - message.feeExecuted).toString(), solanaSignature: signature, slotAtomic: slot.toString(),
+    mintedAtomic: (message.amount - message.feeExecuted).toString(), solanaSignature: signature, slotAtomic: received.slot.toString(),
     observedAt: new Date(now()).toISOString() };
   const proof = await store.create(journal, Object.freeze({ ...fields, integrityHash: hashObject(fields) }));
   return { state: "delivered", forwardState: null, proof, waitingFor: null, nextActions: [], recorded: true };
@@ -227,6 +245,32 @@ function attested(published: IssuerMessage, terms: CircleBurnTerms): CctpBurnMes
   return message;
 }
 
+/**
+ * The message the burn transaction emitted: the one `MessageSent` of Circle's Base transmitter in its receipt, in the
+ * finalized block the source proof recorded, and that block's time.
+ */
+async function sourceBurn(read: FinalizedReader, source: CircleSourceProof): Promise<{ readonly bytes: Buffer; readonly logIndex: bigint; readonly time: bigint }> {
+  const fail = (reason: string): never => {
+    throw new ApnError("APN_RPC_PROTOCOL", "The Base receipt does not carry this burn's Circle message.", { reason });
+  };
+  const same = (value: unknown, expected: string) => typeof value === "string" && value.toLowerCase() === expected.toLowerCase();
+  const rpc = read(8453), receipt = await rpc.call("eth_getTransactionReceipt", [source.transactionHash]);
+  if (!isPlainRecord(receipt) || !same(receipt.transactionHash, source.transactionHash) || !same(receipt.blockHash, source.blockHash) ||
+    receipt.status !== "0x1" || !Array.isArray(receipt.logs) || receipt.logs.length > 1024) fail("circle_delivery_source_receipt");
+  const sent = (receipt as { logs: unknown[] }).logs.filter((log): log is Record<string, unknown> => isPlainRecord(log) &&
+    same(log.address, CCTP_BASE_MESSAGE_TRANSMITTER) && Array.isArray(log.topics) && same(log.topics[0], CCTP_MESSAGE_SENT));
+  if (sent.length !== 1) fail("circle_delivery_source_event");
+  const log = sent[0]!, bytes = messageSentBytes(log.data);
+  if (bytes === null || log.removed === true || (log.topics as unknown[]).length !== 1 || !same(log.transactionHash, source.transactionHash) ||
+    !same(log.blockHash, source.blockHash)) fail("circle_delivery_source_event");
+  const logIndex = evmRpcQuantity(log.logIndex), number = BigInt(source.blockNumberAtomic);
+  const block = await rpc.call("eth_getBlockByNumber", [`0x${number.toString(16)}`, false]);
+  if (!isPlainRecord(block) || !same(block.hash, source.blockHash) || evmRpcQuantity(block.number) !== number) fail("circle_delivery_source_block");
+  return { bytes: bytes!, logIndex, time: evmRpcQuantity((block as Record<string, unknown>).timestamp) };
+}
+
+/** A complete receive of these bytes older than the burn: a message is received once, so it is final, not skipped. */
+const RECEIVED_BEFORE_BURN = "circle_delivery_receipt_before_burn";
 function binding(reason: string): never {
   throw new ApnError("APN_RPC_PROTOCOL", "The Solana transaction is not this burn's receipt.", { reason });
 }
@@ -236,17 +280,17 @@ function binding(reason: string): never {
  * receive a message. A candidate this node does not return or this reader cannot judge, or a full page, with no receipt
  * found is reported as unread, never taken as "not received".
  */
-async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, message: CctpBurnMessage,
-  usedNonce: string): Promise<{ readonly signature: string; readonly slot: bigint } | null> {
+async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, message: CctpBurnMessage, usedNonce: string,
+  burnTime: bigint): Promise<SolanaReceipt & { readonly signature: string } | null> {
   const rows = rpcArray(await rpc.call("getSignaturesForAddress", [usedNonce, { commitment: "finalized", limit: NONCE_PAGE }]), NONCE_PAGE).map(rpcRecord);
   let unjudged = false;
   for (const signature of rows.filter(row => row.err === null).map(row => solanaSignature(row.signature)).reverse()) {
     try {
-      const slot = await solanaReceipt(rpc, terms, message, usedNonce, signature);
-      if (slot !== null) return { signature, slot };
+      const received = await solanaReceipt(rpc, terms, message, usedNonce, signature, burnTime);
+      if (received !== null) return { signature, ...received };
       unjudged = true;
     } catch (error) {
-      if (!(error instanceof ApnError) || error.code !== "APN_RPC_PROTOCOL") throw error;
+      if (!(error instanceof ApnError) || error.code !== "APN_RPC_PROTOCOL" || error.details?.reason === RECEIVED_BEFORE_BURN) throw error;
       // A reason names a well-formed transaction that is not this receive; a bare protocol refusal is a shape not judged.
       if (typeof error.details?.reason !== "string" || !error.details.reason.startsWith("circle_delivery_")) unjudged = true;
     }
@@ -256,13 +300,15 @@ async function nonceReceiver(rpc: SolanaReadPort, terms: CircleBurnTerms, messag
   return null;
 }
 
+interface SolanaReceipt { readonly slot: bigint; readonly blockTime: bigint }
 /**
- * The named transaction at `finalized`, or null while the node does not return it there. It must have succeeded and carry
- * a `receive_message` of these exact bytes to the transmitter (top level or inner), write the used-nonce account and move
- * exactly the minted amount of USDC into the recipient token account owned by the recipient. Integers may be bigints.
+ * The named transaction at `finalized`, or null while the node does not return it there. It must be later than the burn's
+ * block (no receive before the burn delivers it), have succeeded and carry a `receive_message` of these exact bytes to
+ * the transmitter (top level or inner), write the used-nonce account and move exactly the minted amount of USDC into the
+ * recipient token account owned by the recipient. Integers may be bigints.
  */
 async function solanaReceipt(rpc: SolanaReadPort, terms: CircleBurnTerms, message: CctpBurnMessage, usedNonce: string,
-  signature: string): Promise<bigint | null> {
+  signature: string, burnTime: bigint): Promise<SolanaReceipt | null> {
   const value = await rpc.call("getTransaction", [signature, { encoding: "jsonParsed", commitment: "finalized", maxSupportedTransactionVersion: 0 }]);
   if (value === null) return null;
   const tx = rpcRecord(value), meta = rpcRecord(tx.meta), transaction = rpcRecord(tx.transaction), body = rpcRecord(transaction.message);
@@ -289,7 +335,18 @@ async function solanaReceipt(rpc: SolanaReadPort, terms: CircleBurnTerms, messag
     return BigInt(amount);
   };
   if (balance(meta.postTokenBalances, true) - balance(meta.preTokenBalances, false) !== message.amount - message.feeExecuted) binding("circle_delivery_amount");
-  return slot;
+  // Last, on an otherwise complete receive. A node without the block's time cannot judge it (not a reason of a transaction
+  // that is not this receive). The route's burns ask standard finality (2000, fixed by the source event), so a burn's own
+  // receive comes after Base finality, many minutes after its block; with fast finality the margin would be seconds.
+  if (tx.blockTime === null || tx.blockTime === undefined) {
+    throw new ApnError("APN_RPC_PROTOCOL", "The Solana RPC returned the transaction without its block time.", { reason: "solana_block_time_missing" });
+  }
+  const blockTime = rpcAtomic(tx.blockTime);
+  if (blockTime <= burnTime) {
+    throw new ApnError("APN_RPC_PROTOCOL", "The message was received on Solana before this burn: Circle's answer is another burn's.",
+      { reason: RECEIVED_BEFORE_BURN });
+  }
+  return { slot, blockTime };
 }
 
 function deliveryCorrupt(): never {
@@ -298,14 +355,17 @@ function deliveryCorrupt(): never {
 function validateDelivery(value: unknown, journal: NonEvmSourceJournal): CircleSolanaDelivery {
   if (!isPlainRecord(value) || canonicalJson(Object.keys(value).sort()) !== canonicalJson(DELIVERY_KEYS)) deliveryCorrupt();
   const proof = value as unknown as CircleSolanaDelivery, { integrityHash, ...fields } = proof, terms = circleBurnTerms(journal);
-  const numbers = [proof.burnAtomic, proof.maxFeeAtomic, proof.feeExecutedAtomic, proof.mintedAtomic, proof.slotAtomic];
+  const numbers = [proof.burnAtomic, proof.maxFeeAtomic, proof.feeExecutedAtomic, proof.mintedAtomic, proof.slotAtomic, proof.sourceLogIndexAtomic,
+    proof.sourceBlockTimeAtomic, proof.receiveBlockTimeAtomic];
   if (terms === null || proof.schemaVersion !== CIRCLE_SOLANA_DELIVERY_SCHEMA || hashObject(fields) !== integrityHash ||
     proof.operationId !== journal.operationId || proof.profileHash !== journal.profileHash || proof.sourceTransactionHash !== journal.transactionHash ||
     proof.recipientOwner !== terms.recipientOwner || proof.recipientAta !== terms.recipientAta ||
     numbers.some(number => typeof number !== "string" || !UINT.test(number)) || BigInt(proof.burnAtomic) !== terms.amount ||
     BigInt(proof.feeExecutedAtomic) > BigInt(proof.maxFeeAtomic) || BigInt(proof.feeExecutedAtomic) >= BigInt(proof.burnAtomic) ||
     BigInt(proof.mintedAtomic) !== BigInt(proof.burnAtomic) - BigInt(proof.feeExecutedAtomic) ||
+    BigInt(proof.receiveBlockTimeAtomic) <= BigInt(proof.sourceBlockTimeAtomic) ||
     typeof proof.eventNonce !== "string" || !NONCE.test(proof.eventNonce) || typeof proof.messageSha256 !== "string" || !SHA.test(proof.messageSha256) ||
+    typeof proof.sourceMessageSha256 !== "string" || !SHA.test(proof.sourceMessageSha256) ||
     typeof proof.observedAt !== "string" || !Number.isFinite(Date.parse(proof.observedAt)) ||
     new Date(Date.parse(proof.observedAt)).toISOString() !== proof.observedAt) deliveryCorrupt();
   try { solanaSignature(proof.solanaSignature); } catch { deliveryCorrupt(); }
