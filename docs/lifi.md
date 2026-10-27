@@ -958,12 +958,17 @@ MessageTransmitterV2 (`0x81D40F21F12A8F0E3252Bccb954D722d4c464B64`), and the
 attested bytes equal that event's message in every byte except the four fields
 Circle's attestation service fills after the burn (nonce, executed finality,
 executed fee, expiration block), which the event leaves zero. CCTP V2 assigns
-nonces offchain, so this event is the chain's own anchor of the burn: a message
-of another burn that differs in any byte the burn fixed (max fee, minimum
-finality, destination caller, hook data, recipient, amount, sender) proves
-nothing here. Two burns that emitted byte-identical messages are told apart only
-by the nonce Circle assigned each; the per-message claim below still keeps one
-receipt to one operation. The receiving transaction is the `forwardTxHash` Circle names or,
+nonces offchain and this route's message names no payer: its sender is the fee
+wrapper, its max fee is 0 and its hook is fixed by the recipient. So any two
+burns of one amount to one token account (with the same token-account creation
+hook) emit the same bytes, whoever pays. The receiving Solana transaction must
+therefore also be later than the burn's Base block (its `blockTime` against the
+block's timestamp, read by number and matched to the recorded block hash): a
+receive that happened before the burn, such as an older burn's of the same
+terms, is not its delivery, whatever Circle answers. Between burns of the same
+bytes in flight together, Circle's nonce is the only discriminator the protocol
+has; APN cannot check it on chain, and the per-message claim below still keeps
+one receipt to one operation. The receiving transaction is the `forwardTxHash` Circle names or,
 without one (a failed forward received by someone else), found among the
 successful finalized transactions naming the message's `used_nonce` account:
 anyone may name that public account, so each (oldest first, one page of 16) is
@@ -978,8 +983,9 @@ credit the recipient's USDC account with exactly the principal minus the
 executed fee. Then the message is claimed for this operation
 (`circle-solana-delivery-claims-v2/<nonce>.json`, so one receipt never proves two
 operations), the proof is recorded once beside the journal
-(`<operation>.solana-delivery-v2.json`, with the source event's log index and
-the SHA-256 of its message) and `phase` reads `delivered`. Records of 0.5.76
+(`<operation>.solana-delivery-v2.json`, with the source event's log index, the
+SHA-256 of its message, the burn block's time and the receive's block time) and
+`phase` reads `delivered`. Records of 0.5.76
 (`<operation>.solana-delivery.json`, `circle-solana-delivery-claims/`) were made
 without the source binding and are no longer read: the next status proves the
 delivery again and records v2 beside them; the old files stay as they are.

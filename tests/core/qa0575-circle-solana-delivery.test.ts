@@ -25,10 +25,11 @@ test("Circle's real forwarded receipts are proven on Solana and recorded once; l
     const emitted = Buffer.from(message), sent = (burn.receipt.logs as Json[]).find(log => log.address === "0x81d40f21f12a8f0e3252bccb954d722d4c464b64")!;
     emitted.fill(0, 12, 44); emitted.fill(0, 144, 148);
     assert.deepEqual([proof.solanaSignature, proof.burnAtomic, proof.maxFeeAtomic, proof.feeExecutedAtomic, proof.mintedAtomic, proof.recipientAta,
-      proof.recipientOwner, proof.eventNonce, proof.messageSha256, proof.sourceTransactionHash, proof.sourceLogIndexAtomic, proof.sourceMessageSha256],
+      proof.recipientOwner, proof.eventNonce, proof.messageSha256, proof.sourceTransactionHash, proof.sourceLogIndexAtomic, proof.sourceMessageSha256,
+      proof.sourceBlockTimeAtomic, proof.receiveBlockTimeAtomic],
     [burn.signature, burn.amount.toString(), "0", "0", burn.amount.toString(), burn.ata, burn.owner, burn.iris.messages[0].eventNonce,
       createHash("sha256").update(message).digest("hex"), journal.transactionHash, BigInt(sent.logIndex).toString(),
-      createHash("sha256").update(emitted).digest("hex")]);
+      createHash("sha256").update(emitted).digest("hex"), burn.burnTime.toString(), String(burn.receive.blockTime)]);
     const again = await status(root, journal, silent);
     assert.deepEqual([again.phase, again.proofClass, again.delivery?.proof], ["delivered", "durable_public_state", proof]);
   }
