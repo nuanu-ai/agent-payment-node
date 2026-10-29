@@ -35,8 +35,14 @@ export type MetaMaskNativeSubmission = ({
 }) & {
     readonly diagnostic?: MetaMaskNativeDiagnostic;
 };
+/**
+ * Which vendor-read invariant a native transfer failed (QA 0.5.79 MM-NATIVE-PREFLIGHT-DIAGNOSTIC-079-001), with the
+ * owner's next step. Every one still refuses before any operation exists; the step is advice, never run by APN. A step
+ * written `mm …` is the pinned vendor client, which `runnable` turns into a command that runs as typed.
+ */
+export type MetaMaskNativeRefusal = "metamask_native_chain_unsupported" | "metamask_vendor_read_failed" | "metamask_session_required" | "metamask_session_project_changed" | "metamask_guard_mode_required" | "metamask_wallet_mismatch" | "metamask_guard_policy_missing";
 /** Normal vendor CLI reads only; no policy mutation or remote rolling-usage prediction. */
-export declare function readMetaMaskNativeVendorPolicy(chainId: MetaMaskNativeFeeChainId, payer: Address, recipient: Address, deadline?: MetaMaskNativeDeadlineInput): Promise<MetaMaskNativeVendorPolicy>;
+export declare function readMetaMaskNativeVendorPolicy(chainId: MetaMaskNativeFeeChainId, payer: Address, recipient: Address, deadline?: MetaMaskNativeDeadlineInput, profile?: string): Promise<MetaMaskNativeVendorPolicy>;
 /** A failure before the vendor child process was spawned: nothing was handed to the vendor. */
 export declare class MetaMaskNativeHandoffNotStarted extends Error {
     readonly causeError: unknown;

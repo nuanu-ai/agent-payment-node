@@ -12,26 +12,66 @@ import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMe
 // Read at call time: this module sits in an import cycle with the owner, so no imported value is used at load.
 const nativeChain = (value) => METAMASK_NATIVE_CHAINS.includes(value);
 const EFFECT_STATES = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING"]);
+const REFUSALS = {
+    metamask_native_chain_unsupported: { message: "MetaMask native transfers do not support this chain.", nextActions: () => [] },
+    metamask_vendor_read_failed: { message: "The MetaMask Agent Wallet did not answer a read of its session, Guard mode or policy.",
+        nextActions: () => ["mm auth status --json"] },
+    metamask_session_required: { message: "The MetaMask Agent Wallet has no signed-in session; sign in again.",
+        nextActions: ({ profile }) => profile === undefined ? [] : [`apn wallet connect --profile ${profile} --provider metamask-agent-wallet --auth-method browser`] },
+    metamask_session_project_changed: { message: "The MetaMask Agent Wallet is signed in to another project than this transfer was quoted in.", nextActions: () => [] },
+    // The vendor reports a failed mode read as null too, so "unreported" names both: read it, then set Guard mode.
+    metamask_guard_mode_required: { message: "The MetaMask server wallet did not report Guard mode (it is unset, another mode, or unreadable); " +
+            "set Guard mode, approve the MetaMask email, then rerun.", nextActions: () => ["mm wallet trading-mode get --json", "mm wallet trading-mode set guard"] },
+    metamask_wallet_mismatch: { message: "The MetaMask Agent Wallet has another wallet selected than the paying profile; select the paying wallet.",
+        nextActions: ({ payer }) => payer === undefined ? [] : [`mm wallet select ${payer}`] },
+    // The vendor reports no policy and a failed policy read alike, as an empty policy.
+    metamask_guard_policy_missing: { message: "The MetaMask Agent Wallet reported no Guard policy for the paying wallet (none is set, or its read failed); " +
+            "set one with `mm wallet policy set --policy <yaml>` (the template shows the form), then rerun.",
+        nextActions: () => ["mm wallet policy get --json", "mm wallet policy template"] },
+};
+const MODES = new Set(["guard", "beast"]);
 class NativeReadRefusal extends ApnError {
     nativeDiagnostic;
-    constructor(nativeDiagnostic) {
-        super("APN_OPERATION_BLOCKED", "The MetaMask Agent Wallet did not confirm the paying wallet, Guard mode or policy.");
+    constructor(nativeDiagnostic, message, details) {
+        super("APN_OPERATION_BLOCKED", message, details);
         this.nativeDiagnostic = nativeDiagnostic;
     }
 }
-function refuse(diagnostic) {
+function refuse(reason, facts = {}, who = {}, diagnostic) {
+    const details = { ...facts, reason, nextActions: REFUSALS[reason].nextActions(who) };
     if (diagnostic !== undefined)
-        throw new NativeReadRefusal(diagnostic);
-    throw new ApnError("APN_OPERATION_BLOCKED", "The MetaMask Agent Wallet did not confirm the paying wallet, Guard mode or policy.");
+        throw new NativeReadRefusal(diagnostic, REFUSALS[reason].message, details);
+    throw new ApnError("APN_OPERATION_BLOCKED", REFUSALS[reason].message, details);
+}
+const quoted = (value) => /^[A-Za-z0-9_./@:+=-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+/**
+ * The refusal with each `mm …` step written as the pinned client run by APN's own Node: Homebrew links only `apn`, so a
+ * bare `mm` is not on the owner's PATH (the policy refusals of metamask-native-policy.ts included).
+ */
+async function runnable(error) {
+    const actions = error instanceof ApnError ? error.details?.nextActions : undefined;
+    if (!(error instanceof ApnError) || !Array.isArray(actions) || !actions.some(action => action.startsWith("mm ")))
+        return error;
+    let script;
+    try {
+        script = await resolveMetaMaskBin();
+    }
+    catch {
+        return error;
+    }
+    const prefix = `${quoted(process.execPath)} ${quoted(script)} `;
+    const details = { ...error.details, nextActions: actions.map(action => action.startsWith("mm ") ? prefix + action.slice(3) : action) };
+    return error instanceof NativeReadRefusal ? new NativeReadRefusal(error.nativeDiagnostic, error.message, details)
+        : new ApnError(error.code, error.message, details);
 }
 function chain(value) {
     if (!nativeChain(value))
-        refuse();
+        refuse("metamask_native_chain_unsupported");
 }
-function success(result) {
+function success(result, read, who = {}) {
     const parsed = parseMetaMaskProcessOutput(result.stdout), envelope = parsed?.envelope;
     if (result.exitCode !== 0 || parsed === null || parsed.notices.length !== 0 || envelope?.ok !== true || !isPlainRecord(envelope.data))
-        refuse(result.nativeDiagnostic === undefined ? undefined : validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, code: result.exitCode === 0 ? "protocol" : result.nativeDiagnostic.code }));
+        refuse("metamask_vendor_read_failed", { failedRead: read }, who, result.nativeDiagnostic === undefined ? undefined : validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, code: result.exitCode === 0 ? "protocol" : result.nativeDiagnostic.code }));
     return envelope.data;
 }
 function remaining(deadline) {
@@ -39,13 +79,13 @@ function remaining(deadline) {
         return undefined;
     return nativeDeadlineRemaining(deadline);
 }
-async function project(runner, deadline) {
+async function project(runner, deadline, who = {}) {
     const result = await runner.runJson(["auth", "status", "--json"], remaining(deadline), deadline);
     try {
-        const data = success(result);
+        const data = success(result, "auth status", who);
         if (data.authenticated !== true || !isPlainRecord(data.summary) || data.summary.mode !== "session" ||
             typeof data.summary.projectId !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/u.test(data.summary.projectId))
-            refuse();
+            refuse("metamask_session_required", {}, who);
         return sha256(data.summary.projectId);
     }
     finally {
@@ -56,13 +96,20 @@ async function project(runner, deadline) {
  * Three vendor reads (PROV-12): the session project, then Guard trading mode and the policy of the selected server
  * wallet. Both wallet reads report the selected address, so a separate address read before and after adds nothing.
  */
-async function readPolicy(runner, expected, deadline) {
-    const vendorProjectHash = await project(runner, deadline), payer = expected.payer.toLowerCase();
+async function readPolicy(runner, expected, deadline, profile) {
+    const payer = expected.payer.toLowerCase(), who = { ...(profile === undefined ? {} : { profile }), payer: expected.payer };
+    const vendorProjectHash = await project(runner, deadline, who);
+    const selected = (address) => {
+        if (typeof address !== "string" || address.toLowerCase() !== payer)
+            refuse("metamask_wallet_mismatch", {}, who);
+    };
     const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline), deadline);
     try {
-        const data = success(mode);
-        if (data.mode !== "guard" || typeof data.address !== "string" || data.address.toLowerCase() !== payer)
-            refuse();
+        const data = success(mode, "trading-mode get", who);
+        selected(data.address);
+        // A new MetaMask project (a sign-in that created one) starts with no trading mode, which the vendor reports as null.
+        if (data.mode !== "guard")
+            refuse("metamask_guard_mode_required", { observedTradingMode: data.mode === null || data.mode === undefined ? "unreported" : typeof data.mode === "string" && MODES.has(data.mode) ? data.mode : "unrecognized" }, who);
     }
     finally {
         mode.stdout.fill(0);
@@ -70,9 +117,10 @@ async function readPolicy(runner, expected, deadline) {
     const result = await runner.runJson(["wallet", "policy", "get", "--json"], remaining(deadline), deadline);
     let admitted;
     try {
-        const data = success(result);
-        if (typeof data.address !== "string" || data.address.toLowerCase() !== payer || typeof data.policy !== "string")
-            refuse();
+        const data = success(result, "policy get", who);
+        selected(data.address);
+        if (typeof data.policy !== "string" || data.policy.trim() === "")
+            refuse("metamask_guard_policy_missing", {}, who);
         // OD-4: the policy must name this wallet, allowlist this recipient on this chain and carry an outflow limit.
         admitted = { vendorPolicyHash: sha256(data.policy), ...metaMaskGuardPolicyAdmits(data.policy, expected) };
     }
@@ -82,9 +130,14 @@ async function readPolicy(runner, expected, deadline) {
     return Object.freeze({ selectedAddress: getAddress(expected.payer), vendorProjectHash, ...admitted, tradingMode: "guard", observedAt: new Date().toISOString() });
 }
 /** Normal vendor CLI reads only; no policy mutation or remote rolling-usage prediction. */
-export async function readMetaMaskNativeVendorPolicy(chainId, payer, recipient, deadline) {
+export async function readMetaMaskNativeVendorPolicy(chainId, payer, recipient, deadline, profile) {
     chain(chainId);
-    return await readPolicy(new NodeMetaMaskProcessRunner(), { payer: getAddress(payer), chainId, recipient: getAddress(recipient) }, deadline);
+    try {
+        return await readPolicy(new NodeMetaMaskProcessRunner(), { payer: getAddress(payer), chainId, recipient: getAddress(recipient) }, deadline, profile);
+    }
+    catch (error) {
+        throw await runnable(error);
+    }
 }
 const quantity = (value) => `0x${BigInt(value).toString(16)}`;
 /** A failure before the vendor child process was spawned: nothing was handed to the vendor. */
@@ -199,7 +252,7 @@ export async function readMetaMaskNativeRequest(requestId, vendorProjectHash) {
         observation.stage = "before_guard";
         observation.guard_step = "project_before";
         if (await project(runner) !== vendorProjectHash)
-            refuse();
+            refuse("metamask_session_project_changed");
         observation.before_guard_verified = true;
         observation.stage = "watch";
         observation.guard_step = null;
@@ -216,7 +269,7 @@ export async function readMetaMaskNativeRequest(requestId, vendorProjectHash) {
         observation.stage = "after_guard";
         observation.guard_step = "project_after";
         if (await project(runner) !== vendorProjectHash)
-            refuse();
+            refuse("metamask_session_project_changed");
         observation.after_guard_verified = true;
         observation.stage = "complete";
         observation.guard_step = null;
