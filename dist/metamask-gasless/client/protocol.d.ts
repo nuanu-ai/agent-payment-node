@@ -1,4 +1,5 @@
 import { type MetaMaskReadDiagnostic } from "./read-diagnostic.js";
+import { type MetaMaskSubmitDiagnostic } from "./submit-diagnostic.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity, MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
 import type { MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
 import { type MetaMaskGaslessFailure } from "../reasons.js";
@@ -31,6 +32,7 @@ export type HelperResponse = {
     readonly ok: false;
     readonly failure: MetaMaskGaslessFailure;
     readonly diagnostic?: MetaMaskReadDiagnostic;
+    readonly submitDiagnostic?: MetaMaskSubmitDiagnostic;
 };
 export declare function helperRequest(value: unknown): HelperRequest;
 export declare function helperResponse(value: unknown, request: HelperRequest): HelperResponse;

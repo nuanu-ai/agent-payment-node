@@ -15,7 +15,7 @@ const EFFECT_STATES = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCA
 const REFUSALS = {
     metamask_native_chain_unsupported: { message: "MetaMask native transfers do not support this chain.", nextActions: () => [] },
     metamask_vendor_read_failed: { message: "The MetaMask Agent Wallet did not answer a read of its session, Guard mode or policy.",
-        nextActions: () => ["mm auth status --json"] },
+        nextActions: ({ read }) => [`mm ${READ_ARGS[read ?? "auth status"].join(" ")}`] },
     metamask_session_required: { message: "The MetaMask Agent Wallet has no signed-in session; sign in again.",
         nextActions: ({ profile }) => profile === undefined ? [] : [`apn wallet connect --profile ${profile} --provider metamask-agent-wallet --auth-method browser`] },
     metamask_session_project_changed: { message: "The MetaMask Agent Wallet is signed in to another project than this transfer was quoted in.", nextActions: () => [] },
@@ -32,15 +32,15 @@ const REFUSALS = {
 const MODES = new Set(["guard", "beast"]);
 class NativeReadRefusal extends ApnError {
     nativeDiagnostic;
-    constructor(nativeDiagnostic, message, details) {
-        super("APN_OPERATION_BLOCKED", message, details);
+    constructor(nativeDiagnostic, code, message, details) {
+        super(code, message, details);
         this.nativeDiagnostic = nativeDiagnostic;
     }
 }
 function refuse(reason, facts = {}, who = {}, diagnostic) {
     const details = { ...facts, reason, nextActions: REFUSALS[reason].nextActions(who) };
     if (diagnostic !== undefined)
-        throw new NativeReadRefusal(diagnostic, REFUSALS[reason].message, details);
+        throw new NativeReadRefusal(diagnostic, "APN_OPERATION_BLOCKED", REFUSALS[reason].message, details);
     throw new ApnError("APN_OPERATION_BLOCKED", REFUSALS[reason].message, details);
 }
 const quoted = (value) => /^[A-Za-z0-9_./@:+=-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
@@ -61,7 +61,7 @@ async function runnable(error) {
     }
     const prefix = `${quoted(process.execPath)} ${quoted(script)} `;
     const details = { ...error.details, nextActions: actions.map(action => action.startsWith("mm ") ? prefix + action.slice(3) : action) };
-    return error instanceof NativeReadRefusal ? new NativeReadRefusal(error.nativeDiagnostic, error.message, details)
+    return error instanceof NativeReadRefusal ? new NativeReadRefusal(error.nativeDiagnostic, error.code, error.message, details)
         : new ApnError(error.code, error.message, details);
 }
 function chain(value) {
@@ -71,7 +71,7 @@ function chain(value) {
 function success(result, read, who = {}) {
     const parsed = parseMetaMaskProcessOutput(result.stdout), envelope = parsed?.envelope;
     if (result.exitCode !== 0 || parsed === null || parsed.notices.length !== 0 || envelope?.ok !== true || !isPlainRecord(envelope.data))
-        refuse("metamask_vendor_read_failed", { failedRead: read }, who, result.nativeDiagnostic === undefined ? undefined : validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, code: result.exitCode === 0 ? "protocol" : result.nativeDiagnostic.code }));
+        refuse("metamask_vendor_read_failed", { failedRead: read }, { ...who, read }, result.nativeDiagnostic === undefined ? undefined : validateMetaMaskNativeDiagnostic({ ...result.nativeDiagnostic, code: result.exitCode === 0 ? "protocol" : result.nativeDiagnostic.code }));
     return envelope.data;
 }
 function remaining(deadline) {
@@ -79,8 +79,31 @@ function remaining(deadline) {
         return undefined;
     return nativeDeadlineRemaining(deadline);
 }
+const READ_ARGS = { "auth status": ["auth", "status", "--json"],
+    "trading-mode get": ["wallet", "trading-mode", "get", "--json"], "policy get": ["wallet", "policy", "get", "--json"] };
+/**
+ * One vendor read. A read the runner itself failed (QA 0.5.80 MM-NATIVE-READ-TIMEOUT-DIAGNOSTIC-080-001: a timeout,
+ * the deadline, a start or protocol failure) keeps its code, message and retry advice, and names the failed read and
+ * the runner's own failure class. Only a read whose vendor process ran and failed other than by the deadline also
+ * offers that read to run by hand; a client that did not resolve or a passed deadline keeps the error's own advice.
+ */
+async function vendorRead(runner, read, deadline) {
+    const timeoutMs = remaining(deadline);
+    try {
+        return await runner.runJson(READ_ARGS[read], timeoutMs, deadline);
+    }
+    catch (error) {
+        if (!(error instanceof ApnError))
+            throw error;
+        const diagnostic = takeMetaMaskNativeProcessFailureDiagnostic(error);
+        const byHand = diagnostic?.stage === "sdk_read" && diagnostic.code !== "deadline";
+        const details = { ...error.details, reason: "metamask_vendor_read_failed", failedRead: read, readFailure: diagnostic?.code ?? "unclassified",
+            ...(byHand ? { nextActions: [`mm ${READ_ARGS[read].join(" ")}`] } : {}) };
+        throw diagnostic === undefined ? new ApnError(error.code, error.message, details) : new NativeReadRefusal(diagnostic, error.code, error.message, details);
+    }
+}
 async function project(runner, deadline, who = {}) {
-    const result = await runner.runJson(["auth", "status", "--json"], remaining(deadline), deadline);
+    const result = await vendorRead(runner, "auth status", deadline);
     try {
         const data = success(result, "auth status", who);
         if (data.authenticated !== true || !isPlainRecord(data.summary) || data.summary.mode !== "session" ||
@@ -103,7 +126,7 @@ async function readPolicy(runner, expected, deadline, profile) {
         if (typeof address !== "string" || address.toLowerCase() !== payer)
             refuse("metamask_wallet_mismatch", {}, who);
     };
-    const mode = await runner.runJson(["wallet", "trading-mode", "get", "--json"], remaining(deadline), deadline);
+    const mode = await vendorRead(runner, "trading-mode get", deadline);
     try {
         const data = success(mode, "trading-mode get", who);
         selected(data.address);
@@ -114,7 +137,7 @@ async function readPolicy(runner, expected, deadline, profile) {
     finally {
         mode.stdout.fill(0);
     }
-    const result = await runner.runJson(["wallet", "policy", "get", "--json"], remaining(deadline), deadline);
+    const result = await vendorRead(runner, "policy get", deadline);
     let admitted;
     try {
         const data = success(result, "policy get", who);

@@ -155,7 +155,8 @@ export class MetaMaskGaslessService {
         const result = liveMetaMaskGaslessOperation(step.operation);
         const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
                 reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
-        return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved };
+        return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved,
+            ...(step.submitDiagnostic === undefined ? {} : { submit_diagnostic: submitDiagnosticOutput(step.submitDiagnostic) }) };
     }
     dependencies() {
         if (this.context.metaMaskGasless === undefined)
@@ -187,5 +188,9 @@ export class MetaMaskGaslessService {
             return await work(current.record);
         });
     }
+}
+/** The submit diagnostic in the output's own key style. */
+function submitDiagnosticOutput(d) {
+    return { stage: d.stage, post: d.post, http_status: d.httpStatus, check: d.check, provider_error: d.providerError, provider_status: d.providerStatus };
 }
 //# sourceMappingURL=service.js.map
