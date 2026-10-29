@@ -327,7 +327,9 @@ export class SecureStateStore {
       } else {
         try {
           await lstat(target);
-          stateSecurity("State target appeared during an atomic write.");
+          // A create-only write that another writer published first meets the same conflict as one that found the
+          // target occupied: link() would refuse it, and callers read and validate the winner's file.
+          stateSecurity(createOnly ? "State target is already occupied." : "State target appeared during an atomic write.");
         } catch (error) {
           if (!isCode(error, "ENOENT")) throw error;
         }
