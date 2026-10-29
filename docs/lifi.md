@@ -974,7 +974,15 @@ route's standard finality), Circle's nonce is the only discriminator the
 protocol has; APN cannot check it on chain, and the per-message claim below still
 keeps one receipt to one operation. If Circle mislabeled such a pair, the later
 operation would read `delivered` with the earlier receive and the earlier one
-would stay `unread` (`circle_delivery_message_claimed`). The receiving transaction is the `forwardTxHash` Circle names or,
+would stay `unread` (`circle_delivery_message_claimed`). That is this route's
+contract, and every recorded delivery states it: beside the proof,
+`delivery.operationBinding` is `circle_attested_nonce`. The bytes, the burn's own
+event, the time order and the credit are read on chain; which of several burns
+with identical bytes a receive belongs to rests on the nonce Circle attested, the
+same attestation on which Solana mints. APN does not refuse a repeat payment of
+the same terms while the first is in flight: that would block a payer's ordinary
+second purchase at one price from one seller to guard against a labeling error
+by the issuer whose attestation already decides the mint. The receiving transaction is the `forwardTxHash` Circle names or,
 without one (a failed forward received by someone else), found among the
 successful finalized transactions naming the message's `used_nonce` account:
 anyone may name that public account, so each (oldest first, one page of 16) is

@@ -27,6 +27,12 @@ import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
 /** v2 binds the message to the burn's own `MessageSent`; v1 records (0.5.76, without that binding) are never read. */
 export const CIRCLE_SOLANA_DELIVERY_SCHEMA = "apn.circle-v2-solana-delivery.v2";
 const CLAIM_SCHEMA = "apn.circle-v2-solana-delivery-claim.v2", CLAIMS = "circle-solana-delivery-claims-v2";
+/**
+ * What ties a recorded delivery to its operation, shown beside every recorded proof. The bytes, the burn's own event, the
+ * time order and the credit are read on chain; which of several burns with identical bytes a receive belongs to rests on
+ * the nonce Circle attested, as Circle's attestation already decides what Solana mints.
+ */
+export const CIRCLE_OPERATION_BINDING = "circle_attested_nonce";
 /** Circle's CCTP V2 message transmitter on Solana mainnet; a received message's nonce account is its PDA ["used_nonce", nonce]. */
 export const CIRCLE_SOLANA_MESSAGE_TRANSMITTER = "CCTPV2Sm4AdWt5296sk4P66VBZ7bEhcARwFaaS9YPbeC";
 export const CIRCLE_SOLANA_RPC_ACTION = "Set APN_SOLANA_RPC_URL to a Solana mainnet HTTPS endpoint, then rerun the same command.";

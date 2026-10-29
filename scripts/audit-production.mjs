@@ -13,8 +13,34 @@ const isRecord = value => value !== null && typeof value === "object" && !Array.
  * is 4.6.7; awal 2.12.x and @x402/* 2.x require zod ^3, which has no fixed release, and zod 4 breaks their APIs
  * (single-argument z.record, errorMap). Only zod 3.x installed under those packages is excepted, until the expiry.
  */
+/**
+ * Accepted 2026-10-29 under the owner's standing APN QA mandate (QA 0.5.77 RELEASE-AUDIT-DEEPMERGE-077-001), the rule of
+ * the zod exception: GHSA-gcqx-w48m-w2h4 (npm advisory 1243505) covers every deepmerge from 4.2.0 to 4.3.1, the latest
+ * release; upstream closed the report with no fix (TehShrike/deepmerge#273). Only the Torus HTTP and login helpers under
+ * @metamask/agent-wallet require it in production. They merge request options and login parameters their own code
+ * builds and never a response body. The `mm` CLI bundles its own copy, so no override of the installed package could
+ * change what runs.
+ */
 export const EXCEPTIONS = Object.freeze([Object.freeze({ advisory: 1243066, ghsa: "GHSA-mrhx-c7xc-m3w5", package: "zod", major: "3",
-  under: Object.freeze(["node_modules/awal/", "node_modules/@x402/"]), expires: "2026-11-23T00:00:00.000Z" })]);
+  under: Object.freeze(["node_modules/awal/", "node_modules/@x402/"]), expires: "2026-11-23T00:00:00.000Z" }),
+Object.freeze({ advisory: 1243505, ghsa: "GHSA-gcqx-w48m-w2h4", package: "deepmerge", major: "4",
+  requiredBy: Object.freeze(["@toruslabs/customauth", "@toruslabs/http-helpers"]), expires: "2026-11-28T00:00:00.000Z" })]);
+
+/**
+ * The same advisory in the vendored MetaMask EVM SDK (audit-vendor-emitted.mjs): its bundle carries deepmerge 4.3.1 from
+ * @toruslabs/http-helpers, called only by that helper's `get`, whose two callers (the gas-estimate fetches) pass literal
+ * request options.
+ */
+export const VENDOR_EXCEPTIONS = Object.freeze([Object.freeze({ advisory: 1243505, ghsa: "GHSA-gcqx-w48m-w2h4", package: "deepmerge",
+  versions: Object.freeze(["4.3.1"]), bundles: Object.freeze(["metamask-evm-sdk"]), expires: "2026-11-28T00:00:00.000Z" })]);
+
+const packageName = path => path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
+/** Every production lockfile package that requires `name` is one of `allowed`; APN's own manifest never does. */
+function requiredOnlyBy(lock, name, allowed) {
+  return Object.entries(lock).every(([path, row]) => !isRecord(row) || row.dev === true ||
+    !["dependencies", "optionalDependencies", "peerDependencies"].some(field => isRecord(row[field]) && name in row[field]) ||
+    path !== "" && allowed.includes(packageName(path)));
+}
 
 /** Which findings an approved exception covers and which still fail; `lock` is the lockfile's `packages` map. */
 export function classifyAudit(report, lock, nowMs, exceptions) {
@@ -27,7 +53,9 @@ export function classifyAudit(report, lock, nowMs, exceptions) {
       const exception = exceptions.find(item => item.advisory === advisory.source && item.package === name);
       if (exception === undefined) return false;
       if (nowMs >= Date.parse(exception.expires)) { failures.push(`${name}: exception for ${exception.ghsa} expired at ${exception.expires}`); return false; }
-      return entry.nodes.every(node => exception.under.some(prefix => node.startsWith(prefix)) &&
+      const scoped = node => exception.under === undefined ? requiredOnlyBy(lock, name, exception.requiredBy)
+        : exception.under.some(prefix => node.startsWith(prefix));
+      return entry.nodes.every(node => scoped(node) &&
         typeof lock[node]?.version === "string" && lock[node].version.startsWith(`${exception.major}.`));
     });
     if (covered && entry.via.every(isRecord)) { accepted.add(name); excepted.push({ package: name, advisories: advisories.map(advisory => advisory.source), nodes: entry.nodes }); }
@@ -46,6 +74,12 @@ export function classifyAudit(report, lock, nowMs, exceptions) {
     if (!accepted.has(name)) failures.push(`${name}: ${entry.severity} via ${entry.via.map(via => isRecord(via) ? via.url ?? via.source : via).join(", ")}`);
   }
   return { findings: entries.length, excepted, failures };
+}
+
+/** Whether an approved vendor exception covers one advisory row of `name`, emitted at `versions` by `bundles`. */
+export function vendorExcepted(name, row, versions, bundles, nowMs, exceptions) {
+  return exceptions.some(exception => exception.package === name && exception.advisory === row.id && nowMs < Date.parse(exception.expires) &&
+    versions.every(version => exception.versions.includes(version)) && bundles.every(bundle => exception.bundles.includes(bundle)));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {

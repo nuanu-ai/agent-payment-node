@@ -62,7 +62,11 @@ export async function releasePublishedTemporary(target: string, targetInfo: Stat
       released = true;
     }
   }
-  if (!released) return false;
+  if (!released) {
+    // The stage's own writer may have unlinked it after the caller's lstat: the same file, back to one link.
+    const now = await lstat(target).catch(() => null);
+    return now !== null && now.isFile() && now.dev === targetInfo.dev && now.ino === targetInfo.ino && now.nlink === 1;
+  }
   const directory = await open(parent, "r");
   try { await directory.sync(); } finally { await directory.close(); }
   return true;
