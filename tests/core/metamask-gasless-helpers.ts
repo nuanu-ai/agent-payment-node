@@ -61,6 +61,8 @@ export class MmTestProvider implements MetaMaskGaslessProviderPort {
   fees = ["50000"];
   feeAt = 0;
   failSubmit = false;
+  /** Thrown by submit when set, as the provider client would throw it. */
+  submitError: unknown;
   failObserve = false;
   failInspect = false;
   status: MetaMaskGaslessProviderObservation["status"] = "broadcasted";
@@ -94,6 +96,7 @@ export class MmTestProvider implements MetaMaskGaslessProviderPort {
   }
   async submit(intent: MetaMaskGaslessIntent) {
     this.calls.push("submit"); this.submissions.push(structuredClone(intent)); await this.beforeSubmit?.(intent);
+    if (this.submitError !== undefined) throw this.submitError;
     if (this.failSubmit) throw new Error("private_submit_canary");
     return this.hint(intent);
   }

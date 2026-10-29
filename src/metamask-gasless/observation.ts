@@ -1,4 +1,5 @@
 import type { StateStore } from "../state.js";
+import type { MetaMaskSubmitDiagnostic } from "./client/submit-diagnostic.js";
 import type { MetaMaskGaslessClock } from "./clock.js";
 import { mmDispatchIntent } from "./dispatch.js";
 import { mmPrivateHash } from "./identity.js";
@@ -21,6 +22,8 @@ export interface MetaMaskGaslessStep {
   readonly warning?: MetaMaskGaslessFailure;
   /** A nonterminal result read after only the reserved terminal slot was left; reported, never saved. */
   readonly unsaved?: { readonly observation: MetaMaskGaslessObservation; readonly cursor: MetaMaskGaslessCursor };
+  /** Where this call's own submit stopped, when it ended unknown (client/submit-diagnostic.ts); reported, never saved. */
+  readonly submitDiagnostic?: MetaMaskSubmitDiagnostic;
 }
 /** An owner-named observation RPC with the environment variable that named it. */
 export interface MetaMaskGaslessObserver {
@@ -30,6 +33,7 @@ export interface MetaMaskGaslessObserver {
 export interface MetaMaskGaslessProviderRead {
   readonly hint: MetaMaskGaslessProviderObservation | null;
   readonly failure: MetaMaskGaslessFailureReason | null;
+  readonly diagnostic?: MetaMaskSubmitDiagnostic;
 }
 export function metaMaskGaslessProviderObservation(value: unknown,
   op: MetaMaskGaslessOperationRecord): MetaMaskGaslessProviderObservation {

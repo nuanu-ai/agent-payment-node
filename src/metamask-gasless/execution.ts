@@ -1,4 +1,5 @@
 import type { ClockPort, WaitPort } from "../ports.js";
+import { takeSubmitDiagnostic } from "./client/submit-diagnostic.js";
 import type { StateStore } from "../state.js";
 import { metaMaskGaslessApprovalPhrase, metaMaskGaslessApprovalSummary } from "./approval.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
@@ -97,7 +98,8 @@ export class MetaMaskGaslessExecution {
         } catch (error) {
           if (mmClassify(error, "mm_gasless_submit_unknown").reason === "mm_gasless_clock") throw error;
           this.clock.check(op);
-          return { hint: null, failure: "mm_gasless_submit_unknown" } satisfies MetaMaskGaslessProviderRead;
+          const diagnostic = takeSubmitDiagnostic(error);
+          return { hint: null, failure: "mm_gasless_submit_unknown", ...(diagnostic === undefined ? {} : { diagnostic }) } satisfies MetaMaskGaslessProviderRead;
         }
       });
       this.clock.check(op);
@@ -112,7 +114,8 @@ export class MetaMaskGaslessExecution {
       // A storage failure is not permission to re-save an uncertain marker or POST.
       throw error;
     }
-    return await this.observation.run(op, submitted);
+    const step = await this.observation.run(op, submitted);
+    return submitted.diagnostic === undefined ? step : { ...step, submitDiagnostic: submitted.diagnostic };
   }
 
   /**

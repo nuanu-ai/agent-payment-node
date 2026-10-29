@@ -120,8 +120,9 @@ test("the rehearsal helper gate refuses the relay-capable modes before any child
   const runner = new PresendRunner();
   const client = new MetaMaskGaslessProviderClient({ environment: {}, clock: f.clock, runner });
 
+  // The refusal says the submit stopped at the runner, before any POST (submit-diagnostic.ts).
   await assert.rejects(client.submit(intent), { code: "APN_OPERATION_BLOCKED",
-    details: { reason: "mm_gasless_submit_unknown" } });
+    details: { reason: "mm_gasless_submit_unknown", submitStage: "launch", submitPost: "not_reached", submitCheck: "runner_launch" } });
   await assert.rejects(client.observe(intent), { code: "APN_PROVIDER_UNAVAILABLE",
     details: { reason: "mm_gasless_provider_unavailable" } });
   assert.deepEqual(runner.refused, ["submit", "observe"]);

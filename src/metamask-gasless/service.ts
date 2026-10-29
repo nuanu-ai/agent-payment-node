@@ -149,7 +149,8 @@ export class MetaMaskGaslessService {
     const result = liveMetaMaskGaslessOperation(step.operation);
     const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
       reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
-    return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved };
+    return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved,
+      ...(step.submitDiagnostic === undefined ? {} : { submit_diagnostic: step.submitDiagnostic }) };
   }
   private dependencies(): MetaMaskGaslessDependencies {
     if (this.context.metaMaskGasless === undefined) mmFail("mm_gasless_capability_unavailable");
