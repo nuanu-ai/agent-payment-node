@@ -1,4 +1,5 @@
 import type { ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
+import { type SubmitCheck, type SubmitPost } from "./submit-diagnostic.js";
 import { type SentinelFailure } from "./sentinel.js";
 import type { MetaMaskGaslessIntent, MetaMaskGaslessQuote } from "../model.js";
 import type { MetaMaskGaslessQuoteInput } from "../ports.js";
@@ -47,6 +48,14 @@ export declare class HelperNetworkPolicy {
     private lastClockMs;
     private deadlineFailure;
     private sessionFailure;
+    /** What the submit's one POST did, as closed facts (submit-diagnostic.ts); `check` is "none" until a policy check refused. */
+    submitFacts(): {
+        readonly post: SubmitPost;
+        readonly httpStatus: number | null;
+        readonly check: SubmitCheck;
+        readonly providerError: string | null;
+    };
+    private submitRefused;
     /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
     relaySupportFacts(): RelaySupportFacts | undefined;
     /**
