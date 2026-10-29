@@ -61,9 +61,20 @@ test("deepmerge 4 required only by the Torus helpers is excepted, with what is f
     ["APN's own manifest", { ...merged, "": { dependencies: { deepmerge: "4.3.1" } } }],
     ["another production package", { ...merged, "node_modules/other": { version: "1.0.0", dependencies: { deepmerge: "^4.0.0" } } }],
     ["an optional dependency", { ...merged, "node_modules/other": { version: "1.0.0", optionalDependencies: { deepmerge: "^4.0.0" } } }],
-    ["another major", { ...merged, "node_modules/deepmerge": { version: "5.0.0" } }]]) {
+    ["another major", { ...merged, "node_modules/deepmerge": { version: "5.0.0" } }],
+    ["a requirer through an npm alias", { ...merged, "node_modules/other": { version: "1.0.0", dependencies: { dm: "npm:deepmerge@4.3.1" } } }],
+    ["another package installed under a Torus name", { ...merged, "node_modules/@toruslabs/customauth": { name: "evil", version: "1.0.0",
+      dependencies: { deepmerge: "^4.3.1" } } }],
+    ["deepmerge installed under another name", { ...merged, "node_modules/deepmerge": { name: "evil", version: "4.3.1" } }]]) {
     assert.deepEqual(failing(lock), ["deepmerge", "@toruslabs/http-helpers"], label);
   }
+  // The aliased copy itself is flagged under its install name: it is not deepmerge's own node.
+  const aliased = { vulnerabilities: { dm: { name: "dm", severity: "low", via: [{ ...DEEPMERGE, name: "dm" }], nodes: ["node_modules/dm"] } } };
+  assert.deepEqual(classifyAudit(aliased, { ...merged, "node_modules/dm": { name: "deepmerge", version: "4.3.1" } }, NOW, EXCEPTIONS).failures.map(failure => failure.split(":")[0]), ["dm"]);
+  const empty = { vulnerabilities: { deepmerge: { ...deepmergeReport.vulnerabilities.deepmerge, nodes: [] } } };
+  assert.deepEqual(classifyAudit(empty, merged, NOW, EXCEPTIONS).failures.map(failure => failure.split(":")[0]), ["deepmerge"], "a row with no nodes");
+  const unscoped = [{ ...EXCEPTIONS[1], requiredBy: undefined }];
+  assert.throws(() => classifyAudit(deepmergeReport, merged, NOW, unscoped), /exactly one scope/);
   const expired = classifyAudit(deepmergeReport, merged, Date.parse(EXCEPTIONS[1].expires), EXCEPTIONS);
   assert.ok(expired.failures.some(failure => failure.includes("expired")), JSON.stringify(expired));
 });
@@ -75,5 +86,6 @@ test("the vendored deepmerge is excepted only at 4.3.1, for its advisory, in the
   assert.equal(covered("deepmerge", row, ["4.3.1"], ["metamask-evm-sdk", "tron-utils"]), false);
   assert.equal(covered("deepmerge", { id: 1 }, ["4.3.1"], ["metamask-evm-sdk"]), false);
   assert.equal(covered("zod", row, ["4.3.1"], ["metamask-evm-sdk"]), false);
+  assert.equal(covered("deepmerge", row, [], []), false, "an answer for a package no bundle emitted");
   assert.equal(covered("deepmerge", row, ["4.3.1"], ["metamask-evm-sdk"], Date.parse(VENDOR_EXCEPTIONS[0].expires)), false);
 });
