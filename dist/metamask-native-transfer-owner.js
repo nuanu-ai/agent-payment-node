@@ -62,7 +62,7 @@ export async function assertMetaMaskNativeOwnedContextCurrent(scope, context) {
     e.guardStage = "owner_guard";
     await assertCurrentLocal(scope, context);
     e.guardStage = "sdk_read";
-    const vendor = await readMetaMaskNativeVendorPolicy(quote.chainId, quote.sender, transfer.recipient, deadline);
+    const vendor = await readMetaMaskNativeVendorPolicy(quote.chainId, quote.sender, transfer.recipient, deadline, context.profile);
     assertMetaMaskNativeOwnedScope(scope, context);
     if (vendor.vendorPolicyHash !== context.vendorPolicyHash || vendor.vendorProjectHash !== context.vendorProjectHash || vendor.tradingMode !== "guard" || vendor.selectedAddress.toLowerCase() !== quote.sender.toLowerCase())
         blocked("Native transfer current vendor project or Guard policy changed.");
@@ -204,7 +204,7 @@ export async function runMetaMaskNativeTransfer(stateRoot, input) {
             const usage = await ledger.usage(identity, now);
             const admission = evaluateAssetPolicy(owner.policy.registry, { chain: identity.chain, asset: identity.asset, rail: "direct", amountAtomic: "1", dailyUsageAtomic: usage.amountAtomic, asOfDate: day, asOf: now.toISOString() });
             const cap = BigInt(admission.caps.maximumPerTransferAtomic) < BigInt(admission.dailyRemainingAtomic) ? admission.caps.maximumPerTransferAtomic : admission.dailyRemainingAtomic;
-            const vendor = await readMetaMaskNativeVendorPolicy(chainId, sender, recipient);
+            const vendor = await readMetaMaskNativeVendorPolicy(chainId, sender, recipient, undefined, profileName);
             if (vendor.selectedAddress.toLowerCase() !== payer || vendor.tradingMode !== "guard" || !/^[a-f0-9]{64}$/.test(vendor.vendorProjectHash))
                 blocked("MetaMask vendor wallet or Guard mode differs from the paying profile.");
             const prepared = await prepareMetaMaskNativeQuote({ chainId, maximumNativeFeeWei: cap, sender, recipient, amountAtomic }).catch((error) => {
