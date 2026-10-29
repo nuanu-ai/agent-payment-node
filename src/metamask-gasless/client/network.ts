@@ -198,8 +198,8 @@ export class HelperNetworkPolicy {
   private assertSubmitDeadline(): void {
     if (this.context.mode !== "submit") return;
     const current = this.context.now().getTime(), deadline = Date.parse(this.context.intent.expiresAt);
-    if (!Number.isSafeInteger(current) || !Number.isSafeInteger(deadline)) { this.deadlineFailure = "mm_gasless_clock"; mmFail("mm_gasless_clock"); }
-    if (this.lastClockMs !== undefined && current < this.lastClockMs) { this.deadlineFailure = "mm_gasless_clock"; mmFail("mm_gasless_clock"); }
+    if (!Number.isSafeInteger(current) || !Number.isSafeInteger(deadline)) { this.deadlineFailure = "mm_gasless_clock"; this.submitRefused("clock"); mmFail("mm_gasless_clock"); }
+    if (this.lastClockMs !== undefined && current < this.lastClockMs) { this.deadlineFailure = "mm_gasless_clock"; this.submitRefused("clock"); mmFail("mm_gasless_clock"); }
     this.lastClockMs = current;
     if (current >= deadline) { this.deadlineFailure = "mm_gasless_expired"; this.submitRefused("deadline"); mmFail("mm_gasless_expired"); }
   }
@@ -212,7 +212,8 @@ export class HelperNetworkPolicy {
     requireBearer(headers, this.context.token);
     if (this.context.mode === "submit" && url === collection && method === "POST" && body !== null) {
       try { validateSubmitBody(body, this.context.intent, this.expectedSubmitBody); }
-      catch (error) { this.#submitPost = "refused"; this.submitRefused("body_mismatch"); throw error; }
+      // A POST that may already have left is never downgraded to refused.
+      catch (error) { if (this.#submitPost !== "sent") this.#submitPost = "refused"; this.submitRefused("body_mismatch"); throw error; }
       return "submit";
     }
     if (this.context.mode === "observe" && url === `${collection}/${this.context.intent.requestId}` && method === "GET" && body === null) return "observe";

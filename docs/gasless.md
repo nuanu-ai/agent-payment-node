@@ -591,14 +591,17 @@ Unichain and Avalanche belong to the local-wallet path above.
 
 A dispatch that ends `unknown_finality` with `mm_gasless_submit_unknown` stays
 unknown: APN cannot prove the relay request never arrived. The output of that
-same `approve` or `resume` call carries `submit_diagnostic` (never stored):
-the helper `stage` it stopped at, whether APN's network policy let the one
-`POST` out (`post`: `not_reached`, `refused` by APN's own body check, or
-`sent`), the POST's `httpStatus`, the `check` that refused (APN's body or
-response checks, a duplicate or unexpected request, the deadline, the
-session, or the helper runner), and the provider's error code or unknown job
-status when they are upper-case tokens. No body, URL, header or identifier is
-included.
+same `approve` or `resume` call carries `submit_diagnostic` (never stored): the
+helper `stage` it stopped at; `post`, which is `not_reached` only when no POST
+could have left (APN's own checks before it, or no helper process started),
+`refused` when APN's body check refused it unsent, `sent` when it may have
+reached MetaMask, and `unknown` when a helper that ran failed; the POST's
+`http_status`; the `check` that refused (APN's body or response checks, a
+duplicate or unexpected request, the deadline or clock, the session, an answer
+outside 2xx, no usable answer after it left, or the helper runner); and MetaMask's error code
+or unknown job status when they are short upper-case tokens. No body, URL,
+header or identifier is included. Only `not_reached` and `refused` rule out a
+payment; never prepare the transfer again on any other value.
 
 ### Tested keyless RPC endpoints
 

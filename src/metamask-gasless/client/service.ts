@@ -83,12 +83,19 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
     }
     if (request.mode === "submit") {
       const facts = policy?.submitFacts();
-      // A sent POST answered outside 2xx, with no check of APN's own refusing, is the provider's answer itself.
-      const answered = facts?.post === "sent" && facts.httpStatus !== null && (facts.httpStatus < 200 || facts.httpStatus >= 300);
-      const check: SubmitCheck = facts !== undefined && facts.check !== "none" ? facts.check : sent.check ?? (answered ? "http_status" : "unclassified");
-      return { version: MM_HELPER_VERSION, ok: false, failure, submitDiagnostic: submitDiagnostic(sent.stage, { post: facts?.post ?? "not_reached",
-        httpStatus: facts?.httpStatus ?? null, check, providerError: facts?.providerError ?? null,
-        providerStatus: check === "response_status" ? sent.providerStatus : null }) };
+      // A sent POST answered outside 2xx, with no check of APN's own refusing, is the provider's answer itself; a sent
+      // POST with no answer at all (a transport failure after it left) says so.
+      const post = facts?.post ?? "not_reached", status = facts?.httpStatus ?? null;
+      const answered = post === "sent" && status !== null && (status < 200 || status >= 300);
+      const check: SubmitCheck = facts !== undefined && facts.check !== "none" ? facts.check
+        : sent.check ?? (answered ? "http_status" : post === "sent" && status === null ? "no_answer" : "unclassified");
+      // The diagnostic never replaces the failure: one that does not validate is left out.
+      let diagnostic;
+      try {
+        diagnostic = submitDiagnostic(sent.stage, { post, httpStatus: status, check, providerError: facts?.providerError ?? null,
+          providerStatus: check === "response_status" ? sent.providerStatus : null });
+      } catch { diagnostic = undefined; }
+      return { version: MM_HELPER_VERSION, ok: false, failure, ...(diagnostic === undefined ? {} : { submitDiagnostic: diagnostic }) };
     }
     return { version: MM_HELPER_VERSION, ok: false, failure };
   } finally {
@@ -201,7 +208,7 @@ async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: 
   if (second.generationHash !== first.generationHash || second.projectId !== first.projectId || second.token !== first.token) {
     mmFail("mm_gasless_binding_changed");
   }
-  assertBeforeDeadline(intent.expiresAt, now());
+  sent.check = "deadline"; assertBeforeDeadline(intent.expiresAt, now()); sent.check = undefined;
   sent.stage = "body";
   const wireExecutions = evm.executionsToWire(intent.quote.executions.map((item) => ({ target: item.target, value: BigInt(item.value), callData: item.callData })));
   const wireDelegation = evm.unsignedDelegationToWire(intent.unsignedDelegation as never);
