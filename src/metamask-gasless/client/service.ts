@@ -1,5 +1,6 @@
 import { ApnError } from "../../errors.js";
 import { readDiagnostic, type ReadStage } from "./read-diagnostic.js";
+import { submitDiagnostic, submitToken, type SubmitCheck, type SubmitStage } from "./submit-diagnostic.js";
 import { agentSdk, agentEvm, foxEvm, foxKeyring, ethereumControllers } from "./sdk-vendor.js";
 import { homedir } from "node:os";
 import { encodeFunctionData, hashTypedData, parseAbi } from "viem";
@@ -38,6 +39,8 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
   const home = options.homeDirectory ?? homedir();
   let policy: HelperNetworkPolicy | undefined;
   const phase: { stage: ReadStage } = { stage: "private_state" };
+  // The submit's own stage and the response check that refused, for its closed diagnostic (submit-diagnostic.ts).
+  const sent: SubmitProgress = { stage: "private_state", check: undefined, providerStatus: null };
   const originalFetch = globalThis.fetch;
   const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
   const consoleMethods = saveConsole();
@@ -54,7 +57,8 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       if (request.mode === "submit") policy.primeSubmitClock(firstObservedAt);
       globalThis.fetch = policy.fetch;
       const result = request.mode === "quote" ? await quote(request.input, state, policy, phase) : request.mode === "submit" ?
-        await submit(request.intent, state, home, now, policy, firstObservedAt) : await observe(request.intent, state, policy, now);
+        await submit(request.intent, state, home, now, policy, firstObservedAt, sent) : await observe(request.intent, state, policy, now);
+      if (request.mode === "submit") sent.stage = "complete";
       policy.assertComplete();
       return { version: MM_HELPER_VERSION, ok: true, result };
     }
@@ -76,6 +80,22 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage,
         invariant, context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate, context?.tokenFeesShape,
         { ...context?.feeFacts, ...relay, ...usdc }) };
+    }
+    if (request.mode === "submit") {
+      const facts = policy?.submitFacts();
+      // A sent POST answered outside 2xx, with no check of APN's own refusing, is the provider's answer itself; a sent
+      // POST with no answer at all (a transport failure after it left) says so.
+      const post = facts?.post ?? "not_reached", status = facts?.httpStatus ?? null;
+      const answered = post === "sent" && status !== null && (status < 200 || status >= 300);
+      const check: SubmitCheck = facts !== undefined && facts.check !== "none" ? facts.check
+        : sent.check ?? (answered ? "http_status" : post === "sent" && status === null ? "no_answer" : "unclassified");
+      // The diagnostic never replaces the failure: one that does not validate is left out.
+      let diagnostic;
+      try {
+        diagnostic = submitDiagnostic(sent.stage, { post, httpStatus: status, check, providerError: facts?.providerError ?? null,
+          providerStatus: check === "response_status" ? sent.providerStatus : null });
+      } catch { diagnostic = undefined; }
+      return { version: MM_HELPER_VERSION, ok: false, failure, ...(diagnostic === undefined ? {} : { submitDiagnostic: diagnostic }) };
     }
     return { version: MM_HELPER_VERSION, ok: false, failure };
   } finally {
@@ -165,16 +185,21 @@ async function buildUnsigned(input: Extract<HelperRequest, { mode: "buildUnsigne
   return mmValidateUnsigned(result, input);
 }
 
+interface SubmitProgress { stage: SubmitStage; check: SubmitCheck | undefined; providerStatus: string | null }
+
 async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: string, now: () => Date,
-  policy: HelperNetworkPolicy, firstObservedAt: Date): Promise<MetaMaskGaslessProviderObservation> {
+  policy: HelperNetworkPolicy, firstObservedAt: Date, sent: SubmitProgress): Promise<MetaMaskGaslessProviderObservation> {
+  sent.stage = "sdk_load";
   const evm = await foxEvm();
   const keyrings = await foxKeyring();
+  sent.stage = "hydrate";
   const firstHydrated = await hydrateSdkState(first);
   if (firstHydrated.writes() !== 0) mmFail("mm_gasless_state_security");
   const { keyring } = await keyrings.createKeyringController({ mode: keyrings.KEYRING_KIND.SERVER,
     input: { baseUrl: SERVER_URL, authToken: first.token, projectId: first.projectId,
       wallets: firstHydrated.walletState.remoteWallets as never[] }, adapters: [(deps) => new evm.EvmServerAdapter(deps)], logLevel: "silent" });
   const adapter = evm.evmServerAdapter(keyring);
+  sent.stage = "binding";
   const secondObservedAt = now();
   if (secondObservedAt.getTime() < firstObservedAt.getTime()) mmFail("mm_gasless_clock");
   const second = await readPrivateState(home, intent.binding, secondObservedAt);
@@ -183,16 +208,19 @@ async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: 
   if (second.generationHash !== first.generationHash || second.projectId !== first.projectId || second.token !== first.token) {
     mmFail("mm_gasless_binding_changed");
   }
-  assertBeforeDeadline(intent.expiresAt, now());
+  sent.check = "deadline"; assertBeforeDeadline(intent.expiresAt, now()); sent.check = undefined;
+  sent.stage = "body";
   const wireExecutions = evm.executionsToWire(intent.quote.executions.map((item) => ({ target: item.target, value: BigInt(item.value), callData: item.callData })));
   const wireDelegation = evm.unsignedDelegationToWire(intent.unsignedDelegation as never);
   const expectedBody = { requestId: intent.requestId, method: "eth_sendRelayTransaction", encoding: "redeemDelegations",
     tx: { from: intent.binding.address, chainId: intent.request.chainId }, executions: wireExecutions, delegation: wireDelegation };
   policy.setExpectedSubmitBody(expectedBody);
+  sent.stage = "post";
   const status = await adapter.submitRelayTransaction({ from: intent.binding.address, chainId: intent.request.chainId,
     executions: wireExecutions, delegation: wireDelegation },
   { chainId: intent.request.chainId, origin: "apn", requestId: intent.requestId });
-  return providerObservation(status, intent, now(), "mm_gasless_submit_unknown");
+  sent.stage = "response";
+  return providerObservation(status, intent, now(), "mm_gasless_submit_unknown", sent);
 }
 
 async function observe(intent: MetaMaskGaslessIntent, state: PrivateState, policy: HelperNetworkPolicy,
@@ -234,22 +262,32 @@ function validateSdkQuote(value: unknown, input: Extract<HelperRequest, { mode: 
 }
 
 function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, now: Date,
-  reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable"): MetaMaskGaslessProviderObservation {
-  if (!isPlainRecord(value) || value.requestId !== intent.requestId || value.kind !== "transaction" || typeof value.status !== "string" ||
-    !isPlainRecord(value.tx) || String(value.tx.from).toLowerCase() !== intent.binding.address || value.tx.chainId !== intent.request.chainId) {
-    mmFail(reason);
-  }
+  reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable", sent?: SubmitProgress): MetaMaskGaslessProviderObservation {
+  // Each refusal names its check for a submit's diagnostic; the conditions are the same as one compound test.
+  const refuse = (check: SubmitCheck): never => { if (sent !== undefined) sent.check = check; return mmFail(reason); };
+  if (!isPlainRecord(value)) return refuse("response_body");
+  if (value.requestId !== intent.requestId) return refuse("response_request_id");
+  if (value.kind !== "transaction") return refuse("response_kind");
+  if (typeof value.status !== "string") return refuse("response_status");
+  if (!isPlainRecord(value.tx) || String(value.tx.from).toLowerCase() !== intent.binding.address || value.tx.chainId !== intent.request.chainId) return refuse("response_tx");
   // The SDK preserves backend metadata. Extract only the bound observation fields;
   // approval details, links, signatures and any future metadata never leave this helper.
+  if (value.txHash !== undefined && sent !== undefined) sent.check = "response_hash";
   const txHash = value.txHash === undefined ? null : mmHex(value.txHash, 32, reason);
+  if (sent !== undefined) sent.check = undefined;
   const pending = ["EVALUATING", "SIGNING", "BROADCASTING"];
   const failed = ["FAILED", "BROADCAST_FAILED"];
   const unavailableStatuses = ["BROADCAST_TRACKING_EXPIRED", "CONFIRMATION_TRACKING_EXPIRED"];
   const status = value.status === "AWAITING_MFA" ? "awaiting_approval" : pending.includes(value.status) ? "pending" :
     value.status === "BROADCASTED" ? "broadcasted" :
     value.status === "CONFIRMED" ? "confirmed" : value.status === "DENIED" ? "denied" : value.status === "EXPIRED" ? "expired" :
-      failed.includes(value.status) ? "failed" : unavailableStatuses.includes(value.status) ? "unavailable" : mmFail(reason);
+      failed.includes(value.status) ? "failed" : unavailableStatuses.includes(value.status) ? "unavailable" : unknownStatus(value.status, sent, reason);
   return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status, txHash };
+}
+/** A job status APN does not know refuses; a submit's diagnostic keeps it when it is a token. */
+function unknownStatus(status: string, sent: SubmitProgress | undefined, reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable"): never {
+  if (sent !== undefined) { sent.check = "response_status"; sent.providerStatus = submitToken(status); }
+  return mmFail(reason);
 }
 function unavailable(intent: MetaMaskGaslessIntent, now: Date): MetaMaskGaslessProviderObservation {
   return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status: "unavailable", txHash: null };

@@ -1,3 +1,4 @@
+import { takeSubmitDiagnostic } from "./client/submit-diagnostic.js";
 import { metaMaskGaslessApprovalPhrase, metaMaskGaslessApprovalSummary } from "./approval.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
 import { MetaMaskGaslessClock } from "./clock.js";
@@ -112,7 +113,8 @@ export class MetaMaskGaslessExecution {
                     if (mmClassify(error, "mm_gasless_submit_unknown").reason === "mm_gasless_clock")
                         throw error;
                     this.clock.check(op);
-                    return { hint: null, failure: "mm_gasless_submit_unknown" };
+                    const diagnostic = takeSubmitDiagnostic(error);
+                    return { hint: null, failure: "mm_gasless_submit_unknown", ...(diagnostic === undefined ? {} : { diagnostic }) };
                 }
             });
             this.clock.check(op);
@@ -130,7 +132,8 @@ export class MetaMaskGaslessExecution {
             // A storage failure is not permission to re-save an uncertain marker or POST.
             throw error;
         }
-        return await this.observation.run(op, submitted);
+        const step = await this.observation.run(op, submitted);
+        return submitted.diagnostic === undefined ? step : { ...step, submitDiagnostic: submitted.diagnostic };
     }
     /**
      * Every check between the owner's approval and the dispatch marker, re-taken now. The prepared snapshot is

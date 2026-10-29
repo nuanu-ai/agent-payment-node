@@ -1,4 +1,5 @@
 import { readDiagnostic, readFailureError, readRunnerFailure, takeReadRunnerDiagnostic } from "./read-diagnostic.js";
+import { runnerDiagnostic, submitFailureError, takeSubmitDiagnostic } from "./submit-diagnostic.js";
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,15 +54,25 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
     catch (error) {
       if (request.mode === "inspect" || request.mode === "quote") throw readFailureError("mm_gasless_provider_unavailable",
         takeReadRunnerDiagnostic(error, request.mode) ?? readDiagnostic(request.mode, "launch", "runner_launch"));
-      return mmFail(request.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+      // A runner that did not say whether its helper started may have let the POST out. From a runner only its own two
+      // shapes count: refused before launch, or failed after it with the POST unknown.
+      if (request.mode === "submit") {
+        const own = takeSubmitDiagnostic(error);
+        throw submitFailureError("mm_gasless_submit_unknown", own !== undefined && (own.stage === "launch" || own.stage === "runner") ? own
+          : runnerDiagnostic("runner_launch", true));
+      }
+      return mmFail("mm_gasless_provider_unavailable");
     }
     let response;
     try { response = helperResponse(raw, request); } catch (error) {
       if (request.mode === "inspect" || request.mode === "quote") throw readFailureError(mmClassify(error, "mm_gasless_provider_unavailable").reason,
         readDiagnostic(request.mode, "helper_response", "response_invalid"));
+      if (request.mode === "submit") throw submitFailureError(mmClassify(error, "mm_gasless_submit_unknown").reason,
+        runnerDiagnostic("response_invalid", true));
       throw error;
     }
     if (!response.ok) {
+      if (response.submitDiagnostic !== undefined) throw submitFailureError(response.failure.reason, response.submitDiagnostic);
       if (response.diagnostic !== undefined) throw withMetaMaskProviderRefusal(readFailureError(response.failure.reason,
         response.diagnostic), response.diagnostic, request.mode === "quote" ? request.input.chainId : undefined);
       throw mmError(response.failure.reason);
@@ -72,13 +83,17 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
 
 export class SubprocessMetaMaskGaslessHelperRunner implements MetaMaskGaslessHelperRunner {
   async run(request: HelperRequest, options: HelperRunnerOptions): Promise<unknown> {
-    const failure = (invariant: "runner_launch" | "runner_exit" | "runner_timeout" | "runner_output", code: number | null = null, signal: NodeJS.Signals | null = null) =>
-      request.mode === "inspect" || request.mode === "quote" ? readRunnerFailure(request.mode, invariant, code, signal) : new Error("helper failed");
+    // Only a refusal before spawn proves the helper never ran; after spawn its POST may have left.
+    const failure = (invariant: "runner_launch" | "runner_exit" | "runner_timeout" | "runner_output", code: number | null = null,
+      signal: NodeJS.Signals | null = null, started = true) =>
+      request.mode === "inspect" || request.mode === "quote" ? readRunnerFailure(request.mode, invariant, code, signal)
+        : request.mode === "submit" ? submitFailureError("mm_gasless_submit_unknown", runnerDiagnostic(invariant, started))
+          : new Error("helper failed");
     if (!isAbsolute(process.execPath) || !isAbsolute(HELPER_ENTRY) || !Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1) {
-      throw failure("runner_launch");
+      throw failure("runner_launch", null, null, false);
     }
     const input = JSON.stringify(request);
-    if (Buffer.byteLength(input) > MAX_IO) throw failure("runner_launch");
+    if (Buffer.byteLength(input) > MAX_IO) throw failure("runner_launch", null, null, false);
     const environment = sanitizedEnvironment(options.environment);
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [HELPER_ENTRY], { shell: false, stdio: ["pipe", "pipe", "ignore"], env: environment });
