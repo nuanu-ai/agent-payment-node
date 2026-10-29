@@ -72,7 +72,7 @@ test("the owner's existing policy keeps working by meaning: seller allowlisted w
  setup();policyQueue({payer:OWNER,policy:OWNER_POLICY});await assert.rejects(readMetaMaskNativeVendorPolicy(1,getAddress(OWNER),RECIPIENT),{message:/does not allowlist this recipient/});
 });
 const refusals: Record<string, {readonly change: Parameters<typeof policyQueue>[0]; readonly reason?: string}> = {
-  empty:{change:{policy:""},reason:"metamask_guard_policy_unreadable"},
+  empty:{change:{policy:""},reason:"metamask_guard_policy_missing"},
   otherWallet:{change:{policy:POLICY.replace(`'${PAYER}'`,`'${RECIPIENT}'`)},reason:"metamask_guard_policy_wallet_mismatch"},
   notAllowlisted:{change:{policy:POLICY.replaceAll(RECIPIENT,PAYER).replace(RECIPIENT.toLowerCase(),PAYER.toLowerCase())},reason:"metamask_guard_recipient_not_allowlisted"},
   otherChainOnly:{change:{policy:POLICY.replace("    chain_id: 1\n","    chain_id: 137\n")},reason:"metamask_guard_recipient_not_allowlisted"},
@@ -118,25 +118,34 @@ test("the vendor policy changing between prepare and send refuses before the fin
 
 // These request reads never authorize a financial effect or settlement.
 test("empty project metadata refuses unsigned",async()=>{setup();policyQueue({project:""});await assert.rejects(readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT));assert.equal(calls.length,1);});
-// QA 0.5.79 MM-NATIVE-PREFLIGHT-DIAGNOSTIC-079-001: each failed vendor invariant names itself and the owner's next step.
+// QA 0.5.79 MM-NATIVE-PREFLIGHT-DIAGNOSTIC-079-001: each failed vendor invariant names itself and the owner's next step;
+// a vendor step runs as typed, as the pinned client under APN's own Node (Homebrew links only `apn`, not `mm`).
+const MM = `${process.execPath} /test-only-pinned-package `;
 const refusal = (reason:string, nextActions:readonly string[], facts:Record<string,unknown>={}) => (error:unknown) => {
   const e = error as {code?:string;details?:Record<string,unknown>};
-  assert.equal(e.code,"APN_OPERATION_BLOCKED"); assert.deepEqual(e.details,{reason,...facts,nextActions}); return true;
+  assert.equal(e.code,"APN_OPERATION_BLOCKED"); assert.deepEqual(e.details,{...facts,reason,nextActions}); return true;
 };
-test("a refused vendor read names the failed invariant and the next step; nothing is sent",async()=>{
+test("a refused vendor read names the failed invariant and a next step that runs as typed; nothing is sent",async()=>{
   const read = () => readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT,undefined,"qa-mm-wallet");
-  setup();project();queue.push(result({mode:null,address:PAYER}));
-  await assert.rejects(read(),refusal("metamask_guard_mode_required",["mm wallet trading-mode set guard"],{observedTradingMode:"unset"}));
-  setup();project();queue.push(result({mode:"beast",address:PAYER}));
-  await assert.rejects(read(),refusal("metamask_guard_mode_required",["mm wallet trading-mode set guard"],{observedTradingMode:"beast"}));
+  const mode = [`${MM}wallet trading-mode get --json`,`${MM}wallet trading-mode set guard`];
+  for (const [reported, observed] of [[null,"unreported"],["beast","beast"],["paper","unrecognized"]] as const) {
+    setup();project();queue.push(result({mode:reported,address:PAYER}));
+    await assert.rejects(read(),refusal("metamask_guard_mode_required",mode,{observedTradingMode:observed}));
+  }
   setup();queue.push(result({authenticated:false,summary:null}));
   await assert.rejects(read(),refusal("metamask_session_required",["apn wallet connect --profile qa-mm-wallet --provider metamask-agent-wallet --auth-method browser"]));
-  setup();project();queue.push(result({mode:"guard",address:RECIPIENT}));
-  await assert.rejects(read(),refusal("metamask_wallet_mismatch",["mm wallet select"]));
-  setup();project();queue.push(result({mode:"guard",address:PAYER}),result({policy:null,address:PAYER}));
-  await assert.rejects(read(),refusal("metamask_guard_policy_missing",["mm wallet policy template","mm wallet policy get"]));
+  // The selected wallet is checked before the mode: another wallet in another mode is the wallet's refusal.
+  setup();project();queue.push(result({mode:"beast",address:RECIPIENT}));
+  await assert.rejects(read(),refusal("metamask_wallet_mismatch",[`${MM}wallet select ${PAYER}`]));
+  for (const policy of [null,"", "  \n"]) {
+    setup();project();queue.push(result({mode:"guard",address:PAYER}),result({policy,address:PAYER}));
+    await assert.rejects(read(),refusal("metamask_guard_policy_missing",[`${MM}wallet policy get --json`,`${MM}wallet policy template`]));
+  }
   setup();project();queue.push(result({mode:"guard",address:PAYER},1));
-  await assert.rejects(read(),refusal("metamask_vendor_read_failed",["mm auth status --json"]));
+  await assert.rejects(read(),refusal("metamask_vendor_read_failed",[`${MM}auth status --json`],{failedRead:"trading-mode get"}));
+  // The policy-meaning refusals get the same runnable step.
+  setup();policyQueue({policy:POLICY.replace(PAYER,RECIPIENT)});
+  await assert.rejects(read(),refusal("metamask_guard_policy_wallet_mismatch",[`${MM}wallet policy get`]));
   // Without a profile the session step cannot name one, so it offers none rather than a placeholder.
   setup();queue.push(result({authenticated:false,summary:null}));
   await assert.rejects(readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT),refusal("metamask_session_required",[]));
