@@ -7,7 +7,7 @@ import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
 import { pastUnstartedDeadline } from "../unstarted-deadline.js";
 import { CIRCLE_V2_SOURCE_TTL_MS } from "./circle-v2-source-service.js";
 import { settleCircleSourceUsage } from "./circle-v2-source-usage.js";
-import { circleSolanaDelivery } from "./circle-v2-solana-delivery.js";
+import { CIRCLE_OPERATION_BINDING, circleSolanaDelivery } from "./circle-v2-solana-delivery.js";
 export const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 const PROOF_KEYS = ["blockHash", "blockNumberAtomic", "blockTag", "chainId", "finalizedBlockNumberAtomic", "integrityHash", "nonceAtomic",
     "observedAt", "operationId", "payer", "profileHash", "schemaVersion", "status", "to", "transactionHash"];
@@ -73,6 +73,7 @@ export async function circleSourceStatus(root, journal, read, now, refreshAllowa
         outcome: proof?.status ?? null, sourceProof: proof, waitingFor, journal, proofClass, ...(left === undefined ? {} : { residualAllowance: left }),
         ...(usage === undefined || usage === null ? {} : { sourceUsage: usage }),
         ...(delivery === undefined ? {} : { delivery: { state: delivery.state, forwardState: delivery.forwardState, proof: delivery.proof,
+                ...(delivery.proof === null ? {} : { operationBinding: CIRCLE_OPERATION_BINDING }),
                 ...(delivery.unreadReason === undefined ? {} : { unreadReason: delivery.unreadReason }) } }),
         nextActions: [...delivery?.nextActions ?? [],
             ...waitingFor !== null && journal.transactionHash !== null ? [statusAction] : [],
