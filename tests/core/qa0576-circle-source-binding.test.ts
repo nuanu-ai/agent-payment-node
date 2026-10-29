@@ -60,8 +60,11 @@ test("between burns of the same bytes in flight together, Circle's nonce decides
   const { root, journal } = await setup(t);
   const twin = await burned(root, SMALL, H("c"), 8); await recorded(root, twin);
   const view = await status(root, twin, reader(SMALL, []), SMALL, sourceReceipt(SMALL, twin), sourceBlock(SMALL.burnTime + 30n));
-  assert.deepEqual([view.phase, view.delivery?.proof?.solanaSignature], ["delivered", SMALL.signature]);
-  await unread(await status(root, journal, reader(SMALL, [])), "circle_delivery_message_claimed", "the twin holds the receipt");
+  // The status says what that association rests on (QA 0.5.77): the nonce Circle attested, not a chain read.
+  assert.deepEqual([view.phase, view.delivery?.proof?.solanaSignature, view.delivery?.operationBinding], ["delivered", SMALL.signature, "circle_attested_nonce"]);
+  const claimed = await status(root, journal, reader(SMALL, []));
+  await unread(claimed, "circle_delivery_message_claimed", "the twin holds the receipt");
+  assert.equal(claimed.delivery !== undefined && "operationBinding" in claimed.delivery, false);
 });
 
 test("a message that differs from the burn's own event in a byte the burn fixed proves nothing", async (t) => {

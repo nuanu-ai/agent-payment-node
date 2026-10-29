@@ -1,9 +1,11 @@
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { VENDOR_EXCEPTIONS, vendorExcepted } from "./audit-production.mjs";
 
 // `npm audit --omit=dev` reads the lockfile's production closure. Vendored bundles carry code from
 // packages the lockfile files under dev, so this gate asks the same advisory service about the exact
-// package versions each bundle's provenance says it emitted. Severities mirror `--audit-level=low`.
+// package versions each bundle's provenance says it emitted. Severities mirror `--audit-level=low`; only a dated
+// exception in audit-production.mjs, scoped to its advisory, versions and bundles, keeps a finding from failing.
 const root = resolve(import.meta.dirname, "..");
 const BULK_ADVISORY_URL = "https://registry.npmjs.org/-/npm/v1/security/advisories/bulk";
 const FAILING = new Set(["low", "moderate", "high", "critical"]);
@@ -23,7 +25,7 @@ async function files(directory) {
 
 const shipped = JSON.parse(await readFile(join(root, "package.json"), "utf8")).files
   .map(pattern => /^vendor\/([^/]+)\/\*\*$/u.exec(pattern)?.[1]).filter(name => name !== undefined);
-const versions = new Map(), bundles = [];
+const versions = new Map(), emitters = new Map(), bundles = [];
 for (const name of shipped) {
   const directory = join(root, "vendor", name);
   if (!(await lstat(directory)).isDirectory()) throw new Error(`vendor ${name} is not a directory`);
@@ -39,6 +41,7 @@ for (const name of shipped) {
   for (const row of Object.values(emitted)) {
     if (typeof row?.name !== "string" || typeof row.version !== "string") throw new Error(`vendor ${name} emitted package row is malformed`);
     versions.set(row.name, new Set([...(versions.get(row.name) ?? []), row.version]));
+    emitters.set(row.name, new Set([...(emitters.get(row.name) ?? []), name]));
   }
   bundles.push(name);
 }
@@ -49,9 +52,12 @@ const response = await fetch(BULK_ADVISORY_URL, { method: "POST", headers: { "co
 if (response.status !== 200) throw new Error(`advisory service answered ${response.status}`);
 const advisories = await response.json();
 if (!isRecord(advisories) || !Object.values(advisories).every(Array.isArray)) throw new Error("advisory service answer has an unexpected shape");
-const findings = Object.entries(advisories).flatMap(([name, rows]) => rows.map(row => {
+const rows = Object.entries(advisories).flatMap(([name, list]) => list.map(row => {
   if (!FAILING.has(row.severity) && row.severity !== "info") throw new Error(`unknown advisory severity ${row.severity} for ${name}`);
-  return { name, emitted: body[name], severity: row.severity, vulnerableVersions: row.vulnerable_versions, url: row.url };
+  return { name, emitted: body[name], bundles: [...emitters.get(name) ?? []].sort(), severity: row.severity,
+    vulnerableVersions: row.vulnerable_versions, url: row.url, id: row.id };
 })).filter(row => FAILING.has(row.severity));
-process.stdout.write(`${JSON.stringify({ bundles, emittedPackages: Object.values(body).flat().length, findings }, null, 2)}\n`);
+const now = Date.now(), covered = row => vendorExcepted(row.name, row, row.emitted ?? [], row.bundles, now, VENDOR_EXCEPTIONS);
+const excepted = rows.filter(covered), findings = rows.filter(row => !covered(row));
+process.stdout.write(`${JSON.stringify({ bundles, emittedPackages: Object.values(body).flat().length, excepted, findings }, null, 2)}\n`);
 if (findings.length > 0) process.exitCode = 1;
