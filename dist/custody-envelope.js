@@ -8,12 +8,15 @@ const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$
 export function sealEnvelope(secret, spec, header, plaintext) {
     const salt = randomBytes(32), nonce = randomBytes(12);
     let key, ciphertext;
+    const pieces = [];
     try {
         const sealedHeader = header(salt.toString("base64"), nonce.toString("base64"));
         key = derive(secret, salt, spec.info(sealedHeader));
         const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
         cipher.setAAD(Buffer.from(canonicalJson(spec.aad(sealedHeader)), "utf8"));
-        ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+        pieces.push(cipher.update(plaintext));
+        pieces.push(cipher.final());
+        ciphertext = Buffer.concat(pieces);
         return { header: sealedHeader, salt: salt.toString("base64"), nonce: nonce.toString("base64"),
             ciphertext: ciphertext.toString("base64"), tag: cipher.getAuthTag().toString("base64") };
     }
@@ -23,6 +26,8 @@ export function sealEnvelope(secret, spec, header, plaintext) {
         key?.fill(0);
         ciphertext?.fill(0);
         plaintext.fill(0);
+        for (const piece of pieces)
+            piece.fill(0);
     }
 }
 export function sealCanonicalJson(secret, spec, header, value) {
@@ -40,11 +45,15 @@ export async function openEnvelope(secret, spec, header, parts, use) {
         const key = derive(secret, salt, spec.info(header));
         decoded.push(key);
         let plaintext = Buffer.alloc(0);
+        // update() returns the plaintext before final() authenticates it: each piece is zeroed too, also when final() throws.
+        const pieces = [];
         try {
             const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
             decipher.setAAD(Buffer.from(canonicalJson(spec.aad(header)), "utf8"));
             decipher.setAuthTag(tag);
-            plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+            pieces.push(decipher.update(ciphertext));
+            pieces.push(decipher.final());
+            plaintext = joined(pieces);
             return await use(plaintext);
         }
         catch (error) {
@@ -54,6 +63,8 @@ export async function openEnvelope(secret, spec, header, parts, use) {
         }
         finally {
             plaintext.fill(0);
+            for (const piece of pieces)
+                piece.fill(0);
         }
     }
     finally {
@@ -82,6 +93,16 @@ export async function openNested(secret, spec, envelope, accept) {
     const header = { ...envelope, cipher: { name: envelope.cipher.name, nonce: envelope.cipher.nonce } };
     return await openCanonicalJson(secret, spec, header, { salt: envelope.kdf.salt, nonce: envelope.cipher.nonce,
         ciphertext: envelope.cipher.ciphertext, tag: envelope.cipher.tag }, accept);
+}
+/** The pieces in one buffer of its own memory, outside Node's shared pool; each piece is zeroed once copied. */
+function joined(pieces) {
+    const out = Buffer.allocUnsafeSlow(pieces.reduce((total, piece) => total + piece.length, 0));
+    let offset = 0;
+    for (const piece of pieces) {
+        offset += piece.copy(out, offset);
+        piece.fill(0);
+    }
+    return out;
 }
 function derive(secret, salt, info) {
     return Buffer.from(hkdfSync("sha256", secret, salt, Buffer.from(info, "utf8"), 32));
