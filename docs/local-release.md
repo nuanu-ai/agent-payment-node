@@ -28,13 +28,23 @@ Preparation runs the core/source build and tests, supply-chain/platform tests, a
 ## Owner-approved audit exceptions
 
 `scripts/audit-production.mjs` fails on every production finding at low or above except these, each limited to the named
-package, major version and install paths, and refused after its expiry:
+package, major version and install paths (or the production packages that may require it), and refused after its expiry;
+`scripts/audit-vendor-emitted.mjs` takes only its own list, limited to advisory, exact versions and bundles:
 
 - GHSA-mrhx-c7xc-m3w5 (npm advisory 1243066, zod `<4.6.6`, memory exhaustion validating oversized constrained
   collections), approved 2026-10-24, expires 2026-11-23: zod 3.x under `node_modules/awal/` and `node_modules/@x402/`.
   APN's own zod is 4.6.7. awal 2.12.x and @x402/* 2.x require zod `^3`, which has no fixed release, and zod 4 breaks their
   APIs. The affected code runs in the awal child process; a hostile seller response could exhaust that child's memory,
   not APN's process or funds. Remove the exception when upstream ships a fix.
+- GHSA-gcqx-w48m-w2h4 (npm advisory 1243505, deepmerge `>=4.2.0 <=4.3.1`, prototype poisoning of merged objects),
+  accepted 2026-10-29 under the owner's standing APN QA mandate (QA 0.5.77), expires 2026-11-28: deepmerge 4.x while
+  `@toruslabs/http-helpers` and `@toruslabs/customauth` (under `@metamask/agent-wallet`) are the only production packages
+  that require it, and deepmerge 4.3.1 in the `metamask-evm-sdk` vendor bundle. 4.3.1 is the latest release and upstream
+  closed the report without a fix (TehShrike/deepmerge#273). The poisoning needs an attacker's object, such as parsed
+  JSON with its own `__proto__` key, as a merge source; these helpers merge only request options and login parameters
+  built in their own code, never a response body. In the vendor bundle the one call is the HTTP helper's `get`, whose two
+  callers (the gas-estimate fetches) pass literal request options; the `mm` CLI bundles its own copy, so an npm override
+  could not change what runs. Remove both when upstream ships a fix or the Torus helpers drop deepmerge.
 
 The output directory contains the following concrete review material:
 

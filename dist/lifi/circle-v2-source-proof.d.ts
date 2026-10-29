@@ -3,7 +3,7 @@ import { type CircleResidualView } from "./circle-v2-residual-allowance.js";
 import { SecureStateStore } from "../secure-state-store.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
 import { type CircleSourceUsage } from "./circle-v2-source-usage.js";
-import { type CircleSolanaDeliveryReader, type CircleSolanaDeliveryView } from "./circle-v2-solana-delivery.js";
+import { CIRCLE_OPERATION_BINDING, type CircleSolanaDeliveryReader, type CircleSolanaDeliveryView } from "./circle-v2-solana-delivery.js";
 export declare const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 /** The Base receipt of a CCTP V2 source burn, read once at the finalized tag (no archive state). */
 export interface CircleSourceProof {
@@ -52,7 +52,9 @@ export interface CircleSourceStatus {
     /** The payer's Base USDC daily-cap hold of this burn, settled from the recorded receipt (circle-v2-source-usage.ts). */
     readonly sourceUsage?: CircleSourceUsage;
     /** For a successful burn: its receipt on Solana, or what that receipt still waits for (circle-v2-solana-delivery.ts). */
-    readonly delivery?: Pick<CircleSolanaDeliveryView, "state" | "forwardState" | "proof" | "unreadReason">;
+    readonly delivery?: Pick<CircleSolanaDeliveryView, "state" | "forwardState" | "proof" | "unreadReason"> & {
+        readonly operationBinding?: typeof CIRCLE_OPERATION_BINDING;
+    };
 }
 /**
  * `operation status` of a Circle CCTP V2 Base source burn: the saved journal and, when its burn transaction is known,

@@ -8,7 +8,7 @@ import { pastUnstartedDeadline } from "../unstarted-deadline.js";
 import { CIRCLE_V2_SOURCE_TTL_MS } from "./circle-v2-source-service.js";
 import type { NonEvmSourceJournal } from "./non-evm-source-journal.js";
 import { settleCircleSourceUsage, type CircleSourceUsage } from "./circle-v2-source-usage.js";
-import { circleSolanaDelivery, type CircleSolanaDeliveryReader, type CircleSolanaDeliveryView } from "./circle-v2-solana-delivery.js";
+import { CIRCLE_OPERATION_BINDING, circleSolanaDelivery, type CircleSolanaDeliveryReader, type CircleSolanaDeliveryView } from "./circle-v2-solana-delivery.js";
 
 export const CIRCLE_SOURCE_PROOF_SCHEMA = "apn.circle-v2-source-proof.v1";
 /** The Base receipt of a CCTP V2 source burn, read once at the finalized tag (no archive state). */
@@ -68,7 +68,8 @@ export interface CircleSourceStatus {
   /** The payer's Base USDC daily-cap hold of this burn, settled from the recorded receipt (circle-v2-source-usage.ts). */
   readonly sourceUsage?: CircleSourceUsage;
   /** For a successful burn: its receipt on Solana, or what that receipt still waits for (circle-v2-solana-delivery.ts). */
-  readonly delivery?: Pick<CircleSolanaDeliveryView, "state" | "forwardState" | "proof" | "unreadReason">;
+  readonly delivery?: Pick<CircleSolanaDeliveryView, "state" | "forwardState" | "proof" | "unreadReason"> &
+    { readonly operationBinding?: typeof CIRCLE_OPERATION_BINDING };
 }
 const REVOKE = "apn circle approval revoke --profile <profile> --max-gas-limit-atomic <uint> --max-fee-per-gas-wei <wei> " +
   "--max-priority-fee-per-gas-wei <wei> --max-native-debit-wei <wei>";
@@ -95,6 +96,7 @@ export async function circleSourceStatus(root: string, journal: NonEvmSourceJour
     outcome: proof?.status ?? null, sourceProof: proof, waitingFor, journal, proofClass, ...(left === undefined ? {} : { residualAllowance: left }),
     ...(usage === undefined || usage === null ? {} : { sourceUsage: usage }),
     ...(delivery === undefined ? {} : { delivery: { state: delivery.state, forwardState: delivery.forwardState, proof: delivery.proof,
+      ...(delivery.proof === null ? {} : { operationBinding: CIRCLE_OPERATION_BINDING }),
       ...(delivery.unreadReason === undefined ? {} : { unreadReason: delivery.unreadReason }) } }),
     nextActions: [...delivery?.nextActions ?? [],
       ...waitingFor !== null && journal.transactionHash !== null ? [statusAction] : [],
