@@ -65,8 +65,13 @@ test("every update and final output is zeroed: sealing, opening, a wrong tag, ke
   const value = { secret: "s".repeat(24) };
   assert.deepEqual(await outputs(() => sealCanonicalJson(secret, spec, header, value)), [[true, true], [false, true]], "seal: update and final");
   const sealed = sealCanonicalJson(secret, spec, header, value);
-  assert.deepEqual(await outputs(() => openEnvelope(secret, spec, sealed.header, sealed, plaintext => plaintext.toString("utf8"))),
-    [[true, true], [false, true]], "open: update and final");
+  let atUse: unknown;
+  assert.deepEqual(await outputs(() => openEnvelope(secret, spec, sealed.header, sealed, plaintext => {
+    // The pieces are zeroed before the store sees the plaintext, which has memory of its own (not a slice of the shared pool).
+    atUse = [pieces.map(zero), plaintext.byteOffset, plaintext.buffer.byteLength === plaintext.length];
+    return plaintext.toString("utf8");
+  })), [[true, true], [false, true]], "open: update and final");
+  assert.deepEqual(atUse, [[true, true], 0, true]);
   const tag = Buffer.from(sealed.tag, "base64"); tag[0]! ^= 1;
   assert.deepEqual(await outputs(() => openEnvelope(secret, spec, sealed.header, { ...sealed, tag: tag.toString("base64") }, () => "unreachable")),
     [[true, true]], "a wrong tag: final() threw after update() returned the plaintext");
