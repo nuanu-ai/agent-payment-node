@@ -38,16 +38,19 @@ export function sealEnvelope<H>(secret: Buffer, spec: Pick<EnvelopeSpec<H>, "inf
   plaintext: Buffer): SealedParts & { readonly header: H } {
   const salt = randomBytes(32), nonce = randomBytes(12);
   let key: Buffer | undefined, ciphertext: Buffer | undefined;
+  const pieces: Buffer[] = [];
   try {
     const sealedHeader = header(salt.toString("base64"), nonce.toString("base64"));
     key = derive(secret, salt, spec.info(sealedHeader));
     const cipher = createCipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
     cipher.setAAD(Buffer.from(canonicalJson(spec.aad(sealedHeader)), "utf8"));
-    ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    pieces.push(cipher.update(plaintext)); pieces.push(cipher.final());
+    ciphertext = Buffer.concat(pieces);
     return { header: sealedHeader, salt: salt.toString("base64"), nonce: nonce.toString("base64"),
       ciphertext: ciphertext.toString("base64"), tag: cipher.getAuthTag().toString("base64") };
   } finally {
     salt.fill(0); nonce.fill(0); key?.fill(0); ciphertext?.fill(0); plaintext.fill(0);
+    for (const piece of pieces) piece.fill(0);
   }
 }
 
@@ -68,16 +71,19 @@ export async function openEnvelope<H, T>(secret: Buffer, spec: EnvelopeSpec<H>, 
     const salt = field("salt"), nonce = field("nonce"), ciphertext = field("ciphertext"), tag = field("tag");
     const key = derive(secret, salt, spec.info(header)); decoded.push(key);
     let plaintext = Buffer.alloc(0);
+    // update() returns the plaintext before final() authenticates it: each piece is zeroed too, also when final() throws.
+    const pieces: Buffer[] = [];
     try {
       const decipher = createDecipheriv("aes-256-gcm", key, nonce, { authTagLength: 16 });
       decipher.setAAD(Buffer.from(canonicalJson(spec.aad(header)), "utf8"));
       decipher.setAuthTag(tag);
-      plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      pieces.push(decipher.update(ciphertext)); pieces.push(decipher.final());
+      plaintext = Buffer.concat(pieces);
       return await use(plaintext);
     } catch (error) {
       if (error instanceof ApnError) throw error;
       return spec.fail("authentication", null, error);
-    } finally { plaintext.fill(0); }
+    } finally { plaintext.fill(0); for (const piece of pieces) piece.fill(0); }
   } finally { for (const bytes of decoded) bytes.fill(0); }
 }
 

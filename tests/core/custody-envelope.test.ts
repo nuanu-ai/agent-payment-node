@@ -3,9 +3,19 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 
 const crypto = await import("node:crypto");
-const salts: Buffer[] = [], keys: ArrayBuffer[] = [];
+const salts: Buffer[] = [], keys: ArrayBuffer[] = [], pieces: Buffer[] = [];
+type Streaming = { update(...args: unknown[]): Buffer; final(...args: unknown[]): Buffer };
+/** The real cipher, its update/final outputs recorded by reference (bytes, arguments and errors unchanged). */
+function recorded<C>(cipher: C): C {
+  const c = cipher as unknown as Streaming, update = c.update.bind(c), final = c.final.bind(c);
+  c.update = (...args) => { const out = update(...args); pieces.push(out); return out; };
+  c.final = (...args) => { const out = final(...args); pieces.push(out); return out; };
+  return cipher;
+}
+const real = crypto as unknown as { createCipheriv(...args: unknown[]): unknown; createDecipheriv(...args: unknown[]): unknown };
 // Only what custody-envelope.ts and canonical.ts import: a builtin cannot be re-exported whole.
-mock.module("node:crypto", { namedExports: { createCipheriv: crypto.createCipheriv, createDecipheriv: crypto.createDecipheriv, createHash: crypto.createHash,
+mock.module("node:crypto", { namedExports: { createCipheriv: (...args: unknown[]) => recorded(real.createCipheriv(...args)),
+  createDecipheriv: (...args: unknown[]) => recorded(real.createDecipheriv(...args)), createHash: crypto.createHash,
   randomBytes: (size: number) => { const bytes = crypto.randomBytes(size); salts.push(bytes); return bytes; },
   hkdfSync: (...args: Parameters<typeof crypto.hkdfSync>) => { const key = crypto.hkdfSync(...args); keys.push(key); return key; },
 } });
@@ -42,6 +52,31 @@ test("opening hands the plaintext to the store once, then zeroes it and the key,
   assert.deepEqual(failures.map(([failure, field]) => [failure, field]), [["authentication", null]]);
   assert.equal(causes.length, 1); assert.ok(isGcmAuthenticationError(causes[0]), `not an AES-GCM authentication failure: ${String(causes[0])}`);
   assert.ok(zero(new Uint8Array(keys[0]!)));
+});
+
+test("every update and final output is zeroed: sealing, opening, a wrong tag, key or AAD, a store refusal and a validator crash", async () => {
+  // QA 0.5.78 CUSTODY-TRANSIENT-PLAINTEXT-ZEROING-078-002: update() returned the plaintext before final() authenticated it,
+  // and only the concatenation was zeroed, also when final() threw on a wrong tag.
+  const outputs = async (action: () => unknown) => {
+    pieces.length = 0;
+    try { await action(); } catch { /* the refusal itself is asserted elsewhere */ }
+    return pieces.map(piece => [piece.length > 0, zero(piece)]);
+  };
+  const value = { secret: "s".repeat(24) };
+  assert.deepEqual(await outputs(() => sealCanonicalJson(secret, spec, header, value)), [[true, true], [false, true]], "seal: update and final");
+  const sealed = sealCanonicalJson(secret, spec, header, value);
+  assert.deepEqual(await outputs(() => openEnvelope(secret, spec, sealed.header, sealed, plaintext => plaintext.toString("utf8"))),
+    [[true, true], [false, true]], "open: update and final");
+  const tag = Buffer.from(sealed.tag, "base64"); tag[0]! ^= 1;
+  assert.deepEqual(await outputs(() => openEnvelope(secret, spec, sealed.header, { ...sealed, tag: tag.toString("base64") }, () => "unreachable")),
+    [[true, true]], "a wrong tag: final() threw after update() returned the plaintext");
+  assert.deepEqual(await outputs(() => openEnvelope(Buffer.alloc(32, 4), spec, sealed.header, sealed, () => "unreachable")), [[true, true]], "a wrong key");
+  assert.deepEqual(await outputs(() => openEnvelope(secret, { ...spec, aad: h => ({ ...h, extra: true }) }, sealed.header, sealed, () => "unreachable")),
+    [[true, true]], "a changed AAD");
+  assert.deepEqual(await outputs(() => openCanonicalJson(secret, spec, sealed.header, sealed, () => { throw new ApnError("APN_OPERATION_BLOCKED", "store refusal"); })),
+    [[true, true], [false, true]], "a store refusal");
+  assert.deepEqual(await outputs(() => openCanonicalJson(secret, spec, sealed.header, sealed, () => { throw new TypeError("validator crashed"); })),
+    [[true, true], [false, true]], "a validator crash");
 });
 
 test("strict base64, exact lengths and the store's size bound are checked before any key is derived", async () => {
