@@ -35,11 +35,15 @@ export const VENDOR_EXCEPTIONS = Object.freeze([Object.freeze({ advisory: 124350
   versions: Object.freeze(["4.3.1"]), bundles: Object.freeze(["metamask-evm-sdk"]), expires: "2026-11-28T00:00:00.000Z" })]);
 
 const packageName = path => path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
-/** Every production lockfile package that requires `name` is one of `allowed`; APN's own manifest never does. */
+/** A lockfile row installed under its own name (an npm alias row names the real package). */
+const ownName = (lock, path) => isRecord(lock[path]) && (lock[path].name === undefined || lock[path].name === packageName(path));
+/** Whether a lockfile row depends on `name`, by its own key or through an npm alias (`"x": "npm:name@…"`). */
+const requires = (row, name) => ["dependencies", "optionalDependencies", "peerDependencies"].some(field => isRecord(row[field]) &&
+  Object.entries(row[field]).some(([key, spec]) => key === name || spec === `npm:${name}` || typeof spec === "string" && spec.startsWith(`npm:${name}@`)));
+/** Every production lockfile package that requires `name` is one of `allowed` under its own name; APN's manifest never does. */
 function requiredOnlyBy(lock, name, allowed) {
-  return Object.entries(lock).every(([path, row]) => !isRecord(row) || row.dev === true ||
-    !["dependencies", "optionalDependencies", "peerDependencies"].some(field => isRecord(row[field]) && name in row[field]) ||
-    path !== "" && allowed.includes(packageName(path)));
+  return Object.entries(lock).every(([path, row]) => !isRecord(row) || row.dev === true || !requires(row, name) ||
+    path !== "" && allowed.includes(packageName(path)) && ownName(lock, path));
 }
 
 /** Which findings an approved exception covers and which still fail; `lock` is the lockfile's `packages` map. */
@@ -53,9 +57,10 @@ export function classifyAudit(report, lock, nowMs, exceptions) {
       const exception = exceptions.find(item => item.advisory === advisory.source && item.package === name);
       if (exception === undefined) return false;
       if (nowMs >= Date.parse(exception.expires)) { failures.push(`${name}: exception for ${exception.ghsa} expired at ${exception.expires}`); return false; }
-      const scoped = node => exception.under === undefined ? requiredOnlyBy(lock, name, exception.requiredBy)
-        : exception.under.some(prefix => node.startsWith(prefix));
-      return entry.nodes.every(node => scoped(node) &&
+      if ((exception.under === undefined) === (exception.requiredBy === undefined)) throw new Error(`audit exception for ${exception.ghsa} needs exactly one scope`);
+      if (exception.requiredBy !== undefined && !requiredOnlyBy(lock, name, exception.requiredBy)) return false;
+      return Array.isArray(entry.nodes) && entry.nodes.length > 0 && entry.nodes.every(node => packageName(node) === name && ownName(lock, node) &&
+        (exception.under === undefined || exception.under.some(prefix => node.startsWith(prefix))) &&
         typeof lock[node]?.version === "string" && lock[node].version.startsWith(`${exception.major}.`));
     });
     if (covered && entry.via.every(isRecord)) { accepted.add(name); excepted.push({ package: name, advisories: advisories.map(advisory => advisory.source), nodes: entry.nodes }); }
@@ -79,6 +84,7 @@ export function classifyAudit(report, lock, nowMs, exceptions) {
 /** Whether an approved vendor exception covers one advisory row of `name`, emitted at `versions` by `bundles`. */
 export function vendorExcepted(name, row, versions, bundles, nowMs, exceptions) {
   return exceptions.some(exception => exception.package === name && exception.advisory === row.id && nowMs < Date.parse(exception.expires) &&
+    versions.length > 0 && bundles.length > 0 &&
     versions.every(version => exception.versions.includes(version)) && bundles.every(bundle => exception.bundles.includes(bundle)));
 }
 
