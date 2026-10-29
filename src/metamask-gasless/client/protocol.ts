@@ -1,4 +1,5 @@
 import { readDataRecord, validateReadDiagnostic, type MetaMaskReadDiagnostic } from "./read-diagnostic.js";
+import { validateSubmitDiagnostic, type MetaMaskSubmitDiagnostic } from "./submit-diagnostic.js";
 import { isPlainRecord } from "../../canonical.js";
 import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity,
   MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
@@ -22,7 +23,8 @@ export type HelperRequest =
 export type HelperResult = MetaMaskGaslessBinding | MetaMaskGaslessQuote | MetaMaskGaslessUnsignedResult |
   MetaMaskGaslessProviderObservation;
 export type HelperResponse = { readonly version: typeof MM_HELPER_VERSION; readonly ok: true; readonly result: HelperResult } |
-  { readonly version: typeof MM_HELPER_VERSION; readonly ok: false; readonly failure: MetaMaskGaslessFailure; readonly diagnostic?: MetaMaskReadDiagnostic };
+  { readonly version: typeof MM_HELPER_VERSION; readonly ok: false; readonly failure: MetaMaskGaslessFailure;
+    readonly diagnostic?: MetaMaskReadDiagnostic; readonly submitDiagnostic?: MetaMaskSubmitDiagnostic };
 
 export function helperRequest(value: unknown): HelperRequest {
   if (!isPlainRecord(value) || value.version !== MM_HELPER_VERSION || typeof value.mode !== "string") mmFail("mm_gasless_input");
@@ -51,10 +53,14 @@ export function helperResponse(value: unknown, request: HelperRequest): HelperRe
   if (value.ok === false) {
     const readMode = request.mode === "inspect" || request.mode === "quote" ? request.mode : null;
     const hasDiagnostic = readMode !== null && Object.hasOwn(value, "diagnostic");
-    const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : [])], responseReason(request.mode));
+    const hasSubmitDiagnostic = request.mode === "submit" && Object.hasOwn(value, "submitDiagnostic");
+    const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : []), ...(hasSubmitDiagnostic ? ["submitDiagnostic"] : [])],
+      responseReason(request.mode));
     const f = mmExact(readMode === null ? r.failure : readDataRecord(r.failure), ["code", "reason"], responseReason(request.mode));
     if (typeof f.reason !== "string" || !Object.hasOwn(MM_REASON_CODES, f.reason) || f.reason === "mm_gasless_success" ||
       MM_REASON_CODES[f.reason as keyof typeof MM_REASON_CODES] !== f.code) mmFail(responseReason(request.mode));
+    if (hasSubmitDiagnostic) return { version: MM_HELPER_VERSION, ok: false, failure: f as unknown as MetaMaskGaslessFailure,
+      submitDiagnostic: validateSubmitDiagnostic(r.submitDiagnostic) };
     if (hasDiagnostic) {
       const diagnostic = validateReadDiagnostic(r.diagnostic, readMode!);
       return { version: MM_HELPER_VERSION, ok: false, failure: f as unknown as MetaMaskGaslessFailure, diagnostic };

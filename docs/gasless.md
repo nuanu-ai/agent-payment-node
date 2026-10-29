@@ -589,6 +589,17 @@ finality tag, complete transaction/receipt membership and bounded log queries.
 APN checks protocol and USDC implementation code at preparation and settlement.
 Unichain and Avalanche belong to the local-wallet path above.
 
+A dispatch that ends `unknown_finality` with `mm_gasless_submit_unknown` stays
+unknown: APN cannot prove the relay request never arrived. The output of that
+same `approve` or `resume` call carries `submit_diagnostic` (never stored):
+the helper `stage` it stopped at, whether APN's network policy let the one
+`POST` out (`post`: `not_reached`, `refused` by APN's own body check, or
+`sent`), the POST's `httpStatus`, the `check` that refused (APN's body or
+response checks, a duplicate or unexpected request, the deadline, the
+session, or the helper runner), and the provider's error code or unknown job
+status when they are upper-case tokens. No body, URL, header or identifier is
+included.
+
 ### Tested keyless RPC endpoints
 
 APN has no per-chain default RPC (owner rule: no silent defaults); set the

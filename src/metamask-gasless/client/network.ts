@@ -1,4 +1,5 @@
 import type { ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
+import { submitErrorCode, type SubmitCheck, type SubmitPost } from "./submit-diagnostic.js";
 import { captureSponsoredQuote, parseSentinelResponse, sentinelFailure, sentinelQuotedFee, validateSentinelResponse,
   type SentinelFailure } from "./sentinel.js";
 import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT } from "./provider-endpoints.js";
@@ -54,6 +55,15 @@ export class HelperNetworkPolicy {
   #usdcBalance: bigint | undefined;
   #quotedFee: bigint | undefined;
   readonly #readFailures = new WeakMap<object, ReadFailure>();
+  #submitPost: SubmitPost = "not_reached";
+  #submitStatus: number | null = null;
+  #submitCheck: SubmitCheck = "none";
+  #submitError: string | null = null;
+  /** What the submit's one POST did, as closed facts (submit-diagnostic.ts); `check` is "none" until a policy check refused. */
+  submitFacts(): { readonly post: SubmitPost; readonly httpStatus: number | null; readonly check: SubmitCheck; readonly providerError: string | null } {
+    return { post: this.#submitPost, httpStatus: this.#submitStatus, check: this.#submitCheck, providerError: this.#submitError };
+  }
+  private submitRefused(check: SubmitCheck): void { if (this.context.mode === "submit" && this.#submitCheck === "none") this.#submitCheck = check; }
   /** Closed facts of the two validated relay inventories for the quoted chain, once both were read. */
   relaySupportFacts(): RelaySupportFacts | undefined {
     return this.#relayListing === undefined || this.#relayFlag === undefined ? undefined
@@ -109,6 +119,7 @@ export class HelperNetworkPolicy {
       ...(this.#sponsoredAccepted ? [] : ["rpc-balance"]), "sentinel-quote"] :
       this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] : [];
     if (this.counts.size !== expected.length || expected.some((key) => this.counts.get(key) !== 1)) {
+      this.submitRefused("incomplete");
       mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
     }
     if (this.context.mode === "quote" && expected.some((key) => !this.successes.has(key) && !(key === "sentinel-quote" && this.#sponsoredAccepted))) mmFail("mm_gasless_provider_unavailable");
@@ -127,16 +138,28 @@ export class HelperNetworkPolicy {
         ? key as ReadNetwork : "none";
       readStatus = null;
     }
-    if ((this.counts.get(key) ?? 0) !== 0) mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+    if ((this.counts.get(key) ?? 0) !== 0) {
+      this.submitRefused("duplicate_request");
+      mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+    }
     this.counts.set(key, 1);
     if (this.context.mode === "submit") this.assertSubmitDeadline();
     const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+    // From the last deadline check on, the POST may reach the provider: it counts as sent even without an answer.
     const request: FetchExchangeRequest = { url, method, headers, body, maxBytes: MAX_RESPONSE, timeoutMs: 15_000,
-      ...(signal ? { signal } : {}), ...(this.context.mode === "submit" ? { beforeSend: () => this.assertSubmitDeadline() } : {}) };
+      ...(signal ? { signal } : {}), ...(this.context.mode === "submit" ? { beforeSend: () => {
+        this.assertSubmitDeadline(); if (key === "submit") this.#submitPost = "sent";
+      } } : {}) };
     const response = await this.exchange.request(request);
+    if (this.context.mode === "submit" && key === "submit") {
+      this.#submitStatus = Number.isSafeInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
+      if (this.#submitStatus !== null && this.#submitStatus >= 300 && typeof response.body === "string" && Buffer.byteLength(response.body) <= MAX_RESPONSE) {
+        this.#submitError = submitErrorCode(response.body);
+      }
+    }
     if (this.context.mode === "quote") readStatus = Number.isSafeInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
     if (typeof response.body !== "string" || Buffer.byteLength(response.body) > MAX_RESPONSE) mmFail("mm_gasless_provider_unavailable");
-    if (response.status === 401 || response.status === 403) { this.sessionFailure = true; mmFail("mm_gasless_session_unavailable"); }
+    if (response.status === 401 || response.status === 403) { this.sessionFailure = true; this.submitRefused("session"); mmFail("mm_gasless_session_unavailable"); }
     if (this.context.mode === "observe" && response.status === 404) this.notFound = true;
     if (response.status >= 200 && response.status < 300) {
       try {
@@ -145,7 +168,7 @@ export class HelperNetworkPolicy {
         validateResponse(key, response.body, body, this.context);
         if (this.context.mode === "quote") { this.recordRelayFacts(key, response.body, this.context.input.chainId); this.recordUsdcFacts(key, response.body); }
       }
-      catch (error) { validationFailed = true; throw error; }
+      catch (error) { validationFailed = true; this.submitRefused("response_body"); throw error; }
       this.successes.add(key);
     }
     const outputHeaders = new Headers(response.headers); if (!outputHeaders.has("content-type")) outputHeaders.set("content-type", "application/json");
@@ -178,7 +201,7 @@ export class HelperNetworkPolicy {
     if (!Number.isSafeInteger(current) || !Number.isSafeInteger(deadline)) { this.deadlineFailure = "mm_gasless_clock"; mmFail("mm_gasless_clock"); }
     if (this.lastClockMs !== undefined && current < this.lastClockMs) { this.deadlineFailure = "mm_gasless_clock"; mmFail("mm_gasless_clock"); }
     this.lastClockMs = current;
-    if (current >= deadline) { this.deadlineFailure = "mm_gasless_expired"; mmFail("mm_gasless_expired"); }
+    if (current >= deadline) { this.deadlineFailure = "mm_gasless_expired"; this.submitRefused("deadline"); mmFail("mm_gasless_expired"); }
   }
   private classify(url: string, method: string, headers: Record<string, string>, body: string | null): string {
     if (this.context.mode === "inspect" || this.context.mode === "buildUnsigned") mmFail("mm_gasless_provider_unavailable");
@@ -188,9 +211,12 @@ export class HelperNetworkPolicy {
     const collection = `${MIMIR}/v1/projects/${encodeURIComponent(this.context.projectId)}/transaction-requests`;
     requireBearer(headers, this.context.token);
     if (this.context.mode === "submit" && url === collection && method === "POST" && body !== null) {
-      validateSubmitBody(body, this.context.intent, this.expectedSubmitBody); return "submit";
+      try { validateSubmitBody(body, this.context.intent, this.expectedSubmitBody); }
+      catch (error) { this.#submitPost = "refused"; this.submitRefused("body_mismatch"); throw error; }
+      return "submit";
     }
     if (this.context.mode === "observe" && url === `${collection}/${this.context.intent.requestId}` && method === "GET" && body === null) return "observe";
+    this.submitRefused("unexpected_request");
     return mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
   }
 }

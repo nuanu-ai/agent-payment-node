@@ -1,4 +1,5 @@
 import { readDiagnostic, readFailureError, readRunnerFailure, takeReadRunnerDiagnostic } from "./read-diagnostic.js";
+import { submitDiagnostic, submitFailureError, takeSubmitDiagnostic } from "./submit-diagnostic.js";
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,15 +54,20 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
     catch (error) {
       if (request.mode === "inspect" || request.mode === "quote") throw readFailureError("mm_gasless_provider_unavailable",
         takeReadRunnerDiagnostic(error, request.mode) ?? readDiagnostic(request.mode, "launch", "runner_launch"));
-      return mmFail(request.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
+      if (request.mode === "submit") throw takeSubmitDiagnostic(error) !== undefined ? error
+        : submitFailureError("mm_gasless_submit_unknown", submitDiagnostic("launch", { check: "runner_launch" }));
+      return mmFail("mm_gasless_provider_unavailable");
     }
     let response;
     try { response = helperResponse(raw, request); } catch (error) {
       if (request.mode === "inspect" || request.mode === "quote") throw readFailureError(mmClassify(error, "mm_gasless_provider_unavailable").reason,
         readDiagnostic(request.mode, "helper_response", "response_invalid"));
+      if (request.mode === "submit") throw submitFailureError(mmClassify(error, "mm_gasless_submit_unknown").reason,
+        submitDiagnostic("helper_response", { check: "response_invalid" }));
       throw error;
     }
     if (!response.ok) {
+      if (response.submitDiagnostic !== undefined) throw submitFailureError(response.failure.reason, response.submitDiagnostic);
       if (response.diagnostic !== undefined) throw withMetaMaskProviderRefusal(readFailureError(response.failure.reason,
         response.diagnostic), response.diagnostic, request.mode === "quote" ? request.input.chainId : undefined);
       throw mmError(response.failure.reason);
@@ -73,7 +79,9 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
 export class SubprocessMetaMaskGaslessHelperRunner implements MetaMaskGaslessHelperRunner {
   async run(request: HelperRequest, options: HelperRunnerOptions): Promise<unknown> {
     const failure = (invariant: "runner_launch" | "runner_exit" | "runner_timeout" | "runner_output", code: number | null = null, signal: NodeJS.Signals | null = null) =>
-      request.mode === "inspect" || request.mode === "quote" ? readRunnerFailure(request.mode, invariant, code, signal) : new Error("helper failed");
+      request.mode === "inspect" || request.mode === "quote" ? readRunnerFailure(request.mode, invariant, code, signal)
+        : request.mode === "submit" ? submitFailureError("mm_gasless_submit_unknown", submitDiagnostic("launch", { check: invariant }))
+          : new Error("helper failed");
     if (!isAbsolute(process.execPath) || !isAbsolute(HELPER_ENTRY) || !Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1) {
       throw failure("runner_launch");
     }
