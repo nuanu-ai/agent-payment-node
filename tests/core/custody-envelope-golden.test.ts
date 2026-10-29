@@ -1,8 +1,9 @@
 /**
  * Byte compatibility of every custody store with APN 0.5.45 (CORE-15): the golden envelopes sealed by the 0.5.45 stores
  * open, every tampered variant fails exactly as it failed on 0.5.45 (same error class, code, message and details), and
- * a newly sealed envelope opens with the 0.5.45 format, so 0.5.45 opens it. Synthetic keys and a fixed fake wrapping
- * secret only; the Keychain is never touched.
+ * a newly sealed envelope opens with the 0.5.45 format, so 0.5.45 opens it. An AES-GCM authentication failure is worded
+ * by the linked OpenSSL, so either of its two exact forms matches the recorded one (crypto-auth-failure.ts). Synthetic
+ * keys and a fixed fake wrapping secret only; the Keychain is never touched.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -10,6 +11,7 @@ import { canonicalJson } from "../../src/canonical.js";
 import { installCustodyEnvelopeMocks } from "./custody-envelope-mocks.js";
 import { FixedSecret, readGolden, referenceOpen, type Outcome, temporaryRoot } from "./custody-envelope-reference.js";
 import { caseOutcomes, readEnvelopeFiles } from "./custody-envelope-harness.js";
+import { gcmCanonical } from "./crypto-auth-failure.js";
 
 await installCustodyEnvelopeMocks();
 const { CUSTODY_CASES } = await import("./custody-envelope-cases.js");
@@ -36,7 +38,7 @@ for (const [name, c] of Object.entries(CUSTODY_CASES)) {
     if (c.open !== undefined) assert.deepEqual(g.outcomes.golden, { ok: true, plaintext: g.plaintext });
     for (const [kind, expected] of Object.entries(g.outcomes)) {
       const actual = outcomes[kind] as Outcome, divergence = DIVERGENCES[name]?.[kind];
-      if (divergence === undefined) { assert.deepEqual(actual, expected, `${name} ${kind}`); continue; }
+      if (divergence === undefined) { assert.deepEqual(gcmCanonical(actual), gcmCanonical(expected), `${name} ${kind}`); continue; }
       assert.notDeepEqual(actual, expected, `${name} ${kind}: a declared divergence that no longer diverges`);
       assert.equal(actual.ok, false, `${name} ${kind}: ${divergence}`);
       if (!actual.ok) assert.equal(actual.code, "APN_STATE_CORRUPT", `${name} ${kind}: ${divergence}`);
