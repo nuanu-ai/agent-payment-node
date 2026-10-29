@@ -25,7 +25,9 @@ const buffers: Buffer[] = [];
 // Encoded here: a value import of the evidence module would load the real owner and runner before the mocks below.
 const metaMaskNativeTransferData=(to:`0x${string}`,amount:string)=>encodeFunctionData({abi:[{type:"function",name:"transfer",stateMutability:"nonpayable",inputs:[{name:"to",type:"address"},{name:"amount",type:"uint256"}],outputs:[{type:"bool"}]}],functionName:"transfer",args:[to,BigInt(amount)]});
 mock.module("../../src/metamask-package.js", {namedExports: {resolveMetaMaskBin: async () => "/test-only-pinned-package"}});
-mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureDiagnostic: () => undefined, takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
+/** The runner diagnostic the next failed read carries, as the real runner attaches it to its error (one use). */
+let nextRunnerDiagnostic: unknown;
+mock.module("../../src/metamask-process-runner.js", {namedExports: {takeMetaMaskNativeProcessFailureDiagnostic: () => { const d = nextRunnerDiagnostic; nextRunnerDiagnostic = undefined; return d; }, takeMetaMaskNativeProcessFailureIdentifiers: () => undefined, NodeMetaMaskProcessRunner: class {
   async runJson(argv:readonly string[], timeout?:number) {
     calls.push({argv, ...(timeout === undefined ? {} : {timeout})});
     if(readFailure&&calls.length===readFailureAt){const failure=readFailure;readFailure=undefined;throw failure;}
@@ -142,7 +144,7 @@ test("a refused vendor read names the failed invariant and a next step that runs
     await assert.rejects(read(),refusal("metamask_guard_policy_missing",[`${MM}wallet policy get --json`,`${MM}wallet policy template`]));
   }
   setup();project();queue.push(result({mode:"guard",address:PAYER},1));
-  await assert.rejects(read(),refusal("metamask_vendor_read_failed",[`${MM}auth status --json`],{failedRead:"trading-mode get"}));
+  await assert.rejects(read(),refusal("metamask_vendor_read_failed",[`${MM}wallet trading-mode get --json`],{failedRead:"trading-mode get"}));
   // The policy-meaning refusals get the same runnable step.
   setup();policyQueue({policy:POLICY.replace(PAYER,RECIPIENT)});
   await assert.rejects(read(),refusal("metamask_guard_policy_wallet_mismatch",[`${MM}wallet policy get`]));
@@ -150,6 +152,37 @@ test("a refused vendor read names the failed invariant and a next step that runs
   setup();queue.push(result({authenticated:false,summary:null}));
   await assert.rejects(readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT),refusal("metamask_session_required",[]));
   assert.ok(noSend());
+});
+test("a vendor read the runner failed keeps its code and retry advice and names the read, its failure and the read to run",async()=>{
+  // QA 0.5.80 MM-NATIVE-READ-TIMEOUT-DIAGNOSTIC-080-001: a timed-out policy read came out as a bare provider error with
+  // a sign-in-again hint, although the session read had passed.
+  const { ApnError } = await import("../../src/errors.js");
+  for (const [at, read, argv] of [[1, "auth status", "auth status --json"], [2, "trading-mode get", "wallet trading-mode get --json"],
+    [3, "policy get", "wallet policy get --json"]] as const) {
+    setup(); policyQueue(); readFailureAt = at;
+    readFailure = new ApnError("APN_PROVIDER_UNAVAILABLE", "MetaMask Agent Wallet CLI timed out.", { retryable: true });
+    nextRunnerDiagnostic = { stage: "sdk_read", code: "timeout", exitCode: null, signal: "SIGKILL", durationMs: 30006, remainingMs: 0,
+      stderrClass: "none", providerCode: "none" };
+    await assert.rejects(readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT,undefined,"qa-mm-wallet"), (error:unknown) => {
+      const e = error as {code?:string;message?:string;details?:Record<string,unknown>;nativeDiagnostic?:{code:string}};
+      assert.deepEqual([e.code, e.message, e.nativeDiagnostic?.code], ["APN_PROVIDER_UNAVAILABLE", "MetaMask Agent Wallet CLI timed out.", "timeout"]);
+      assert.deepEqual(e.details, { retryable: true, reason: "metamask_vendor_read_failed", failedRead: read, readFailure: "timeout",
+        nextActions: [`${MM}${argv}`] }); return true;
+    });
+    assert.equal(calls.length, at, `no read after the failed ${read}`); assert.ok(noSend());
+  }
+  // A client that did not resolve, a passed deadline, or a failure with no runner diagnostic keeps the error's own advice.
+  for (const [diagnostic, failureClass] of [[{ stage: "sdk_resolver", code: "refused" }, "refused"], [{ stage: "sdk_read", code: "deadline" }, "deadline"],
+    [undefined, "unclassified"]] as const) {
+    setup(); policyQueue(); readFailureAt = 1;
+    readFailure = new ApnError("APN_PROVIDER_UNAVAILABLE", "The exact MetaMask Agent Wallet client is not installed.", { retryable: true });
+    nextRunnerDiagnostic = diagnostic === undefined ? undefined : { ...diagnostic, exitCode: null, signal: null, durationMs: 1, remainingMs: 0,
+      stderrClass: "none", providerCode: "none" };
+    await assert.rejects(readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT), (error:unknown) => {
+      assert.deepEqual((error as {details?:unknown}).details, { retryable: true, reason: "metamask_vendor_read_failed", failedRead: "auth status", readFailure: failureClass });
+      return true;
+    });
+  }
 });
 test("owned quote's project pin mismatch refuses before SDK financial child",async()=>{setup();allowTransport=true;policyQueue({project:"different-project"});await assert.rejects(submitOwnedMetaMaskNative(scope,context()));assert.ok(noSend());});
 function requestQueue(request:Record<string,unknown>,status:Record<string,unknown>,after=PROJECT,exit=0){project();queue.push(result({request,status},exit));project(after);}
