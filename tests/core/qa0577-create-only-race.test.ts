@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { open, readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../../src/canonical.js";
@@ -8,6 +8,7 @@ import { CircleSolanaDeliveryStore } from "../../src/lifi/circle-v2-solana-deliv
 import { SecureStateStore } from "../../src/secure-state-store.js";
 import { ACCOUNT, burned, deliveryFile, H, reader, recorded, setup, SMALL, sourceBlock, sourceReceipt, status, type Json } from "./circle-solana-delivery-fixtures.js";
 import type { NonEvmSourceJournal } from "../../src/lifi/non-evm-source-journal.js";
+import { racedAtSync } from "./atomic-race-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 /**
@@ -21,15 +22,6 @@ class Files extends SecureStateStore {
   async replace(path: string, value: unknown) { await this.writeJson(path, value); }
 }
 
-/** Runs `rival` once, right after the next file sync: inside an atomic write, between its two checks of the target. */
-async function racedAtSync<T>(rival: () => Promise<unknown>, action: () => Promise<T>): Promise<T> {
-  const probe = await open(process.execPath, "r"), handle = Object.getPrototypeOf(probe) as { sync(this: unknown): Promise<void> };
-  await probe.close();
-  const sync = handle.sync;
-  let armed = true;
-  handle.sync = async function (this: unknown) { await sync.call(this); if (armed) { armed = false; await rival(); } };
-  try { return await action(); } finally { handle.sync = sync; }
-}
 /** Wraps the delivery store's writes: the first one to a path containing `part` runs `rival` inside its atomic write. */
 function rivalOnWrite(t: import("node:test").TestContext, part: string, rival: () => Promise<unknown>) {
   const store = CircleSolanaDeliveryStore.prototype as unknown as { writeJson(path: string, value: unknown, createOnly?: boolean): Promise<void> };
