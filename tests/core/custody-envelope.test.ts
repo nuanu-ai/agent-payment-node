@@ -55,7 +55,7 @@ test("opening hands the plaintext to the store once, then zeroes it and the key,
 });
 
 test("every update and final output is zeroed: sealing, opening, a wrong tag, key or AAD, a store refusal and a validator crash", async () => {
-  // QA 0.5.78 CUSTODY-TRANSIENT-PLAINTEXT-ZEROING-078-002: update() returned the plaintext before final() authenticated it,
+  // Regression: update() returned the plaintext before final() authenticated it,
   // and only the concatenation was zeroed, also when final() threw on a wrong tag.
   const outputs = async (action: () => unknown) => {
     pieces.length = 0;

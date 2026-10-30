@@ -9,7 +9,7 @@ export const CANONICAL_WBTC_POLICY_ASSETS: readonly CandidateAsset[] = [
   { chain: "eip155:42161", networkName: "Arbitrum One", identifier: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f" },
 ].map(row => ({ ...row, family: "evm", kind: "token", symbol: "WBTC", decimals: 8, selectionClass: null,
   tokenStandard: "ERC-20", eligibility: null, rails: { direct: false, gasless: false, x402: false, bridge: false, swap: false },
-  caps: null, evidence: { source: "docs/wbtc-acquisition.md; src/lifi/asset-registry.ts canonical WBTC runtime/beacon/implementation pins" },
+  caps: null, evidence: { source: "src/lifi/asset-registry.ts canonical WBTC runtime/beacon/implementation pins" },
   admission: "not_admitted_owner_configuration_missing" }));
 
 /** Only exact WBTC deployment + exact reviewed mechanism resolves; arbitrary legacy rows and rails never do. */

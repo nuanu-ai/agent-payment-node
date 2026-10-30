@@ -1,8 +1,8 @@
 /**
- * QA 0.5.67/0.5.68. RELAY-PREPARE-REFUSAL-CONTEXT-067-002: a Relay quote outliving the owner's policy, an approval or a
+ * Regression: a Relay quote outliving the owner's policy, an approval or a
  * deposit fee above the caller's ceiling, all answered one "identity, deadline, or fee ceiling changed" with no details.
  * Each is now its own reason with the compared public values; the guards are unchanged and nothing is persisted.
- * BRIDGE-TTY-WRONG-FEE-NETWORK-068-002: the bridge consent's fee line named Base for every source chain; it now names
+ * Also: the bridge consent's fee line named Base for every source chain; it now names
  * the source network and what its fee model caps.
  */
 import assert from "node:assert/strict";

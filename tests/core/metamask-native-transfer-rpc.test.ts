@@ -86,7 +86,7 @@ test("funding reads balances and the pending nonce on one endpoint with one chai
 });
 test("wrong chain and ceiling refuse before accepted quote", async () => {
   const w=new Wire(1);w.wrongChain=true;await assert.rejects(w.prepare(),{code:"APN_CHAIN_MISMATCH"});
-  // QA 0.5.71: a fresh quote above the owner's ceiling is a fee-budget refusal with both values, not a corrupt record.
+  // A fresh quote above the owner's ceiling is a fee-budget refusal with both values, not a corrupt record.
   const x=new Wire(1);await assert.rejects(prepareWithRpc(x.rpc(),{chainId:1,maximumNativeFeeWei:"299",sender:SENDER,recipient:RECIPIENT,amountAtomic:"2500"}),
     (error:any)=>error.code==="APN_FEE_BUDGET_EXCEEDED"&&error.details.reason==="native_fee_quote_above_owner_cap"&&error.details.chain==="eip155:1"&&
       error.details.native_symbol==="ETH"&&error.details.quoted_fee_wei==="300"&&error.details.fee_cap_wei==="299");
@@ -149,7 +149,7 @@ test("the explicit payer binds nonce, estimate and the canonical receipt",async(
   w.mutateTx={from:"0xf41170df51aab52aaa04fbc3ff325cf051644aca"};await assert.rejects(w.observe());
 });
 
-test("QA 0.5.71: the owner ceiling bounds a fresh quote exactly, names both limits when it refuses, and a stored quote above its cap stays corrupt", async () => {
+test("the owner ceiling bounds a fresh quote exactly, names both limits when it refuses, and a stored quote above its cap stays corrupt", async () => {
   const input = { chainId: 1 as const, sender: SENDER, recipient: RECIPIENT, amountAtomic: "2500" };
   const exact = await prepareWithRpc(new Wire(1).rpc(), { ...input, maximumNativeFeeWei: "300" });
   assert.equal(exact.feeQuote.totalQuoteWei, "300");

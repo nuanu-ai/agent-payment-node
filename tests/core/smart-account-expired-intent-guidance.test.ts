@@ -1,5 +1,5 @@
 /**
- * QA 0.5.72 SMART-PENDING-EXPIRED-RETRY-GUIDANCE-072-001: after a pending MetaMask Smart Account intent expired, `wallet
+ * Regression: after a pending MetaMask Smart Account intent expired, `wallet
  * status` and `wallet permission list` still advised the exact connect retry, which is refused before consent ("The
  * pending permission intent expired before consent.", no next actions). The guidance now follows the intent's expiry, and
  * the refusal carries it. The pending intent, its session and cap stay unchanged; no consent is requested.

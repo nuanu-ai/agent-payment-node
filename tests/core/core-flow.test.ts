@@ -288,7 +288,7 @@ test("the Base USDC lane records its actual OP-stack fee with the outcome and sh
   await ensureWallet(makeCore({ root: temporary.root, native: new TestNative(temporary.root) }));
   const rpc = new TestRpc();
   const operationId = await prepareTransfer(makeCore({ root: temporary.root, rpc }), "legacy-fee-001");
-  // QA 0.5.51 DIRECT-RECEIPT-FEE-001: execution (gasUsed x price) plus the receipt's own L1 data fee and operator fee.
+  // The actual fee: execution (gasUsed x price) plus the receipt's own L1 data fee and operator fee.
   rpc.receipt = { ...exactReceipt(), evmFeeFields: readEvmReceiptFeeFields({ gasUsed: "0xb411", effectiveGasPrice: "0x3b9aca00", l1Fee: "0x2710",
     operatorFeeScalar: "0x0", operatorFeeConstant: "0x0" }) };
   const approved = operationRecord(await makeCore({ root: temporary.root, rpc, native: new TestNative(temporary.root) }).execute({ command: "transfer.approve", operationId }));
@@ -302,7 +302,7 @@ test("the Base USDC lane records its actual OP-stack fee with the outcome and sh
   assert.deepEqual((receipt.receipt as Record<string, unknown>).actual_network_fee, fee);
   const status = operationRecord(await makeCore({ root: temporary.root }).execute({ command: "operation.status", operationId }));
   assert.deepEqual(status.actual_network_fee, fee);
-  // QA 0.5.64: the receipt names the lane's asset and both parties, as status does.
+  // The receipt names the lane's asset and both parties, as status does.
   const shown = receipt.receipt as Record<string, unknown>;
   assert.deepEqual([shown.chain, shown.token, shown.wallet_address, shown.recipient, (shown.amount as { decimals: number }).decimals],
     ["eip155:8453", BASE_USDC, WALLET, RECIPIENT, 6]);

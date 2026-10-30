@@ -43,7 +43,7 @@ for (const sponsor of [false, true]) test(`paid UI and actual ${sponsor ? "spons
   assert.equal(f.display().purpose, "sign-and-submit-once"); assert.equal(f.display().payTo, reconstructPermit2ProductionMaterial(f.record.material).payTo);
   t.mock.method(f.native, "request", async () => { throw new Error("No generic request or reentrant custody"); });
   // One attempt sends; the other finds the durable marker (null) or, on a loaded host, its bounded lock wait ends first
-  // (APN_STATE_BUSY, QA 0.5.69). Neither of those sends, and the follow-up attempt below still sends nothing.
+  // (APN_STATE_BUSY). Neither of those sends, and the follow-up attempt below still sends nothing.
   const settled = await Promise.allSettled([f.attempt(), f.attempt()]);
   const outcomes = settled.map(s => s.status === "fulfilled" ? s.value : { refusal: (s.reason as { code?: string }).code, message: String((s.reason as Error).message) });
   const kinds = settled.map(s => s.status === "fulfilled" ? s.value.outcome?.kind ?? null : (s.reason as { code?: string }).code);

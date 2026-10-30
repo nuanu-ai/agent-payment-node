@@ -1,5 +1,5 @@
 /**
- * QA 0.5.51 CIRCLE-POST-BURN-ERROR-STATE-001 (165ef682…, Arbitrum USDC -> Monad): approve-source sent the approval and
+ * Regression (Arbitrum USDC -> Monad): approve-source sent the approval and
  * the burn, then the issuer attestation read failed and the command answered a bare APN_HTTP_CONFIG with no operation.
  * Through the real command path (argv, core, funding service, ledger, local custody signing) over the synthetic CCTP
  * network: a command that sent an effect answers with that operation and names the failed read; nothing is resent.

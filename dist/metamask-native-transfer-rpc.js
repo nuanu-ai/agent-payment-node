@@ -71,7 +71,7 @@ export async function prepareWithRpc(rpc, input) {
     const estimated = await rpc.estimate({ chainId, from: sender, to, data, valueAtomic: "0" });
     const economics = { nonceAtomic, ...estimated, maximumGasCostAtomic: (evmUint(estimated.gasLimitAtomic, true) * evmUint(estimated.maxFeePerGasAtomic, true)).toString() };
     const feeQuote = await rpc.feeQuote(chainId, economics);
-    // A fresh quote above the owner's ceiling is a budget refusal before anything is prepared, not a damaged record (QA 0.5.71).
+    // A fresh quote above the owner's ceiling is a budget refusal before anything is prepared, not a damaged record.
     if (evmUint(feeQuote.totalQuoteWei, true) > BigInt(cap))
         throw new ApnError("APN_FEE_BUDGET_EXCEEDED", `The current network-fee quote (${chainDisplay(feeQuote.totalQuoteWei, 18)} ${evmNativeCurrencyLabel(chainId)}) exceeds the owner's native fee ceiling ` +
             `for this transfer (${chainDisplay(cap, 18)} ${evmNativeCurrencyLabel(chainId)}).`, { reason: "native_fee_quote_above_owner_cap", chain: `eip155:${chainId}`,

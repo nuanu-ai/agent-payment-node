@@ -1,8 +1,8 @@
 /**
- * QA 0.5.64 DIRECT-RECEIPT-PARTICIPANT-CONTEXT-063-001: `receipt get` for 16 completed local EVM direct transfers (e.g.
- * 3352da…a12d, ETH on Ethereum) and one AWAL Base gasless transfer gave amount, fee and hash but no sender, recipient or,
- * for AWAL, chain/token/decimals; only `operation status` named them. The receipt now projects the frozen parties and
- * asset of the operation it is sealed to. Nothing stored is rewritten: the context comes from the validated operation.
+ * Regression: `receipt get` for completed local EVM direct transfers (e.g. ETH on Ethereum) and an AWAL Base gasless
+ * transfer gave amount, fee and hash but no sender, recipient or, for AWAL, chain/token/decimals; only `operation status`
+ * named them. The receipt now projects the frozen parties and asset of the operation it is sealed to. Nothing stored is
+ * rewritten: the context comes from the validated operation.
  */
 import assert from "node:assert/strict";
 import test from "node:test";

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 
-// X402-ANY-SELLER-DOC-NOT-SHIPPED-053-001: README linked docs/x402-any-seller.md, but package.json `files` left it out of
+// Regression: README linked docs/x402-any-seller.md, but package.json `files` left it out of
 // the tgz. Every docs/ page the README links must exist and ship.
 test("every docs page the README links exists and is listed in package.json files", () => {
   const readme = readFileSync(resolve("README.md"), "utf8");

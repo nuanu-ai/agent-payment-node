@@ -25,7 +25,7 @@ import { StateStore } from "../../src/state.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
 
-/** QA 0.5.51: two Ethereum token swaps refused the swap before signing (fee cap), then their consented cleanup failed as state corruption. */
+/** Captured case: two Ethereum token swaps refused the swap before signing (fee cap), then their consented cleanup failed as state corruption. */
 const LIVE = JSON.parse(readFileSync("tests/core/fixtures/uniswap-token-qa0551-cleanup.json", "utf8")) as {
   operations: UniswapTokenOperation[]; chain: Record<string, { allowanceAtomic: string; pendingNonce: string;
     reservations: { kind: TokenEffectKind; nonce: string; operationId: string; state: "reserved" | "committed" }[] }> };

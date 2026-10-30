@@ -1,7 +1,7 @@
 /**
- * CIRCLE-BUDGET-REFUSAL-DIAGNOSTICS-001: a fresh, well-formed Circle quote or Base read that does not fit the caller's
+ * A fresh, well-formed Circle quote or Base read that does not fit the caller's
  * limits is refused before signing as an economic refusal with its numbers and units; malformed data stays a protocol
- * refusal. Uses the real Iris quote QA retained (fee 130431) at its own expiry block, offline.
+ * refusal. Uses a real retained Iris quote (fee 130431) at its own expiry block, offline.
  */
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";

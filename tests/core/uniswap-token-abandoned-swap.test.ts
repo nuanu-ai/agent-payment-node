@@ -17,11 +17,11 @@ import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js
 import { UniswapTokenJournal, validateUniswapTokenOperation, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
 import { temporaryState } from "./helpers.js";
-import { CapturedState, movingNode, pinsLikeProduction, tokenSession, usageBucket, WRAPPING } from "./uniswap-token-qa0552-harness.js";
+import { CapturedState, movingNode, pinsLikeProduction, tokenSession, usageBucket, WRAPPING } from "./uniswap-token-moving-node-harness.js";
 
 /**
  * Execute is a foreground CLI command (MCP hands it off); status is compared across CLI and MCP.
- * QA 0.5.54 UNISWAP-TOKEN-SEND-CAPACITY-001-partial054: 867244e9… is `abandoned_unknown` (owner abandon before 0.5.54) with
+ * The captured swap is `abandoned_unknown` (abandoned by its owner on an earlier release) with
  * its usage reserved, the hashless swap marker at nonce 10 and 1 USDC allowance left on the SwapRouter. Execute returned it
  * unchanged and cleanup refused `uniswap_cleanup_phase`. The journal below is the one the normal execute and status return.
  */
@@ -72,7 +72,7 @@ const residual = (op: UniswapTokenOperation) => ({ residualAllowance: { chain: "
   spender: op.route.router, allowanceAtomic: "1000000", readAt: "latest" } });
 const same = (a: OutputEnvelope, b: OutputEnvelope) => assert.deepEqual({ ...a, request_id: null }, { ...b, request_id: null });
 
-test("QA 0.5.54 867244e9…: execute proves the abandoned swap never signed, releases the principal hold, keeps gas, and names the generic revoke", async (t) => {
+test("the captured abandoned swap: execute proves the abandoned swap never signed, releases the principal hold, keeps gas, and names the generic revoke", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const { op, now, chain, cli, mcp, nonceRows, hold } = await abandoned(temporary.root, "reserved");
   const execute = `apn swap ethereum uniswap-token execute --operation ${op.operationId}`;
   const status = await cli("status", 11);
@@ -108,7 +108,7 @@ test("QA 0.5.54 867244e9…: execute proves the abandoned swap never signed, rel
 for (const [label, arrange] of [
   ["its nonce taken at the finalized tag by a transaction the record does not know", (node: { finalizedNonce: bigint }) => { node.finalizedNonce = 11n; }],
   ["the finalized block not yet past the route's deadline", (node: { blockTime: bigint }, deadline: number) => { node.blockTime = BigInt(deadline); }],
-] as const) test(`867244e9… with ${label}: execute keeps the hold and the marker's reservation, then releases once the chain proves it`, async (t) => {
+] as const) test(`the abandoned swap with ${label}: execute keeps the hold and the marker's reservation, then releases once the chain proves it`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const { op, chain, cli, nonceRows, hold } = await abandoned(temporary.root, "reserved");
   arrange(chain.node as never, op.route.deadline);
   const kept = await cli("execute", 15);
@@ -120,7 +120,7 @@ for (const [label, arrange] of [
   assert.deepEqual([(released.operation as UniswapTokenOperation).usageState, await hold()], ["failed_before_effect", ["failed_before_effect", "0"]]);
 });
 
-test("867244e9… with its swap nonce committed to signed bytes: execute changes nothing and does not name itself again", async (t) => {
+test("the abandoned swap with its swap nonce committed to signed bytes: execute changes nothing and does not name itself again", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const { op, chain, cli, nonceRows, hold } = await abandoned(temporary.root, "committed");
   const executed = await cli("execute", 15);
   assert.deepEqual([executed.ok, (executed.operation as UniswapTokenOperation).integrityHash, executed.data, executed.next_actions],

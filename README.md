@@ -225,7 +225,7 @@ Provider balance is never spending authority; the owner allowlist and profile po
 | MetaMask native-fee USDC transfer | `wallet metamask native-transfer[-status/-observe]` | [MetaMask native](docs/metamask-native-cli-sourceprep.md) |
 | LI.FI bridges, GasZip, NEAR 1Click | `bridge *`, `mega funding *`, `sei funding *`, `oneclick source *` | [LI.FI](docs/lifi.md) |
 | Relay bridges | `relay prepare/execute/observe/status/retire` | [Relay](docs/relay.md) |
-| Circle CCTP V2 | `circle evm *`, `circle approval *`, `circle source submit` | [Circle V2 EVM](docs/circle-v2-evm-fast.md) |
+| Circle CCTP V2 | `circle evm *`; `circle approval *`, `circle source submit` (Base to Solana) | [Circle V2 EVM](docs/circle-v2-evm-fast.md); [Base to Solana](docs/lifi.md#circle-cctp-v2-base-usdc-to-solana-approval-and-delivery-status) |
 | Stargate V2 direct | `stargate native *`, `stargate token *` | [quote](docs/stargate-v2-direct-quote.md), [native](docs/stargate-v2-native-execution.md), [token](docs/stargate-v2-token-native-drop.md) |
 | Swaps | `swap ethereum uniswap[-token] *`, `swap tron sunswap *`, `swap solana jupiter/orca *` | [Uniswap](docs/uniswap.md), [SunSwap](docs/sunswap.md), [Jupiter](docs/jupiter.md), [Orca](docs/orca.md) |
 | x402 | `x402 inspect`, `x402 fetch *`, `x402 permit2 *`, `x402 solana *`, `x402 merchant *` | [above](#x402-purchases) |

@@ -1,4 +1,4 @@
-/** Shared harness for the Relay any-profile end-to-end tests (QA RELAY-001..008).
+/** Shared harness for the Relay any-profile end-to-end tests.
  *
  * Identity: two generated keys that belong to nobody (`keccak256("apn-relay-qa-payer-v1")` and
  * `keccak256("apn-relay-qa-recipient-v1")`). The `generated-*-quote-20261017.json` fixtures are keyless Relay

@@ -11,8 +11,8 @@ import { EvmTestRpc } from "./evm-helpers.js";
 import { TestNative, temporaryState } from "./helpers.js";
 
 /**
- * QA 0.5.54 X402-BALANCE-IGNORES-CUSTOM-POLICY-054-001 and X402-POLICY-NATIVE-CURRENCY-LABEL-054-001: an owner policy for
- * Sei (eip155:1329) USDC 0xe15f…2392 with a 1000-atom balance cap and a 0.35 SEI native cap. The wallet held 8095 atoms;
+ * Regression: an owner policy for Sei (eip155:1329) USDC 0xe15f…2392 with a 1000-atom balance cap and a 0.35 SEI native
+ * cap. The wallet held 8095 atoms;
  * `wallet balance` (CLI and MCP) said no limit was configured while x402 prepare refused as overfunded, and the consent
  * screen named the native cap in ETH.
  */

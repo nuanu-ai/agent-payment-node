@@ -36,7 +36,7 @@ export interface MetaMaskGaslessDependencies {
   readonly revocation?: MetaMaskRevocationDependencies;
 }
 /**
- * Next actions follow only what the refusal proves (METAMASK-FEE-REFUSAL-ASSET-GUIDANCE-001): the native gas shortfall
+ * Next actions follow only what the refusal proves: the native gas shortfall
  * MetaMask's own simulation states, APN's own USDC balance read below the transfer plus its fee (at the fee quote or at
  * the chain snapshot), a quoted fee above the owner's cap, or no proven cause. USDC is named as short only on APN's
  * read; no native transfer or other relay stands in for this one, and a higher cap is offered only as the owner's choice.

@@ -170,7 +170,7 @@ test("V1 genuine Native pipeline prepares unsigned, prompts exact TTY, sends onc
  assert.equal(f.rpcReads,originReads);assert.equal(f.providerReads,originProviderReads);assert.equal(f.secretReads,originSecrets);assert.equal(f.sends,1);
 
  f.setFinal();const finalized=await f.runtime("observe",op.operationId,false).status(op.operationId,new Date());assert.equal(finalized.state,"finalized");
- // QA 0.5.51 shared SwapReceiptProof: the finalized receipt's own exact input, output, fee and SOL spend.
+ // Shared SwapReceiptProof: the finalized receipt's own exact input, output, fee and SOL spend.
  const economics=finalized.receiptProof?.economics;assert.equal(economics?.inputAtomic,finalized.quote.inputAmountAtomic);assert.ok(BigInt(economics!.outputAtomic!)>=BigInt(finalized.quote.minimumOutputAtomic));assert.ok(BigInt(economics!.networkFeeAtomic!)>0n);assert.ok(BigInt(economics!.nativeDebitAtomic!)>0n);const secrets=f.secretReads;
  const finalStatus=await executeJupiterCommand({command:"swap.jupiter.status",operationId:op.operationId},{state:new StateStore(f.temp.root),clock:{now:()=>new Date()},jupiterV1Runtime:f.runtime("observe",op.operationId,false)} as RuntimeContext);
  assert.deepEqual(finalStatus.nextActions,[]);
@@ -250,7 +250,7 @@ for(const remaining of [23,24])test(`V1 signing reserve ${remaining} blocks keep
   assert.ok(result.submissionMarker);assert.equal(f.sends,1);assert.ok(f.secretReads>0);
  }
 });
-// QA 0.5.51 route 83: quote, prepare and the approval prompt spent the quote's one blockhash lifetime before signing. The
+// Regression on route 83: quote, prepare and the approval prompt spent the quote's one blockhash lifetime before signing. The
 // approval now freezes its own lifetime: the quoted message with only its recent blockhash replaced, checked before the prompt.
 test("V1 approval re-freezes a spent quote lifetime and signs exactly the fresh message the owner saw",async t=>{
  const title="V1 approval re-freezes a spent quote lifetime and signs exactly the fresh message the owner saw";

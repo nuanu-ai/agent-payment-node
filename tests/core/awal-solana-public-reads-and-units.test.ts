@@ -12,7 +12,7 @@ import { SolanaAwalAdapter } from "../../src/solana/awal-adapter.js";
 import { SolanaTestRpc, SolanaWrapping, SOL_RECIPIENT } from "./solana-helpers.js";
 import { temporaryState } from "./helpers.js";
 
-/** QA 0.5.61: AWAL Solana public reads keep the provider's stdout; non-EVM amounts are labelled in their own units. */
+/** AWAL Solana public reads keep the provider's stdout; non-EVM amounts are labelled in their own units. */
 async function awalChild(address: string): Promise<{ script: string; cleanup: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), "apn-awal-solana-")), script = join(dir, "awal.cjs");
   // A controlled awal stand-in run by the real runner: it answers public JSON only.

@@ -1,5 +1,5 @@
 /**
- * QA 0.5.70 SMART-CONNECT-INACTIVE-NEXT-ACTION-070-001: `wallet connect` to a MetaMask account whose official Base Smart
+ * Regression: `wallet connect` to a MetaMask account whose official Base Smart
  * Account is not enabled yet refused correctly ("Enable the official MetaMask Smart Account on Base, then retry the same
  * connect intent.") but its next action said "Use a local profile for payment effects", i.e. change custody. Both the
  * browser consent and the grant preflight now name that setup step and the same intent; a genuinely unsupported

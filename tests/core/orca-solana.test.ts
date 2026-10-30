@@ -146,7 +146,7 @@ test("one foreground approval takes a fresh blockhash, re-simulates the exact by
   f.rpc.status = "finalized"; f.advance(20_000);
   const finalized = await f.runtime.status(sent.operationId, f.clock.now());
   assert.equal(finalized.state, "finalized"); assert.equal(finalized.receiptProof?.transactionHash, signatureOf(f.rpc.sends[0]!));
-  // QA 0.5.51 UNISWAP-RESULT-ECONOMICS-001 (Orca native): the finalized receipt's own input, output and fee, beside the quote.
+  // Swap economics (Orca native): the finalized receipt's own input, output and fee, beside the quote.
   assert.deepEqual(finalized.receiptProof?.economics, { inputAtomic: AMOUNT_IN.toString(), outputAtomic: f.rpc.simulatedOut.toString(),
     networkFeeAtomic: "5200", nativeDebitAtomic: (AMOUNT_IN + 5_200n).toString(), accountRentAtomic: "0" });
   assert.equal((await f.runtime.status(sent.operationId, f.clock.now())).integrityHash, finalized.integrityHash); assert.equal(f.rpc.sends.length, 1);

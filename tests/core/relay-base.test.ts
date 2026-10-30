@@ -253,7 +253,7 @@ test("Base observe reads one provider candidate and never promotes credit to pai
     assert.equal(diagnostic.operationalAcceptance, false);
     assert.equal(JSON.stringify(diagnostic).includes("private RPC response and credential"), false);
   }
-  // QA 0.5.51 (receiver 101-06): the solver paid with a direct native transfer. It is a qualifying credit like the router
+  // A captured case: the solver paid with a direct native transfer. It is a qualifying credit like the router
   // event, as on every native lane; the same payout stays this operation's (create-only claim).
   const directOnly = await new RelayBaseObserveService(state, () => ({ ...ports }),
     new RelayKeylessStatusService(state, boundFetcher), finalized, usage).observe("default", op.operationId);

@@ -9,7 +9,7 @@ import { decodeWhirlpoolV2AccountSnapshot } from "../../src/swap/jupiter-solana/
 import { JUPITER_V1_WHIRLPOOL_V2_POOL } from "../../src/swap/jupiter-solana/v1-pins.js";
 import type { JupiterV1SemanticAccount } from "../../src/swap/jupiter-solana/v1-material.js";
 
-// QA 0.5.51 (DEVELOPER-STATES item 8): approval of route 83 refused "tick array seed or order changed" 12 s after its
+// Regression: approval of route 83 refused "tick array seed or order changed" 12 s after its
 // quote. Pool 83v8 has tick spacing 1, so one tick array spans 88 ticks (about 0.88% of price); the guard demanded the
 // arrays Jupiter froze at quote time equal the program's preferred run for the pool's tick at approval. The Whirlpool
 // program itself starts at whichever named array holds the current tick, so a pool that moved down still swaps.

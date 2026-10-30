@@ -1,4 +1,4 @@
-/** QA 0.5.51 CIRCLE-POST-BURN-ERROR-STATE-001, Relay instance (996ac8e2…, Base ETH -> Polygon POL): `relay execute` sent the
+/** Regression, Relay instance (Base ETH -> Polygon POL): `relay execute` sent the
  * deposit once, then a source read failed ("EVM RPC returned malformed bytes.") and the command answered a bare error with
  * no journal. Through the installed command path with a simulated chain: the same call answers with the journal (hash,
  * submitting, the observe step) and names the failed read; the next execute only observes and the deposit is sent once. */

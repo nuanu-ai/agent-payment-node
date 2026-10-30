@@ -15,9 +15,9 @@ import { NOW, quoteInput, SdkExchange, syntheticHome } from "./metamask-gasless-
 const PROVIDER_TEXT = "Not enough funds (provider text canary)";
 
 /**
- * QA 0.5.51 rows GASLESS-MM-002..008: HTTP 200 fee quotes whose low fee tier had no `tokenFees` on Arbitrum, Polygon,
- * Ethereum, Linea and Monad. The answer is shaped as the provider sends a simulated transfer it will not price; its
- * tier carries an error but no native gas terms, so no cause is proven (METAMASK-FEE-REFUSAL-ASSET-GUIDANCE-001).
+ * HTTP 200 fee quotes whose low fee tier had no `tokenFees` on Arbitrum, Polygon, Ethereum, Linea and Monad. The answer
+ * is shaped as the provider sends a simulated transfer it will not price; its tier carries an error but no native gas
+ * terms, so no cause is proven.
  */
 class UnpricedExchange extends SdkExchange {
   override async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
@@ -27,7 +27,7 @@ class UnpricedExchange extends SdkExchange {
       transactions: [{ status: "0x1", fees: [{ error: PROVIDER_TEXT }] }], sponsorship: { isSponsored: false, error: null } } }) };
   }
 }
-/** QA row GASLESS-MM-005: Optimism refused at relay support; the provider's relay list carries the chain unflagged. */
+/** Optimism refused at relay support; the provider's relay list carries the chain unflagged. */
 class UnrelayedExchange extends SdkExchange {
   override async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
     const response = await super.request(request);

@@ -104,7 +104,7 @@ const usage = async (asset) => (await new AssetUsageLedger(root).usage({ account
 const NATIVE = { kind: "native", identifier: null }, TOKEN = { kind: "token", identifier: USDC };
 
 /**
- * QA 0.5.52 METAMASK-NATIVE-MFA-GUIDANCE-001 (live 189186…, request 8cc50f3c…): a Guard that needs the owner's approval.
+ * A Guard that needs the owner's approval.
  * The vendor bytes are 6.1.5's own: `send-transaction` without --wait writes the AWAITING_MFA `_notice` and the pending
  * `_summary` (exit 0); `requests watch` before approval writes the notice alone (its `_error` goes to stderr, exit 1).
  */
@@ -127,7 +127,7 @@ async function mfaScenario() {
   assert.equal(first.data.state, "unknown"); assert.equal(first.data.transaction_hash, null); assert.equal(first.data.effect_attempts, 1);
   assert.deepEqual([task.status, task.request_id, task.auth_method, task.expires_at, task.source, task.observe_command], ["awaiting_owner", RID, "social", later, "send", observe]);
   assert.match(task.owner_action, /email registered to your MetaMask dashboard/u); assert.deepEqual(first.next_actions, [observe]);
-  // The record 0.5.52 wrote for 189186…: UNKNOWN with its request id and no task. It recovers through the normal observer.
+  // The record 0.5.52 wrote for the captured transfer: UNKNOWN with its request id and no task. It recovers through the normal observer.
   const journalPath = join(root, "metamask-native-operations", `${id}.json`);
   const { recordHash: _hash, mfaTask: _task, ...body } = JSON.parse(await readFile(journalPath, "utf8"));
   await writeFile(journalPath, `${canonicalJson({ ...body, recordHash: hashObject(body) })}\n`);

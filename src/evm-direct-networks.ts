@@ -90,7 +90,7 @@ export function directEvmRequiresSafeHead(chainId: DirectEvmChainId): boolean {
 }
 
 /**
- * Direct rows of one network: frozen native/token identities plus the three C1-12 direct-only token deployments.
+ * Direct rows of one network: frozen native/token identities plus the three direct-only token deployments.
  * The registry's native coin must agree with the frozen row, so a list revision cannot silently rename or re-scale it.
  */
 export function directEvmListRows(chainId: DirectEvmChainId): readonly CandidateAsset[] {

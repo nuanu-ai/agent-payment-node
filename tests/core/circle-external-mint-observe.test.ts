@@ -112,7 +112,7 @@ test("a relayed mint the destination SAFE head has not reached stays found; the 
 test("an unused issuer message is not scanned: observe leaves the awaiting mint as it is and names approve-mint", async t => {
   const f = await fixture(t); f.chain.usedNonce = 0n;
   const result = await cli(f, "observe"); assert.equal(result.ok, true, JSON.stringify(result)); const out = result.operation as Out;
-  // QA 0.5.51 CIRCLE-NEXT-ACTION-001: a verified burn and attestation wait for the owner's mint, not for another observe.
+  // A verified burn and attestation wait for the owner's mint, not for another observe.
   assert.equal(out.state, "awaiting_mint"); assert.equal(out.external_mint, undefined); assert.deepEqual(out.next_actions, [`apn circle evm approve-mint --operation ${f.op.operationId}`]);
   assert.ok(!f.calls.includes("eth_getLogs")); assert.equal((await journal(f)).integrityHash, f.op.integrityHash); noEffects(f);
 });

@@ -1,8 +1,8 @@
 /**
- * QA 0.5.77 supplement to CIRCLE-OBSERVER-PUBLICATION-RACE-077-001: the same create-only race refused parallel reads of a
+ * The create-only write race of create-only-write-race.test.ts also refused parallel reads of a
  * direct transfer's fee facts and a swap's economics facts (`receipt_facts_unavailable` / APN_STATE_SECURITY) until the
  * next read. Fixed in the secure store (0.5.78); these are the regressions at both sidecar stores and their status
- * helpers, with the winner's file still validated against the record. The receipts are the QA 0.5.51 captures.
+ * helpers, with the winner's file still validated against the record. The receipts are real captured receipts.
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";

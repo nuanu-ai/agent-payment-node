@@ -13,7 +13,7 @@ import { executeStargateV2NativeEth, prepareStargateV2NativeEth, stargateV2Nativ
 import { confirmedStargateSourceReceipt } from "../../src/stargate-v2/native-runtime.js";
 import { BLOCK, sourceReceipt, setup, request, AMOUNT, FEE } from "./stargate-native-support.js";
 
-/** QA 0.5.60: provider x402 recovery reads through a Base USDC binding; deadline and native fee follow-ups. */
+/** Provider x402 recovery reads through a Base USDC binding; native deadline diagnostics and the native source fee. */
 const PAYER = "0xc48ae87E2f0Dbd94b7c089C1A0217c9b23E55032";
 
 function mockHttps(t: TestContext, responder: (request: { method: string; params: unknown[] }) => unknown) {

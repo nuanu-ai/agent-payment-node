@@ -53,7 +53,7 @@ test("a create-only publication interrupted before its stage unlink is read once
 });
 
 test("a stage its own writer unlinked after the caller saw two links leaves the same file with one link", async (t) => {
-  // QA 0.5.77 (CIRCLE-OBSERVER-PUBLICATION-RACE-077-001): a concurrent observer saw the winner's target between its link
+  // Regression: a concurrent observer saw the winner's target between its link
   // and its stage unlink, found no stage to release and failed "State file must have exactly one link."
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const store = new Probe(temporary.root); await store.initialize();

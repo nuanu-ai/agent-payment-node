@@ -19,7 +19,7 @@ import { RelayUnsignedOperationRepository } from "../../src/relay-unsigned-opera
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 
-/** QA 0.5.59: a finalized Circle burn stops counting against later days; a deposit-only Relay quote is a classified refusal. */
+/** A finalized Circle burn stops counting against later days; a deposit-only Relay quote is a classified refusal. */
 const ACCOUNT = privateKeyToAccount(`0x${"11".repeat(32)}`), H = (c: string) => c.repeat(64);
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const BURN = parseAbi(["function depositForBurnWithHookAndFees(uint256 amount,uint32 destinationDomain,bytes32 mintRecipient,address burnToken,bytes32 destinationCaller,bytes hookData,(bytes signedQuote,address refundAddress) claim) payable"]);

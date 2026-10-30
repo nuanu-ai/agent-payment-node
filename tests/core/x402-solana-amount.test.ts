@@ -5,7 +5,7 @@ import type { X402SolanaRecord } from "../../src/x402-solana/model.js";
 import { approveX402SolanaAbandon } from "../../src/x402-solana/runtime.js";
 import { publicX402Solana } from "../../src/x402-solana/view.js";
 
-// X402-SOLANA-DECIMAL-DIRECTION-053-001: a 1000-atom USDC payment showed amount_decimal "1000000000" (the decimal→atomic
+// Regression: a 1000-atom USDC payment showed amount_decimal "1000000000" (the decimal→atomic
 // parser applied to atoms). The status and the abandon screen must render atoms → display units.
 function record(amountAtomic: string): X402SolanaRecord {
   const terms = {

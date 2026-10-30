@@ -12,7 +12,7 @@ import { racedAtSync } from "./atomic-race-helpers.js";
 import { temporaryState } from "./helpers.js";
 
 /**
- * QA 0.5.77 (CIRCLE-OBSERVER-PUBLICATION-RACE-077-001): parallel statuses of one Circle operation failed with
+ * Regression: parallel statuses of one Circle operation failed with
  * APN_STATE_SECURITY "State target appeared during an atomic write." when another observer published the same file while
  * this one was still writing its temporary copy. A create-only write that loses that race meets the same conflict as one
  * that finds the target occupied, which every create-only caller already resolves by reading and validating the winner.
@@ -97,7 +97,7 @@ test("parallel statuses of one burn, its source proof unrecorded, all read deliv
 });
 
 test("parallel statuses of one recorded burn all read delivered, with one proof and one claim", async (t) => {
-  // The QA reproduction: rounds of 8 ordinary statuses of one operation whose source proof is already recorded.
+  // The original reproduction: rounds of 8 ordinary statuses of one operation whose source proof is already recorded.
   for (let round = 0; round < 4; round++) {
     const { root, journal } = await setup(t);
     const views = await Promise.all(Array.from({ length: 8 }, () => status(root, journal, reader(SMALL, []))));

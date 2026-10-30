@@ -1,5 +1,5 @@
 /**
- * OUTPUT-RECOVERY-GUIDANCE-001: recovery advice addresses the operation that failed. An anonymous LI.FI inventory read is
+ * Recovery advice addresses the operation that failed. An anonymous LI.FI inventory read is
  * retried as a read, never repaired by a wallet connect; wallet-provider advice stays only on commands an external wallet
  * profile can run; a profile without a permission lifecycle and a local gasless endpoint error name their own next step.
  */

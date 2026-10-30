@@ -122,7 +122,7 @@ for(const kind of ["gross","gas","price","net","type2","signature","receipt-fee"
   else await assert.rejects(proveGaszipDelivery(lane==="sei"?SEI_ROUTE:MEGA_ROUTE,f.rpc(),f.prepare.owner.address,d));
  });
 }
-/** QA GASZIP-LIVE-SCALAR-001: the real Sei payout whose RPC `s` is a 63-digit QUANTITY (no leading zero nibble). */
+/** The real Sei payout whose RPC `s` is a 63-digit QUANTITY (no leading zero nibble). */
 async function shortScalarPayout(){
  const q=JSON.parse(await raw("sei-short-scalar-payout.json")) as Row,captured=q.calls.find((c:Row)=>c.method==="eth_getTransactionByHash").body.result as Row;
  const delivery=inspectGaszipDelivery(SEI_ROUTE,seiCodec.json(q.provider.body),q.sourceHash,q.owner,q.amountAtomic,q.sourceBlock) as GaszipCorrelatedDelivery;
@@ -134,7 +134,7 @@ async function shortScalarPayout(){
  }});
  return {q,captured,delivery,prove:(tx:Row)=>proveGaszipDelivery(SEI_ROUTE,port(tx),q.owner,delivery)};
 }
-test("sei QA-captured payout with a 63-digit s closes through the production destination proof",async()=>{
+test("sei captured payout with a 63-digit s closes through the production destination proof",async()=>{
  const p=await shortScalarPayout();assert.equal(p.captured.s.length,65);assert.equal(p.captured.r.length,66);assert.equal(p.delivery.grossNative,true);
  const proof=await p.prove(p.captured);assert.equal(proof?.amount,p.q.netAtomic);assert.equal(proof?.status,"success");assert.equal(proof?.hash,p.captured.hash);
  assert.equal(BigInt(p.delivery.amount)-BigInt(p.q.netAtomic),BigInt(p.captured.gas)*BigInt(p.captured.gasPrice));
@@ -153,6 +153,6 @@ for(const [name,change,reason] of [
  ["s at curve order",()=>({s:"0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"}),/sei_gaszip_native_signature_s/],
  ["other payout amount",(t:Row)=>({value:`0x${(BigInt(t.value)+1n).toString(16)}`}),/sei_gaszip_native_signed_hash/],
  ["63-digit transaction hash",(t:Row)=>({hash:`0x${t.hash.slice(3)}`}),/sei_gaszip_hash/],
-] as const)test(`sei QA-captured short-scalar payout still refuses ${name}`,async()=>{
+] as const)test(`sei captured short-scalar payout still refuses ${name}`,async()=>{
  const p=await shortScalarPayout();await assert.rejects(p.prove({...p.captured,...change(p.captured)}),reason);
 });

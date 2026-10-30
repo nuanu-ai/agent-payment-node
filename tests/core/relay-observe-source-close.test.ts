@@ -18,7 +18,7 @@ import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
 
 /**
- * QA 0.5.51 RELAY-OBSERVE-TERMINAL-CLAIM-001 (49d4d136…, Ethereum USDC -> BNB): `relay observe` proved the deposit final and
+ * Regression (Ethereum USDC -> BNB): `relay observe` proved the deposit final and
  * the BNB credit, but left the deposit journal `submitting`, so the operation stayed `prepared` and blocked its account.
  */
 const payer = "0x0B4Dd0C3dA001Fa146EEd3f80B01860BEF6B8a14".toLowerCase(), recipient = "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7".toLowerCase();

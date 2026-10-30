@@ -1,5 +1,5 @@
 /**
- * QA 0.5.66 X402-SOLANA-RECOVERY-URL-QUOTING-066-003: a prepared Solana x402 payment's continue action pasted the seller
+ * Regression: a prepared Solana x402 payment's continue action pasted the seller
  * URL bare, so in zsh `?` failed as a glob ("no matches found") and `&` split the command before APN ran. The action now
  * renders the URL (and every other value) as one shell argument; only the `<the same key>` placeholder stays bare.
  */

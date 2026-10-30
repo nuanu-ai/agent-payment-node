@@ -76,7 +76,7 @@ for (const route of SOURCE_ROUTES) test(`source observation ${route[0]}->${route
   }
 });
 
-/** A Base USDC to Arbitrum Across operation whose one approval was sent while its observation failed, as in QA operation faa9ec23. */
+/** A Base USDC to Arbitrum Across operation whose one approval was sent while its observation failed, as in a captured operation. */
 async function approvalSent(root: string) {
   const s = await lifiFixture(root, "base-arb");
   const { id } = await s.prepare("across"); s.source.failObserve = true;
@@ -131,7 +131,7 @@ for (const receipt of ["primary", "scalar"] as const) test(`resume after a sent 
       { source: () => rpcFor(8453, observer), destination: () => rpcFor(42161, session),
         residual: () => rpcFor(8453, new RpcReadSession({ ...common, maxHttpRequests: 2, maxHttpAttempts: 3 })) }, physical) };
   };
-  // QA's first resume: the invocation is spent, so observation cannot start a request. That is a deferral, not unknown finality.
+  // The first resume: the invocation is spent, so observation cannot start a request. That is a deferral, not unknown finality.
   const spent = invocation(bridgeInvocationPostBudget(op)), first = await spent.execution.resume(op);
   assert.equal(spent.reads.posts.length, 0); assert.equal(first.integrityHash, op.integrityHash); assert.equal(first.terminal, false);
   assert.deepEqual(effects(first), effects(op));

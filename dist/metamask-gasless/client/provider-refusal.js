@@ -13,7 +13,7 @@ export function withMetaMaskProviderRefusal(error, d, chainId) {
  * A provider answer, not an APN fault, stated as exactly what MetaMask said: which provider read, which network and
  * which field. Only closed facts, proven numbers and APN's own constants appear; no provider text crosses the helper
  * boundary. A missing relay fee is never read as a USDC shortfall: the cause is named only when the answer's own
- * numbers prove it (METAMASK-FEE-REFUSAL-ASSET-GUIDANCE-001), or APN's own balance read does.
+ * numbers prove it, or APN's own balance read does.
  */
 export function metaMaskProviderRefusal(reason, d, chainId) {
     if (chainId === undefined)

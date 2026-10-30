@@ -1,94 +1,210 @@
 # x402 Permit2 source boundaries
 
-The package includes the pure offer foundation, unsigned current-owner preflight and a CLI-only foreground Permit2 flow for any EVM chain and token the owner's active allowlist policy admits for x402 with the `x402-exact-permit2` mechanism pin ([any seller](x402-any-seller.md)). The foundation and preflight remain unsigned. The foreground flow can sign and send one exact paid GET, then use genuine readonly chain evidence to finalize the owned journal. Source fixtures do not establish live merchant, human approval, manual QA or paid acceptance.
+The foreground Permit2 lane pays one x402 v2 `exact` offer with `assetTransferMethod: "permit2"` from the local wallet,
+on any EVM chain and token that the owner's active allowlist policy admits for x402 with the `x402-exact-permit2`
+mechanism pin. It is a CLI-only flow with foreground approval: one exact paid GET, then settlement proven from public
+chain evidence.
 
-## Scope
+Unattended Permit2 through `x402 fetch`, the Permit2 allowance commands and the admission rules shared by every lane are
+described in [x402 to any seller](x402-any-seller.md).
 
-- Pins the Permit2 contract and x402 exact proxy addresses; verifies on each chain the proxy's runtime hash and Permit2's runtime template with that chain's own immutables. Token identity (symbol, decimals) is the owner's allowlist row.
-- Selects and hashes an exact seller offer while preserving token, payee, amount, chain, timeout and extension bindings.
-- Plans Permit2 and optional exact-amount EIP-2612 typed data. The plan is data only; no key material is accepted.
-- Provides a local-wallet Permit2 prepare domain that binds the exact merchant challenge and the lowest-index admitted offer to the active owner x402 admission, its Permit2 mechanism pin and caps, token balance/allowance, contract code and (for a sponsored permit only) the token domain. The production read port loads the authenticated active policy and common usage ledger, checks the local payer and selected amount against its x402 admission, then reads that chain's state at its latest block through a configured RPC source: chain id with the header, then balance, allowance, the Permit2 nonce word and the Permit2/proxy runtime code in one JSON-RPC batch pinned by EIP-1898 `{blockHash, requireCanonical}`, and a third pinned POST (token domain, EIP-2612 nonce) only when a short allowance needs a seller-sponsored permit. It does not read a facilitator: the seller picks the facilitator, EIP-2612 sponsorship follows the seller's own 402 declaration, and a facilitator that cannot settle leaves the signature to expire unused at its deadline. The port returns only observations to the existing unsigned `preparePermit2WithPort` boundary.
-- The prepare core accepts the decoded x402 v2 `PAYMENT-REQUIRED` shape. EIP-2612 sponsorship requires a valid `extensions.eip2612GasSponsoring` version-one declaration and matching facilitator capability; the declaration remains bound to the challenge hash. The read port can supply only owner admission and observations, not payer or merchant terms.
-- Provides payer signature recovery/verification for externally supplied signatures.
-- Provides receipt and Permit2 nonce bitmap evidence codecs plus read-only chain/facilitator fixtures.
+| Command | Purpose | MCP |
+| --- | --- | --- |
+| `x402 permit2 preflight` | Check that inspected terms are admissible, without signing or saving anything. | No |
+| `x402 permit2 approve` | Foreground approval, signing and one paid GET. | Handoff only |
+| `x402 permit2 observe` | Read-only continuation that proves settlement or unused expiry. | No |
+| `x402 permit2 status` | Read one operation from the local journal. | `apn_x402_permit2_status` |
 
-## Explicit boundary
+## Requirements
 
-The foundation/read adapter has no signing or submission authority. It requires an explicitly configured RPC source, active owner profile, authenticated local account resolver and usage ledger, and rechecks that account after reading. CLI current-owner preflight uses this read port; MCP exposes only existing intent status. The separate foreground CLI closure owns its default TTY approval and private signing/dispatch context. HTTP status, response header and facilitator assertion never prove completed payment.
+- A local wallet profile with a native custody binding. External provider profiles are refused.
+- An active allowlist policy whose `accounts.evm` is the wallet, with a token row on the offer's chain that has the
+  `x402` rail, caps and exactly this mechanism pin:
 
-The adapter requires the chain's `latest` block no older than 30 seconds at return and pins every contract read to that block's hash (pre-sign facts predict settlement and cannot move money; settlement and expiry stay `finalized` proofs). It refuses a caller clock that differs from its trusted clock by more than one second. One read makes exactly two batched POSTs, with a five-second per-POST timeout and a 15-second deadline checked before each POST and at return, and never retries. Concurrent reads sharing a port or the same injected RPC source refuse. The RPC endpoint must accept JSON-RPC batches. Production reads go through the shared direct-EVM transport (provider-family pacing across processes and a per-command POST cap), the same one the signing fence and the observer use. The port cannot independently prove the remote endpoint's identity or enforce a global public-endpoint quota. Older records keep PayAI's `/supported` digest in `checkpoint.facilitatorSupportedDigest`; new records store the checked seller challenge hash there. There is no live merchant or paid acceptance in this change.
+  ```json
+  { "provider": "x402-exact-permit2", "reference": "0x402085c248EeA27D92E8b30b2C58ed07f9E20001" }
+  ```
 
-Ethereum USDT and native coins remain refused by the capability matrix when no keyless facilitator and token authorization path are proven. The fixtures under `docs/evidence/x402-non-usdc-2026-09-18/` are read-only observations collected without `/settle`.
+- The token balance, and either an existing allowance to Permit2 that covers the price
+  (`x402 permit2 allowance set`) or a seller-declared EIP-2612 sponsorship.
+- A credential-free public HTTPS RPC of the offer's chain, passed as `--rpc-url`. It must accept JSON-RPC batches.
 
-## Operation status
+Native coins cannot be paid through Permit2: only token rows are admitted.
 
-`apn x402 permit2 status --profile <profile> --operation <operation-id>` and MCP `apn_x402_permit2_status` read the operation from the Permit2 production journal (`permit2-production/`), the same record `x402 permit2 approve` and `observe` write. They return the redacted public projection: production state, lifecycle, terminal flag, chain, payer, recipient, token, amount, deadline and resource origin. A missing record returns `not_found` without creating anything. Wrong profile, malformed records, invalid operation IDs, unsafe permissions and symlinks fail closed.
+## What the lane checks
 
-Status uses the secure state's non-mutating checked JSON reader directly: no initialization, locks, repair, fsync, RPC, wallet, policy activation, usage reservation, signature or send. Typed data, authorization material, signatures and secrets are omitted from output. The earlier blocked-intent generation (`permit2-intents/`, `permit2-exposures/`) never had a production writer and was removed.
+- The canonical Permit2 contract and the x402 exact proxy at their pinned addresses, verified on each chain: the proxy's
+  runtime hash, and Permit2's runtime template with that chain's own immutables. Token symbol and decimals come from the
+  owner's allowlist row.
+- The selected offer and its hash, keeping the token, payee, amount, chain, timeout and extension bindings exactly as
+  the seller sent them. The offer is the lowest-index offer the owner's policy admits.
+- The Permit2 typed data and, only when needed, an exact-amount EIP-2612 permit. Planning is data only; no key material
+  is accepted at that stage.
+- The owner admission: the active policy and the shared usage ledger are loaded, and the local payer and the amount are
+  checked against the x402 admission, its Permit2 pin and its caps.
+- The decoded x402 v2 `PAYMENT-REQUIRED` challenge. EIP-2612 sponsorship requires a valid version-one
+  `extensions.eip2612GasSponsoring` declaration with a matching facilitator capability, and the declaration stays bound
+  to the challenge hash. The read side supplies only owner admission and chain observations, never payer or merchant
+  terms.
 
-## Current-owner CLI preflight
+APN does not query a facilitator. The seller chooses the facilitator, EIP-2612 sponsorship follows the seller's own 402
+declaration, and a facilitator that cannot settle leaves the signature to expire unused at its deadline.
 
-`apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> --expected-challenge-hash <64-lowercase-hex> --expected-index <index> --expected-terms <base64-json-of-selected-PaymentRequirements> --rpc-url <public-HTTPS-RPC-of-the-offer-chain>` takes an already inspected x402 v2 `PAYMENT-REQUIRED` header and the exact selected terms the operator expects. APN decodes the header strictly, checks the challenge hash, index and full selected requirement before any RPC, and then reads the current local wallet's checked public metadata and encrypted envelope identity. An external provider profile or disagreement in account binding refuses. The production port loads active x402 Permit2 policy, reads the existing common usage bucket without initialization or reservation, and checks the chain's latest-block evidence. It rechecks wallet, policy and usage after the network reads.
+### Chain reads
 
-Success returns only profile, `admissible_unsigned` state, `execution_blocked` capability, chain, payer, recipient, token, atomic amount, deadline, challenge/offer/policy/prepare hashes and `permit2_execution_not_exposed` blocker code. Failure returns a classified code and blocker reason. Typed data, nonce, authorization, signatures, private wallet data, and merchant resource content are omitted. This preflight command never creates an intent, payment journal, usage reservation or payment request. The configured RPC is public HTTPS only, receives two read-only batches, and uses the read port's per-POST and total deadlines; the shared direct-EVM scheduler paces POST starts per provider family across CLI processes. This preflight writes only operational pacing metadata and lock files; it does not write payment state. A cancelled or timed-out queued read checks its abort signal before contacting the RPC. No MCP preflight tool exists. This is synthetic source verification; no live merchant or paid acceptance is claimed.
+- Reads are taken at the chain's `latest` block, which must be no older than 30 seconds, and every contract read is
+  pinned to that block's hash (EIP-1898 `{blockHash, requireCanonical}`). These pre-sign facts only predict settlement
+  and cannot move money; settlement and expiry stay `finalized` proofs.
+- One read makes exactly two batched POSTs: chain id with the block header, then balance, allowance, the Permit2 nonce
+  word and the Permit2 and proxy runtime code. A third pinned POST (token domain, EIP-2612 nonce) is made only when a
+  short allowance needs a seller-sponsored permit.
+- Each POST has a 5-second timeout, and a 15-second deadline is checked before each POST and at return. Reads are never
+  retried. A caller clock more than one second away from the trusted clock is refused. Concurrent reads sharing the same
+  RPC source are refused.
+- Reads go through the shared direct-EVM transport: provider-family pacing across processes and a per-command POST cap,
+  the same transport the signing fence and the observer use.
+- APN cannot prove the remote endpoint's identity or enforce a global quota on a public endpoint.
 
-When another process holds the endpoint lock through a slow RPC, a queued preflight may return busy or time out before starting its own transport. After contention clears, the operator can make a fresh manual attempt. The CLI does not retry automatically.
+HTTP status, response headers and facilitator assertions never prove a completed payment.
 
-## Foreground production CLI
+## Preflight
 
-Use an installed artifact whose provenance and `approve`/`observe` help match this
-source contract. The source candidate is unreleased; its version number alone
-does not establish installed support. No eligible live merchant URL is established
-here. The following commands are templates. Replace every placeholder with
-verified inputs before running them; do not use example endpoints for payment.
+```text
+apn x402 permit2 preflight --profile <profile> --payment-required <base64-header> \
+  --expected-challenge-hash <64-lowercase-hex> --expected-index <index> \
+  --expected-terms <base64-json-of-selected-PaymentRequirements> --rpc-url <public-HTTPS-RPC-of-the-offer-chain>
+```
 
-1. Verify the current local-native owner binding, active Permit2 policy and caps,
-   available funds, the merchant's exact Permit2 offer and a credential-free
-   public HTTPS RPC of the offer's chain. Choose a stable 8 to 200 character safe ASCII
-   idempotency key for this exact request. `--profile` defaults to `default` on
-   approve; name the verified profile explicitly when another wallet owns it.
-2. Run the approval command in a foreground TTY:
+Preflight takes an already inspected x402 v2 `PAYMENT-REQUIRED` header and the exact terms the operator expects.
+
+1. It decodes the header strictly and checks the challenge hash, the index and the full selected requirement before any
+   RPC.
+2. It reads the local wallet's checked public metadata and encrypted envelope identity. An external provider profile or
+   a disagreement in account binding refuses.
+3. It loads the active Permit2 policy, reads the usage bucket without initializing or reserving it, and reads the chain
+   at its latest block.
+4. It rechecks the wallet, policy and usage after the network reads.
+
+On success it returns the profile, state `admissible_unsigned`, capability `execution_blocked`, chain, payer, recipient,
+token, atomic amount, deadline, the challenge, offer, policy and prepare hashes, and blocker code
+`permit2_execution_not_exposed`; preflight itself never executes a payment. On failure it returns a classified code and
+reason. Typed data, nonce, authorization, signatures, private wallet data and merchant resource content are never
+returned.
+
+Preflight never creates an intent, payment journal, usage reservation or payment request. It writes only RPC pacing
+metadata and lock files. A queued read that is cancelled or times out checks its abort signal before contacting the
+RPC. When another process holds the endpoint lock through a slow RPC, preflight may return busy or time out before
+starting its own request; try again once contention clears. The CLI does not retry automatically.
+
+## Approve
+
+The commands below are templates. Replace every placeholder with verified inputs; do not use example endpoints for
+payment.
+
+1. Verify the local wallet binding, the active Permit2 policy and its caps, the available funds, the merchant's exact
+   Permit2 offer, and a credential-free public HTTPS RPC of the offer's chain. Choose a stable idempotency key of 8 to
+   200 safe ASCII characters for this exact request. `--profile` defaults to `default` on approve; name the profile
+   explicitly when another wallet owns the payment.
+2. Run the approval in a foreground terminal:
 
    ```text
    apn x402 permit2 approve --url <verified-merchant-https-url> --rpc-url <verified-public-https-rpc-of-the-offer-chain> --profile <verified-local-profile> --idempotency-key <stable-request-key>
    ```
 
-   Inspect the frozen request, payee and maximum debit at the prompt. Consent
-   authorizes signing and at most one paid GET in that process. This command
-   does not offer sign-only approval. Keep the returned operation ID.
-3. If the operation is held (HOLD), continue only with observation. An explicit
-   nonzero transaction hash is a candidate to check, not proof of payment:
+   Inspect the frozen request, payee and maximum debit at the prompt. Consent authorizes signing and at most one paid
+   GET in that process. There is no sign-only approval. Keep the returned operation id.
 
-   ```text
-   apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-public-https-rpc-of-the-offer-chain> --profile <same-local-profile> --transaction <candidate-transaction-hash>
-   ```
+What approve does:
 
-   Without `--transaction`, settlement observation can use a saved transaction
-   hint. A missing or bad hint leaves the operation held; a later explicit
-   candidate can be checked. HTTP 200 and transaction hints do not prove public
-   chain finality. Only genuine finalized chain evidence can finalize payment.
-4. For an expired authorization with no effect, use the separate mode:
+- It permits GET only. There are no caller headers or body, and no approval bypass flag.
+- Before the unsigned merchant request, it validates the local native custody capability and metadata binding. It
+  does not decrypt the wallet or open the Keychain before approval.
+- After consent it signs with the guarded native signer and makes one dedicated HTTPS attempt with a 20-second monotonic
+  dispatch deadline and no retry.
+- The response is reduced to an immutable, untrusted locator record. HTTP 200, a transaction hint or a timeout cannot
+  mark the payment settled or failed.
+- A matching operation that is already exposed, signed, request-pending or terminal returns sanitized status, with no
+  HTTP, RPC, prompt, key access or ledger repair. A prepared, reserving or reserved operation resumes from its saved
+  material without another 402 inspection or preparation.
 
-   ```text
-   apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-public-https-rpc-of-the-offer-chain> --profile <same-local-profile> --expired-unused
-   ```
+Approve states: `prepared`, `reserving`, `reserved`, `exposure_unknown`, `request_pending`, `terminal_pending`; terminal
+`settled`, `expired_no_effect`, `released_unsubmitted`.
 
-   `--transaction` and `--expired-unused` are mutually exclusive. Expiry alone
-   is insufficient: this mode requires actual finalized chain time beyond the
-   saved deadline and evidence that the nonce remains unused.
+## Observe
 
-The same profile, key and exact request retain one operation. Changing the request
-with the same profile/key returns an idempotency conflict. Prepared, reserving or
-reserved operations resume saved material. Exposed, signed, pending and terminal
-operations never prepare again, sign again or send again. Observation reads the
-saved owner and operation, and may reconcile the owned local journal and usage
-ledger; it performs no merchant request or signing. Omit `--profile` on observe
-to use the saved owner, or provide the same profile as a check.
+If the operation is held, continue only with observation. It never contacts the merchant, approves, decrypts, re-signs
+or resends.
 
-`apn x402 permit2 approve --help` describes the required owner-selected HTTPS URL, HTTPS RPC, explicit stable idempotency key and optional profile (default `default`). The command permits GET only, with no caller headers/body or approval bypass flag. Before unsigned merchant HTTP, it validates a genuine local-native capability and metadata binding; it does not describe/decrypt the wallet or load Keychain before approval. Matching exposed, signed, request-pending and terminal operations return sanitized status with no HTTP, RPC, UI, keys or ledger repair. Prepared/reserving/reserved operations resume from saved material without another 402 inspection or preparation.
+```text
+apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-public-https-rpc-of-the-offer-chain> --profile <same-local-profile> --transaction <candidate-transaction-hash>
+```
 
-The new same-process `signAndSubmitOnce` enclosure owns concrete default foreground TTY consent, original approval clock, journal and fence. Constructor-injected approval callbacks and public `run` cannot authorize this enclosure. After consent it uses guarded native signing, one private first-request grant and one dedicated HTTPS attempt, with a 20-second monotonic dispatch deadline and no retry. Response data is reduced to an immutable untrusted locator sidecar. HTTP 200, a transaction hint or a timeout cannot mark payment settled or failed.
+- An explicit non-zero transaction hash is a candidate to check, not proof of payment.
+- Without `--transaction`, observation can use a saved transaction hint. A missing or bad hint leaves the operation
+  held, and a later explicit candidate can still be checked.
+- Only finalized chain evidence can finalize the payment; HTTP 200 and transaction hints do not. A proof finalizes the
+  local journal and the shared usage ledger.
 
-`apn x402 permit2 observe --help` describes readonly continuation by operation ID, selected HTTPS RPC and either an explicit transaction candidate or `--expired-unused`. It performs no merchant request, approval, decryption, re-signing or resend. A later candidate can probe genuine chain evidence despite a bad saved hint; only the existing private observer proof can finalize the journal and common usage ledger. Unsigned rows do not start RPC, and matching terminal ledger intent can reconcile locally. Legacy Permit2 status and generic operation status remain separate; approve and observe have no MCP tools.
+For an authorization that expired with no effect:
 
-Lower-level configurable approval-authority APIs remain trusted wiring: their private proofs bind the issuer's decision and owned material, and do not independently attest an actual human TTY receipt. Synthetic tests may mock the concrete TTY prototype as a consent fixture. Those tests do not prove human approval. Global human-consent, installed/manual QA and live acceptance obligations remain open; the original 32 acceptance obligations are unchanged. No eligible live merchant URL is established by this source work.
+```text
+apn x402 permit2 observe --operation <saved-operation-id> --rpc-url <verified-public-https-rpc-of-the-offer-chain> --profile <same-local-profile> --expired-unused
+```
+
+`--transaction` and `--expired-unused` are mutually exclusive. Expiry alone is not enough: this mode needs finalized
+chain time beyond the saved deadline and evidence that the nonce is still unused.
+
+Omit `--profile` on observe to use the saved owner, or give the same profile as a check. Unsigned operations do not
+start RPC, and an operation whose ledger intent is already terminal can reconcile locally.
+
+## Status
+
+```text
+apn x402 permit2 status --profile <profile> --operation <operation-id>
+```
+
+`status` and MCP `apn_x402_permit2_status` read the operation from the Permit2 journal (`permit2-production/`), the same
+record `approve` and `observe` write. They return a redacted view: state, lifecycle, terminal flag, chain, payer,
+recipient, token, amount, deadline and resource origin.
+
+- A missing record returns `not_found` without creating anything.
+- A wrong profile, malformed records, invalid operation ids, unsafe permissions and symbolic links fail closed.
+- Status uses a non-mutating checked reader: no initialization, locks, repair, fsync, RPC, wallet, policy activation,
+  usage reservation, signature or send. Typed data, authorization material, signatures and secrets are never shown.
+
+Status states: `prepared`, `reserving`, `reserved`, `release_pending`, `exposure_unknown`, `request_pending`,
+`terminal_pending`; terminal `not_found`, `released_unsubmitted`, `settled`, `expired_no_effect`.
+
+The generic `operation status` and this command are separate. `approve` and `observe` have no MCP tools.
+
+## Idempotency
+
+- The same profile, key and exact request keep one operation. Changing the request under the same profile and key is an
+  idempotency conflict.
+- Prepared, reserving or reserved operations resume their saved material.
+- Exposed, signed, pending and terminal operations never prepare, sign or send again.
+
+## Trust boundary
+
+- The read side has no signing or submission authority. It needs an explicitly configured RPC, an active owner
+  profile, an authenticated local account resolver and the usage ledger, and rechecks the account after reading.
+- Only the foreground `approve` path owns TTY consent and the private signing and dispatch context.
+- Lower-level approval-authority APIs are trusted wiring: their proofs bind the issuer's decision and owned material,
+  but do not themselves attest that a human approved in a terminal.
+
+## Reason codes
+
+| Reason | Meaning | What to do |
+| --- | --- | --- |
+| `x402_permit2_owner_admission_required` | No active allowlist policy admits a Permit2 token for the profile. | Stage and activate a row with the Permit2 pin. |
+| `x402_permit2_allowance_required` | The allowance to Permit2 is short and no EIP-2612 sponsorship is available. | Run `x402 permit2 allowance set` for that chain and token. |
+| `x402_offer_timeout_below_bound` | The lowest-index admitted offer's payment window is under 30 seconds. | Not payable in this lane. |
+| `x402_resource_url_mismatch` | The challenge names another origin or path. | Check the URL. |
+
+Other offer refusals are listed in [offer selection](x402-offer-selection.md#offer-terms-and-refusals).
+
+## Compatibility
+
+- Older records keep a facilitator `/supported` digest in `checkpoint.facilitatorSupportedDigest`; new records store the
+  checked seller challenge hash there.
+- Records prepared with a payment window shorter than 30 seconds still load.
