@@ -1,9 +1,9 @@
 /**
- * QA 0.5.67. SOLANA-X402-PREPARED-ERROR-CONTEXT-065-001 (post-commit addendum): a derived operation-index write that fails
- * after `x402 solana pay` saved its prepared record answered APN_INTERNAL with no id; the key fixes the id, so the saved
- * payment is named. X402-EXPIRED-UNSENT-WAIT-CONTEXT-067-001: `operation resume --wait-seconds` on an expired, never-sent
- * EIP-3009 authorization (FINALIZED not yet past its expiry) answered a bare APN_OPERATION_BLOCKED; it now answers as a
- * plain resume does, with the operation and a `not_exposed` wait outcome. Expiry, nonce and hold rules are unchanged.
+ * Regression: a derived operation-index write that fails after `x402 solana pay` saved its prepared record answered
+ * APN_INTERNAL with no id; the key fixes the id, so the saved payment is named. Also: `operation resume --wait-seconds`
+ * on an expired, never-sent EIP-3009 authorization (FINALIZED not yet past its expiry) answered a bare
+ * APN_OPERATION_BLOCKED; it now answers as a plain resume does, with the operation and a `not_exposed` wait outcome.
+ * Expiry, nonce and hold rules are unchanged.
  */
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import assert from "node:assert/strict";

@@ -80,7 +80,7 @@ test("Fp discovery can retry once but never build a foreign policy-selected pool
  assert.equal((refused.error as any)?.code,"APN_OPERATION_BLOCKED");assert.equal(refused.resolved,0);assert.equal(refused.posted.length,0);assert.equal(refused.urls.length,2);
 });
 
-// QA 0.5.51: with every current pool admitted, APN still asked Jupiter for "the" route of the first admitted pool and refused
+// Regression: with every current pool admitted, APN still asked Jupiter for "the" route of the first admitted pool and refused
 // any other pool Jupiter answered, although the owner admitted it. Jupiter's quote API has no pool selector.
 const ALL:readonly JupiterV1RouteId[]=["whirlpool-v1-83-sol-usdc-authority","whirlpool-v1-fp-sol-usdc-authority","whirlpool-swap-v2-esv-sol-usdc-authority","whirlpool-swap-v2-4h-sol-usdc-authority"];
 test("any admitted pool Jupiter answers is built: the unfiltered best first when a SwapV2 pool is admitted",async()=>{

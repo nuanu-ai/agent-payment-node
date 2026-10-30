@@ -1,4 +1,4 @@
-/** QA RELAY-001 (Ethereum USDC to BNB) and RELAY-005 (Ethereum USDC to Base ETH) end to end through the installed
+/** Relay Ethereum USDC to BNB and Ethereum USDC to Base ETH end to end through the installed
  * command path, for a profile and addresses that belong to nobody: `wallet import` → owner policy → `relay prepare` /
  * `relay prepare` → `relay execute` (approval) → `relay execute` (deposit) → `relay execute`
  * (finalized deposit) → `relay observe` / `relay base observe` (credit to the caller's recipient) → `relay status`. */

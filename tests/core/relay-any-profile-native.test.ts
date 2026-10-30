@@ -1,4 +1,4 @@
-/** QA RELAY-002, 003, 004, 006, 007 end to end through the installed command path, for profiles and addresses that
+/** The native Relay routes end to end through the installed command path, for profiles and addresses that
  * belong to nobody: `wallet import` → owner policy → `relay prepare` → `relay execute` (foreground code,
  * real signing, one send) → `relay execute` (source receipt) → `relay observe` (destination credit to the
  * caller's recipient) → `relay status`. Chains are simulated; quotes are provider-signed for the generated keys. */

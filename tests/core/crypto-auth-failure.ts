@@ -1,5 +1,5 @@
 /**
- * An AES-256-GCM authentication failure as the linked OpenSSL reports it (QA 0.5.78 SOURCE-TEST-CRYPTO-ERROR-PORTABILITY-078-001).
+ * An AES-256-GCM authentication failure as the linked OpenSSL reports it.
  * Node's bundled OpenSSL 3 throws a plain Error without a code, "Unsupported state or unable to authenticate data";
  * OpenSSL 4 (Homebrew node@24 24.22, linked to openssl@4 4.1.0) throws ERR_OSSL_BAD_DECRYPT,
  * "error:1C800064:Provider routines::bad decrypt". Only these two exact forms are an authentication failure.

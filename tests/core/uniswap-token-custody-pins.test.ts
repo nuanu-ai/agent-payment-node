@@ -7,7 +7,7 @@ import { UniswapTokenCustody } from "../../src/swap/uniswap-v3/token-custody.js"
 import { UniswapTokenNonceStore } from "../../src/swap/uniswap-v3/token-nonce.js";
 import { validateUniswapTokenOperation, type UniswapTokenOperation } from "../../src/swap/uniswap-v3/token-operation.js";
 import { temporaryState } from "./helpers.js";
-import { blockHash, movingNode, tokenSession, WRAPPING } from "./uniswap-token-qa0552-harness.js";
+import { blockHash, movingNode, tokenSession, WRAPPING } from "./uniswap-token-moving-node-harness.js";
 
 const LIVE = JSON.parse(readFileSync("tests/core/fixtures/uniswap-token-qa0552.json", "utf8")) as { stranded: { operation: UniswapTokenOperation } };
 const hex = (value: bigint) => `0x${value.toString(16)}`;

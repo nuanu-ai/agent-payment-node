@@ -1,5 +1,5 @@
 /**
- * SYNTHETIC end-to-end (OWNR-18/19, QA X402-MERCHANT-001): any local profile pays any x402 transfer-proof merchant through
+ * SYNTHETIC end-to-end (OWNR-18/19): any local profile pays any x402 transfer-proof merchant through
  * the real CLI command path (argv parse, bind, runtime, service, custody). Keys are generated in a temporary state and sign
  * for real; the merchant and the MegaETH RPC are in-process fakes; nothing leaves the machine.
  *
@@ -141,7 +141,7 @@ async function setup(t: test.TestContext, m: Merchant, profile: string, admissio
 }
 const reason = (r: { readonly error: { readonly details?: Readonly<Record<string, unknown>> } | null }) => r.error?.details?.reason;
 
-for (const [label, m] of [["x402engine USDm merchant (X402-MERCHANT-001)", USDM_MERCHANT], ["synthetic SYND merchant with a non-USDm asset", SYND_MERCHANT]] as const) {
+for (const [label, m] of [["x402engine USDm merchant", USDM_MERCHANT], ["synthetic SYND merchant with a non-USDm asset", SYND_MERCHANT]] as const) {
   test(`${label}: a generated non-owner profile prepares, approves in the foreground, pays once and receives delivery`, async (t) => {
     const f = await setup(t, m, `buyer-${m.pin.symbol.toLowerCase()}`);
     const prepared = await f.prepare("any-merchant-0001");

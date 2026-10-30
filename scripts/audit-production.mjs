@@ -14,8 +14,7 @@ const isRecord = value => value !== null && typeof value === "object" && !Array.
  * (single-argument z.record, errorMap). Only zod 3.x installed under those packages is excepted, until the expiry.
  */
 /**
- * Accepted 2026-10-29 under the owner's standing APN QA mandate (QA 0.5.77 RELEASE-AUDIT-DEEPMERGE-077-001), the rule of
- * the zod exception: GHSA-gcqx-w48m-w2h4 (npm advisory 1243505) covers every deepmerge from 4.2.0 to 4.3.1, the latest
+ * Maintainer-approved 2026-10-29 (APN 0.5.78), under the rule of the zod exception: GHSA-gcqx-w48m-w2h4 (npm advisory 1243505) covers every deepmerge from 4.2.0 to 4.3.1, the latest
  * release; upstream closed the report with no fix (TehShrike/deepmerge#273). Only the Torus HTTP and login helpers under
  * @metamask/agent-wallet require it in production. They merge request options and login parameters their own code
  * builds and never a response body. The `mm` CLI bundles its own copy, so no override of the installed package could

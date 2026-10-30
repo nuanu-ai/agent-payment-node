@@ -10,10 +10,10 @@ import { bridgeNoRouteEvidence } from "../../src/lifi/no-route.js";
 import { temporaryState } from "./helpers.js";
 import { LIFI_SYNTHETIC_SENDER, LifiTestProvider, lifiFixture, lifiSteps } from "./lifi-helpers.js";
 
-// QA 0.5.51 BRIDGE-LIFI-008/009 listed "no eligible route" for Ethereum ETH to Monad MON and to BNB. APN drops no route LI.FI
+// APN listed "no eligible route" for Ethereum ETH to Monad MON and to BNB. APN drops no route LI.FI
 // returns (every returned route is listed, preparable or gated), so an empty list is LI.FI's own answer; it now says so.
 const MONAD_EMPTY = { routes: [], unavailableRoutes: { filteredOut: [], failed: [] } };
-/** sha256 of the exact LI.FI body: the `response_hash` the QA captured for both Monad samples (0.001 and 0.01 ETH). */
+/** sha256 of the exact LI.FI body: the `response_hash` captured for both Monad samples (0.001 and 0.01 ETH). */
 const QA_MONAD_RESPONSE_HASH = "fadee8ede726896cd8294347660b236e767470485f59a014fff4447794395635";
 function argv(path: string[], args: Record<string, string>) { return [...path, ...Object.entries(args).flatMap(([k, v]) => [`--${k.replaceAll("_", "-")}`, v])]; }
 const nativeArgs = (to: string) => ({ profile: "lifi-local", from_chain: "eip155:1", to_chain: to, from_token: "native", to_token: "native", amount: "0.01",

@@ -1,8 +1,8 @@
 /**
- * QA 0.5.65 SOLANA-X402-PREPARED-ERROR-CONTEXT-065-001: after `x402 solana pay` saved its prepared payment, a simulation
- * refusal (or an RPC failure binding the lifetime) answered with no operation id or next actions, though the prepared
- * record holds the account claim. X402-GENERIC-ASSET-ERROR-CONTEXT-065-002: with MXNB or USD1 selected, the balance,
- * balance-limit and cap-relation errors named USDC. Both are answers only: signing, sending, holds and limits are unchanged.
+ * Regression: after `x402 solana pay` saved its prepared payment, a simulation refusal (or an RPC failure binding the
+ * lifetime) answered with no operation id or next actions, though the prepared record holds the account claim. And with
+ * MXNB or USD1 selected, the balance, balance-limit and cap-relation errors named USDC. Both fixes change answers only:
+ * signing, sending, holds and limits are unchanged.
  */
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import assert from "node:assert/strict";

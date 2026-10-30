@@ -110,7 +110,7 @@ function x402Unit(network: X402PolicyNetwork | undefined): { readonly symbol: st
     : { symbol: listed.symbol, note: ` (${listed.symbol}, ${listed.decimals} decimals, APN token list)` };
 }
 
-/** The native cap in the chain's own currency (QA 0.5.54: Sei showed "ETH"); the atomic value and its field stay as they are. */
+/** The native cap in the chain's own currency (never "ETH" on Sei); the atomic value and its field stay as they are. */
 export function nativeCapLine(chainId: number, maxBalanceWei: string | undefined): string {
   const native = evmNativeCurrencyLabel(chainId), pinned = DIRECT_EVM_NETWORKS.some((row) => row.chainId === chainId);
   if (maxBalanceWei === undefined) return `Maximum wallet ${native}: not configured`;

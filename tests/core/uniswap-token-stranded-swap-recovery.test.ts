@@ -25,7 +25,7 @@ import { UNISWAP_TOKEN_MECHANISM_PIN } from "../../src/swap/uniswap-v3/token-rou
 import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runtime-factory.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
-import { blockHash, CapturedState, movingNode, pinsLikeProduction, tokenSession, typingTerminal, usageBucket, WRAPPING } from "./uniswap-token-qa0552-harness.js";
+import { blockHash, CapturedState, movingNode, pinsLikeProduction, tokenSession, typingTerminal, usageBucket, WRAPPING } from "./uniswap-token-moving-node-harness.js";
 
 interface Cleaned { readonly operation: UniswapTokenOperation; readonly usage: AssetUsageReservation; readonly cleanupTransaction: Record<string, string>;
   readonly finalizedHead: { readonly number: string; readonly hash: string }; readonly nonceAtFinality: number }
@@ -35,7 +35,7 @@ const usageKey = (op: UniswapTokenOperation) => `apn.uniswap-token-usage:${op.op
 const dayOf = (op: UniswapTokenOperation) => new Date(`${op.updatedAt.slice(0, 10)}T12:00:00.000Z`);
 const command = (action: string, op: UniswapTokenOperation) => ["swap", "ethereum", "uniswap-token", action, "--operation", op.operationId];
 
-/** The captured journal written as it is on the QA machine, its ledger row, and the node it is read through. */
+/** The captured journal written exactly as APN stores it, its ledger row, and the node it is read through. */
 async function captured(root: string, op: UniswapTokenOperation, usage: AssetUsageReservation, now: Date) {
   const state = new StateStore(root); await state.initialize(); await new UniswapTokenJournal(root).save(op);
   assert.equal(assetUsageReservationId(identity(op), usageKey(op)), op.usageReservationId); assert.equal(idempotency(usageKey(op)), usage.idempotencyHash);
@@ -54,7 +54,7 @@ function nonceRows(root: string, account: string): string[] {
   return Object.values(raw.reservations as Record<string, { kind: string; nonce: string; state: string }>).map((row) => `${row.kind}:${row.nonce}:${row.state}`).sort();
 }
 
-/** The stranded 867244e9… as captured: its journal and hold, the approval landed and journaled, the swap's nonce reserved (or committed). */
+/** The stranded swap as captured: its journal and hold, the approval landed and journaled, the swap's nonce reserved (or committed). */
 async function stranded(root: string, swapNonce: "reserved" | "committed") {
   const op = validateUniswapTokenOperation(LIVE.stranded.operation);
   const now = new Date((op.route.deadline + 3_600) * 1000), usage = seal({ schemaVersion: "apn.asset-usage-reservation.v1", ...identity(op),
@@ -75,7 +75,7 @@ async function stranded(root: string, swapNonce: "reserved" | "committed") {
   return { op, now, c };
 }
 
-test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stranded swap unsigned and, the 1 USDC approval standing, requires cleanup", async (t) => {
+test("the captured stranded swap: status names execute; execute proves the stranded swap unsigned and, the 1 USDC approval standing, requires cleanup", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const { op, now, c } = await stranded(temporary.root, "reserved");
   const refused = await c.cli("status", 11);
   assert.deepEqual([refused.ok, refused.error?.details?.reason, refused.next_actions], [false, "uniswap_token_public_effect_missing",
@@ -102,7 +102,7 @@ test("QA 0.5.52 live 867244e9…: status names execute; execute proves the stran
   assert.equal(((await c.cli("execute", 15)).operation as UniswapTokenOperation).integrityHash, closed.integrityHash);
 });
 
-test("867244e9… with its swap nonce committed: execute keeps the hashless marker and the hold (a committed reservation counts as signed)", async (t) => {
+test("the stranded swap with its swap nonce committed: execute keeps the hashless marker and the hold (a committed reservation counts as signed)", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const { op, c } = await stranded(temporary.root, "committed");
   const executed = await c.cli("execute", 15);
   assert.deepEqual([executed.ok, executed.error?.details?.reason], [false, "uniswap_token_public_effect_missing"], JSON.stringify(executed.error));
@@ -111,7 +111,7 @@ test("867244e9… with its swap nonce committed: execute keeps the hashless mark
     [["approval:9:committed", "swap:10:committed"], "reserved", op.route.amountIn, []]);
 });
 
-test("867244e9…-shaped: a residual allowance takes one consented revoke at the freed nonce before cleaned; a zero one closes at once", async (t) => {
+test("a swap stranded the same way: a residual allowance takes one consented revoke at the freed nonce before cleaned; a zero one closes at once", async (t) => {
   for (const residual of [true, false]) {
     const temporary = await temporaryState(); t.after(temporary.cleanup); const key = `0x${"0".repeat(63)}7` as Hex, account = privateKeyToAccount(key).address;
     const state = new StateStore(temporary.root); await state.initialize(); await new EncryptedWalletStore(state, WRAPPING).importNew("qa0552-shaped", key, account);
@@ -130,7 +130,7 @@ test("867244e9…-shaped: a residual allowance takes one consented revoke at the
     let op = await run(9).prepare({ command: "swap.uniswap-token.prepare", profile: "qa0552-shaped", quoteHash: quote.quoteHash, idempotencyKey: `shaped-${residual}` });
     op = await run(14, "approve").approve(op.operationId); chain.land(chain.node.sends[0]!, chain.node.head - 5n); chain.node.allowance = live.route.amountIn;
     op = await run(11).status(op.operationId); assert.equal(op.phase, "approval_observed"); const approvalGas = op.accumulatedNativeDebitWei;
-    // The 0.5.52 stop: the swap marker at nonce 10 is durable and its nonce reserved, nothing signed; then the route expires.
+    // The captured stop: the swap marker at nonce 10 is durable and its nonce reserved, nothing signed; then the route expires.
     op = await new UniswapTokenJournal(temporary.root).save(transitionUniswapToken(op, "submission_started", { swapAttempt: tokenAttempt(op, "swap", "10", now) }, now));
     assert.equal(await new UniswapTokenNonceStore(temporary.root).allocate(op, "swap", 10n), "10");
     now = new Date((op.route.deadline + 3_600) * 1000);
@@ -172,7 +172,7 @@ test("867244e9…-shaped: a residual allowance takes one consented revoke at the
   }
 });
 
-test("QA 0.5.52 live 262d15ed… (USDC) and fc03d78f… (USDT): status releases the principal once the finalized chain holds the cleanup at the swap's nonce", async (t) => {
+test("the captured cleaned USDC and USDT swaps: status releases the principal once the finalized chain holds the cleanup at the swap's nonce", async (t) => {
   for (const live of LIVE.cleaned) {
     const temporary = await temporaryState(); t.after(temporary.cleanup); const op = validateUniswapTokenOperation(live.operation), now = new Date(dayOf(op));
     const c = await captured(temporary.root, op, live.usage, now), cleanup = live.cleanupTransaction, cleanupBlock = BigInt(cleanup.blockNumber!);

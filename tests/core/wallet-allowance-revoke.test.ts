@@ -28,7 +28,7 @@ import { OperationIndex } from "../../src/operation-index/index.js";
 import { SecureStateStore } from "../../src/secure-state-store.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
-import { blockHash, CapturedState, movingNode, pinsLikeProduction, tokenSession, typingTerminal, usageBucket, WRAPPING } from "./uniswap-token-qa0552-harness.js";
+import { blockHash, CapturedState, movingNode, pinsLikeProduction, tokenSession, typingTerminal, usageBucket, WRAPPING } from "./uniswap-token-moving-node-harness.js";
 import { allowanceRpc } from "./wallet-allowance-helpers.js";
 
 const LIVE = JSON.parse(readFileSync("tests/core/fixtures/uniswap-token-qa0552.json", "utf8")) as { expiredCleaned: { operation: UniswapTokenOperation } };
@@ -45,7 +45,7 @@ async function uniswapStatus(root: string, chain: ReturnType<typeof movingNode>,
   return await createApnCore(bindArgv(statusArgv(op)), { stateRoot: root, wrappingSecret: WRAPPING, clock, uniswapTokenRuntime: runtime }).execute(bindArgv(statusArgv(op)).request);
 }
 
-test("QA 0.5.52 live ea09a115…: the cleaned USDT swap shows its standing 10000 approval and names the exact revoke", async (t) => {
+test("a captured cleaned USDT swap shows its standing 10000 approval and names the exact revoke", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const op = validateUniswapTokenOperation(LIVE.expiredCleaned.operation);
   assert.deepEqual([op.phase, op.cleanupEvidence?.kind, op.usageState, op.route.inputToken, op.route.router], ["cleaned", "expired_approval_no_swap",
     "failed_before_effect", ETHEREUM_USDT, UNISWAP_V3_SWAP_ROUTER]);
@@ -66,7 +66,7 @@ test("QA 0.5.52 live ea09a115…: the cleaned USDT swap shows its standing 10000
   assert.deepEqual(chain.node.sends, []);
 });
 
-/** A swap the 0.5.52 exit cleaned with its approval standing, shaped like ea09a115… (USDT→USDC, 10000), for a test signer. */
+/** A swap the 0.5.52 exit cleaned with its approval standing, shaped like the captured one (USDT→USDC, 10000), for a test signer. */
 async function residualSwap(root: string) {
   const at = new Date(), state = new StateStore(root); await state.initialize(); await new EncryptedWalletStore(state, WRAPPING).importNew(PROFILE, KEY, ACCOUNT);
   const policy = await activateDirectPolicy(root, PROFILE, { accounts: { evm: ACCOUNT }, now: at, admissions: [UNISWAP_USDC, ETHEREUM_USDT].map((identifier) => ({

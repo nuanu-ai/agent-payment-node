@@ -11,8 +11,8 @@ import type { CircleFundingLifecyclePorts } from "../../src/circle-v2-evm/fundin
 import type { CircleAttesterSnapshot, CircleSourceProof } from "../../src/circle-v2-evm/protocol.js";
 
 test("full actual Iris COMPLETE response passes runtime API parsing and real enabled-attester signatures", async t => {
-  const original = JSON.parse(await readFile("docs/evidence/circle-v2-evm-iris-v2-actual-response-20261009.json", "utf8"));
-  const context = JSON.parse(await readFile("docs/evidence/circle-v2-evm-iris-v2-actual-source-context-20261009.json", "utf8")) as { source: CircleSourceProof; attesters: CircleAttesterSnapshot };
+  const original = JSON.parse(await readFile("tests/fixtures/circle-v2-evm-iris/actual-response.json", "utf8"));
+  const context = JSON.parse(await readFile("tests/fixtures/circle-v2-evm-iris/actual-source-context.json", "utf8")) as { source: CircleSourceProof; attesters: CircleAttesterSnapshot };
   // The real burn moved 40100 atomic USDC to the fixed recipient: a funding binding with exactly those economics.
   const gasPayer = circleLegacyRoute(59144, "evm-live-buyer").gasPayer;
   const funding = circleFundingBinding(59144, { sourceProfile: "evm-live-buyer", sourceOwner: CIRCLE_SOURCE_OWNER, destinationProfile: "evm-live-buyer", gasPayer },

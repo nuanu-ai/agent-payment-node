@@ -1,7 +1,7 @@
 /**
- * QA 0.5.51 CIRCLE-RECEIPT-ECONOMICS-001 and CIRCLE-NEXT-ACTION-001: the completed route shows the USDC it actually
- * credited and the issuer fee it actually paid (gross 40100, max fee 100, min mint 40000, fee 5 → net 40095 on Sei, as
- * operation 4b84d79c… did), pending facts stay null, and every phase names the owner step it waits for.
+ * The completed route shows the USDC it actually credited and the issuer fee it actually paid (gross 40100, max fee 100,
+ * min mint 40000, fee 5 → net 40095 on Sei, as a captured operation did), pending facts stay null, and every phase names
+ * the owner step it waits for.
  * Synthetic CPU-only observations driven through the real lifecycle; no network, no keys.
  */
 import assert from "node:assert/strict";

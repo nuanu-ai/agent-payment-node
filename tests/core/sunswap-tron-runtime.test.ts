@@ -45,7 +45,7 @@ test("one foreground command shows the exact screen, takes the typed code after 
   f.rpc.outcome = "success";
   const final = await f.runtime.status(sent.operationId, f.clock.now());
   assert.equal(final.state, "finalized"); assert.equal(final.receiptProof?.transactionHash, signed.txID); assert.equal(f.rpc.broadcasts.length, 1);
-  // QA 0.5.51 (SunSwap, shared SwapReceiptProof): the solidified record's call value, USDT credit and burned fee in SUN.
+  // Swap economics (SunSwap, shared SwapReceiptProof): the solidified record's call value, USDT credit and burned fee in SUN.
   assert.deepEqual(final.receiptProof?.economics, { inputAtomic: AMOUNT, outputAtomic: v2Output(BigInt(AMOUNT)).toString(), networkFeeAtomic: "12345",
     nativeDebitAtomic: (BigInt(AMOUNT) + 12_345n).toString() });
   assert.equal(await f.usage(), AMOUNT);

@@ -1,48 +1,218 @@
 # Gasless USDT staged implementation
 
-This package contains Ethereum USDT gasless capability checks and a guarded send core. It contains the exact asset, chain and sponsor registry; quote, paymaster, UserOperation and receipt codecs; nonce, balance and allowance-slot reads; stable refusal classification; and a read-only rehearsal fixture. The `gasless usdt prepare` CLI and MCP commands save an unsigned, policy-bound operation. `gasless usdt status` reads that saved binding. Foreground CLI execution is separate from MCP.
+`apn gasless usdt` sends USDT on Ethereum from a local wallet without holding ETH. Pimlico's keyless ERC-20 paymaster
+pays the gas and takes its fee in USDT from the same transfer. The flow has two stages: `prepare` saves an unsigned,
+policy-bound operation, and `execute` signs it locally and sends it at most once after foreground approval.
 
-`LocalUsdtSigningService` signs the saved binding in local custody. `UsdtExecutionJournal` reserves common asset usage and persists the may-have-sent marker. `GuardedUsdtSendService` issues at most one `eth_sendUserOperation` call through the fixed keyless Pimlico endpoint after fresh guards and a durable hash-bound marker. A separate effect lock protects signing and the submit marker against concurrent cleanup. A failed or interrupted pre-submit attempt is marked `failed_before_effect` and releases its usage reservation; only an operation with no submitting marker can take this path. `UsdtRecoveryService` makes one observation pass for an existing hash-bound submission. `usdtPacedRecoveryPort` supplies persisted provider pacing and deadline; one pass uses at most one keyless Pimlico read and nine public Ethereum reads, without retry. The bundler locator is only a hint: when it is missing, unavailable or contradicted by its own finalized receipt, recovery scans Ethereum's canonical EntryPoint `UserOperationEvent` logs for the exact hash, sender and paymaster from the prepared safe block through the last block that could still include the operation (its signed paymaster `validUntil`), in one batch of at most eleven ranges. Recovery requires Ethereum chain 1, a transaction receipt in a canonical finalized block, and the EntryPoint event. When that scan covers a finalized block after `validUntil` without the event, the operation can never land: it becomes terminal `expired_never_landed` and its usage reservation is released. Successful settlement also requires the exact USDT recipient and treasury transfers; a confirmed failed UserOperation event releases the usage reservation. Missing or conflicting evidence remains `unknown_finality` and never triggers another send. The foreground CLI wires execution and observation; MCP exposes unsigned prepare and read-only status only. The rehearsal loads no key, signs nothing and sends nothing.
+This is separate from the USDC path in [gasless.md](gasless.md). No mainnet transfer acceptance has been recorded for
+this path yet, and public-RPC support for its block-hash-pinned sponsor checks is not yet verified.
 
-Every request is bound to Ethereum chain 1, the pinned USDT contract, EntryPoint, delegate, paymaster and treasury, exact sender/recipient, gross amount, fee cap, minimum received amount, quote storage layout, gas price and paymaster validity. Any identity, chain, amount, expiry, prototype or excess mismatch fails closed with a stable `capability unavailable` or typed refusal reason. Provider text is bounded and never returned as a secret.
+## Fixed configuration
 
-## Read-only rehearsal
+Every request is bound to these pins. Any identity, chain, amount, expiry, prototype or excess mismatch fails closed with
+`capability unavailable` or a typed refusal reason.
 
-After building the package, run the fixture with an explicit RPC URL:
+| Item | Value |
+| --- | --- |
+| Chain | Ethereum, chain ID 1 (`eip155:1`) |
+| Token | USDT `0xdAC17F958D2ee523a2206206994597C13D831ec7`, 6 decimals |
+| EntryPoint (v0.8) | `0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108` |
+| EIP-7702 delegate | `0xe6Cae83BdE06E4c305530e199D7217f42808555B` |
+| Paymaster (USDT spender) | `0x888888888888Ec68A58AB8094Cc1AD20Ba3D2402` |
+| Fee treasury | `0x4337Ff05c84B9A80Ea0a78dBE7B8E102F66d4c08` |
+| Sponsor endpoint | `https://public.pimlico.io/v2/1/rpc` (keyless; 20 requests per minute per IP, shared with every other call) |
+| Required RPC variable | `APN_ETHEREUM_RPC_URL` (no default) |
+
+## Requirements
+
+- A local EVM wallet profile.
+- An active owner asset policy for the owner's Ethereum account and Ethereum USDT that admits the `gasless` rail with
+  positive per-transfer and daily caps and exactly this mechanism:
+
+  ```json
+  { "provider": "pimlico-erc20-paymaster", "reference": "eip155:1:0x888888888888Ec68A58AB8094Cc1AD20Ba3D2402" }
+  ```
+
+- `APN_ETHEREUM_RPC_URL` set to a public HTTPS Ethereum RPC for `prepare`, `execute`, `resume` and `observe`. Without
+  it these commands refuse with `APN_RPC_CONFIG`.
+- The sender needs at least the gross USDT amount. It needs no ETH.
+
+## Commands
 
 ```sh
-APN_ETHEREUM_RPC_URL=https://example.invalid node scripts/gasless-usdt-rehearsal.mjs \
-  --sender <your-ethereum-address> \
-  --to 0x000000000000000000000000000000000000dEaD \
+apn gasless usdt prepare --profile <profile> --to <recipient> --amount <gross-USDT> \
+  --max-fee <USDT> --min-received <USDT> --idempotency-key <key>
+apn gasless usdt status --profile-hash <hash> --operation <operation-id>
+apn gasless usdt execute --profile-hash <hash> --operation <operation-id>
+apn gasless usdt resume --profile-hash <hash> --operation <operation-id>
+apn gasless usdt observe --profile-hash <hash> --operation <operation-id>
+apn gasless usdt execution-status --profile-hash <hash> --operation <operation-id>
+```
+
+| Command | What it does | MCP tool |
+| --- | --- | --- |
+| `prepare` | Reads the active owner policy, a safe Ethereum account snapshot and the sponsor; saves only unsigned material. | `apn_gasless_usdt_prepare` |
+| `status` | Reads the saved bound operation. No network access. | `apn_gasless_usdt_status` |
+| `execute` | Foreground approval, local signing and at most one send. | none (CLI only) |
+| `resume` | Observes a submitted hash (as `observe`), retires an interrupted unsent attempt, or returns the saved operation. Never signs or sends. | `apn_gasless_usdt_resume` |
+| `observe` | Observes the original submitted hash through finalized Ethereum evidence. Never signs or sends. | none |
+| `execution-status` | Reads the local bound and execution journals. No network access. | none |
+
+`--amount`, `--max-fee` and `--min-received` are decimal USDT with at most six fractional digits. `--idempotency-key` is
+8 to 128 safe ASCII characters. `--profile-hash` is the 64-character lowercase hex profile hash recorded in the prepared
+operation (`profileHash`).
+
+## Amounts and fees
+
+Preparation computes the whole fee budget `F = min(max-fee, amount - min-received)` and the recipient amount
+`N = amount - F`. A quote whose worst case exceeds `F` is refused; nothing is widened to fit it.
+
+The frozen account batch makes three calls, in this order: USDT `approve(paymaster, 0)`, `approve(paymaster, F)`, then
+`transfer(recipient, N)`. The paymaster sees this exact calldata. It charges its actual fee `A` (at most `F`) to the
+fee treasury in `postOp`. After a successful charge, `F - A` may remain approved to the paymaster until a later gasless
+USDT batch resets it.
+
+The gas offer is fixed (verification 75,000, call 130,000, paymaster verification 100,000, paymaster post-op 75,000,
+pre-verification 100,000), so your fee cap covers the worst case and the bundler cannot use more.
+
+## Prepare
+
+`prepare` reads the authenticated active owner policy and the combined daily USDT usage before any public RPC read. It
+binds the owner's Ethereum account, the active policy digest, revision and activation, the exact USDT and paymaster
+mechanism, positive transfer and daily caps, and one canonical safe-block account snapshot. It then saves the complete
+unsigned operation. A missing, revoked, expired, mismatched or unadmitted policy is refused.
+
+**Frozen economics.** The gas fields, initial prices, gross, fee cap, net amount and calldata are frozen. The initial
+quote and fast price are recorded as information. The sponsor payload's authenticated exchange rate and post-op overhead
+determine the signed fee bound, which must fit the same fee cap; the initial estimated fee may exceed the cap, but the
+authenticated signed economics must fit. A later valid quote or price change is recorded with an exact list of changed
+fields and does not reprice the operation. Signed bytes are never rewritten.
+
+**Sponsor verification.** Before the operation is saved, one RPC batch at the canonical safe block verifies the pinned
+paymaster's hash, EIP-191 signer recovery, signer membership and `getHash` parity. The sponsor payload must stay valid
+for at least 60 seconds and at most one hour after the check.
+
+**Reads.** Preparation permits at most 8 read admissions, with no retry, polling or fallback to single reads:
+
+- Ethereum batch 1: chain ID and safe block identity.
+- Ethereum batch 2, bound to that safe block hash: four pinned code hashes, four contract invariants, owner code, USDT
+  balance, EntryPoint nonce and EOA nonce (needed for the unsigned EIP-7702 authorization stub when the account is not
+  yet delegated).
+- Sponsor: five calls (quote twice, gas price twice, paymaster data once). Malformed or wrong-route quotes refuse.
+- Ethereum batch 3: sponsor membership and `getHash` parity at the saved safe block hash.
+
+A malformed, missing, duplicate or mismatched batch response refuses preparation. A call pinned by block hash
+(EIP-1898) that the RPC does not support refuses; APN never falls back to `latest` or a block number. Each command's
+reads share a 60-second deadline. Each endpoint family shares one persisted in-flight slot and a fail-closed 429
+cooldown. Pimlico requests start at least 3 seconds apart; other public RPC requests at least 750 ms apart. An admission
+can be counted before scheduling rejects it, so the limit is not a count of physical requests.
+
+**Idempotency and holds.** Retrying with the same key and the same request returns the first saved operation, even if
+time, policy, safe block or sponsor data have changed since; it checks the saved claim before any policy or RPC read. A
+different recipient, amount or profile under the same key is refused before those reads. The key is claimed across all
+profiles in the gasless USDT journal, and prepare refuses a key that another money family already holds
+(`APN_IDEMPOTENCY_CONFLICT`, `gasless_usdt_idempotency_other_family`). Other families do not yet refuse a key first used
+here.
+
+Prepare also refuses while another non-terminal operation holds the owner's Ethereum account. A prepared operation
+alone holds nothing; an execution that can still sign, send or land (`planned`, `reserved`, `submitting`,
+`submitted_pending`, `unknown_finality`) holds `evm:1:<owner>` for every money family.
+
+**Durability.** Each preparation is written as a private, integrity-checked local record. The state root's parent
+directory must exist, and APN syncs each directory it creates; a file system that cannot sync directories refuses
+preparation. If writing stops after the idempotency claim, `status` reads the complete claim and a matching retry
+restores the final file. Stale incomplete temporary files are cleaned up.
+
+CLI and MCP results omit the raw sponsor payload, its signature and authorization bytes. The saved sponsor capture is
+labelled `point_in_time_capture_not_current_authorization`: it is evidence of what was checked, not a current
+authorization.
+
+## Execute
+
+`apn gasless usdt execute --profile-hash <hash> --operation <operation-id>` loads only an existing prepared operation
+and needs a foreground terminal.
+
+**Consent screen.** It shows Ethereum, the owner, the recipient, the gross amount, the exact recipient amount, the
+requested maximum fee and the effective fee cap `F`, the quoted fee bound, the bound policy revision and digest, and the
+saved paymaster quote validity. It names the Pimlico sponsor, the paymaster (USDT spender) and the signed fee treasury,
+and states that the batch grants the paymaster exactly `F` USDT allowance. On first use it identifies the EIP-7702
+delegate and warns that the on-chain designation can persist after the transfer. You type the displayed code.
+
+**Checks after consent.** The command rechecks the active policy, the saved quote expiry and fee cap, and the safe
+account state; it does not request a new sponsor quote. A later safe block is normal: it must be at or after the
+prepared block and keep the same EntryPoint and EOA nonces and delegation, with at least the gross USDT balance. The
+command then reserves shared usage. One fresh sponsor-authentication batch re-attests sponsor membership and `getHash`
+parity at the fresh safe block, followed by a fresh owner-policy, usage and time check before the key is used.
+
+**Key access.** A single-use permit binds the exact operation and wallet identity, expires after 5 seconds and is
+consumed under the custody lock before key access. Missing, reused or delayed permits refuse without an automatic extra
+read. Payload validity and the 5-second authentication age are checked again after the secret is retrieved, immediately
+before each signature. Sponsor membership is point-in-time evidence, not an inclusion guarantee.
+
+**Send.** APN signs locally, independently verifies the signed UserOperation, persists its hash and the `submitting`
+state, and then makes one `eth_sendUserOperation` call to the fixed Pimlico endpoint. Execution permits seven read
+admissions: four snapshot batches before custody, one authentication batch and two final snapshot batches.
+
+**Failures.**
+
+- If signing or a fresh check fails before `submitting`, the operation is marked `failed_before_effect` and its usage
+  reservation is released. Only an operation with no submitting marker can take this path.
+- On restart, `execute` repairs any leftover `planned` or `reserved` journal under the effect lock, refuses that old
+  operation and requires a new preparation.
+- A lost or mismatched send response is `unknown_finality`. Another `execute` never resends.
+- A record prepared under different protocol pins is refused before any prompt with `APN_REPREPARE_REQUIRED`
+  (`gasless_usdt_protocol_changed`). An expired or changed sponsor quote is refused with `APN_REPREPARE_REQUIRED`
+  (`gasless_usdt_quote_expired_or_changed`). Prepare again in both cases.
+
+## Recovery and observation
+
+```sh
+apn gasless usdt resume --profile-hash <hash> --operation <operation-id>
+apn gasless usdt observe --profile-hash <hash> --operation <operation-id>
+```
+
+`resume` observes a submitted hash exactly like `observe`, retires an interrupted unsent `planned` or `reserved`
+attempt (releasing its usage hold under the effect lock), and otherwise returns the saved operation. `observe` uses
+the original saved hash and a finalized canonical receipt to update the journal. Neither signs nor sends.
+
+One observation pass uses at most one keyless Pimlico read and nine public Ethereum reads, without retry:
+
+- The bundler's receipt is only a locator. When it is missing, unavailable or contradicted by its own finalized
+  receipt, APN scans Ethereum's canonical EntryPoint `UserOperationEvent` logs for the exact hash, sender and paymaster,
+  from the prepared safe block through the last block that could still include the operation (the signed paymaster
+  `validUntil`), in one batch of at most eleven ranges.
+- Completion (`finalized`) requires Ethereum chain 1, a transaction receipt in a canonical finalized block, the
+  EntryPoint event, and the exact USDT recipient and treasury transfers.
+- A confirmed failed UserOperation event (`failed_confirmed_revert`) releases the usage reservation.
+- When the scan covers a finalized block after `validUntil` without the event, the operation can never land: it
+  becomes terminal `expired_never_landed` and its usage reservation is released.
+- Missing or conflicting evidence stays `unknown_finality` and never triggers another send.
+
+Terminal states: `finalized`, `failed_confirmed_revert`, `expired_never_landed`, `failed_before_effect`. Non-terminal:
+`prepared`, `submitted_pending`, `unknown_finality`.
+
+A saved record is loaded against its own integrity hashes and the schema it was written with, never against the
+current pins. Status, resume, observation and the release of a hold therefore keep working for records written by an
+earlier release; only `execute` checks the current pins.
+
+## Compatibility
+
+Operations prepared by earlier releases in the bound-operation v1 format keep their original strict quote, rate and
+drift validation and exact bytes. They still load for `status`, but cannot execute: their paymaster payloads expired at
+most an hour after preparation. Prepare them again. v1 and current records share one idempotency claim namespace; the
+first claim wins.
+
+## For contributors
+
+A read-only mainnet rehearsal runs the production adapters up to the first signature. It loads no key, reads no APN
+state, signs nothing and sends nothing. Build the package first:
+
+```sh
+APN_ETHEREUM_RPC_URL=<public-ethereum-rpc> node scripts/gasless-usdt-rehearsal.mjs \
+  --sender <your-ethereum-address> --to <recipient> \
   --amount 1 --max-fee 0.5 --min-received 0.5
 ```
 
-This stops before any signature and does not read APN state.
-
-## Policy bound local prepare core
-
-New CLI/MCP preparations use bound-operation v2. Its initial quote and fast price are informational facts; the gas fields, initial prices, gross, fee cap, net amount and calldata remain frozen. The sponsor payload's authenticated exchange rate and postOp overhead determine the reported signed fee bound, which must fit the same fee cap. A later valid quote or fast-price change is recorded with an exact changed-field list and does not reprice the frozen operation. Signed bytes are never rewritten. The initial estimated fee may exceed the cap; authenticated signed economics must still fit. V2 verifies the pinned deployed paymaster's inherited historical V7 hash, EIP-191 signer recovery, signer membership and getHash parity in one canonical-block RPC batch before publication.
-
-Persisted v1 records retain their original strict quote/rate/drift validators and exact bytes. V1 and v2 share the original v1-derived claim filename namespace: the first claim wins without migration or authentication backfill. Releases before 2026-10-05 wrote v1 with `preparePolicyBoundUsdt`; that writer is no longer shipped (it survives only as a test fixture). V1 records still load for status, but cannot execute: their paymaster payloads expired at most an hour after preparation.
-
-The v1 preparation worked as follows (v2 keeps the same policy, safe-block and batch rules). Its adapter must supply the authenticated active owner policy, combined daily USDT usage, a trusted clock, and account state at one canonical Ethereum safe block. The sponsor is the fixed keyless Pimlico endpoint. The API refuses a missing, revoked, expired, mismatched or unadmitted policy; the owner account, Ethereum USDT identity, gasless mechanism pin and positive per-transfer and daily caps must match exactly. It requires the signed paymaster rate to equal the quote rate and checks both against the fee budget, repeats the quote and policy reads after sponsor data, and returns an immutable copy of the prepared data with a binding hash covering the policy revision, safe block, account nonce, fee plan, paymaster data and unsigned operation.
-
-The frozen account batch calls USDT `approve(paymaster, 0)`, then `approve(paymaster, F)`, then `transfer(recipient, N)`, in that order. The paymaster request sees this exact calldata. Preparation remains unsigned.
-
-The separate `UsdtBoundOperationRepository` and `GaslessUsdtOperationService.prepareBound` persist the complete preparation as a private, integrity-checked local record. The state root's parent must exist; creating or reopening each private directory syncs its parent, and an unsupported directory fsync refuses preparation. A complete, fsynced file is published through an exclusive link for each idempotency key before the final operation file; competing processes cannot claim the same key for different bindings. This claim is shared across profiles **within the bound Gasless USDT journal only**. A new bound preparation also refuses a key that another money family's operation already holds, and refuses while another non-terminal operation holds the owner's Ethereum account; an execution that can still sign, send or land (`planned`, `reserved`, `submitting`, `submitted_pending`, `unknown_finality`) holds `evm:1:<owner>` for every money family, while a bound preparation alone holds nothing. Other families do not yet refuse a key first used by a bound USDT preparation. A matching retry checks the durable claim and frozen caller intent before reading current policy or public RPC, then returns the first saved bound record even if time, policy, safe block or sponsor data has changed. A different recipient, amount or profile under the same key is refused before those reads. If publication stops after the claim, `statusBound` reads that complete claim and a matching retry restores the final file. Stale incomplete temporary files are cleaned up. A saved bound or execution record loads against its own integrity hashes and the schema it was written with, never against the current pins, so status, resume, observation and the release of a hold keep working for records an earlier release wrote; `execute` re-validates against the current pins first and refuses a record prepared under different pins with `APN_REPREPARE_REQUIRED` (`gasless_usdt_protocol_changed`) before any prompt. A later safe block is normal: execution re-guards at its own fresh safe block, which must be at or after the prepared block and keep the same EntryPoint and EOA nonces and delegation with at least the gross USDT balance. `gasless usdt status` reads only this bound journal (no release ever wrote the earlier dormant journal, so there is nothing else to read). The separate execution journal rechecks policy and account state, reserves shared usage, and persists the signed UserOperation hash before dispatch. An ambiguous response or mismatched acknowledgement stays `unknown_finality`; subsequent calls never rebroadcast. There is no fresh mainnet transfer acceptance.
-
-## Foreground execution and observation
-
-`apn gasless usdt execute --profile-hash <hash> --operation <operation-id>` loads only an existing bound operation. The terminal presents Ethereum, owner, recipient, gross amount, exact recipient amount, the requested maximum fee and the effective fee cap `F = min(maxFee, gross - minReceived)`, the quoted fee bound, bound policy revision and digest, and saved paymaster quote validity. It names the Pimlico sponsor, pinned paymaster (USDT spender), and signed fee treasury. The batch grants the paymaster exactly `F` USDT allowance; after a successful fee charge `A`, `F - A` may remain approved until a later gasless USDT batch resets it. On first use, the prompt identifies the EIP-7702 delegate and warns that its on-chain designation can persist after the transfer. The operator must type the displayed code. The command then rechecks the active policy, saved quote expiry and fee cap, and safe account state; it does not request a new sponsor quote. It reserves shared usage. For v2, one fresh sponsor-authentication batch reuses the second reserve guard's verified snapshot and re-attests sponsor membership and getHash parity at that fresh safe block, followed by a fresh owner-policy/usage/time fence before custody. A nonserializable single-use permit binds the exact operation and wallet identity; it expires after 5 seconds and is consumed under the custody lock before key access. Missing, reused or delayed permits refuse without an automatic extra read. Current payload validity and the 5-second authentication age are checked again after awaited secret retrieval, immediately before each wallet signature. Sponsor membership is point-in-time evidence, not an inclusion guarantee. The shared execution read budget remains seven admissions: four snapshot batches before custody, one authentication batch, and two final snapshot batches. The command then signs locally, independently verifies the signed UserOperation, persists its hash and `submitting` state, and issues one `eth_sendUserOperation` to the fixed keyless Pimlico endpoint. If signing or a fresh guard fails before `submitting`, the command records `failed_before_effect` and releases the reserved quota. On restart, `execute` repairs any leftover `planned` or `reserved` journal under the effect lock, refuses that old operation, and requires a new preparation. A lost or mismatched send response is `unknown_finality`; another execute call never resends. `apn gasless usdt execution-status` reads the local journal. `apn gasless usdt resume` reads the live bound and execution journals: it observes a submitted hash exactly like `observe`, retires an interrupted unsent `planned` or `reserved` attempt and releases its usage hold under the effect lock, and otherwise returns the saved operation. `apn gasless usdt observe` uses the original saved hash and a finalized canonical receipt to update the journal; it never signs or sends. These three commands have no MCP tool. `APN_ETHEREUM_RPC_URL` is required for live checks and observation. No fresh mainnet transfer acceptance has been recorded.
-
-## Unsigned command and read budget
-
-`apn gasless usdt prepare --profile <profile> --to <recipient> --amount <gross-USDT> --max-fee <USDT> --min-received <USDT> --idempotency-key <key>` reads the authenticated active owner policy and combined daily USDT usage before public RPC. It binds the owner's Ethereum account, active policy digest/revision/activation, exact USDT and paymaster mechanism, positive transfer and daily caps, and one canonical safe-block account snapshot. It saves the complete unsigned operation. The idempotency key protects this bound journal across all profiles and does not reserve the key in other payment families. The matching MCP tool is `apn_gasless_usdt_prepare`. Read it with `apn gasless usdt status --profile-hash <hash> --operation <operation-id>` or `apn_gasless_usdt_status`.
-
-New v2 preparation permits at most **8 read admissions**, with no retry, polling or fallback to single reads. Ethereum uses two strict JSON-RPC batches: chain ID plus safe block identity, then four pinned code hashes, four contract invariants, owner code, USDT balance, EntryPoint nonce and EOA nonce bound to that canonical safe block hash. A malformed, missing, duplicate or mismatched batch response refuses preparation. The EOA nonce is needed for the unsigned EIP-7702 authorization stub when the account is undelegated. The fixed sponsor still uses five separate calls: quote twice, gas price twice and paymaster data once. For v2, the second quote and gas-price reads record informational changes; malformed or wrong-route quotes still refuse. A third Ethereum batch authenticates sponsor membership and exact getHash parity at the saved canonical safe-block hash. An admission can be counted before scheduling rejects it, so this limit is not a measured physical-dispatch counter. Legacy v1 retains its exact drift check. The command has a 60-second total read deadline; each endpoint family shares one persisted in-flight slot and a fail-closed 429 cooldown. Public Pimlico starts are at least 3 seconds apart to respect its 20 requests/minute limit; other public RPC starts are at least 750 ms apart. New membership/getHash EIP-1898 endpoint behavior and live payment acceptance remain unverified; unsupported canonical-hash calls refuse without latest/number fallback.
-
-V2 CLI/MCP results redact raw sponsor payload/signature and authorization bytes. Their saved sponsor capture is explicitly labelled as point-in-time evidence, not current authorization.
-
-## Installed package no-money acceptance
-
-After `npm run build`, run `node --test tests/packaging/gasless-usdt-installed.test.mjs`. The test packs APN, installs that archive in a temporary sandbox, and imports only the installed package. Deterministic local policy, safe-block and sponsor ports prepare one synthetic 1 USDT operation, verify its durable unsigned journal, status and exact replay, and refuse an amount above the owner cap before public reads. An injected approval refusal proves the installed CLI stops before the signer, wallet secret, usage reservation or dispatch. The installed execution journal then binds a second synthetic operation to one shared USDT usage lease, persists and replays the reserved record, durably releases the lease through pre-effect cleanup, and records a synthetic hash-bound `submitting` marker. The installed CLI observes a deliberately mismatched bundler identity, records `unknown_finality`, and retains the usage lease; the test reopens the journal, checks integrity, and confirms no dispatch occurred. The installed read-budget transport also permits seven read admissions and refuses an eighth; its fake transport records the corresponding seven dispatches. This proves the local installed-package path with synthetic inputs; it does not exercise public RPC compatibility, signing, broadcast or mainnet payment acceptance.
+`tests/packaging/gasless-usdt-installed.test.mjs` (after `npm run build`) packs APN, installs the archive in a temporary
+sandbox and exercises prepare, status, replay, refusals, the execution journal and the read budgets of the installed
+package with synthetic inputs. It does not exercise public RPC compatibility, signing, broadcast or a mainnet payment.

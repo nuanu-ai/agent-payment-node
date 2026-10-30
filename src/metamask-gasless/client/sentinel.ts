@@ -136,7 +136,7 @@ function tokenFeeQuantity(value: unknown): boolean {
 /**
  * The low fee tier's own native gas terms, kept only when they prove a native shortfall in proven units: the tier's
  * `balanceNeeded` equals `gas x maxFeePerGas` exactly (gas units times wei per gas, so wei) and exceeds `currentBalance`,
- * which the same tier compares in the same unit. QA 0.5.52 captured Ethereum `error: "Not enough funds"` with 70997 gas x
+ * which the same tier compares in the same unit. For example, Ethereum answered `error: "Not enough funds"` with 70997 gas x
  * 2161967598 wei = 153493213555206 wei needed against 20000000000000 wei held. Anything else proves no cause.
  */
 function nativeGasFacts(fee: Record<string, unknown>): NativeGasFacts | undefined {

@@ -1,6 +1,6 @@
 /**
- * QA 0.5.52 METAMASK-NATIVE-MFA-GUIDANCE-001: live native transfer 189186… is UNKNOWN with effectAttempts 1, provider
- * request 8cc50f3c… and the hand-off diagnostic `sdk_send`/`ok`, while MetaMask waits for the owner's email approval of
+ * A captured native transfer is UNKNOWN with effectAttempts 1, a provider request and the hand-off diagnostic
+ * `sdk_send`/`ok`, while MetaMask waits for the owner's email approval of
  * that request. The journal keeps the verified approval as an MFA task beside (never instead of) the financial state, the
  * public view names it and the no-send observer, and every binding of the task to the record is checked on load.
  */
@@ -13,7 +13,7 @@ import { temporaryState } from "./helpers.js";
 
 const RID = "8cc50f3c-ca4e-41d1-98bb-b30f7bcaa3aa", EXPIRES = "2026-10-20T09:51:13.922Z";
 const EVIDENCE = "8aeaabee731ce6e603fddc324702a37abb45dd59d434101acabfab015027d46a";
-// The diagnostic the live hand-off stored (QA evidence mm-ethereum-native-usdc-transfer01).
+// The diagnostic the captured hand-off stored.
 const DIAGNOSTIC = { stage: "sdk_send", code: "ok", exitCode: 0, signal: null, durationMs: 3860, remainingMs: 25349, stderrClass: "unclassified", providerCode: "other" };
 const legacy = JSON.parse(await readFile("tests/fixtures/legacy-corpus/44-v0543-metamask-native-driver-no-rid/metamask-native-operations/" +
   "dc9b7d038f702ce64c1a155d9649fc6f9d413410dce4946e7f6807f70f28c133.json", "utf8")) as MetaMaskNativeOperation;

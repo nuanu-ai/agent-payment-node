@@ -1,4 +1,4 @@
-/** CCTP V2 Fast from Arbitrum USDC (domain 3). Pins refreshed at safe blocks on 2026-10-09; see reports/.../mm-usdc-bridges/fresh-deployment-pins.json.
+/** CCTP V2 Fast from Arbitrum USDC (domain 3). Pins refreshed at safe blocks on 2026-10-09.
  * Primary contracts: https://developers.circle.com/cctp/references/contract-addresses */
 import { getAddress, type Address } from "viem";
 export type CircleDestinationChain = 1329 | 59144 | 143;

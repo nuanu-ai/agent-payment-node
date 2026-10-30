@@ -7,7 +7,7 @@ import { createApnCore } from "../../src/runtime-factory.js";
 import { EVM_REQUEST, EvmApproval, EvmTestRpc, EvmWrappingSecret, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { temporaryState } from "./helpers.js";
 
-// QA 0.5.56 SOLANA-CAPABILITIES-X402-FALSE-056-001: capabilities named the working Solana x402 lane unavailable.
+// Regression: capabilities named the working Solana x402 lane unavailable.
 test("CLI and MCP Solana capabilities name the local x402 exact SPL lane and nothing wider", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const tool = projectMcpTools().find((candidate) => candidate.name === "apn_wallet_capabilities_solana")!;
@@ -20,7 +20,7 @@ test("CLI and MCP Solana capabilities name the local x402 exact SPL lane and not
   const data = output.data as { x402: Record<string, unknown>; profiles: { provider: string; x402?: boolean }[] };
   assert.deepEqual(data.x402, {
     available: true, scheme: "exact", network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", provider: "local", feePayer: "seller_facilitator",
-    // QA 0.5.57: the owner's x402 row can name only an inventory mint, so the capability lists those (wSOL is not one).
+    // The owner's x402 row can name only an inventory mint, so the capability lists those (wSOL is not one).
     assets: [{ symbol: "USDC", mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", decimals: 6 },
       { symbol: "USDT", mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", decimals: 6 }],
     assetSource: "allowlist_inventory_classic_spl", refused: ["native_sol", "token_2022_mint", "mint_outside_inventory"],
@@ -31,7 +31,7 @@ test("CLI and MCP Solana capabilities name the local x402 exact SPL lane and not
     [["local", true], ["coinbase-awal", false], ["metamask-smart-account", false], ["metamask-agent-wallet", false]]);
 });
 
-// QA 0.5.56 DIRECT-NONTTY-RETRY-SIGNED-GUIDANCE-056-001: a refused native call before signing left `started`, and a
+// Regression: a refused native call before signing left `started`, and a
 // repeated approve claimed a signature that never existed. The guard stays; only its words follow the state.
 test("a repeated approve of a started transfer says the signature is unresolved, and resume still closes it", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);

@@ -1,5 +1,5 @@
 /**
- * QA 0.5.73 IDEMPOTENCY-LENGTH-CONTRACT-072-002: `apn help` and the MCP description promised 8..128 for x402 merchant while
+ * Regression: `apn help` and the MCP description promised 8..128 for x402 merchant while
  * its pattern and runtime took 8..200, and the shared parser took up to 200 for Stargate, whose prepare then refused 129.
  * Each command now declares exactly one maximum. Help, the MCP schema, the CLI/MCP parser and the family's own prepare read
  * it, so a key the parser admits is never refused later for its length, and every refusal happens before any state or RPC.

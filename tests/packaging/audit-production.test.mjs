@@ -43,7 +43,7 @@ test("each exception names its advisory, package, major, scope and a 30-day expi
   }
 });
 
-// QA 0.5.77 RELEASE-AUDIT-DEEPMERGE-077-001: deepmerge has no fixed release; it is excepted only while the Torus helpers
+// deepmerge has no fixed release; it is excepted only while the Torus helpers
 // under @metamask/agent-wallet are the production packages that require it.
 const DEEPMERGE = { source: 1243505, name: "deepmerge", url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4", severity: "low", range: ">=4.2.0 <=4.3.1" };
 const merged = { "": { dependencies: { "@metamask/agent-wallet": "6.1.5" } }, "node_modules/deepmerge": { version: "4.3.1" },

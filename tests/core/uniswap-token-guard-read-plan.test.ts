@@ -21,10 +21,10 @@ import { createUniswapTokenRuntime } from "../../src/swap/uniswap-v3/token-runti
 import { UNISWAP_TOKEN_EXECUTE_PLAN, uniswapTokenProbedCap } from "../../src/swap/uniswap-v3/token-runtime.js";
 import { activateDirectPolicy } from "./direct-allowlist-helpers.js";
 import { temporaryState } from "./helpers.js";
-import { movingNode, pinsLikeProduction, tokenSession, typingTerminal, WRAPPING } from "./uniswap-token-qa0552-harness.js";
+import { movingNode, pinsLikeProduction, tokenSession, typingTerminal, WRAPPING } from "./uniswap-token-moving-node-harness.js";
 
 const KEY = `0x${"0".repeat(63)}5` as Hex, ACCOUNT = privateKeyToAccount(KEY).address, PROFILE = "qa0552-token";
-/** The captured live operation's caps (fresh quote 867244e9…): 1 USDC for at least 0.98 USDT, 0.4 gwei / 0.05 gwei, 0.00015 ETH. */
+/** The captured operation's caps (its fresh quote): 1 USDC for at least 0.98 USDT, 0.4 gwei / 0.05 gwei, 0.00015 ETH. */
 const LIVE = (JSON.parse(readFileSync("tests/core/fixtures/uniswap-token-qa0552.json", "utf8")) as { stranded: { operation: UniswapTokenOperation } }).stranded.operation;
 
 async function production(root: string, pooled = false) {
@@ -54,7 +54,7 @@ async function production(root: string, pooled = false) {
   return { at, state, chain, run, posts, approvalObserved };
 }
 
-test("QA 0.5.52: a USDC→USDT execute reads every guard fact once at one block and fits its plan with the send (moving chain)", async (t) => {
+test("a USDC→USDT execute reads every guard fact once at one block and fits its plan with the send (moving chain)", async (t) => {
   for (const pooled of [false, true]) {
     const temporary = await temporaryState(); t.after(temporary.cleanup); const p = await production(temporary.root, pooled);
     const observed = await p.approvalObserved(`plan-${pooled}`), cap = uniswapTokenProbedCap(UNISWAP_TOKEN_EXECUTE_PLAN, pooled ? 1 : 0);
@@ -67,7 +67,7 @@ test("QA 0.5.52: a USDC→USDT execute reads every guard fact once at one block 
     assert.deepEqual([count("eth_getCode"), count("eth_getStorageAt"), count("eth_estimateGas"), count("eth_getTransactionCount")], [5, 1, 1, 2],
       "the code pins, the gas estimate and the nonce reads happen once each (the pending nonce: reserve, then the guard's check)");
     // Archive: the pins (scalar: the chain id rides in their first batch; pooled: the anchor batch), the state batch, the
-    // simulation and the receipt lookup this transport routes there. The live failure spent 17 archive attempts before its send.
+    // simulation and the receipt lookup this transport routes there. The captured failure spent 17 archive attempts before its send.
     assert.deepEqual(telemetry.attemptsByEndpointRole, { primary: 5, receipt: 0, archive: 7 }, JSON.stringify(telemetry));
     const signed = parseTransaction(p.chain.node.sends[1]!);
     assert.deepEqual([signed.nonce, signed.to?.toLowerCase(), signed.data], [10, op.route.router.toLowerCase(), op.route.calldata]);
@@ -76,7 +76,7 @@ test("QA 0.5.52: a USDC→USDT execute reads every guard fact once at one block 
   }
 });
 
-test("QA 0.5.52: an approval that execute resumes from approved fits the same plan", async (t) => {
+test("an approval that execute resumes from approved fits the same plan", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const p = await production(temporary.root);
   const journal = new UniswapTokenJournal(temporary.root);
   let step = p.run(8); const quote = await step.runtime.quote({ command: "swap.uniswap-token.quote", profile: PROFILE, account: ACCOUNT, recipient: ACCOUNT,
@@ -100,7 +100,7 @@ test("QA 0.5.52: an approval that execute resumes from approved fits the same pl
   assert.equal(p.posts(step.call), 14, "allowance 1, nonce 1, block 1, pins 4, state 1, simulation 1, gas 1, fees 1, send 1, observation 2");
 });
 
-test("QA 0.5.52: guard reads that run out of budget refuse before custody with a recorded diagnostic, a freed nonce and the hold kept for cleanup", async (t) => {
+test("guard reads that run out of budget refuse before custody with a recorded diagnostic, a freed nonce and the hold kept for cleanup", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const p = await production(temporary.root);
   const observed = await p.approvalObserved("starved"), sends = p.chain.node.sends.length;
   const { runtime } = p.run(6), op = await runtime.execute(observed.operationId);

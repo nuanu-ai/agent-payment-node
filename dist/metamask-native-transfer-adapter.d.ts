@@ -36,7 +36,7 @@ export type MetaMaskNativeSubmission = ({
     readonly diagnostic?: MetaMaskNativeDiagnostic;
 };
 /**
- * Which vendor-read invariant a native transfer failed (QA 0.5.79 MM-NATIVE-PREFLIGHT-DIAGNOSTIC-079-001), with the
+ * Which vendor-read invariant a native transfer failed, with the
  * owner's next step. Every one still refuses before any operation exists; the step is advice, never run by APN. A step
  * written `mm …` is the pinned vendor client, which `runnable` turns into a command that runs as typed.
  */

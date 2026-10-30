@@ -4,7 +4,7 @@ import type { FinalizedReadCall, PublicFinalizedRead } from "../../src/evm-final
 import type { WalletAllowanceRpc } from "../../src/wallet-allowance/chain.js";
 import { newWalletAllowanceRevoke } from "../../src/wallet-allowance/model.js";
 import { WalletAllowanceRevokeRepository } from "../../src/wallet-allowance/repository.js";
-import type { movingNode } from "./uniswap-token-qa0552-harness.js";
+import type { movingNode } from "./uniswap-token-moving-node-harness.js";
 
 type Call = { readonly method: string; readonly params: readonly unknown[] };
 /** The fake node's transport as the family's chain port and as a finalized reader: one POST per batch, one per send (no POST cap, no cooldown). */

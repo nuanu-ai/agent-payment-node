@@ -9,7 +9,7 @@ import { absent, base, burned, copy, deliveryFile, H, iris, reader, recorded, se
   type Json } from "./circle-solana-delivery-fixtures.js";
 
 /**
- * QA 0.5.76 (CIRCLE-DELIVERY-SOURCE-BINDING-076-001): Circle's issuer API answered a new burn's hash with the attested
+ * Regression: Circle's issuer API answered a new burn's hash with the attested
  * message and Solana receipt of an older burn of the same terms, and the new operation became `delivered`. CCTP V2
  * assigns nonces offchain and this route's message names no payer (sender is the fee wrapper, max fee 0, the hook is
  * fixed by the recipient), so two burns of one amount to one token account emit the same bytes. What the chains fix is
@@ -37,7 +37,7 @@ const unread = async (view: Awaited<ReturnType<typeof status>>, reason: string, 
 const claims = (root: string, dir = "circle-solana-delivery-claims-v2") => readFile(join(root, dir, `${(SMALL.iris.messages[0].eventNonce as string).slice(2)}.json`), "utf8");
 
 test("a receipt older than the burn is not its delivery, whatever Circle answers for the burn", async (t) => {
-  // The QA case on chain data: a new burn of the same principal to the same account emits the old burn's bytes exactly.
+  // The reported case on chain data: a new burn of the same principal to the same account emits the old burn's bytes exactly.
   const { root, journal } = await setup(t), calls: string[] = [];
   const later = await burned(root, SMALL, H("c"), 8); await recorded(root, later);
   const statusOf = (answers = {}, time = RECEIVED + 60n) => status(root, later, reader(SMALL, calls, answers), SMALL, sourceReceipt(SMALL, later), sourceBlock(time));
@@ -60,7 +60,7 @@ test("between burns of the same bytes in flight together, Circle's nonce decides
   const { root, journal } = await setup(t);
   const twin = await burned(root, SMALL, H("c"), 8); await recorded(root, twin);
   const view = await status(root, twin, reader(SMALL, []), SMALL, sourceReceipt(SMALL, twin), sourceBlock(SMALL.burnTime + 30n));
-  // The status says what that association rests on (QA 0.5.77): the nonce Circle attested, not a chain read.
+  // The status says what that association rests on: the nonce Circle attested, not a chain read.
   assert.deepEqual([view.phase, view.delivery?.proof?.solanaSignature, view.delivery?.operationBinding], ["delivered", SMALL.signature, "circle_attested_nonce"]);
   const claimed = await status(root, journal, reader(SMALL, []));
   await unread(claimed, "circle_delivery_message_claimed", "the twin holds the receipt");
@@ -68,7 +68,7 @@ test("between burns of the same bytes in flight together, Circle's nonce decides
 });
 
 test("a message that differs from the burn's own event in a byte the burn fixed proves nothing", async (t) => {
-  // The QA reproduction's receipt carries no Circle event at all.
+  // The original reproduction's receipt carries no Circle event at all.
   const { root, journal } = await setup(t), calls: string[] = [];
   await unread(await status(root, journal, reader(SMALL, calls), SMALL, { ...sourceReceipt(SMALL, journal), logs: [] }),
     "circle_delivery_source_event", "no MessageSent");

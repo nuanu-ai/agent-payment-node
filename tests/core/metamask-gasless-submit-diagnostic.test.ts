@@ -1,5 +1,5 @@
 /**
- * QA 0.5.79 MM-GASLESS-SUBMIT-UNKNOWN-079-002: two fresh Base MetaMask gasless dispatches ended `unknown_finality /
+ * Regression: two fresh Base MetaMask gasless dispatches ended `unknown_finality /
  * mm_gasless_submit_unknown` and the exact GET answered 404, with nothing saying where the submit stopped. The submit
  * now reports closed facts of its own attempt (submit-diagnostic.ts) with that call's output; the outcome stays unknown.
  * These run the real vendored SDK against a synthetic provider.

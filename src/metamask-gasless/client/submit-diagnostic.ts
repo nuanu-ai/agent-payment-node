@@ -3,7 +3,7 @@ import { mmError, mmFail, type MetaMaskGaslessFailureReason } from "../reasons.j
 import { readDataRecord } from "./read-diagnostic.js";
 
 /**
- * Where a MetaMask gasless submit stopped (QA 0.5.79 MM-GASLESS-SUBMIT-UNKNOWN-079-002), as closed facts only: the
+ * Where a MetaMask gasless submit stopped, as closed facts only: the
  * helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, and the
  * provider's error code or job status when they have a closed token form. No body, URL, header or identifier leaves.
  * It is shown with the attempt's own output and never stored: the outcome stays unknown whatever it says.

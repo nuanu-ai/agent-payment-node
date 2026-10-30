@@ -13,9 +13,9 @@ import { temporaryState } from "./helpers.js";
 import { NoSecret } from "./operation-commands-families.js";
 
 /**
- * QA 0.5.52 DIRECT-RPC-CONFIG-NETWORK-GUIDANCE-052-001: `apn pay transfer approve --operation 5732d51e…` (and the second
- * reproduction d66d3c92…) on a prepared Ethereum native transfer without --rpc-url answered "This command requires an
- * explicit HTTPS Base RPC endpoint." before any prompt. The refusal must name the operation's own chain and setting.
+ * Regression: `apn pay transfer approve` on a prepared Ethereum native transfer without --rpc-url answered "This
+ * command requires an explicit HTTPS Base RPC endpoint." before any prompt. The refusal must name the operation's own
+ * chain and setting.
  */
 const NETWORKS = { 1: "Ethereum", 42161: "Arbitrum One" } as const;
 

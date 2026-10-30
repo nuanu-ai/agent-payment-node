@@ -39,7 +39,7 @@ export function publicX402Solana(record: X402SolanaRecord, pending: string | nul
 function nextActions(record: X402SolanaRecord): readonly string[] {
   const observe = `apn x402 solana observe --operation ${record.operationId}`;
   if (record.terminal) return [];
-  // The seller URL is one shell argument (its `?` and `&` would glob or split in zsh, QA 0.5.66); only the key placeholder stays bare.
+  // The seller URL is one shell argument (its `?` and `&` would glob or split in zsh); only the key placeholder stays bare.
   if (record.state === "prepared") return [`${createCliHandoff(["apn", "x402", "solana", "pay", "--profile", record.profile, "--url", record.terms.url,
     "--asset", record.terms.mint, "--max-amount", record.terms.maxAmountAtomic, "--idempotency-key"]).shell} <the same key>`, observe];
   if (record.state === "exposed") return [observe, `apn operation abandon --operation ${record.operationId}`];

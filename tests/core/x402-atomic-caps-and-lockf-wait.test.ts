@@ -5,7 +5,7 @@ import { COMMAND_MANIFEST } from "../../src/command-catalog.js";
 import { renderHelp } from "../../src/command-help.js";
 import { MacosAdvisoryLock, type LockfChild } from "../../src/macos-advisory-lock.js";
 
-/** QA 0.5.62: generic x402 caps are the selected asset's atomic units; a slow lockf helper on a loaded Mac still locks. */
+/** Generic x402 caps are the selected asset's atomic units; a slow lockf helper on a loaded Mac still locks. */
 test("generic x402 caps say atomic in Usage, in their own Options line and in the manifest type", () => {
   const cases: Array<[readonly string[], string]> = [
     [["x402", "fetch", "prepare"], "--max-amount-atomic"],

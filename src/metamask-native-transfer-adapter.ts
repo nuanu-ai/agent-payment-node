@@ -34,7 +34,7 @@ export type MetaMaskNativeSubmission = (
   & {readonly diagnostic?: MetaMaskNativeDiagnostic};
 
 /**
- * Which vendor-read invariant a native transfer failed (QA 0.5.79 MM-NATIVE-PREFLIGHT-DIAGNOSTIC-079-001), with the
+ * Which vendor-read invariant a native transfer failed, with the
  * owner's next step. Every one still refuses before any operation exists; the step is advice, never run by APN. A step
  * written `mm …` is the pinned vendor client, which `runnable` turns into a command that runs as typed.
  */
@@ -100,7 +100,7 @@ function remaining(deadline?: MetaMaskNativeDeadlineInput): number | undefined {
 const READ_ARGS: Readonly<Record<VendorRead, readonly string[]>> = { "auth status": ["auth", "status", "--json"],
   "trading-mode get": ["wallet", "trading-mode", "get", "--json"], "policy get": ["wallet", "policy", "get", "--json"] };
 /**
- * One vendor read. A read the runner itself failed (QA 0.5.80 MM-NATIVE-READ-TIMEOUT-DIAGNOSTIC-080-001: a timeout,
+ * One vendor read. A read the runner itself failed (a timeout,
  * the deadline, a start or protocol failure) keeps its code, message and retry advice, and names the failed read and
  * the runner's own failure class. Only a read whose vendor process ran and failed other than by the deadline also
  * offers that read to run by hand; a client that did not resolve or a passed deadline keeps the error's own advice.

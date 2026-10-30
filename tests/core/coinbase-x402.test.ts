@@ -792,7 +792,7 @@ test("AWAL x402 treats non-2xx, partial payment metadata and amount mismatch as 
     { neutral: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwcm90ZWN0ZWQifQ.signature12" },
     { neutral: "session=protected-session-value" },
     { neutral: "sid=protected-cookie; Path=/; HttpOnly=true" },
-    { neutral: "<local-path>" },
+    { neutral: "/Users/someone/.config/wallet.key" },
     { neutral: "-----BEGIN PRIVATE KEY----- protected" },
     { neutral: "AbCdEfGhIjKlMnOpQrStUvWx1234" },
     ["safe", "owner@example.com"],

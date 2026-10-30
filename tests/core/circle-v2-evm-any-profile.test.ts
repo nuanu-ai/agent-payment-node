@@ -1,5 +1,5 @@
 /**
- * SYNTHETIC end-to-end: QA CIRCLE-BRIDGE-003..010 (CCTP V2 Fast, Arbitrum USDC to Sei, Linea or Monad) for profiles that
+ * SYNTHETIC end-to-end: CCTP V2 Fast bridges (Arbitrum USDC to Sei, Linea or Monad) for profiles that
  * are not the owner's, through the real command path: argv parse, bind, core dispatch, the funding service, owner policy
  * admission, usage ledger, local custody signing, public JSON-RPC and issuer API. Generated keys, a temporary state and
  * the synthetic network in circle-v2-evm-any-profile-network.ts; no live RPC, no funds. Only the foreground TTY prompt is

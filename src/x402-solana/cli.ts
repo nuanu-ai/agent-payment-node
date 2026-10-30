@@ -36,11 +36,11 @@ export async function executeX402SolanaCli(bound: BoundCommand, options: Runtime
   } catch (error) {
     // A payment that already has a record answers with it: the original error and the operation itself (its id, state,
     // signature and exposure). Before exposure nothing reached the seller: the error's own remedy leads when it has one,
-    // else the payment's actions (a prepared payment holds its claim: the same-key pay, then the no-send observe; QA 0.5.65).
+    // else the payment's actions (a prepared payment holds its claim: the same-key pay, then the no-send observe).
     // After exposure (a seller HTTP error, a transport error, a malformed response) the payment may well have landed; the
     // first action is the no-send observe and nothing here or in a replay sends again.
     try {
-      // A failure after prepare saved the record (a derived-index write, QA 0.5.67) still names it: the key fixes the id,
+      // A failure after prepare saved the record (a derived-index write) still names it: the key fixes the id,
       // and only a record of exactly this request answers (a key naming another payment stays a bare conflict).
       const service = new X402SolanaService(root, x402SolanaPorts(root, options));
       const saved = operationId !== undefined ? await service.records.find(operationId)

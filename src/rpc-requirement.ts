@@ -4,7 +4,7 @@ import { directEvmNetwork, type DirectEvmChainId } from "./evm-direct-networks.j
 /**
  * The one chain a command's `--rpc-url` must serve. A missing endpoint is refused naming exactly this chain and the
  * setting that supplies it, never another network: an Ethereum transfer approved without `--rpc-url` once asked for a
- * Base RPC (DIRECT-RPC-CONFIG-NETWORK-GUIDANCE-052-001). The endpoint's chain id is still proven where it is used.
+ * Base RPC. The endpoint's chain id is still proven where it is used.
  */
 export interface RpcChain { readonly chainId: number; readonly name: string }
 

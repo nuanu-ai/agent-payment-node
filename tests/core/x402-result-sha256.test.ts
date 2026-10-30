@@ -1,7 +1,7 @@
 /**
- * QA 0.5.51 X402-RESULT-SHA256-001: the public `sha256` of a seller result is the plain SHA-256 of the body bytes; the
- * stored domain-separated hash keeps its value and is published under its own name with its rule. The bytes are the
- * paid QuickNode answer of operation 532db8f8… (45 bytes); no payment is repeated.
+ * The public `sha256` of a seller result is the plain SHA-256 of the body bytes; the stored domain-separated hash keeps
+ * its value and is published under its own name with its rule. The bytes are a captured paid QuickNode answer
+ * (45 bytes); no payment is repeated.
  */
 import assert from "node:assert/strict";
 import test from "node:test";

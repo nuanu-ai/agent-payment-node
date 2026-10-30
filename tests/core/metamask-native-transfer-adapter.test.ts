@@ -120,7 +120,7 @@ test("the vendor policy changing between prepare and send refuses before the fin
 
 // These request reads never authorize a financial effect or settlement.
 test("empty project metadata refuses unsigned",async()=>{setup();policyQueue({project:""});await assert.rejects(readMetaMaskNativeVendorPolicy(1,PAYER,RECIPIENT));assert.equal(calls.length,1);});
-// QA 0.5.79 MM-NATIVE-PREFLIGHT-DIAGNOSTIC-079-001: each failed vendor invariant names itself and the owner's next step;
+// Each failed vendor invariant names itself and the owner's next step;
 // a vendor step runs as typed, as the pinned client under APN's own Node (Homebrew links only `apn`, not `mm`).
 const MM = `${process.execPath} /test-only-pinned-package `;
 const refusal = (reason:string, nextActions:readonly string[], facts:Record<string,unknown>={}) => (error:unknown) => {
@@ -154,7 +154,7 @@ test("a refused vendor read names the failed invariant and a next step that runs
   assert.ok(noSend());
 });
 test("a vendor read the runner failed keeps its code and retry advice and names the read, its failure and the read to run",async()=>{
-  // QA 0.5.80 MM-NATIVE-READ-TIMEOUT-DIAGNOSTIC-080-001: a timed-out policy read came out as a bare provider error with
+  // Regression: a timed-out policy read came out as a bare provider error with
   // a sign-in-again hint, although the session read had passed.
   const { ApnError } = await import("../../src/errors.js");
   for (const [at, read, argv] of [[1, "auth status", "auth status --json"], [2, "trading-mode get", "wallet trading-mode get --json"],
@@ -190,7 +190,7 @@ function readEvidence(request:Record<string,unknown>,status:Record<string,unknow
 const request=()=>({pollingId:RID,kind:"transaction",namespace:"evm",chainId:1});
 test("a request READ is three processes: project, watch, project; it returns matching hash and chain hints",async()=>{setup();requestQueue({...request(),txHash:TX},{txHash:TX,status:"CONFIRMED"});const v=await readMetaMaskNativeRequest(RID,PROJECT_HASH);assert.deepEqual(v,{disposition:"acknowledged",requestId:RID,transactionHash:TX,chainId:1,readObservation:readEvidence({...request(),txHash:TX},{txHash:TX,status:"CONFIRMED"},TX)});assert.deepEqual(calls.map(c=>c.argv[1]),["status","requests","status"]);const watch=calls[1]!;assert.deepEqual(watch.argv,["wallet","requests","watch",RID,"--wallet-timeout","1","--json"]);assert.equal(watch.timeout,6000);assert.ok(noSend());});
 test("normal pending request stays pending and cannot prove fee or finality",async()=>{setup();requestQueue(request(),{status:"AWAITING_MFA"});const evidence=readEvidence(request(),{status:"AWAITING_MFA"});assert.deepEqual(await readMetaMaskNativeRequest(RID,PROJECT_HASH),{disposition:"pending",requestId:RID,chainId:1,mfa:{expiresAt:null,authMethod:null,evidenceHash:evidence.response_hash},readObservation:evidence});});
-// QA 0.5.52 METAMASK-NATIVE-MFA-GUIDANCE-001: 6.1.5's own bytes. `requests watch` before the owner approves writes the
+// A Guard awaiting the owner's MFA approval, in Agent Wallet 6.1.5's own bytes. `requests watch` before the owner approves writes the
 // AWAITING_MFA notice alone (its `_error` goes to stderr, exit 1); `send-transaction` without --wait adds the pending summary.
 const EXPIRES="2026-10-20T09:51:13.922Z";
 const mfaNotice=(pollingId=RID,extra:Record<string,unknown>={})=>JSON.stringify({_notice:{kind:"AWAITING_MFA",pollingId,expiresAt:EXPIRES,authMethod:"social",message:`Approval required: check the email registered to your dashboard and confirm to proceed.\nRequest ID: ${pollingId}`,...extra}});

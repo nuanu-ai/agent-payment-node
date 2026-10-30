@@ -1,8 +1,8 @@
 /**
- * QA 0.5.51 follow-up: swaps finalized by 0.5.51 have no economics in their sealed records. Status reads the swap's own
+ * Swaps finalized by APN 0.5.51 have no economics in their sealed records. Status reads the swap's own
  * finalized transaction once (bound to the record's proven hash), keeps the facts in a sidecar bound to the record's
- * integrity hash, and reads no RPC afterwards. The records and transactions are the QA captures of Uniswap 30448bcb…,
- * SunSwap 1693a1ba… and Orca 5e805839…; nothing is paid again.
+ * integrity hash, and reads no RPC afterwards. The records and transactions are real captured Uniswap, SunSwap and Orca
+ * swaps; nothing is paid again.
  */
 import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";

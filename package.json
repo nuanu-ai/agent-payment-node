@@ -1,6 +1,6 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.81",
+  "version": "0.5.82",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
@@ -36,7 +36,6 @@
     "docs/stargate-v2-native-execution.md",
     "docs/stargate-v2-token-native-drop.md",
     "docs/uniswap.md",
-    "docs/wbtc-acquisition.md",
     "docs/sunswap.md",
     "docs/jupiter.md",
     "vendor/metamask-evm-sdk/**",
@@ -45,7 +44,6 @@
     "docs/runtime-sdk-vendor.md",
     "vendor/metamask-smart-account/**",
     "docs/relay.md",
-    "docs/wbtc-continuation-budget.md",
     "docs/circle-v2-evm-fast.md",
     "docs/local-release.md",
     "docs/x402-merchant-usdm.md",

@@ -8,7 +8,7 @@ import { ApnError } from "./errors.js";
 export const BASE_CHAIN_HEX = "0x2105";
 /**
  * The account is MetaMask's own but its official Base Smart Account is not enabled yet: a setup step the owner takes, not an
- * unsupported path, so the next step is to enable it and retry the same intent, never another custody (QA 0.5.70).
+ * unsupported path, so the next step is to enable it and retry the same intent, never another custody.
  */
 export function smartAccountInactive() {
     return new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "Enable the official MetaMask Smart Account on Base, then retry the same connect intent.", {

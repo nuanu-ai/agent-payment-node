@@ -26,7 +26,7 @@ export interface ValidatedSmartAccountGrant {
 export declare const BASE_CHAIN_HEX: "0x2105";
 /**
  * The account is MetaMask's own but its official Base Smart Account is not enabled yet: a setup step the owner takes, not an
- * unsupported path, so the next step is to enable it and retry the same intent, never another custody (QA 0.5.70).
+ * unsupported path, so the next step is to enable it and retry the same intent, never another custody.
  */
 export declare function smartAccountInactive(): ApnError;
 export declare function smartAccountEnvironment(): import("@metamask/smart-accounts-kit").SmartAccountsEnvironment;

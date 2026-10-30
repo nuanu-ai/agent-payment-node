@@ -61,7 +61,7 @@ export class TtyBridgeApproval implements BridgeApprovalPort {
   }
 }
 
-/** What the pre-send fee check bounds on the source network, by its fee model (QA 0.5.68: the line named Base for every source). */
+/** What the pre-send fee check bounds on the source network, by its fee model (each source names its own network, never Base for all). */
 export function sourceFeeNote(chainId: number): string {
   const network = directEvmNetwork(chainId as DirectEvmChainId), name = `${network.name} (${network.caip2})`;
   switch (network.feeModel) {

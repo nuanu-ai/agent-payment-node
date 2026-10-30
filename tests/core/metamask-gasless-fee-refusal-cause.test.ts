@@ -15,7 +15,7 @@ import { MM_TEST_RECIPIENT, mmFixture } from "./metamask-gasless-helpers.js";
 import { NOW, quoteInput, SdkExchange, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
 
 /**
- * QA 0.5.52 METAMASK-FEE-REFUSAL-ASSET-GUIDANCE-001, evidence mm-ethereum-052-fee-explanation02/03: two read-only
+ * Two captured read-only
  * Ethereum fee quotes whose low tier had no `tokenFees`, its literal error and these public numeric terms (balanceNeeded is
  * exactly gas x maxFeePerGas; currentBalance is the server wallet's native ETH, its USDC was 983141 atoms).
  */

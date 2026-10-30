@@ -9,7 +9,7 @@ import { stargateTokenEnvelope } from "../../src/stargate-v2/token-runtime.js";
 import { AMOUNT, FEE, OWNER, request, setup } from "./stargate-native-support.js";
 import * as token from "./stargate-token-support.js";
 
-// QA 0.5.57 STARGATE-NATIVE-FUNDS-AS-RPC-CONFIG-057-001: an unfunded native value reached eth_estimateGas, whose node
+// Regression: an unfunded native value reached eth_estimateGas, whose node
 // error (-32003 OutOfFunds) surfaced as APN_RPC_CONFIG. A known value is now refused by name, with its numbers, first.
 const POOL = getAddress("0x77b2043768d28E9C9aB44E1aBfC95944bcE57931");
 const blocked = (reason: string, check: (details: Record<string, unknown>) => void) => (error: unknown) => {

@@ -1,9 +1,9 @@
 /**
- * QA 0.5.52 DIRECT-BASE-RECEIPT-FEE-052-001: the completed Base USDC transfer ebe647… (tx 0x3f6e7f33…, block 52809368)
+ * Regression: a completed Base USDC transfer (tx 0x3f6e7f33…, block 52809368)
  * showed `actual_network_fee.status=incomplete`, reason `receipt_blob_fee_unmodeled`, because its OP-stack (Jovian) receipt
  * carries the DA footprint as `blobGasUsed` (14800) with no `blobGasPrice`. That is block-limit metadata, not a charge: the
  * fee is execution 270354000000 + L1 442851329 + operator 0 = 270796851329 wei. The receipt and the fee 0.5.52 stored from
- * it are the QA captures; only the identity fields our harness signed (hash, block) are rebound to them.
+ * it are real captures; only the identity fields the harness signed (hash, block) are rebound to them.
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";

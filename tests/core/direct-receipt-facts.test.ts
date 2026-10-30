@@ -1,8 +1,8 @@
 /**
- * QA 0.5.51 follow-up: direct transfers completed by 0.5.51 (Sei USDC ca0c90b1…, Monad native 61fb4793…) have no fee in
+ * Direct transfers completed by APN 0.5.51 (e.g. Sei USDC, Monad native) have no fee in
  * their sealed records. Status and receipt read the transfer's own receipt once through the chain's configured RPC, bound
  * to the stored hash and the block the record proved, keep the fee in a sidecar bound to the record, and read nothing more.
- * The receipts are the QA captures; only the identity fields our harness signed (hash, block) are rebound to them.
+ * The receipts are real captured receipts; only the identity fields the harness signed (hash, block) are rebound to them.
  */
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";

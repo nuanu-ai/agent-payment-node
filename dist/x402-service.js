@@ -403,7 +403,7 @@ export class X402Service extends X402PaidRequest {
                 return waitOutcome("completed", waitSeconds, observations);
             if (!isPostExposureWaitState(current.record)) {
                 // An authorization APN never sent and the chain shows no settlement of (an expired one waits for FINALIZED to prove
-                // it unused, QA 0.5.67): there is nothing to wait for, so the operation answers as a plain resume does.
+                // it unused): there is nothing to wait for, so the operation answers as a plain resume does.
                 if (current.record.state === "authorized_not_sent" && current.record.settlementEvidence === undefined &&
                     !current.record.attempts.some((attempt) => attempt.purpose === "payment"))
                     return waitOutcome("not_exposed", waitSeconds, observations);

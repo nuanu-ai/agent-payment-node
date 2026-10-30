@@ -1,8 +1,8 @@
 import { capabilityHash } from "./provider-profile.js";
 /**
  * What a pending consent intent allows next. While it is live: the exact retry, or cancelling it after a MetaMask review.
- * Once expired the exact connect is refused before consent, so only the review, the local cancel and a new intent remain
- * (QA 0.5.72). Forget removes only the local intent; MetaMask-side authority is reviewed and revoked there.
+ * Once expired the exact connect is refused before consent, so only the review, the local cancel and a new intent remain.
+ * Forget removes only the local intent; MetaMask-side authority is reviewed and revoked there.
  */
 export function pendingPermissionNextActions(profile, permission, nowUnix) {
     const forget = `apn wallet permission forget --profile ${profile} --expected-revision ${permission.revision}`;

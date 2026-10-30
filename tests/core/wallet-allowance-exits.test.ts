@@ -20,7 +20,7 @@ import { WALLET_ALLOWANCE_REVOKE_JOURNAL_MAX } from "../../src/wallet-allowance/
 import { WalletAllowanceRevokeRepository } from "../../src/wallet-allowance/repository.js";
 import { walletAllowanceResendCommand } from "../../src/wallet-allowance/view.js";
 import { temporaryState } from "./helpers.js";
-import { movingNode, typingTerminal, WRAPPING } from "./uniswap-token-qa0552-harness.js";
+import { movingNode, typingTerminal, WRAPPING } from "./uniswap-token-moving-node-harness.js";
 import { allowanceRpc } from "./wallet-allowance-helpers.js";
 
 const KEY = `0x${"0".repeat(63)}9` as Hex, ACCOUNT = privateKeyToAccount(KEY).address, PROFILE = "qa0554-revoke";

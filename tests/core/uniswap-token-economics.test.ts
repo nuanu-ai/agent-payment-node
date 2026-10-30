@@ -1,4 +1,4 @@
-/** QA 0.5.51 follow-up: the token-input Uniswap lane's observed result carries the same shared swap economics. */
+/** The token-input Uniswap lane's observed result carries the same shared swap economics. */
 import assert from "node:assert/strict";
 import test from "node:test";
 import { executeUniswapCommand } from "../../src/swap/uniswap-command-service.js";

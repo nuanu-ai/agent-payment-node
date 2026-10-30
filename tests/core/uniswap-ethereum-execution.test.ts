@@ -191,7 +191,7 @@ test("observer requires marker and proves exact finalized receipt, reorg, finali
   }; };
   const observer = new UniswapEthereumReceiptObserver(rpc(), () => new Date((deadline - 200) * 1000));
   assert.equal((await observer.observe(m.operation, m.binding, hash))?.finalized, true);
-  // QA 0.5.51 UNISWAP-RESULT-ECONOMICS-001: the receipt's own credit (here 30 above the minimum), the mined value and gasUsed x price.
+  // Swap economics: the receipt's own credit (here 30 above the minimum), the mined value and gasUsed x price.
   const above = await new UniswapEthereumReceiptObserver(rpc({ output: BigInt(minimumOutput) + 30n }), () => new Date((deadline - 200) * 1000)).observe(m.operation, m.binding, hash);
   assert.deepEqual(above?.economics, { inputAtomic: inputAmount, outputAtomic: (BigInt(minimumOutput) + 30n).toString(), networkFeeAtomic: "120000000000000",
     nativeDebitAtomic: (BigInt(inputAmount) + 120_000_000_000_000n).toString() });

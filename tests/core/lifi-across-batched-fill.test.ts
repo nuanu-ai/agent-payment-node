@@ -16,7 +16,7 @@ import { addressWord, eventArgs, mutateEvent } from "./lifi-event-fixtures.js";
 import { lifiFixture } from "./lifi-helpers.js";
 import { findStored } from "./stored-operations.js";
 
-/** QA 0.5.51 operation 14b9c3b6…: Base ETH -> Ethereum ETH; the relayer filled it in one transaction with two BNB-origin fills. */
+/** A captured operation: Base ETH -> Ethereum ETH; the relayer filled it in one transaction with two BNB-origin fills. */
 const LIVE = JSON.parse(readFileSync("tests/core/fixtures/across-qa0551-batched-fill.json", "utf8")) as {
   operationId: string; sourceProof: BridgeSourceProof; destinationReceipt: BridgeProtocolReceipt;
   route: { sender: string; recipient: string; lifiTransactionId: Hex } };

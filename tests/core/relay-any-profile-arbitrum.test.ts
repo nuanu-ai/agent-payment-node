@@ -1,4 +1,4 @@
-/** QA RELAY-008 (Arbitrum USDC to Ethereum USDC) end to end through the installed command path, for a profile and
+/** Relay Arbitrum USDC to Ethereum USDC end to end through the installed command path, for a profile and
  * addresses that belong to nobody: `wallet import` → owner policy → `relay prepare --source-chain eip155:42161` →
  * `relay execute` (allowance check, then the approval) → `relay observe` → `relay execute` (deposit) → `relay observe`
  * → `relay observe --destination-rpc-url` (the Ethereum USDC credit to the caller's recipient, recorded once and then terminal). */

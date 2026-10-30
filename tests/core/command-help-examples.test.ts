@@ -3,7 +3,7 @@ import test from "node:test";
 import { bindArgv } from "../../src/command-binder.js";
 import { COMMANDS } from "../../src/command-catalog.js";
 
-// CLI-HELP-INCOMPLETE-EXAMPLES-063-001: a copied help example either asks for help or carries every
+// A copied help example either asks for help or carries every
 // required option, so it reaches the command's own checks instead of "Missing required --profile".
 const EVM = "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1", TRON = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const SOLANA = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";

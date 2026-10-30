@@ -1,6 +1,6 @@
 {
  "provenance": {
-  "sourcePath": "<local-path>",
+  "sourcePath": "captured APN state record (local path withheld)",
   "sourceSha256": "3b60fe87e94f69f33e768364c1058a83d3576570857c17f532a5c3c03a606e42",
   "class": "Actual read-existing public unsigned native operation/slot/prepared, no private material",
   "note": "Copied from tests/fixtures/cleanup85-native/original-unsigned.json (APN 0.5.44) when the cleanup85 controller was deleted; the public unsigned operation record only."

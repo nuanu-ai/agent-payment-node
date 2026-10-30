@@ -9,8 +9,8 @@ import type { TestContext } from "node:test";
 export const FRESH_PROCESS_TEST_TIMEOUT_MS = 600_000;
 
 /**
- * One fresh worker process, run to its own end. No per-child wall clock decides its answer: QA 0.5.52 saw a 15 s spawnSync
- * kill read as `status null` instead of the phase's own exit code. A real hang is bounded by the test's
+ * One fresh worker process, run to its own end. No per-child wall clock decides its answer: a 15 s spawnSync
+ * kill was once read as `status null` instead of the phase's own exit code. A real hang is bounded by the test's
  * `FRESH_PROCESS_TEST_TIMEOUT_MS`, after which this child is killed by its own pid (never by a name pattern).
  */
 export async function freshProcess(context: TestContext, args: readonly string[]) {

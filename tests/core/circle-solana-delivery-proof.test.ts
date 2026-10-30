@@ -11,7 +11,7 @@ import { absent, ACCOUNT, burned, copy, deliveryFile, H, iris, LARGE, reader, re
 import { temporaryState } from "./helpers.js";
 
 /**
- * QA 0.5.75: two Circle Base to Solana burns that Circle's forwarding service had delivered within minutes still showed
+ * Regression: two Circle Base to Solana burns that Circle's forwarding service had delivered within minutes still showed
  * `submitted_pending` with nothing to wait for. The status now proves the receipt on Solana from the chain and records it.
  */
 test("Circle's real forwarded receipts are proven on Solana and recorded once; later statuses read nothing", async (t) => {

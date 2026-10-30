@@ -1,5 +1,5 @@
 /**
- * MANIFEST-V2-RECOVERY-COMMAND-001 and GASZIP-MANIFEST-STATES-001: every command APN names to a caller exists in the
+ * Every command APN names to a caller exists in the
  * published manifest v2, and the published state lists are the journals' own lists.
  */
 import assert from "node:assert/strict";

@@ -1,5 +1,5 @@
 /**
- * METAMASK-MISSING-RPC-DIAGNOSTIC-001: an unset, empty or non-public-HTTPS chain RPC setting is a configuration refusal
+ * An unset, empty or non-public-HTTPS chain RPC setting is a configuration refusal
  * that names the variable and the chain, raised before any network request, provider call, record or signature; a
  * reachable RPC of another chain stays a strict binding refusal.
  */

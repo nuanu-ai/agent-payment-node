@@ -1,8 +1,8 @@
 /**
- * QA 0.5.51 DIRECT-RECEIPT-FEE-001: a completed or reverted direct EVM transfer records what it actually paid, from its
- * own canonical receipt and by its network's charge rule, and shows it in status and receipt (CLI and MCP alike). The
- * per-chain amounts below are the QA witnesses: Sei USDC ca0c90b1… (gasUsed x price), Monad 61fb4793… and e7616864…
- * (full gas limit billed), Polygon 3319e697…. A component the receipt does not carry leaves the fee incomplete.
+ * A completed or reverted direct EVM transfer records what it actually paid, from its own canonical receipt and by its
+ * network's charge rule, and shows it in status and receipt (CLI and MCP alike). The per-chain amounts below are captured
+ * transfers: Sei USDC (gasUsed x price), two on Monad (full gas limit billed) and one on Polygon. A component the receipt
+ * does not carry leaves the fee incomplete.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -25,7 +25,7 @@ const deriveEvmActualFee = (fee: EvmActualFeeInput) => deriveWithModel(fee, dire
 const input = (chainId: number, gasLimit: bigint, maxFee: bigint, raw: Record<string, unknown>): EvmActualFeeInput => ({ chainId, transactionHash: HASH,
   blockNumberAtomic: "100", gasLimitAtomic: gasLimit.toString(), maxFeePerGasAtomic: maxFee.toString(), receiptFields: readEvmReceiptFeeFields(raw) });
 
-test("each network's charge rule gives the QA witnesses' exact fee", () => {
+test("each network's charge rule gives the captured transfers' exact fee", () => {
   const sei = deriveEvmActualFee(input(1329, 130000n, 102000000000n, { gasUsed: toHex(114147n), effectiveGasPrice: toHex(51000000000n) }));
   assert.equal(sei.totalFeeAtomic, "5821497000000000"); assert.equal(sei.feeModel, "eip1559"); assert.equal(sei.gasBilledAtomic, "114147");
   const monad = deriveEvmActualFee(input(143, 21000n, 204000000000n, { gasUsed: toHex(21000n), effectiveGasPrice: toHex(102000000000n) }));
