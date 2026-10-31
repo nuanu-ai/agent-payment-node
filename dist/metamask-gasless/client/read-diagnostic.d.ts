@@ -1,8 +1,8 @@
 import { ApnError } from "../../errors.js";
 import { type MetaMaskGaslessFailureReason } from "../reasons.js";
 export type ReadMode = "inspect" | "quote";
-export type ReadStage = "launch" | "private_state" | "sdk_load" | "hydrate" | "inspect" | "inventory" | "chain_override" | "relay_support" | "fee_quote" | "quote_output" | "helper_response";
-export type ReadNetwork = "none" | "mimir-networks" | "accounts-networks" | "sentinel-networks" | "rpc-decimals" | "rpc-balance" | "sentinel-quote";
+export type ReadStage = "launch" | "private_state" | "project_wallets" | "sdk_load" | "hydrate" | "inspect" | "inventory" | "chain_override" | "relay_support" | "fee_quote" | "quote_output" | "helper_response";
+export type ReadNetwork = "none" | "project-wallets" | "mimir-networks" | "accounts-networks" | "sentinel-networks" | "rpc-decimals" | "rpc-balance" | "sentinel-quote";
 export declare const readValidationPredicates: readonly ["response_json", "response_root", "sentinel_mode", "sentinel_keys", "sentinel_jsonrpc", "sentinel_id", "sentinel_result", "sentinel_transactions", "sentinel_transactions_length", "sentinel_last_transaction", "sentinel_fees", "sentinel_fees_length", "sentinel_low_tier", "sentinel_token_fees", "sentinel_token_fees_length", "sentinel_entry", "sentinel_token", "sentinel_token_address", "sentinel_token_match", "sentinel_entry_error", "sentinel_symbol", "sentinel_decimals", "sentinel_fee_quantity", "sentinel_fee_recipient"];
 export type ReadValidationPredicate = typeof readValidationPredicates[number];
 export type TokenFeesKind = "missing" | "null" | "object" | "string" | "number" | "boolean";
@@ -37,7 +37,11 @@ export interface UsdcShortfallFacts {
     readonly usdcCurrentAtomic: string;
     readonly usdcRequiredAtomic: string;
 }
-export type ReadFacts = Partial<SentinelFeeFacts & RelaySupportFacts & NativeGasFacts & UsdcShortfallFacts>;
+/** The EVM server wallets a validated 200 project-wallet list names, none of them the bound one (1 to 128). */
+export interface ProjectWalletFacts {
+    readonly projectWalletCount: number;
+}
+export type ReadFacts = Partial<SentinelFeeFacts & RelaySupportFacts & NativeGasFacts & UsdcShortfallFacts & ProjectWalletFacts>;
 export interface MetaMaskReadDiagnostic extends ReadFacts {
     readonly tokenFeesKind?: TokenFeesKind;
     readonly validationPredicate?: ReadValidationPredicate;

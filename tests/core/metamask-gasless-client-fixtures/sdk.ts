@@ -47,12 +47,20 @@ export async function syntheticHome(options: HomeOptions = {}) {
   return { home, directory, token, sessionBytes, walletBytes, binding, cleanup: () => rm(home, { recursive: true, force: true }) };
 }
 
+/** The session project's wallet list, as MetaMask answers a project holding the bound wallet. */
+export const PROJECT_WALLETS_URL = `https://agentic-mimir-service.api.cx.metamask.io/v1/projects/${PROJECT}/wallets`;
+export const listedWallets = (): FetchExchangeResponse =>
+  ({ status: 200, body: JSON.stringify({ wallets: [{ address: OWNER, name: "primary", namespace: "evm" }] }) });
+
 export class SdkExchange implements FetchExchange {
   readonly requests: FetchExchangeRequest[] = [];
   beforeSends = 0;
+  /** The project wallet list's answer; `status` and `malformed` apply to every other read. */
+  projectWallets: () => FetchExchangeResponse = listedWallets;
   constructor(readonly chainId: number, readonly status = 200, readonly malformed: string | null = null) {}
   async request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> {
     this.requests.push(request); request.beforeSend?.(); if (request.beforeSend) this.beforeSends += 1;
+    if (request.method === "GET" && request.url === PROJECT_WALLETS_URL) return this.projectWallets();
     if (this.malformed === "inventory" && request.url.endsWith("/v1/supportedNetworks")) return { status: 200, body: "{}" };
     if (this.status !== 200) return { status: this.status, body: "{}" };
     let body: unknown;

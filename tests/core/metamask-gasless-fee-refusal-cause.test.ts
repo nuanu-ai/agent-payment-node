@@ -114,7 +114,7 @@ test("APN's own balance read below the transfer plus the quoted fee is a USDC re
       `${required} USDC atoms (${Number(required) / 1e6} USDC) this transfer plus MetaMask's quoted USDC relay fee needs (APN's own balanceOf read at the fee quote).`);
     assert.deepEqual([error.details?.reason, error.details?.mm_read_stage, error.details?.mm_read_invariant, error.details?.mm_read_usdc_current_atomic,
       error.details?.mm_read_usdc_required_atomic], ["mm_gasless_balance", "fee_quote", "closed_failure", "500000", required]);
-    assert.equal(requests, 6, "the normal quote reads, including the balance word"); assert.equal(exchange.beforeSends, 0);
+    assert.equal(requests, 7, "the normal quote reads, including the project wallet list and the balance word"); assert.equal(exchange.beforeSends, 0);
   });
   const covered = await refusal(new TierExchange(8453, { error: PROVIDER_ERROR }), 8453);
   assert.equal(covered.error.details?.mm_read_usdc_current_atomic, undefined, "no balance read, no USDC fact");

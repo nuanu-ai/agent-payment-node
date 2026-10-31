@@ -6,7 +6,8 @@ import { MetaMaskGaslessProviderClient, SubprocessMetaMaskGaslessHelperRunner } 
 import { helperResponse, MM_HELPER_VERSION } from "../../src/metamask-gasless/client/protocol.js";
 import { HelperNetworkPolicy, networkContextQuote } from "../../src/metamask-gasless/client/network.js";
 import { readDiagnostic, readRunnerFailure, validateReadDiagnostic } from "../../src/metamask-gasless/client/read-diagnostic.js";
-import { expectedQuote, NOW, quoteInput, SECRET, SdkExchange, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
+import { expectedQuote, listedWallets, NOW, PROJECT, PROJECT_WALLETS_URL, quoteInput, SECRET, SdkExchange, syntheticHome } from
+  "./metamask-gasless-client-fixtures/sdk.js";
 
 const failure = { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" } as const;
 const request = { version: MM_HELPER_VERSION, mode: "inspect" as const, expected: { profile: "fixture",
@@ -88,7 +89,8 @@ test("normal inspect failure before any HTTP has private-state diagnostic and no
 test("normal quote HTTP failure identifies quote inventory phase without leaking exchange error", async (t) => {
   const home = await syntheticHome(); t.after(home.cleanup); let calls = 0;
   const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
-    { homeDirectory: home.home, now: () => NOW, exchange: { async request() { calls++; throw new Error(SECRET); } } });
+    { homeDirectory: home.home, now: () => NOW, exchange: { async request(r) {
+      if (r.url === PROJECT_WALLETS_URL) return listedWallets(); calls++; throw new Error(SECRET); } } });
   assert.equal(result.ok, false); if (result.ok) return;
   assert.equal(result.failure.code, failure.code); assert.equal(result.diagnostic?.mode, "quote");
   assert.equal(result.diagnostic?.stage, "inventory"); assert.ok(calls >= 1 && calls <= 3);
@@ -98,7 +100,7 @@ test("normal quote HTTP failure identifies quote inventory phase without leaking
 test("concurrent policy reads associate fixed HTTP status with the actual thrown error", async (t) => {
   const home = await syntheticHome(); t.after(home.cleanup);
   const input = quoteInput(home.binding, 8453);
-  const policy = new HelperNetworkPolicy(networkContextQuote(input, home.binding.address, SECRET), { async request(r) {
+  const policy = new HelperNetworkPolicy(networkContextQuote(input, home.binding.address, SECRET, PROJECT), { async request(r) {
     if (r.url.includes("mimir")) return { status: 200, body: JSON.stringify({ malformed: SECRET }) };
     return { status: 200, body: JSON.stringify({ fullSupport: [], partialSupport: {} }) };
   } });
@@ -154,7 +156,7 @@ test("normal malformed 2xx parser and schema failures carry trusted validation b
     const home = await syntheticHome(); t.after(home.cleanup); const exchange = new SdkExchange(8453);
     const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
       { homeDirectory: home.home, now: () => NOW, exchange: { async request(r) {
-        return r.url.includes("mimir") ? { status: 200, body } : await exchange.request(r);
+        return r.url.endsWith("/v1/supportedNetworks") ? { status: 200, body } : await exchange.request(r);
       } } });
     assert.equal(result.ok, false); if (result.ok) return;
     assert.equal(result.failure.code, "APN_PROVIDER_UNAVAILABLE");
@@ -172,7 +174,7 @@ test("HTTP authentication and unbound errors cannot manufacture network validati
   assert.equal(result.ok, false); if (result.ok) return;
   assert.deepEqual(result.diagnostic, { mode: "quote", stage: "inventory", invariant: "closed_failure",
     network: "mimir-networks", httpStatus: 401, exitCode: null, signal: "none", timedOut: false });
-  const policy = new HelperNetworkPolicy(networkContextQuote(quoteInput(home.binding, 8453), home.binding.address, SECRET),
+  const policy = new HelperNetworkPolicy(networkContextQuote(quoteInput(home.binding, 8453), home.binding.address, SECRET, PROJECT),
     { async request() { return { status: 500, body: "{" }; } });
   const response = await policy.fetch("https://agentic-mimir-service.api.cx.metamask.io/v1/supportedNetworks");
   assert.equal(response.status, 500);

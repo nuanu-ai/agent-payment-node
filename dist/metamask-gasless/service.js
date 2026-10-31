@@ -18,6 +18,7 @@ import { canonicalProfile } from "../wallet-policy.js";
 import { directEvmNetwork } from "../evm-direct-networks.js";
 import { formatAtomic } from "../money.js";
 import { mmFeeCapNextAction } from "./refusals.js";
+import { mmProjectWalletGuidance, mmProjectWalletNextActions, mmProjectWalletReason } from "./project-wallet-guidance.js";
 /**
  * Next actions follow only what the refusal proves: the native gas shortfall
  * MetaMask's own simulation states, APN's own USDC balance read below the transfer plus its fee (at the fee quote or at
@@ -87,13 +88,15 @@ export class MetaMaskGaslessService {
             return publicMetaMaskGaslessOperation(await preparation.prepare(input));
         }
         catch (error) {
-            throw prepareGuidance(await this.sessionGuidance(error, input.profile), input.profile, input.request);
+            const guided = await this.sessionGuidance(await mmProjectWalletGuidance(error, input.profile), input.profile);
+            throw prepareGuidance(guided, input.profile, input.request);
         }
     }
     /**
      * A lost provider session is normally renewed with the foreground wallet connect handoff, but wallet lifecycle
-     * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile instead
-     * of at a command that would only be refused.
+     * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile first,
+     * instead of at a command that would only be refused; any steps of the refusal's own follow, since they end in a
+     * wallet connect that waits for it.
      */
     async sessionGuidance(error, profileInput) {
         if (!(error instanceof ApnError) || error.code !== "APN_PROVIDER_SESSION_REQUIRED")
@@ -109,9 +112,11 @@ export class MetaMaskGaslessService {
                 return error;
             blocking = guard.details.blockingOperationId;
         }
+        const own = Array.isArray(error.details?.nextActions) ? error.details.nextActions : [];
         return new ApnError(error.code, error.message, { ...error.details, blockingOperationId: blocking, nextActions: [
                 `apn operation status --operation ${blocking}`,
                 `Wallet connect for this profile waits until operation ${blocking} is terminal. Follow its next actions; if its outcome is still unknown after its approval window, release it with apn operation abandon --operation ${blocking}. Then run the foreground wallet connect handoff again.`,
+                ...own,
             ] });
     }
     async approve(operationId) {
@@ -123,7 +128,7 @@ export class MetaMaskGaslessService {
                 throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve this MetaMask USDC transfer in a foreground terminal.", {
                     reason: "mm_gasless_approval", nextActions: [`apn gasless transfer approve --operation ${op.operationId}`],
                 });
-            return this.project(await this.execution().approve(op, approval));
+            return await this.project(await this.execution().approve(op, approval));
         });
     }
     async resume(operationId, observationRpcEnv) {
@@ -134,11 +139,11 @@ export class MetaMaskGaslessService {
             if ((op.terminal && !provable) || op.state === "awaiting_approval")
                 return liveMetaMaskGaslessOperation(op);
             if (environmentName === undefined)
-                return this.project(provable ? await this.observation().run(op) : await this.execution().run(op));
+                return await this.project(provable ? await this.observation().run(op) : await this.execution().run(op));
             const factory = this.dependencies().observationRpcFor;
             if (factory === undefined)
                 return mmFail("mm_gasless_rpc_binding");
-            return this.project(await this.observation({ rpc: factory(op.intent.request.chainId, environmentName), environmentName }).run(op));
+            return await this.project(await this.observation({ rpc: factory(op.intent.request.chainId, environmentName), environmentName }).run(op));
         });
     }
     /** The owner's on-chain disable of a disclosed delegation whose outcome is still unproved (no journal write). */
@@ -151,8 +156,14 @@ export class MetaMaskGaslessService {
     async receipt(operationId) {
         return await this.locked(operationId, async (op) => await this.records.loadReceipt(op.profileHash, op.operationId));
     }
-    project(step) {
-        const result = liveMetaMaskGaslessOperation(step.operation);
+    /** A guard that found the login's project without the bound wallet also names both ways out, with this call's output only. */
+    async project(step) {
+        const live = liveMetaMaskGaslessOperation(step.operation), op = step.operation;
+        const reason = op.failure?.reason;
+        const result = op.state === "failed_before_effect" && mmProjectWalletReason(reason) ? { ...live, next_actions: [
+                ...await mmProjectWalletNextActions({ reason, profile: op.intent.profile, address: op.intent.binding.address,
+                    revision: op.intent.binding.revision, otherWallets: undefined }), ...live.next_actions
+            ] } : live;
         const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
                 reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
         return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved,

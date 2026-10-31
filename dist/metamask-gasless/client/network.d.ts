@@ -1,4 +1,4 @@
-import type { ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
+import type { ProjectWalletFacts, ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
 import { type SubmitCheck, type SubmitPost } from "./submit-diagnostic.js";
 import { type SentinelFailure } from "./sentinel.js";
 import type { MetaMaskGaslessIntent, MetaMaskGaslessQuote } from "../model.js";
@@ -29,6 +29,7 @@ export type ModeContext = {
     readonly input: MetaMaskGaslessQuoteInput;
     readonly owner: string;
     readonly authToken: string;
+    readonly projectId: string;
 } | {
     readonly mode: "submit" | "observe";
     readonly intent: MetaMaskGaslessIntent;
@@ -64,6 +65,8 @@ export declare class HelperNetworkPolicy {
      * vendor chunk-6XX5MONG.mjs `quoteGaslessTransfer`). Without both reads there is no proof and no fact.
      */
     usdcShortfall(): UsdcShortfallFacts | undefined;
+    /** The EVM wallet count of a validated 200 project-wallet list that does not name the bound wallet; never an address. */
+    projectWalletFacts(): ProjectWalletFacts | undefined;
     /** Transient fixed metadata, never response content or permission. */
     readFailureContext(error: unknown): ReadFailure;
     constructor(context: ModeContext, exchange?: FetchExchange);
@@ -91,7 +94,7 @@ interface ReadFailure extends Partial<SentinelFailure> {
 export declare class HttpsFetchExchange implements FetchExchange {
     request(request: FetchExchangeRequest): Promise<FetchExchangeResponse>;
 }
-export declare function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string): ModeContext;
+export declare function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string, projectId: string): ModeContext;
 export declare function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessIntent, projectId: string, token: string, now: () => Date): ModeContext;
 export declare function networkContextEmpty(mode: "inspect" | "buildUnsigned"): ModeContext;
 export {};

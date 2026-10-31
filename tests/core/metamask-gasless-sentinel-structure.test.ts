@@ -29,7 +29,7 @@ test("normal pinned quote classifies raw nonarray tokenFees without exposing con
     assert.deepEqual(result.diagnostic, { mode: "quote", stage: "fee_quote", invariant: "network_validation",
       network: "sentinel-quote", httpStatus: 200, exitCode: null, signal: "none", timedOut: false,
       validationPredicate: "sentinel_token_fees", tokenFeesKind: kind, ...absentFacts });
-    const error = withMetaMaskProviderRefusal(readFailureError(result.failure.reason, result.diagnostic!), result.diagnostic!, 8453);
+    const error = withMetaMaskProviderRefusal(readFailureError(result.failure.reason, result.diagnostic!), result.diagnostic!, 8453, home.binding);
     assert.equal(error.details?.mm_read_token_fees_kind, kind);
     assert.equal(error.details?.mm_read_sentinel_simulation, "absent");
     if (answered) {
@@ -41,7 +41,7 @@ test("normal pinned quote classifies raw nonarray tokenFees without exposing con
       assert.equal(error.details?.provider_missing_field, "result.transactions[-1].fees[0].tokenFees");
     } else assert.equal(error.message, "MetaMask gasless operation could not advance safely.");
     assert.equal(JSON.stringify(result).includes(SECRET), false);
-    assert.equal(exchange.requests.length, 5); assert.equal(exchange.beforeSends, 0);
+    assert.equal(exchange.requests.length, 6); assert.equal(exchange.beforeSends, 0);
   });
 });
 test("valid array preserves exact success envelope and normal quote request count", async t => {
@@ -49,7 +49,7 @@ test("valid array preserves exact success envelope and normal quote request coun
   const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
     { homeDirectory: home.home, now: () => NOW, exchange });
   assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: true, result: expectedQuote(8453) });
-  assert.equal(exchange.requests.length, 6); assert.equal(exchange.beforeSends, 0);
+  assert.equal(exchange.requests.length, 7); assert.equal(exchange.beforeSends, 0);
 });
 test("structural kind is optional, closed, consistent, and forbidden outside its trusted failure", () => {
   const old = readDiagnostic("quote", "fee_quote", "network_validation", "sentinel-quote", 200, null, "none", false, "sentinel_token_fees");

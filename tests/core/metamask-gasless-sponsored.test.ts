@@ -17,7 +17,7 @@ import { MM_SINGLE_MODE, MM_BATCH_MODE, mmExactBatchTerms, mmValidateUnsigned } 
 import { verifyMetaMaskReceiptAccounting } from "../../src/metamask-gasless/chain/receipt.js";
 import { addressWord, MM_INCREASED_COUNT_TOPIC, MM_TRANSFER_TOPIC } from "../../src/metamask-gasless/chain/abi.js";
 import { mmRegistry } from "../../src/metamask-gasless/registry.js";
-import { expectedQuote, intent, NOW, OWNER, RECIPIENT, quoteInput, SdkExchange, syntheticHome } from
+import { expectedQuote, intent, NOW, OWNER, PROJECT, RECIPIENT, quoteInput, SdkExchange, syntheticHome } from
   "./metamask-gasless-client-fixtures/sdk.js";
 
 class SponsoredExchange extends SdkExchange {
@@ -42,8 +42,8 @@ for (const chain of [143, 1329] as const) test(`original SDK capture supports ex
   const quote = response.result as MetaMaskGaslessQuote;
   assert.equal(quote.feeMode, "sponsored"); assert.equal(quote.feeAtomic, "0"); assert.equal(quote.feeRecipient, null);
   assert.equal(quote.executions.length, 1); assert.equal(quote.netAtomic, "1000");
-  assert.equal(exchange.requests.length, 5);
-  assert.equal(exchange.requests.filter(r => r.method === "GET").length, 3);
+  assert.equal(exchange.requests.length, 6);
+  assert.equal(exchange.requests.filter(r => r.method === "GET").length, 4);
   assert.equal(exchange.requests.filter(r => r.url.includes("rpc.example.test")).length, 1);
   assert.equal(exchange.requests.some(r => r.url.includes("transaction-requests")), false);
   const request = { chainId: chain, recipient: RECIPIENT, grossAtomic: "1000", maxFeeAtomic: "0", minReceivedAtomic: "1000" };
@@ -106,7 +106,7 @@ test("paid quote bytes and two-execution contract remain unchanged", async (t) =
   const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 1) },
     { homeDirectory: home.home, now: () => NOW, exchange });
   assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: true, result: expectedQuote(1) });
-  assert.equal(exchange.requests.length, 6);
+  assert.equal(exchange.requests.length, 7);
   assert.equal(expectedQuote(1).hash, "b7f812a0af7d56821e7667d4bf7472f8e85563a7520370835894cd1d30c8aefc");
   assert.deepEqual(Object.keys(mmProtocolPins(mmRegistry(1).row)), ["manager", "delegate", "limitedCalls", "exactBatch"]);
   const quote = expectedQuote(1), request = { chainId: 1 as const, recipient: RECIPIENT, grossAtomic: "1000050",
@@ -119,7 +119,7 @@ test("paid quote bytes and two-execution contract remain unchanged", async (t) =
 
 test("caller-provided errors cannot mint a sponsored capture", async (t) => {
   const home = await syntheticHome(); t.after(home.cleanup);
-  const policy = new HelperNetworkPolicy(networkContextQuote(quoteInput(home.binding, 143), OWNER, home.token), new SponsoredExchange(143));
+  const policy = new HelperNetworkPolicy(networkContextQuote(quoteInput(home.binding, 143), OWNER, home.token, PROJECT), new SponsoredExchange(143));
   assert.equal(policy.takeSponsoredQuote(new Error("Insufficient balance to cover the transfer and gasless relay fee.")), undefined);
   assert.equal(policy.takeSponsoredQuote({ validationPredicate: "sentinel_token_fees", tokenFeesShape: "missing" }), undefined);
   assert.equal(policy.takeSponsoredQuote(null), undefined);
@@ -184,7 +184,7 @@ test("capture is bound to its exact policy, original error, request purpose and 
     { homeDirectory: home.home, now: () => NOW, exchange: original });
   async function capture(netAtomic = "1000") {
     const exchange = new SponsoredExchange(143);
-    const gate = new HelperNetworkPolicy(networkContextQuote({ ...input, netAtomic }, OWNER, home.token), exchange);
+    const gate = new HelperNetworkPolicy(networkContextQuote({ ...input, netAtomic }, OWNER, home.token, PROJECT), exchange);
     let error: unknown;
     for (const request of original.requests) {
       try { await gate.fetch(request.url, { method: request.method, headers: request.headers, body: request.body }); }

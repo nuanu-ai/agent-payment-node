@@ -3,9 +3,9 @@ import { ApnError } from "../../errors.js";
 import { mmError, mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
 
 export type ReadMode = "inspect" | "quote";
-export type ReadStage = "launch" | "private_state" | "sdk_load" | "hydrate" | "inspect" | "inventory" |
+export type ReadStage = "launch" | "private_state" | "project_wallets" | "sdk_load" | "hydrate" | "inspect" | "inventory" |
   "chain_override" | "relay_support" | "fee_quote" | "quote_output" | "helper_response";
-export type ReadNetwork = "none" | "mimir-networks" | "accounts-networks" | "sentinel-networks" |
+export type ReadNetwork = "none" | "project-wallets" | "mimir-networks" | "accounts-networks" | "sentinel-networks" |
   "rpc-decimals" | "rpc-balance" | "sentinel-quote";
 export const readValidationPredicates = ["response_json", "response_root", "sentinel_mode", "sentinel_keys", "sentinel_jsonrpc", "sentinel_id", "sentinel_result", "sentinel_transactions", "sentinel_transactions_length", "sentinel_last_transaction", "sentinel_fees", "sentinel_fees_length", "sentinel_low_tier", "sentinel_token_fees", "sentinel_token_fees_length", "sentinel_entry", "sentinel_token", "sentinel_token_address", "sentinel_token_match", "sentinel_entry_error", "sentinel_symbol", "sentinel_decimals", "sentinel_fee_quantity", "sentinel_fee_recipient"] as const;
 export type ReadValidationPredicate = typeof readValidationPredicates[number];
@@ -38,7 +38,9 @@ export interface NativeGasFacts {
 }
 /** APN's validated `balanceOf` read below the net amount plus MetaMask's quoted USDC relay fee (USDC atoms). */
 export interface UsdcShortfallFacts { readonly usdcCurrentAtomic: string; readonly usdcRequiredAtomic: string }
-export type ReadFacts = Partial<SentinelFeeFacts & RelaySupportFacts & NativeGasFacts & UsdcShortfallFacts>;
+/** The EVM server wallets a validated 200 project-wallet list names, none of them the bound one (1 to 128). */
+export interface ProjectWalletFacts { readonly projectWalletCount: number }
+export type ReadFacts = Partial<SentinelFeeFacts & RelaySupportFacts & NativeGasFacts & UsdcShortfallFacts & ProjectWalletFacts>;
 const FACT_VALUES: Readonly<Record<keyof (SentinelFeeFacts & RelaySupportFacts), readonly string[]>> = {
   sentinelSimulation: ["succeeded", "reverted", "absent", "other"], sentinelFeeError: ["present", "absent", "other"],
   sentinelSponsorship: ["sponsored", "not_sponsored", "absent", "other"],
@@ -48,6 +50,7 @@ const FEE_FACTS = ["sentinelSimulation", "sentinelFeeError", "sentinelSponsorshi
 const RELAY_FACTS = ["relayServerWalletNetwork", "relaySentinelFlag"] as const;
 const NATIVE_FACTS = ["nativeGasUnits", "nativeMaxFeePerGasWei", "nativeRequiredWei", "nativeCurrentWei"] as const;
 const USDC_FACTS = ["usdcCurrentAtomic", "usdcRequiredAtomic"] as const;
+const PROJECT_FACTS = ["projectWalletCount"] as const;
 const decimal = (value: unknown): bigint | undefined =>
   typeof value === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(value) ? BigInt(value) : undefined;
 /** Native facts carry a proven shortfall only: required = gas x max fee per gas, above the current balance. */
@@ -75,11 +78,11 @@ export interface MetaMaskReadDiagnostic extends ReadFacts {
   readonly timedOut: boolean;
 }
 const keys = ["mode", "stage", "invariant", "network", "httpStatus", "exitCode", "signal", "timedOut"] as const;
-const stages: readonly string[] = ["launch", "private_state", "sdk_load", "hydrate", "inspect", "inventory",
+const stages: readonly string[] = ["launch", "private_state", "project_wallets", "sdk_load", "hydrate", "inspect", "inventory",
   "chain_override", "relay_support", "fee_quote", "quote_output", "helper_response"];
 const invariants: readonly string[] = ["closed_failure", "unclassified_exception", "network_validation",
   "runner_launch", "runner_exit", "runner_timeout", "runner_output", "response_invalid"];
-const networks: readonly string[] = ["none", "mimir-networks", "accounts-networks", "sentinel-networks",
+const networks: readonly string[] = ["none", "project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks",
   "rpc-decimals", "rpc-balance", "sentinel-quote"];
 /** Reject getters and proxies before reading an untrusted diagnostic or failure envelope. */
 export function readDataRecord(value: unknown): Record<string, unknown> {
@@ -104,8 +107,10 @@ export function validateReadDiagnostic(value: unknown, mode: ReadMode): MetaMask
   const hasShape = Object.hasOwn(d, "tokenFeesKind");
   const feeFacts = FEE_FACTS.filter(key => Object.hasOwn(d, key)), relayFacts = RELAY_FACTS.filter(key => Object.hasOwn(d, key));
   const nativeFacts = NATIVE_FACTS.filter(key => Object.hasOwn(d, key)), usdcFacts = USDC_FACTS.filter(key => Object.hasOwn(d, key));
+  const projectFacts = PROJECT_FACTS.filter(key => Object.hasOwn(d, key));
   if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) + (hasShape ? 1 : 0) +
-    feeFacts.length + relayFacts.length + nativeFacts.length + usdcFacts.length || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
+    feeFacts.length + relayFacts.length + nativeFacts.length + usdcFacts.length + projectFacts.length ||
+    keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
     typeof d.stage !== "string" || !stages.includes(d.stage) || typeof d.invariant !== "string" || !invariants.includes(d.invariant) ||
     typeof d.network !== "string" || !networks.includes(d.network) ||
     !bounded(d.httpStatus, 100, 599) || !bounded(d.exitCode, 0, 255) ||
@@ -137,11 +142,14 @@ export function validateReadDiagnostic(value: unknown, mode: ReadMode): MetaMask
       d.sentinelFeeError !== "present" || (d.tokenFeesKind !== "missing" && d.tokenFeesKind !== "null") || !nativeShortfall(d)) ||
     usdcFacts.length !== 0 && (usdcFacts.length !== USDC_FACTS.length || mode !== "quote" || d.stage !== "fee_quote" ||
       d.invariant !== "closed_failure" || d.network !== "none" || hasShape || !usdcShortfall(d))) mmFail("mm_gasless_provider_unavailable");
+  // The wallet count rides only on APN's own closed refusal of a project list that does not name the bound wallet.
+  if (projectFacts.length !== 0 && (mode !== "quote" || d.stage !== "project_wallets" || d.invariant !== "closed_failure" ||
+    d.network !== "none" || !bounded(d.projectWalletCount, 1, 128) || d.projectWalletCount === null)) mmFail("mm_gasless_provider_unavailable");
   // Construct a new closed object; never retain caller-owned properties.
   return Object.freeze(Object.fromEntries([...keys.map(key => [key, d[key]]),
     ...(Object.hasOwn(d, "validationPredicate") ? [["validationPredicate", d.validationPredicate]] : []),
     ...(hasShape ? [["tokenFeesKind", d.tokenFeesKind]] : []),
-    ...[...feeFacts, ...relayFacts, ...nativeFacts, ...usdcFacts].map(key => [key, d[key]])])) as unknown as MetaMaskReadDiagnostic;
+    ...[...feeFacts, ...relayFacts, ...nativeFacts, ...usdcFacts, ...projectFacts].map(key => [key, d[key]])])) as unknown as MetaMaskReadDiagnostic;
 }
 export function readDiagnostic(mode: ReadMode, stage: ReadStage,
   invariant: MetaMaskReadDiagnostic["invariant"], network: ReadNetwork = "none", httpStatus: number | null = null,
@@ -156,7 +164,8 @@ const FACT_DETAILS: Readonly<Record<keyof ReadFacts, string>> = { sentinelSimula
   relayServerWalletNetwork: "mm_read_relay_server_wallet_network", relaySentinelFlag: "mm_read_relay_sentinel_flag",
   nativeGasUnits: "mm_read_native_gas_units", nativeMaxFeePerGasWei: "mm_read_native_max_fee_per_gas_wei",
   nativeRequiredWei: "mm_read_native_required_wei", nativeCurrentWei: "mm_read_native_current_wei",
-  usdcCurrentAtomic: "mm_read_usdc_current_atomic", usdcRequiredAtomic: "mm_read_usdc_required_atomic" };
+  usdcCurrentAtomic: "mm_read_usdc_current_atomic", usdcRequiredAtomic: "mm_read_usdc_required_atomic",
+  projectWalletCount: "mm_read_project_wallet_count" };
 export function readFailureError(reason: MetaMaskGaslessFailureReason, d: MetaMaskReadDiagnostic): ApnError {
   const plain = readDataRecord(d);
   if (plain.mode !== "inspect" && plain.mode !== "quote") mmFail("mm_gasless_provider_unavailable");
@@ -165,7 +174,7 @@ export function readFailureError(reason: MetaMaskGaslessFailureReason, d: MetaMa
     mm_read_mode: diagnostic.mode, mm_read_stage: diagnostic.stage, mm_read_invariant: diagnostic.invariant,
     ...(diagnostic.validationPredicate === undefined ? {} : { mm_read_validation_predicate: diagnostic.validationPredicate }),
     ...(diagnostic.tokenFeesKind === undefined ? {} : { mm_read_token_fees_kind: diagnostic.tokenFeesKind }),
-    ...Object.fromEntries([...FEE_FACTS, ...RELAY_FACTS, ...NATIVE_FACTS, ...USDC_FACTS].filter(key => diagnostic[key] !== undefined)
+    ...Object.fromEntries([...FEE_FACTS, ...RELAY_FACTS, ...NATIVE_FACTS, ...USDC_FACTS, ...PROJECT_FACTS].filter(key => diagnostic[key] !== undefined)
       .map(key => [FACT_DETAILS[key], diagnostic[key]!])),
     mm_read_network: diagnostic.network, mm_read_signal: diagnostic.signal, mm_read_timed_out: diagnostic.timedOut,
     ...(diagnostic.httpStatus === null ? {} : { mm_read_http_status: diagnostic.httpStatus }),

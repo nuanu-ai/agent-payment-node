@@ -11,6 +11,10 @@ export const MM_REASON_CODES = {
   mm_gasless_identity: "APN_PROFILE_DRIFT",
   mm_gasless_binding_changed: "APN_PROFILE_DRIFT",
   mm_gasless_session_unavailable: "APN_PROVIDER_SESSION_REQUIRED",
+  /** The MetaMask login's project has no server wallet (its wallet list answered 404 or listed no EVM wallet). */
+  mm_gasless_project_has_no_wallets: "APN_PROVIDER_SESSION_REQUIRED",
+  /** The MetaMask login's project lists EVM server wallets, but not the profile's bound one. */
+  mm_gasless_wallet_not_in_project: "APN_PROVIDER_SESSION_REQUIRED",
   mm_gasless_quote_invalid: "APN_PROVIDER_PROTOCOL",
   mm_gasless_quote_unstable: "APN_PROVIDER_PROTOCOL",
   mm_gasless_fee_cap: "APN_FEE_BUDGET_EXCEEDED",

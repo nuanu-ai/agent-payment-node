@@ -24,7 +24,7 @@ test("SDK quote accepts both published Accounts partial-support shapes and rich 
       const response = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote", input: quoteInput(home.binding, 8453) },
         { homeDirectory: home.home, now: () => NOW, exchange });
       assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: true, result: expectedQuote(8453) });
-      assert.equal(exchange.requests.length, 6);
+      assert.equal(exchange.requests.length, 7);
       assert.equal(exchange.requests.filter((request) => request.url.includes("tx-sentinel-") && request.method === "POST").length, 1);
       assert.equal(exchange.requests.some((request) => request.url.includes("transaction-requests")), false);
       assert.equal(exchange.beforeSends, 0);
@@ -64,7 +64,7 @@ test("SDK malformed network inventories cannot reach quote RPC or a transaction 
       failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" },
       diagnostic: { mode: "quote", stage: "inventory", invariant: "closed_failure", network: "none",
         httpStatus: null, exitCode: null, signal: "none", timedOut: false } });
-    assert.equal(exchange.requests.length, 3);
+    assert.equal(exchange.requests.length, 4);
     assert.equal(exchange.requests.some((request) => request.method === "POST"), false);
     assert.equal(exchange.beforeSends, 0);
   });
@@ -95,7 +95,7 @@ test("SDK disabled relay capability is refused naming the provider list that lac
     failure: { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "mm_gasless_relay_unsupported" },
     diagnostic: { mode: "quote", stage: "relay_support", invariant: "closed_failure", network: "none",
       httpStatus: null, exitCode: null, signal: "none", timedOut: false, relayServerWalletNetwork, relaySentinelFlag } });
-  assert.equal(exchange.requests.length, 3);
+  assert.equal(exchange.requests.length, 4);
   assert.equal(exchange.requests.some((request) => request.method === "POST"), false);
   });
 });

@@ -4,6 +4,7 @@ import { nativeDeadlineRemaining, validateMetaMaskNativeDiagnostic } from "./met
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, takeMetaMaskNativeProcessFailureDiagnostic } from "./metamask-process-runner.js";
+import { metaMaskCommand } from "./metamask-command.js";
 import { resolveMetaMaskBin } from "./metamask-package.js";
 import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice } from "./metamask-process-output.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
@@ -43,7 +44,6 @@ function refuse(reason, facts = {}, who = {}, diagnostic) {
         throw new NativeReadRefusal(diagnostic, "APN_OPERATION_BLOCKED", REFUSALS[reason].message, details);
     throw new ApnError("APN_OPERATION_BLOCKED", REFUSALS[reason].message, details);
 }
-const quoted = (value) => /^[A-Za-z0-9_./@:+=-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
 /**
  * The refusal with each `mm …` step written as the pinned client run by APN's own Node: Homebrew links only `apn`, so a
  * bare `mm` is not on the owner's PATH (the policy refusals of metamask-native-policy.ts included).
@@ -52,14 +52,13 @@ async function runnable(error) {
     const actions = error instanceof ApnError ? error.details?.nextActions : undefined;
     if (!(error instanceof ApnError) || !Array.isArray(actions) || !actions.some(action => action.startsWith("mm ")))
         return error;
-    let script;
+    let prefix;
     try {
-        script = await resolveMetaMaskBin();
+        prefix = `${await metaMaskCommand()} `;
     }
     catch {
         return error;
     }
-    const prefix = `${quoted(process.execPath)} ${quoted(script)} `;
     const details = { ...error.details, nextActions: actions.map(action => action.startsWith("mm ") ? prefix + action.slice(3) : action) };
     return error instanceof NativeReadRefusal ? new NativeReadRefusal(error.nativeDiagnostic, error.code, error.message, details)
         : new ApnError(error.code, error.message, details);

@@ -6,7 +6,7 @@ import { executeHelperRequest, MetaMaskGaslessProviderClient, MM_HELPER_VERSION,
   SubprocessMetaMaskGaslessHelperRunner, type MetaMaskGaslessHelperRunner } from "../../src/metamask-gasless/client/index.js";
 import type { MetaMaskGaslessProfileIdentity, MetaMaskGaslessUnsignedResult } from "../../src/metamask-gasless/model.js";
 import { MM_CHAINS } from "../../src/metamask-gasless/registry.js";
-import { expectedQuote, intent, NOW, OWNER, PROJECT, quoteInput, SECRET, SdkExchange, syntheticHome } from
+import { expectedQuote, intent, NOW, OWNER, PROJECT, PROJECT_WALLETS_URL, quoteInput, SECRET, SdkExchange, syntheticHome } from
   "./metamask-gasless-client-fixtures/sdk.js";
 
 const inspectPrivateDiagnostic = { mode: "inspect", stage: "private_state", invariant: "closed_failure",
@@ -196,9 +196,10 @@ test("client quote runs actual public factory and exact finite network budget on
       { homeDirectory: home.home, now: () => NOW, exchange });
     assert.equal(result.ok, true, `chain ${chainId}: ${JSON.stringify(result)}`);
     if (result.ok) assert.deepEqual(result.result, expectedQuote(chainId));
-    assert.equal(exchange.requests.length, 6);
+    assert.equal(exchange.requests.length, 7);
+    assert.deepEqual([exchange.requests[0]!.method, exchange.requests[0]!.url, exchange.requests[0]!.body], ["GET", PROJECT_WALLETS_URL, null]);
     assert.equal(exchange.requests.filter((request) => request.url === input.rpcUrl).length, 2);
-    assert.equal(exchange.requests.filter((request) => request.headers.authorization === `Bearer ${home.token}`).length, 2);
+    assert.equal(exchange.requests.filter((request) => request.headers.authorization === `Bearer ${home.token}`).length, 3);
     assert.ok(exchange.requests.filter((request) => request.url === input.rpcUrl).every((request) => request.headers.authorization === undefined));
     assert.equal(await readFile(join(home.directory, "session.json"), "utf8"), home.sessionBytes);
     assert.equal(await readFile(join(home.directory, "wallets.json"), "utf8"), home.walletBytes);
@@ -278,7 +279,7 @@ test("client preserves fixed auth failures without retry and maps one 404 observ
     { homeDirectory: home.home, now: () => NOW, exchange: quoteAuth });
   assert.deepEqual(deniedQuote, { version: MM_HELPER_VERSION, ok: false,
     failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" }, diagnostic: quoteAuthDiagnostic });
-  assert.ok(quoteAuth.requests.length <= 3); assert.equal(quoteAuth.requests.some((request) => request.url.includes("rpc.example.test")), false);
+  assert.ok(quoteAuth.requests.length <= 4); assert.equal(quoteAuth.requests.some((request) => request.url.includes("rpc.example.test")), false);
 
   const built = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "buildUnsigned",
     input: { owner: OWNER, chainId, executions: quote.executions } }, { now: () => NOW });
