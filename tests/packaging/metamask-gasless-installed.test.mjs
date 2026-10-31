@@ -232,6 +232,21 @@ test("installed prepare rejects private identity and transport failures without 
   });
 });
 
+test("installed prepare refuses a login whose project does not hold the wallet before any other provider read", { timeout: 60000 }, async () => {
+  const other = "0x4444444444444444444444444444444444444444", s = await scenario(installed);
+  s.update({ projectWallets: [{ address: other, namespace: "evm" }] });
+  const result = await s.cli(s.prepareArgv("mm-not-in-project"));
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.error.code, "APN_PROVIDER_SESSION_REQUIRED");
+  assert.equal(result.error.details.reason, "mm_gasless_wallet_not_in_project");
+  assert.equal(result.error.details.mm_read_project_wallet_count, 1);
+  assert.equal(result.next_actions.length, 2); assert.match(result.next_actions[1], / --expected-revision 1\. /u);
+  assert.equal(JSON.stringify(result).includes(other), false, "no other address is printed");
+  assert.deepEqual((await s.trace()).filter(entry => entry.kind === "https").map(entry => entry.method), ["GET"],
+    "only the project wallet list was read");
+  assert.equal(s.fixture().postCount, 0); await assertSafeTrace(s, 0);
+});
+
 test("installed archive preserves real encrypted storage and classified Keychain boundaries", { timeout: 90000 }, async () => {
   const evidence = await runInstalledStorageProof({ packageRoot: installed.packageRoot, workRoot: installed.root });
   await writeFile(join(installed.root, "storage-installed-proof.json"), JSON.stringify(evidence, null, 2) + "\n");

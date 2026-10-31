@@ -75,6 +75,11 @@ export async function respond(path, url, method, headers, body) {
       token: { address: row.token, symbol: "USDC", decimals: 6 }, balanceNeededToken: rawFee, feeRecipient: f.feeRecipient,
     }] }] }] } });
   }
+  // Since 0.5.83 every quote first reads the session project's wallet list; by default it holds the bound owner.
+  if (url === `${MIMIR}/v1/projects/${f.project}/wallets`) {
+    assert.equal(method, "GET"); assert.equal(body, null);
+    return json({ wallets: f.projectWallets ?? [{ address: f.owner, name: "fixture-wallet", namespace: "evm" }] });
+  }
   const collection = `${MIMIR}/v1/projects/${f.project}/transaction-requests`;
   if (url === collection && method === "POST") {
     assert.equal(f.postCount, 0, "a second provider POST is never allowed");

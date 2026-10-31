@@ -37,6 +37,12 @@ test("MetaMask utils UUID override and production lock closure are exact", async
   const lock = JSON.parse(lockBytes.toString("utf8"));
 
   assert.deepEqual(manifest.overrides, {
+    "@oclif/core": {
+        "minimatch": "11.0.1"
+    },
+    "@metamask/fox-sdk": {
+        "zod": "4.6.7"
+    },
     "@solana/web3.js": {
         "jayson": "5.0.0"
     },
