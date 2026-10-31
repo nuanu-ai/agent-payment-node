@@ -95,8 +95,9 @@ for (const directory of ["metamask-evm-sdk", "metamask-smart-account", "relay-or
   assert.equal(Object.values(provenance.emittedPackages).some(row => ["elliptic", "@toruslabs/ffjavascript", "rpc-websockets"].includes(row.name)), false);
   assert.ok(Object.keys(provenance.packages).length >= contributed.size);
   // GHSA-q3jh-wrc6-jgq8 and GHSA-8r9p-f939-6h3c: follow-redirects 1.16.0 can keep credential headers on a cross-origin redirect; 1.16.1 fixes both.
+  // GHSA-mrwp-f3q8-3g9p: 1.16.0-1.16.1 discard cross-realm sensitiveHeaders arrays and let custom credentials follow redirects; 1.16.2 fixes it.
   for (const row of Object.values(provenance.emittedPackages).filter(row => row.name === "follow-redirects")) {
     const [major, minor, patch] = row.version.split(".").map(Number);
-    assert.ok(major > 1 || major === 1 && (minor > 16 || minor === 16 && patch >= 1), `emitted follow-redirects ${row.version}`);
+    assert.ok(major > 1 || major === 1 && (minor > 16 || minor === 16 && patch >= 2), `emitted follow-redirects ${row.version}`);
   }
 });
