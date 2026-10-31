@@ -1,8 +1,9 @@
-import type { ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
+import type { ProjectWalletFacts, ReadNetwork, RelaySupportFacts, UsdcShortfallFacts } from "./read-diagnostic.js";
 import { submitErrorCode, type SubmitCheck, type SubmitPost } from "./submit-diagnostic.js";
 import { captureSponsoredQuote, parseSentinelResponse, sentinelFailure, sentinelQuotedFee, validateSentinelResponse,
   type SentinelFailure } from "./sentinel.js";
-import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT } from "./provider-endpoints.js";
+import { MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT, mmProjectWalletsUrl } from "./provider-endpoints.js";
+import { readProjectWallets, type ProjectWallets } from "./project-wallets.js";
 import { request as httpsRequest } from "node:https";
 import { canonicalJson, exactKeys, isPlainRecord } from "../../canonical.js";
 import { parsePublicHttpsUrl, resolvePublicAddresses, sameIpAddress, type PinnedAddress } from "../../network-policy.js";
@@ -35,7 +36,8 @@ export interface FetchExchangeResponse { readonly status: number; readonly heade
 export interface FetchExchange { request(request: FetchExchangeRequest): Promise<FetchExchangeResponse> }
 export type ModeContext =
   | { readonly mode: "inspect" | "buildUnsigned" }
-  | { readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput; readonly owner: string; readonly authToken: string }
+  | { readonly mode: "quote"; readonly input: MetaMaskGaslessQuoteInput; readonly owner: string; readonly authToken: string;
+      readonly projectId: string }
   | { readonly mode: "submit" | "observe"; readonly intent: MetaMaskGaslessIntent; readonly projectId: string;
       readonly token: string; readonly now: () => Date };
 
@@ -54,6 +56,7 @@ export class HelperNetworkPolicy {
   #relayFlag: RelaySupportFacts["relaySentinelFlag"] | undefined;
   #usdcBalance: bigint | undefined;
   #quotedFee: bigint | undefined;
+  #projectWallets: ProjectWallets | undefined;
   readonly #readFailures = new WeakMap<object, ReadFailure>();
   #submitPost: SubmitPost = "not_reached";
   #submitStatus: number | null = null;
@@ -80,6 +83,10 @@ export class HelperNetworkPolicy {
     const required = BigInt(this.context.input.netAtomic) + fee;
     return this.#usdcBalance < required ? { usdcCurrentAtomic: this.#usdcBalance.toString(), usdcRequiredAtomic: required.toString() } : undefined;
   }
+  /** The EVM wallet count of a validated 200 project-wallet list that does not name the bound wallet; never an address. */
+  projectWalletFacts(): ProjectWalletFacts | undefined {
+    return this.#projectWallets === undefined || this.#projectWallets.listed ? undefined : { projectWalletCount: this.#projectWallets.evmCount };
+  }
   /** Transient fixed metadata, never response content or permission. */
   readFailureContext(error: unknown): ReadFailure {
     return error !== null && typeof error === "object" ? this.#readFailures.get(error) ?? { network: "none", httpStatus: null, validationFailed: false }
@@ -92,8 +99,8 @@ export class HelperNetworkPolicy {
   takeSponsoredQuote(error: unknown): MetaMaskGaslessQuote | undefined {
     const failure = error !== null && typeof error === "object" ? this.#readFailures.get(error) : undefined;
     if (failure?.validationPredicate !== "sentinel_token_fees" || failure.tokenFeesShape !== "missing" ||
-      this.context.mode !== "quote" || this.#sponsoredAccepted || this.#sponsoredProof === undefined || this.counts.size !== 5 ||
-      ["mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals"].some(key => this.counts.get(key) !== 1 || !this.successes.has(key)) ||
+      this.context.mode !== "quote" || this.#sponsoredAccepted || this.#sponsoredProof === undefined || this.counts.size !== 6 ||
+      ["project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals"].some(key => this.counts.get(key) !== 1 || !this.successes.has(key)) ||
       this.counts.get("sentinel-quote") !== 1) return undefined;
     const quote = this.#sponsoredProof; this.#sponsoredProof = undefined; this.#sponsoredAccepted = true;
     return quote;
@@ -115,10 +122,11 @@ export class HelperNetworkPolicy {
       this.counts.get(key) !== 1 || !this.successes.has(key))) mmFail("mm_gasless_provider_unavailable");
   }
   assertComplete(): void {
-    const expected = this.context.mode === "quote" ? ["mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals",
-      ...(this.#sponsoredAccepted ? [] : ["rpc-balance"]), "sentinel-quote"] :
+    const expected = this.context.mode === "quote" ? ["project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks",
+      "rpc-decimals", ...(this.#sponsoredAccepted ? [] : ["rpc-balance"]), "sentinel-quote"] :
       this.context.mode === "submit" ? ["submit"] : this.context.mode === "observe" ? ["observe"] : [];
-    if (this.counts.size !== expected.length || expected.some((key) => this.counts.get(key) !== 1)) {
+    const walletListed = this.context.mode !== "quote" || this.#projectWallets?.listed === true;
+    if (this.counts.size !== expected.length || expected.some((key) => this.counts.get(key) !== 1) || !walletListed) {
       this.submitRefused("incomplete");
       mmFail(this.context.mode === "submit" ? "mm_gasless_submit_unknown" : "mm_gasless_provider_unavailable");
     }
@@ -134,8 +142,8 @@ export class HelperNetworkPolicy {
     const headers = requestHeaders(input, init);
     const key = this.classify(url, method, headers, body);
     if (this.context.mode === "quote") {
-      readNetwork = ["mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals", "rpc-balance", "sentinel-quote"].includes(key)
-        ? key as ReadNetwork : "none";
+      readNetwork = ["project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks", "rpc-decimals", "rpc-balance",
+        "sentinel-quote"].includes(key) ? key as ReadNetwork : "none";
       readStatus = null;
     }
     if ((this.counts.get(key) ?? 0) !== 0) {
@@ -160,12 +168,15 @@ export class HelperNetworkPolicy {
     if (this.context.mode === "quote") readStatus = Number.isSafeInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : null;
     if (typeof response.body !== "string" || Buffer.byteLength(response.body) > MAX_RESPONSE) mmFail("mm_gasless_provider_unavailable");
     if (response.status === 401 || response.status === 403) { this.sessionFailure = true; this.submitRefused("session"); mmFail("mm_gasless_session_unavailable"); }
+    // The project's wallet list answers 200, or 404 for a project with none; any other status is refused with it recorded.
+    if (key === "project-wallets" && response.status !== 200 && response.status !== 404) mmFail("mm_gasless_provider_unavailable");
     if (this.context.mode === "observe" && response.status === 404) this.notFound = true;
     if (response.status >= 200 && response.status < 300) {
       try {
         if (key === "sentinel-quote" && response.status === 200 && this.context.mode === "quote" && body !== null)
           this.#sponsoredProof = captureSponsoredQuote(response.body, body, this.context);
-        validateResponse(key, response.body, body, this.context);
+        if (key === "project-wallets" && this.context.mode === "quote") this.#projectWallets = readProjectWallets(response.body, this.context.owner);
+        else validateResponse(key, response.body, body, this.context);
         if (this.context.mode === "quote") { this.recordRelayFacts(key, response.body, this.context.input.chainId); this.recordUsdcFacts(key, response.body); }
       }
       catch (error) { validationFailed = true; this.submitRefused("response_body"); throw error; }
@@ -232,6 +243,9 @@ function classifyQuote(context: Extract<ModeContext, { mode: "quote" }>, rawUrl:
     requireNoBearer(headers); return validateRpcBody(body, context);
   }
   const url = exactProviderUrl(rawUrl);
+  if (rawUrl === mmProjectWalletsUrl(context.projectId) && method === "GET" && body === null) {
+    requireBearer(headers, context.authToken); return "project-wallets";
+  }
   if (url.href === MIMIR_NETWORKS && method === "GET" && body === null) { requireNoBearer(headers); return "mimir-networks"; }
   if (url.href === ACCOUNTS_NETWORKS && method === "GET" && body === null) { requireNoBearer(headers); return "accounts-networks"; }
   if (url.href === SENTINEL_NETWORKS && method === "GET" && body === null) { requireBearer(headers, context.authToken); return "sentinel-networks"; }
@@ -415,8 +429,8 @@ function sendHttps(url: URL, input: FetchExchangeRequest, addresses: readonly Pi
   });
 }
 
-export function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string): ModeContext {
-  return { mode: "quote", input: structuredClone(input), owner, authToken };
+export function networkContextQuote(input: MetaMaskGaslessQuoteInput, owner: string, authToken: string, projectId: string): ModeContext {
+  return { mode: "quote", input: structuredClone(input), owner, authToken, projectId };
 }
 export function networkContextRequest(mode: "submit" | "observe", intent: MetaMaskGaslessIntent, projectId: string,
   token: string, now: () => Date): ModeContext { return { mode, intent, projectId, token, now }; }

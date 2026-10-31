@@ -11,6 +11,7 @@ const FEE_FACTS = ["sentinelSimulation", "sentinelFeeError", "sentinelSponsorshi
 const RELAY_FACTS = ["relayServerWalletNetwork", "relaySentinelFlag"];
 const NATIVE_FACTS = ["nativeGasUnits", "nativeMaxFeePerGasWei", "nativeRequiredWei", "nativeCurrentWei"];
 const USDC_FACTS = ["usdcCurrentAtomic", "usdcRequiredAtomic"];
+const PROJECT_FACTS = ["projectWalletCount"];
 const decimal = (value) => typeof value === "string" && /^(?:0|[1-9][0-9]{0,77})$/u.test(value) ? BigInt(value) : undefined;
 /** Native facts carry a proven shortfall only: required = gas x max fee per gas, above the current balance. */
 function nativeShortfall(d) {
@@ -23,11 +24,11 @@ function usdcShortfall(d) {
     return current !== undefined && required !== undefined && current < required;
 }
 const keys = ["mode", "stage", "invariant", "network", "httpStatus", "exitCode", "signal", "timedOut"];
-const stages = ["launch", "private_state", "sdk_load", "hydrate", "inspect", "inventory",
+const stages = ["launch", "private_state", "project_wallets", "sdk_load", "hydrate", "inspect", "inventory",
     "chain_override", "relay_support", "fee_quote", "quote_output", "helper_response"];
 const invariants = ["closed_failure", "unclassified_exception", "network_validation",
     "runner_launch", "runner_exit", "runner_timeout", "runner_output", "response_invalid"];
-const networks = ["none", "mimir-networks", "accounts-networks", "sentinel-networks",
+const networks = ["none", "project-wallets", "mimir-networks", "accounts-networks", "sentinel-networks",
     "rpc-decimals", "rpc-balance", "sentinel-quote"];
 /** Reject getters and proxies before reading an untrusted diagnostic or failure envelope. */
 export function readDataRecord(value) {
@@ -59,8 +60,10 @@ export function validateReadDiagnostic(value, mode) {
     const hasShape = Object.hasOwn(d, "tokenFeesKind");
     const feeFacts = FEE_FACTS.filter(key => Object.hasOwn(d, key)), relayFacts = RELAY_FACTS.filter(key => Object.hasOwn(d, key));
     const nativeFacts = NATIVE_FACTS.filter(key => Object.hasOwn(d, key)), usdcFacts = USDC_FACTS.filter(key => Object.hasOwn(d, key));
+    const projectFacts = PROJECT_FACTS.filter(key => Object.hasOwn(d, key));
     if (Object.keys(d).length !== keys.length + (Object.hasOwn(d, "validationPredicate") ? 1 : 0) + (hasShape ? 1 : 0) +
-        feeFacts.length + relayFacts.length + nativeFacts.length + usdcFacts.length || keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
+        feeFacts.length + relayFacts.length + nativeFacts.length + usdcFacts.length + projectFacts.length ||
+        keys.some(key => !Object.hasOwn(d, key)) || d.mode !== mode ||
         typeof d.stage !== "string" || !stages.includes(d.stage) || typeof d.invariant !== "string" || !invariants.includes(d.invariant) ||
         typeof d.network !== "string" || !networks.includes(d.network) ||
         !bounded(d.httpStatus, 100, 599) || !bounded(d.exitCode, 0, 255) ||
@@ -96,11 +99,15 @@ export function validateReadDiagnostic(value, mode) {
         usdcFacts.length !== 0 && (usdcFacts.length !== USDC_FACTS.length || mode !== "quote" || d.stage !== "fee_quote" ||
             d.invariant !== "closed_failure" || d.network !== "none" || hasShape || !usdcShortfall(d)))
         mmFail("mm_gasless_provider_unavailable");
+    // The wallet count rides only on APN's own closed refusal of a project list that does not name the bound wallet.
+    if (projectFacts.length !== 0 && (mode !== "quote" || d.stage !== "project_wallets" || d.invariant !== "closed_failure" ||
+        d.network !== "none" || !bounded(d.projectWalletCount, 1, 128) || d.projectWalletCount === null))
+        mmFail("mm_gasless_provider_unavailable");
     // Construct a new closed object; never retain caller-owned properties.
     return Object.freeze(Object.fromEntries([...keys.map(key => [key, d[key]]),
         ...(Object.hasOwn(d, "validationPredicate") ? [["validationPredicate", d.validationPredicate]] : []),
         ...(hasShape ? [["tokenFeesKind", d.tokenFeesKind]] : []),
-        ...[...feeFacts, ...relayFacts, ...nativeFacts, ...usdcFacts].map(key => [key, d[key]])]));
+        ...[...feeFacts, ...relayFacts, ...nativeFacts, ...usdcFacts, ...projectFacts].map(key => [key, d[key]])]));
 }
 export function readDiagnostic(mode, stage, invariant, network = "none", httpStatus = null, exitCode = null, signal = "none", timedOut = false, validationPredicate, shape, facts = {}) {
     return validateReadDiagnostic({ mode, stage, invariant, network, httpStatus, exitCode, signal, timedOut,
@@ -112,7 +119,8 @@ const FACT_DETAILS = { sentinelSimulation: "mm_read_sentinel_simulation",
     relayServerWalletNetwork: "mm_read_relay_server_wallet_network", relaySentinelFlag: "mm_read_relay_sentinel_flag",
     nativeGasUnits: "mm_read_native_gas_units", nativeMaxFeePerGasWei: "mm_read_native_max_fee_per_gas_wei",
     nativeRequiredWei: "mm_read_native_required_wei", nativeCurrentWei: "mm_read_native_current_wei",
-    usdcCurrentAtomic: "mm_read_usdc_current_atomic", usdcRequiredAtomic: "mm_read_usdc_required_atomic" };
+    usdcCurrentAtomic: "mm_read_usdc_current_atomic", usdcRequiredAtomic: "mm_read_usdc_required_atomic",
+    projectWalletCount: "mm_read_project_wallet_count" };
 export function readFailureError(reason, d) {
     const plain = readDataRecord(d);
     if (plain.mode !== "inspect" && plain.mode !== "quote")
@@ -122,7 +130,7 @@ export function readFailureError(reason, d) {
         mm_read_mode: diagnostic.mode, mm_read_stage: diagnostic.stage, mm_read_invariant: diagnostic.invariant,
         ...(diagnostic.validationPredicate === undefined ? {} : { mm_read_validation_predicate: diagnostic.validationPredicate }),
         ...(diagnostic.tokenFeesKind === undefined ? {} : { mm_read_token_fees_kind: diagnostic.tokenFeesKind }),
-        ...Object.fromEntries([...FEE_FACTS, ...RELAY_FACTS, ...NATIVE_FACTS, ...USDC_FACTS].filter(key => diagnostic[key] !== undefined)
+        ...Object.fromEntries([...FEE_FACTS, ...RELAY_FACTS, ...NATIVE_FACTS, ...USDC_FACTS, ...PROJECT_FACTS].filter(key => diagnostic[key] !== undefined)
             .map(key => [FACT_DETAILS[key], diagnostic[key]])),
         mm_read_network: diagnostic.network, mm_read_signal: diagnostic.signal, mm_read_timed_out: diagnostic.timedOut,
         ...(diagnostic.httpStatus === null ? {} : { mm_read_http_status: diagnostic.httpStatus }),

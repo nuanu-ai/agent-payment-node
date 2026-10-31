@@ -16,6 +16,7 @@ import { mmAddress, mmHex, mmUint } from "../validation.js";
 import { HelperNetworkPolicy, networkContextEmpty, networkContextQuote, networkContextRequest,
   type FetchExchange } from "./network.js";
 import { readPrivateState, type PrivateState } from "./private-state.js";
+import { assertProjectWallet } from "./project-wallets.js";
 import { helperRequest, MM_HELPER_VERSION, type HelperRequest, type HelperResponse, type HelperResult } from "./protocol.js";
 import { hydrateSdkState } from "./session.js";
 
@@ -52,7 +53,8 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       const expected = request.mode === "quote" ? request.input.binding : request.intent.binding;
       const firstObservedAt = now();
       const state = await readPrivateState(home, expected, firstObservedAt);
-      policy = request.mode === "quote" ? new HelperNetworkPolicy(networkContextQuote(request.input, state.address, state.token), options.exchange) :
+      policy = request.mode === "quote" ? new HelperNetworkPolicy(networkContextQuote(request.input, state.address, state.token, state.projectId),
+        options.exchange) :
         new HelperNetworkPolicy(networkContextRequest(request.mode, request.intent, state.projectId, state.token, now), options.exchange);
       if (request.mode === "submit") policy.primeSubmitClock(firstObservedAt);
       globalThis.fetch = policy.fetch;
@@ -77,9 +79,11 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       const closed = invariant === "closed_failure" && context?.network === "none";
       const relay = failure.reason === "mm_gasless_relay_unsupported" && phase.stage === "relay_support" && closed ? policy?.relaySupportFacts() : undefined;
       const usdc = failure.reason === "mm_gasless_balance" && phase.stage === "fee_quote" && closed ? policy?.usdcShortfall() : undefined;
+      const wallets = failure.reason === "mm_gasless_wallet_not_in_project" && phase.stage === "project_wallets" && closed
+        ? policy?.projectWalletFacts() : undefined;
       return { version: MM_HELPER_VERSION, ok: false, failure, diagnostic: readDiagnostic(request.mode, phase.stage,
         invariant, context?.network, context?.httpStatus, null, "none", false, context?.validationPredicate, context?.tokenFeesShape,
-        { ...context?.feeFacts, ...relay, ...usdc }) };
+        { ...context?.feeFacts, ...relay, ...usdc, ...wallets }) };
     }
     if (request.mode === "submit") {
       const facts = policy?.submitFacts();
@@ -116,6 +120,8 @@ async function inspect(home: string, expected: Extract<HelperRequest, { mode: "i
 
 async function quote(input: Extract<HelperRequest, { mode: "quote" }>["input"], state: PrivateState,
   policy: HelperNetworkPolicy, phase: { stage: ReadStage }): Promise<MetaMaskGaslessQuote> {
+  phase.stage = "project_wallets";
+  await assertProjectWallet(policy.fetch, state);
   phase.stage = "sdk_load";
   const sdk = await agentSdk();
   sdk.disableAnalytics();

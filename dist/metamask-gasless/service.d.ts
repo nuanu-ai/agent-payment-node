@@ -39,8 +39,9 @@ export declare class MetaMaskGaslessService {
     prepare(input: Parameters<MetaMaskGaslessPreparation["prepare"]>[0]): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     /**
      * A lost provider session is normally renewed with the foreground wallet connect handoff, but wallet lifecycle
-     * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile instead
-     * of at a command that would only be refused.
+     * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile first,
+     * instead of at a command that would only be refused; any steps of the refusal's own follow, since they end in a
+     * wallet connect that waits for it.
      */
     private sessionGuidance;
     approve(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
@@ -49,6 +50,7 @@ export declare class MetaMaskGaslessService {
     revoke(operationId: string): Promise<Readonly<Record<string, unknown>>>;
     status(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     receipt(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessReceipt>;
+    /** A guard that found the login's project without the bound wallet also names both ways out, with this call's output only. */
     private project;
     private dependencies;
     private execution;

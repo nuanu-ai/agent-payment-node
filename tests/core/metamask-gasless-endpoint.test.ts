@@ -21,7 +21,7 @@ function policy(rpcUrl = ROOT) {
     accountBindingHash: "1".repeat(64), capabilityHash: "2".repeat(64), revision: 1, projectHash: "3".repeat(64),
     walletReferenceHash: "4".repeat(64), walletIdHash: "5".repeat(64), namespace: "eip155", mode: "server", environment: "prod" },
     chainId: 8453, token: TOKEN, recipient: "0x2222222222222222222222222222222222222222", netAtomic: "1000", rpcUrl };
-  return { gate: new HelperNetworkPolicy(networkContextQuote(input, OWNER, "unit-test-auth"), exchange), requests };
+  return { gate: new HelperNetworkPolicy(networkContextQuote(input, OWNER, "unit-test-auth", "unit-test-project"), exchange), requests };
 }
 function body(call: Record<string, unknown> = { to: TOKEN, data: "0x313ce567" }, tag: unknown = "latest") {
   return JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [call, tag] });
@@ -181,7 +181,7 @@ test("observed valid LOW tier with an unused fourth tier lacking tokenFees passe
   const { response, exchange } = await syntheticSelectedQuote(t, observedShape);
   assert.equal(response.ok, true);
   if (response.ok) assert.equal((response.result as { feeAtomic: string }).feeAtomic, "5251");
-  assert.equal(exchange.requests.length, 6);
+  assert.equal(exchange.requests.length, 7);
   assert.equal(exchange.beforeSends, 0);
 });
 
@@ -204,7 +204,7 @@ test("earlier transaction and higher fee tiers cannot replace the exact last LOW
     assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false, failure: diagnostic.tokenFeesKind === "missing"
       ? { code: "APN_PROVIDER_CAPABILITY_UNAVAILABLE", reason: "mm_gasless_fee_unquoted" }
       : { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic });
-    assert.equal(exchange.requests.length, 5);
+    assert.equal(exchange.requests.length, 6);
   });
   const good = await syntheticSelectedQuote(t, v => { observedShape(v); v.result.transactions.unshift({ fees: [{}], unused: SECRET }); });
   assert.equal(good.response.ok, true);
@@ -253,7 +253,7 @@ test("selected requested-token fee entry retains required fields and rejects amb
     const { response, exchange } = await syntheticSelectedQuote(sub, mutate);
     assert.deepEqual(response, { version: MM_HELPER_VERSION, ok: false,
       failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic });
-    assert.equal(exchange.requests.length, 5);
+    assert.equal(exchange.requests.length, 6);
   });
 });
 

@@ -4,7 +4,7 @@ import test from "node:test";
 import { installGaslessDependencyBoundary } from "../../src/metamask-gasless/client/dependency-boundary.js";
 import { foxEvm } from "../../src/metamask-gasless/client/sdk-vendor.js";
 import type { MetaMaskGaslessUnsignedResult } from "../../src/metamask-gasless/model.js";
-import { expectedQuote, intent, NOW, OWNER, quoteInput, SdkExchange, syntheticHome } from
+import { expectedQuote, intent, listedWallets, NOW, OWNER, PROJECT_WALLETS_URL, quoteInput, SdkExchange, syntheticHome } from
   "./metamask-gasless-client-fixtures/sdk.js";
 
 const rejected = /APN dependency boundary rejected Solana decoder/u;
@@ -60,7 +60,10 @@ test("a rejected decoder load returns a closed helper failure", async (t) => {
   let attempts = 0;
   const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote",
     input: quoteInput(home.binding, 8453) }, { homeDirectory: home.home, now: () => NOW,
-    exchange: { async request() { attempts += 1; await import("@solana/spl-token"); throw new Error("unreachable"); } } });
+    exchange: { async request(r) {
+      if (r.url === PROJECT_WALLETS_URL) return listedWallets();
+      attempts += 1; await import("@solana/spl-token"); throw new Error("unreachable");
+    } } });
   assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
     failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, diagnostic: { mode: "quote", stage: "inventory",
       invariant: "unclassified_exception", network: "mimir-networks", httpStatus: null, exitCode: null,

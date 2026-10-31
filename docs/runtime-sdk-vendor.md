@@ -20,8 +20,8 @@ fences keep their existing contracts.
 |---|---|---|
 | `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `05e9601a4ae684223b03efa3d6faa80b5e87c0c734c710baf6090d993539b948` |
 | `vendor/metamask-smart-account` | Smart Account kit 2.0.0 root/actions/contracts/utils/experimental, permission types 2.0.0, delegation core 3.0.0, MetaMask x402 1.0.0 | `ff253d54bfb8082ebb7e753d4125303aa84a421566dc11490936ece27448ddc3` |
-| `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `647efee5547554c97df76c20f8b9d940b001dd5f2089dc173ae1e80897e57dec` |
-| `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `884ea5e965e946f7975492207f6b93b9cd769024ba1865c713477b1190cc46a3` |
+| `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `b0e919b536ce6cd58b0a7e79403a780a0c099560c9e332cd829ccdd12bb36a8b` |
+| `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `2f9961b36d28b97d4a524bb02a0c89e2fa351cd17fb157e1f2f7d13d1f5f3e8e` |
 
 ## Load-time integrity
 
@@ -90,9 +90,10 @@ Release preparation runs it after the production audit. Its dated exceptions are
 Dependency pins that keep the emitted code clear:
 
 - **follow-redirects:** the Relay and TRON bundles emit `follow-redirects`, which GHSA-q3jh-wrc6-jgq8 (array-form
-  headers kept credentials across origins) and GHSA-8r9p-f939-6h3c (unescaped sensitive-header names) cover below 1.16.1.
-  A root override resolves it to 1.16.1. APN calls only `getOrderId` and offline TRON address, signature and transaction
-  helpers from these bundles, none of which sends an HTTP request.
+  headers kept credentials across origins) and GHSA-8r9p-f939-6h3c (unescaped sensitive-header names) cover below
+  1.16.1, and GHSA-mrwp-f3q8-3g9p (cross-realm `sensitiveHeaders` arrays discarded, custom credentials followed
+  redirects) covers 1.16.0 to 1.16.1. A root override resolves it to 1.16.2. APN calls only `getOrderId` and offline
+  TRON address, signature and transaction helpers from these bundles, none of which sends an HTTP request.
 - **zod in the Fox SDK:** Fox SDK 2.7.0 (and 2.10.0) pins zod 3.23.8, which GHSA-mrhx-c7xc-m3w5 (zod `<4.6.6`, memory
   exhaustion validating oversized constrained collections) affects with no fixed zod 3 release. The Fox SDK uses only
   `z.string`, `z.object`, `z.boolean`, `z.number`, `z.enum` and `.passthrough()`, all present in zod 4, so the

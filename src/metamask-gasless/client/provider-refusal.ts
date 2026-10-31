@@ -1,19 +1,20 @@
 import { ApnError } from "../../errors.js";
 import { directEvmNetwork } from "../../evm-direct-networks.js";
 import { formatAtomic } from "../../money.js";
-import type { MetaMaskGaslessChainId } from "../model.js";
+import type { MetaMaskGaslessBinding, MetaMaskGaslessChainId } from "../model.js";
 import type { MetaMaskGaslessFailureReason } from "../reasons.js";
 import { mmUsdcShortfallMessage } from "../refusals.js";
-import { mmSentinelQuoteEndpoint, MM_SENTINEL_NETWORKS_ENDPOINT, MM_SERVER_WALLET_NETWORKS_ENDPOINT } from "./provider-endpoints.js";
+import { mmSentinelQuoteEndpoint, MM_PROJECT_WALLETS_ENDPOINT, MM_SENTINEL_NETWORKS_ENDPOINT,
+  MM_SERVER_WALLET_NETWORKS_ENDPOINT } from "./provider-endpoints.js";
 import type { MetaMaskReadDiagnostic } from "./read-diagnostic.js";
 
 export interface MetaMaskProviderRefusal { readonly message: string; readonly details: Readonly<Record<string, string | number>> }
 
 /** Parent side only: restate a classified read failure as the provider's answer when it is one. */
 export function withMetaMaskProviderRefusal(error: ApnError, d: MetaMaskReadDiagnostic,
-  chainId: MetaMaskGaslessChainId | undefined): ApnError {
+  chainId: MetaMaskGaslessChainId | undefined, binding: MetaMaskGaslessBinding | undefined): ApnError {
   const reason = error.details?.reason;
-  const refusal = typeof reason === "string" ? metaMaskProviderRefusal(reason as MetaMaskGaslessFailureReason, d, chainId) : undefined;
+  const refusal = typeof reason === "string" ? metaMaskProviderRefusal(reason as MetaMaskGaslessFailureReason, d, chainId, binding) : undefined;
   return refusal === undefined ? error : new ApnError(error.code, refusal.message, { ...error.details, ...refusal.details });
 }
 
@@ -24,8 +25,10 @@ export function withMetaMaskProviderRefusal(error: ApnError, d: MetaMaskReadDiag
  * numbers prove it, or APN's own balance read does.
  */
 export function metaMaskProviderRefusal(reason: MetaMaskGaslessFailureReason, d: MetaMaskReadDiagnostic,
-  chainId: MetaMaskGaslessChainId | undefined): MetaMaskProviderRefusal | undefined {
+  chainId: MetaMaskGaslessChainId | undefined, binding: MetaMaskGaslessBinding | undefined): MetaMaskProviderRefusal | undefined {
   if (chainId === undefined) return undefined;
+  if ((reason === "mm_gasless_project_has_no_wallets" || reason === "mm_gasless_wallet_not_in_project") && binding !== undefined &&
+    d.stage === "project_wallets") return projectWalletRefusal(reason, d, binding);
   const network = directEvmNetwork(chainId).name, where = `on ${network} (chain ${chainId})`;
   if (reason === "mm_gasless_fee_unquoted" && d.tokenFeesKind !== undefined && d.sentinelSimulation !== undefined) {
     const field = `result.transactions[-1].fees[0].tokenFees ${d.tokenFeesKind === "missing" ? "missing" : `set to ${d.tokenFeesKind}`}`;
@@ -59,4 +62,22 @@ export function metaMaskProviderRefusal(reason: MetaMaskGaslessFailureReason, d:
       provider_server_wallet_endpoint: MM_SERVER_WALLET_NETWORKS_ENDPOINT, chain_id: chainId, network } };
   }
   return undefined;
+}
+
+/**
+ * The login's project, as MetaMask's own wallet list states it: no server wallet, or EVM server wallets that do not
+ * include the profile's. Only their count is named; the project id and every other address stay out. The bound
+ * address and the profile revision it was quoted under travel with the refusal for its next actions.
+ */
+function projectWalletRefusal(reason: "mm_gasless_project_has_no_wallets" | "mm_gasless_wallet_not_in_project",
+  d: MetaMaskReadDiagnostic, binding: MetaMaskGaslessBinding): MetaMaskProviderRefusal {
+  const owner = binding.address;
+  const count = d.projectWalletCount, read = `MetaMask's project wallet list (${MM_PROJECT_WALLETS_ENDPOINT})`;
+  const answer = reason === "mm_gasless_project_has_no_wallets"
+    ? `has no server wallet, so it does not hold the connected wallet ${owner}: ${read} names no EVM server wallet`
+    : `does not hold the connected wallet ${owner}: ${read} names ${count === undefined ? "only other"
+      : `${count} other`} EVM server wallet${count === 1 ? "" : "s"}`;
+  return { message: `The MetaMask login in mm belongs to a project that ${answer}. Nothing was signed or sent.`,
+    details: { provider_read: "metamask project wallet list", provider_endpoint: MM_PROJECT_WALLETS_ENDPOINT, wallet_address: owner,
+      profile_revision: binding.revision } };
 }

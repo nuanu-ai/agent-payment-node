@@ -5,6 +5,7 @@ import { isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError, type ErrorCode, type ErrorDetail } from "./errors.js";
 import type { Hex } from "./model.js";
 import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, takeMetaMaskNativeProcessFailureDiagnostic, type MetaMaskProcessResult } from "./metamask-process-runner.js";
+import { metaMaskCommand } from "./metamask-command.js";
 import { resolveMetaMaskBin } from "./metamask-package.js";
 import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice, type MetaMaskMfaNotice } from "./metamask-process-output.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
@@ -70,7 +71,6 @@ function refuse(reason: MetaMaskNativeRefusal, facts: Readonly<Record<string, Er
   if (diagnostic !== undefined) throw new NativeReadRefusal(diagnostic, "APN_OPERATION_BLOCKED", REFUSALS[reason].message, details);
   throw new ApnError("APN_OPERATION_BLOCKED", REFUSALS[reason].message, details);
 }
-const quoted = (value: string) => /^[A-Za-z0-9_./@:+=-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
 /**
  * The refusal with each `mm …` step written as the pinned client run by APN's own Node: Homebrew links only `apn`, so a
  * bare `mm` is not on the owner's PATH (the policy refusals of metamask-native-policy.ts included).
@@ -78,9 +78,8 @@ const quoted = (value: string) => /^[A-Za-z0-9_./@:+=-]+$/u.test(value) ? value 
 async function runnable(error: unknown): Promise<unknown> {
   const actions = error instanceof ApnError ? error.details?.nextActions : undefined;
   if (!(error instanceof ApnError) || !Array.isArray(actions) || !actions.some(action => action.startsWith("mm "))) return error;
-  let script: string;
-  try { script = await resolveMetaMaskBin(); } catch { return error; }
-  const prefix = `${quoted(process.execPath)} ${quoted(script)} `;
+  let prefix: string;
+  try { prefix = `${await metaMaskCommand()} `; } catch { return error; }
   const details = { ...error.details, nextActions: actions.map(action => action.startsWith("mm ") ? prefix + action.slice(3) : action) };
   return error instanceof NativeReadRefusal ? new NativeReadRefusal(error.nativeDiagnostic, error.code, error.message, details)
     : new ApnError(error.code, error.message, details);

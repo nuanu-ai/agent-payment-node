@@ -1,6 +1,6 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.82",
+  "version": "0.5.83",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
@@ -105,6 +105,9 @@
     "@metamask/delegation-core": "3.0.0"
   },
   "overrides": {
+    "@oclif/core": {
+      "minimatch": "11.0.1"
+    },
     "@metamask/fox-sdk": {
       "zod": "4.6.7"
     },
@@ -144,7 +147,7 @@
     "fast-uri@<3.1.9": "3.1.9",
     "brace-expansion@>=4 <5.0.12": "5.0.12",
     "pbkdf2@<=3.1.6": "3.1.7",
-    "follow-redirects@<1.16.1": "1.16.1"
+    "follow-redirects@<1.16.2": "1.16.2"
   },
   "license": "MIT",
   "main": "index.js",

@@ -105,10 +105,10 @@
       "name": "eventemitter3",
       "version": "5.0.1"
     },
-    "follow-redirects@1.16.1": {
+    "follow-redirects@1.16.2": {
       "license": "MIT",
       "name": "follow-redirects",
-      "version": "1.16.1"
+      "version": "1.16.2"
     },
     "form-data@4.0.6": {
       "license": "MIT",
@@ -1860,14 +1860,14 @@
     {
       "bytes": 315,
       "file": "debug.js",
-      "identity": "follow-redirects@1.16.1",
+      "identity": "follow-redirects@1.16.2",
       "sha256": "8dbf7e71a9292be180e3469a6b7a164171d3c39dec79e5dbc4aa1c9f09509faf"
     },
     {
-      "bytes": 21539,
+      "bytes": 21483,
       "file": "index.js",
-      "identity": "follow-redirects@1.16.1",
-      "sha256": "656e169cc2e8043ec00b7d912f3ff523a01026a3fd38e04516b37fb39be94f14"
+      "identity": "follow-redirects@1.16.2",
+      "sha256": "c93380e360cdc3e7f97771e542f99253b1527f0650bdef32180bcf012840e1ce"
     },
     {
       "bytes": 15086,
@@ -4423,12 +4423,12 @@
     {
       "bytesInOutput": 423,
       "file": "debug.js",
-      "identity": "follow-redirects@1.16.1"
+      "identity": "follow-redirects@1.16.2"
     },
     {
-      "bytesInOutput": 18440,
+      "bytesInOutput": 18371,
       "file": "index.js",
-      "identity": "follow-redirects@1.16.1"
+      "identity": "follow-redirects@1.16.2"
     },
     {
       "bytesInOutput": 11695,
@@ -5787,10 +5787,10 @@
       "name": "eventemitter3",
       "version": "5.0.1"
     },
-    "follow-redirects@1.16.1": {
+    "follow-redirects@1.16.2": {
       "license": "MIT",
       "name": "follow-redirects",
-      "version": "1.16.1"
+      "version": "1.16.2"
     },
     "form-data@4.0.6": {
       "license": "MIT",

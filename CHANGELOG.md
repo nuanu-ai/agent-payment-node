@@ -2,6 +2,16 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.83 — 2026-10-31
+
+- MetaMask gasless: before anything is signed, `gasless transfer prepare` and `approve` check that the current MetaMask login's project holds the connected server wallet. If it does not, they refuse with `mm_gasless_project_has_no_wallets` or `mm_gasless_wallet_not_in_project` and say how to sign in with the right account or create a new server wallet, instead of sending a delegation the service rejects.
+- Security: the vendored Relay order-id and TRON utility bundles are rebuilt with follow-redirects 1.16.2 (GHSA-mrwp-f3q8-3g9p); APN never sent HTTP through that code.
+- Security: the MetaMask CLI's `@oclif/core` now resolves minimatch 11.0.1 (GHSA-g3hv-75wg-m249).
+
+## 0.5.82 — 2026-10-30
+
+- Documentation rewritten as references of current behaviour; `CHANGELOG.md` and `CONTRIBUTING.md` added. No runtime change.
+
 ## 0.5.81 — 2026-10-29
 
 - MetaMask gasless: a submit that stops without a result now reports where it stopped (`submit_diagnostic`) in the operation's own output.

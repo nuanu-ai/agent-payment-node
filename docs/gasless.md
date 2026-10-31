@@ -612,6 +612,39 @@ Each of these ends a prepare before anything is written:
 
 Any other malformed quote is `APN_PROVIDER_UNAVAILABLE / mm_gasless_provider_unavailable`.
 
+### Login project and server wallet
+
+MetaMask keeps server wallets per project, and `mm` keeps its cached wallet list across logins, so a login can select a
+wallet its own project does not hold. Before any other provider read of a quote, APN reads the session project's wallet
+list (`GET agentic-mimir-service …/v1/projects/{projectId}/wallets` with the session's own token). That happens at
+prepare and again in the fresh quote approve takes before the dispatch marker, so a refusal comes before anything is
+signed or sent:
+
+- `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_project_has_no_wallets`: the project has no server wallet (the list
+  answered 404 or names no EVM wallet).
+- `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_wallet_not_in_project`: the project's EVM server wallets do not include the
+  connected one. The refusal gives their count (`mm_read_project_wallet_count`), never their addresses.
+
+Any other answer (another HTTP status, a malformed list, a timeout) is `APN_PROVIDER_UNAVAILABLE /
+mm_gasless_provider_unavailable`, naming the read (`mm_read_network: project-wallets`) and any HTTP status
+(`mm_read_http_status`); the transfer does not continue.
+
+The next actions spell out two ways forward, with `mm` written as the pinned client APN runs (Homebrew links only
+`apn`):
+
+1. To keep paying from the connected wallet, sign in to MetaMask with the account that created it (`mm logout`, then
+   `mm login`, then `mm wallet select` with that address if the account holds several wallets) and connect the profile
+   again with `apn wallet connect`. The address stays the same, so no revision is needed.
+2. Pay from another wallet of the current project: a new address, so its `apn wallet connect` names the profile's
+   current revision with `--expected-revision`, and funds on the old address stay with the login that created it. In a
+   project with no server wallet, `mm init --wallet server-wallet --mode guard --json` creates its first one. In a
+   project that already has some, `mm init` creates none: it selects one of them and keeps that wallet's server-side
+   trading mode, so list them with `mm wallet list` and pick one with `mm wallet select`.
+
+A refusal at approve ends the operation `failed_before_effect`, and that approve output names the same two ways
+forward. While another unresolved operation holds the profile, its steps come first, because wallet connect waits for
+it.
+
 ### Approval and the checks before dispatch
 
 Approval shows the exact USDC debit, recipient amount, quoted fee, fee ceiling, minimum receipt and persistent
@@ -842,6 +875,7 @@ it. `apn operation status` and `apn operation resume` read the saved journal wit
 | `gasless_allowance_drift` | Local | A non-zero paymaster allowance remains; clear it before a new prepare. |
 | `mm_gasless_fee_cap` | MetaMask | The quoted fee is above your cap; nothing was dispatched. |
 | `mm_gasless_relay_unsupported`, `mm_gasless_fee_unquoted`, `mm_gasless_balance` | MetaMask | Prepare refusals, see [Prepare refusals](#prepare-refusals). |
+| `mm_gasless_project_has_no_wallets`, `mm_gasless_wallet_not_in_project` | MetaMask | The `mm` login's project does not hold the connected wallet; nothing was sent. See [Login project and server wallet](#login-project-and-server-wallet). |
 | `mm_gasless_submit_unknown` | MetaMask | The dispatch outcome is unknown; read `submit_diagnostic` and resume. |
 | `mm_gasless_provider_approval` | MetaMask | Confirm the transaction through MetaMask MFA, then resume. |
 | `mm_gasless_provider_mfa_rejected`, `mm_gasless_provider_failed` | MetaMask | The provider closed the request; still guarded until proof. Consider `revoke`. |

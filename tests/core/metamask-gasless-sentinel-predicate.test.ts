@@ -4,7 +4,7 @@ import { HelperNetworkPolicy, networkContextQuote } from "../../src/metamask-gas
 import { executeHelperRequest } from "../../src/metamask-gasless/client/service.js";
 import { MM_HELPER_VERSION, helperResponse } from "../../src/metamask-gasless/client/protocol.js";
 import { readDiagnostic, readFailureError, validateReadDiagnostic, type ReadValidationPredicate } from "../../src/metamask-gasless/client/read-diagnostic.js";
-import { NOW, quoteInput, SECRET, SdkExchange, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
+import { NOW, PROJECT, quoteInput, SECRET, SdkExchange, syntheticHome } from "./metamask-gasless-client-fixtures/sdk.js";
 
 // Mutate one independently specified shape at a time; preceding fields remain valid.
 const mutations: [ReadValidationPredicate, (v: any) => void][] = [
@@ -46,7 +46,7 @@ test("normal quote first-refusal predicates identify each Sentinel field without
       network: "sentinel-quote", httpStatus: 200, exitCode: null, signal: "none", timedOut: false, validationPredicate: predicate,
       ...(predicate === "sentinel_token_fees" ? { tokenFeesKind: "object", sentinelSimulation: "absent", sentinelFeeError: "absent",
         sentinelSponsorship: "absent" } : {}) });
-    assert.equal(exchange.requests.length, 5); assert.equal(JSON.stringify(result).includes(SECRET), false);
+    assert.equal(exchange.requests.length, 6); assert.equal(JSON.stringify(result).includes(SECRET), false);
     const error = readFailureError(result.failure.reason, result.diagnostic!);
     assert.equal(error.details?.mm_read_validation_predicate, predicate);
   });
@@ -99,7 +99,7 @@ test("concurrent policies and unsourced errors cannot steal or forge first-refus
   assert.equal(typeof bearer, "string");
   const response = await new SdkExchange(8453).request(sent);
   const policies = ["sentinel_id", "sentinel_symbol"].map(predicate => new HelperNetworkPolicy(
-    networkContextQuote(input, home.binding.address, bearer!.slice(7)), { async request() {
+    networkContextQuote(input, home.binding.address, bearer!.slice(7), PROJECT), { async request() {
       const value = JSON.parse(response.body);
       if (predicate === "sentinel_id") value.id = 11;
       else value.result.transactions[0].fees[0].tokenFees[0].token.symbol = "";
