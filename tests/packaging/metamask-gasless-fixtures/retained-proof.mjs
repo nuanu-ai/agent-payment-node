@@ -44,7 +44,8 @@ export async function runInstalledRetainedProof(installed) {
     else s.update({ packageRoot: reinstalledRoot });
 
     const blocked = await s.cli(s.prepareArgv(`mm-after-${name}-0001`));
-    const sameDomain = ["local-direct", "local-x402", "provider-x402", "local-gasless"].includes(name);
+    // The retained local gasless approval expired unsent, so it no longer holds the account (it stays byte-for-byte).
+    const sameDomain = ["local-direct", "local-x402", "provider-x402"].includes(name);
     if (sameDomain) {
       assert.equal(blocked.ok, false, `${name}: ${JSON.stringify(blocked)}`);
       assert.deepEqual(blocked.error.details, {
@@ -54,8 +55,8 @@ export async function runInstalledRetainedProof(installed) {
         blockingAccount: s.fixture().owner.toLowerCase(),
       }, name);
     } else {
-      // Solana and source-chain bridge journals use different conflict domains, so MetaMask
-      // may prepare on Base while retaining the old operation byte-for-byte.
+      // Solana and source-chain bridge journals use different conflict domains, and an expired unsent gasless
+      // approval holds nothing, so MetaMask may prepare on Base while retaining the old operation byte-for-byte.
       assert.equal(blocked.ok, true, `${name}: ${JSON.stringify(blocked)}`);
       assert.notEqual(blocked.error?.code, "APN_OPERATION_BLOCKED", name);
     }
