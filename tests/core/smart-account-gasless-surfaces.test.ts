@@ -18,7 +18,7 @@ import { smartAccountGaslessRuntime } from "../../src/smart-account-gasless/runt
 import type { SmartAccountGaslessDependencies } from "../../src/smart-account-gasless/service.js";
 import { StateStore } from "../../src/state.js";
 import { temporaryState } from "./helpers.js";
-import { SA_TEST_AT, SA_TEST_RECIPIENT, saStructuralMaterial, saStructuralUnused, saTestIntent } from "./smart-account-gasless-fixtures.js";
+import { SA_TEST_AT, SA_TEST_RECIPIENT, saStructuralMaterial, saStructuralUnused, saTestIntent, saTestRestart } from "./smart-account-gasless-fixtures.js";
 
 const KEY = "sa-surface-key", ID = "a".repeat(64);
 const input = { profile: "sa-synthetic", chain: "8453", to: SA_TEST_RECIPIENT,
@@ -42,6 +42,7 @@ async function connection(options: McpRuntimeOptions) {
 
 /** These ports prove real CLI/MCP routing and counters; SDK/chain authentication has its own integration tests. */
 async function fixture(stateRoot: string) {
+  saTestRestart();
   const state = new StateStore(stateRoot), original = saTestIntent(), capability = metamaskSmartAccountX402CapabilitySnapshot();
   const binding = { ...original.binding, capabilityHash: capabilityHash(capability) };
   await state.initialize();

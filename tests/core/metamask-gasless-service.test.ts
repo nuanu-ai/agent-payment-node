@@ -312,27 +312,29 @@ test("MM lost session points at the operation holding the profile instead of a r
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("MM gasless prepare waits for an unresolved operation of another profile bound to the same address", async () => {
+test("MM gasless prepare of another profile bound to the same address waits for an approval and proceeds beside a dispatch", async () => {
   const root = await sandbox();
   try {
     const f = await mmFixture(root), alias = "mm-alias";
     await f.state.writeProviderProfile({ ...f.publicProfile, profile: alias, profile_hash: f.state.profileHash(alias) });
     const { id } = await f.prepare(); f.rpc.phase = "pending"; f.rpc.candidate = null;
-    assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
-    assert.equal((await f.record(id)).state, "unknown_finality");
+    // Another amount, so the fixture's fixed salt still yields a delegation of its own.
     const aliasPrepare = (key: string) => f.core.execute({ command: "gasless.transfer.prepare", profile: alias,
-      request: f.request, idempotencyKey: key });
+      request: { ...f.request, grossAtomic: "10000001" }, idempotencyKey: key });
     const blocked = await aliasPrepare("mm-alias-0001");
-    assert.equal(blocked.ok, false, "a second profile on the same address must not dispatch on Base while the first is unresolved");
+    assert.equal(blocked.ok, false, "a second profile on the same address must not prepare while the first awaits approval");
     assert.equal(blocked.error?.code, "APN_OPERATION_BLOCKED");
     assert.equal(blocked.error?.details?.blockingOperationId, id);
+    assert.equal(blocked.error?.details?.blockingState, "awaiting_approval");
     assert.equal(blocked.error?.details?.blockingAccount, f.binding.address);
     assert.equal((await f.core.metaMaskGasless.records.listAllOperations()).length, 1);
-    f.advance(600_000);
-    assert.equal((await new ApnCore({ state: f.state, clock: f.clock, wait: f.wait, metaMaskGasless: f.dependencies,
-      operationAbandonApproval: { approve: async () => undefined } }).execute({ command: "operation.abandon", operationId: id })).ok, true);
-    const released = await aliasPrepare("mm-alias-0002");
-    assert.equal(released.ok, true, JSON.stringify(released.error));
+    assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
+    assert.equal((await f.record(id)).state, "unknown_finality");
+    // Its dispatch is over and only the outcome is unknown: the alias proceeds and is told about it.
+    const beside = await aliasPrepare("mm-alias-0002");
+    assert.equal(beside.ok, true, JSON.stringify(beside.error));
+    assert.deepEqual((beside.operation as { unresolved_beside?: { operations: unknown } }).unresolved_beside?.operations,
+      [{ operation_id: id, state: "unknown_finality", recipient: f.request.recipient, dispatched_gross_atomic: "10000000" }]);
     assert.equal(f.provider.submissions.length, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

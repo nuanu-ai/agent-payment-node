@@ -8,7 +8,8 @@ import { entryOf, OperationIndexReconciler } from "./reconcile.js";
 import { operationRegistry, type OperationRegistry } from "./registry.js";
 import { OPERATION_INDEX_DIRECTORY, OPERATION_INDEX_LOCK, OperationIndexDamage, OperationIndexStore, type StoredRecordName } from "./store.js";
 import { collidingClaims, normalizeClaims, OPERATION_FAMILIES, profileClaim, UNREADABLE_PROVIDER_CLAIM, unreadableFamilyClaim,
-  unreadableProfileClaim, type OperationClaim, type OperationIndexEntry, type PrepareIdentity, type WantedClaims } from "./types.js";
+  unreadableProfileClaim, type OperationBeside, type OperationClaim, type OperationIndexEntry, type PrepareIdentity,
+  type WantedClaims } from "./types.js";
 
 /** Same bound as ORPHAN_TEMPORARY_AGE_MS: an admission without a record older than this belongs to a crashed prepare. */
 export const ADMISSION_LEASE_MS = 10 * 60_000;
@@ -77,6 +78,20 @@ export class OperationIndex {
   /** APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. */
   async assertAvailable(wanted: WantedClaims): Promise<void> {
     await this.repairing(async () => { await this.reconciler.reconcile(); await this.check(wanted); });
+  }
+
+  /** The unresolved operations holding one of `wanted.claims` that their family admits beside it; a blocker is skipped, not thrown. */
+  async admittedBeside(wanted: WantedClaims): Promise<readonly OperationBeside[]> {
+    return await this.repairing(async () => {
+      await this.reconciler.reconcile();
+      const beside: OperationBeside[] = [];
+      for (const entry of await this.openEntries()) {
+        if (entry.operationId === wanted.except || collidingClaims(entry.claims, wanted.claims).length === 0) continue;
+        const verdict = await this.inspect(entry, wanted);
+        if (verdict !== null && !(verdict instanceof ApnError)) beside.push(verdict);
+      }
+      return beside.sort((left, right) => left.operationId < right.operationId ? -1 : 1);
+    });
   }
 
   /**
@@ -237,8 +252,8 @@ export class OperationIndex {
       .sort((left, right) => order.indexOf(left.family) - order.indexOf(right.family) || (left.operationId < right.operationId ? -1 : 1));
     const clear = new Set<string>();
     for (const entry of colliding) {
-      const blocked = await this.inspect(entry, all);
-      if (blocked !== null) throw blocked;
+      const verdict = await this.inspect(entry, all);
+      if (verdict instanceof ApnError) throw verdict;
       clear.add(entry.operationId);
     }
     // Amortized collection: a few other open entries are verified per check, so open/ stays small without settle().
@@ -273,9 +288,10 @@ export class OperationIndex {
 
   /**
    * Verifies one open entry against its record and keeps the index in step with it. With `wanted`, returns the
-   * APN_OPERATION_BLOCKED error when it still blocks that admission; without, it only collects.
+   * APN_OPERATION_BLOCKED error when it still blocks that admission, or the entry when its family admits that admission
+   * beside its colliding claims; without, it only collects.
    */
-  private async inspect(entry: OperationIndexEntry, wanted: WantedClaims | null): Promise<ApnError | null> {
+  private async inspect(entry: OperationIndexEntry, wanted: WantedClaims | null): Promise<ApnError | OperationBeside | null> {
     // One ID in two stores is decided by the names walk alone; no single record can clear it.
     if (entry.unreadableReason === "duplicate_operation_id") return wanted === null ? null : blockedBy(entry, null, collidingClaims(entry.claims, wanted.claims));
     const adapter = this.adapter(entry), name = nameOf(entry);
@@ -300,8 +316,10 @@ export class OperationIndex {
     if (entry.state !== "active" || derived.state !== "active") await this.reconciler.write(next, true);
     if (wanted === null || derived.state === "terminal") return null;
     if (derived.state === "unreadable") return blockedBy(entry, null, collidingClaims(derived.claims, wanted.claims));
-    const blocking = collidingClaims(next.claims, wanted.claims).filter(claim => adapter!.admits?.(record, wanted, claim) !== true);
-    return blocking.length === 0 ? null : blockedBy(entry, adapter!.state(record), blocking);
+    const colliding = collidingClaims(next.claims, wanted.claims);
+    const blocking = colliding.filter(claim => adapter!.admits?.(record, wanted, claim) !== true);
+    if (blocking.length > 0) return blockedBy(entry, adapter!.state(record), blocking);
+    return colliding.length === 0 ? null : { operationId: entry.operationId, family: entry.family, state: adapter!.state(record), record };
   }
 
   /** After `work`: the admitted entry becomes the entry its record yields, keeping the admitted claims while unresolved. */

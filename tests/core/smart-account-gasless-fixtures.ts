@@ -12,7 +12,13 @@ import type { SmartAccountGaslessCursor } from "../../src/smart-account-gasless/
 export const SA_TEST_OWNER = `0x${"11".repeat(20)}` as Address;
 export const SA_TEST_SESSION = `0x${"22".repeat(20)}` as Address;
 export const SA_TEST_RECIPIENT = `0x${"33".repeat(20)}` as Address;
-export const SA_TEST_AT = "2026-09-10T20:30:00.000Z";
+/**
+ * The fixture instant: a child process is handed its parent's, and a lifecycle fixture restarts it at the current second
+ * for each test, because the operation index reads an expired unsent record on the wall clock.
+ */
+export let SA_TEST_AT = process.env.APN_SA_TEST_AT ?? currentSecond();
+export function saTestRestart(): void { SA_TEST_AT = currentSecond(); }
+function currentSecond(): string { return new Date(Math.floor(Date.now() / 1000) * 1000).toISOString(); }
 const hexHash = (digit: string): Hex => `0x${digit.repeat(64)}`;
 
 /** Public synthetic binding only. Real SDK/chain fixtures are separate proof obligations. */

@@ -2,7 +2,7 @@ import type { OperationAbandonApprovalPort } from "../operation-abandon-approval
 import type { SecureStateStore } from "../secure-state-store.js";
 import { type OperationFamilyAdapter } from "./adapter.js";
 import { type OperationRegistry } from "./registry.js";
-import { type OperationIndexEntry, type PrepareIdentity, type WantedClaims } from "./types.js";
+import { type OperationBeside, type OperationIndexEntry, type PrepareIdentity, type WantedClaims } from "./types.js";
 /** Same bound as ORPHAN_TEMPORARY_AGE_MS: an admission without a record older than this belongs to a crashed prepare. */
 export declare const ADMISSION_LEASE_MS: number;
 export { OPERATION_INDEX_LOCK } from "./store.js";
@@ -31,6 +31,8 @@ export declare class OperationIndex {
     resolvePrepare(identity: PrepareIdentity): Promise<OperationIndexEntry | null>;
     /** APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. */
     assertAvailable(wanted: WantedClaims): Promise<void>;
+    /** The unresolved operations holding one of `wanted.claims` that their family admits beside it; a blocker is skipped, not thrown. */
+    admittedBeside(wanted: WantedClaims): Promise<readonly OperationBeside[]>;
     /**
      * Admits a new operation: replay and conflict checks, then the claim is written (as `admitted`) before `work` runs
      * the family's prepare body. On success the entry follows the record; when `work` throws and wrote no record, the
@@ -73,7 +75,8 @@ export declare class OperationIndex {
     private openEntries;
     /**
      * Verifies one open entry against its record and keeps the index in step with it. With `wanted`, returns the
-     * APN_OPERATION_BLOCKED error when it still blocks that admission; without, it only collects.
+     * APN_OPERATION_BLOCKED error when it still blocks that admission, or the entry when its family admits that admission
+     * beside its colliding claims; without, it only collects.
      */
     private inspect;
     /** After `work`: the admitted entry becomes the entry its record yields, keeping the admitted claims while unresolved. */

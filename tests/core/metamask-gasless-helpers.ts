@@ -172,9 +172,14 @@ export class MmTestRpc implements MetaMaskGaslessRpcPort {
   }
 }
 
+/**
+ * The fixture clock starts at the current second unless a test names its own start: the operation index decides an
+ * expired unsent approval on the wall clock, as production does, so a fixture far in the past would read every fresh
+ * approval as expired.
+ */
 export async function mmFixture(root: string, chainId: MetaMaskGaslessChainId = 8453,
-  designation: "empty" | "pinned" = "empty", options: { abandonApproval?: OperationAbandonApprovalPort } = {}) {
-  const state = new StateStore(root), now = new Date("2026-09-09T00:00:00.000Z"), profile = "mm-fixture";
+  designation: "empty" | "pinned" = "empty", options: { abandonApproval?: OperationAbandonApprovalPort; now?: Date } = {}) {
+  const state = new StateStore(root), now = new Date(options.now ?? Math.floor(Date.now() / 1000) * 1000), profile = "mm-fixture";
   await state.initialize(); const capabilities = metamaskDirectCapabilitySnapshot();
   const publicProfile: ProviderProfileRecord = { schema_version: "apn.provider-profile.v1", profile,
     profile_hash: state.profileHash(profile), provider_id: "metamask-agent-wallet", public_address: MM_TEST_OWNER,

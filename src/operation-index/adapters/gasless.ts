@@ -17,7 +17,7 @@ import { MetaMaskGaslessService } from "../../metamask-gasless/service.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "../../operation-abandon-gasless.js";
 import { abandonSmartAccountGasless } from "../../operation-abandon-provider.js";
 import { assertResumeOptions, oneObservationOnly, type ResumeOptionUse } from "../../operation-command-options.js";
-import { evmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
+import { conflictDomainKey, evmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { SA_TERMINAL, type SmartAccountGaslessOperationRecord } from "../../smart-account-gasless/operation-model.js";
 import { SmartAccountGaslessOperationRepository } from "../../smart-account-gasless/operation-repository.js";
 import { OperationService } from "../../operation-service.js";
@@ -27,7 +27,8 @@ import { publicSmartAccountGaslessOperation } from "../../smart-account-gasless/
 import { SmartAccountGaslessService } from "../../smart-account-gasless/service.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
-import type { OperationFamily } from "../types.js";
+import type { OperationClaim, OperationFamily, WantedClaims } from "../types.js";
+import { pastUnstartedDeadline } from "./family-claims.js";
 
 interface GaslessRecord { readonly profileHash: string; readonly operationId: string; readonly idempotencyHash: string;
   readonly requestHash: string; readonly state: string; readonly terminal: boolean }
@@ -42,13 +43,24 @@ interface GaslessCommands {
 }
 
 /**
+ * What sets one gasless family apart in the index besides its outcomes. `unsentUntil` is the deadline of a record that
+ * never let its signed effect leave APN (null once it may have): the family refuses that step past it, so the record
+ * stops holding its account and profile once it plus the unstarted margin has passed, while its own commands still close
+ * it. `admits` is the family's coexistence rule, if any.
+ */
+interface GaslessRules<R> {
+  unsentUntil(record: R): string | number | null;
+  readonly admits?: OperationFamilyAdapter<R>["admits"];
+}
+
+/**
  * The four gasless journals differ only in their directory, reader, outcome list (which each validator ties the record's
- * `terminal` flag to), signing-owner field, public projection and service.
+ * `terminal` flag to), signing-owner field, public projection, service and rules.
  */
 function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, directory: string, outcomes: () => readonly string[],
   load: (root: string, profileHash: string, operationId: string) => Promise<R | null>,
   domains: (record: R) => readonly MoneyConflictDomain[], ownerPath: readonly string[], view: (record: R) => unknown,
-  commands: GaslessCommands): OperationFamilyAdapter<R> {
+  commands: GaslessCommands, rules: GaslessRules<R>): OperationFamilyAdapter<R> {
   const store: OperationStore = { directory, perProfile: true };
   return {
     family,
@@ -59,8 +71,13 @@ function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, direct
     },
     identity: standardIdentity,
     claims: record => readableClaims(() => domainClaims(domains(record))),
-    terminal: record => outcomes().includes(record.state),
+    terminal: record => {
+      if (outcomes().includes(record.state)) return true;
+      const deadline = rules.unsentUntil(record);
+      return deadline !== null && pastUnstartedDeadline(deadline);
+    },
     state: record => record.state,
+    ...(rules.admits === undefined ? {} : { admits: rules.admits }),
     salvage: raw => salvageRecord(raw, value => [salvageEvm(field(value, "intent", "request", "chainId"), field(value, "intent", ...ownerPath))]),
     view: async record => view(record),
     status: async (context, record) => operationOutcome(await commands.status(context, record.operationId)),
@@ -83,6 +100,38 @@ export const smartAccountGaslessDomains = (record: SmartAccountGaslessOperationR
 export const facilitatorGaslessDomains = (record: FacilitatorOperationRecord): readonly MoneyConflictDomain[] =>
   [evmConflictDomain(record.intent.request.chainId, record.intent.owner.address)];
 
+/** Local: the bootstrap disclosure is the first step that leaves APN; an expired undisclosed one is closed as no effect. */
+const LOCAL_UNSENT: readonly string[] = ["awaiting_approval", "execution_pending", "bootstrap_pending"];
+const localUnsentUntil = (record: GaslessOperationRecord) => LOCAL_UNSENT.includes(record.state) && record.settlement === null &&
+  [record.bootstrap, record.userOperation].every(effect => effect.disclosureAttempts === 0 && effect.submissionAttempts === 0)
+  ? record.intent.expiresAt : null;
+/** MetaMask: the dispatch marker is written only with time left before `expiresAt`, and its delegation is signed at dispatch. */
+const MM_UNSENT: readonly string[] = ["awaiting_approval", "execution_pending"];
+/**
+ * A MetaMask dispatch that is over with only its outcome unknown: no APN process approves or sends it again (its
+ * recovery only observes), and its effect is a one-use delegation with its own salt, redeemed by MetaMask's relayer
+ * without an account nonce of the server wallet. Only another MetaMask gasless transfer of the account proceeds beside it.
+ */
+const MM_DISPATCHED: readonly string[] = ["submitted_pending", "unknown_finality", "failed_effects_pending"];
+/**
+ * The owner's disable of one delegation is the server wallet's own transaction. A MetaMask gasless transfer sends none
+ * from that wallet (MetaMask's relayer does), so a disable proceeds beside any of them, in every state.
+ */
+function metaMaskGaslessAdmits(record: MetaMaskGaslessOperationRecord, wanted: WantedClaims, held: OperationClaim): boolean {
+  if (held.key !== conflictDomainKey(metaMaskGaslessDomains(record)[0]!)) return false;
+  return wanted.tag?.kind === "metamask_gasless_revoke" || wanted.tag?.kind === "metamask_gasless_beside_dispatched" &&
+    record.submissionAttempts === 1 && MM_DISPATCHED.includes(record.state);
+}
+/** Smart Account: the exposure marker is the boundary, and the child delegation itself expires on chain at `expiresAt`. */
+const SA_UNSENT: readonly string[] = ["awaiting_approval", "execution_pending", "material_pending", "material_sealed"];
+/**
+ * Facilitator: the verify marker is the boundary. Awaiting approval is refused past `expiresAt`; an approved one carries
+ * its authorization, which can never be used past `validBefore` (it leaves APN only well before it).
+ */
+const facilitatorUnsentUntil = (record: FacilitatorOperationRecord) => record.state === "awaiting_approval" ? record.intent.expiresAt
+  : record.state === "approved" && record.signed !== null
+    ? Math.max(Date.parse(record.intent.expiresAt), Number(record.signed.authorization.validBefore) * 1000) : null;
+
 export const gaslessTransferAdapter = gaslessAdapter<GaslessOperationRecord>("gasless_transfer", "gasless-operations", () => GASLESS_TERMINAL,
   async (root, profileHash, id) => await new GaslessOperationRepository(root).loadOperation(profileHash, id),
   gaslessDomains, ["owner", "address"], publicGaslessOperation, {
@@ -91,7 +140,7 @@ export const gaslessTransferAdapter = gaslessAdapter<GaslessOperationRecord>("ga
     resume: async (context, id, observationRpcEnv) => await new GaslessService(context).resume(id, observationRpcEnv),
     receipt: async (context, id) => await new GaslessService(context).receipt(id),
     abandon: async (context, id) => await abandonLocalGasless({ context, operations: operations(context), gasless: new GaslessService(context) }, id),
-  });
+  }, { unsentUntil: localUnsentUntil });
 export const metaMaskGaslessAdapter = gaslessAdapter<MetaMaskGaslessOperationRecord>("metamask_gasless_transfer", "metamask-gasless-operations",
   () => MM_TERMINAL,
   async (root, profileHash, id) => await new MetaMaskGaslessOperationRepository(root).loadOperation(profileHash, id),
@@ -104,6 +153,9 @@ export const metaMaskGaslessAdapter = gaslessAdapter<MetaMaskGaslessOperationRec
     receipt: async (context, id) => await new MetaMaskGaslessService(context).receipt(id),
     abandon: async (context, id) => await abandonMetaMaskGasless({ context, operations: operations(context),
       metaMaskGasless: new MetaMaskGaslessService(context) }, id),
+  }, {
+    unsentUntil: record => MM_UNSENT.includes(record.state) && record.submissionAttempts === 0 ? record.intent.expiresAt : null,
+    admits: metaMaskGaslessAdmits,
   });
 export const smartAccountGaslessAdapter = gaslessAdapter<SmartAccountGaslessOperationRecord>("smart_account_gasless_transfer",
   "smart-account-gasless-operations", () => SA_TERMINAL,
@@ -114,7 +166,7 @@ export const smartAccountGaslessAdapter = gaslessAdapter<SmartAccountGaslessOper
     resume: async (context, id, observationRpcEnv) => await new SmartAccountGaslessService(context).resume(id, observationRpcEnv),
     receipt: async (context, id) => await new SmartAccountGaslessService(context).receipt(id),
     abandon: async (context, id) => await abandonSmartAccountGasless(context, operations(context), id),
-  });
+  }, { unsentUntil: record => SA_UNSENT.includes(record.state) && record.exposureAttempts === 0 ? record.intent.expiresAt : null });
 export const facilitatorGaslessAdapter = gaslessAdapter<FacilitatorOperationRecord>("facilitator_gasless_transfer",
   "facilitator-gasless-operations", () => FACILITATOR_TERMINAL,
   async (root, profileHash, id) => await new FacilitatorGaslessOperationRepository(root).loadOperation(profileHash, id),
@@ -125,4 +177,4 @@ export const facilitatorGaslessAdapter = gaslessAdapter<FacilitatorOperationReco
     receipt: async (context, id) => await new FacilitatorGaslessService(context).receipt(id),
     abandon: async (context, id) => await abandonFacilitatorGasless({ context, operations: operations(context),
       facilitatorGasless: new FacilitatorGaslessService(context) }, id),
-  });
+  }, { unsentUntil: facilitatorUnsentUntil });

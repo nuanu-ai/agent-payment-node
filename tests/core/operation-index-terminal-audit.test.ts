@@ -18,6 +18,7 @@ import { METAMASK_NATIVE_RESOLVED_STATES, METAMASK_NATIVE_STATES } from "../../s
 import { DIRECT_OPERATION_STATES, LOCAL_DIRECT_TERMINAL_STATES, PROVIDER_DIRECT_TERMINAL_STATES } from "../../src/model.js";
 import { operationRegistry } from "../../src/operation-index/registry.js";
 import type { OperationFamily } from "../../src/operation-index/types.js";
+import { UNSTARTED_DEADLINE_MARGIN_MS } from "../../src/unstarted-deadline.js";
 import { PROVIDER_X402_STATES, PROVIDER_X402_TERMINAL_STATES } from "../../src/provider-x402-model.js";
 import { RAIL_STATES, RAIL_TERMINAL_STATES } from "../../src/rail-operation-model.js";
 import { ARBITRUM_EFFECT_PHASES } from "../../src/relay/arbitrum-source-effect-journal.js";
@@ -57,6 +58,14 @@ const byState = (label: string, states: readonly string[], terminal: readonly st
   ({ label, states, terminal: listed(terminal), record: state => ({ state, ...extra }) });
 const byPhase = (label: string, states: readonly string[], terminal: (phase: string) => boolean, extra: Record<string, unknown> = {}): Case =>
   ({ label, states, terminal, record: phase => ({ phase, ...extra }) });
+/** The four gasless records with nothing sent yet, at a deadline (ISO time) of choice. */
+const unsentEffect = { disclosureAttempts: 0, submissionAttempts: 0 };
+const GASLESS_UNSENT = (expiresAt: string) => ({
+  gasless_transfer: { intent: { expiresAt }, settlement: null, bootstrap: unsentEffect, userOperation: unsentEffect },
+  metamask_gasless_transfer: { intent: { expiresAt }, submissionAttempts: 0 },
+  smart_account_gasless_transfer: { intent: { expiresAt }, exposureAttempts: 0 },
+  facilitator_gasless_transfer: { intent: { expiresAt }, signed: { authorization: { validBefore: String(Math.floor(Date.parse(expiresAt) / 1000)) } } },
+}) as const;
 
 const CASES: Readonly<Record<Exclude<OperationFamily, "relay_unsigned">, readonly Case[]>> = {
   direct_transfer: [byState("local", DIRECT_OPERATION_STATES, LOCAL_DIRECT_TERMINAL_STATES),
@@ -66,10 +75,11 @@ const CASES: Readonly<Record<Exclude<OperationFamily, "relay_unsigned">, readonl
   { label: "provider", states: PROVIDER_X402_STATES, terminal: listed(PROVIDER_X402_TERMINAL_STATES), record: state => ({ strategy: "provider_atomic", record: { state } }) }],
   rail_transfer: [byState("rail", RAIL_STATES, RAIL_TERMINAL_STATES)],
   bridge_route: [byState("bridge", bridgeStates.options, BRIDGE_TERMINAL)],
-  gasless_transfer: [byState("gasless", gaslessStates.options, GASLESS_TERMINAL)],
-  metamask_gasless_transfer: [byState("metamask gasless", MM_STATES, MM_TERMINAL)],
-  smart_account_gasless_transfer: [byState("smart account", SA_STATES, SA_TERMINAL)],
-  facilitator_gasless_transfer: [byState("facilitator", FACILITATOR_STATES, FACILITATOR_TERMINAL)],
+  gasless_transfer: [byState("gasless", gaslessStates.options, GASLESS_TERMINAL, GASLESS_UNSENT(FUTURE).gasless_transfer)],
+  metamask_gasless_transfer: [byState("metamask gasless", MM_STATES, MM_TERMINAL, GASLESS_UNSENT(FUTURE).metamask_gasless_transfer)],
+  smart_account_gasless_transfer: [byState("smart account", SA_STATES, SA_TERMINAL, GASLESS_UNSENT(FUTURE).smart_account_gasless_transfer)],
+  facilitator_gasless_transfer: [byState("facilitator", FACILITATOR_STATES, FACILITATOR_TERMINAL,
+    GASLESS_UNSENT(FUTURE).facilitator_gasless_transfer)],
   circle_route: [byState("v1", CIRCLE_V1_STATES, CIRCLE_V1_TERMINAL_STATES, { schemaVersion: "apn.circle-v2-evm-operation.v1" }),
     byState("v2", CIRCLE_V2_STATES, CIRCLE_V2_TERMINAL_STATES, { schemaVersion: "apn.circle-v2-evm-operation.v2" })],
   merchant_x402: [byState("merchant", MERCHANT_PHASES, MERCHANT_TERMINAL_PHASES, { expiresAt: FUTURE })],
@@ -107,6 +117,41 @@ test("every adapter is terminal exactly in its family's own terminal states", as
       }
     }
   }
+});
+
+test("a gasless record whose effect never left APN stops holding its account once its deadline and the margin passed", async () => {
+  const registry = operationRegistry(), past = new Date(Date.now() - UNSTARTED_DEADLINE_MARGIN_MS - 1_000).toISOString();
+  const recent = new Date(Date.now() - UNSTARTED_DEADLINE_MARGIN_MS + 60_000).toISOString();
+  // The states before each family's own send marker; every later state needs a proof or the owner's abandon as before.
+  const unsent: Readonly<Record<keyof ReturnType<typeof GASLESS_UNSENT>, readonly string[]>> = {
+    gasless_transfer: ["awaiting_approval", "execution_pending", "bootstrap_pending"],
+    metamask_gasless_transfer: ["awaiting_approval", "execution_pending"],
+    smart_account_gasless_transfer: ["awaiting_approval", "execution_pending", "material_pending", "material_sealed"],
+    facilitator_gasless_transfer: ["awaiting_approval", "approved"],
+  };
+  const states = { gasless_transfer: gaslessStates.options, metamask_gasless_transfer: MM_STATES, smart_account_gasless_transfer: SA_STATES,
+    facilitator_gasless_transfer: FACILITATOR_STATES } as const;
+  const outcomes = { gasless_transfer: GASLESS_TERMINAL, metamask_gasless_transfer: MM_TERMINAL, smart_account_gasless_transfer: SA_TERMINAL,
+    facilitator_gasless_transfer: FACILITATOR_TERMINAL } as const;
+  for (const family of Object.keys(unsent) as (keyof typeof unsent)[]) {
+    const adapter = registry.get(family)!;
+    for (const state of states[family]) {
+      const record = (at: string, extra: Record<string, unknown> = {}) => ({ state, ...GASLESS_UNSENT(at)[family], ...extra }) as never;
+      const outcome = (outcomes[family] as readonly string[]).includes(state);
+      assert.equal(await adapter.terminal(record(past), "/unused"), outcome || unsent[family].includes(state), `${family} ${state} past`);
+      assert.equal(await adapter.terminal(record(recent), "/unused"), outcome, `${family} ${state} within the margin`);
+    }
+  }
+  // A send marker keeps it open past every deadline.
+  const sent = (family: keyof typeof unsent, state: string, extra: Record<string, unknown>) =>
+    registry.get(family)!.terminal({ state, ...GASLESS_UNSENT(past)[family], ...extra } as never, "/unused");
+  assert.equal(await sent("metamask_gasless_transfer", "execution_pending", { submissionAttempts: 1 }), false);
+  assert.equal(await sent("smart_account_gasless_transfer", "material_sealed", { exposureAttempts: 1 }), false);
+  assert.equal(await sent("gasless_transfer", "bootstrap_pending", { bootstrap: { ...unsentEffect, disclosureAttempts: 1 } }), false);
+  assert.equal(await sent("gasless_transfer", "execution_pending", { settlement: {} }), false);
+  // An approved facilitator authorization holds until its own validity has passed too.
+  const later = String(Math.floor(Date.now() / 1000) + 3_600);
+  assert.equal(await sent("facilitator_gasless_transfer", "approved", { signed: { authorization: { validBefore: later } } }), false);
 });
 
 test("a frozen legacy bridge journal holds its account but not its profile; a current one holds both", () => {

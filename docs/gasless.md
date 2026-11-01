@@ -37,6 +37,12 @@ neither keyless sponsor accepts EIP-7702 there.
   inputs under the same key are refused.
 - An approval never sends the same operation twice. A recorded signing, disclosure or send attempt is never repeated by
   approval replay, `operation resume` or any later command.
+- An operation from which nothing has left APN stops holding its address and profile ten minutes after its deadline,
+  because APN refuses that first step after the deadline: the approval deadline, and for an approved Avalanche
+  authorization also its `validBefore`. That covers an unapproved operation, an approval that stopped before its
+  dispatch, disclosure or exposure marker, and for the Local wallet a signature that was never disclosed. Its own
+  `approve` or `resume` still records it `failed_before_effect`. An operation whose signed effect may have left APN keeps
+  its hold until a proof or the owner's abandonment.
 - A saved operation is checked on every read only against its own fields and hashes. A later APN release that changes a
   protocol pin (for example after a Circle USDC or paymaster upgrade), an asset row or the gas-offer calibration never
   stops `status`, `resume`, `abandon` or another family's commands. Before any new signature, disclosure or send, the
@@ -689,6 +695,20 @@ address on that chain: once the account carries the pinned designation, an earli
 so the account is held, not just the profile. Public output contains hashed provider identities and accounting, never
 the private request UUID, session token, unsigned wire or provider response.
 
+One exception: an earlier MetaMask Agent gasless transfer of the same server wallet and chain whose dispatch is over and
+whose outcome alone is unknown (`submitted_pending`, `unknown_finality` or `failed_effects_pending`) does not block a new
+MetaMask Agent gasless transfer, in any profile bound to that wallet. Its delegation is single-use with its own salt,
+MetaMask's relayer redeems it without an account nonce of the server wallet, and APN only observes it from then on. An
+earlier transfer awaiting approval, approved but not dispatched, or dispatched with no recorded POST outcome
+(`dispatch_pending`) still blocks, and so does every unresolved operation of another kind on the account (direct, x402,
+MetaMask native and the rest), as does the profile for wallet lifecycle changes. Each new delegation must differ from
+every delegation those earlier transfers hold (`mm_gasless_delegation_reused` otherwise, before anything is signed), so
+their proofs never mix. The approval screen lists each earlier transfer (`Earlier unresolved transfer: operation <id>;
+state <state>; recipient <address>; dispatched gross <amount>`) and one line that each may still complete beside this
+one. The prepare and approve output carries the same list as `unresolved_beside`: `operations` with each one's
+`operation_id`, `state`, `recipient` and `dispatched_gross_atomic` (the gross of the batch it dispatched, not a proved
+debit), and that `warning`. An approval reads the list before its screen and does not read it again after the dispatch.
+
 ### Submit diagnostic (`submit_diagnostic`)
 
 A dispatch that ends `unknown_finality` with `mm_gasless_submit_unknown` stays unknown: APN cannot prove the relay
@@ -767,7 +787,10 @@ warning instead of being saved.
 A MetaMask Agent transfer whose outcome is still unknown after its approval window can be released with
 `apn operation abandon --operation <operation-id>` after the exact acknowledgement. APN records `abandoned_unknown`;
 MetaMask may still relay the transfer later, because its delegation has no on-chain expiry. The confirmation screen
-shows the gross of the batch actually dispatched; for a fixed-net transfer it also shows the approved ceiling.
+shows the gross of the batch actually dispatched; for a fixed-net transfer it also shows the approved ceiling. A new
+MetaMask Agent gasless transfer from the same wallet and chain, or a `gasless transfer revoke` of another of its
+delegations, does not need this release (see [Dispatch and the permission it leaves](#dispatch-and-the-permission-it-leaves));
+wallet lifecycle changes and other kinds of payment on the account still do.
 
 Abandonment is an acknowledgement, not an outcome. `apn operation resume` still observes an abandoned dispatch (the
 provider status of the original request, then the chain), and a proof replaces it: the redemption (`completed`, with
@@ -784,6 +807,11 @@ delegation may still be redeemed and only a proof ends that. Your exit is to dis
 apn gasless transfer revoke --operation <operation-id>
 apn operation resume --operation <operation-id>
 ```
+
+`revoke` is refused while an unresolved operation of another kind holds the server wallet on that chain (a MetaMask
+native transfer, for example), checked before any read and again right before the send: the disable is the server
+wallet's own transaction on its account nonce. The wallet's other MetaMask Agent gasless transfers never block it, in any
+state, because they send nothing from that wallet themselves.
 
 `revoke` reads, at the finality block pinned by hash, that the delegation is neither redeemed nor disabled, and that the
 pinned DelegationManager hashes the call's delegation tuple (`getDelegationHash`) to the operation's delegation hash.
@@ -881,6 +909,7 @@ it. `apn operation status` and `apn operation resume` read the saved journal wit
 | `mm_gasless_provider_mfa_rejected`, `mm_gasless_provider_failed` | MetaMask | The provider closed the request; still guarded until proof. Consider `revoke`. |
 | `mm_gasless_rpc_log_range`, `mm_gasless_rpc_rate_limited`, `mm_gasless_rpc_unavailable` | MetaMask | The RPC refused or failed during recovery; resume continues from the proved cursor. |
 | `mm_gasless_delegation_disabled` | MetaMask | The delegation was disabled before any redemption; `revoked_unused`, holds released. |
+| `mm_gasless_delegation_reused` | MetaMask | A new delegation repeated one an earlier unresolved transfer holds; nothing was signed or sent. Prepare again. |
 | `mm_gasless_record_capacity` | MetaMask | History is full except the terminal slot; observations are reported, not saved. |
 | `APN_INSUFFICIENT_GAS` | MetaMask `revoke` | Send the stated native amount to the server wallet, then retry `revoke`. |
 

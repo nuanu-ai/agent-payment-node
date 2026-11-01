@@ -12,8 +12,10 @@ export declare class MetaMaskGaslessExecution {
     private readonly clock;
     private readonly observation;
     constructor(state: StateStore, rpcFor: MetaMaskGaslessRpcFactory, provider: MetaMaskGaslessProviderPort, clock: ClockPort, save: MetaMaskGaslessSave, wait: WaitPort);
-    approve(op: MetaMaskGaslessOperationRecord, approval: MetaMaskGaslessApprovalPort): Promise<MetaMaskGaslessStep>;
-    run(op: MetaMaskGaslessOperationRecord): Promise<MetaMaskGaslessStep>;
+    /** `siblings` are the account's earlier unresolved transfers, collected by the caller before this approval screen. */
+    approve(op: MetaMaskGaslessOperationRecord, approval: MetaMaskGaslessApprovalPort, siblings: readonly MetaMaskGaslessOperationRecord[]): Promise<MetaMaskGaslessStep>;
+    /** `siblings` as for `approve`; they are only compared, so a dispatched operation that only observes needs none. */
+    run(op: MetaMaskGaslessOperationRecord, siblings: readonly MetaMaskGaslessOperationRecord[]): Promise<MetaMaskGaslessStep>;
     /**
      * Every check between the owner's approval and the dispatch marker, re-taken now. The prepared snapshot is
      * identity and designation evidence; the dispatch clock runs on the read taken here. The owner approved a

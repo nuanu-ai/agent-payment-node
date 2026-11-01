@@ -3,13 +3,16 @@ import { approvalCode } from "../approval-code.js";
 import { publicMetaMaskGaslessOperation } from "./journal/receipt.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
 import { mmRegistry } from "./registry.js";
+import { mmSiblingsOutput } from "./siblings.js";
 import { mmFormat } from "./validation.js";
 
 export function metaMaskGaslessApprovalPhrase(op: MetaMaskGaslessOperationRecord): string {
   return approvalCode("gasless", op.operationId, op.fingerprint);
 }
-export function metaMaskGaslessApprovalSummary(op: MetaMaskGaslessOperationRecord, now: number): Readonly<Record<string, unknown>> {
-  return { ...publicMetaMaskGaslessOperation(op), network: mmRegistry(op.intent.request.chainId).row.network,
+/** `siblings`: the account's earlier unresolved MetaMask gasless transfers this one proceeds beside, shown before consent. */
+export function metaMaskGaslessApprovalSummary(op: MetaMaskGaslessOperationRecord, now: number,
+  siblings: readonly MetaMaskGaslessOperationRecord[]): Readonly<Record<string, unknown>> {
+  return { ...publicMetaMaskGaslessOperation(op), ...mmSiblingsOutput(siblings), network: mmRegistry(op.intent.request.chainId).row.network,
     ...(op.intent.request.fixedNet ? { requested_fixed_net_usdc: mmFormat(op.intent.request.fixedNet.netAtomic),
       maximum_gross_usdc: mmFormat(op.intent.request.fixedNet.maxGrossAtomic) } : {}),
     gross_usdc: mmFormat(mmActualGross(op.intent.quote)), recipient_usdc: mmFormat(op.intent.quote.netAtomic),

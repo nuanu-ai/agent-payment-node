@@ -7,11 +7,11 @@ import { metaMaskGaslessApprovalPhrase, metaMaskGaslessApprovalSummary } from ".
 import { TtyMetaMaskGaslessApproval } from "../../src/metamask-gasless/tty.js";
 import { makeOperation } from "./metamask-gasless-journal-fixtures/factory.js";
 
-function approvalInput() {
+function approvalInput(siblings: readonly ReturnType<typeof makeOperation>[] = []) {
   const op = makeOperation("mm-tty", "mm-tty-1");
   return { operationId: op.operationId, fingerprint: op.fingerprint,
     exactPhrase: metaMaskGaslessApprovalPhrase(op),
-    summary: { ...metaMaskGaslessApprovalSummary(op, Date.parse(op.intent.preparedAt)),
+    summary: { ...metaMaskGaslessApprovalSummary(op, Date.parse(op.intent.preparedAt), siblings),
       expires_at: new Date(Date.now() + 60_000).toISOString() } };
 }
 
@@ -27,6 +27,22 @@ test("MetaMask approval displays exact debit, fee, permission and the six-charac
     "Type " + input.exactPhrase + " and press Enter to confirm."]) assert.ok(tty.output().includes(text), text);
   assert.equal(tty.output().includes("12345678-1234-4234-8234-123456789abc"), false);
   assert.equal(tty.closes(), 1);
+});
+
+test("MetaMask approval lists each earlier unresolved transfer of the account with what it dispatched, once warned", async () => {
+  const sibling = makeOperation("mm-tty", "mm-tty-earlier"), input = approvalInput([sibling]), tty = terminal(`${input.exactPhrase}\n`);
+  assert.equal(await new TtyMetaMaskGaslessApproval({ openTerminal: async () => tty.port, isTerminal: () => true }).confirm(input), true);
+  const lines = tty.output().split("\n");
+  const listed = `Earlier unresolved transfer: operation ${sibling.operationId}; state awaiting_approval; ` +
+    `recipient ${sibling.intent.request.recipient}; dispatched gross 10 USDC (10000000 atomic)`;
+  const at = lines.indexOf(listed);
+  assert.ok(at > 0, tty.output());
+  assert.equal(lines[at + 1], "Each earlier MetaMask gasless transfer listed here, from the same server wallet on this chain, has no proved " +
+    "outcome yet and may still complete beside this one.");
+  assert.equal(lines.filter(line => line.startsWith("Earlier unresolved transfer:")).length, 1);
+  const plain = terminal(`${approvalInput().exactPhrase}\n`);
+  assert.equal(await new TtyMetaMaskGaslessApproval({ openTerminal: async () => plain.port, isTerminal: () => true }).confirm(approvalInput()), true);
+  assert.equal(plain.output().includes("Earlier unresolved transfer"), false);
 });
 
 test("MetaMask approval refuses missing identity, altered fingerprint, trailing space and over-bound input", async () => {

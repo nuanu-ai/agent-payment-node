@@ -2,6 +2,12 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.84 — 2026-11-01
+
+- MetaMask gasless: a transfer whose outcome is unknown no longer blocks new MetaMask gasless transfers from the same server wallet. The new transfer's approval screen and result list each earlier unresolved transfer (recipient and dispatched gross) and warn that it may still complete. Transfers that APN may still be sending, other rails and nonce-using operations keep blocking as before.
+- MetaMask gasless revoke is admitted beside unresolved MetaMask gasless transfers of the same wallet; a new delegation that repeats an unresolved one's hash is refused (`mm_gasless_delegation_reused`).
+- Gasless transfers (MetaMask, local, Smart Account, facilitator) that expired before anything was sent stop holding the account.
+
 ## 0.5.83 — 2026-10-31
 
 - MetaMask gasless: before anything is signed, `gasless transfer prepare` and `approve` check that the current MetaMask login's project holds the connected server wallet. If it does not, they refuse with `mm_gasless_project_has_no_wallets` or `mm_gasless_wallet_not_in_project` and say how to sign in with the right account or create a new server wallet, instead of sending a delegation the service rejects.

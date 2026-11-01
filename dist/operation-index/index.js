@@ -72,6 +72,21 @@ export class OperationIndex {
     async assertAvailable(wanted) {
         await this.repairing(async () => { await this.reconciler.reconcile(); await this.check(wanted); });
     }
+    /** The unresolved operations holding one of `wanted.claims` that their family admits beside it; a blocker is skipped, not thrown. */
+    async admittedBeside(wanted) {
+        return await this.repairing(async () => {
+            await this.reconciler.reconcile();
+            const beside = [];
+            for (const entry of await this.openEntries()) {
+                if (entry.operationId === wanted.except || collidingClaims(entry.claims, wanted.claims).length === 0)
+                    continue;
+                const verdict = await this.inspect(entry, wanted);
+                if (verdict !== null && !(verdict instanceof ApnError))
+                    beside.push(verdict);
+            }
+            return beside.sort((left, right) => left.operationId < right.operationId ? -1 : 1);
+        });
+    }
     /**
      * Admits a new operation: replay and conflict checks, then the claim is written (as `admitted`) before `work` runs
      * the family's prepare body. On success the entry follows the record; when `work` throws and wrote no record, the
@@ -236,9 +251,9 @@ export class OperationIndex {
             .sort((left, right) => order.indexOf(left.family) - order.indexOf(right.family) || (left.operationId < right.operationId ? -1 : 1));
         const clear = new Set();
         for (const entry of colliding) {
-            const blocked = await this.inspect(entry, all);
-            if (blocked !== null)
-                throw blocked;
+            const verdict = await this.inspect(entry, all);
+            if (verdict instanceof ApnError)
+                throw verdict;
             clear.add(entry.operationId);
         }
         // Amortized collection: a few other open entries are verified per check, so open/ stays small without settle().
@@ -277,7 +292,8 @@ export class OperationIndex {
     }
     /**
      * Verifies one open entry against its record and keeps the index in step with it. With `wanted`, returns the
-     * APN_OPERATION_BLOCKED error when it still blocks that admission; without, it only collects.
+     * APN_OPERATION_BLOCKED error when it still blocks that admission, or the entry when its family admits that admission
+     * beside its colliding claims; without, it only collects.
      */
     async inspect(entry, wanted) {
         // One ID in two stores is decided by the names walk alone; no single record can clear it.
@@ -314,8 +330,11 @@ export class OperationIndex {
             return null;
         if (derived.state === "unreadable")
             return blockedBy(entry, null, collidingClaims(derived.claims, wanted.claims));
-        const blocking = collidingClaims(next.claims, wanted.claims).filter(claim => adapter.admits?.(record, wanted, claim) !== true);
-        return blocking.length === 0 ? null : blockedBy(entry, adapter.state(record), blocking);
+        const colliding = collidingClaims(next.claims, wanted.claims);
+        const blocking = colliding.filter(claim => adapter.admits?.(record, wanted, claim) !== true);
+        if (blocking.length > 0)
+            return blockedBy(entry, adapter.state(record), blocking);
+        return colliding.length === 0 ? null : { operationId: entry.operationId, family: entry.family, state: adapter.state(record), record };
     }
     /** After `work`: the admitted entry becomes the entry its record yields, keeping the admitted claims while unresolved. */
     async follow(operationId) {

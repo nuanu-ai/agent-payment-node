@@ -2,6 +2,7 @@ import { ApnError } from "../errors.js";
 import { exactChainConsent, type TtyTransferApprovalOptions } from "../tty-approval.js";
 import type { MetaMaskGaslessPublicOperation } from "./operation-model.js";
 import type { MetaMaskGaslessApprovalPort } from "./ports.js";
+import type { MetaMaskGaslessSiblingsOutput } from "./siblings.js";
 import { mmError } from "./reasons.js";
 import { mmFormat } from "./validation.js";
 
@@ -10,6 +11,10 @@ export class TtyMetaMaskGaslessApproval implements MetaMaskGaslessApprovalPort {
   async confirm(input: Parameters<MetaMaskGaslessApprovalPort["confirm"]>[0]): Promise<boolean> {
     const s = input.summary as unknown as MetaMaskGaslessPublicOperation, t = s.transfer;
     const usdc = (amount: string) => `${mmFormat(amount)} USDC (${amount} atomic)`;
+    const beside = (input.summary as MetaMaskGaslessSiblingsOutput).unresolved_beside;
+    const siblings = beside === undefined ? [] : [...beside.operations.map(other => `Earlier unresolved transfer: operation ` +
+      `${other.operation_id}; state ${other.state}; recipient ${other.recipient}; dispatched gross ${usdc(other.dispatched_gross_atomic)}`),
+    beside.warning];
     const lines = ["Agent Payment Node — MetaMask gasless USDC approval",
       `Profile: ${s.profile}; provider: metamask-agent-wallet; custody: provider-managed server wallet`,
       `Chain: eip155:${t.chain_id}; network: ${String(input.summary.network)}`,
@@ -21,7 +26,7 @@ export class TtyMetaMaskGaslessApproval implements MetaMaskGaslessApprovalPort {
         "Displayed debit and fee are estimates; confirmation permits repricing within both ceilings." ]),
       `${t.requested_fixed_net_atomic === undefined ? "Total sender debit" : "Estimated sender debit"}: ${usdc(t.gross_atomic)}`,
       `Recipient receives: ${usdc(t.frozen_net_atomic)}`, `${t.requested_fixed_net_atomic === undefined ? "Exact fee" : "Estimated fee"}: ${usdc(t.frozen_fee_atomic)}`,
-      `Your fee ceiling: ${usdc(t.user_max_fee_atomic)}`, `Your minimum receipt: ${usdc(t.minimum_received_atomic)}`,
+      `Your fee ceiling: ${usdc(t.user_max_fee_atomic)}`, `Your minimum receipt: ${usdc(t.minimum_received_atomic)}`, ...siblings,
       String(input.summary.authorization), String(input.summary.outer_gas_payer),
       String(input.summary.persistent_effects), String(input.summary.permission_warning),
       `Current designation: ${s.permission.initial_designation}`, `Delegation hash: ${s.permission.delegation_hash}`,
