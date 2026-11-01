@@ -45,6 +45,9 @@ export class FacilitatorExecution {
         catch (error) {
             return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_guard") });
         }
+        // A guard that outlived the deadline never signs: the operation index releases an unapproved one after it.
+        if (this.expired(op))
+            return await this.save(op, { state: "failed_before_effect", failure: "facilitator_gasless_expired" });
         const authorization = newFacilitatorAuthorization(op.intent.owner.address.toLowerCase(), op.intent.requirement, this.now());
         const signed = { authorization, digest: facilitatorAuthorizationDigest(authorization), startBlock, signatureHash: null };
         op = await this.save(op, { state: "approved", signed, failure: null, approval: { policy: FACILITATOR_POLICY,

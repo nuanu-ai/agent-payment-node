@@ -59,12 +59,24 @@ export interface PrepareIdentity {
 
 /**
  * Family coexistence the generic rule cannot express, evaluated on the blocker's loaded record by `adapter.admits`:
- * R8 native Arbitrum beside a Circle source whose burn is final (for this exact account), and another Circle route
- * queueing a source nonce after the blocker's canonical burn.
+ * R8 native Arbitrum beside a Circle source whose burn is final (for this exact account), another Circle route
+ * queueing a source nonce after the blocker's canonical burn, a MetaMask gasless transfer beside one of the same
+ * account whose dispatch is over and only its outcome is unknown, and the owner's disable of one MetaMask gasless
+ * delegation beside the account's other MetaMask gasless transfers.
  */
 export type WantedTag =
   | { readonly kind: "native_beside_settled_circle"; readonly account: string }
-  | { readonly kind: "circle_source_after_burn" };
+  | { readonly kind: "circle_source_after_burn" }
+  | { readonly kind: "metamask_gasless_beside_dispatched" }
+  | { readonly kind: "metamask_gasless_revoke" };
+
+/** An unresolved operation that holds a wanted claim but whose family admits the admission beside it, with its record. */
+export interface OperationBeside {
+  readonly operationId: string;
+  readonly family: OperationFamily;
+  readonly state: string;
+  readonly record: unknown;
+}
 
 export interface WantedClaims {
   /** The admitting family; null when the caller does not state it, which then wants every family quarantine. */

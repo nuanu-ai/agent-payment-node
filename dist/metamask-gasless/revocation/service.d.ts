@@ -12,5 +12,7 @@ export interface MetaMaskRevocationDependencies {
  * delegation, signed and paid by its own server wallet after foreground consent. It records nothing in the operation:
  * the chain is the record, and `operation resume` closes the operation only from the manager's disabled flag with the
  * redemption count 0 at one finality block. Repeating it can never move USDC; the pinned nonce lets one call land.
+ * `assertAvailable` refuses while an operation that may use the server wallet's own account is unresolved; it runs under
+ * the account's evm-owner lock, before pricing and again with the send.
  */
-export declare function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGaslessOperationRecord, rpcFor: MetaMaskGaslessRpcFactory, dependencies: MetaMaskRevocationDependencies): Promise<Readonly<Record<string, unknown>>>;
+export declare function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGaslessOperationRecord, rpcFor: MetaMaskGaslessRpcFactory, dependencies: MetaMaskRevocationDependencies, assertAvailable: () => Promise<void>): Promise<Readonly<Record<string, unknown>>>;

@@ -26,8 +26,9 @@ import { StateStore, sealWallet } from "../../src/state.js";
 import { GASLESS_TEST_RECIPIENT, GaslessApproval, GaslessWrapping, testWord } from "./gasless-helpers.js";
 import { temporaryState } from "./helpers.js";
 
-const NOW = new Date("2026-09-15T12:00:00.000Z");
-const SECONDS = Math.floor(NOW.getTime() / 1000);
+/** Restarted at the current second by each fixture: the operation index reads an expired unsent record on the wall clock. */
+let NOW = new Date(Math.floor(Date.now() / 1000) * 1000), SECONDS = Math.floor(NOW.getTime() / 1000);
+function restartClock(): void { NOW = new Date(Math.floor(Date.now() / 1000) * 1000); SECONDS = Math.floor(NOW.getTime() / 1000); }
 const TX = testWord("avalanche-settlement");
 const RPC_URL = "https://api.avax.network/ext/bc/C/rpc";
 const block = (number: number, timestamp: number): GaslessBlock =>
@@ -85,6 +86,7 @@ class Facilitator implements FacilitatorPort {
 }
 
 async function fixture(root: string, policy: { readonly active?: boolean; readonly maximum?: string; readonly daily?: string } = {}) {
+  restartClock();
   const key = generatePrivateKey(), account = privateKeyToAccount(key), profile = "avalanche-local", state = new StateStore(root);
   const wrapping = new GaslessWrapping(), wallets = new EncryptedWalletStore(state, wrapping);
   await state.initialize();

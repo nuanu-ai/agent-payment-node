@@ -13,6 +13,7 @@ import { mmRequestHash } from "./operation-model.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import { metaMaskGaslessQuote } from "./quotation.js";
 import { mmRegistry } from "./registry.js";
+import { mmAssertUniqueDelegation } from "./siblings.js";
 import { mmFail } from "./reasons.js";
 import { mmValidateUnsigned } from "./unsigned.js";
 import { mmRequest, mmUuid } from "./validation.js";
@@ -40,13 +41,14 @@ export class MetaMaskGaslessPreparation {
             const owner = await metaMaskGaslessOwner(state, profile);
             clock.check();
             // The server wallet may be bound to several profiles. Its delegation is redeemable by anyone once the account
-            // carries the pinned designation, so an unresolved operation of any of them holds the account on that chain.
+            // carries the pinned designation, so an unresolved operation of any of them holds the account on that chain,
+            // except a MetaMask gasless transfer whose dispatch is over with only its outcome unknown (see the adapter).
             return await state.withLocks([evmAddressLock(owner.address)], async () => {
                 for (const hash of await evmAccountProfileHashes(state, owner.address, profileHash)) {
-                    await this.o.operations.assertEvmAccountAvailable(hash, request.chainId, owner.address);
+                    await this.o.operations.assertMetaMaskGaslessAccountAvailable(hash, request.chainId, owner.address);
                 }
                 // The account claim is written before any provider or RPC read, and dropped if no operation is written.
-                return await this.o.operations.admit({ kind: "metamask_gasless_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(request.chainId, owner.address)] }, async () => {
+                return await this.o.operations.admit({ kind: "metamask_gasless_transfer", profileHash, operationId, idempotencyHash, requestHash }, { domains: () => [evmConflictDomain(request.chainId, owner.address)], tag: { kind: "metamask_gasless_beside_dispatched" } }, async () => {
                     if ([MM_ZERO_ADDRESS, owner.address, row.token, ...Object.values(row.protocol).map(p => p.address)].includes(request.recipient)) {
                         mmFail("mm_gasless_input");
                     }
@@ -64,6 +66,8 @@ export class MetaMaskGaslessPreparation {
                         const unsigned = await this.o.provider.buildUnsigned(unsignedInput);
                         clock.check();
                         const checkedUnsigned = mmValidateUnsigned(unsigned, unsignedInput);
+                        mmAssertUniqueDelegation(checkedUnsigned.delegationHash, await this.o.operations.metaMaskGaslessBeside(profileHash, request.chainId, binding.address, operationId));
+                        clock.check();
                         const snapshot = await rpc.snapshot({ owner: binding.address, delegationHash: checkedUnsigned.delegationHash,
                             grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
                         clock.check(undefined, [snapshot.observedAt]);

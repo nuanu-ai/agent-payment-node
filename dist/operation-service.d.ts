@@ -125,6 +125,18 @@ export declare class OperationService {
     assertEvmAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
     /** R8 (OWNR-16): a native Arbitrum move to a local custody wallet does not wait for this account's Circle routes whose source burn is final. */
     assertEvmNativeAccountAvailableBesideSettledCircle(profileHash: string, account: string): Promise<void>;
+    /**
+     * A MetaMask gasless transfer also proceeds beside the account's MetaMask gasless transfers whose dispatch is over and
+     * only their outcome is unknown; every other unresolved operation of the chain and account still blocks it.
+     */
+    assertMetaMaskGaslessAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
+    /** Those MetaMask gasless transfers of the chain and account, other than the operation itself, that it proceeds beside now. */
+    metaMaskGaslessBeside(profileHash: string, chainId: number | string, account: string, operationId: string): Promise<readonly MetaMaskGaslessOperationRecord[]>;
+    /**
+     * The owner's disable of a MetaMask gasless delegation waits for every unresolved operation of the chain and account
+     * except the account's MetaMask gasless transfers (the adapter's rule) and the operation itself.
+     */
+    assertMetaMaskRevokeAvailable(profileHash: string, chainId: number | string, account: string, operationId: string): Promise<void>;
     /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
     assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void>;
     /** The account check of one saved operation, excluding only that operation's own claim; its owner holds the account locks. */

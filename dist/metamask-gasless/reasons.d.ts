@@ -44,6 +44,8 @@ export declare const MM_REASON_CODES: {
     readonly mm_gasless_owner_abandoned: "APN_OPERATION_BLOCKED";
     /** The delegator disabled the delegation on chain before any redemption: proved, no effect, nothing more can happen. */
     readonly mm_gasless_delegation_disabled: "APN_PROVIDER_EFFECT_UNAVAILABLE";
+    /** A new delegation's hash equals one an unresolved transfer of the account holds; nothing was signed or sent. */
+    readonly mm_gasless_delegation_reused: "APN_PROVIDER_PROTOCOL";
     readonly mm_gasless_state_corrupt: "APN_STATE_CORRUPT";
     readonly mm_gasless_state_security: "APN_STATE_SECURITY";
     readonly mm_gasless_idempotency_conflict: "APN_IDEMPOTENCY_CONFLICT";

@@ -1,3 +1,4 @@
+import { evmAccountProfileHashes } from "../evm-account-aliases.js";
 import { mmObservationRpcEnv } from "./chain/rpc.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
@@ -14,6 +15,7 @@ import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
 import { revokeMetaMaskGasless } from "./revocation/service.js";
+import { mmSiblingsOutput } from "./siblings.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { directEvmNetwork } from "../evm-direct-networks.js";
 import { formatAtomic } from "../money.js";
@@ -85,7 +87,8 @@ export class MetaMaskGaslessService {
         const preparation = new MetaMaskGaslessPreparation({ state: this.context.state, records: this.records,
             operations: this.operations, rpcFor: d.rpcFor, provider: d.provider, clock: this.context.clock, ids: this.context.ids });
         try {
-            return publicMetaMaskGaslessOperation(await preparation.prepare(input));
+            const op = await preparation.prepare(input);
+            return { ...publicMetaMaskGaslessOperation(op), ...mmSiblingsOutput(await this.siblings(op)) };
         }
         catch (error) {
             const guided = await this.sessionGuidance(await mmProjectWalletGuidance(error, input.profile), input.profile);
@@ -128,7 +131,9 @@ export class MetaMaskGaslessService {
                 throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve this MetaMask USDC transfer in a foreground terminal.", {
                     reason: "mm_gasless_approval", nextActions: [`apn gasless transfer approve --operation ${op.operationId}`],
                 });
-            return await this.project(await this.execution().approve(op, approval));
+            // Read and projected once, before the screen and the dispatch: after the POST nothing may fail for this list.
+            const siblings = await this.siblings(op), shown = mmSiblingsOutput(siblings);
+            return { ...await this.project(await this.execution().approve(op, approval, siblings)), ...shown };
         });
     }
     async resume(operationId, observationRpcEnv) {
@@ -138,8 +143,13 @@ export class MetaMaskGaslessService {
             const provable = op.state === "abandoned_unknown" && op.submissionAttempts === 1;
             if ((op.terminal && !provable) || op.state === "awaiting_approval")
                 return liveMetaMaskGaslessOperation(op);
-            if (environmentName === undefined)
-                return await this.project(provable ? await this.observation().run(op) : await this.execution().run(op));
+            if (provable && environmentName === undefined)
+                return await this.project(await this.observation().run(op));
+            if (environmentName === undefined) {
+                // Only an approved transfer not yet dispatched can still dispatch here; a dispatched one only observes.
+                const siblings = op.submissionAttempts === 0 ? await this.siblings(op) : [];
+                return await this.project(await this.execution().run(op, siblings));
+            }
             const factory = this.dependencies().observationRpcFor;
             if (factory === undefined)
                 return mmFail("mm_gasless_rpc_binding");
@@ -148,7 +158,22 @@ export class MetaMaskGaslessService {
     }
     /** The owner's on-chain disable of a disclosed delegation whose outcome is still unproved (no journal write). */
     async revoke(operationId) {
-        return await this.locked(operationId, async (op) => await revokeMetaMaskGasless(this.context.state, op, this.dependencies().rpcFor, this.dependencies().revocation ?? {}));
+        return await this.locked(operationId, async (op) => await revokeMetaMaskGasless(this.context.state, op, this.dependencies().rpcFor, this.dependencies().revocation ?? {}, async () => await this.assertRevokeAvailable(op)));
+    }
+    /**
+     * The disable is the server wallet's own transaction on its account nonce: an unresolved operation of another family
+     * on the chain and account, in any profile bound to it, blocks it; the account's MetaMask gasless transfers never do.
+     * The caller holds the account's evm-owner lock.
+     */
+    async assertRevokeAvailable(op) {
+        const { chainId } = op.intent.request, account = op.intent.binding.address;
+        for (const hash of await evmAccountProfileHashes(this.context.state, account, op.profileHash)) {
+            await this.operations.assertMetaMaskRevokeAvailable(hash, chainId, account, op.operationId);
+        }
+    }
+    /** The account's other MetaMask gasless transfers this one proceeds beside (dispatched, outcome unknown). */
+    async siblings(op) {
+        return await this.operations.metaMaskGaslessBeside(op.profileHash, op.intent.request.chainId, op.intent.binding.address, op.operationId);
     }
     async status(operationId) {
         return await this.locked(operationId, async (op) => liveMetaMaskGaslessOperation(op));

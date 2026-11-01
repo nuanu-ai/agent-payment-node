@@ -4,7 +4,7 @@ import { MerchantRepository } from "./x402-merchant/repository.js";
 import { validateMerchant } from "./x402-merchant/model.js";
 import { Permit2ProductionRepository, validatePermit2ProductionRecord } from "./x402-permit2/production-repository.js";
 import { ApnError } from "./errors.js";
-import { conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys, sharedEvmConflictDomain } from "./operation-conflict-domain.js";
+import { conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys, sharedEvmConflictDomain } from "./operation-conflict-domain.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import { ProviderX402Repository } from "./provider-x402-repository.js";
 import { RelayUnsignedOperationRepository, validateRelayUnsignedOperation } from "./relay-unsigned-operation.js";
@@ -111,6 +111,30 @@ export class OperationService {
     /** R8 (OWNR-16): a native Arbitrum move to a local custody wallet does not wait for this account's Circle routes whose source burn is final. */
     async assertEvmNativeAccountAvailableBesideSettledCircle(profileHash, account) {
         await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], undefined, { kind: "native_beside_settled_circle", account });
+    }
+    /**
+     * A MetaMask gasless transfer also proceeds beside the account's MetaMask gasless transfers whose dispatch is over and
+     * only their outcome is unknown; every other unresolved operation of the chain and account still blocks it.
+     */
+    async assertMetaMaskGaslessAccountAvailable(profileHash, chainId, account) {
+        await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)], undefined, { kind: "metamask_gasless_beside_dispatched" });
+    }
+    /** Those MetaMask gasless transfers of the chain and account, other than the operation itself, that it proceeds beside now. */
+    async metaMaskGaslessBeside(profileHash, chainId, account, operationId) {
+        const beside = await this.index.admittedBeside({ family: null, profileHash, claims: [{ key: conflictDomainKey(evmConflictDomain(chainId, account)) }],
+            tag: { kind: "metamask_gasless_beside_dispatched" }, except: canonicalOperationId(operationId) });
+        return beside.map(({ family, record }) => {
+            if (family !== "metamask_gasless_transfer")
+                throw new ApnError("APN_STATE_CORRUPT", "Only a MetaMask gasless transfer is admitted beside another.");
+            return record;
+        });
+    }
+    /**
+     * The owner's disable of a MetaMask gasless delegation waits for every unresolved operation of the chain and account
+     * except the account's MetaMask gasless transfers (the adapter's rule) and the operation itself.
+     */
+    async assertMetaMaskRevokeAvailable(profileHash, chainId, account, operationId) {
+        await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)], canonicalOperationId(operationId), { kind: "metamask_gasless_revoke" });
     }
     /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
     async assertEvmAccountSharedAvailable(profileHash, chainId, account) {

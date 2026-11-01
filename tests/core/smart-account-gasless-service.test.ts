@@ -24,7 +24,7 @@ import type { SmartAccountGaslessApprovalPort, SmartAccountGaslessMaterialPort,
 import { saError } from "../../src/smart-account-gasless/reasons.js";
 import { SmartAccountGaslessService } from "../../src/smart-account-gasless/service.js";
 import { abandonSmartAccountGasless } from "../../src/operation-abandon-provider.js";
-import { SA_TEST_AT, saTestIntent } from "./smart-account-gasless-fixtures.js";
+import { SA_TEST_AT, saTestIntent, saTestRestart } from "./smart-account-gasless-fixtures.js";
 
 const PROFILE = "sa-synthetic", KEY = "service-fixture", TX = `0x${"6".repeat(64)}` as Hex;
 const when = (seconds: number) => new Date(Date.parse(SA_TEST_AT) + seconds * 1000);
@@ -34,6 +34,7 @@ type Calls = Record<"inspect" | "supported" | "snapshot" | "unspent" | "seal" | 
 
 /** Lifecycle-only fake ports: no real signature, encrypted custody, RPC or provider is represented by these fixtures. */
 async function fixture(root: string, create = true) {
+  if (create) saTestRestart();
   await mkdir(root, { recursive: true, mode: 0o700 });
   const state = new StateStore(root, { lockWaitMs: 1000 }), original = saTestIntent();
   const capability = metamaskSmartAccountX402CapabilitySnapshot(), binding = { ...original.binding, capabilityHash: capabilityHash(capability) };
@@ -343,7 +344,7 @@ async function child(root: string, stage: string, action: "approve" | "resume", 
   return await new Promise((resolve, reject) => {
     const processChild = spawn(process.execPath, [fileURLToPath(import.meta.url)], { env: {
       PATH: process.env.PATH ?? "/usr/bin", APN_SA_TEST_CHILD_STATE: root, APN_SA_TEST_CHILD_STAGE: stage,
-      APN_SA_TEST_CHILD_ACTION: action, APN_SA_TEST_NOW_SECONDS: String(nowSeconds) }, stdio: ["ignore", "pipe", "pipe"] });
+      APN_SA_TEST_CHILD_ACTION: action, APN_SA_TEST_NOW_SECONDS: String(nowSeconds), APN_SA_TEST_AT: SA_TEST_AT }, stdio: ["ignore", "pipe", "pipe"] });
     let output = ""; processChild.stdout.on("data", value => { output += String(value); });
     processChild.stderr.on("data", value => { output += String(value); }); processChild.once("error", reject);
     processChild.once("close", code => resolve({ code, output }));

@@ -135,12 +135,13 @@ export class GaslessTestRpc implements GaslessRpcPort {
       evidenceHash: hashObject(settlement), reason: null };
   }
 }
+/** The clock starts at the current second unless named: the operation index reads an expired unsent record on the wall clock. */
 export async function gaslessFixture(root: string, chainId: GaslessChainId = 8453, options: {
   now?: Date; wrapping?: GaslessWrapping; rpc?: GaslessTestRpc; key?: Hex; initializeWallet?: boolean;
   activatePolicy?: boolean;
   delegation?: "empty" | "expected"; custody?: GaslessCustodyPort; abandonApproval?: OperationAbandonApprovalPort;
 } = {}) {
-  const now = options.now ?? new Date("2026-09-09T00:00:00.000Z"), key = options.key ?? generatePrivateKey();
+  const now = options.now ?? new Date(Math.floor(Date.now() / 1000) * 1000), key = options.key ?? generatePrivateKey();
   const account = privateKeyToAccount(key), profile = "gasless-local", state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS });
   const wrapping = options.wrapping ?? new GaslessWrapping(), wallets = new EncryptedWalletStore(state, wrapping);
   await state.initialize();

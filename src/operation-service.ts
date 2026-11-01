@@ -10,7 +10,7 @@ import { ApnError } from "./errors.js";
 import type { CommandOutcome } from "./commands.js";
 import type { OperationRecord } from "./model.js";
 import type { StateStore } from "./state.js";
-import { conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys,
+import { conflictDomainKey, conflictDomainKeys, evmConflictDomain, railConflictDomain, sharedConflictDomainKeys,
   sharedEvmConflictDomain, type MoneyConflictDomain } from "./operation-conflict-domain.js";
 import { canonicalOperationId } from "./transfer-policy.js";
 import type { X402SettlementWaitProjection, X402OperationRecord } from "./x402-state-integrity.js";
@@ -28,8 +28,8 @@ import { OperationIndex } from "./operation-index/index.js";
 import { relayStatus } from "./operation-index/adapters/relay.js";
 import { permit2Domains } from "./operation-index/adapters/permit2.js";
 import { x402StoredOutcome, x402StoredReceiptOutcome, type X402StoredOperation } from "./operation-index/adapters/x402.js";
-import { profileClaim, providerClaims, UNREADABLE_PROVIDER_CLAIM, unreadableProfileClaim, type OperationClaim, type OperationIndexEntry,
-  type WantedTag } from "./operation-index/types.js";
+import { profileClaim, providerClaims, UNREADABLE_PROVIDER_CLAIM, unreadableProfileClaim, type OperationClaim,
+  type OperationIndexEntry, type WantedTag } from "./operation-index/types.js";
 export type StoredMoneyOperation =
   | { readonly kind: "sei_gaszip"; readonly record: GaszipFundingRecord }
   | { readonly kind: "circle_route"; readonly record: CircleKnownOperation }
@@ -168,6 +168,32 @@ export class OperationService {
   async assertEvmNativeAccountAvailableBesideSettledCircle(profileHash: string, account: string): Promise<void> {
     await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(42161, account)], undefined,
       { kind: "native_beside_settled_circle", account });
+  }
+  /**
+   * A MetaMask gasless transfer also proceeds beside the account's MetaMask gasless transfers whose dispatch is over and
+   * only their outcome is unknown; every other unresolved operation of the chain and account still blocks it.
+   */
+  async assertMetaMaskGaslessAccountAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {
+    await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)], undefined,
+      { kind: "metamask_gasless_beside_dispatched" });
+  }
+  /** Those MetaMask gasless transfers of the chain and account, other than the operation itself, that it proceeds beside now. */
+  async metaMaskGaslessBeside(profileHash: string, chainId: number | string, account: string,
+    operationId: string): Promise<readonly MetaMaskGaslessOperationRecord[]> {
+    const beside = await this.index.admittedBeside({ family: null, profileHash, claims: [{ key: conflictDomainKey(evmConflictDomain(chainId, account)) }],
+      tag: { kind: "metamask_gasless_beside_dispatched" }, except: canonicalOperationId(operationId) });
+    return beside.map(({ family, record }) => {
+      if (family !== "metamask_gasless_transfer") throw new ApnError("APN_STATE_CORRUPT", "Only a MetaMask gasless transfer is admitted beside another.");
+      return record as MetaMaskGaslessOperationRecord;
+    });
+  }
+  /**
+   * The owner's disable of a MetaMask gasless delegation waits for every unresolved operation of the chain and account
+   * except the account's MetaMask gasless transfers (the adapter's rule) and the operation itself.
+   */
+  async assertMetaMaskRevokeAvailable(profileHash: string, chainId: number | string, account: string, operationId: string): Promise<void> {
+    await this.assertConflictDomainsAvailable(profileHash, () => [evmConflictDomain(chainId, account)], canonicalOperationId(operationId),
+      { kind: "metamask_gasless_revoke" });
   }
   /** A local EIP-3009 x402 purchase waits only for exclusive claims on its chain and account, never for another purchase. */
   async assertEvmAccountSharedAvailable(profileHash: string, chainId: number | string, account: string): Promise<void> {

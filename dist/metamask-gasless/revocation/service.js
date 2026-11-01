@@ -1,4 +1,5 @@
 import { ApnError } from "../../errors.js";
+import { evmAddressLock } from "../../evm-address-ownership.js";
 import { mmDispatchIntent } from "../dispatch.js";
 import { metaMaskGaslessOwner } from "../owner.js";
 import { mmDisableCall } from "./call.js";
@@ -11,8 +12,10 @@ const REVOCABLE = ["submitted_pending", "unknown_finality", "failed_effects_pend
  * delegation, signed and paid by its own server wallet after foreground consent. It records nothing in the operation:
  * the chain is the record, and `operation resume` closes the operation only from the manager's disabled flag with the
  * redemption count 0 at one finality block. Repeating it can never move USDC; the pinned nonce lets one call land.
+ * `assertAvailable` refuses while an operation that may use the server wallet's own account is unresolved; it runs under
+ * the account's evm-owner lock, before pricing and again with the send.
  */
-export async function revokeMetaMaskGasless(state, op, rpcFor, dependencies) {
+export async function revokeMetaMaskGasless(state, op, rpcFor, dependencies, assertAvailable) {
     const id = op.operationId, resume = `apn operation resume --operation ${id}`;
     if (!REVOCABLE.includes(op.state) || op.submissionAttempts !== 1) {
         throw new ApnError("APN_OPERATION_BLOCKED", op.state === "dispatch_pending"
@@ -26,6 +29,8 @@ export async function revokeMetaMaskGasless(state, op, rpcFor, dependencies) {
         throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Confirm the delegation disable in a foreground terminal.", { reason: "mm_revoke_approval", nextActions: [`apn gasless transfer revoke --operation ${id}`] });
     }
     await metaMaskGaslessOwner(state, op.intent.profile, op.intent.binding);
+    const owner = evmAddressLock(op.intent.binding.address);
+    await state.withLocks([owner], assertAvailable);
     const dispatched = mmDispatchIntent(op), chainId = dispatched.request.chainId, call = mmDisableCall(dispatched);
     const rpc = rpcFor(chainId);
     if (rpc.chainId !== chainId || rpc.revocation === undefined) {
@@ -43,8 +48,11 @@ export async function revokeMetaMaskGasless(state, op, rpcFor, dependencies) {
     if (!await approval.confirm(summary)) {
         throw new ApnError("APN_OPERATION_BLOCKED", "The delegation disable was not confirmed; nothing was sent.", { reason: "mm_revoke_refused" });
     }
-    const submitted = await state.withLocks(["provider-session:metamask-agent-wallet"], async () => await wallet.send({ chainId,
-        from: call.from, payload: mmRevocationPayload(call, chain), intent: `APN ${id}: disable delegation ${call.delegationHash}` }));
+    const submitted = await state.withLocks([owner, "provider-session:metamask-agent-wallet"], async () => {
+        await assertAvailable();
+        return await wallet.send({ chainId, from: call.from, payload: mmRevocationPayload(call, chain),
+            intent: `APN ${id}: disable delegation ${call.delegationHash}` });
+    });
     return { operation_id: id, chain_id: chainId, kind: "metamask_delegation_disable", delegator: call.from, delegation_manager: call.to,
         delegation_hash: call.delegationHash, call_hash: call.callHash, fingerprint: summary.fingerprint,
         nonce_atomic: chain.nonceAtomic, gas_limit_atomic: chain.gasLimitAtomic, max_fee_per_gas_atomic: chain.maxFeePerGasAtomic,

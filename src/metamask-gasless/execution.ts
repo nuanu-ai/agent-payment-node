@@ -8,6 +8,7 @@ import { mmDispatchIntent } from "./dispatch.js";
 import { mmActualGross, mmPolicyHash, mmRepriceWithinCap } from "./economics.js";
 import { mmAssertSameBinding } from "./identity.js";
 import { assertMetaMaskGaslessDispatchCapacity } from "./journal/transitions.js";
+import { mmAssertUniqueDelegation } from "./siblings.js";
 import type { Hex } from "../model.js";
 import { MM_MIN_REMAINING_MS, type MetaMaskGaslessBinding, type MetaMaskGaslessDispatch,
   type MetaMaskGaslessQuote, type MetaMaskGaslessSnapshot, type MetaMaskGaslessUnsignedResult } from "./model.js";
@@ -45,7 +46,9 @@ export class MetaMaskGaslessExecution {
     this.observation = new MetaMaskGaslessObservationService(state, rpcFor, provider, this.clock, save);
   }
 
-  async approve(op: MetaMaskGaslessOperationRecord, approval: MetaMaskGaslessApprovalPort): Promise<MetaMaskGaslessStep> {
+  /** `siblings` are the account's earlier unresolved transfers, collected by the caller before this approval screen. */
+  async approve(op: MetaMaskGaslessOperationRecord, approval: MetaMaskGaslessApprovalPort,
+    siblings: readonly MetaMaskGaslessOperationRecord[]): Promise<MetaMaskGaslessStep> {
     if (op.terminal || op.state !== "awaiting_approval") return { operation: op };
     let now: number;
     try { now = this.clock.beforeApproval(op); } catch (error) { return await this.halt(op, error); }
@@ -53,7 +56,7 @@ export class MetaMaskGaslessExecution {
     let accepted: boolean;
     try {
       accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
-        exactPhrase: metaMaskGaslessApprovalPhrase(op), summary: metaMaskGaslessApprovalSummary(op, now) });
+        exactPhrase: metaMaskGaslessApprovalPhrase(op), summary: metaMaskGaslessApprovalSummary(op, now, siblings) });
     } catch (error) {
       try { this.clock.check(op); } catch (clockError) { return await this.halt(op, clockError); }
       if (mmClassify(error, "mm_gasless_approval").reason === "mm_gasless_expired") return await this.halt(op, error);
@@ -68,10 +71,11 @@ export class MetaMaskGaslessExecution {
     const at = new Date(now).toISOString();
     op = await this.save(op, { state: "execution_pending", approval: { fingerprint: op.fingerprint,
       approvedAt: at, expiresAt: op.intent.expiresAt } }, at);
-    return await this.run(op);
+    return await this.run(op, siblings);
   }
 
-  async run(op: MetaMaskGaslessOperationRecord): Promise<MetaMaskGaslessStep> {
+  /** `siblings` as for `approve`; they are only compared, so a dispatched operation that only observes needs none. */
+  async run(op: MetaMaskGaslessOperationRecord, siblings: readonly MetaMaskGaslessOperationRecord[]): Promise<MetaMaskGaslessStep> {
     if (op.terminal || op.state === "awaiting_approval") return { operation: op };
     if (op.submissionAttempts === 1) return await this.observation.run(op);
     if (op.state !== "execution_pending" || op.approval === null || op.approval.fingerprint !== op.fingerprint) {
@@ -82,6 +86,7 @@ export class MetaMaskGaslessExecution {
     try {
       const result = await this.state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
         const guarded = await this.steady(op, async () => await this.guard(op));
+        mmAssertUniqueDelegation((guarded.dispatch ?? op.intent).delegationHash, siblings);
         assertMetaMaskGaslessDispatchCapacity(op);
         const at = new Date(this.clock.beforeDispatchAtCurrent(op, guarded.observedAt)).toISOString();
         // Persistence must finish before starting any relay-capable helper.
