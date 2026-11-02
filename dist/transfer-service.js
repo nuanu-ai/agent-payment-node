@@ -1,4 +1,5 @@
 import { DirectPublicEffectJournal, directCustodyPayload } from "./direct-public-effect.js";
+import { settleDispatchedDirect } from "./direct-transfer-settle.js";
 import { assertEvmNativeCustody } from "./evm-native-custody.js";
 import { TransferServiceObservation, requiredLocal } from "./transfer-service-observe.js";
 import { hashObject } from "./canonical.js";
@@ -233,6 +234,8 @@ export class TransferService {
             throw new ApnError("APN_OPERATION_BLOCKED", "The historical cleanup85 native cancellation is read-only.");
         return await this.invocation(() => this.observation.resume(operationId, waitSeconds, observeOnly, coinbaseObservationRpc));
     }
+    /** The blocker settle of a dispatched local transfer (direct-transfer-settle.ts): observed once, never dispatched. */
+    async settleDispatched(operationId) { return await settleDispatchedDirect(this.context, this.observation, operationId); }
     async recoverProviderRequest(operationId, providerRequestId) {
         return await this.observation.recoverProviderRequest(operationId, providerRequestId);
     }

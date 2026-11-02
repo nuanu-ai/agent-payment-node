@@ -6,6 +6,18 @@ import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, sa
 import { pastUnstartedDeadline } from "./family-claims.js";
 import { OPERATION_ABANDON, OPERATION_STATUS } from "./family-commands.js";
 const STORE = { directory: WALLET_ALLOWANCE_REVOKE_STORE, perProfile: false };
+/** One bounded observation over the chain's own APN_<CHAIN>_RPC_URL; it never signs or sends. */
+async function observe(context, record) {
+    const { observeWalletAllowanceRevoke } = await import("../../wallet-allowance/service.js");
+    const batch = async (calls) => {
+        // One batch is one node answering every read of the proof together, as the shared never-lands rule requires.
+        const reader = context.finalizedRead?.(record.terms.chainId);
+        if (reader?.batch === undefined)
+            throw new ApnError("APN_RPC_CONFIG", `Observing this revoke reads eip155:${record.terms.chainId}: set ${record.terms.rpcSetting}.`, { reason: "wallet_allowance_rpc_required", setting: record.terms.rpcSetting });
+        return await reader.batch(calls);
+    };
+    return await observeWalletAllowanceRevoke(new WalletAllowanceRevokeRepository(context.state.root), { batch }, record, () => context.clock.now());
+}
 /**
  * The owner's revoke of one ERC-20 allowance of the local wallet: it holds the wallet on its chain from prepare until a
  * receipt at the chain's proof tag, the finalized never-lands proof, an unsigned expiry or the owner's abandon. Its status
@@ -26,19 +38,14 @@ export const walletAllowanceRevokeAdapter = {
     salvage: (raw) => salvageRecord(raw, (value) => [salvageEvm(field(value, "terms", "chainId"), field(value, "terms", "owner"))]),
     view: async (record) => (await import("../../wallet-allowance/view.js")).publicWalletAllowanceRevoke(record),
     async status(context, record) {
-        const [{ observeWalletAllowanceRevoke }, { publicWalletAllowanceRevoke, walletAllowanceRevokeProofClass }] = await Promise.all([
-            import("../../wallet-allowance/service.js"), import("../../wallet-allowance/view.js")
-        ]);
-        const batch = async (calls) => {
-            // One batch is one node answering every read of the proof together, as the shared never-lands rule requires.
-            const reader = context.finalizedRead?.(record.terms.chainId);
-            if (reader?.batch === undefined)
-                throw new ApnError("APN_RPC_CONFIG", `Observing this revoke reads eip155:${record.terms.chainId}: set ${record.terms.rpcSetting}.`, { reason: "wallet_allowance_rpc_required", setting: record.terms.rpcSetting });
-            return await reader.batch(calls);
-        };
-        const next = await observeWalletAllowanceRevoke(new WalletAllowanceRevokeRepository(context.state.root), { batch }, record, () => context.clock.now());
+        const next = await observe(context, record), { publicWalletAllowanceRevoke, walletAllowanceRevokeProofClass } = await import("../../wallet-allowance/view.js");
         const data = publicWalletAllowanceRevoke(next);
         return { proofClass: walletAllowanceRevokeProofClass(next), data, operation: null, receipt: null, nextActions: data.next_actions };
+    },
+    // The blocker settle: the same one bounded observation as status.
+    async settleIfNeverLands(context, record) {
+        const next = await observe(context, record), { walletAllowanceRevokeProofClass } = await import("../../wallet-allowance/view.js");
+        return next.terminal ? walletAllowanceRevokeProofClass(next) : null;
     },
     async abandon(context, record) {
         const [{ abandonWalletAllowanceRevoke }, { publicWalletAllowanceRevoke }] = await Promise.all([import("../../wallet-allowance/service.js"),

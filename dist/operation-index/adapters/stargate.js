@@ -2,7 +2,7 @@ import { FileStargateNativeJournal } from "../../stargate-v2/native-journal.js";
 import { STARGATE_NATIVE_TERMINAL_PHASES } from "../../stargate-v2/native-record.js";
 import { FileStargateTokenJournal, STARGATE_TOKEN_TRANSITIONS } from "../../stargate-v2/token-journal.js";
 import { ApnError } from "../../errors.js";
-import { legacyStargateTerminal } from "../../legacy/stargate-v2/closure.js";
+import { LEGACY_CLOSURE_REASON, legacyStargateTerminal } from "../../legacy/stargate-v2/closure.js";
 import { isLegacyStargateRecord, loadLegacyStargateRecord } from "../../legacy/stargate-v2/reader.js";
 import { field, readableClaims, requiredRecordPath, salvageEvm } from "../adapter.js";
 import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
@@ -53,6 +53,13 @@ function stargateAdapter(family, directory, chainId, read, terminal, service, ru
             return operationOutcome(await (isLegacyStargateRecord(record) ? service(context).status(record.operationId) : service(context).observe(record.operationId)));
         },
         receipt: async (context, record) => receiptOutcome(await service(context).receipt(record.operationId)),
+        // The blocker settle: an unreleased-schema record runs the closure its status runs; a live journal has no port.
+        async settleIfNeverLands(context, record) {
+            if (!isLegacyStargateRecord(record))
+                return null;
+            await service(context).status(record.operationId);
+            return await legacyStargateTerminal(context.state.root, record) ? LEGACY_CLOSURE_REASON : null;
+        },
         ...(abandon === undefined ? {} : { async abandon(context, record) {
                 // An unreleased-schema record has its own exit: the chain-proven closure its status runs (once closed, it is terminal).
                 if (isLegacyStargateRecord(record)) {

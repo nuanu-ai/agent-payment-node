@@ -7,3 +7,13 @@ export declare function successEnvelope(request: CommandRequest, requestId: stri
  * none, never those.
  */
 export declare function failureEnvelope(command: string, requestId: string, error: unknown, externalWallet?: boolean): OutputEnvelope;
+/**
+ * The operation index names the blocker for every family; its status shows what it waits for (and, for a record of an
+ * unreleased Stargate schema, runs the chain-proven closure). Where that status only reads the record, the command
+ * boundary, which can read the blocker's family, appends the family's own observing command (operation-blocker-guidance.ts).
+ * A blocker whose record cannot be read has one more exit: the owner releases its claims with TTY consent (the record and
+ * any ledger hold stay as they are).
+ */
+export declare function blockedNextActions(blocker: string, unreadable: boolean): readonly string[];
+/** One plain line per earlier operation the invocation closed (`closed_blockers`), for a person at the terminal. */
+export declare function closedBlockerNotes(envelope: OutputEnvelope): readonly string[];

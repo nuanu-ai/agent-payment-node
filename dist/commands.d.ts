@@ -665,6 +665,11 @@ export type CommandRequest = {
     readonly command: "operation.status";
     readonly operationId: string;
     readonly refreshAllowance?: true;
+}
+/** Internal, never bound from the CLI or MCP: the runtime of a blocker a refused prepare settles (operation-auto-settle.ts). */
+ | {
+    readonly command: "operation.settle";
+    readonly operationId: string;
 } | {
     readonly command: "receipt.get";
     readonly operationId: string;
@@ -691,4 +696,13 @@ export interface OutputEnvelope {
         readonly details?: ErrorDetails;
     };
     readonly next_actions: readonly string[];
+    /** Earlier operations this invocation closed before it ran, each proven terminal; present only when non-empty. */
+    readonly closed_blockers?: readonly ClosedBlocker[];
+}
+/** An earlier operation that blocked this invocation until its own observation proved it terminal. */
+export interface ClosedBlocker {
+    readonly operation_id: string;
+    readonly family: string;
+    readonly state: string;
+    readonly proof: string;
 }
