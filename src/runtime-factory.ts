@@ -16,6 +16,7 @@ import type { CommandRequest, OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
 import { operationRuntimeCommand } from "./operation-commands.js";
 import { refreshOperationIndex } from "./operation-index/refresh.js";
+import { settleBlockerAndRetry } from "./operation-auto-settle.js";
 import { EncryptedProfilePolicy } from "./encrypted-profile-policy.js";
 import { LocalWalletNative } from "./local-wallet-native.js";
 import { MacOSLoginKeychainSecret } from "./macos-keychain.js";
@@ -147,7 +148,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const effectiveRpcUrl = bound.rpcUrl;
   // Every direct EVM network is capped and paced the same way, so every transfer prepare carries the guard state.
   const directGuardCommand = bound.request.command === "transfer.approve" || bound.request.command === "operation.resume" ||
-    bound.request.command === "transfer.prepare";
+    bound.request.command === "transfer.prepare" || bound.request.command === "operation.settle";
   const rpc = options.rpc ?? (effectiveRpcUrl === undefined ? undefined : new HttpsBaseRpc(effectiveRpcUrl,
     directGuardCommand ? { directGuardState: state } : {}));
   const coinbaseRpc = options.rpc;
@@ -387,14 +388,16 @@ function uniswapTokenRpcBudget(command: string): { readonly maxHttpRequests: num
 /**
  * Every command, CLI or MCP. A command that names an operation has just read (or closed) that operation's record, or
  * at least looked it up to build its runtime, so its operation-index entry follows the record right after it, whatever
- * the command answered and even when its runtime could not be built (best effort; the next admission re-verifies).
+ * the command answered and even when its runtime could not be built (best effort; the next admission re-verifies). A
+ * prepare refused by a blocker that provably can no longer land settles it in its own runtime and runs once more.
  */
 export async function executeBoundCommand(
   bound: BoundCommand,
   options: RuntimeFactoryOptions = {},
 ): Promise<OutputEnvelope> {
   const root = options.stateRoot ?? effectiveStateRoot();
-  try { return await executeBound(bound, options, root); }
+  try { return await settleBlockerAndRetry(bound, root, async () => await executeBound(bound, options, root), (operationId, command) => createApnCore(
+    { request: { command: "operation.settle", operationId }, ...(bound.rpcUrl === undefined ? {} : { rpcUrl: bound.rpcUrl }) }, options, command).context); }
   finally { await refreshOperationIndex(root, (bound.request as { readonly operationId?: unknown }).operationId); }
 }
 

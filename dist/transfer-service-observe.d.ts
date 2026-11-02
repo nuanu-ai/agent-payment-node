@@ -30,7 +30,7 @@ export declare class TransferServiceObservation {
      * it, so this one can never land. Below that nonce, a hash the RPC does not hold at all is re-sent as the identical
      * signed bytes; at most one copy of them can ever be included, so observing first and re-sending never adds an effect.
      */
-    private settleUnlanded;
+    settleUnlanded(operation: LocalOperationRecord, rpc: RpcPort, observeOnly: boolean): Promise<LocalOperationRecord>;
     /** The persisted signed bytes, read back from encrypted custody and checked against the frozen transfer; never a new signature. */
     private signedRawTransaction;
     /**
@@ -46,7 +46,10 @@ export declare class TransferServiceObservation {
     /** A completed transfer's fee: recorded, or (records written before APN recorded it) its receipt-facts sidecar or one read. */
     private actualFee;
     inspectReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<LocalOperationRecord>;
-    private observeReceipt;
+    observeReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<{
+        readonly operation: LocalOperationRecord;
+        readonly receipt: "absent" | "unavailable" | "read";
+    }>;
     private classifyReceipt;
     requiredOperation(operationId: string): Promise<OperationRecord>;
 }

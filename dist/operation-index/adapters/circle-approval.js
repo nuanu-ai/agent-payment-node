@@ -1,7 +1,7 @@
 import { abandonCircleApproval, CIRCLE_APPROVAL_RESOLVED_PHASES, loadCircleApproval, publicCircleApproval } from "../../lifi/circle-v2-approval-executor.js";
 import { field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord } from "../adapter.js";
 import { evmClaim, pastUnstartedDeadline } from "./family-claims.js";
-import { OPERATION_STATUS } from "./family-commands.js";
+import { installed, OPERATION_STATUS } from "./family-commands.js";
 const STORE = { directory: "circle-approvals", perProfile: false };
 /**
  * Circle Base USDC allowance effects. Execute refuses a `prepared` approval past its preparation expiry before signing;
@@ -24,6 +24,13 @@ export const circleApprovalAdapter = {
     // Status observes a sent approval and closes an unsent marker as failed_before_effect; it never signs or resends.
     status: async (context, record) => await (await import("../../circle-command-service.js")).executeCircleCommand({ command: "circle.approval.status", operationId: record.id }, context),
     abandon: async (context, record) => publicCircleApproval(await abandonCircleApproval(context.state, record.id, context.requireOperationAbandonApproval(), () => context.clock.now().getTime())),
+    // The blocker settle: the same observation as status, with the proof class status reports.
+    async settleIfNeverLands(context, record) {
+        const next = await installed(context.circleApproval, "Circle approval executor is unavailable.").status(record.id);
+        if (!CIRCLE_APPROVAL_RESOLVED_PHASES.includes(next.phase))
+            return null;
+        return next.phase === "completed" ? "circle_approval_safe_receipt_and_allowance" : "circle_approval_journal_state";
+    },
     commands: { status: OPERATION_STATUS, resume: OPERATION_STATUS },
     runtimeCommand: async () => "circle.approval.status",
 };

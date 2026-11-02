@@ -141,7 +141,7 @@ export class TransferServiceObservation {
    * it, so this one can never land. Below that nonce, a hash the RPC does not hold at all is re-sent as the identical
    * signed bytes; at most one copy of them can ever be included, so observing first and re-sending never adds an effect.
    */
-  private async settleUnlanded(operation: LocalOperationRecord, rpc: RpcPort, observeOnly: boolean): Promise<LocalOperationRecord> {
+  async settleUnlanded(operation: LocalOperationRecord, rpc: RpcPort, observeOnly: boolean): Promise<LocalOperationRecord> {
     const evm = rpc.evm, nonce = BigInt(operation.economics.nonceAtomic);
     if (evm?.finalizedBatch === undefined || operation.transactionHash === undefined) return operation;
     let check: NeverLandsCheck;
@@ -282,7 +282,7 @@ export class TransferServiceObservation {
     return (await this.observeReceipt(operation, rpc)).operation;
   }
 
-  private async observeReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<{ readonly operation: LocalOperationRecord; readonly receipt: "absent" | "unavailable" | "read" }> {
+  async observeReceipt(operation: LocalOperationRecord, rpc: RpcPort): Promise<{ readonly operation: LocalOperationRecord; readonly receipt: "absent" | "unavailable" | "read" }> {
     if (operation.transactionHash === undefined) return { operation, receipt: "unavailable" };
     let receipt: RpcReceipt | null;
     try {

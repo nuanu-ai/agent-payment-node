@@ -1,5 +1,5 @@
 import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
-import { legacyBridgeTerminal } from "../../legacy/lifi-bridge/closure.js";
+import { LEGACY_BRIDGE_CLOSURE_REASON, legacyBridgeTerminal } from "../../legacy/lifi-bridge/closure.js";
 import { legacyBridgeOpen, legacyBridgeStatus } from "../../legacy/lifi-bridge/status.js";
 import { isLegacyBridgeOperation, type StoredBridgeOperationRecord } from "../../lifi/legacy-operation.js";
 import { BRIDGE_TERMINAL } from "../../lifi/operation-model.js";
@@ -55,6 +55,12 @@ export const bridgeAdapter: OperationFamilyAdapter<StoredBridgeOperationRecord> 
     return operationOutcome(await new BridgeService(context).resume(record.operationId));
   },
   receipt: async (context, record) => receiptOutcome(await new BridgeService(context).receipt(record.operationId)),
+  // The blocker settle: an open frozen journal runs the closure its status runs; a current journal is observed by resume only.
+  async settleIfNeverLands(context, record) {
+    if (!isLegacyBridgeOperation(record) || !legacyBridgeOpen(record)) return null;
+    await bridgeStatus(context, record);
+    return await legacyBridgeTerminal(context.state.root, record) ? LEGACY_BRIDGE_CLOSURE_REASON : null;
+  },
   // No owner abandon: resume proves the outcome, including a source effect that can no longer land; a frozen journal
   // closes by the finalized nonce its status reads.
   commands: { status: "apn operation status --operation <operation-id>", exit: "apn operation resume --operation <operation-id>" },

@@ -276,6 +276,24 @@ material inputs under the same key is a conflict, including a different operatio
 
 **Conflicts.** A new direct transfer waits only for unresolved operations on the same chain and sending account.
 
+**A blocker that can no longer land.** A prepare refused by an unresolved operation of its account (`pay transfer
+prepare` and `prepare-asset`, `x402 fetch prepare`, `bridge prepare`, `circle approval prepare`, `wallet allowance
+revoke`, `x402 permit2 allowance set|revoke`) first runs that blocker's own bounded observation once; it never signs,
+sends or asks consent for it. Observed this way: a dispatched local direct transfer (`submitted_pending` or
+`unknown_finality`: its receipt, then the finalized never-lands proof, never re-sent), a wallet allowance revoke, a
+Circle approval, and frozen legacy bridge and Stargate records (their closure). The direct observation reuses the
+prepare's own `--rpc-url` only after a standalone chain-id read proves it serves the transfer's chain, so an endpoint of
+another chain is never sent the transfer's hash. When the observation proves the blocker terminal the prepare runs again
+once, and that run's envelope (a success, or a refusal naming what blocks now) carries the additive optional
+`closed_blockers: [{ operation_id, family, state, proof }]`; on a terminal APN also prints one line per closed operation
+on stderr. When nothing was closed the first refusal is returned; if the observation ran, its `error.details` add
+`blocker_observation` (`not_proven` or `unavailable`) and, when the observation failed, `blocker_error_code`,
+`blocker_error_message` and `blocker_error_reason` when it has one: an APN refusal as it words itself (for example
+`APN_RPC_CONFIG` without an RPC, `APN_CHAIN_MISMATCH`), any other fault as `APN_INTERNAL` with its class in
+`blocker_error_class`, never its text. Only after the observation ran over the prepare's RPC, passed its chain check
+and proved nothing does the refusal name, after its `apn operation status`, `apn operation resume` with that RPC. The
+schema version stays `apn.cli.v1`.
+
 **Before signing.** Every check that can refuse (owner policy, funding, fees, nonce) runs before signing. A durable
 started record precedes signing, and the encrypted signature is saved before the command returns. After a restart APN
 retrieves only that signature; if none exists, the operation fails before effect rather than signing a replacement.

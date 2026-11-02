@@ -39,7 +39,7 @@ apn help --json
 Discovery runs before any state, Keychain, wallet, policy, network or signing work. Help is raw text; `apn help --json`
 prints one raw `apn.command-manifest.v2` JSON object, the machine source of truth. Every operational command prints
 exactly one `apn.cli.v1` JSON envelope with `ok`, `error`, `operation`, `receipt` and `next_actions`. `next_actions`
-names the next command to run, or the variable or option to fix.
+names the next command to run, or the variable or option to fix; optional `closed_blockers`: see Recovery guarantees.
 
 Manifest v2 merged several v1 commands (the `*-network` twins, `wallet balance-asset`, the Relay route groups) and
 removed the historical Circle v1 and LI.FI recovery commands, whose operations are all terminal. The manifest's
@@ -483,6 +483,11 @@ resent. Status and receipts survive restart, reinstall and upgrades because Home
 An operation that is not terminal blocks new money operations only on its own network and sending account; the refusal
 names the blocking operation. Another chain, another wallet, or the Solana or TRON account of the same profile stays
 available. Wallet lifecycle changes wait for every operation in the profile.
+
+A prepare refused by such a blocker first runs the blocker's own bounded observation once (no signature, send or
+consent) and runs again once when it proves the blocker terminal; that answer lists it in optional `closed_blockers`.
+Otherwise the first refusal returns, its details adding `blocker_observation` and, when the observation failed,
+`blocker_error_code`, `blocker_error_message` and `blocker_error_reason` ([docs/evm-assets.md](docs/evm-assets.md)).
 
 ## Proof boundary
 

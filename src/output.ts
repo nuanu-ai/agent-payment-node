@@ -81,16 +81,29 @@ function nextActions(error: ReturnType<typeof asApnError>, externalWallet: boole
     case "APN_REPREPARE_REQUIRED": return ["Prepare a new operation (with a new idempotency key where the command takes one); this one can no longer proceed."];
     case "APN_STATE_BUSY": return ["The kernel lock stayed busy through the bounded wait; retry after the active APN process exits. APN keeps stable lock files in place."];
     case "APN_OPERATION_BLOCKED": {
-      // The operation index names the blocker for every family; its status shows what it waits for (and, for a record
-      // of an unreleased Stargate schema, runs the chain-proven closure). A blocker whose record cannot be read has one
-      // more exit: the owner releases its claims with TTY consent (the record and any ledger hold stay as they are).
       const blocker = error.details?.blockingOperationId;
       if (typeof blocker !== "string") return [];
-      return error.details?.blockingReason === "blocking_record_unreadable"
-        ? [`apn operation status --operation ${blocker}`, `apn operation abandon --operation ${blocker}`] : [`apn operation status --operation ${blocker}`];
+      return blockedNextActions(blocker, error.details?.blockingReason === "blocking_record_unreadable");
     }
     default: return [];
   }
+}
+
+/**
+ * The operation index names the blocker for every family; its status shows what it waits for (and, for a record of an
+ * unreleased Stargate schema, runs the chain-proven closure). Where that status only reads the record, the command
+ * boundary, which can read the blocker's family, appends the family's own observing command (operation-blocker-guidance.ts).
+ * A blocker whose record cannot be read has one more exit: the owner releases its claims with TTY consent (the record and
+ * any ledger hold stay as they are).
+ */
+export function blockedNextActions(blocker: string, unreadable: boolean): readonly string[] {
+  return unreadable ? [`apn operation status --operation ${blocker}`, `apn operation abandon --operation ${blocker}`] : [`apn operation status --operation ${blocker}`];
+}
+
+/** One plain line per earlier operation the invocation closed (`closed_blockers`), for a person at the terminal. */
+export function closedBlockerNotes(envelope: OutputEnvelope): readonly string[] {
+  return (envelope.closed_blockers ?? []).map(closed =>
+    `Closed earlier operation ${closed.operation_id} (${closed.family}): its outcome is final (${closed.state}), so it no longer blocks.`);
 }
 
 /** The RPC environment variables an RPC configuration failure names in its message or reason, in order, once each. */

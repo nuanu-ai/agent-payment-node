@@ -1,5 +1,6 @@
 import { assertCoinbaseObservationRequest } from "../../coinbase-gasless-observation-source.js";
 import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
+import { SETTLED_DIRECT_STATES } from "../../direct-transfer-settle.js";
 import { LOCAL_DIRECT_TERMINAL_STATES, PROVIDER_DIRECT_TERMINAL_STATES, type OperationRecord } from "../../model.js";
 import { abandonDirectTransfer } from "../../operation-abandon-service.js";
 import { refuseObservationRpc, refuseObserveOnly } from "../../operation-command-options.js";
@@ -67,4 +68,15 @@ export const directAdapter: OperationFamilyAdapter<OperationRecord> = {
       options.coinbaseObservationRpc));
   },
   abandon: async (context, record) => await abandonDirectTransfer(context, record.operationId),
+  // The blocker settle: a dispatched local transfer is observed once (receipt, then never-lands) and never dispatched
+  // again, over the refused command's RPC only once a standalone chain-id read proved it serves the transfer's chain.
+  async settleIfNeverLands(context, record) {
+    if (record.providerDirect !== undefined || !SETTLED_DIRECT_STATES.includes(record.state)) return null;
+    const settled = await new TransferService(context).settleDispatched(record.operationId);
+    return directTerminal(settled) ? settled.proofClass : null;
+  },
+  // Status only reads a local transfer; a dispatched one is observed by its own next action, resume (which re-sends
+  // only its own signed bytes). No other state is advanced by it.
+  observeCommand: record => record.providerDirect === undefined && SETTLED_DIRECT_STATES.includes(record.state)
+    ? "apn operation resume --operation <operation-id> --rpc-url <https-url>" : undefined,
 };

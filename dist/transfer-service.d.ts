@@ -1,4 +1,5 @@
 import type { CommandRequest } from "./commands.js";
+import type { OperationRecord } from "./model.js";
 import type { RuntimeContext } from "./runtime.js";
 export declare class TransferService {
     private readonly context;
@@ -19,6 +20,8 @@ export declare class TransferService {
     approve(operationId: string): Promise<unknown>;
     private approveOperation;
     resume(operationId: string, waitSeconds?: number, observeOnly?: true, coinbaseObservationRpc?: string): Promise<unknown>;
+    /** The blocker settle of a dispatched local transfer (direct-transfer-settle.ts): observed once, never dispatched. */
+    settleDispatched(operationId: string): Promise<OperationRecord>;
     recoverProviderRequest(operationId: string, providerRequestId: string): Promise<unknown>;
     status(operationId: string): Promise<unknown>;
     abandonLocal(operationId: string): Promise<unknown>;

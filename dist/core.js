@@ -482,6 +482,7 @@ export class ApnCore {
             }
             case "operation.status": return await this.operationCommands.status(request.operationId, request.refreshAllowance === true);
             case "receipt.get": return await this.operationCommands.receipt(request.operationId);
+            case "operation.settle": throw new ApnError("APN_UNSUPPORTED_COMMAND", "Operation settle only builds a blocker's runtime; it is never dispatched.");
         }
     }
     async prepareGasless(request) {
