@@ -29,9 +29,10 @@ type Settled = { readonly closed: ClosedBlocker } | { readonly observation: "not
 /**
  * The command boundary (CLI and MCP), outside every family lock and the index lock: a prepare refused because an earlier
  * operation of the same account is unresolved settles that blocker once, through its family's own observation, and runs
- * again once when the observation proves it terminal. Anything else (no settle port, a blocker the index does not confirm,
- * nothing proven, a settle failure, a second refusal) answers the first refusal; a settle that ran but proved nothing
- * names why in its `blocker_observation` detail. A success after a settle reports it in `closed_blockers`.
+ * again once when the observation proves it terminal; that run's own envelope (a success, or a refusal naming what
+ * blocks now) carries the closed blocker in `closed_blockers`. When nothing was closed (no settle port, a blocker the index
+ * does not confirm, nothing proven, a settle failure) the first refusal is the answer; a settle that ran but proved
+ * nothing names why in its `blocker_observation` detail.
  */
 export async function settleBlockerAndRetry(bound: BoundCommand, root: string, run: () => Promise<OutputEnvelope>, runtime: BlockerRuntime,
   registry: OperationRegistry = operationRegistry()): Promise<OutputEnvelope> {
@@ -43,8 +44,8 @@ export async function settleBlockerAndRetry(bound: BoundCommand, root: string, r
   if (blocker === null) return first;
   const settled = await settle(blocker, root, runtime);
   if ("observation" in settled) return { ...first, error: { ...first.error, details: { ...first.error.details, blocker_observation: settled.observation } } };
-  const second = await run();
-  return second.ok ? { ...second, closed_blockers: [settled.closed] } : first;
+  // The retry answers for itself, a refusal naming what blocks now included; the closed blocker is reported either way.
+  return { ...await withBlockerGuidance(await run(), root, registry), closed_blockers: [settled.closed] };
 }
 
 /** The blocker as the index confirms it: active, in the refused state, of a family with a settle port; null otherwise. */

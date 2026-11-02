@@ -107,13 +107,15 @@ test("a port that claims a proof its record does not show is not believed: no re
   assert.deepEqual([s.runs(), s.settles.length], [1, 1]);
 });
 
-test("a second refusal after a settle answers the first refusal unchanged; the blocker is settled at most once", async (t) => {
+test("a refusal after a settle answers with the retry's own refusal plus the closed blocker; the blocker is settled at most once", async (t) => {
   const s = await setup(t, async r => { await save(s.root, { ...r, state: "failed_proven_superseded", terminal: true }); return "finalized_nonce_without_receipt"; });
   await save(s.root, record(1)); await save(s.root, record(2));
-  const first = blocked(id(1), "submitted_pending");
-  s.answers.push(first, blocked(id(2), "submitted_pending"));
+  const second = blocked(id(2), "submitted_pending");
+  s.answers.push(blocked(id(1), "submitted_pending"), second);
   const out = await s.settle();
-  assert.deepEqual(out, first);
+  assert.deepEqual(out, { ...second, closed_blockers: [{ operation_id: id(1), family: "direct_transfer", state: "failed_proven_superseded",
+    proof: "finalized_nonce_without_receipt" }] }, "the refusal names what blocks now; the closed one is reported");
+  assert.equal(out.error?.details?.blocker_observation, undefined);
   assert.deepEqual([s.runs(), s.settles.map(r => r.operationId)], [2, [id(1)]], "the second blocker is not settled by this invocation");
   assert.equal((await s.index().find(id(2)))?.state, "active");
 });
