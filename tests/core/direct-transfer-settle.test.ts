@@ -91,9 +91,10 @@ test("an RPC of another chain is asked its chain id alone: the blocker's hash is
     posts.push(calls.map(item => item.method)); throw new Error("unexpected batch");
   };
   const other = { evm: new EvmRpc(async method => await call(method), "https://optimism.example", undefined, async calls => await batch(calls)) } as unknown as RpcPort;
-  const refused = await settleBlockerAndRetry({ request: next }, root, async () => await setup.core.execute(next),
+  const refused = await settleBlockerAndRetry({ request: next, rpcUrl: "https://optimism.example" }, root, async () => await setup.core.execute(next),
     () => new ApnCore({ state: setup.state, rpc: other, clock: setup.clock }).context);
   assert.deepEqual([refused.error?.details?.blocker_observation, refused.error?.details?.blocker_error_code], ["unavailable", "APN_CHAIN_MISMATCH"]);
+  assert.deepEqual(refused.next_actions, [`apn operation status --operation ${id}`], "an RPC that failed the chain check is never named");
   assert.deepEqual(posts, [["eth_chainId"]], "no receipt, transaction or nonce request names the blocker");
   assert.equal(await readFile(recordPath, "utf8"), bytes);
   assert.equal((await setup.state.findOperation(id))?.state, "submitted_pending");

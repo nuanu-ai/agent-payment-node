@@ -287,10 +287,12 @@ another chain is never sent the transfer's hash. When the observation proves the
 once, and that run's envelope (a success, or a refusal naming what blocks now) carries the additive optional
 `closed_blockers: [{ operation_id, family, state, proof }]`; on a terminal APN also prints one line per closed operation
 on stderr. When nothing was closed the first refusal is returned; if the observation ran, its `error.details` add
-`blocker_observation` (`not_proven` or `unavailable`) and, for an APN refusal of the observation (for example
-`APN_RPC_CONFIG` without an RPC, `APN_CHAIN_MISMATCH`), `blocker_error_code`, `blocker_error_message` and
-`blocker_error_reason` when it has one. A refusal by a dispatched direct transfer names, after its `apn operation
-status`, `apn operation resume` with the prepare's RPC. The schema version stays `apn.cli.v1`.
+`blocker_observation` (`not_proven` or `unavailable`) and, when the observation failed, `blocker_error_code`,
+`blocker_error_message` and `blocker_error_reason` when it has one: an APN refusal as it words itself (for example
+`APN_RPC_CONFIG` without an RPC, `APN_CHAIN_MISMATCH`), any other fault as `APN_INTERNAL` with its class in
+`blocker_error_class`, never its text. Only after the observation ran over the prepare's RPC, passed its chain check
+and proved nothing does the refusal name, after its `apn operation status`, `apn operation resume` with that RPC. The
+schema version stays `apn.cli.v1`.
 
 **Before signing.** Every check that can refuse (owner policy, funding, fees, nonce) runs before signing. A durable
 started record precedes signing, and the encrypted signature is saved before the command returns. After a restart APN

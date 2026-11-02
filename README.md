@@ -486,7 +486,7 @@ available. Wallet lifecycle changes wait for every operation in the profile.
 
 A prepare refused by such a blocker first runs the blocker's own bounded observation once (no signature, send or
 consent) and runs again once when it proves the blocker terminal; that answer lists it in optional `closed_blockers`.
-Otherwise the first refusal returns, its details adding `blocker_observation` and, for an APN refusal of it,
+Otherwise the first refusal returns, its details adding `blocker_observation` and, when the observation failed,
 `blocker_error_code`, `blocker_error_message` and `blocker_error_reason` ([docs/evm-assets.md](docs/evm-assets.md)).
 
 ## Proof boundary

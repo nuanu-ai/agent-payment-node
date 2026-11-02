@@ -1,6 +1,6 @@
 import type { BoundCommand } from "./command-binder.js";
 import type { ClosedBlocker, CommandRequest, OutputEnvelope } from "./commands.js";
-import { ApnError } from "./errors.js";
+import { ApnError, asApnError } from "./errors.js";
 import { STATE_HASH, type OperationFamilyAdapter } from "./operation-index/adapter.js";
 import { OperationIndex } from "./operation-index/index.js";
 import { operationRegistry, type OperationRegistry } from "./operation-index/registry.js";
@@ -29,7 +29,8 @@ const PREPARE_COMMANDS: ReadonlySet<CommandRequest["command"]> = new Set<Command
 export type BlockerRuntime = (operationId: string, command: CommandRequest["command"]) => RuntimeContext;
 type SettlingAdapter = OperationFamilyAdapter & Required<Pick<OperationFamilyAdapter, "settleIfNeverLands">>;
 interface Blocker { readonly index: OperationIndex; readonly entry: OperationIndexEntry; readonly adapter: SettlingAdapter; readonly record: unknown }
-type Settled = { readonly closed: ClosedBlocker } | { readonly observation: "not_proven" } | { readonly observation: "unavailable"; readonly error: ApnError };
+type Unavailable = { readonly observation: "unavailable"; readonly error: ApnError };
+type Settled = { readonly closed: ClosedBlocker } | { readonly observation: "not_proven" } | Unavailable;
 
 /**
  * The command boundary (CLI and MCP), outside every family lock and the index lock: a prepare refused because an earlier
@@ -38,33 +39,40 @@ type Settled = { readonly closed: ClosedBlocker } | { readonly observation: "not
  * blocks now) carries the closed blocker in `closed_blockers`. When nothing was closed (no settle port, a blocker the index
  * does not confirm, nothing proven, an APN refusal of the settle) the first refusal is the answer; a settle that ran but
  * proved nothing names why in its `blocker_observation` detail, and an APN refusal of it in `blocker_error_code`,
- * `blocker_error_message` and (when it has one) `blocker_error_reason`. Any other failure is a fault and propagates.
+ * `blocker_error_message` and (when it has one) `blocker_error_reason`. Any other failure of the lookup or the settle
+ * is classified as the boundary classifies it (APN_INTERNAL, its class in `blocker_error_class`, never its own text),
+ * and the first refusal is still the answer. Only when the settle ran over the invocation's own RPC and proved nothing
+ * (its chain check passed) does the refusal also name the blocker's observing command with that RPC.
  */
 export async function settleBlockerAndRetry(bound: BoundCommand, root: string, run: () => Promise<OutputEnvelope>, runtime: BlockerRuntime,
   registry: OperationRegistry = operationRegistry()): Promise<OutputEnvelope> {
-  const first = await withBlockerGuidance(await run(), root, registry, bound.rpcUrl);
+  const first = await withBlockerGuidance(await run(), root, registry, undefined);
   if (!PREPARE_COMMANDS.has(bound.request.command) || first.error?.code !== "APN_OPERATION_BLOCKED") return first;
   const { blockingOperationId, blockingState } = first.error.details ?? {};
   if (typeof blockingOperationId !== "string" || !STATE_HASH.test(blockingOperationId) || typeof blockingState !== "string") return first;
   const blocker = await confirmed(root, registry, blockingOperationId, blockingState);
   if (blocker === null) return first;
-  const settled = await settle(blocker, root, runtime);
+  const settled = "observation" in blocker ? blocker : await settle(blocker, root, runtime);
   if ("observation" in settled) {
-    return { ...first, error: { ...first.error, details: { ...first.error.details, blocker_observation: settled.observation, ...blockerError(settled) } } };
+    const observed = { ...first, error: { ...first.error, details: { ...first.error.details, blocker_observation: settled.observation, ...blockerError(settled) } } };
+    return settled.observation === "not_proven" ? await withBlockerGuidance(observed, root, registry, bound.rpcUrl) : observed;
   }
   // The retry answers for itself, a refusal naming what blocks now included; the closed blocker is reported either way.
-  return { ...await withBlockerGuidance(await run(), root, registry, bound.rpcUrl), closed_blockers: [settled.closed] };
+  return { ...await withBlockerGuidance(await run(), root, registry, undefined), closed_blockers: [settled.closed] };
 }
 
-/** The blocker as the index confirms it: active, in the refused state, of a family with a settle port; null otherwise. */
-async function confirmed(root: string, registry: OperationRegistry, operationId: string, blockingState: string): Promise<Blocker | null> {
+/**
+ * The blocker as the index confirms it: active, in the refused state, of a family with a settle port; null otherwise
+ * (an APN refusal of the lookup included). A fault of the lookup itself is reported as the settle's.
+ */
+async function confirmed(root: string, registry: OperationRegistry, operationId: string, blockingState: string): Promise<Blocker | Unavailable | null> {
   try {
     const index = new OperationIndex(new SecureStateStore(root), registry), entry = await index.find(operationId);
     const adapter = entry === null ? undefined : index.adapter(entry);
     if (entry?.state !== "active" || !settles(adapter)) return null;
     const record = await index.loadRecord(entry);
     return record !== null && adapter.state(record) === blockingState ? { index, entry, adapter, record } : null;
-  } catch (error) { if (error instanceof ApnError) return null; throw error; }
+  } catch (error) { return error instanceof ApnError ? null : { observation: "unavailable", error: asApnError(error) }; }
 }
 
 /** One settle; the port's word is checked against the record it wrote, read again through the family's own reader. */
@@ -80,17 +88,15 @@ async function settle({ index, entry, adapter, record }: Blocker, root: string, 
     const after = await index.loadRecord(entry);
     if (after === null || !await adapter.terminal(after, root)) return { observation: "not_proven" };
     return { closed: { operation_id: entry.operationId, family: entry.family, state: adapter.state(after), proof } };
-  } catch (error) {
-    if (error instanceof ApnError) return { observation: "unavailable", error };
-    throw error;
-  }
+  } catch (error) { return { observation: "unavailable", error: asApnError(error) }; }
 }
 
-/** An APN refusal of the settle, as its own code and wording say it (never a stack). */
+/** The settle's refusal as its own code and wording say it, or a fault as the boundary classifies it (never its text or stack). */
 function blockerError(settled: Settled): Readonly<Record<string, string>> {
   if (!("error" in settled)) return {};
   const { code, message, details } = settled.error;
-  return { blocker_error_code: code, blocker_error_message: message, ...(typeof details?.reason === "string" ? { blocker_error_reason: details.reason } : {}) };
+  return { blocker_error_code: code, blocker_error_message: message, ...(typeof details?.reason === "string" ? { blocker_error_reason: details.reason } : {}),
+    ...(typeof details?.internal_class === "string" ? { blocker_error_class: details.internal_class } : {}) };
 }
 
 const settles = (adapter: OperationFamilyAdapter | undefined): adapter is SettlingAdapter => adapter?.settleIfNeverLands !== undefined;

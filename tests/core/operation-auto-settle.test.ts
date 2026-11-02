@@ -53,12 +53,16 @@ const blocked = (blocker: string, state: string, command = "transfer.prepare") =
     blockingNetwork: "evm:8453", blockingAccount: A }));
 const prepared = successEnvelope(PREPARE, UUID, { proofClass: "durable_pre_effect", data: null, operation: { operation_id: id(7) }, receipt: null, nextActions: [] });
 
-async function setup(t: test.TestContext, port?: Port) {
+type Observe = (record: TestRecord) => string | undefined;
+const RESUME: Observe = r => r.state === "submitted_pending" ? "apn operation resume --operation <operation-id> --rpc-url <https-url>" : undefined;
+const RPC = "https://base.example";
+
+async function setup(t: test.TestContext, port?: Port, observe?: Observe) {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const state = new StateStore(temporary.root); await state.initialize();
   const settles: TestRecord[] = [], runtimes: [string, CommandRequest["command"]][] = [];
   const registry: OperationRegistry = new Map<OperationFamily, OperationFamilyAdapter>([
-    ["direct_transfer", adapter("direct_transfer", "test-a", port === undefined ? undefined : async r => { settles.push(r); return await port(r); }) as OperationFamilyAdapter],
+    ["direct_transfer", adapter("direct_transfer", "test-a", port === undefined ? undefined : async r => { settles.push(r); return await port(r); }, observe) as OperationFamilyAdapter],
     ["rail_transfer", adapter("rail_transfer", "test-b") as OperationFamilyAdapter],
   ]);
   const runtime: BlockerRuntime = (operationId, command) => { runtimes.push([operationId, command]); return {} as RuntimeContext; };
@@ -66,7 +70,8 @@ async function setup(t: test.TestContext, port?: Port) {
   const answers: OutputEnvelope[] = [];
   let runs = 0;
   const run = async () => { runs += 1; const next = answers.shift(); assert.ok(next !== undefined, "the command ran more often than scripted"); return next; };
-  const settle = async (request: CommandRequest = PREPARE) => await settleBlockerAndRetry({ request } satisfies BoundCommand, temporary.root, run, runtime, registry);
+  const settle = async (request: CommandRequest = PREPARE, rpcUrl?: string) => await settleBlockerAndRetry({ request, ...(rpcUrl === undefined ? {} : { rpcUrl }) } satisfies BoundCommand,
+    temporary.root, run, runtime, registry);
   return { root: temporary.root, registry, settles, runtimes, answers, runs: () => runs, settle, index: () => new OperationIndex(state, registry) };
 }
 
@@ -98,12 +103,23 @@ test("nothing proven, or an APN refusal of the settle, answers the first refusal
   }
 });
 
-test("a fault in the settle (not an APN refusal) is not swallowed: it fails the command", async (t) => {
-  const s = await setup(t, async () => { throw new TypeError("record.terms is undefined"); });
+test("a fault of the settle or of its lookup answers the first refusal, classified as the boundary classifies it, never its own text", async (t) => {
+  const internal = { blocker_observation: "unavailable", blocker_error_code: "APN_INTERNAL", blocker_error_message: "The operation failed safely.",
+    blocker_error_class: "TypeError" };
+  const s = await setup(t, async () => { throw new TypeError("record.terms is undefined at /Users/someone/.apn"); });
   await save(s.root, record(1));
-  s.answers.push(blocked(id(1), "submitted_pending"));
-  await assert.rejects(s.settle(), TypeError);
+  const first = blocked(id(1), "submitted_pending");
+  s.answers.push(first);
+  const out = await s.settle(PREPARE, RPC);
+  assert.deepEqual(out, { ...first, error: { ...first.error!, details: { ...first.error!.details, ...internal } } });
+  assert.equal(JSON.stringify(out).includes("record.terms"), false);
   assert.deepEqual([s.runs(), s.settles.length], [1, 1]);
+
+  // A family reader that faults while the blocker is confirmed: the same answer, and no port runs.
+  const broken: OperationRegistry = new Map<OperationFamily, OperationFamilyAdapter>([["direct_transfer", { ...adapter("direct_transfer", "test-a",
+    async () => { throw new Error("must not settle"); }), state: () => { throw new TypeError("state of undefined"); } } as OperationFamilyAdapter]]);
+  const confirmedOut = await settleBlockerAndRetry({ request: PREPARE }, s.root, async () => first, () => { throw new Error("no runtime"); }, broken);
+  assert.deepEqual(confirmedOut, { ...first, error: { ...first.error!, details: { ...first.error!.details, ...internal } } });
 });
 
 test("a port that persisted a terminal transition and then failed is still followed by the index; nothing runs again", async (t) => {
@@ -172,31 +188,51 @@ test("an envelope with nothing closed carries no closed_blockers field", async (
   assert.deepEqual(closedBlockerNotes(out), []);
 });
 
-test("a blocked refusal appends the observing command after status, only in an observed state and only when it runs as typed", async (t) => {
+test("a refusal names the observing command with the invocation's RPC only after a settle ran over it and proved nothing", async (t) => {
+  const status = `apn operation status --operation ${id(1)}`, resume = `apn operation resume --operation ${id(1)} --rpc-url ${RPC}`;
+  const cases: { readonly name: string; readonly port: Port; readonly request?: CommandRequest; readonly rpcUrl?: string; readonly next: readonly string[] }[] = [
+    { name: "settled over the RPC, nothing proven", port: async () => null, rpcUrl: RPC, next: [status, resume] },
+    { name: "no RPC given", port: async () => null, next: [status] },
+    { name: "the settle was refused (no chain check passed)", port: async () => { throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match."); },
+      rpcUrl: RPC, next: [status] },
+    { name: "no settle ran", port: async () => null, request: { command: "transfer.approve", operationId: id(1) }, rpcUrl: RPC, next: [status] },
+  ];
+  for (const { name, port, request, rpcUrl, next } of cases) {
+    const s = await setup(t, port, RESUME);
+    await save(s.root, record(1));
+    s.answers.push(blocked(id(1), "submitted_pending", request?.command));
+    assert.deepEqual((await s.settle(request, rpcUrl)).next_actions, next, name);
+  }
+});
+
+test("the guidance appends after status, only in an observed state, and as a hint never changes a refusal it cannot complete", async (t) => {
   const s = await setup(t);
-  const resume = (r: TestRecord) => r.state === "submitted_pending" ? "apn operation resume --operation <operation-id> --rpc-url <https-url>" : undefined;
+  let loads = 0, observeFault = false;
+  const counted = adapter("rail_transfer", "test-b"), direct = adapter("direct_transfer", "test-a", undefined,
+    r => { if (observeFault) throw new TypeError("observe of undefined"); return RESUME(r); });
   const registry: OperationRegistry = new Map<OperationFamily, OperationFamilyAdapter>([
-    ["direct_transfer", adapter("direct_transfer", "test-a", undefined, resume) as OperationFamilyAdapter],
-    ["rail_transfer", adapter("rail_transfer", "test-b") as OperationFamilyAdapter],
+    ["direct_transfer", direct as OperationFamilyAdapter],
+    ["rail_transfer", { ...counted, load: async (root: string, path: string) => { loads += 1; return await counted.load(root, path); } } as OperationFamilyAdapter],
   ]);
   await save(s.root, record(1)); await save(s.root, record(2), "test-b"); await save(s.root, record(3, { state: "awaiting_approval" }));
-  const RPC = "https://base.example";
-  const guided = async (envelope: OutputEnvelope) => await withBlockerGuidance(envelope, s.root, registry, RPC);
-  const withoutRpc = async (envelope: OutputEnvelope) => await withBlockerGuidance(envelope, s.root, registry, undefined);
-  assert.deepEqual((await guided(blocked(id(1), "submitted_pending"))).next_actions,
-    [`apn operation status --operation ${id(1)}`, `apn operation resume --operation ${id(1)} --rpc-url https://base.example`]);
-  // Without the invocation's RPC the command would keep its placeholder, so it is not named.
-  assert.deepEqual((await withoutRpc(blocked(id(1), "submitted_pending"))).next_actions, [`apn operation status --operation ${id(1)}`]);
-  // A blocking claim that is not an account of the invocation's network never borrows its RPC.
-  const profileWide = failureEnvelope("transfer.prepare", UUID, new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this profile is not terminal.",
-    { blockingOperationId: id(1), blockingState: "submitted_pending" }));
-  assert.deepEqual(await guided(profileWide), profileWide);
-  assert.deepEqual((await guided(blocked(id(3), "awaiting_approval"))).next_actions, [`apn operation status --operation ${id(3)}`], "a state it does not observe");
-  assert.deepEqual((await guided(blocked(id(2), "submitted_pending"))).next_actions, [`apn operation status --operation ${id(2)}`],
-    "a family whose status observes keeps it alone");
+  const index = new OperationIndex(new StateStore(s.root), registry);
+  for (const n of [1, 2, 3]) await index.find(id(n));
+  const guided = async (envelope: OutputEnvelope, rpcUrl: string | undefined) => await withBlockerGuidance(envelope, s.root, registry, rpcUrl);
+  assert.deepEqual((await guided(blocked(id(1), "submitted_pending"), RPC)).next_actions, [`apn operation status --operation ${id(1)}`,
+    `apn operation resume --operation ${id(1)} --rpc-url ${RPC}`]);
+  assert.deepEqual((await guided(blocked(id(1), "submitted_pending"), undefined)).next_actions, [`apn operation status --operation ${id(1)}`],
+    "a command that would keep its placeholder is not named");
+  assert.deepEqual((await guided(blocked(id(3), "awaiting_approval"), RPC)).next_actions, [`apn operation status --operation ${id(3)}`], "a state it does not observe");
+  loads = 0;
+  assert.deepEqual((await guided(blocked(id(2), "submitted_pending"), RPC)).next_actions, [`apn operation status --operation ${id(2)}`]);
+  assert.equal(loads, 0, "a family without an observing command is never read");
+  observeFault = true;
+  const faulted = blocked(id(1), "submitted_pending");
+  assert.deepEqual(await guided(faulted, RPC), faulted, "a fault of the hint keeps the refusal");
+  observeFault = false;
   const explicit = failureEnvelope("transfer.prepare", UUID, new ApnError("APN_OPERATION_BLOCKED", "held", { blockingOperationId: id(1), blockingState: "submitted_pending",
     nextActions: ["apn wallet connect"] }));
-  assert.deepEqual(await guided(explicit), explicit);
+  assert.deepEqual(await guided(explicit, RPC), explicit);
   const unknown = blocked(id(9), "submitted_pending");
-  assert.deepEqual(await guided(unknown), unknown);
+  assert.deepEqual(await guided(unknown, RPC), unknown);
 });

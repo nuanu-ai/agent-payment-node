@@ -71,8 +71,9 @@ export interface OperationFamilyAdapter<R = unknown> {
   /**
    * The family's own command that advances the observation of this record, appended after its `apn operation status`
    * to a refusal it blocks; undefined in a state that command does not observe, and absent where that status is itself
-   * the observation. `--rpc-url <https-url>` is filled from the refused invocation's RPC; a command left with any other
-   * placeholder is never named (operation-blocker-guidance.ts).
+   * the observation. `--rpc-url <https-url>` is filled only with the refused invocation's RPC once this record's own
+   * settle ran over it and passed its chain check; a command left with a placeholder is never named
+   * (operation-blocker-guidance.ts).
    */
   observeCommand?(record: R): string | undefined;
   readonly commands?: { readonly status: string; readonly resume?: string; readonly exit?: string };
