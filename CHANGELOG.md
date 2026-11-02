@@ -2,6 +2,11 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.85 — 2026-11-02
+
+- A prepare refused because an earlier operation of the same account is unresolved now observes that operation once and, when its outcome is proven final (its transaction landed, or its nonce was spent elsewhere and it can no longer land), closes it and runs again. The result lists what was closed in `closed_blockers`. This covers direct EVM transfers that were sent, allowance revokes, Circle approvals and legacy LI.FI and Stargate records. Nothing is signed or re-sent by this check; when nothing is proven, the refusal is the same as before and says why in `blocker_observation`.
+- A refusal by such a blocker now names that family's observing command as the next action instead of `apn operation status`, which only reads the stored record for some families.
+
 ## 0.5.84 — 2026-11-01
 
 - MetaMask gasless: a transfer whose outcome is unknown no longer blocks new MetaMask gasless transfers from the same server wallet. The new transfer's approval screen and result list each earlier unresolved transfer (recipient and dispatched gross) and warn that it may still complete. Transfers that APN may still be sending, other rails and nonce-using operations keep blocking as before.
