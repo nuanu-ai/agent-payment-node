@@ -61,16 +61,20 @@ export interface OperationFamilyAdapter<R = unknown> {
    * The blocker settle (src/operation-auto-settle.ts) of a record a new admission was refused for: one bounded
    * observation, under the family's own locks, in a runtime of its own. It writes only this record (and the ledger
    * follow-up the family's own observation already does); it never signs, sends, re-broadcasts, opens custody or asks
-   * consent. It returns the proof that decided the record when the record is terminal afterwards, and null otherwise
-   * (nothing proven, or a state it does not observe). Absent for a family where never-landing cannot be proven or its
-   * cleanup needs a new signature.
+   * consent. A port that reads over the refused command's own RPC first proves, in a request naming nothing of the
+   * blocker, that the endpoint serves the blocker's chain. It returns the proof that decided the record when the record
+   * is terminal afterwards, and null otherwise (nothing proven, or a state it does not observe); an APN refusal it
+   * throws is reported with the first refusal. Absent for a family where never-landing cannot be proven or its cleanup
+   * needs a new signature.
    */
   settleIfNeverLands?(ctx: RuntimeContext, record: R): Promise<string | null>;
   /**
-   * The family's own command that observes this record on chain, named as the next action of a refusal it blocks;
-   * absent where `apn operation status` (the family's own status) is that observation.
+   * The family's own command that advances the observation of this record, appended after its `apn operation status`
+   * to a refusal it blocks; undefined in a state that command does not observe, and absent where that status is itself
+   * the observation. `--rpc-url <https-url>` is filled from the refused invocation's RPC; a command left with any other
+   * placeholder is never named (operation-blocker-guidance.ts).
    */
-  readonly observeCommand?: string;
+  observeCommand?(record: R): string | undefined;
   readonly commands?: { readonly status: string; readonly resume?: string; readonly exit?: string };
   /**
    * The family's own command whose runtime `status`, `resume` and `receipt` delegate to. The runtime factory builds a

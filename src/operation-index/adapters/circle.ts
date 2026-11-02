@@ -57,7 +57,6 @@ export const circleAdapter: OperationFamilyAdapter<CircleKnownOperation> = {
   abandon: async (context, record) => await (await import("../../circle-v2-evm/funding-abandon.js")).abandonCircleFunding(context.state, record.operationId,
     context.requireOperationAbandonApproval(), () => context.clock.now().getTime()),
   // Approval, mint, observation and cleanup are Circle's own foreground and network commands.
-  observeCommand: "apn circle evm observe --operation <operation-id>",
   commands: { status: "apn circle evm status --operation <operation-id>", resume: "apn circle evm observe --operation <operation-id>",
     exit: "apn circle evm cleanup --operation <operation-id>" },
 };

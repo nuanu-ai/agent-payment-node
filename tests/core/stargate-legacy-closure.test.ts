@@ -7,6 +7,8 @@ import { bindArgv } from "../../src/command-binder.js";
 import { ApnError } from "../../src/errors.js";
 import { legacyStargateStatus, type LegacyChainRead, type LegacyStargateStatus } from "../../src/legacy/stargate-v2/status.js";
 import { namedProfileHash } from "../../src/operation-index/adapters/family-claims.js";
+import { ApnCore } from "../../src/core.js";
+import { stargateTokenAdapter } from "../../src/operation-index/adapters/stargate.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
 import { failureEnvelope } from "../../src/output.js";
@@ -178,4 +180,16 @@ test("the owner's six unreleased records (read-only copies), when present, index
   await service.assertEvmAccountAvailable(profile, 10, owner); await service.assertEvmAccountAvailable(profile, 1, owner);
   await rm(join(temporary.root, "operation-index"), { recursive: true, force: true });
   for (const { record } of legacy) assert.equal((await new OperationIndex(state).find(record.operationId))?.state, "terminal");
+});
+
+test("the blocker settle port runs the unreleased-schema record's own closure: null while nothing is proven, the closure reason once it is", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const item = await only(temporary.root, "65-unreleased-stargate-token-v4", "approved"), state = new StateStore(temporary.root);
+  const env = { APN_OPTIMISM_RPC_URL: "https://op.example", APN_ETHEREUM_RPC_URL: "https://eth.example" };
+  const port = async (finalizedNonce: bigint) => await stargateTokenAdapter.settleIfNeverLands!(new ApnCore({ state, clock: { now: () => new Date(NOW) },
+    stargateToken: new StargateTokenService(state, wrapping, env, () => NOW, () => mockChain(10, finalizedNonce).rpc) }).context, item.record);
+  assert.equal(await port(8n), null);
+  assert.equal(await exists(sidecar(temporary.root, item)), false);
+  assert.equal(await port(9n), "legacy_closed_nonce_consumed");
+  assert.equal(await exists(sidecar(temporary.root, item)), true);
 });

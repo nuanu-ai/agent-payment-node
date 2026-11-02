@@ -36,5 +36,4 @@ export const railAdapter: OperationFamilyAdapter<RailOperationRecord> = {
   },
   receipt: async (context, record) => receiptOutcome(await new RailOperationService(context).receipt(record.operationId)),
   abandon: async (context, record) => await abandonRailTransfer(context, new RailOperationService(context), record),
-  observeCommand: "apn operation resume --operation <operation-id>",
 };

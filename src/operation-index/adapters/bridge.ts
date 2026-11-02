@@ -61,8 +61,6 @@ export const bridgeAdapter: OperationFamilyAdapter<StoredBridgeOperationRecord> 
     await bridgeStatus(context, record);
     return await legacyBridgeTerminal(context.state.root, record) ? LEGACY_BRIDGE_CLOSURE_REASON : null;
   },
-  // Status only reads a current journal; resume observes it (and runs a frozen one's closure).
-  observeCommand: "apn operation resume --operation <operation-id>",
   // No owner abandon: resume proves the outcome, including a source effect that can no longer land; a frozen journal
   // closes by the finalized nonce its status reads.
   commands: { status: "apn operation status --operation <operation-id>", exit: "apn operation resume --operation <operation-id>" },

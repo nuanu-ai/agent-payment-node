@@ -45,7 +45,6 @@ export const x402SolanaAdapter: OperationFamilyAdapter<X402SolanaRecord> = {
     return publicX402Solana(await abandonX402Solana(context.state.root, record.operationId, () => context.clock.now(),
       async (current) => await approveX402SolanaAbandon(approval, current)));
   },
-  observeCommand: "apn x402 solana observe --operation <operation-id>",
   commands: { status: "apn x402 solana status --operation <operation-id>", resume: "apn x402 solana observe --operation <operation-id>",
     exit: "apn operation abandon --operation <operation-id>" },
 };

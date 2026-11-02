@@ -28,7 +28,6 @@ function gaszipAdapter(lane: "sei" | "mega", domains: (record: GaszipFundingReco
     salvage: raw => salvageRecord(raw, value => chains.map(chain => salvageEvm(chain, field(value, "owner", "address")))),
     view: async record => publicGaszipFunding(route(), record),
     // Funding status observes the safe source and the correlated destination; there is no owner abandon.
-    observeCommand: `apn ${lane} funding status --operation <operation-id>`,
     commands: { status: `apn ${lane} funding status --operation <operation-id>`, resume: `apn ${lane} funding status --operation <operation-id>` },
   };
 }

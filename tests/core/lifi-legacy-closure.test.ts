@@ -7,6 +7,8 @@ import { canonicalJson } from "../../src/canonical.js";
 import { bindArgv } from "../../src/command-binder.js";
 import { ApnError } from "../../src/errors.js";
 import { environmentFinalizedReader, type FinalizedReader } from "../../src/evm-finalized-proof.js";
+import { ApnCore } from "../../src/core.js";
+import { bridgeAdapter } from "../../src/operation-index/adapters/bridge.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
 import { createApnCore } from "../../src/runtime-factory.js";
@@ -109,4 +111,17 @@ test("the closure reads the source chain's own RPC setting and an RPC of another
   const other = await cli(temporary.root, s, () => mockChain(42161, nonce + 1n).rpc)(["operation", "status", "--operation", id]);
   assert.equal(other.error?.code, "APN_CHAIN_MISMATCH");
   assert.equal(await exists(sidecar(temporary.root, profileHash, id)), false);
+});
+
+test("the blocker settle port runs the frozen journal's own closure: null while nothing is proven, the closure reason once it is", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { s, id, nonce, path, profileHash } = await frozenUnknown(temporary.root), before = await readFile(path, "utf8"), state = new StateStore(temporary.root);
+  const entry = (await new OperationIndex(state).find(id))!, record = (await bridgeAdapter.load(temporary.root, entry.recordPath))!;
+  const port = async (finalizedNonce: bigint) => await bridgeAdapter.settleIfNeverLands!(new ApnCore({ state, clock: { now: () => new Date(s.now) },
+    finalizedRead: () => mockChain(8453, finalizedNonce).rpc }).context, record);
+  assert.equal(await port(nonce), null);
+  assert.equal(await exists(sidecar(temporary.root, profileHash, id)), false);
+  assert.equal(await port(nonce + 1n), "legacy_closed_nonce_consumed");
+  assert.equal(await exists(sidecar(temporary.root, profileHash, id)), true);
+  assert.equal(await readFile(path, "utf8"), before, "the journal is unchanged");
 });

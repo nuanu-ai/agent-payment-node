@@ -25,7 +25,7 @@ interface TestRecord { readonly schemaVersion: "test.v1"; readonly operationId: 
   readonly requestHash: string; readonly state: string; readonly terminal: boolean; readonly account: string }
 class Reader extends SecureStateStore { async read(path: string) { return await this.readJson(path); } }
 type Port = (record: TestRecord) => Promise<string | null>;
-function adapter(family: OperationFamily, directory: string, port?: Port, observeCommand?: string): OperationFamilyAdapter<TestRecord> {
+function adapter(family: OperationFamily, directory: string, port?: Port, observeCommand?: (record: TestRecord) => string | undefined): OperationFamilyAdapter<TestRecord> {
   return {
     family, stores: [{ directory, perProfile: true }],
     load: async (root, recordPath) => await new Reader(root).read(recordPath) as TestRecord | null,
@@ -83,18 +83,39 @@ test("a proven blocker is settled once in its own runtime, the prepare runs agai
   assert.deepEqual(closedBlockerNotes(out), [`Closed earlier operation ${id(1)} (direct_transfer): its outcome is final (failed_proven_superseded), so it no longer blocks.`]);
 });
 
-test("nothing proven, or a settle that fails, answers the first refusal with only the observation added; nothing runs again", async (t) => {
-  for (const [port, observation] of [[async () => null, "not_proven"], [async () => { throw new ApnError("APN_RPC_CONFIG", "no rpc"); }, "unavailable"],
-    [async () => { throw new Error("socket closed"); }, "unavailable"]] as const) {
+test("nothing proven, or an APN refusal of the settle, answers the first refusal with only the observation added; nothing runs again", async (t) => {
+  const refusal = new ApnError("APN_RPC_CONFIG", "Pass --rpc-url for the operation's chain.", { reason: "direct_rpc_required" });
+  for (const [port, added] of [[async () => null, { blocker_observation: "not_proven" }], [async () => { throw refusal; }, { blocker_observation: "unavailable",
+    blocker_error_code: "APN_RPC_CONFIG", blocker_error_message: "Pass --rpc-url for the operation's chain.", blocker_error_reason: "direct_rpc_required" }]] as const) {
     const s = await setup(t, port);
     await save(s.root, record(1));
     const first = blocked(id(1), "submitted_pending");
     s.answers.push(first);
     const out = await s.settle();
-    assert.deepEqual(out, { ...first, error: { ...first.error!, details: { ...first.error!.details, blocker_observation: observation } } }, observation);
+    assert.deepEqual(out, { ...first, error: { ...first.error!, details: { ...first.error!.details, ...added } } }, added.blocker_observation);
     assert.deepEqual([s.runs(), s.settles.length, Object.hasOwn(out, "closed_blockers")], [1, 1, false]);
     assert.equal((await s.index().find(id(1)))?.state, "active");
   }
+});
+
+test("a fault in the settle (not an APN refusal) is not swallowed: it fails the command", async (t) => {
+  const s = await setup(t, async () => { throw new TypeError("record.terms is undefined"); });
+  await save(s.root, record(1));
+  s.answers.push(blocked(id(1), "submitted_pending"));
+  await assert.rejects(s.settle(), TypeError);
+  assert.deepEqual([s.runs(), s.settles.length], [1, 1]);
+});
+
+test("a port that persisted a terminal transition and then failed is still followed by the index; nothing runs again", async (t) => {
+  const s = await setup(t, async r => {
+    await save(s.root, { ...r, state: "failed_proven_superseded", terminal: true });
+    throw new ApnError("APN_RPC_AMBIGUOUS", "The evidence read did not answer.");
+  });
+  await save(s.root, record(1));
+  s.answers.push(blocked(id(1), "submitted_pending"));
+  const out = await s.settle();
+  assert.deepEqual([out.error?.details?.blocker_observation, out.error?.details?.blocker_error_code, s.runs()], ["unavailable", "APN_RPC_AMBIGUOUS", 1]);
+  assert.deepEqual([(await s.index().find(id(1)))?.state, (await s.index().find(id(1)))?.claims], ["terminal", []], "refreshed after the port ran");
 });
 
 test("a port that claims a proof its record does not show is not believed: no retry", async (t) => {
@@ -151,19 +172,31 @@ test("an envelope with nothing closed carries no closed_blockers field", async (
   assert.deepEqual(closedBlockerNotes(out), []);
 });
 
-test("a blocked refusal names the family's observing command where its status only reads; explicit next actions stay", async (t) => {
+test("a blocked refusal appends the observing command after status, only in an observed state and only when it runs as typed", async (t) => {
   const s = await setup(t);
+  const resume = (r: TestRecord) => r.state === "submitted_pending" ? "apn operation resume --operation <operation-id> --rpc-url <https-url>" : undefined;
   const registry: OperationRegistry = new Map<OperationFamily, OperationFamilyAdapter>([
-    ["direct_transfer", adapter("direct_transfer", "test-a", undefined, "apn operation resume --operation <operation-id>") as OperationFamilyAdapter],
+    ["direct_transfer", adapter("direct_transfer", "test-a", undefined, resume) as OperationFamilyAdapter],
     ["rail_transfer", adapter("rail_transfer", "test-b") as OperationFamilyAdapter],
   ]);
-  await save(s.root, record(1)); await save(s.root, record(2), "test-b");
-  assert.deepEqual((await withBlockerGuidance(blocked(id(1), "submitted_pending"), s.root, registry)).next_actions, [`apn operation resume --operation ${id(1)}`]);
-  assert.deepEqual((await withBlockerGuidance(blocked(id(2), "submitted_pending"), s.root, registry)).next_actions, [`apn operation status --operation ${id(2)}`],
-    "a family whose status observes keeps it");
+  await save(s.root, record(1)); await save(s.root, record(2), "test-b"); await save(s.root, record(3, { state: "awaiting_approval" }));
+  const RPC = "https://base.example";
+  const guided = async (envelope: OutputEnvelope) => await withBlockerGuidance(envelope, s.root, registry, RPC);
+  const withoutRpc = async (envelope: OutputEnvelope) => await withBlockerGuidance(envelope, s.root, registry, undefined);
+  assert.deepEqual((await guided(blocked(id(1), "submitted_pending"))).next_actions,
+    [`apn operation status --operation ${id(1)}`, `apn operation resume --operation ${id(1)} --rpc-url https://base.example`]);
+  // Without the invocation's RPC the command would keep its placeholder, so it is not named.
+  assert.deepEqual((await withoutRpc(blocked(id(1), "submitted_pending"))).next_actions, [`apn operation status --operation ${id(1)}`]);
+  // A blocking claim that is not an account of the invocation's network never borrows its RPC.
+  const profileWide = failureEnvelope("transfer.prepare", UUID, new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this profile is not terminal.",
+    { blockingOperationId: id(1), blockingState: "submitted_pending" }));
+  assert.deepEqual(await guided(profileWide), profileWide);
+  assert.deepEqual((await guided(blocked(id(3), "awaiting_approval"))).next_actions, [`apn operation status --operation ${id(3)}`], "a state it does not observe");
+  assert.deepEqual((await guided(blocked(id(2), "submitted_pending"))).next_actions, [`apn operation status --operation ${id(2)}`],
+    "a family whose status observes keeps it alone");
   const explicit = failureEnvelope("transfer.prepare", UUID, new ApnError("APN_OPERATION_BLOCKED", "held", { blockingOperationId: id(1), blockingState: "submitted_pending",
     nextActions: ["apn wallet connect"] }));
-  assert.deepEqual(await withBlockerGuidance(explicit, s.root, registry), explicit);
+  assert.deepEqual(await guided(explicit), explicit);
   const unknown = blocked(id(9), "submitted_pending");
-  assert.deepEqual(await withBlockerGuidance(unknown, s.root, registry), unknown);
+  assert.deepEqual(await guided(unknown), unknown);
 });

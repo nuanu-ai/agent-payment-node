@@ -40,7 +40,6 @@ export const merchantAdapter: OperationFamilyAdapter<MerchantOperation> = {
       .abandon(record.operationId, context.requireOperationAbandonApproval()));
   },
   // Merchant observation and the unsent retirement run on their own bounded CLI path; its status carries the payment and delivery evidence.
-  observeCommand: "apn x402 merchant observe --operation <operation-id>",
   commands: { status: "apn x402 merchant status --operation <operation-id>", resume: "apn x402 merchant observe --operation <operation-id>",
     exit: "apn x402 merchant retire-unsent --operation <operation-id>" },
 };

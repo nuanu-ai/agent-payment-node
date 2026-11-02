@@ -36,7 +36,6 @@ export const relayAdapter: OperationFamilyAdapter<RelayUnsignedOperation> = {
   salvage: raw => salvageRecord(raw, value => [salvageEvm(field(value, "sourceChainId"), field(value, "sourceAccount"))]),
   view: async (record, root) => await relayStatus(root, record),
   // Execution, observation and retirement of the unsigned draft are Relay's own commands.
-  observeCommand: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <source-rpc>",
   commands: { status: "apn relay status --profile <profile> --operation <operation-id>",
     resume: "apn relay observe --profile <profile> --operation <operation-id> --rpc-url <source-rpc>",
     exit: "apn relay retire --profile <profile> --operation <operation-id>" },

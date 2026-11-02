@@ -92,13 +92,12 @@ function nextActions(error: ReturnType<typeof asApnError>, externalWallet: boole
 /**
  * The operation index names the blocker for every family; its status shows what it waits for (and, for a record of an
  * unreleased Stargate schema, runs the chain-proven closure). Where that status only reads the record, the command
- * boundary knows the blocker's family and names the family's own observing command instead (operation-blocker-guidance.ts).
+ * boundary, which can read the blocker's family, appends the family's own observing command (operation-blocker-guidance.ts).
  * A blocker whose record cannot be read has one more exit: the owner releases its claims with TTY consent (the record and
  * any ledger hold stay as they are).
  */
-export function blockedNextActions(blocker: string, unreadable: boolean, observeCommand?: string): readonly string[] {
-  if (unreadable) return [`apn operation status --operation ${blocker}`, `apn operation abandon --operation ${blocker}`];
-  return [observeCommand === undefined ? `apn operation status --operation ${blocker}` : observeCommand.replaceAll("<operation-id>", blocker)];
+export function blockedNextActions(blocker: string, unreadable: boolean): readonly string[] {
+  return unreadable ? [`apn operation status --operation ${blocker}`, `apn operation abandon --operation ${blocker}`] : [`apn operation status --operation ${blocker}`];
 }
 
 /** One plain line per earlier operation the invocation closed (`closed_blockers`), for a person at the terminal. */

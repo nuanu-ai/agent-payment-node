@@ -11,7 +11,6 @@ import { TransferService } from "../../transfer-service.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageHash, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
 import { providerClaims, UNREADABLE_PROVIDER_CLAIM, type OperationClaim } from "../types.js";
-import { OPERATION_RESUME } from "./family-commands.js";
 
 const STORE: OperationStore = { directory: "operations", perProfile: true };
 const PROVIDER_ID = /^[a-z0-9][a-z0-9-]{0,63}$/u;
@@ -69,12 +68,15 @@ export const directAdapter: OperationFamilyAdapter<OperationRecord> = {
       options.coinbaseObservationRpc));
   },
   abandon: async (context, record) => await abandonDirectTransfer(context, record.operationId),
-  // The blocker settle: a dispatched local transfer is observed once (receipt, then never-lands) and never dispatched again.
+  // The blocker settle: a dispatched local transfer is observed once (receipt, then never-lands) and never dispatched
+  // again, over the refused command's RPC only once a standalone chain-id read proved it serves the transfer's chain.
   async settleIfNeverLands(context, record) {
     if (record.providerDirect !== undefined || !SETTLED_DIRECT_STATES.includes(record.state)) return null;
     const settled = await new TransferService(context).settleDispatched(record.operationId);
     return directTerminal(settled) ? settled.proofClass : null;
   },
-  // Status only reads a local transfer; resume observes it (and re-sends only its own signed bytes).
-  observeCommand: OPERATION_RESUME,
+  // Status only reads a local transfer; a dispatched one is observed by its own next action, resume (which re-sends
+  // only its own signed bytes). No other state is advanced by it.
+  observeCommand: record => record.providerDirect === undefined && SETTLED_DIRECT_STATES.includes(record.state)
+    ? "apn operation resume --operation <operation-id> --rpc-url <https-url>" : undefined,
 };
