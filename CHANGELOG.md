@@ -5,7 +5,7 @@ Release artifacts, their SHA-256 digests and provenance for every version are on
 ## 0.5.85 — 2026-11-02
 
 - A prepare refused because an earlier operation of the same account is unresolved now observes that operation once and, when its outcome is proven final (its transaction landed, or its nonce was spent elsewhere and it can no longer land), closes it and runs again. The result lists what was closed in `closed_blockers`. This covers direct EVM transfers that were sent, allowance revokes, Circle approvals and legacy LI.FI and Stargate records. Nothing is signed or re-sent by this check; when nothing is proven, the refusal is the same as before and says why in `blocker_observation`.
-- A refusal by such a blocker now names that family's observing command as the next action instead of `apn operation status`, which only reads the stored record for some families.
+- A refusal by a sent direct transfer now adds `apn operation resume` with the invocation's RPC after `apn operation status`, because status only reads a direct transfer's stored record. When the check could not run (no RPC, an RPC of another chain), the refusal says why in `blocker_error_code` and `blocker_error_message`; the earlier transaction's hash is never sent to an RPC of another chain.
 
 ## 0.5.84 — 2026-11-01
 
