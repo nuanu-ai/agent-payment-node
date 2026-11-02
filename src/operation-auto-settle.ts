@@ -1,0 +1,75 @@
+import type { BoundCommand } from "./command-binder.js";
+import type { ClosedBlocker, CommandRequest, OutputEnvelope } from "./commands.js";
+import { STATE_HASH, type OperationFamilyAdapter } from "./operation-index/adapter.js";
+import { OperationIndex } from "./operation-index/index.js";
+import { operationRegistry, type OperationRegistry } from "./operation-index/registry.js";
+import type { OperationIndexEntry } from "./operation-index/types.js";
+import { withBlockerGuidance } from "./operation-blocker-guidance.js";
+import type { RuntimeContext } from "./runtime.js";
+import { SecureStateStore } from "./secure-state-store.js";
+
+/**
+ * The commands that admit a new money operation and are retried once after their blocker settles. Each is safe to run
+ * twice: a refused admission writes nothing (OperationIndex.admit, assertAvailable), everything such a command does before
+ * its admission only reads or closes expired unsent records (idempotent), and it replays by its own identity (idempotency
+ * key, slot or intent digest). Signing, sending and consent all come after the admission, so a refused first run asked
+ * and sent nothing.
+ */
+const PREPARE_COMMANDS: ReadonlySet<CommandRequest["command"]> = new Set<CommandRequest["command"]>([
+  "transfer.prepare", "x402.fetch.prepare", "bridge.prepare", "circle.approval.prepare",
+  "wallet.allowance.revoke", "x402.permit2.allowance.set", "x402.permit2.allowance.revoke",
+]);
+
+/** The blocker's own runtime: built as its family's commands build theirs, never sharing the refused command's RPC object. */
+export type BlockerRuntime = (operationId: string, command: CommandRequest["command"]) => RuntimeContext;
+type SettlingAdapter = OperationFamilyAdapter & Required<Pick<OperationFamilyAdapter, "settleIfNeverLands">>;
+interface Blocker { readonly index: OperationIndex; readonly entry: OperationIndexEntry; readonly adapter: SettlingAdapter; readonly record: unknown }
+type Settled = { readonly closed: ClosedBlocker } | { readonly observation: "not_proven" | "unavailable" };
+
+/**
+ * The command boundary (CLI and MCP), outside every family lock and the index lock: a prepare refused because an earlier
+ * operation of the same account is unresolved settles that blocker once, through its family's own observation, and runs
+ * again once when the observation proves it terminal. Anything else (no settle port, a blocker the index does not confirm,
+ * nothing proven, a settle failure, a second refusal) answers the first refusal; a settle that ran but proved nothing
+ * names why in its `blocker_observation` detail. A success after a settle reports it in `closed_blockers`.
+ */
+export async function settleBlockerAndRetry(bound: BoundCommand, root: string, run: () => Promise<OutputEnvelope>, runtime: BlockerRuntime,
+  registry: OperationRegistry = operationRegistry()): Promise<OutputEnvelope> {
+  const first = await withBlockerGuidance(await run(), root, registry);
+  if (!PREPARE_COMMANDS.has(bound.request.command) || first.error?.code !== "APN_OPERATION_BLOCKED") return first;
+  const { blockingOperationId, blockingState } = first.error.details ?? {};
+  if (typeof blockingOperationId !== "string" || !STATE_HASH.test(blockingOperationId) || typeof blockingState !== "string") return first;
+  const blocker = await confirmed(root, registry, blockingOperationId, blockingState);
+  if (blocker === null) return first;
+  const settled = await settle(blocker, root, runtime);
+  if ("observation" in settled) return { ...first, error: { ...first.error, details: { ...first.error.details, blocker_observation: settled.observation } } };
+  const second = await run();
+  return second.ok ? { ...second, closed_blockers: [settled.closed] } : first;
+}
+
+/** The blocker as the index confirms it: active, in the refused state, of a family with a settle port; null otherwise. */
+async function confirmed(root: string, registry: OperationRegistry, operationId: string, blockingState: string): Promise<Blocker | null> {
+  try {
+    const index = new OperationIndex(new SecureStateStore(root), registry), entry = await index.find(operationId);
+    const adapter = entry === null ? undefined : index.adapter(entry);
+    if (entry?.state !== "active" || !settles(adapter)) return null;
+    const record = await index.loadRecord(entry);
+    return record !== null && adapter.state(record) === blockingState ? { index, entry, adapter, record } : null;
+  } catch { return null; }
+}
+
+/** One settle; the port's word is checked against the record it wrote, read again through the family's own reader. */
+async function settle({ index, entry, adapter, record }: Blocker, root: string, runtime: BlockerRuntime): Promise<Settled> {
+  try {
+    // The family's own runtime command, as operationRuntimeCommand reads it; a family that names none runs in the settle command's.
+    const command = await adapter.runtimeCommand?.(record) ?? "operation.settle";
+    const proof = await adapter.settleIfNeverLands(runtime(entry.operationId, command), record);
+    if (proof === null) return { observation: "not_proven" };
+    await index.refresh(entry.operationId);
+    const after = await index.loadRecord(entry);
+    if (after === null || !await adapter.terminal(after, root)) return { observation: "not_proven" };
+    return { closed: { operation_id: entry.operationId, family: entry.family, state: adapter.state(after), proof } };
+  } catch { return { observation: "unavailable" }; }
+}
+
+const settles = (adapter: OperationFamilyAdapter | undefined): adapter is SettlingAdapter => adapter?.settleIfNeverLands !== undefined;

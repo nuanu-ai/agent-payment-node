@@ -34,6 +34,7 @@ export const permit2Adapter: OperationFamilyAdapter<Permit2ProductionRecord> = {
   salvage: raw => salvageRecord(raw, value => [salvageEvm(permit2ChainId(field(value, "material", "owner", "chain")), field(value, "material", "wallet", "account"))]),
   view: async record => publicPermit2Production(record),
   // Observation, including the proof that an expired authorization was never used, runs on Permit2's own CLI path.
+  observeCommand: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc>",
   commands: { status: "apn x402 permit2 status --profile <profile> --operation <operation-id>",
     resume: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc>",
     exit: "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> --expired-unused" },

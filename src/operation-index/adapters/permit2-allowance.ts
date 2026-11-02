@@ -30,6 +30,7 @@ export const permit2AllowanceAdapter: OperationFamilyAdapter<Permit2AllowanceRec
         assetLabel: `allowance of ${t.token} to Permit2`, unit: "atomic units",
         outcomeNote: "The approve may still land and set this allowance; revoke it later with apn x402 permit2 allowance revoke." })));
   },
+  observeCommand: "apn x402 permit2 allowance observe --operation <operation-id> --rpc-url <https-rpc>",
   commands: { status: "apn x402 permit2 allowance status --operation <operation-id>",
     resume: "apn x402 permit2 allowance observe --operation <operation-id> --rpc-url <https-rpc>", exit: "apn operation abandon --operation <operation-id>" },
 };

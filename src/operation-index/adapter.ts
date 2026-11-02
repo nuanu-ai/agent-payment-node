@@ -57,6 +57,20 @@ export interface OperationFamilyAdapter<R = unknown> {
   receipt?(ctx: RuntimeContext, record: R): Promise<CommandOutcome>;
   resume?(ctx: RuntimeContext, record: R, options: OperationResumeOptions): Promise<CommandOutcome>;
   abandon?(ctx: RuntimeContext, record: R): Promise<unknown>;
+  /**
+   * The blocker settle (src/operation-auto-settle.ts) of a record a new admission was refused for: one bounded
+   * observation, under the family's own locks, in a runtime of its own. It writes only this record (and the ledger
+   * follow-up the family's own observation already does); it never signs, sends, re-broadcasts, opens custody or asks
+   * consent. It returns the proof that decided the record when the record is terminal afterwards, and null otherwise
+   * (nothing proven, or a state it does not observe). Absent for a family where never-landing cannot be proven or its
+   * cleanup needs a new signature.
+   */
+  settleIfNeverLands?(ctx: RuntimeContext, record: R): Promise<string | null>;
+  /**
+   * The family's own command that observes this record on chain, named as the next action of a refusal it blocks;
+   * absent where `apn operation status` (the family's own status) is that observation.
+   */
+  readonly observeCommand?: string;
   readonly commands?: { readonly status: string; readonly resume?: string; readonly exit?: string };
   /**
    * The family's own command whose runtime `status`, `resume` and `receipt` delegate to. The runtime factory builds a
