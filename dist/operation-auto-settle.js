@@ -1,4 +1,4 @@
-import { ApnError } from "./errors.js";
+import { ApnError, asApnError } from "./errors.js";
 import { STATE_HASH } from "./operation-index/adapter.js";
 import { OperationIndex } from "./operation-index/index.js";
 import { operationRegistry } from "./operation-index/registry.js";
@@ -22,10 +22,13 @@ const PREPARE_COMMANDS = new Set([
  * blocks now) carries the closed blocker in `closed_blockers`. When nothing was closed (no settle port, a blocker the index
  * does not confirm, nothing proven, an APN refusal of the settle) the first refusal is the answer; a settle that ran but
  * proved nothing names why in its `blocker_observation` detail, and an APN refusal of it in `blocker_error_code`,
- * `blocker_error_message` and (when it has one) `blocker_error_reason`. Any other failure is a fault and propagates.
+ * `blocker_error_message` and (when it has one) `blocker_error_reason`. Any other failure of the lookup or the settle
+ * is classified as the boundary classifies it (APN_INTERNAL, its class in `blocker_error_class`, never its own text),
+ * and the first refusal is still the answer. Only when the settle ran over the invocation's own RPC and proved nothing
+ * (its chain check passed) does the refusal also name the blocker's observing command with that RPC.
  */
 export async function settleBlockerAndRetry(bound, root, run, runtime, registry = operationRegistry()) {
-    const first = await withBlockerGuidance(await run(), root, registry, bound.rpcUrl);
+    const first = await withBlockerGuidance(await run(), root, registry, undefined);
     if (!PREPARE_COMMANDS.has(bound.request.command) || first.error?.code !== "APN_OPERATION_BLOCKED")
         return first;
     const { blockingOperationId, blockingState } = first.error.details ?? {};
@@ -34,14 +37,18 @@ export async function settleBlockerAndRetry(bound, root, run, runtime, registry 
     const blocker = await confirmed(root, registry, blockingOperationId, blockingState);
     if (blocker === null)
         return first;
-    const settled = await settle(blocker, root, runtime);
+    const settled = "observation" in blocker ? blocker : await settle(blocker, root, runtime);
     if ("observation" in settled) {
-        return { ...first, error: { ...first.error, details: { ...first.error.details, blocker_observation: settled.observation, ...blockerError(settled) } } };
+        const observed = { ...first, error: { ...first.error, details: { ...first.error.details, blocker_observation: settled.observation, ...blockerError(settled) } } };
+        return settled.observation === "not_proven" ? await withBlockerGuidance(observed, root, registry, bound.rpcUrl) : observed;
     }
     // The retry answers for itself, a refusal naming what blocks now included; the closed blocker is reported either way.
-    return { ...await withBlockerGuidance(await run(), root, registry, bound.rpcUrl), closed_blockers: [settled.closed] };
+    return { ...await withBlockerGuidance(await run(), root, registry, undefined), closed_blockers: [settled.closed] };
 }
-/** The blocker as the index confirms it: active, in the refused state, of a family with a settle port; null otherwise. */
+/**
+ * The blocker as the index confirms it: active, in the refused state, of a family with a settle port; null otherwise
+ * (an APN refusal of the lookup included). A fault of the lookup itself is reported as the settle's.
+ */
 async function confirmed(root, registry, operationId, blockingState) {
     try {
         const index = new OperationIndex(new SecureStateStore(root), registry), entry = await index.find(operationId);
@@ -52,9 +59,7 @@ async function confirmed(root, registry, operationId, blockingState) {
         return record !== null && adapter.state(record) === blockingState ? { index, entry, adapter, record } : null;
     }
     catch (error) {
-        if (error instanceof ApnError)
-            return null;
-        throw error;
+        return error instanceof ApnError ? null : { observation: "unavailable", error: asApnError(error) };
     }
 }
 /** One settle; the port's word is checked against the record it wrote, read again through the family's own reader. */
@@ -78,17 +83,16 @@ async function settle({ index, entry, adapter, record }, root, runtime) {
         return { closed: { operation_id: entry.operationId, family: entry.family, state: adapter.state(after), proof } };
     }
     catch (error) {
-        if (error instanceof ApnError)
-            return { observation: "unavailable", error };
-        throw error;
+        return { observation: "unavailable", error: asApnError(error) };
     }
 }
-/** An APN refusal of the settle, as its own code and wording say it (never a stack). */
+/** The settle's refusal as its own code and wording say it, or a fault as the boundary classifies it (never its text or stack). */
 function blockerError(settled) {
     if (!("error" in settled))
         return {};
     const { code, message, details } = settled.error;
-    return { blocker_error_code: code, blocker_error_message: message, ...(typeof details?.reason === "string" ? { blocker_error_reason: details.reason } : {}) };
+    return { blocker_error_code: code, blocker_error_message: message, ...(typeof details?.reason === "string" ? { blocker_error_reason: details.reason } : {}),
+        ...(typeof details?.internal_class === "string" ? { blocker_error_class: details.internal_class } : {}) };
 }
 const settles = (adapter) => adapter?.settleIfNeverLands !== undefined;
 //# sourceMappingURL=operation-auto-settle.js.map

@@ -15,6 +15,9 @@ export type BlockerRuntime = (operationId: string, command: CommandRequest["comm
  * blocks now) carries the closed blocker in `closed_blockers`. When nothing was closed (no settle port, a blocker the index
  * does not confirm, nothing proven, an APN refusal of the settle) the first refusal is the answer; a settle that ran but
  * proved nothing names why in its `blocker_observation` detail, and an APN refusal of it in `blocker_error_code`,
- * `blocker_error_message` and (when it has one) `blocker_error_reason`. Any other failure is a fault and propagates.
+ * `blocker_error_message` and (when it has one) `blocker_error_reason`. Any other failure of the lookup or the settle
+ * is classified as the boundary classifies it (APN_INTERNAL, its class in `blocker_error_class`, never its own text),
+ * and the first refusal is still the answer. Only when the settle ran over the invocation's own RPC and proved nothing
+ * (its chain check passed) does the refusal also name the blocker's observing command with that RPC.
  */
 export declare function settleBlockerAndRetry(bound: BoundCommand, root: string, run: () => Promise<OutputEnvelope>, runtime: BlockerRuntime, registry?: OperationRegistry): Promise<OutputEnvelope>;
