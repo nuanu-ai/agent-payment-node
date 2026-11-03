@@ -71,7 +71,7 @@ function validateSession(envelope, now) {
     const projectId = data.projectId;
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(projectId))
         mmFail("mm_gasless_session_unavailable");
-    validateJwt(data.cliToken, projectId, now.getTime());
+    validateJwt(data.cliToken, projectId, now.getTime(), boundedString(data.cliRefreshToken));
     return data;
 }
 function validateWallet(envelope) {
@@ -114,7 +114,8 @@ function validateRemote(value) {
     if (value.namespace !== "solana")
         mmAddress(value.address, "mm_gasless_state_corrupt");
 }
-function validateJwt(token, projectId, nowMs) {
+/** A token past `exp` beside a stored refresh token is one `mm` renews on its next authenticated command, never APN. */
+function validateJwt(token, projectId, nowMs, refreshable) {
     const parts = token.split(".");
     if (parts.length !== 3 || parts.some((part) => !/^[A-Za-z0-9_-]+$/u.test(part) || part.length > 8192)) {
         mmFail("mm_gasless_session_unavailable");
@@ -129,9 +130,11 @@ function validateJwt(token, projectId, nowMs) {
     catch {
         return mmFail("mm_gasless_session_unavailable");
     }
-    if (!isPlainRecord(payload) || payload.sub !== projectId || !Number.isSafeInteger(payload.exp) || Number(payload.exp) < 0 ||
-        Number(payload.exp) * 1000 <= nowMs)
+    if (!isPlainRecord(payload) || payload.sub !== projectId || !Number.isSafeInteger(payload.exp) || Number(payload.exp) < 0) {
         mmFail("mm_gasless_session_unavailable");
+    }
+    if (Number(payload.exp) * 1000 <= nowMs)
+        mmFail(refreshable ? "mm_gasless_session_expired" : "mm_gasless_session_unavailable");
     for (const key of ["nbf", "iat"]) {
         const value = payload[key];
         if (value !== undefined && (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) * 1000 > nowMs)) {

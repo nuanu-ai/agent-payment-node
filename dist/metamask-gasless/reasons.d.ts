@@ -10,6 +10,8 @@ export declare const MM_REASON_CODES: {
     readonly mm_gasless_identity: "APN_PROFILE_DRIFT";
     readonly mm_gasless_binding_changed: "APN_PROFILE_DRIFT";
     readonly mm_gasless_session_unavailable: "APN_PROVIDER_SESSION_REQUIRED";
+    /** The `mm` CLI access token is past its `exp` and the session keeps a refresh token, which `mm` itself renews it with. */
+    readonly mm_gasless_session_expired: "APN_PROVIDER_SESSION_REQUIRED";
     /** The MetaMask login's project has no server wallet (its wallet list answered 404 or listed no EVM wallet). */
     readonly mm_gasless_project_has_no_wallets: "APN_PROVIDER_SESSION_REQUIRED";
     /** The MetaMask login's project lists EVM server wallets, but not the profile's bound one. */
