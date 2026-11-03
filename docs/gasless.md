@@ -503,9 +503,19 @@ The currently selected wallet must resolve to that same address. This path does 
 refresh a login or complete provider MFA. If the session is unavailable, complete the normal provider login separately
 and continue the saved operation. Observing a dispatched operation never needs the session.
 
-While an unresolved operation holds the profile, wallet connect for that profile waits for it, so a prepare refused for
-a missing session names that operation instead: inspect it with `apn operation status`, and release an outcome still
-unknown after its approval window with `apn operation abandon` before connecting again.
+APN only reads the `mm` session; `mm` renews its own CLI access token with the stored refresh token on its next
+authenticated command. A prepare refused for the session says which case it is, before any network read:
+
+- `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_session_expired`: the CLI token is past its `exp` and the session keeps a
+  refresh token.
+- `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_session_unavailable`: the session is missing or unreadable, its token has
+  expired with no refresh token, or MetaMask refused it.
+
+Both give the same steps, with `mm` written as the pinned client: `mm auth status --json`, which renews an expired
+token and changes nothing else; if it answers `"authenticated": false`, `mm login` with the MetaMask account that created
+the connected wallet (then `mm wallet select` if that account holds more than one). That account's project and address
+are the ones the profile is bound to, so no wallet connect is needed and neither step waits for the profile's
+unresolved operations. Then the same prepare runs again; the refusal wrote no operation.
 
 ### Networks and RPC
 
@@ -903,6 +913,7 @@ it. `apn operation status` and `apn operation resume` read the saved journal wit
 | `gasless_allowance_drift` | Local | A non-zero paymaster allowance remains; clear it before a new prepare. |
 | `mm_gasless_fee_cap` | MetaMask | The quoted fee is above your cap; nothing was dispatched. |
 | `mm_gasless_relay_unsupported`, `mm_gasless_fee_unquoted`, `mm_gasless_balance` | MetaMask | Prepare refusals, see [Prepare refusals](#prepare-refusals). |
+| `mm_gasless_session_expired`, `mm_gasless_session_unavailable` | MetaMask | The `mm` session cannot be used; renew it with `mm auth status --json` or log in again. See [MetaMask Agent server wallet](#metamask-agent-server-wallet). |
 | `mm_gasless_project_has_no_wallets`, `mm_gasless_wallet_not_in_project` | MetaMask | The `mm` login's project does not hold the connected wallet; nothing was sent. See [Login project and server wallet](#login-project-and-server-wallet). |
 | `mm_gasless_submit_unknown` | MetaMask | The dispatch outcome is unknown; read `submit_diagnostic` and resume. |
 | `mm_gasless_provider_approval` | MetaMask | Confirm the transaction through MetaMask MFA, then resume. |
