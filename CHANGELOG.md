@@ -4,7 +4,7 @@ Release artifacts, their SHA-256 digests and provenance for every version are on
 
 ## 0.5.86 — 2026-11-03
 
-- MetaMask gasless: a prepare refused because the `mm` CLI token has expired now says so (`mm_gasless_session_expired`) and gives `mm auth status --json`, which renews the token with the session's refresh token and changes nothing else; if that fails, `mm login` with the account that created the connected wallet. Neither step needs a wallet connect, so a session refusal no longer points at `apn operation abandon` of an earlier unresolved transfer.
+- MetaMask gasless: a refusal because the `mm` CLI token has expired now says so (`mm_gasless_session_expired`). Session refusals give `mm auth status --json`, which renews the token with the session's refresh token and leaves the project, wallet and trading mode as they are; if that answers `"authenticated": false` or the refusal repeats, `mm logout` and `mm login` with the account that created the connected wallet. Neither step needs a wallet connect, so a session refusal no longer points at `apn operation abandon` of an earlier unresolved transfer. Approve and resume results with a session reason carry the same steps.
 
 ## 0.5.85 — 2026-11-02
 

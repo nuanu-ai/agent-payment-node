@@ -504,18 +504,22 @@ refresh a login or complete provider MFA. If the session is unavailable, complet
 and continue the saved operation. Observing a dispatched operation never needs the session.
 
 APN only reads the `mm` session; `mm` renews its own CLI access token with the stored refresh token on its next
-authenticated command. A prepare refused for the session says which case it is, before any network read:
+authenticated command. A refusal for the session says which case it is:
 
 - `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_session_expired`: the CLI token is past its `exp` and the session keeps a
-  refresh token.
+  refresh token. APN finds this in the local session file, before any network read.
 - `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_session_unavailable`: the session is missing or unreadable, its token has
-  expired with no refresh token, or MetaMask refused it.
+  expired with no refresh token, or MetaMask refused the token (HTTP 401 or 403).
 
-Both give the same steps, with `mm` written as the pinned client: `mm auth status --json`, which renews an expired
-token and changes nothing else; if it answers `"authenticated": false`, `mm login` with the MetaMask account that created
-the connected wallet (then `mm wallet select` if that account holds more than one). That account's project and address
-are the ones the profile is bound to, so no wallet connect is needed and neither step waits for the profile's
-unresolved operations. Then the same prepare runs again; the refusal wrote no operation.
+Both give the same steps, with `mm` written as the pinned client. First `mm auth status --json`: it checks the token
+with MetaMask and renews an invalid one; the renewal writes only the token pair, not the project, wallet or trading
+mode. If it answers `"authenticated": false`, or the same refusal comes back, `mm logout`, then `mm login` with the
+MetaMask account that created the connected wallet (then `mm wallet select <address>` if that account holds more than
+one); `mm` starts a login only once no active token is left. That account's project and address are the ones the
+profile is bound to, so no wallet connect is needed and neither step waits for the profile's unresolved operations.
+After a prepare refusal the same prepare runs again; it wrote no operation. An approve whose guard finds the session
+unusable ends `failed_before_effect` with the same reason and steps, and a dispatched transfer whose provider status
+read failed keeps its resume after them.
 
 ### Networks and RPC
 
@@ -756,7 +760,8 @@ by MetaMask's job order the request closed at the MFA step, before signing. That
 no signature exists, so the operation stays guarded until a proved outcome or owner abandonment. A `FAILED` or
 `BROADCAST_FAILED` request, or a `DENIED` or `EXPIRED` one that never reported MFA, stays `mm_gasless_provider_failed`.
 Once MetaMask reports a closed status, a later failed provider read (such as an expired session) keeps that status and
-reason instead of replacing it with `mm_gasless_provider_unavailable` or `mm_gasless_session_unavailable`.
+reason instead of replacing it with `mm_gasless_provider_unavailable`, `mm_gasless_session_expired` or
+`mm_gasless_session_unavailable`.
 
 ### Recovery
 
