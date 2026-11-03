@@ -23,6 +23,8 @@ export interface HomeOptions {
   readonly remoteWallets?: readonly Record<string, unknown>[];
   readonly byokWallets?: readonly Record<string, unknown>[];
   readonly exp?: number;
+  /** The stored `cliRefreshToken`; `null` is a session mm cannot renew without a new login. */
+  readonly refreshToken?: string | null;
 }
 export async function syntheticHome(options: HomeOptions = {}) {
   const home = await mkdtemp(join(await realpath(tmpdir()), "apn-mm-client-"));
@@ -30,7 +32,7 @@ export async function syntheticHome(options: HomeOptions = {}) {
   const payload = Buffer.from(JSON.stringify({ sub: PROJECT, exp: options.exp ?? 2_000_000_000, iat: 1_700_000_000 })).toString("base64url");
   const token = `e30.${payload}.synthetic-signature`;
   const ref = options.ref ?? { address: OWNER.toUpperCase().replace("0X", "0x") };
-  const session = { schemaVersion: "1.0.0", data: { cliToken: token, cliRefreshToken: SECRET, projectId: PROJECT,
+  const session = { schemaVersion: "1.0.0", data: { cliToken: token, cliRefreshToken: options.refreshToken === undefined ? SECRET : options.refreshToken, projectId: PROJECT,
     chain: null, walletMode: "server-wallet", tradingMode: "guard", authMethod: "qr", loginMethod: "qr", consent: 0 } };
   const wallet = { schemaVersion: "0.0.1", data: { byokWallets: options.byokWallets ?? [],
     remoteWallets: options.remoteWallets ?? [{ address: OWNER, name: "primary", namespace: "evm" }],

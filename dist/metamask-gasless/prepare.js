@@ -13,7 +13,7 @@ import { mmRequestHash } from "./operation-model.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import { metaMaskGaslessQuote } from "./quotation.js";
 import { mmRegistry } from "./registry.js";
-import { mmAssertUniqueDelegation } from "./siblings.js";
+import { mmAssertUniqueDelegation, mmTransfersBeside } from "./siblings.js";
 import { mmFail } from "./reasons.js";
 import { mmValidateUnsigned } from "./unsigned.js";
 import { mmRequest, mmUuid } from "./validation.js";
@@ -66,7 +66,7 @@ export class MetaMaskGaslessPreparation {
                         const unsigned = await this.o.provider.buildUnsigned(unsignedInput);
                         clock.check();
                         const checkedUnsigned = mmValidateUnsigned(unsigned, unsignedInput);
-                        mmAssertUniqueDelegation(checkedUnsigned.delegationHash, await this.o.operations.metaMaskGaslessBeside(profileHash, request.chainId, binding.address, operationId));
+                        mmAssertUniqueDelegation(checkedUnsigned.delegationHash, await mmTransfersBeside(this.o.operations, this.o.records, profileHash, request.chainId, binding.address, operationId));
                         clock.check();
                         const snapshot = await rpc.snapshot({ owner: binding.address, delegationHash: checkedUnsigned.delegationHash,
                             grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });

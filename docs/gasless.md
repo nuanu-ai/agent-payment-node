@@ -503,9 +503,26 @@ The currently selected wallet must resolve to that same address. This path does 
 refresh a login or complete provider MFA. If the session is unavailable, complete the normal provider login separately
 and continue the saved operation. Observing a dispatched operation never needs the session.
 
-While an unresolved operation holds the profile, wallet connect for that profile waits for it, so a prepare refused for
-a missing session names that operation instead: inspect it with `apn operation status`, and release an outcome still
-unknown after its approval window with `apn operation abandon` before connecting again.
+APN only reads the `mm` session; `mm` renews its own CLI access token with the stored refresh token on its next
+authenticated command. A refusal for the session says which case it is:
+
+- `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_session_expired`: the CLI token is past its `exp` and the session keeps a
+  refresh token. APN finds this in the local session file, before any network read.
+- `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_session_unavailable`: the session is missing or unreadable, its token has
+  expired with no refresh token, or MetaMask refused the token (HTTP 401 or 403).
+
+Both give the same steps, with `mm` written as the pinned client. First `mm auth status --json`: it checks the token
+with MetaMask and renews an invalid one; the renewal writes only the token pair, not the project, wallet or trading
+mode. If it answers `"authenticated": false`, `mm login` with the MetaMask account that created the connected wallet
+(then `mm wallet select <address>` if that account holds more than one). If it fails with an error, run it again later
+without logging out, and if it keeps failing, `mm login`. Only when it answers `"authenticated": true` and the same
+refusal comes back does the token need replacing: `mm logout`, then `mm login`, since `mm` starts a login only once no
+active token is left. `mm logout` also deletes `mm`'s local wallet list and the seed of any local (BYOK) wallet in that
+`mm` home, so back those up first. That account's project and address are the ones the profile is bound to, so no
+wallet connect is needed and no step waits for the profile's unresolved operations.
+After a prepare refusal the same prepare runs again; it wrote no operation. An approve whose guard finds the session
+unusable ends `failed_before_effect` with the same reason and steps, and a dispatched transfer whose provider status
+read failed keeps its resume after them.
 
 ### Networks and RPC
 
@@ -701,9 +718,11 @@ MetaMask Agent gasless transfer, in any profile bound to that wallet. Its delega
 MetaMask's relayer redeems it without an account nonce of the server wallet, and APN only observes it from then on. An
 earlier transfer awaiting approval, approved but not dispatched, or dispatched with no recorded POST outcome
 (`dispatch_pending`) still blocks, and so does every unresolved operation of another kind on the account (direct, x402,
-MetaMask native and the rest), as does the profile for wallet lifecycle changes. Each new delegation must differ from
-every delegation those earlier transfers hold (`mm_gasless_delegation_reused` otherwise, before anything is signed), so
-their proofs never mix. The approval screen lists each earlier transfer (`Earlier unresolved transfer: operation <id>;
+MetaMask native and the rest), as does the profile for wallet lifecycle changes. A dispatch the owner released
+(`abandoned_unknown` after its submission) holds nothing, but its delegation may still be redeemed, so it counts as an
+earlier transfer here too. Each new delegation must differ from every delegation those earlier transfers hold
+(`mm_gasless_delegation_reused` otherwise, checked at prepare and again for the delegation approve derives before its
+dispatch, before anything is signed), so their proofs never mix. The approval screen lists each earlier transfer (`Earlier unresolved transfer: operation <id>;
 state <state>; recipient <address>; dispatched gross <amount>`) and one line that each may still complete beside this
 one. The prepare and approve output carries the same list as `unresolved_beside`: `operations` with each one's
 `operation_id`, `state`, `recipient` and `dispatched_gross_atomic` (the gross of the batch it dispatched, not a proved
@@ -746,7 +765,8 @@ by MetaMask's job order the request closed at the MFA step, before signing. That
 no signature exists, so the operation stays guarded until a proved outcome or owner abandonment. A `FAILED` or
 `BROADCAST_FAILED` request, or a `DENIED` or `EXPIRED` one that never reported MFA, stays `mm_gasless_provider_failed`.
 Once MetaMask reports a closed status, a later failed provider read (such as an expired session) keeps that status and
-reason instead of replacing it with `mm_gasless_provider_unavailable` or `mm_gasless_session_unavailable`.
+reason instead of replacing it with `mm_gasless_provider_unavailable`, `mm_gasless_session_expired` or
+`mm_gasless_session_unavailable`.
 
 ### Recovery
 
@@ -903,13 +923,14 @@ it. `apn operation status` and `apn operation resume` read the saved journal wit
 | `gasless_allowance_drift` | Local | A non-zero paymaster allowance remains; clear it before a new prepare. |
 | `mm_gasless_fee_cap` | MetaMask | The quoted fee is above your cap; nothing was dispatched. |
 | `mm_gasless_relay_unsupported`, `mm_gasless_fee_unquoted`, `mm_gasless_balance` | MetaMask | Prepare refusals, see [Prepare refusals](#prepare-refusals). |
+| `mm_gasless_session_expired`, `mm_gasless_session_unavailable` | MetaMask | The `mm` session cannot be used; renew it with `mm auth status --json` or log in again. See [MetaMask Agent server wallet](#metamask-agent-server-wallet). |
 | `mm_gasless_project_has_no_wallets`, `mm_gasless_wallet_not_in_project` | MetaMask | The `mm` login's project does not hold the connected wallet; nothing was sent. See [Login project and server wallet](#login-project-and-server-wallet). |
 | `mm_gasless_submit_unknown` | MetaMask | The dispatch outcome is unknown; read `submit_diagnostic` and resume. |
 | `mm_gasless_provider_approval` | MetaMask | Confirm the transaction through MetaMask MFA, then resume. |
 | `mm_gasless_provider_mfa_rejected`, `mm_gasless_provider_failed` | MetaMask | The provider closed the request; still guarded until proof. Consider `revoke`. |
 | `mm_gasless_rpc_log_range`, `mm_gasless_rpc_rate_limited`, `mm_gasless_rpc_unavailable` | MetaMask | The RPC refused or failed during recovery; resume continues from the proved cursor. |
 | `mm_gasless_delegation_disabled` | MetaMask | The delegation was disabled before any redemption; `revoked_unused`, holds released. |
-| `mm_gasless_delegation_reused` | MetaMask | A new delegation repeated one an earlier unresolved transfer holds; nothing was signed or sent. Prepare again. |
+| `mm_gasless_delegation_reused` | MetaMask | A new delegation repeated one an earlier unresolved or released transfer holds; nothing was signed or sent. Prepare again. |
 | `mm_gasless_record_capacity` | MetaMask | History is full except the terminal slot; observations are reported, not saved. |
 | `APN_INSUFFICIENT_GAS` | MetaMask `revoke` | Send the stated native amount to the server wallet, then retry `revoke`. |
 

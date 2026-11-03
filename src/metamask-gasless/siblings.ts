@@ -1,8 +1,12 @@
 import type { Address, Hex } from "../model.js";
+import { conflictDomainKey, evmConflictDomain } from "../operation-conflict-domain.js";
+import type { OperationService } from "../operation-service.js";
+import { canonicalOperationId } from "../transfer-policy.js";
 import { mmDispatchIntent } from "./dispatch.js";
 import { mmActualGross } from "./economics.js";
 import type { MetaMaskGaslessState } from "./model.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
+import type { MetaMaskGaslessRepositoryPort } from "./ports.js";
 import { mmFail } from "./reasons.js";
 
 /** Said once beside the listed transfers, on the approval screen and in the prepare and approve output. */
@@ -35,4 +39,21 @@ export function mmAssertUniqueDelegation(delegationHash: Hex, siblings: readonly
   if (siblings.some(sibling => [sibling.intent.delegationHash, mmDispatchIntent(sibling).delegationHash].includes(delegationHash))) {
     mmFail("mm_gasless_delegation_reused");
   }
+}
+
+/**
+ * The account's earlier MetaMask gasless transfers a new one proceeds beside: the unresolved ones the operation index
+ * admits, and each dispatch the owner released (`abandoned_unknown` after its one submission). A release holds no
+ * account claim, but its delegation may still be redeemed, so it is listed and its hash stays unique all the same.
+ */
+export async function mmTransfersBeside(operations: Pick<OperationService, "metaMaskGaslessBeside">,
+  records: Pick<MetaMaskGaslessRepositoryPort, "listAllOperations">, profileHash: string, chainId: number, account: Address,
+  operationId: string): Promise<readonly MetaMaskGaslessOperationRecord[]> {
+  const open = await operations.metaMaskGaslessBeside(profileHash, chainId, account, operationId);
+  const key = conflictDomainKey(evmConflictDomain(chainId, account)), self = canonicalOperationId(operationId);
+  const released = (await records.listAllOperations()).filter(record => record.state === "abandoned_unknown" &&
+    record.submissionAttempts === 1 && record.operationId !== self && !open.some(other => other.operationId === record.operationId) &&
+    conflictDomainKey(evmConflictDomain(record.intent.request.chainId, record.intent.binding.address)) === key)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.operationId.localeCompare(right.operationId));
+  return [...open, ...released];
 }

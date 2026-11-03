@@ -57,7 +57,8 @@ async function expectedActions(kind: "none" | "others", revision: number, which?
   const mm = await metaMaskCommand(), connect = "apn wallet connect --profile mm-fixture --provider metamask-agent-wallet --auth-method browser";
   const keep = `To keep paying from ${OWNER}, sign in to MetaMask with the account that created it: ${mm} logout, then ${mm} login ` +
     `(then ${mm} wallet select ${OWNER} if that account holds more than one wallet), then connect this profile again with ${connect}. ` +
-    "The address stays the same, so no revision is needed.";
+    `The address stays the same, so no revision is needed. ${mm} logout also deletes mm's local wallet list and the seed of any ` +
+    "local (BYOK) wallet in that mm home, so back those up first.";
   return [keep, kind === "none"
     ? `Or create this project's first server wallet with ${mm} init --wallet server-wallet --mode guard --json and connect it with ` +
       `${connect} --expected-revision ${revision}. That is a new address: funds on ${OWNER} stay with the login that created it.`

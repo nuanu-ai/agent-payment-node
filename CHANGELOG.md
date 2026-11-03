@@ -2,6 +2,11 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.86 — 2026-11-03
+
+- MetaMask gasless: a refusal because the `mm` CLI token has expired now says so (`mm_gasless_session_expired`). Session refusals give `mm auth status --json`, which renews the token with the session's refresh token and leaves the project, wallet and trading mode as they are; if that answers `"authenticated": false`, `mm login` with the account that created the connected wallet; `mm logout` only when an active token keeps being refused, with a warning that it also deletes `mm`'s local wallet list and BYOK seeds. No step needs a wallet connect, so a session refusal no longer points at `apn operation abandon` of an earlier unresolved transfer. Approve and resume results with a session reason carry the same steps, and the project-wallet refusal's `mm logout` step now carries the same warning.
+- MetaMask gasless: a dispatch the owner released with `apn operation abandon` (`abandoned_unknown`, its delegation possibly still redeemable) is now listed in `unresolved_beside` and on the approval screen of a new transfer from the same wallet and chain, and a new delegation repeating its hash is refused (`mm_gasless_delegation_reused`) at prepare and before approve's dispatch. It still holds nothing.
+
 ## 0.5.85 — 2026-11-02
 
 - A prepare refused because an earlier operation of the same account is unresolved now observes that operation once and, when its outcome is proven final (its transaction landed, or its nonce was spent elsewhere and it can no longer land), closes it and runs again. The result lists what was closed in `closed_blockers`. This covers direct EVM transfers that were sent, allowance revokes, Circle approvals and legacy LI.FI and Stargate records. Nothing is signed or re-sent by this check; when nothing is proven, the refusal is the same as before and says why in `blocker_observation`.

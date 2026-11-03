@@ -22,12 +22,13 @@ import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
 import { revokeMetaMaskGasless, type MetaMaskRevocationDependencies } from "./revocation/service.js";
-import { mmSiblingsOutput } from "./siblings.js";
+import { mmSiblingsOutput, mmTransfersBeside } from "./siblings.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { directEvmNetwork } from "../evm-direct-networks.js";
 import { formatAtomic } from "../money.js";
 import { mmFeeCapNextAction } from "./refusals.js";
 import { mmProjectWalletGuidance, mmProjectWalletNextActions, mmProjectWalletReason } from "./project-wallet-guidance.js";
+import { mmSessionGuidance, mmSessionNextActions, mmSessionReason } from "./session-guidance.js";
 
 export interface MetaMaskGaslessDependencies {
   readonly rpcFor: MetaMaskGaslessRpcFactory;
@@ -97,18 +98,21 @@ export class MetaMaskGaslessService {
       return { ...publicMetaMaskGaslessOperation(op), ...mmSiblingsOutput(await this.siblings(op)) };
     }
     catch (error) {
-      const guided = await this.sessionGuidance(await mmProjectWalletGuidance(error, input.profile), input.profile);
+      const renewal = await mmSessionGuidance(error, async () => (await metaMaskGaslessOwner(this.context.state, input.profile)).address);
+      const guided = renewal !== error ? renewal : await this.connectGuidance(await mmProjectWalletGuidance(error, input.profile), input.profile);
       throw prepareGuidance(guided, input.profile, input.request);
     }
   }
   /**
-   * A lost provider session is normally renewed with the foreground wallet connect handoff, but wallet lifecycle
-   * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile first,
-   * instead of at a command that would only be refused; any steps of the refusal's own follow, since they end in a
-   * wallet connect that waits for it.
+   * A refusal whose way forward ends in a wallet connect (another login's project) waits, as every wallet lifecycle
+   * change does, for each unresolved operation of the profile. Point at the operation that holds the profile first,
+   * instead of at a command that would only be refused; the refusal's own steps follow. A lost or expired `mm` session
+   * never comes here: `mm` renews it without a wallet connect (session-guidance.ts).
    */
-  private async sessionGuidance(error: unknown, profileInput: string): Promise<unknown> {
-    if (!(error instanceof ApnError) || error.code !== "APN_PROVIDER_SESSION_REQUIRED") return error;
+  private async connectGuidance(error: unknown, profileInput: string): Promise<unknown> {
+    if (!(error instanceof ApnError) || error.code !== "APN_PROVIDER_SESSION_REQUIRED" || mmSessionReason(error.details?.reason)) {
+      return error;
+    }
     let blocking: string;
     try {
       await this.operations.assertProfileAvailable(this.context.state.profileHash(canonicalProfile(profileInput)));
@@ -172,7 +176,8 @@ export class MetaMaskGaslessService {
   }
   /** The account's other MetaMask gasless transfers this one proceeds beside (dispatched, outcome unknown). */
   private async siblings(op: MetaMaskGaslessOperationRecord): Promise<readonly MetaMaskGaslessOperationRecord[]> {
-    return await this.operations.metaMaskGaslessBeside(op.profileHash, op.intent.request.chainId, op.intent.binding.address, op.operationId);
+    return await mmTransfersBeside(this.operations, this.records, op.profileHash, op.intent.request.chainId, op.intent.binding.address,
+      op.operationId);
   }
   async status(operationId: string) {
     return await this.locked(operationId, async op => liveMetaMaskGaslessOperation(op));
@@ -186,7 +191,12 @@ export class MetaMaskGaslessService {
     const reason = op.failure?.reason;
     const result = op.state === "failed_before_effect" && mmProjectWalletReason(reason) ? { ...live, next_actions: [
       ...await mmProjectWalletNextActions({ reason, profile: op.intent.profile, address: op.intent.binding.address,
-        revision: op.intent.binding.revision, otherWallets: undefined }), ...live.next_actions] } : live;
+        revision: op.intent.binding.revision, otherWallets: undefined }), ...live.next_actions] }
+      // An approve stopped before effect is prepared again; an unresolved one keeps its own resume after the renewal.
+      : mmSessionReason(reason) && (op.state === "failed_before_effect" || !op.terminal) ? { ...live, next_actions: [
+        ...await mmSessionNextActions(op.intent.binding.address, op.state === "failed_before_effect"
+          ? "Then prepare this transfer again: this operation ended before anything was sent." : undefined), ...live.next_actions] }
+      : live;
     const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
       reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
     return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved,

@@ -80,7 +80,7 @@ test("normal inspect failure before any HTTP has private-state diagnostic and no
   const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect", expected },
     { homeDirectory: home.home, now: () => NOW, exchange });
   assert.equal(result.ok, false); if (result.ok) return;
-  assert.deepEqual(result.failure, { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" });
+  assert.deepEqual(result.failure, { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_expired" });
   assert.equal(result.diagnostic?.mode, "inspect"); assert.equal(result.diagnostic?.stage, "private_state");
   assert.equal(result.diagnostic?.network, "none"); assert.equal(result.diagnostic?.httpStatus, null);
   assert.deepEqual(exchange.requests, []);

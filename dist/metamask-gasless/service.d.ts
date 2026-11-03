@@ -109,12 +109,12 @@ export declare class MetaMaskGaslessService {
         next_actions: readonly string[];
     }>;
     /**
-     * A lost provider session is normally renewed with the foreground wallet connect handoff, but wallet lifecycle
-     * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile first,
-     * instead of at a command that would only be refused; any steps of the refusal's own follow, since they end in a
-     * wallet connect that waits for it.
+     * A refusal whose way forward ends in a wallet connect (another login's project) waits, as every wallet lifecycle
+     * change does, for each unresolved operation of the profile. Point at the operation that holds the profile first,
+     * instead of at a command that would only be refused; the refusal's own steps follow. A lost or expired `mm` session
+     * never comes here: `mm` renews it without a wallet connect (session-guidance.ts).
      */
-    private sessionGuidance;
+    private connectGuidance;
     approve(operationId: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     resume(operationId: string, observationRpcEnv?: string): Promise<import("./operation-model.js").MetaMaskGaslessPublicOperation>;
     /** The owner's on-chain disable of a disclosed delegation whose outcome is still unproved (no journal write). */
