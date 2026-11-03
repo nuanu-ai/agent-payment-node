@@ -28,7 +28,7 @@ import { directEvmNetwork } from "../evm-direct-networks.js";
 import { formatAtomic } from "../money.js";
 import { mmFeeCapNextAction } from "./refusals.js";
 import { mmProjectWalletGuidance, mmProjectWalletNextActions, mmProjectWalletReason } from "./project-wallet-guidance.js";
-import { mmSessionGuidance, mmSessionReason } from "./session-guidance.js";
+import { mmSessionGuidance, mmSessionNextActions, mmSessionReason } from "./session-guidance.js";
 
 export interface MetaMaskGaslessDependencies {
   readonly rpcFor: MetaMaskGaslessRpcFactory;
@@ -190,7 +190,12 @@ export class MetaMaskGaslessService {
     const reason = op.failure?.reason;
     const result = op.state === "failed_before_effect" && mmProjectWalletReason(reason) ? { ...live, next_actions: [
       ...await mmProjectWalletNextActions({ reason, profile: op.intent.profile, address: op.intent.binding.address,
-        revision: op.intent.binding.revision, otherWallets: undefined }), ...live.next_actions] } : live;
+        revision: op.intent.binding.revision, otherWallets: undefined }), ...live.next_actions] }
+      // An approve stopped before effect is prepared again; an unresolved one keeps its own resume after the renewal.
+      : mmSessionReason(reason) && (op.state === "failed_before_effect" || !op.terminal) ? { ...live, next_actions: [
+        ...await mmSessionNextActions(op.intent.binding.address, op.state === "failed_before_effect"
+          ? "Then prepare this transfer again: this operation ended before anything was sent." : undefined), ...live.next_actions] }
+      : live;
     const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
       reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
     return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved,
