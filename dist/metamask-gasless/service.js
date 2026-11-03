@@ -15,7 +15,7 @@ import { mmRegistry } from "./registry.js";
 import { mmFail } from "./reasons.js";
 import { mmChain } from "./validation.js";
 import { revokeMetaMaskGasless } from "./revocation/service.js";
-import { mmSiblingsOutput } from "./siblings.js";
+import { mmSiblingsOutput, mmTransfersBeside } from "./siblings.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { directEvmNetwork } from "../evm-direct-networks.js";
 import { formatAtomic } from "../money.js";
@@ -176,7 +176,7 @@ export class MetaMaskGaslessService {
     }
     /** The account's other MetaMask gasless transfers this one proceeds beside (dispatched, outcome unknown). */
     async siblings(op) {
-        return await this.operations.metaMaskGaslessBeside(op.profileHash, op.intent.request.chainId, op.intent.binding.address, op.operationId);
+        return await mmTransfersBeside(this.operations, this.records, op.profileHash, op.intent.request.chainId, op.intent.binding.address, op.operationId);
     }
     async status(operationId) {
         return await this.locked(operationId, async (op) => liveMetaMaskGaslessOperation(op));

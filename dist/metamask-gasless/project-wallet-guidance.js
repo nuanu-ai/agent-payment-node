@@ -1,5 +1,6 @@
 import { ApnError } from "../errors.js";
 import { metaMaskCommand } from "../metamask-command.js";
+import { mmLogoutWarning } from "./session-guidance.js";
 import { canonicalProfile } from "../wallet-policy.js";
 export function mmProjectWalletReason(reason) {
     return reason === "mm_gasless_project_has_no_wallets" || reason === "mm_gasless_wallet_not_in_project";
@@ -24,7 +25,7 @@ export async function mmProjectWalletNextActions(refusal) {
     const rebind = `${connect} --expected-revision ${revision}`;
     const keep = `To keep paying from ${address}, sign in to MetaMask with the account that created it: ${mm} logout, then ${mm} login ` +
         `(then ${mm} wallet select ${address} if that account holds more than one wallet), then connect this profile again with ` +
-        `${connect}. The address stays the same, so no revision is needed.`;
+        `${connect}. The address stays the same, so no revision is needed. ${mmLogoutWarning(mm)}`;
     if (refusal.reason === "mm_gasless_project_has_no_wallets")
         return [keep,
             `Or create this project's first server wallet with ${mm} init --wallet server-wallet --mode guard --json and connect it with ` +
