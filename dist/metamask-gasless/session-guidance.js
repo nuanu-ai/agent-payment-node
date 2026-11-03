@@ -15,7 +15,8 @@ export const mmLogoutWarning = (mm) => `${mm} logout also deletes mm's local wal
 /**
  * Renewing the `mm` session is `mm`'s own step: `auth status` refreshes an expired token, and a new login with the
  * account that created the wallet keeps its project and address, so the profile needs no wallet connect and nothing
- * waits for the profile's unresolved operations. A failed token check is waited out, never answered with a logout;
+ * waits for the profile's unresolved operations. A failed token check is retried and then answered with a login (which
+ * `mm` starts when its stored token cannot be read), never with a logout;
  * only a token MetaMask keeps refusing while `auth status` calls it active needs one, since `mm` starts a login only
  * once no active token is left. When the pinned client cannot be resolved the steps keep the bare `mm`, as the project
  * wallet refusals do.
@@ -33,7 +34,7 @@ export async function mmSessionNextActions(address, then) {
     return [`${mm} auth status --json`,
         `If it answers "authenticated": false, sign in to MetaMask again with ${account}: ${mm} login${select}. The project and ` +
             "address stay the same, so this profile needs no wallet connect.",
-        "If it fails with an error instead, MetaMask's token check did not answer: run it again later, without logging out.",
+        `If it fails with an error instead, run it again later, without logging out; if it keeps failing, ${mm} login as above.`,
         `If it answers "authenticated": true and the same refusal comes back, MetaMask refuses that token: ${mm} logout, then ` +
             `${mm} login as above. ${mmLogoutWarning(mm)}`,
         ...(then === undefined ? [] : [then])];
