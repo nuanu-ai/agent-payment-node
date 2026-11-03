@@ -281,34 +281,44 @@ test("MM DENIED or EXPIRED after MFA reads as rejected before signing, stays gua
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("MM lost session points at the operation holding the profile instead of a refused wallet connect", async () => {
+test("MM session refusal renews the session through mm, never through wallet connect or an abandon", async () => {
   const root = await sandbox();
   try {
     const f = await mmFixture(root);
     const core = () => new ApnCore({ state: f.state, clock: f.clock, wait: f.wait,
       metaMaskGasless: { ...f.dependencies, rpcFor: chainId => new MmTestRpc(chainId, f.now) } });
-    const lostSession = () => { f.provider.inspect = async () => { throw mmError("mm_gasless_session_unavailable"); }; };
     const arbitrum = (key: string) => ({ command: "gasless.transfer.prepare", profile: f.profile,
       request: { ...f.request, chainId: 42161 }, idempotencyKey: key }) as const;
     const { id } = await f.prepare(); f.rpc.phase = "pending"; f.rpc.candidate = null;
     assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
     assert.equal((await f.record(id)).state, "unknown_finality");
-    lostSession();
-    const held = await core().execute(arbitrum("mm-session-held"));
-    assert.equal(held.ok, false); assert.equal(held.error?.code, "APN_PROVIDER_SESSION_REQUIRED");
-    assert.equal(held.error?.details?.reason, "mm_gasless_session_unavailable");
-    assert.equal(held.error?.details?.blockingOperationId, id);
-    assert.equal(held.next_actions[0], `apn operation status --operation ${id}`);
-    assert.match(held.next_actions[1]!, new RegExp(`apn operation abandon --operation ${id}\\. Then run the foreground wallet connect`, "u"));
-    assert.equal(held.next_actions.some(action => action === "Run the foreground wallet connect handoff again."), false);
+    const renewal = (actions: readonly string[]) => {
+      assert.equal(actions.length, 3);
+      assert.match(actions[0]!, / auth status --json$/u);
+      assert.match(actions[1]!, new RegExp(`created ${f.binding.address}: .* login \\(then .* wallet select ${f.binding.address} `, "u"));
+      assert.match(actions[1]!, /needs no wallet connect\.$/u);
+      assert.equal(actions[2], "Then run the same prepare again: no operation was written.");
+      assert.equal(actions.some(action => /abandon|apn wallet connect|wallet connect handoff/u.test(action)), false);
+    };
+    for (const reason of ["mm_gasless_session_expired", "mm_gasless_session_unavailable"] as const) {
+      f.provider.inspect = async () => { throw mmError(reason); };
+      // The unresolved transfer still holds the profile's wallet lifecycle; renewing mm's session waits for nothing.
+      const held = await core().execute(arbitrum(`mm-session-held-${reason}`));
+      assert.equal(held.ok, false); assert.equal(held.error?.code, "APN_PROVIDER_SESSION_REQUIRED");
+      assert.equal(held.error?.details?.reason, reason);
+      assert.equal(held.error?.details?.blockingOperationId, undefined);
+      assert.match(held.error!.message, reason === "mm_gasless_session_expired" ? /CLI token in mm has expired/u : /session in mm/u);
+      renewal(held.next_actions);
+    }
+    assert.equal((await f.record(id)).state, "unknown_finality");
 
     const free = await mmFixture(join(root, "free"));
-    free.provider.inspect = async () => { throw mmError("mm_gasless_session_unavailable"); };
+    free.provider.inspect = async () => { throw mmError("mm_gasless_session_expired"); };
     const freeCore = new ApnCore({ state: free.state, clock: free.clock, wait: free.wait,
       metaMaskGasless: { ...free.dependencies, rpcFor: chainId => new MmTestRpc(chainId, free.now) } });
     const plain = await freeCore.execute({ ...arbitrum("mm-session-free"), profile: free.profile });
     assert.equal(plain.error?.code, "APN_PROVIDER_SESSION_REQUIRED");
-    assert.deepEqual(plain.next_actions, ["Run the foreground wallet connect handoff again."]);
+    assert.equal(plain.next_actions.length, 3); assert.match(plain.next_actions[0]!, / auth status --json$/u);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

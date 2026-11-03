@@ -120,6 +120,12 @@ test("client inspect rejects id fallback, duplicate selected matches, unsafe fil
   const staleResult = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect", expected: identity(stale.binding) },
     { homeDirectory: stale.home, now: () => NOW });
   assert.deepEqual(staleResult, { version: MM_HELPER_VERSION, ok: false,
+    failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_expired" }, diagnostic: inspectPrivateDiagnostic });
+  // Without a refresh token mm cannot renew the expired token itself: that session needs a new login.
+  const unrenewable = await syntheticHome({ exp: Math.floor(NOW.getTime() / 1000), refreshToken: null }); t.after(unrenewable.cleanup);
+  const unrenewableResult = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "inspect",
+    expected: identity(unrenewable.binding) }, { homeDirectory: unrenewable.home, now: () => NOW });
+  assert.deepEqual(unrenewableResult, { version: MM_HELPER_VERSION, ok: false,
     failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" }, diagnostic: inspectPrivateDiagnostic });
 
   const linked = await syntheticHome(); t.after(linked.cleanup);
@@ -145,15 +151,15 @@ test("public helper enforces JWT NumericDate millisecond boundaries before provi
     { name: "exp one millisecond before", claims: { sub: PROJECT, exp: expirationSeconds, iat: nowSeconds - 60 },
       now: new Date(expirationSeconds * 1000 - 1), accepted: true },
     { name: "exp at equality", claims: { sub: PROJECT, exp: expirationSeconds, iat: nowSeconds - 60 },
-      now: new Date(expirationSeconds * 1000), accepted: false },
+      now: new Date(expirationSeconds * 1000), accepted: false, reason: "mm_gasless_session_expired" },
     { name: "exp one millisecond after", claims: { sub: PROJECT, exp: expirationSeconds, iat: nowSeconds - 60 },
-      now: new Date(expirationSeconds * 1000 + 1), accepted: false },
+      now: new Date(expirationSeconds * 1000 + 1), accepted: false, reason: "mm_gasless_session_expired" },
     { name: "nbf one second in the future", claims: { sub: PROJECT, exp: nowSeconds + 600, nbf: nowSeconds + 1,
-      iat: nowSeconds - 60 }, now: NOW, accepted: false },
+      iat: nowSeconds - 60 }, now: NOW, accepted: false, reason: "mm_gasless_session_unavailable" },
     { name: "nbf at equality", claims: { sub: PROJECT, exp: nowSeconds + 600, nbf: nowSeconds,
       iat: nowSeconds - 60 }, now: NOW, accepted: true },
     { name: "iat one second in the future", claims: { sub: PROJECT, exp: nowSeconds + 600,
-      iat: nowSeconds + 1 }, now: NOW, accepted: false },
+      iat: nowSeconds + 1 }, now: NOW, accepted: false, reason: "mm_gasless_session_unavailable" },
     { name: "iat at equality", claims: { sub: PROJECT, exp: nowSeconds + 600,
       iat: nowSeconds }, now: NOW, accepted: true },
   ] as const;
@@ -169,7 +175,7 @@ test("public helper enforces JWT NumericDate millisecond boundaries before provi
     const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "quote",
       input: quoteInput(home.binding, 8453) }, { homeDirectory: home.home, now: () => row.now, exchange });
     assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" }, diagnostic: quotePrivateDiagnostic });
+      failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: row.reason }, diagnostic: quotePrivateDiagnostic });
     assert.deepEqual(exchange.requests, [], "invalid claims must not reach refresh, authenticated SDK, RPC, or payment calls");
     assert.equal(exchange.beforeSends, 0);
   });
