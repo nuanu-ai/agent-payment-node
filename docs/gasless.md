@@ -514,8 +514,8 @@ authenticated command. A refusal for the session says which case it is:
 Both give the same steps, with `mm` written as the pinned client. First `mm auth status --json`: it checks the token
 with MetaMask and renews an invalid one; the renewal writes only the token pair, not the project, wallet or trading
 mode. If it answers `"authenticated": false`, `mm login` with the MetaMask account that created the connected wallet
-(then `mm wallet select <address>` if that account holds more than one). If it fails with an error, MetaMask's token
-check did not answer: run it again later, without logging out. Only when it answers `"authenticated": true` and the same
+(then `mm wallet select <address>` if that account holds more than one). If it fails with an error, run it again later
+without logging out, and if it keeps failing, `mm login`. Only when it answers `"authenticated": true` and the same
 refusal comes back does the token need replacing: `mm logout`, then `mm login`, since `mm` starts a login only once no
 active token is left. `mm logout` also deletes `mm`'s local wallet list and the seed of any local (BYOK) wallet in that
 `mm` home, so back those up first. That account's project and address are the ones the profile is bound to, so no

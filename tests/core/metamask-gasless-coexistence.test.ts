@@ -12,7 +12,7 @@ import { admitOperation } from "../../src/operation-index/admission.js";
 import { OperationService } from "../../src/operation-service.js";
 import { StateProfileRepository } from "../../src/profile-repository.js";
 import { TestNative, TestRpc, temporaryState } from "./helpers.js";
-import { mmFixture, mmTestWord } from "./metamask-gasless-helpers.js";
+import { MmTestRpc, mmFixture, mmTestWord } from "./metamask-gasless-helpers.js";
 import { TestHttp } from "./x402-helpers.js";
 
 type Fixture = Awaited<ReturnType<typeof mmFixture>>;
@@ -210,6 +210,11 @@ test("a dispatch the owner released keeps its delegation hash unique and is list
   assert.equal(approved.ok, true, JSON.stringify(approved.error));
   assert.deepEqual(f.approval.calls[screens]!.summary.unresolved_beside, besideOf(next.operation));
   assert.deepEqual(await f.record(released), record);
+  // Only the same chain and account: a transfer on another chain lists nothing beside it.
+  const arbitrum = await new ApnCore({ state: f.state, clock: f.clock, wait: f.wait,
+    metaMaskGasless: { ...f.dependencies, rpcFor: chainId => new MmTestRpc(chainId, f.now) } }).execute({ command: "gasless.transfer.prepare",
+    profile: f.profile, request: { ...f.request, chainId: 42161 }, idempotencyKey: "mm-released-arbitrum" });
+  assert.equal(arbitrum.ok, true, JSON.stringify(arbitrum.error)); assert.equal(besideOf(arbitrum.operation), undefined);
 });
 
 test("an expired MetaMask approval that never dispatched stops holding the account; its own approval still closes it", async (t) => {

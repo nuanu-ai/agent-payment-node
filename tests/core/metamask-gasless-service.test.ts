@@ -300,7 +300,7 @@ test("MM session refusal renews the session through mm, never through wallet con
       assert.match(actions[1]!, /^If it answers "authenticated": false, sign in /u);
       assert.match(actions[1]!, /needs no wallet connect\.$/u);
       assert.equal(actions[1]!.includes("logout"), false, "a token mm can no longer renew needs a login, never a logout");
-      assert.match(actions[2]!, /^If it fails with an error instead, .* without logging out\.$/u);
+      assert.match(actions[2]!, /^If it fails with an error instead, run it again later, without logging out; if it keeps failing, .* login as above\.$/u);
       assert.match(actions[3]!, /^If it answers "authenticated": true and the same refusal comes back, .* logout, then .* login as above\. /u);
       assert.match(actions[3]!, /seed of any local \(BYOK\) wallet in that mm home, so back those up first\.$/u);
       assert.equal(actions[4], "Then run the same prepare again: no operation was written.");
