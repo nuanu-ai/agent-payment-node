@@ -28,6 +28,7 @@ import { directEvmNetwork } from "../evm-direct-networks.js";
 import { formatAtomic } from "../money.js";
 import { mmFeeCapNextAction } from "./refusals.js";
 import { mmProjectWalletGuidance, mmProjectWalletNextActions, mmProjectWalletReason } from "./project-wallet-guidance.js";
+import { mmSessionGuidance, mmSessionReason } from "./session-guidance.js";
 
 export interface MetaMaskGaslessDependencies {
   readonly rpcFor: MetaMaskGaslessRpcFactory;
@@ -97,18 +98,21 @@ export class MetaMaskGaslessService {
       return { ...publicMetaMaskGaslessOperation(op), ...mmSiblingsOutput(await this.siblings(op)) };
     }
     catch (error) {
-      const guided = await this.sessionGuidance(await mmProjectWalletGuidance(error, input.profile), input.profile);
+      const renewal = await mmSessionGuidance(error, async () => (await metaMaskGaslessOwner(this.context.state, input.profile)).address);
+      const guided = renewal !== error ? renewal : await this.connectGuidance(await mmProjectWalletGuidance(error, input.profile), input.profile);
       throw prepareGuidance(guided, input.profile, input.request);
     }
   }
   /**
-   * A lost provider session is normally renewed with the foreground wallet connect handoff, but wallet lifecycle
-   * changes wait for every unresolved operation of the profile. Point at the operation that holds the profile first,
-   * instead of at a command that would only be refused; any steps of the refusal's own follow, since they end in a
-   * wallet connect that waits for it.
+   * A refusal whose way forward ends in a wallet connect (another login's project) waits, as every wallet lifecycle
+   * change does, for each unresolved operation of the profile. Point at the operation that holds the profile first,
+   * instead of at a command that would only be refused; the refusal's own steps follow. A lost or expired `mm` session
+   * never comes here: `mm` renews it without a wallet connect (session-guidance.ts).
    */
-  private async sessionGuidance(error: unknown, profileInput: string): Promise<unknown> {
-    if (!(error instanceof ApnError) || error.code !== "APN_PROVIDER_SESSION_REQUIRED") return error;
+  private async connectGuidance(error: unknown, profileInput: string): Promise<unknown> {
+    if (!(error instanceof ApnError) || error.code !== "APN_PROVIDER_SESSION_REQUIRED" || mmSessionReason(error.details?.reason)) {
+      return error;
+    }
     let blocking: string;
     try {
       await this.operations.assertProfileAvailable(this.context.state.profileHash(canonicalProfile(profileInput)));
