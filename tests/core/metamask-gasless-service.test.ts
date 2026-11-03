@@ -294,13 +294,16 @@ test("MM session refusal renews the session through mm, never through wallet con
     assert.equal((await f.core.execute({ command: "gasless.transfer.approve", operationId: id })).ok, true);
     assert.equal((await f.record(id)).state, "unknown_finality");
     const renewal = (actions: readonly string[]) => {
-      assert.equal(actions.length, 3);
+      assert.equal(actions.length, 5);
       assert.match(actions[0]!, / auth status --json$/u);
       assert.match(actions[1]!, new RegExp(`created ${f.binding.address}: .* login \\(then .* wallet select ${f.binding.address} `, "u"));
-      assert.match(actions[1]!, /^If it answers "authenticated": false, or the same refusal comes back, /u);
-      assert.match(actions[1]!, / logout, then .* login /u);
+      assert.match(actions[1]!, /^If it answers "authenticated": false, sign in /u);
       assert.match(actions[1]!, /needs no wallet connect\.$/u);
-      assert.equal(actions[2], "Then run the same prepare again: no operation was written.");
+      assert.equal(actions[1]!.includes("logout"), false, "a token mm can no longer renew needs a login, never a logout");
+      assert.match(actions[2]!, /^If it fails with an error instead, .* without logging out\.$/u);
+      assert.match(actions[3]!, /^If it answers "authenticated": true and the same refusal comes back, .* logout, then .* login as above\. /u);
+      assert.match(actions[3]!, /seed of any local \(BYOK\) wallet in that mm home, so back those up first\.$/u);
+      assert.equal(actions[4], "Then run the same prepare again: no operation was written.");
       assert.equal(actions.some(action => /abandon|apn wallet connect|wallet connect handoff/u.test(action)), false);
     };
     for (const reason of ["mm_gasless_session_expired", "mm_gasless_session_unavailable"] as const) {
@@ -319,8 +322,8 @@ test("MM session refusal renews the session through mm, never through wallet con
     const resumed = await f.core.execute({ command: "operation.resume", operationId: id });
     const observed = resumed.operation as Record<string, unknown>, after = observed.next_actions as string[];
     assert.equal(observed.state, "unknown_finality");
-    assert.equal(after.length, 3); assert.match(after[0]!, / auth status --json$/u);
-    assert.equal(after[2], `apn operation resume --operation ${id}`);
+    assert.equal(after.length, 5); assert.match(after[0]!, / auth status --json$/u);
+    assert.equal(after[4], `apn operation resume --operation ${id}`);
 
     const free = await mmFixture(join(root, "free"));
     free.provider.inspect = async () => { throw mmError("mm_gasless_session_expired"); };
@@ -328,7 +331,7 @@ test("MM session refusal renews the session through mm, never through wallet con
       metaMaskGasless: { ...free.dependencies, rpcFor: chainId => new MmTestRpc(chainId, free.now) } });
     const plain = await freeCore.execute({ ...arbitrum("mm-session-free"), profile: free.profile });
     assert.equal(plain.error?.code, "APN_PROVIDER_SESSION_REQUIRED");
-    assert.equal(plain.next_actions.length, 3); assert.match(plain.next_actions[0]!, / auth status --json$/u);
+    assert.equal(plain.next_actions.length, 5); assert.match(plain.next_actions[0]!, / auth status --json$/u);
 
     // Approve's guard reads the session again: it ends before effect, with the renewal before the receipt.
     const stopped = await mmFixture(join(root, "approve")), { id: late } = await stopped.prepare();
@@ -338,10 +341,10 @@ test("MM session refusal renews the session through mm, never through wallet con
     const shown = approved.operation as Record<string, unknown>;
     assert.deepEqual([shown.state, shown.reason], ["failed_before_effect", "mm_gasless_session_expired"]);
     const steps = shown.next_actions as string[];
-    assert.equal(steps.length, 4); assert.match(steps[0]!, / auth status --json$/u);
+    assert.equal(steps.length, 6); assert.match(steps[0]!, / auth status --json$/u);
     assert.match(steps[1]!, new RegExp(`created ${stopped.binding.address}: `, "u"));
-    assert.equal(steps[2], "Then prepare this transfer again: this operation ended before anything was sent.");
-    assert.equal(steps[3], `apn receipt get --operation ${late}`);
+    assert.equal(steps[4], "Then prepare this transfer again: this operation ended before anything was sent.");
+    assert.equal(steps[5], `apn receipt get --operation ${late}`);
     assert.equal(stopped.provider.submissions.length, 0, "nothing was dispatched");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -350,8 +353,8 @@ test("MM session guidance without the profile's address still names no wallet co
   const guided = await mmSessionGuidance(mmError("mm_gasless_session_unavailable"), async () => { throw new Error("gone"); });
   assert.ok(guided instanceof ApnError);
   const actions = guided.details?.nextActions as string[];
-  assert.equal(actions.length, 3);
-  assert.match(actions[1]!, /with the account that created this profile's server wallet: .* logout, then .* login\. /u);
+  assert.equal(actions.length, 5);
+  assert.match(actions[1]!, /with the account that created this profile's server wallet: .* login\. /u);
   assert.equal(actions.some(action => /wallet select|<|abandon|apn wallet connect/u.test(action)), false);
   const other = mmError("mm_gasless_project_has_no_wallets");
   assert.equal(await mmSessionGuidance(other, async () => "0x1"), other);

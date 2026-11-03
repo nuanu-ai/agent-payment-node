@@ -183,10 +183,33 @@ test("two MetaMask transfers beside each other observe, resume and abandon indep
   const abandoned = await f.restart().execute({ command: "operation.abandon", operationId: second });
   assert.equal(abandoned.ok, true, JSON.stringify(abandoned.error));
   assert.equal((await f.record(second)).state, "abandoned_unknown"); assert.equal((await f.record(first)).state, "completed");
-  // Nothing is unresolved now, so a new transfer lists nothing.
+  // The completed one is proved; the released dispatch may still be redeemed, so a new transfer still lists it.
   const third = await prepare(f, "mm-pair-third", 2);
-  assert.equal(third.ok, true, JSON.stringify(third.error)); assert.equal(besideOf(third.operation), undefined);
+  assert.equal(third.ok, true, JSON.stringify(third.error));
+  assert.deepEqual(besideOf(third.operation)?.operations, [listed(await f.record(second))]);
   assert.equal(f.provider.submissions.length, 2);
+});
+
+test("a dispatch the owner released keeps its delegation hash unique and is listed on the approval screen", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const f = await mmFixture(temporary.root, 8453, "empty", { abandonApproval: { approve: async () => undefined } });
+  const released = await unresolved(f, "mm-released-first"); f.advance(600_000);
+  const abandoned = await f.restart().execute({ command: "operation.abandon", operationId: released });
+  assert.equal(abandoned.ok, true, JSON.stringify(abandoned.error));
+  const record = await f.record(released);
+  assert.deepEqual([record.state, record.submissionAttempts], ["abandoned_unknown", 1]);
+  // Same transfer and the fixture's fixed salt: the released delegation's hash, which MetaMask may still redeem.
+  const reused = await prepare(f, "mm-released-reuse");
+  assert.equal(reused.error?.code, "APN_PROVIDER_PROTOCOL"); assert.equal(reused.error?.details?.reason, "mm_gasless_delegation_reused");
+  assert.deepEqual((await f.core.metaMaskGasless.records.listAllOperations()).map(op => op.operationId), [released]);
+  const next = await prepare(f, "mm-released-next", 1);
+  assert.equal(next.ok, true, JSON.stringify(next.error));
+  assert.deepEqual(besideOf(next.operation)?.operations, [listed(record)]);
+  const screens = f.approval.calls.length;
+  const approved = await f.core.execute({ command: "gasless.transfer.approve", operationId: idOf(next.operation) });
+  assert.equal(approved.ok, true, JSON.stringify(approved.error));
+  assert.deepEqual(f.approval.calls[screens]!.summary.unresolved_beside, besideOf(next.operation));
+  assert.deepEqual(await f.record(released), record);
 });
 
 test("an expired MetaMask approval that never dispatched stops holding the account; its own approval still closes it", async (t) => {
