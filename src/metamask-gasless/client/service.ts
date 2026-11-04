@@ -1,6 +1,8 @@
 import { ApnError } from "../../errors.js";
 import { readDiagnostic, type ReadStage } from "./read-diagnostic.js";
 import { submitDiagnostic, submitToken, type SubmitCheck, type SubmitStage } from "./submit-diagnostic.js";
+import { jobTx, type MetaMaskJobTx } from "./job-tx.js";
+import { observeDiagnostic, type ObserveCheck } from "./observe-diagnostic.js";
 import { agentSdk, agentEvm, foxEvm, foxKeyring, ethereumControllers } from "./sdk-vendor.js";
 import { homedir } from "node:os";
 import { encodeFunctionData, hashTypedData, parseAbi } from "viem";
@@ -41,7 +43,9 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
   let policy: HelperNetworkPolicy | undefined;
   const phase: { stage: ReadStage } = { stage: "private_state" };
   // The submit's own stage and the response check that refused, for its closed diagnostic (submit-diagnostic.ts).
-  const sent: SubmitProgress = { stage: "private_state", check: undefined, providerStatus: null };
+  const sent: SubmitProgress = { stage: "private_state", check: undefined, providerStatus: null, tx: undefined };
+  // An observation's own refused answer check, for its closed diagnostic (observe-diagnostic.ts).
+  const seen: ResponseProgress = { check: undefined, providerStatus: null, tx: undefined };
   const originalFetch = globalThis.fetch;
   const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
   const consoleMethods = saveConsole();
@@ -59,7 +63,7 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       if (request.mode === "submit") policy.primeSubmitClock(firstObservedAt);
       globalThis.fetch = policy.fetch;
       const result = request.mode === "quote" ? await quote(request.input, state, policy, phase) : request.mode === "submit" ?
-        await submit(request.intent, state, home, now, policy, firstObservedAt, sent) : await observe(request.intent, state, policy, now);
+        await submit(request.intent, state, home, now, policy, firstObservedAt, sent) : await observe(request.intent, state, policy, now, seen);
       if (request.mode === "submit") sent.stage = "complete";
       policy.assertComplete();
       return { version: MM_HELPER_VERSION, ok: true, result };
@@ -97,9 +101,16 @@ export async function executeHelperRequest(input: unknown, options: HelperExecut
       let diagnostic;
       try {
         diagnostic = submitDiagnostic(sent.stage, { post, httpStatus: status, check, providerError: facts?.providerError ?? null,
-          providerStatus: check === "response_status" ? sent.providerStatus : null });
+          providerStatus: check === "response_status" || check === "response_tx" ? sent.providerStatus : null,
+          responseTx: check === "response_tx" ? sent.tx ?? null : null });
       } catch { diagnostic = undefined; }
       return { version: MM_HELPER_VERSION, ok: false, failure, ...(diagnostic === undefined ? {} : { submitDiagnostic: diagnostic }) };
+    }
+    if (request.mode === "observe" && seen.check !== undefined) {
+      let diagnostic;
+      try { diagnostic = observeDiagnostic(seen.check as ObserveCheck, seen.providerStatus, seen.check === "response_tx" ? seen.tx ?? null : null); }
+      catch { diagnostic = undefined; }
+      return { version: MM_HELPER_VERSION, ok: false, failure, ...(diagnostic === undefined ? {} : { observeDiagnostic: diagnostic }) };
     }
     return { version: MM_HELPER_VERSION, ok: false, failure };
   } finally {
@@ -191,7 +202,9 @@ async function buildUnsigned(input: Extract<HelperRequest, { mode: "buildUnsigne
   return mmValidateUnsigned(result, input);
 }
 
-interface SubmitProgress { stage: SubmitStage; check: SubmitCheck | undefined; providerStatus: string | null }
+/** The answer check that refused a job answer, its job status token and how its `tx` compared, for a closed diagnostic. */
+interface ResponseProgress { check: SubmitCheck | undefined; providerStatus: string | null; tx: MetaMaskJobTx | undefined }
+interface SubmitProgress extends ResponseProgress { stage: SubmitStage }
 
 async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: string, now: () => Date,
   policy: HelperNetworkPolicy, firstObservedAt: Date, sent: SubmitProgress): Promise<MetaMaskGaslessProviderObservation> {
@@ -230,7 +243,7 @@ async function submit(intent: MetaMaskGaslessIntent, first: PrivateState, home: 
 }
 
 async function observe(intent: MetaMaskGaslessIntent, state: PrivateState, policy: HelperNetworkPolicy,
-  now: () => Date): Promise<MetaMaskGaslessProviderObservation> {
+  now: () => Date, seen: ResponseProgress): Promise<MetaMaskGaslessProviderObservation> {
   const evm = await foxEvm();
   const keyrings = await foxKeyring();
   const hydrated = await hydrateSdkState(state);
@@ -240,7 +253,7 @@ async function observe(intent: MetaMaskGaslessIntent, state: PrivateState, polic
       wallets: hydrated.walletState.remoteWallets as never[] }, adapters: [(deps) => new evm.EvmServerAdapter(deps)], logLevel: "silent" });
   try {
     const status = await evm.evmServerAdapter(keyring).getJobStatus({ pollingId: intent.requestId, kind: evm.SIGN_REQUEST_KIND.TRANSACTION });
-    return providerObservation(status, intent, now(), "mm_gasless_provider_unavailable");
+    return providerObservation(status, intent, now(), "mm_gasless_provider_unavailable", seen);
   } catch (error) {
     if (policy.didObserveNotFound()) return unavailable(intent, now());
     throw error;
@@ -268,14 +281,17 @@ function validateSdkQuote(value: unknown, input: Extract<HelperRequest, { mode: 
 }
 
 function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, now: Date,
-  reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable", sent?: SubmitProgress): MetaMaskGaslessProviderObservation {
+  reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable", sent?: ResponseProgress): MetaMaskGaslessProviderObservation {
   // Each refusal names its check for a submit's diagnostic; the conditions are the same as one compound test.
   const refuse = (check: SubmitCheck): never => { if (sent !== undefined) sent.check = check; return mmFail(reason); };
   if (!isPlainRecord(value)) return refuse("response_body");
   if (value.requestId !== intent.requestId) return refuse("response_request_id");
   if (value.kind !== "transaction") return refuse("response_kind");
   if (typeof value.status !== "string") return refuse("response_status");
-  if (!isPlainRecord(value.tx) || String(value.tx.from).toLowerCase() !== intent.binding.address || value.tx.chainId !== intent.request.chainId) return refuse("response_tx");
+  if (!isPlainRecord(value.tx) || String(value.tx.from).toLowerCase() !== intent.binding.address || value.tx.chainId !== intent.request.chainId) {
+    if (sent !== undefined) { sent.tx = jobTx(value.tx, intent); sent.providerStatus = submitToken(value.status); }
+    return refuse("response_tx");
+  }
   // The SDK preserves backend metadata. Extract only the bound observation fields;
   // approval details, links, signatures and any future metadata never leave this helper.
   if (value.txHash !== undefined && sent !== undefined) sent.check = "response_hash";
@@ -291,7 +307,7 @@ function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, now:
   return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status, txHash };
 }
 /** A job status APN does not know refuses; a submit's diagnostic keeps it when it is a token. */
-function unknownStatus(status: string, sent: SubmitProgress | undefined, reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable"): never {
+function unknownStatus(status: string, sent: ResponseProgress | undefined, reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable"): never {
   if (sent !== undefined) { sent.check = "response_status"; sent.providerStatus = submitToken(status); }
   return mmFail(reason);
 }

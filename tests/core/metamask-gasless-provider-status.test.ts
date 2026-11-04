@@ -52,17 +52,24 @@ test("response metadata cannot override a mismatched identity, unknown status, o
     input: { owner: OWNER, chainId: 8453, executions: expectedQuote(8453).executions } }, { now: () => NOW });
   assert.equal(built.ok, true); if (!built.ok) return;
   const operation = intent(home.binding, 8453, expectedQuote(8453), built.result as MetaMaskGaslessUnsignedResult);
-  const cases = [
-    { requestId: "other-request" }, { status: "APPROVED" }, { status: "OTHER" }, { txHash: "0x01" },
-    { tx: { from: "0x9999999999999999999999999999999999999999", chainId: 8453 } },
-    { tx: { from: OWNER, chainId: 1 } }, { tx: { from: OWNER, chainId: "8453" } }, { tx: null },
+  // Each refusal names its check; a refused `tx` also says how it differed (client/job-tx.ts), never with its values.
+  const tx = (from: string, chainId: string, chainIdMatches: boolean) => ({ check: "response_tx", providerStatus: "CONFIRMED",
+    responseTx: { tx: "object", from, chainId, chainIdMatches } });
+  const cases: Array<[Record<string, unknown>, Record<string, unknown>]> = [
+    [{ requestId: "other-request" }, { check: "response_request_id", providerStatus: null, responseTx: null }],
+    [{ status: "APPROVED" }, { check: "response_status", providerStatus: "APPROVED", responseTx: null }],
+    [{ status: "OTHER" }, { check: "response_status", providerStatus: "OTHER", responseTx: null }],
+    [{ txHash: "0x01" }, { check: "response_hash", providerStatus: null, responseTx: null }],
+    [{ tx: { from: "0x9999999999999999999999999999999999999999", chainId: 8453 } }, tx("other_address", "number", true)],
+    [{ tx: { from: OWNER, chainId: 1 } }, tx("owner", "number", false)], [{ tx: { from: OWNER, chainId: "8453" } }, tx("owner", "decimal_string", true)],
+    [{ tx: null }, { check: "response_tx", providerStatus: "CONFIRMED", responseTx: { tx: "null", from: null, chainId: null, chainIdMatches: null } }],
   ];
-  for (const [index, patch] of cases.entries()) await t.test(String(index), async () => {
+  for (const [index, [patch, refused]] of cases.entries()) await t.test(String(index), async () => {
     const exchange = new StatusExchange({ ...patch, approved: true, success: true });
     const result = await executeHelperRequest({ version: MM_HELPER_VERSION, mode: "observe", intent: operation },
       { homeDirectory: home.home, now: () => NOW, exchange });
     assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
-      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" } });
+      failure: { code: "APN_PROVIDER_UNAVAILABLE", reason: "mm_gasless_provider_unavailable" }, observeDiagnostic: { mode: "observe", ...refused } });
     assert.equal(exchange.requests.length, 1); assert.equal(exchange.requests[0]!.method, "GET");
     assert.equal(exchange.beforeSends, 0); assert.equal(JSON.stringify(result).includes(PRIVATE), false);
   });

@@ -1,5 +1,6 @@
 import { readDiagnostic, readFailureError, readRunnerFailure, takeReadRunnerDiagnostic } from "./read-diagnostic.js";
 import { runnerDiagnostic, submitFailureError, takeSubmitDiagnostic } from "./submit-diagnostic.js";
+import { observeFailureError } from "./observe-diagnostic.js";
 import { spawn } from "node:child_process";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -73,6 +74,7 @@ export class MetaMaskGaslessProviderClient implements MetaMaskGaslessProviderPor
     }
     if (!response.ok) {
       if (response.submitDiagnostic !== undefined) throw submitFailureError(response.failure.reason, response.submitDiagnostic);
+      if (response.observeDiagnostic !== undefined) throw observeFailureError(response.failure.reason, response.observeDiagnostic);
       if (response.diagnostic !== undefined) {
         const quoted = request.mode === "quote" ? request.input : undefined;
         throw withMetaMaskProviderRefusal(readFailureError(response.failure.reason, response.diagnostic), response.diagnostic,

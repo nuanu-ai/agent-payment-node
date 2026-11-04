@@ -1,5 +1,6 @@
 import type { StateStore } from "../state.js";
 import type { MetaMaskSubmitDiagnostic } from "./client/submit-diagnostic.js";
+import { takeObserveDiagnostic, type MetaMaskObserveDiagnostic } from "./client/observe-diagnostic.js";
 import type { MetaMaskGaslessClock } from "./clock.js";
 import { mmDispatchIntent } from "./dispatch.js";
 import { mmPrivateHash } from "./identity.js";
@@ -24,7 +25,13 @@ export interface MetaMaskGaslessStep {
   readonly unsaved?: { readonly observation: MetaMaskGaslessObservation; readonly cursor: MetaMaskGaslessCursor };
   /** Where this call's own submit stopped, when it ended unknown (client/submit-diagnostic.ts); reported, never saved. */
   readonly submitDiagnostic?: MetaMaskSubmitDiagnostic;
+  /** What this call's own read of the provider job said, when it made one; reported, never saved. */
+  readonly providerRead?: MetaMaskGaslessProviderReadReport;
 }
+/** The job status the read accepted, or why it was refused (client/observe-diagnostic.ts when an answer check refused it). */
+export type MetaMaskGaslessProviderReadReport =
+  | { readonly ok: true; readonly status: MetaMaskGaslessProviderObservation["status"]; readonly txHash: boolean }
+  | { readonly ok: false; readonly reason: MetaMaskGaslessFailureReason; readonly diagnostic: MetaMaskObserveDiagnostic | null };
 /** An owner-named observation RPC with the environment variable that named it. */
 export interface MetaMaskGaslessObserver {
   readonly rpc: MetaMaskGaslessRpcPort;
@@ -34,6 +41,8 @@ export interface MetaMaskGaslessProviderRead {
   readonly hint: MetaMaskGaslessProviderObservation | null;
   readonly failure: MetaMaskGaslessFailureReason | null;
   readonly diagnostic?: MetaMaskSubmitDiagnostic;
+  /** Which answer check refused this observation's own job read, if one did. */
+  readonly observeDiagnostic?: MetaMaskObserveDiagnostic;
 }
 export function metaMaskGaslessProviderObservation(value: unknown,
   op: MetaMaskGaslessOperationRecord): MetaMaskGaslessProviderObservation {
@@ -56,12 +65,19 @@ export class MetaMaskGaslessObservationService {
    * disabled before any redemption. Anything else is reported, never saved.
    */
   async run(op: MetaMaskGaslessOperationRecord, submitted?: MetaMaskGaslessProviderRead): Promise<MetaMaskGaslessStep> {
+    const own: { read?: MetaMaskGaslessProviderRead } = {};
+    const step = await this.once(op, submitted, own);
+    return own.read === undefined ? step : { ...step, providerRead: providerReadReport(own.read) };
+  }
+
+  private async once(op: MetaMaskGaslessOperationRecord, submitted: MetaMaskGaslessProviderRead | undefined,
+    own: { read?: MetaMaskGaslessProviderRead }): Promise<MetaMaskGaslessStep> {
     const abandoned = op.state === "abandoned_unknown";
     if ((op.terminal && !abandoned) || op.submissionAttempts !== 1) return { operation: op };
     try {
       this.clock.check(op);
       assertMetaMaskGaslessObservable(op);
-      const result = submitted ?? await this.readProvider(op);
+      const result = submitted ?? (own.read = await this.readProvider(op));
       this.clock.check(op, result.hint === null ? [] : [result.hint.observedAt]);
       const providerObservation = this.retainProvider(op, result.hint);
       let chain: MetaMaskGaslessRpcObservation;
@@ -133,7 +149,8 @@ export class MetaMaskGaslessObservationService {
       const reason = mmClassify(error, "mm_gasless_provider_unavailable").reason;
       if (reason === "mm_gasless_clock") throw error;
       this.clock.check(op);
-      return { hint: null, failure: reason };
+      const diagnostic = takeObserveDiagnostic(error);
+      return { hint: null, failure: reason, ...(diagnostic === undefined ? {} : { observeDiagnostic: diagnostic }) };
     }
   }
 
@@ -175,6 +192,13 @@ export class MetaMaskGaslessObservationService {
       provider?.status === "unavailable" ? "mm_gasless_provider_unavailable" : "mm_gasless_pending");
     return { ...base, state: usableHint ? "submitted_pending" : "unknown_finality", failure: mmFailure(reason) };
   }
+}
+
+/** `readProvider` returns either the accepted job status or the reason it was refused, never neither. */
+function providerReadReport(read: MetaMaskGaslessProviderRead): MetaMaskGaslessProviderReadReport {
+  if (read.hint !== null) return { ok: true, status: read.hint.status, txHash: read.hint.txHash !== null };
+  if (read.failure === null) return mmFail("mm_gasless_internal");
+  return { ok: false, reason: read.failure, diagnostic: read.observeDiagnostic ?? null };
 }
 
 function closedProvider(provider: MetaMaskGaslessProviderObservation): boolean {

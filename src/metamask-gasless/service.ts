@@ -1,6 +1,7 @@
 import { evmAccountProfileHashes } from "../evm-account-aliases.js";
 import { mmObservationRpcEnv } from "./chain/rpc.js";
 import type { MetaMaskSubmitDiagnostic } from "./client/submit-diagnostic.js";
+import { jobTxOutput } from "./client/job-tx.js";
 import type { MetaMaskGaslessObservationRpcFactory } from "./ports.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
@@ -13,7 +14,8 @@ import { liveMetaMaskGaslessOperation, publicMetaMaskGaslessOperation } from "./
 import { advanceMetaMaskGaslessOperation } from "./journal/transitions.js";
 import type { MetaMaskGaslessChainId, MetaMaskGaslessMutable, MetaMaskGaslessRequest } from "./model.js";
 import type { MetaMaskGaslessOperationRecord } from "./operation-model.js";
-import { MetaMaskGaslessObservationService, type MetaMaskGaslessObserver, type MetaMaskGaslessStep } from "./observation.js";
+import { MetaMaskGaslessObservationService, type MetaMaskGaslessObserver, type MetaMaskGaslessProviderReadReport,
+  type MetaMaskGaslessStep } from "./observation.js";
 import { metaMaskGaslessOwner } from "./owner.js";
 import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort,
   MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcFactory } from "./ports.js";
@@ -200,7 +202,8 @@ export class MetaMaskGaslessService {
     const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
       reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
     return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved,
-      ...(step.submitDiagnostic === undefined ? {} : { submit_diagnostic: submitDiagnosticOutput(step.submitDiagnostic) }) };
+      ...(step.submitDiagnostic === undefined ? {} : { submit_diagnostic: submitDiagnosticOutput(step.submitDiagnostic) }),
+      ...(step.providerRead === undefined ? {} : { provider_read: providerReadOutput(step.providerRead) }) };
   }
   private dependencies(): MetaMaskGaslessDependencies {
     if (this.context.metaMaskGasless === undefined) mmFail("mm_gasless_capability_unavailable");
@@ -234,5 +237,11 @@ export class MetaMaskGaslessService {
 
 /** The submit diagnostic in the output's own key style. */
 function submitDiagnosticOutput(d: MetaMaskSubmitDiagnostic) {
-  return { stage: d.stage, post: d.post, http_status: d.httpStatus, check: d.check, provider_error: d.providerError, provider_status: d.providerStatus };
+  return { stage: d.stage, post: d.post, http_status: d.httpStatus, check: d.check, provider_error: d.providerError, provider_status: d.providerStatus,
+    response_tx: jobTxOutput(d.responseTx) };
+}
+/** This call's own provider job read in the output's key style: the status it accepted, or the reason and refused check. */
+function providerReadOutput(r: MetaMaskGaslessProviderReadReport) {
+  return r.ok ? { ok: true, status: r.status, tx_hash: r.txHash } : { ok: false, reason: r.reason, check: r.diagnostic?.check ?? null,
+    provider_status: r.diagnostic?.providerStatus ?? null, response_tx: jobTxOutput(r.diagnostic?.responseTx ?? null) };
 }
