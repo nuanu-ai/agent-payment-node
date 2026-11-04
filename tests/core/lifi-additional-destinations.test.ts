@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import test from "node:test";
 import { getAddress } from "viem";
 import { validateBridgeRequest } from "../../src/lifi/asset-registry.js";
@@ -8,11 +6,12 @@ import { bindBridgeCommand } from "../../src/lifi/command-catalog.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
 import type { BridgeRouteRequest } from "../../src/lifi/model.js";
 import { materializeBridgeRoute, parseBridgeRoutes } from "../../src/lifi/routes.js";
+import { lifiCapture } from "./lifi-capture.js";
 
 type Json = Record<string, any>;
 const SENDER = getAddress("0x1111111111111111111111111111111111111111");
 const SOURCE = getAddress("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
-const fixture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures/lifi-ethereum-additional-destinations-quote-20260920.json"), "utf8")) as Json;
+const fixture = lifiCapture("lifi-ethereum-additional-destinations-quote-20260920.json") as Json;
 
 function admittedRows(): { chainId: number; tool: "across" | "stargateV2"; step: Json }[] {
   const rows: { chainId: number; tool: "across" | "stargateV2"; step: Json }[] = [];

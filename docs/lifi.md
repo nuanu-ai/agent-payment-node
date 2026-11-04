@@ -338,8 +338,16 @@ safe approval (see [Recovery](#recovery-and-proof)).
 
 APN accepts one source bridge call, one admitted asset pair and no destination contract call (the BNB composite below is
 the one reviewed exception). The finite decoders require the LI.FI Diamond `0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE`,
-the FeeForwarder `0xCE40449B773a3E6E5e769ADb4e567179d4828cbd`, the `lifi-api` integrator, a zero referrer and exact fee
-distribution to the fee recipient `0xC06ebbefD94032B85424D51906e2A335EFAe264B`. Across requires an empty message and no
+the FeeForwarder v2.1.0 `0xDe2b920506EE931a6A2ABDF566526220214FBbAE` as both the fee step's call and approval target, the
+`lifi-api` integrator, a zero referrer and exact fee distribution to the fee recipient
+`0xC06ebbefD94032B85424D51906e2A335EFAe264B`.
+
+On 2026-11-04 LI.FI replaced FeeForwarder v2.0.0 `0xCE40449B773a3E6E5e769ADb4e567179d4828cbd` with v2.1.0 on Ethereum,
+Base and Arbitrum: the Diamond allowlists only v2.1.0 (lifinance/contracts#2611), whose `forwardERC20Fees` and
+`forwardNativeFees` are unchanged. A new route that still names v2.0.0 would revert on chain, so preparation refuses it
+as `APN_PROVIDER_PROTOCOL` (`fee_forwarder_retired`), and an unsent operation prepared through it before the switch must
+be prepared again (`APN_REPREPARE_REQUIRED`, same reason). An operation prepared before the switch keeps its record: it
+still validates, and its source proof takes `FeesForwarded` from the FeeForwarder its own call names. Across requires an empty message and no
 exclusivity. Stargate requires Taxi with an empty compose message, options and `oftCmd`. Arbitrary calldata, swaps,
 Permit2, typed-data requests, approval resets and provider-added effects are rejected.
 

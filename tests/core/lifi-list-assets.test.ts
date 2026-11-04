@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import test from "node:test";
 import { decodeEventLog, decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData, getAbiItem, getAddress } from "viem";
 import type { AbiParameter } from "viem";
@@ -25,6 +23,7 @@ import type { BridgeRpcPort } from "../../src/lifi/ports.js";
 import { bridgeDestinationProof, bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { materializeBridgeRoute, parseBridgeRoutes } from "../../src/lifi/routes.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
+import { lifiCapture } from "./lifi-capture.js";
 
 type Json = Record<string, any>;
 type Pair = "eth-base" | "eth-arb";
@@ -45,7 +44,7 @@ const HASH = `0x${"ab".repeat(32)}` as Hex;
 const ONE_MILLI_ETH = "1000000000000000";
 
 async function capture(): Promise<Json> {
-  return JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", "lifi-list-assets-read-only-20260918.json"), "utf8")) as Json;
+  return lifiCapture("lifi-list-assets-read-only-20260918.json") as Json;
 }
 function nativeRequest(pair: Pair, over: Partial<BridgeRouteRequest> = {}): BridgeRouteRequest {
   return validateBridgeRequest({ fromChainId: 1, toChainId: pair === "eth-base" ? 8453 : 42161, fromToken: BRIDGE_ZERO_ADDRESS,
