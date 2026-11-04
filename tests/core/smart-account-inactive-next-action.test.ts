@@ -27,7 +27,7 @@ async function browserOutcome(code: string) {
   const consent = new LoopbackMetaMaskConsent(async (openedUrl) => {
     const opened = new URL(openedUrl);
     const callback = await fetch(`${opened.origin}/callback`, { method: "POST", headers: { "content-type": "application/json", origin: opened.origin },
-      body: JSON.stringify({ token: opened.hash.slice(1), outcome: { ok: false, code, diagnostic: { step: "eth_getCode", provider_code: null, provider_message: null } } }) });
+      body: JSON.stringify({ token: opened.hash.slice(1), outcome: { ok: false, code, diagnostic: { step: "eth_getCode", after_grant: false, provider_code: null, provider_message: null } } }) });
     assert.equal(callback.status, 204);
   }, 1_000);
   try { await consent.request(REQUEST); } catch (error) { return error as Error & { code: string; details: Record<string, unknown> }; }

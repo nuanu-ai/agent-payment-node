@@ -22,3 +22,8 @@ export declare class LoopbackMetaMaskConsent implements SmartAccountConsentPort 
     private run;
     private handle;
 }
+/**
+ * The page's last step: choosing the injected provider, the wallet method whose call or answer stopped it, or the sync
+ * comparison of the selected account with the bound owner (`owner_match`).
+ */
+export declare const CONSENT_STEPS: readonly ["provider_choice", "eth_requestAccounts", "wallet_switchEthereumChain", "wallet_addEthereumChain", "eth_chainId", "eth_accounts", "wallet_getSupportedExecutionPermissions", "eth_getCode", "wallet_getGrantedExecutionPermissions", "wallet_requestExecutionPermissions", "owner_match"];
