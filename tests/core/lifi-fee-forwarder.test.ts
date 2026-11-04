@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { encodeFunctionData } from "viem";
-import { sha256 } from "../../src/canonical.js";
+import { canonicalJson, sha256 } from "../../src/canonical.js";
 import { deploymentAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_FORWARDER_V2_0, RECORDED_FEE_FORWARDERS } from "../../src/lifi/abi.js";
 import { bridgeFeeForwarder, decodeBridgeCall } from "../../src/lifi/decode.js";
 import { bridgeDeploymentCheck } from "../../src/lifi/deployment-check.js";
@@ -12,7 +14,10 @@ import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { parseReceiptLogs } from "../../src/lifi/rpc-proof-codec.js";
 import { materializeBridgeRoute, parseBridgeRoutes } from "../../src/lifi/routes.js";
 import { BRIDGE_DIAMOND } from "../../src/lifi/validation.js";
-import { feeForwarderV20Materialization, readdressFeeForwarder } from "./lifi-capture.js";
+import { feeForwarderV20Materialization, feeForwarderV20Record, readdressFeeForwarder } from "./lifi-capture.js";
+import { lifiFixture } from "./lifi-helpers.js";
+import { temporaryState } from "./helpers.js";
+import { findStored } from "./stored-operations.js";
 
 // The paid Ethereum -> Base native Stargate source of 2026-10-07: its call and its receipt name FeeForwarder v2.0.0.
 const captured = JSON.parse(readFileSync(new URL("../../../tests/core/lifi-fixtures/native-stargate-paid-source-20261007.json", import.meta.url), "utf8"));
@@ -96,4 +101,23 @@ test("a step LI.FI built after the switch names v2.1.0 at the same calldata plac
   assert.equal(after.slice(0, 10), before.slice(0, 10));
   assert.equal(after.indexOf(word(FEE_FORWARDER)), before.indexOf(word(FEE_FORWARDER_V2_0)));
   assert.equal(after.indexOf(FEE_FORWARDER_SELECTOR.slice(2)), before.indexOf(FEE_FORWARDER_SELECTOR.slice(2)));
+});
+
+test("an unsent record from before the switch gets no signature: approve ends it before consent, its approval included", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "arb-eth"), { id, operation } = await s.prepare("stargateV2", "fee-forwarder-v2-0-record");
+  assert.equal(operation.effects[0]!.role, "approval");
+  const stored = feeForwarderV20Record(operation);
+  await writeFile(join(temporary.root, "bridge-operations", stored.profileHash, `${id}.json`), `${canonicalJson(stored)}\n`);
+  const loaded = (await findStored(s.core.bridges.records, id))!;
+  assert.equal(bridgeFeeForwarder(loaded.intent.materialization), FEE_FORWARDER_V2_0);
+  s.source.op = loaded; s.destination.op = loaded;
+  const loads = s.wrapping.loads, calls = s.source.calls.length;
+  const result = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(result.ok, true, result.error?.message);
+  const record = (await findStored(s.core.bridges.records, id))!;
+  assert.equal(record.state, "failed_before_effect"); assert.equal(record.failure?.reason, "unsent_apn_reprepare_required");
+  assert.ok(record.effects.every(effect => effect.phase === "unsealed" && effect.submissionAttempts === 0));
+  // Refused before the approval prompt, before any key load, RPC read, signature or send.
+  assert.equal(s.approval.calls.length, 0); assert.equal(s.wrapping.loads, loads);
+  assert.equal(s.source.calls.length, calls); assert.equal(s.source.submissions.length, 0);
 });

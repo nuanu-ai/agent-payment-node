@@ -2,6 +2,10 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.89 — 2026-11-04
+
+- LI.FI bridges: an unsent operation whose call still names FeeForwarder v2.0.0 now gets no signature, not even for its token approval. `bridge approve` or `operation resume` ends it as `failed_before_effect` (`unsent_apn_reprepare_required`) before the approval prompt, and the transfer is prepared again. In 0.5.88 the check before the send read only whether the Diamond allowlists v2.1.0, so such an operation could have had its approval signed and sent, and only the bridge call would then have failed. Such an operation cannot occur in practice: a prepared operation expires within five minutes, and the switch came hours before 0.5.88. QA reproduced it with a synthetic record and a fixed clock, without signing or sending.
+
 ## 0.5.88 — 2026-11-04
 
 - LI.FI bridges: on 2026-11-04 LI.FI replaced its FeeForwarder v2.0.0 `0xCE40449B773a3E6E5e769ADb4e567179d4828cbd` with v2.1.0 `0xDe2b920506EE931a6A2ABDF566526220214FBbAE` on Ethereum, Base and Arbitrum, and every route from those chains now names v2.1.0, so each `bridge prepare` failed with `Bridge validation failed: fee_swap`. APN now accepts v2.1.0 for new routes, and the check at the head before the send reads the Diamond's allowlisting of it for `forwardERC20Fees`, as it did for v2.0.0. v2.1.0 is a Sourcify exact match of LI.FI's `FeeForwarder.sol` v2.1.0, has the same owner, and keeps `forwardERC20Fees` and `forwardNativeFees` unchanged. A route that still names v2.0.0 is refused at preparation (`fee_forwarder_retired`) because the Diamond would revert it. Operations prepared before the switch stay readable, and their source proof takes `FeesForwarded` from v2.0.0, the FeeForwarder their own call names.

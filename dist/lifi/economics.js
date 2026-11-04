@@ -3,6 +3,8 @@ import { validateEconomics } from "../transfer-policy.js";
 import { bridgeNativePrincipal } from "./asset-registry.js";
 import { bridgeDeploymentCheck } from "./deployment-check.js";
 import { bridgeDeployment } from "./deployments.js";
+import { FEE_FORWARDER } from "./abi.js";
+import { bridgeFeeForwarder } from "./decode.js";
 import { ApnError } from "../errors.js";
 import { approvalData } from "./transaction.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_MIN_REMAINING_MS, bridgeFailure, bridgeHeadroomWei, bridgeUint } from "./validation.js";
@@ -213,6 +215,10 @@ export async function guardBridgeEffect(op, role, source, destination, now, depl
         bridgeFailure("APN_STATE_CORRUPT", "bridge_deployment_proof_verifier_changed");
     if (op.terminal || effect === undefined || effect.submissionAttempts !== 0)
         bridgeFailure("APN_OPERATION_BLOCKED", "bridge_first_send_only");
+    // The head check below reads the current FeeForwarder's allowlisting, not the one a record from before a LI.FI
+    // switch calls; such a record gets no signature, its approval included, and is prepared again.
+    if (bridgeFeeForwarder(m) !== FEE_FORWARDER)
+        bridgeFailure("APN_REPREPARE_REQUIRED", "fee_forwarder_retired");
     // The guard binds chain identity, not the endpoint URL: every read checks eth_chainId, so a user may swap a failing RPC.
     if (source.chainId !== m.request.fromChainId || destination.chainId !== m.request.toChainId)
         bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_chain_identity");

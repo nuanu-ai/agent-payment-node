@@ -348,7 +348,10 @@ transactions on Ethereum, Base and Arbitrum allowlisted it and de-allowlisted v2
 `0xCE40449B773a3E6E5e769ADb4e567179d4828cbd` (deployment records in lifinance/contracts#2611); `forwardERC20Fees` and
 `forwardNativeFees` are unchanged. A route that still names v2.0.0 would revert on chain, so preparation refuses it as
 `APN_PROVIDER_PROTOCOL` (`fee_forwarder_retired`). A record prepared before the switch may name v2.0.0: it still
-validates, and its source proof takes `FeesForwarded` from the FeeForwarder its own call names.
+validates, and its source proof takes `FeesForwarded` from the FeeForwarder its own call names. Such a record that has
+sent nothing gets no signature, not even for its approval: `bridge approve` or `operation resume` ends it as
+`failed_before_effect` (`unsent_apn_reprepare_required`) before the approval prompt, and the transfer is prepared again.
+The head check alone would not catch it, because it reads the allowlisting of the current FeeForwarder.
 
 For a native principal the decoder accepts exactly:
 
