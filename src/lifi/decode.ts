@@ -73,12 +73,10 @@ export function decodeBridgeCall(materialization: BridgeMaterialization): Decode
 /** The FeeForwarder a materialization's one fee step calls, after `decodeBridgeCall` accepted it. */
 export function bridgeFeeForwarder(materialization: BridgeMaterialization): Address {
   const data = bridgeHex(materialization.transaction.data, BRIDGE_MAX_CALLDATA_BYTES), selector = data.slice(0, 10);
+  const abi = materialization.tool === "across" && selector === ACROSS_SELECTOR ? acrossBridgeAbi
+    : materialization.tool === "stargateV2" && selector === STARGATE_SELECTOR ? stargateBridgeAbi : fail("tool_selector");
   let swaps: readonly SwapData[];
-  try {
-    if (materialization.tool === "across" && selector === ACROSS_SELECTOR) swaps = decodeFunctionData({ abi: acrossBridgeAbi, data }).args[1] as unknown as readonly SwapData[];
-    else if (materialization.tool === "stargateV2" && selector === STARGATE_SELECTOR) swaps = decodeFunctionData({ abi: stargateBridgeAbi, data }).args[1] as unknown as readonly SwapData[];
-    else return fail("tool_selector");
-  } catch { return fail("ABI_decode"); }
+  try { swaps = decodeFunctionData({ abi, data }).args[1] as unknown as readonly SwapData[]; } catch { return fail("ABI_decode"); }
   const forwarder = swaps.length === 1 ? swaps[0]!.callTo : undefined;
   return forwarder !== undefined && RECORDED_FEE_FORWARDERS.includes(forwarder) ? forwarder : fail("fee_swap");
 }

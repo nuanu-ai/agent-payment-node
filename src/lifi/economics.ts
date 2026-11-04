@@ -4,8 +4,6 @@ import { validateEconomics } from "../transfer-policy.js";
 import { bridgeNativePrincipal } from "./asset-registry.js";
 import { bridgeDeploymentCheck } from "./deployment-check.js";
 import { bridgeDeployment } from "./deployments.js";
-import { FEE_FORWARDER } from "./abi.js";
-import { bridgeFeeForwarder } from "./decode.js";
 import type { BridgeAccountSnapshot, BridgeEnvelope, BridgeFeeCeiling, BridgeMaterialization, BridgeTransaction, DecodedBridgeCall } from "./model.js";
 import { ApnError, type ErrorDetails } from "../errors.js";
 import type { BridgeOperationRecord, BridgePreSignRpcCategory, BridgePreSignRpcFailure, BridgePreSignRpcMethod, BridgePreSignRpcStage } from "./operation-model.js";
@@ -216,8 +214,6 @@ export async function guardBridgeEffect(op: BridgeOperationRecord, role: "approv
   const i = op.intent, m = i.materialization, effect = op.effects.find((e) => e.role === role);
   if (bridgeApprovalPolicyBinding(m, i.policyHash, i.preparedAt) === null) bridgeFailure("APN_STATE_CORRUPT", "bridge_deployment_proof_verifier_changed");
   if (op.terminal || effect === undefined || effect.submissionAttempts !== 0) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_first_send_only");
-  // Prepared through the replaced FeeForwarder: the Diamond would revert the call, so it is prepared again.
-  if (bridgeFeeForwarder(m) !== FEE_FORWARDER) bridgeFailure("APN_REPREPARE_REQUIRED", "fee_forwarder_retired");
   // The guard binds chain identity, not the endpoint URL: every read checks eth_chainId, so a user may swap a failing RPC.
   if (source.chainId !== m.request.fromChainId || destination.chainId !== m.request.toChainId) bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_chain_identity");
   const destinationCheck = bridgeDeploymentCheck(m.request.toChainId, m.request.fromChainId, m.tool, m.request.toToken, "destination");

@@ -55,14 +55,11 @@ export function decodeBridgeCall(materialization) {
 /** The FeeForwarder a materialization's one fee step calls, after `decodeBridgeCall` accepted it. */
 export function bridgeFeeForwarder(materialization) {
     const data = bridgeHex(materialization.transaction.data, BRIDGE_MAX_CALLDATA_BYTES), selector = data.slice(0, 10);
+    const abi = materialization.tool === "across" && selector === ACROSS_SELECTOR ? acrossBridgeAbi
+        : materialization.tool === "stargateV2" && selector === STARGATE_SELECTOR ? stargateBridgeAbi : fail("tool_selector");
     let swaps;
     try {
-        if (materialization.tool === "across" && selector === ACROSS_SELECTOR)
-            swaps = decodeFunctionData({ abi: acrossBridgeAbi, data }).args[1];
-        else if (materialization.tool === "stargateV2" && selector === STARGATE_SELECTOR)
-            swaps = decodeFunctionData({ abi: stargateBridgeAbi, data }).args[1];
-        else
-            return fail("tool_selector");
+        swaps = decodeFunctionData({ abi, data }).args[1];
     }
     catch {
         return fail("ABI_decode");

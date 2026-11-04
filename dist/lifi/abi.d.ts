@@ -5,8 +5,8 @@ export declare const FEE_FORWARDER_SELECTOR: Hex;
 export declare const FEE_FORWARDER_NATIVE_SELECTOR: Hex;
 /**
  * LI.FI FeeForwarder v2.1.0 (Sourcify exact match, lifinance/contracts src/Periphery/FeeForwarder.sol). On 2026-11-04
- * the Diamond on Ethereum, Base and Arbitrum allowlisted it and de-allowlisted v2.0.0 (lifinance/contracts#2611).
- * A new route must name it; `forwardERC20Fees` and `forwardNativeFees` are unchanged from v2.0.0.
+ * Diamond transactions on Ethereum, Base and Arbitrum allowlisted it and de-allowlisted v2.0.0; the deployment records
+ * are in lifinance/contracts#2611. A new route must name it; `forwardERC20Fees` and `forwardNativeFees` are unchanged.
  */
 export declare const FEE_FORWARDER: Address;
 /** LI.FI FeeForwarder v2.0.0, the one operations prepared before 2026-11-04 called. Only their records and receipts name it. */

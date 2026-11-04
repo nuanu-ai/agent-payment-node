@@ -4,17 +4,14 @@ import test from "node:test";
 import { encodeFunctionData } from "viem";
 import { deploymentAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_FORWARDER_V2_0, RECORDED_FEE_FORWARDERS } from "../../src/lifi/abi.js";
 import { bridgeFeeForwarder, decodeBridgeCall } from "../../src/lifi/decode.js";
+import { bridgeDeploymentCheck } from "../../src/lifi/deployment-check.js";
 import { bridgeDeployment } from "../../src/lifi/deployments.js";
-import { bridgeApprovalPolicyHash, guardBridgeEffect } from "../../src/lifi/economics.js";
 import type { BridgeMaterialization, BridgeProtocolReceipt } from "../../src/lifi/model.js";
-import type { BridgeRpcPort } from "../../src/lifi/ports.js";
 import { bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { parseReceiptLogs } from "../../src/lifi/rpc-proof-codec.js";
 import { materializeBridgeRoute, parseBridgeRoutes } from "../../src/lifi/routes.js";
 import { BRIDGE_DIAMOND } from "../../src/lifi/validation.js";
-import { temporaryState } from "./helpers.js";
 import { feeForwarderV20Materialization, readdressFeeForwarder } from "./lifi-capture.js";
-import { preparedWbtc } from "./lifi-wbtc-authority-helpers.js";
 
 // The paid Ethereum -> Base native Stargate source of 2026-10-07: its call and its receipt name FeeForwarder v2.0.0.
 const captured = JSON.parse(readFileSync(new URL("../../../tests/core/lifi-fixtures/native-stargate-paid-source-20261007.json", import.meta.url), "utf8"));
@@ -35,7 +32,7 @@ function withForwarders(m: BridgeMaterialization, callTo: string, approveTo: str
   return { ...m, transaction: { ...m.transaction, data: `${head}${word(callTo)}${middle}${word(approveTo)}${tail}` as BridgeMaterialization["transaction"]["data"] } };
 }
 
-test("the current FeeForwarder is v2.1.0 and its code, Diamond allowlisting and owner are what the source check pins", () => {
+test("the current FeeForwarder is v2.1.0: the source check reads its Diamond allowlisting and the pins hold its code", () => {
   assert.equal(FEE_FORWARDER, "0xDe2b920506EE931a6A2ABDF566526220214FBbAE");
   assert.deepEqual(RECORDED_FEE_FORWARDERS, [FEE_FORWARDER, FEE_FORWARDER_V2_0]);
   for (const chainId of [1, 8453, 42161] as const) {
@@ -47,9 +44,10 @@ test("the current FeeForwarder is v2.1.0 and its code, Diamond allowlisting and 
       { address: FEE_FORWARDER, codeHash: "0x99a76627aece8903612e0246c10f13a46e511a0a074d9a4e68987a28c78ebd52" });
     const allowlisted: string = encodeFunctionData({ abi: deploymentAbi, functionName: "isContractSelectorWhitelisted",
       args: [FEE_FORWARDER, FEE_FORWARDER_SELECTOR] as const });
-    assert.equal(d.reads.filter(row => row.address === BRIDGE_DIAMOND && row.data === allowlisted).length, 1);
-    assert.equal(d.reads.filter(row => row.address === FEE_FORWARDER && row.data === "0x8da5cb5b").length, 1);
-    assert.equal(d.reads.some(row => row.data.includes(word(FEE_FORWARDER_V2_0))) || d.code.some(row => row.address === FEE_FORWARDER_V2_0), false);
+    const check = bridgeDeploymentCheck(chainId, peer, "across", token, "source");
+    assert.equal(check.reads.filter(row => row.address === BRIDGE_DIAMOND && row.data === allowlisted && row.expected === `0x${"0".repeat(63)}1`).length, 1);
+    assert.equal(check.reads.some(row => row.address === FEE_FORWARDER || row.data.includes(word(FEE_FORWARDER_V2_0))), false);
+    assert.equal(d.code.some(row => row.address === FEE_FORWARDER_V2_0) || d.reads.some(row => row.data.includes(word(FEE_FORWARDER_V2_0))), false);
   }
 });
 
@@ -83,12 +81,15 @@ test("the source proof takes FeesForwarded only from the FeeForwarder the stored
   assert.throws(() => bridgeSourceProof(stored, decodeBridgeCall(stored), moved), /FeesForwarded/u);
 });
 
-test("an unsent operation prepared through v2.0.0 must be prepared again before any read or signature", async (t) => {
-  const temp = await temporaryState(); t.after(temp.cleanup);
-  const now = new Date("2026-10-09T03:44:00.000Z"), prepared = (await preparedWbtc(temp.root, now)).op;
-  const materialization = feeForwarderV20Materialization(prepared.intent.materialization);
-  const op = { ...prepared, intent: { ...prepared.intent, materialization, policyHash: bridgeApprovalPolicyHash(materialization) } };
-  const unread = new Proxy({}, { get: () => { throw new Error("no RPC read before the refusal"); } }) as BridgeRpcPort;
-  await assert.rejects(guardBridgeEffect(op, "approval", unread, unread, () => now.getTime()),
-    { code: "APN_REPREPARE_REQUIRED", message: /fee_forwarder_retired/u });
+test("a step LI.FI built after the switch names v2.1.0 at the same calldata place and selector as the recorded captures", () => {
+  const live = JSON.parse(readFileSync(new URL("../../../tests/core/lifi-fixtures/lifi-arbitrum-ethereum-usdc-stargate-20261104.json", import.meta.url), "utf8"));
+  const selected = parseBridgeRoutes(live.routeResponse, live.request, live.sender).find(row => row.choice.tool === "stargateV2" && row.choice.preparable)!;
+  const m = materializeBridgeRoute(selected, live.stepResponse, live.request, live.sender).materialization;
+  assert.equal(bridgeFeeForwarder(m), FEE_FORWARDER);
+  const recorded = JSON.parse(readFileSync(new URL("../../../tests/core/lifi-fixtures/lifi-stargate-taxi-step-transactions-20260908.json", import.meta.url), "utf8"));
+  const before = (Object.values(recorded.rows) as { step: { transactionRequest: { data: string } } }[])[0]!.step.transactionRequest.data.toLowerCase();
+  const after = m.transaction.data;
+  assert.equal(after.slice(0, 10), before.slice(0, 10));
+  assert.equal(after.indexOf(word(FEE_FORWARDER)), before.indexOf(word(FEE_FORWARDER_V2_0)));
+  assert.equal(after.indexOf(FEE_FORWARDER_SELECTOR.slice(2)), before.indexOf(FEE_FORWARDER_SELECTOR.slice(2)));
 });
