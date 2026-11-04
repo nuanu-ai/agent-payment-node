@@ -104,7 +104,7 @@ export class LoopbackMetaMaskConsent implements SmartAccountConsentPort {
       response.writeHead(204, securityHeaders());
       response.end();
       if (parsed.outcome.ok) resolve(parsed.outcome.value);
-      else reject(browserFailure(parsed.outcome.code));
+      else reject(browserFailure(parsed.outcome.code, parsed.outcome.diagnostic));
     } catch {
       rejectHttp(response, reject);
     }
@@ -114,13 +114,42 @@ export class LoopbackMetaMaskConsent implements SmartAccountConsentPort {
 type BrowserConfig = ({ readonly mode: "request" } & SmartAccountConsentRequest) |
   ({ readonly mode: "sync" } & SmartAccountConsentSync);
 
-type BrowserFailure = "missing_provider" | "user_rejected" | "wrong_chain" |
-  "unsupported_permission" | "inactive_account" | "changed_account" | "provider_protocol";
+const BROWSER_FAILURES = ["missing_provider", "user_rejected", "wrong_chain", "unsupported_permission",
+  "inactive_account", "changed_account", "provider_protocol"] as const;
+type BrowserFailure = typeof BROWSER_FAILURES[number];
+/**
+ * The page's last step: choosing the injected provider, the wallet method whose call or answer stopped it, or the sync
+ * comparison of the selected account with the bound owner (`owner_match`).
+ */
+export const CONSENT_STEPS = ["provider_choice", "eth_requestAccounts", "wallet_switchEthereumChain", "wallet_addEthereumChain",
+  "eth_chainId", "eth_accounts", "wallet_getSupportedExecutionPermissions", "eth_getCode",
+  "wallet_getGrantedExecutionPermissions", "wallet_requestExecutionPermissions", "owner_match"] as const;
+const PROVIDER_MESSAGE_MAX = 160;
+
+/**
+ * Where a stopped consent stopped. `permission_requested` is true once the page sent MetaMask the permission request, so a
+ * grant may exist unless MetaMask answered with a rejection. The provider code and message are the wallet's own, unverified, and present only when that wallet call itself
+ * threw; the page keeps printable ASCII of the message, at most 160 characters.
+ */
+interface BrowserDiagnostic {
+  readonly step: typeof CONSENT_STEPS[number];
+  readonly permission_requested: boolean;
+  readonly provider_code: number | null;
+  readonly provider_message: string | null;
+}
 
 interface Callback {
   readonly token: string;
   readonly outcome: { readonly ok: true; readonly value: unknown } |
-    { readonly ok: false; readonly code: BrowserFailure };
+    { readonly ok: false; readonly code: BrowserFailure; readonly diagnostic: BrowserDiagnostic };
+}
+
+function isDiagnostic(value: unknown): value is BrowserDiagnostic {
+  if (!isPlainRecord(value) || !exactKeys(value, ["step", "permission_requested", "provider_code", "provider_message"])) return false;
+  const code = value.provider_code, message = value.provider_message;
+  return (CONSENT_STEPS as readonly unknown[]).includes(value.step) && typeof value.permission_requested === "boolean" &&
+    (code === null || (Number.isSafeInteger(code) && Math.abs(code as number) <= 2_147_483_648)) &&
+    (message === null || (typeof message === "string" && message.length <= PROVIDER_MESSAGE_MAX && /^[\x20-\x7e]*$/u.test(message)));
 }
 
 function isCallback(value: unknown): value is Callback {
@@ -130,10 +159,8 @@ function isCallback(value: unknown): value is Callback {
   const outcome = record.outcome as Record<string, unknown>;
   return outcome.ok === true
     ? exactKeys(outcome, ["ok", "value"])
-    : outcome.ok === false && exactKeys(outcome, ["ok", "code"]) && [
-      "missing_provider", "user_rejected", "wrong_chain", "unsupported_permission",
-      "inactive_account", "changed_account", "provider_protocol",
-    ].includes(String(outcome.code));
+    : outcome.ok === false && exactKeys(outcome, ["ok", "code", "diagnostic"]) &&
+      (BROWSER_FAILURES as readonly unknown[]).includes(outcome.code) && isDiagnostic(outcome.diagnostic);
 }
 
 function browserScript(config: BrowserConfig): string {
@@ -152,12 +179,33 @@ const BROWSER_LOGIC = String.raw`
 const token = location.hash.slice(1);
 history.replaceState(null, "", "/");
 const setStatus = (value) => { document.getElementById("status").textContent = value; };
+let step = "provider_choice", permissionRequested = false, walletError;
+const call = async (provider, method, params) => {
+  step = method;
+  try { return await provider.request({ method, params }); }
+  catch (error) { walletError = { error }; throw error; }
+};
+// The code and message are kept only for the error the last wallet call threw, never for the page's own exception.
+const failure = (code, error) => {
+  let providerCode = null, providerMessage = null;
+  try {
+    const raw = error === undefined || error === null ? undefined : error.code;
+    if (typeof raw === "number" && Number.isSafeInteger(raw) && Math.abs(raw) <= 2147483648) providerCode = raw;
+    const message = error === undefined || error === null ? undefined : error.message;
+    if (typeof message === "string") providerMessage = message.replace(/[^\x20-\x7e]/gu, "?").slice(0, ${PROVIDER_MESSAGE_MAX});
+  } catch { /* An accessor-hostile error keeps only its step. */ }
+  return { ok: false, code, diagnostic: { step, permission_requested: permissionRequested, provider_code: providerCode, provider_message: providerMessage } };
+};
 const post = async (outcome) => {
   await fetch(config.callback, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token, outcome }) });
-  setStatus(outcome.ok ? "Permission accepted. You may close this tab." : "Permission stopped safely. You may close this tab.");
+  setStatus(outcome.ok ? "Permission accepted. You may close this tab." : "Permission stopped safely at " + outcome.diagnostic.step +
+    (outcome.diagnostic.provider_code === null ? "" : " (wallet error " + outcome.diagnostic.provider_code + ")") + ". You may close this tab.");
   setTimeout(() => window.close(), 250);
 };
-const classify = (error) => error && Number(error.code) === 4001 ? "user_rejected" : "provider_protocol";
+const classify = (error) => {
+  try { return error && Number(error.code) === 4001 ? "user_rejected" : "provider_protocol"; }
+  catch { return "provider_protocol"; }
+};
 const displayText = (record, key) => {
   try {
     const value = record && record[key];
@@ -226,47 +274,53 @@ const chooseProvider = async (candidates) => {
     });
   });
 };
-const accountCode = async (provider, owner) => await provider.request({ method: "eth_getCode", params: [owner, "latest"] });
+const accountCode = async (provider, owner) => await call(provider, "eth_getCode", [owner, "latest"]);
 const active = (code) => typeof code === "string" && code.toLowerCase() === ("0xef0100" + config.implementation.slice(2)).toLowerCase();
 const sameAccount = async (provider, owner) => {
-  const accounts = await provider.request({ method: "eth_accounts", params: [] });
+  const accounts = await call(provider, "eth_accounts", []);
   return Array.isArray(accounts) && accounts.length > 0 && String(accounts[0]).toLowerCase() === owner.toLowerCase();
 };
 (async () => {
   try {
     const provider = await chooseProvider(await discoverProviders());
-    if (!provider) return await post({ ok: false, code: "missing_provider" });
-    const accounts = await provider.request({ method: "eth_requestAccounts", params: [] });
-    if (!Array.isArray(accounts) || accounts.length === 0) return await post({ ok: false, code: "provider_protocol" });
+    if (!provider) return await post(failure("missing_provider"));
+    const accounts = await call(provider, "eth_requestAccounts", []);
+    if (!Array.isArray(accounts) || accounts.length === 0) return await post(failure("provider_protocol"));
     const owner = String(accounts[0]);
-    try { await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: config.chainId }] }); }
+    try { await call(provider, "wallet_switchEthereumChain", [{ chainId: config.chainId }]); }
     catch (error) {
       if (Number(error && error.code) !== 4902) throw error;
-      await provider.request({ method: "wallet_addEthereumChain", params: [{ chainId: config.chainId, chainName: "Base", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://mainnet.base.org"], blockExplorerUrls: ["https://basescan.org"] }] });
+      await call(provider, "wallet_addEthereumChain", [{ chainId: config.chainId, chainName: "Base", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: ["https://mainnet.base.org"], blockExplorerUrls: ["https://basescan.org"] }]);
     }
-    const chainId = await provider.request({ method: "eth_chainId", params: [] });
-    if (String(chainId).toLowerCase() !== config.chainId) return await post({ ok: false, code: "wrong_chain" });
-    if (!(await sameAccount(provider, owner))) return await post({ ok: false, code: "changed_account" });
-    const supported = await provider.request({ method: "wallet_getSupportedExecutionPermissions", params: [] });
+    const chainId = await call(provider, "eth_chainId", []);
+    if (String(chainId).toLowerCase() !== config.chainId) return await post(failure("wrong_chain"));
+    if (!(await sameAccount(provider, owner))) return await post(failure("changed_account"));
+    const supported = await call(provider, "wallet_getSupportedExecutionPermissions", []);
     const allowance = supported && supported["erc20-token-allowance"];
     if (!allowance || (allowance.chainIds !== undefined && (!Array.isArray(allowance.chainIds) || !allowance.chainIds.some((item) => String(item).toLowerCase() === config.chainId))) || !Array.isArray(allowance.ruleTypes) || !allowance.ruleTypes.includes("expiry")) {
-      return await post({ ok: false, code: "unsupported_permission" });
+      return await post(failure("unsupported_permission"));
     }
     const code = await accountCode(provider, owner);
-    if (!active(code)) return await post({ ok: false, code: "inactive_account" });
+    if (!active(code)) return await post(failure("inactive_account"));
     if (config.mode === "sync") {
-      if (owner.toLowerCase() !== config.ownerAddress.toLowerCase()) return await post({ ok: false, code: "changed_account" });
-      const permission_responses = await provider.request({ method: "wallet_getGrantedExecutionPermissions", params: [] });
+      if (owner.toLowerCase() !== config.ownerAddress.toLowerCase()) { step = "owner_match"; return await post(failure("changed_account")); }
+      const permission_responses = await call(provider, "wallet_getGrantedExecutionPermissions", []);
       return await post({ ok: true, value: { owner_address: owner, chain_id: chainId, account_code: code, supported_permissions: supported, permission_responses } });
     }
     const request = { chainId: config.chainId, from: owner, to: config.sessionAddress, permission: { type: "erc20-token-allowance", isAdjustmentAllowed: true, data: { tokenAddress: config.tokenAddress, allowanceAmount: "0x" + BigInt(config.capAtomic).toString(16), startTime: config.startsAtUnix, justification: "Allow this APN session to spend up to the selected Base USDC cap." } }, rules: [{ type: "expiry", data: { timestamp: config.expiresAtUnix } }] };
-    if (!(await sameAccount(provider, owner)) || !active(await accountCode(provider, owner))) return await post({ ok: false, code: "changed_account" });
-    const permission_responses = await provider.request({ method: "wallet_requestExecutionPermissions", params: [request] });
-    const finalChain = await provider.request({ method: "eth_chainId", params: [] });
+    if (!(await sameAccount(provider, owner)) || !active(await accountCode(provider, owner))) return await post(failure("changed_account"));
+    permissionRequested = true;
+    const permission_responses = await call(provider, "wallet_requestExecutionPermissions", [request]);
+    const finalChain = await call(provider, "eth_chainId", []);
+    if (String(finalChain).toLowerCase() !== config.chainId) return await post(failure("changed_account"));
+    if (!(await sameAccount(provider, owner))) return await post(failure("changed_account"));
     const finalCode = await accountCode(provider, owner);
-    if (String(finalChain).toLowerCase() !== config.chainId || !(await sameAccount(provider, owner)) || !active(finalCode)) return await post({ ok: false, code: "changed_account" });
+    if (!active(finalCode)) return await post(failure("changed_account"));
     return await post({ ok: true, value: { owner_address: owner, chain_id: finalChain, account_code: finalCode, supported_permissions: supported, permission_responses } });
-  } catch (error) { await post({ ok: false, code: classify(error) }); }
+  } catch (error) {
+    const thrownByWallet = walletError !== undefined && walletError.error === error;
+    await post(failure(thrownByWallet ? classify(error) : "provider_protocol", thrownByWallet ? error : undefined));
+  }
 })();`;
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>APN MetaMask permission</title></head><body><main><h1>APN MetaMask Smart Account</h1><p id="status">Finding injected wallet providers…</p><p>Provider identity metadata is self-reported and unverified. Choose the wallet you installed and intend to use. Provider icons are not displayed.</p><ol id="providers" aria-label="Injected wallet providers"></ol></main><script src="/app.js"></script></body></html>`;
@@ -303,7 +357,15 @@ function rejectHttp(response: ServerResponse, reject: (error: unknown) => void):
   reject(new ApnError("APN_PROVIDER_PROTOCOL", "MetaMask loopback consent violated its bounded protocol.", { retryable: false }));
 }
 
-function browserFailure(code: BrowserFailure): ApnError {
+function browserFailure(code: BrowserFailure, diagnostic: BrowserDiagnostic): ApnError {
+  const failure = classifiedBrowserFailure(code);
+  return new ApnError(failure.code, failure.message, { ...failure.details, consent_step: diagnostic.step,
+    consent_permission_requested: diagnostic.permission_requested,
+    ...(diagnostic.provider_code === null ? {} : { provider_error_code: diagnostic.provider_code }),
+    ...(diagnostic.provider_message === null ? {} : { provider_error_message: diagnostic.provider_message }) });
+}
+
+function classifiedBrowserFailure(code: BrowserFailure): ApnError {
   if (code === "user_rejected") return new ApnError("APN_PROVIDER_SESSION_REQUIRED", "MetaMask permission consent was rejected; retry the same connect intent if desired.", { retryable: true });
   if (code === "missing_provider") return new ApnError("APN_PROVIDER_UNAVAILABLE", "No injected MetaMask provider was available in the foreground browser.", { retryable: true });
   if (code === "inactive_account") return smartAccountInactive();

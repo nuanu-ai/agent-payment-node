@@ -27,7 +27,7 @@ async function browserOutcome(code: string) {
   const consent = new LoopbackMetaMaskConsent(async (openedUrl) => {
     const opened = new URL(openedUrl);
     const callback = await fetch(`${opened.origin}/callback`, { method: "POST", headers: { "content-type": "application/json", origin: opened.origin },
-      body: JSON.stringify({ token: opened.hash.slice(1), outcome: { ok: false, code } }) });
+      body: JSON.stringify({ token: opened.hash.slice(1), outcome: { ok: false, code, diagnostic: { step: "eth_getCode", permission_requested: false, provider_code: null, provider_message: null } } }) });
     assert.equal(callback.status, 204);
   }, 1_000);
   try { await consent.request(REQUEST); } catch (error) { return error as Error & { code: string; details: Record<string, unknown> }; }
@@ -44,7 +44,8 @@ test("an inactive Smart Account in the grant preflight points at enabling it and
 
 test("the browser consent's inactive account answers the same; an unsupported permission keeps its own advice", async () => {
   const inactive = await browserOutcome("inactive_account");
-  assert.deepEqual([inactive.code, inactive.details.reason, inactive.details.retryable], ["APN_PROVIDER_EFFECT_UNAVAILABLE", "smart_account_inactive", true]);
+  assert.deepEqual([inactive.code, inactive.details.reason, inactive.details.retryable, inactive.details.consent_step],
+    ["APN_PROVIDER_EFFECT_UNAVAILABLE", "smart_account_inactive", true, "eth_getCode"]);
   assert.deepEqual(failureEnvelope("wallet.connect", "request", inactive, true).next_actions, [ENABLE]);
   const unsupported = await browserOutcome("unsupported_permission");
   assert.deepEqual([unsupported.code, unsupported.details.retryable, unsupported.details.reason], ["APN_PROVIDER_EFFECT_UNAVAILABLE", false, undefined]);
