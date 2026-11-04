@@ -339,9 +339,9 @@ safe approval (see [Recovery](#recovery-and-proof)).
 APN accepts one source bridge call, one admitted asset pair and no destination contract call (the BNB composite below is
 the one reviewed exception). The finite decoders require the LI.FI Diamond `0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE`,
 one fee step whose call and approval target are the same recorded FeeForwarder, the `lifi-api` integrator, a zero
-referrer and exact fee distribution to the fee recipient `0xC06ebbefD94032B85424D51906e2A335EFAe264B`. Across requires an
-empty message and no exclusivity. Stargate requires Taxi with an empty compose message, options and `oftCmd`. Arbitrary
-calldata, swaps, Permit2, typed-data requests, approval resets and provider-added effects are rejected.
+referrer and exact fee distribution to the fee recipient `0xC06ebbefD94032B85424D51906e2A335EFAe264B`. Across requires
+an empty message and no exclusivity. Stargate requires Taxi with an empty compose message, options and `oftCmd`.
+Arbitrary calldata, swaps, Permit2, typed-data requests, approval resets and provider-added effects are rejected.
 
 A new route must name FeeForwarder v2.1.0 `0xDe2b920506EE931a6A2ABDF566526220214FBbAE`. On 2026-11-04 Diamond
 transactions on Ethereum, Base and Arbitrum allowlisted it and de-allowlisted v2.0.0

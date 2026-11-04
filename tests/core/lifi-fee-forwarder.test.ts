@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { encodeFunctionData } from "viem";
+import { sha256 } from "../../src/canonical.js";
 import { deploymentAbi, FEE_FORWARDER, FEE_FORWARDER_SELECTOR, FEE_FORWARDER_V2_0, RECORDED_FEE_FORWARDERS } from "../../src/lifi/abi.js";
 import { bridgeFeeForwarder, decodeBridgeCall } from "../../src/lifi/decode.js";
 import { bridgeDeploymentCheck } from "../../src/lifi/deployment-check.js";
@@ -83,6 +84,9 @@ test("the source proof takes FeesForwarded only from the FeeForwarder the stored
 
 test("a step LI.FI built after the switch names v2.1.0 at the same calldata place and selector as the recorded captures", () => {
   const live = JSON.parse(readFileSync(new URL("../../../tests/core/lifi-fixtures/lifi-arbitrum-ethereum-usdc-stargate-20261104.json", import.meta.url), "utf8"));
+  assert.equal(live.capture.mode, "anonymous_read_only_no_signing_no_send");
+  assert.equal(sha256(JSON.stringify(live.routeResponse)), live.capture.routeResponseSha256);
+  assert.equal(sha256(JSON.stringify(live.stepResponse)), live.capture.stepResponseSha256);
   const selected = parseBridgeRoutes(live.routeResponse, live.request, live.sender).find(row => row.choice.tool === "stargateV2" && row.choice.preparable)!;
   const m = materializeBridgeRoute(selected, live.stepResponse, live.request, live.sender).materialization;
   assert.equal(bridgeFeeForwarder(m), FEE_FORWARDER);

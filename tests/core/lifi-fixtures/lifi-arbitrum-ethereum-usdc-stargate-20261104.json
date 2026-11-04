@@ -3,7 +3,9 @@
     "mode": "anonymous_read_only_no_signing_no_send",
     "routesCapturedAt": "2026-11-04T10:15:35Z",
     "stepCapturedAt": "2026-11-04T10:15:36Z",
-    "purpose": "A LI.FI step built after the 2026-11-04 FeeForwarder switch: the fee step calls v2.1.0."
+    "purpose": "A LI.FI step built after the 2026-11-04 FeeForwarder switch: the fee step calls v2.1.0.",
+    "routeResponseSha256": "c545e821b443c9e679627908c6501ea76a78de16041b61e0bb48f37e87b666b3",
+    "stepResponseSha256": "d4e5aa159144f58425431ca61c6e2a901d25aa95114be2ab1ba5a285e50e8bbe"
   },
   "request": {
     "fromChainId": 42161,
