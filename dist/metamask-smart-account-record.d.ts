@@ -41,6 +41,8 @@ export interface GrantedSmartAccountPermissionRecord extends PermissionRecordBas
     readonly permission_response: Readonly<Record<string, unknown>>;
 }
 export type SmartAccountPermissionRecord = PendingSmartAccountPermissionRecord | GrantedSmartAccountPermissionRecord;
+/** A permission's consent page port: a whole unprivileged TCP port. */
+export declare const isConsentPort: (value: unknown) => value is number;
 export declare function validateSmartAccountPermissionRecord(value: unknown): SmartAccountPermissionRecord;
 export declare function isGrantedPermissionRecord(record: SmartAccountPermissionRecord): record is GrantedSmartAccountPermissionRecord;
 export declare function projectPermissionBinding(record: GrantedSmartAccountPermissionRecord, nowUnix: number): ProviderPermissionBinding;

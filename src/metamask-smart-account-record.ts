@@ -1,7 +1,6 @@
 import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { Address, Hex } from "./model.js";
-import { isConsentPort } from "./metamask-smart-account-consent.js";
 import type {
   ProviderPermissionBinding,
   ProviderPendingPermissionBinding,
@@ -56,6 +55,10 @@ export interface GrantedSmartAccountPermissionRecord extends PermissionRecordBas
 export type SmartAccountPermissionRecord =
   | PendingSmartAccountPermissionRecord
   | GrantedSmartAccountPermissionRecord;
+
+/** A permission's consent page port: a whole unprivileged TCP port. */
+export const isConsentPort = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 1024 && (value as number) <= 65535;
 
 const HASH = /^[a-f0-9]{64}$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;

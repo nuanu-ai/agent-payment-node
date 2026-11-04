@@ -14,9 +14,6 @@ export interface SmartAccountConsentSync {
     readonly port: number;
     readonly ownerAddress: Address;
 }
-export declare const CONSENT_PORT_MIN = 1024;
-export declare const CONSENT_PORT_MAX = 65535;
-export declare const isConsentPort: (value: unknown) => value is number;
 /** A loopback port the system has free now, for a new permission's consent origin; the caller saves it before use. */
 export declare function allocateConsentPort(): Promise<number>;
 export interface SmartAccountConsentPort {

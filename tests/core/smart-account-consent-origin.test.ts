@@ -104,7 +104,9 @@ test("sync of a permission whose consent origin was never recorded refuses witho
   const before = canonicalJson(store.record);
   await assert.rejects(adapter.sync(PROFILE_HASH, 1), (error: ApnError) => error.code === "APN_PROVIDER_EFFECT_UNAVAILABLE" &&
     error.details?.reason === "consent_origin_unrecorded" && error.details.retryable === false &&
-    Array.isArray(error.details.nextActions) && error.details.nextActions.length === 2);
+    Array.isArray(error.details.nextActions) && error.details.nextActions.length === 2 &&
+    /permission list --profile smart-origin shows/u.test(String(error.details.nextActions[1])) &&
+    !/--expected-revision \d/u.test(String(error.details.nextActions[1])));
   assert.deepEqual([consent.syncs.length, canonicalJson(store.record)], [0, before]);
 });
 
@@ -127,7 +129,8 @@ test("the consent page binds exactly the saved port and refuses a busy one befor
     let launched = false;
     const busy = new LoopbackMetaMaskConsent(async () => { launched = true; }, 1_000);
     await assert.rejects(busy.sync({ port, ownerAddress: OWNER }), (error: ApnError) => error.code === "APN_PROVIDER_UNAVAILABLE" &&
-      error.details?.reason === "consent_port_in_use" && error.details.consent_port === port && error.details.retryable === true);
+      error.details?.reason === "consent_port_in_use" && error.details.consent_port === port && error.details.retryable === true &&
+      Array.isArray(error.details.nextActions) && String(error.details.nextActions[0]).includes(`lsof -nP -iTCP:${port} -sTCP:LISTEN`));
     assert.equal(launched, false);
   } finally { await new Promise<void>((resolve) => squatter.close(() => resolve())); }
 });

@@ -458,7 +458,8 @@ function consentOriginUnrecorded(record: GrantedSmartAccountPermissionRecord): n
   throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This permission was granted before APN recorded its consent origin, and MetaMask lists a " +
     "permission only to that origin, so sync cannot check it.", { retryable: false, reason: "consent_origin_unrecorded", nextActions: [
     `Check in MetaMask whether the permission for session ${record.session_address} is still granted; APN cannot sync it.`,
-    `To get a permission APN can sync, the owner may forget this one with apn wallet permission forget --profile ${record.profile} ` +
-      `--expected-revision ${record.revision} (MetaMask-side authority may remain) and connect again.`,
+    `To get a permission APN can sync, the owner may forget this one with apn wallet permission forget --profile ${record.profile}, ` +
+      `--expected-revision set to the profile revision apn wallet permission list --profile ${record.profile} shows ` +
+      "(MetaMask-side authority may remain), and connect again.",
   ] });
 }

@@ -219,8 +219,9 @@ tokens, seed phrases or private keys.
   MetaMask lists a permission only to the page origin that requested it, so each permission keeps one consent origin,
   `http://127.0.0.1:<port>`: the port is saved before its first consent and reused by every retry of the same
   `wallet connect` (which also reuses the pending intent and its session) and by `wallet permission sync`. A busy port
-  refuses with `consent_port_in_use`; free it and retry. A permission connected before 0.5.91 has no recorded origin,
-  and `wallet permission sync` refuses it with `consent_origin_unrecorded` without changing it.
+  refuses with `consent_port_in_use` before the browser opens; free it and retry. A permission connected before 0.5.91
+  has no recorded origin, and `wallet permission sync` refuses it with `consent_origin_unrecorded` without changing
+  it.
 
 Provider balance is never spending authority; the owner allowlist and profile policy still apply.
 

@@ -4,9 +4,7 @@ import { createServer } from "node:http";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { BASE_CHAIN_HEX, smartAccountEnvironment, smartAccountInactive } from "./metamask-smart-account-grant.js";
-export const CONSENT_PORT_MIN = 1024;
-export const CONSENT_PORT_MAX = 65535;
-export const isConsentPort = (value) => Number.isSafeInteger(value) && value >= CONSENT_PORT_MIN && value <= CONSENT_PORT_MAX;
+import { isConsentPort } from "./metamask-smart-account-record.js";
 /** A loopback port the system has free now, for a new permission's consent origin; the caller saves it before use. */
 export async function allocateConsentPort() {
     const server = createServer();
@@ -50,7 +48,9 @@ export class LoopbackMetaMaskConsent {
             if (error?.code !== "EADDRINUSE")
                 throw error;
             throw new ApnError("APN_PROVIDER_UNAVAILABLE", `The MetaMask consent port 127.0.0.1:${config.port} of this permission is in use; ` +
-                "free it and retry the same command.", { retryable: true, reason: "consent_port_in_use", consent_port: config.port });
+                "free it and retry the same command.", { retryable: true, reason: "consent_port_in_use", consent_port: config.port, nextActions: [
+                    `Find what listens on 127.0.0.1:${config.port} (lsof -nP -iTCP:${config.port} -sTCP:LISTEN), stop it, then rerun the same command.`
+                ] });
         });
         const origin = `http://127.0.0.1:${port}`;
         const timer = setTimeout(() => fail?.(new ApnError("APN_PROVIDER_UNAVAILABLE", "MetaMask foreground consent timed out safely; retry the same connect intent.", { retryable: true })), this.deadlineMs);

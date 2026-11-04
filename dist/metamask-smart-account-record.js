@@ -1,8 +1,9 @@
 import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
-import { isConsentPort } from "./metamask-smart-account-consent.js";
 export const SMART_ACCOUNT_PERMISSION_RECORD_VERSION = "apn.metamask-smart-account-permission.v1";
 export const METAMASK_SMART_ACCOUNT_PROVIDER_ID = "metamask-smart-account";
+/** A permission's consent page port: a whole unprivileged TCP port. */
+export const isConsentPort = (value) => Number.isSafeInteger(value) && value >= 1024 && value <= 65535;
 const HASH = /^[a-f0-9]{64}$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
 const PRIVATE_KEY = /^0x[0-9a-f]{64}$/u;
