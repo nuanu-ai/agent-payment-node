@@ -9,6 +9,8 @@ const CHECKS = ["none", "body_mismatch", "duplicate_request", "unexpected_reques
     "incomplete", "runner_launch", "runner_exit", "runner_timeout", "runner_output", "response_invalid", "unclassified"];
 const KEYS = ["mode", "stage", "post", "httpStatus", "check", "providerError", "providerStatus", "responseTx"];
 const WITH_STATUS = ["response_status", "response_tx"];
+/** Checks of the POST's own 2xx answer; only the body check can refuse it before the SDK returned it. */
+const ANSWERED = ["response_body", "response_request_id", "response_kind", "response_status", "response_tx", "response_hash"];
 const TOKEN = /^[A-Z][A-Z0-9_]{0,39}$/u;
 const BEFORE_ANSWER = ["launch", "private_state", "sdk_load", "hydrate", "binding", "body", "post"];
 /** An upper-case token, or null: provider text never crosses as anything else. */
@@ -39,6 +41,8 @@ export function validateSubmitDiagnostic(value) {
         !(d.providerError === null || submitToken(d.providerError) !== null) || !(d.providerStatus === null || submitToken(d.providerStatus) !== null) ||
         d.providerError !== null && (status === null || status < 300) || d.providerStatus !== null && !WITH_STATUS.includes(String(d.check)) ||
         responseTx === undefined || (responseTx !== null) !== (d.check === "response_tx") ||
+        ANSWERED.includes(String(d.check)) && (d.post !== "sent" || status === null || status < 200 || status >= 300 ||
+            d.stage !== "response" && !(d.check === "response_body" && d.stage === "post")) ||
         d.stage === "launch" && d.post !== "not_reached" || (d.stage === "runner" || d.stage === "helper_response") && d.post !== "unknown" ||
         // Only stages up to the POST can prove it did not leave; only APN's body check at the POST refuses it unsent.
         d.post === "not_reached" && !BEFORE_ANSWER.includes(String(d.stage)) || d.post === "refused" && d.stage !== "post") {

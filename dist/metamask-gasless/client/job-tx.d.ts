@@ -7,7 +7,7 @@ import { type MetaMaskGaslessFailureReason } from "../reasons.js";
  * job, but neither the SDK nor `mm` reads `tx` from the relay POST's answer, so APN reports what actually came.
  */
 export type JobTxShape = "object" | "absent" | "null" | "other";
-/** `owner` is the bound server wallet; any other address (a relayer's, say) is `other_address`. */
+/** `owner`: `from` passes APN's own comparison with the bound server wallet; any other address (a relayer's, say) is `other_address`. */
 export type JobTxFrom = "owner" | "other_address" | "other_string" | "absent" | "other";
 export type JobTxChainId = "number" | "decimal_string" | "hex_string" | "caip2_string" | "other_string" | "absent" | "other";
 export interface MetaMaskJobTx {

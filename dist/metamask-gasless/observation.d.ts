@@ -36,13 +36,17 @@ export interface MetaMaskGaslessObserver {
     readonly rpc: MetaMaskGaslessRpcPort;
     readonly environmentName: string;
 }
-export interface MetaMaskGaslessProviderRead {
-    readonly hint: MetaMaskGaslessProviderObservation | null;
-    readonly failure: MetaMaskGaslessFailureReason | null;
+/** The accepted job status, or the reason it was refused; never both, never neither. */
+export type MetaMaskGaslessProviderRead = {
+    readonly hint: MetaMaskGaslessProviderObservation;
+    readonly failure: null;
+} | {
+    readonly hint: null;
+    readonly failure: MetaMaskGaslessFailureReason;
     readonly diagnostic?: MetaMaskSubmitDiagnostic;
     /** Which answer check refused this observation's own job read, if one did. */
     readonly observeDiagnostic?: MetaMaskObserveDiagnostic;
-}
+};
 export declare function metaMaskGaslessProviderObservation(value: unknown, op: MetaMaskGaslessOperationRecord): MetaMaskGaslessProviderObservation;
 export declare class MetaMaskGaslessObservationService {
     private readonly state;

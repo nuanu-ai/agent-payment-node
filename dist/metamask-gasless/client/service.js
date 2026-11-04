@@ -297,7 +297,7 @@ function validateSdkQuote(value, input, owner) {
     return { ...material, hash: mmQuoteHash(material) };
 }
 function providerObservation(value, intent, now, reason, sent) {
-    // Each refusal names its check for a submit's diagnostic; the conditions are the same as one compound test.
+    // Each refusal names its check for the submit's or the observation's diagnostic; the conditions are one compound test.
     const refuse = (check) => { if (sent !== undefined)
         sent.check = check; return mmFail(reason); };
     if (!isPlainRecord(value))
@@ -331,7 +331,7 @@ function providerObservation(value, intent, now, reason, sent) {
                 failed.includes(value.status) ? "failed" : unavailableStatuses.includes(value.status) ? "unavailable" : unknownStatus(value.status, sent, reason);
     return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status, txHash };
 }
-/** A job status APN does not know refuses; a submit's diagnostic keeps it when it is a token. */
+/** A job status APN does not know refuses; the submit's or observation's diagnostic keeps it when it is a token. */
 function unknownStatus(status, sent, reason) {
     if (sent !== undefined) {
         sent.check = "response_status";

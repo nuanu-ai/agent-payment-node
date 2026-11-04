@@ -173,13 +173,9 @@ export class MetaMaskGaslessObservationService {
         return { ...base, state: usableHint ? "submitted_pending" : "unknown_finality", failure: mmFailure(reason) };
     }
 }
-/** `readProvider` returns either the accepted job status or the reason it was refused, never neither. */
 function providerReadReport(read) {
-    if (read.hint !== null)
-        return { ok: true, status: read.hint.status, txHash: read.hint.txHash !== null };
-    if (read.failure === null)
-        return mmFail("mm_gasless_internal");
-    return { ok: false, reason: read.failure, diagnostic: read.observeDiagnostic ?? null };
+    return read.hint !== null ? { ok: true, status: read.hint.status, txHash: read.hint.txHash !== null }
+        : { ok: false, reason: read.failure, diagnostic: read.observeDiagnostic ?? null };
 }
 function closedProvider(provider) {
     return MM_CLOSED_PROVIDER_STATUSES.includes(provider.status);
