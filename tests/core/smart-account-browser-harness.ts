@@ -1,7 +1,7 @@
 /** The served Smart Account consent page, run in a VM sandbox with a fake document and a scripted injected provider. */
 import assert from "node:assert/strict";
 import { runInNewContext } from "node:vm";
-import { LoopbackMetaMaskConsent } from "../../src/metamask-smart-account-consent.js";
+import { allocateConsentPort, LoopbackMetaMaskConsent } from "../../src/metamask-smart-account-consent.js";
 import type { Address } from "../../src/model.js";
 
 export const SESSION = "0x2222222222222222222222222222222222222222" as Address;
@@ -113,7 +113,8 @@ async function captureServedBrowserAssets(mode: ServedMode): Promise<{ readonly 
     });
     assert.equal(callback.status, 204);
   }, 1_000);
-  assert.deepEqual(mode === "request" ? await consent.request(REQUEST) : await consent.sync({ ownerAddress: OWNER }), expected);
+  assert.deepEqual(mode === "request" ? await consent.request({ ...REQUEST, port: await allocateConsentPort() })
+    : await consent.sync({ port: await allocateConsentPort(), ownerAddress: OWNER }), expected);
   if (assets === undefined) throw new Error("served browser assets were not captured");
   return assets;
 }

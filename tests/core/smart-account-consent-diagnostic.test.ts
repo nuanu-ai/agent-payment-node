@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { failureEnvelope } from "../../src/output.js";
-import { LoopbackMetaMaskConsent } from "../../src/metamask-smart-account-consent.js";
+import { allocateConsentPort, LoopbackMetaMaskConsent } from "../../src/metamask-smart-account-consent.js";
 import { smartAccountEnvironment } from "../../src/metamask-smart-account-grant.js";
 import { OWNER, REQUEST, runServedBrowser, waitFor, type BrowserProvider } from "./smart-account-browser-harness.js";
 
@@ -27,7 +27,7 @@ async function posted(outcome: unknown): Promise<{ status: number; error: Refusa
       body: JSON.stringify({ token: opened.hash.slice(1), outcome }) }).then((response) => response.status);
     await callback;
   }, 1_000);
-  try { await consent.request(REQUEST); } catch (error) {
+  try { await consent.request({ ...REQUEST, port: await allocateConsentPort() }); } catch (error) {
     if (callback === undefined) assert.fail("the callback was never posted");
     return { status: await callback, error: error as Refusal };
   }

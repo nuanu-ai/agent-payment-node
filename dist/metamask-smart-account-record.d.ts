@@ -21,6 +21,11 @@ interface PermissionRecordBase {
     readonly max_observed_unix: number;
     readonly revocation_freshness: ProviderRevocationFreshness;
     readonly last_foreground_sync_at?: string;
+    /**
+     * The loopback port of this permission's consent page, so its MetaMask origin `http://127.0.0.1:<port>`. Saved before
+     * the first consent and reused by every retry and sync; records written before 0.5.91 have none.
+     */
+    readonly consent_port?: number;
 }
 export interface PendingSmartAccountPermissionRecord extends PermissionRecordBase {
     readonly phase: "pending_consent";

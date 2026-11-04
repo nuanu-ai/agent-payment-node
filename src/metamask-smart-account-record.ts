@@ -1,6 +1,7 @@
 import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import type { Address, Hex } from "./model.js";
+import { isConsentPort } from "./metamask-smart-account-consent.js";
 import type {
   ProviderPermissionBinding,
   ProviderPendingPermissionBinding,
@@ -30,6 +31,11 @@ interface PermissionRecordBase {
   readonly max_observed_unix: number;
   readonly revocation_freshness: ProviderRevocationFreshness;
   readonly last_foreground_sync_at?: string;
+  /**
+   * The loopback port of this permission's consent page, so its MetaMask origin `http://127.0.0.1:<port>`. Saved before
+   * the first consent and reused by every retry and sync; records written before 0.5.91 have none.
+   */
+  readonly consent_port?: number;
 }
 
 export interface PendingSmartAccountPermissionRecord extends PermissionRecordBase {
@@ -66,6 +72,7 @@ export function validateSmartAccountPermissionRecord(value: unknown): SmartAccou
     "session_address", "session_private_key", "created_at", "updated_at", "max_observed_unix",
     "revocation_freshness",
     ...(value.last_foreground_sync_at === undefined ? [] : ["last_foreground_sync_at"]),
+    ...(value.consent_port === undefined ? [] : ["consent_port"]),
     ...(granted ? [
       "owner_address", "granted_cap_atomic", "granted_expires_at_unix", "grant_context",
       "grant_fingerprint", "delegation_manager", "permission_response",
@@ -90,7 +97,8 @@ export function validateSmartAccountPermissionRecord(value: unknown): SmartAccou
     !canonicalTimestamp(value.created_at) || !canonicalTimestamp(value.updated_at) ||
     !safeUnix(value.max_observed_unix) || Number(value.max_observed_unix) < Number(value.starts_at_unix) ||
     !["never_synced", "confirmed_present", "confirmed_absent", "unverified"].includes(String(value.revocation_freshness)) ||
-    (value.last_foreground_sync_at !== undefined && !canonicalTimestamp(value.last_foreground_sync_at))
+    (value.last_foreground_sync_at !== undefined && !canonicalTimestamp(value.last_foreground_sync_at)) ||
+    (value.consent_port !== undefined && !isConsentPort(value.consent_port))
   ) invalid();
   if (granted) validateGrantedFields(value);
   return value as unknown as SmartAccountPermissionRecord;

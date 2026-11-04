@@ -1,5 +1,6 @@
 import { exactKeys, isPlainRecord, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
+import { isConsentPort } from "./metamask-smart-account-consent.js";
 export const SMART_ACCOUNT_PERMISSION_RECORD_VERSION = "apn.metamask-smart-account-permission.v1";
 export const METAMASK_SMART_ACCOUNT_PROVIDER_ID = "metamask-smart-account";
 const HASH = /^[a-f0-9]{64}$/u;
@@ -17,6 +18,7 @@ export function validateSmartAccountPermissionRecord(value) {
         "session_address", "session_private_key", "created_at", "updated_at", "max_observed_unix",
         "revocation_freshness",
         ...(value.last_foreground_sync_at === undefined ? [] : ["last_foreground_sync_at"]),
+        ...(value.consent_port === undefined ? [] : ["consent_port"]),
         ...(granted ? [
             "owner_address", "granted_cap_atomic", "granted_expires_at_unix", "grant_context",
             "grant_fingerprint", "delegation_manager", "permission_response",
@@ -41,7 +43,8 @@ export function validateSmartAccountPermissionRecord(value) {
         !canonicalTimestamp(value.created_at) || !canonicalTimestamp(value.updated_at) ||
         !safeUnix(value.max_observed_unix) || Number(value.max_observed_unix) < Number(value.starts_at_unix) ||
         !["never_synced", "confirmed_present", "confirmed_absent", "unverified"].includes(String(value.revocation_freshness)) ||
-        (value.last_foreground_sync_at !== undefined && !canonicalTimestamp(value.last_foreground_sync_at)))
+        (value.last_foreground_sync_at !== undefined && !canonicalTimestamp(value.last_foreground_sync_at)) ||
+        (value.consent_port !== undefined && !isConsentPort(value.consent_port)))
         invalid();
     if (granted)
         validateGrantedFields(value);
