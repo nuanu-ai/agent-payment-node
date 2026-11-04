@@ -1,5 +1,4 @@
-import { isPlainRecord } from "../../canonical.js";
-import { exactKeys } from "../../canonical.js";
+import { exactKeys, isPlainRecord } from "../../canonical.js";
 import { mmFail } from "../reasons.js";
 import { readDataRecord } from "./read-diagnostic.js";
 /**

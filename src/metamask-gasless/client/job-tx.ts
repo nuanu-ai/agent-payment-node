@@ -1,7 +1,6 @@
-import { isPlainRecord } from "../../canonical.js";
+import { exactKeys, isPlainRecord } from "../../canonical.js";
 import type { ErrorDetail } from "../../errors.js";
 import type { MetaMaskGaslessIntent } from "../model.js";
-import { exactKeys } from "../../canonical.js";
 import { mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
 import { readDataRecord } from "./read-diagnostic.js";
 
