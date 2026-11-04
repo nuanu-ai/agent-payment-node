@@ -4,8 +4,8 @@ Release artifacts, their SHA-256 digests and provenance for every version are on
 
 ## 0.5.87 — 2026-11-04
 
-- MetaMask gasless: when APN refuses MetaMask's answer to the relay POST because of its `tx` (`check: "response_tx"`), `submit_diagnostic` now says how that `tx` differed from the request in `response_tx` (`tx` present or not, whether `from` is the bound server wallet, the chain id's form and whether it names the request's chain) and gives the job status in `provider_status`. Only closed values; no address, number or other provider text. The outcome stays unknown and is proved on chain as before.
-- MetaMask gasless: `resume` reports its own read of MetaMask's job status as `provider_read`: the status APN accepted, or the reason, the answer check that refused it and the same `tx` facts. It is shown with that call only and never stored.
+- MetaMask gasless: when APN refuses MetaMask's answer to the relay POST because of its `tx` (`check: "response_tx"`), `submit_diagnostic` now says how that `tx` differed from the request in `response_tx` (`tx` present or not, whether `from` is the bound server wallet, the chain id's form and whether it names the request's chain) and gives MetaMask's job status token in `provider_status`. `response_tx` is present on every `submit_diagnostic` and `null` for every other check. No address or number is included, and the only provider text is that short upper-case token. The outcome stays unknown and is proved on chain as before.
+- MetaMask gasless: `resume` reports its own attempt to read MetaMask's job status as `provider_job_read`: the status APN accepted, or the reason, the answer check that refused MetaMask's answer (null when none did) and the same `tx` facts. It is shown with that call only and never stored.
 
 ## 0.5.86 — 2026-11-03
 

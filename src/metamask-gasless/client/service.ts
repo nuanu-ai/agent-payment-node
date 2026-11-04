@@ -282,7 +282,7 @@ function validateSdkQuote(value: unknown, input: Extract<HelperRequest, { mode: 
 
 function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, now: Date,
   reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable", sent?: ResponseProgress): MetaMaskGaslessProviderObservation {
-  // Each refusal names its check for a submit's diagnostic; the conditions are the same as one compound test.
+  // Each refusal names its check for the submit's or the observation's diagnostic; the conditions are one compound test.
   const refuse = (check: SubmitCheck): never => { if (sent !== undefined) sent.check = check; return mmFail(reason); };
   if (!isPlainRecord(value)) return refuse("response_body");
   if (value.requestId !== intent.requestId) return refuse("response_request_id");
@@ -306,7 +306,7 @@ function providerObservation(value: unknown, intent: MetaMaskGaslessIntent, now:
       failed.includes(value.status) ? "failed" : unavailableStatuses.includes(value.status) ? "unavailable" : unknownStatus(value.status, sent, reason);
   return { observedAt: now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId), status, txHash };
 }
-/** A job status APN does not know refuses; a submit's diagnostic keeps it when it is a token. */
+/** A job status APN does not know refuses; the submit's or observation's diagnostic keeps it when it is a token. */
 function unknownStatus(status: string, sent: ResponseProgress | undefined, reason: "mm_gasless_submit_unknown" | "mm_gasless_provider_unavailable"): never {
   if (sent !== undefined) { sent.check = "response_status"; sent.providerStatus = submitToken(status); }
   return mmFail(reason);

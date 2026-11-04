@@ -19,7 +19,9 @@ import { expectedQuote, intent, NOW, OWNER, SECRET, SdkExchange, syntheticHome }
 import { mmFixture } from "./metamask-gasless-helpers.js";
 
 const RELAYER = "0x9999999999999999999999999999999999999999";
+/** What a tx that passes APN's check classifies as: never a valid refusal fact set. */
 const owner = { tx: "object", from: "owner", chainId: "number", chainIdMatches: true } as const;
+const wrongChain = { ...owner, chainIdMatches: false } as const;
 
 /** The synthetic provider, with the relay POST or the job status GET answered as `answer` says. */
 class Answer extends SdkExchange {
@@ -47,7 +49,9 @@ test("the answer's tx is classified into closed facts and nothing else", () => {
   const bound = { binding: { address: OWNER }, request: { chainId: 1329 } } as never;
   const rows: Array<[unknown, Record<string, unknown>]> = [
     [{ from: OWNER, chainId: 1329 }, owner],
-    [{ from: OWNER.toUpperCase().replace("0X", "0x"), chainId: 1329 }, owner],
+    [{ from: `0X${OWNER.slice(2)}`, chainId: 1329 }, owner],
+    // `from` is `owner` exactly when APN's own comparison passes it, whatever its JSON type.
+    [{ from: [OWNER], chainId: "1329" }, { ...owner, chainId: "decimal_string" }],
     [undefined, { tx: "absent", from: null, chainId: null, chainIdMatches: null }],
     [null, { tx: "null", from: null, chainId: null, chainIdMatches: null }],
     ["0xdead", { tx: "other", from: null, chainId: null, chainIdMatches: null }],
@@ -61,10 +65,11 @@ test("the answer's tx is classified into closed facts and nothing else", () => {
   ];
   for (const [tx, facts] of rows) {
     assert.deepEqual(jobTx(tx, bound), facts, JSON.stringify(tx));
-    assert.deepEqual(validateJobTx(facts, "mm_gasless_submit_unknown"), facts);
+    if (facts !== owner) assert.deepEqual(validateJobTx(facts, "mm_gasless_submit_unknown"), facts);
   }
-  for (const bad of [{ ...owner, from: "0x1111111111111111111111111111111111111111" }, { ...owner, chainIdMatches: null },
-    { tx: "absent", from: "owner", chainId: null, chainIdMatches: null }, { ...owner, chainId: "other", chainIdMatches: true }, { ...owner, extra: 1 }]) {
+  // A set that says the tx passed the check can only be forged.
+  for (const bad of [owner, { ...owner, from: "0x1111111111111111111111111111111111111111" }, { ...wrongChain, chainIdMatches: null },
+    { tx: "absent", from: "owner", chainId: null, chainIdMatches: null }, { ...owner, chainId: "other", chainIdMatches: true }, { ...wrongChain, extra: 1 }]) {
     assert.throws(() => validateJobTx(bad, "mm_gasless_submit_unknown"), { details: { reason: "mm_gasless_submit_unknown" } });
   }
 });
@@ -95,10 +100,13 @@ test("a 201 whose tx APN refuses reports how it differed, with the job status, a
       submitTxFrom: "owner", submitTxChainId: "decimal_string", submitTxChainIdMatches: true } });
   const forged = { version: MM_HELPER_VERSION, ok: false, failure: { code: "APN_OPERATION_BLOCKED", reason: "mm_gasless_submit_unknown" },
     submitDiagnostic: { ...base, providerStatus: null, responseTx: { ...owner, from: OWNER } } };
-  await assert.rejects(client({ async run() { return forged; } }).submit(operation),
-    { details: { reason: "mm_gasless_submit_unknown", submitStage: "helper_response", submitPost: "unknown", submitCheck: "response_invalid" } });
+  for (const submitDiagnostic of [forged.submitDiagnostic, { ...base, providerStatus: null, responseTx: owner },
+    { ...base, stage: "post", providerStatus: null, responseTx: wrongChain }, { ...base, httpStatus: 400, providerStatus: null, responseTx: wrongChain }]) {
+    await assert.rejects(client({ async run() { return { ...forged, submitDiagnostic }; } }).submit(operation),
+      { details: { reason: "mm_gasless_submit_unknown", submitStage: "helper_response", submitPost: "unknown", submitCheck: "response_invalid" } });
+  }
   assert.throws(() => submitDiagnostic("response", { post: "sent", httpStatus: 201, check: "http_status", providerError: null, providerStatus: null,
-    responseTx: owner }), { details: { reason: "mm_gasless_submit_unknown" } }, "tx facts belong to the response_tx check only");
+    responseTx: wrongChain }), { details: { reason: "mm_gasless_submit_unknown" } }, "tx facts belong to the response_tx check only");
 });
 
 test("an observation whose job answer APN refuses says which check refused it; an accepted one carries none", async (t) => {
@@ -118,8 +126,8 @@ test("an observation whose job answer APN refuses says which check refused it; a
   assert.equal(accepted.ok, true);
   const failedRead = await observe(() => ({ status: 503, body: "{}" }));
   assert.equal(failedRead.ok, false); if (!failedRead.ok) assert.equal("observeDiagnostic" in failedRead, false, "no answer check ran");
-  for (const bad of [{ check: "http_status" }, { providerStatus: "QUEUED", check: "response_kind" }, { responseTx: null }, { extra: 1 }]) {
-    assert.throws(() => validateObserveDiagnostic({ ...observeDiagnostic("response_tx", null, owner), ...bad }),
+  for (const bad of [{ check: "http_status" }, { providerStatus: "QUEUED", check: "response_kind" }, { responseTx: null }, { responseTx: owner }, { extra: 1 }]) {
+    assert.throws(() => validateObserveDiagnostic({ ...observeDiagnostic("response_tx", null, wrongChain), ...bad }),
       { details: { reason: "mm_gasless_provider_unavailable" } });
   }
 });
@@ -136,17 +144,17 @@ test("resume shows its own provider read: the accepted status, or the reason and
     const shown = approved.operation as Record<string, unknown>;
     assert.deepEqual(shown.submit_diagnostic, { stage: "response", post: "sent", http_status: 201, check: "response_tx", provider_error: null,
       provider_status: "AWAITING_MFA", response_tx: { tx: "absent", from: null, chain_id: null, chain_id_matches: null } });
-    assert.equal("provider_read" in shown, false, "approve reads no job status of its own");
+    assert.equal("provider_job_read" in shown, false, "approve reads no job status of its own");
     f.provider.observeError = observeFailureError("mm_gasless_provider_unavailable", observeDiagnostic("response_tx", "CONFIRMED",
       { tx: "object", from: "other_address", chainId: "number", chainIdMatches: true }));
     const refused = (await f.core.execute({ command: "operation.resume", operationId: id })).operation as Record<string, unknown>;
-    assert.deepEqual(refused.provider_read, { ok: false, reason: "mm_gasless_provider_unavailable", check: "response_tx", provider_status: "CONFIRMED",
+    assert.deepEqual(refused.provider_job_read, { ok: false, reason: "mm_gasless_provider_unavailable", check: "response_tx", provider_status: "CONFIRMED",
       response_tx: { tx: "object", from: "other_address", chain_id: "number", chain_id_matches: true } });
     f.provider.observeError = undefined; f.provider.status = "awaiting_approval"; f.provider.txHash = null;
     const read = (await f.core.execute({ command: "operation.resume", operationId: id })).operation as Record<string, unknown>;
-    assert.deepEqual(read.provider_read, { ok: true, status: "awaiting_approval", tx_hash: false });
+    assert.deepEqual(read.provider_job_read, { ok: true, status: "awaiting_approval", tx_hash: false });
     const saved = JSON.stringify(await f.record(id));
-    assert.equal(saved.includes("other_address") || saved.includes("provider_read"), false, "the journal keeps no diagnostic");
+    assert.equal(saved.includes("other_address") || saved.includes("provider_job_read"), false, "the journal keeps no diagnostic");
     assert.equal(f.provider.submissions.length, 1);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -762,19 +762,23 @@ chain id.
 | Field | Values |
 | --- | --- |
 | `tx` | `object`, `absent`, `null`, or `other` (not an object). |
-| `from` | `owner` (the bound server wallet), `other_address`, `other_string`, `absent`, `other`; `null` unless `tx` is `object`. |
+| `from` | `owner` (passes APN's comparison with the bound server wallet), `other_address`, `other_string`, `absent`, `other`; `null` unless `tx` is `object`. |
 | `chain_id` | `number`, `decimal_string`, `hex_string`, `caip2_string` (`eip155:<id>`), `other_string`, `absent`, `other`; `null` unless `tx` is `object`. |
 | `chain_id_matches` | Whether a readable chain id names the request's chain; `null` when there is none. |
 
-### Provider read (`provider_read`)
+### Provider job read (`provider_job_read`)
 
-A `resume` that read MetaMask's job status reports that read as `provider_read`, with that call's output only; it is
-never stored. `{ "ok": true, "status": <status>, "tx_hash": <whether the job named a transaction hash> }` is the
-status APN accepted. `{ "ok": false, "reason": <reason>, "check": <check>, "provider_status": <token>, "response_tx":
-<facts> }` is a read APN refused: `check` names the answer check that refused it (`response_body`,
-`response_request_id`, `response_kind`, `response_status`, `response_tx`, `response_hash`) and is `null` when the read
-failed before any answer was checked (network, HTTP status, session); `provider_status` and `response_tx` are as in the
-submit diagnostic. A refused read never decides the outcome: the chain still proves it.
+A `resume` that tried to read MetaMask's job status reports that attempt as `provider_job_read`, with that call's output
+only; it is never stored. `{ "ok": true, "status": <status>, "tx_hash": <whether the job named a transaction hash> }`
+is the status APN accepted, in APN's own names (`awaiting_approval`, `pending`, `broadcasted`, `confirmed`, `failed`,
+`denied`, `expired`, `unavailable`). `{ "ok": false, "reason": <reason>, "check": <check>, "provider_status": <token>,
+"response_tx": <facts> }` is a read that did not give a usable status: `check` names the helper's answer check that
+refused MetaMask's answer (`response_body`, `response_request_id`, `response_kind`, `response_status`, `response_tx`,
+`response_hash`) and is `null` whenever no such check refused it, for example when MetaMask was not reached, answered
+outside 2xx or refused the session, the helper process failed, the profile binding or a lock refused the read, or APN
+refused the helper's result. `provider_status` is MetaMask's own job status token and `response_tx` the facts above, as
+in the submit diagnostic. Apart from `provider_status`, a short upper-case token, no provider text is included. A
+refused read never decides the outcome: the chain still proves it.
 
 ### MFA and provider outcomes
 

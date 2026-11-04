@@ -130,7 +130,10 @@ test("the closed diagnostic form refuses everything it does not define", () => {
   assert.deepEqual(validateSubmitDiagnostic(submitDiagnostic("post", { post: "sent", httpStatus: 400, check: "http_status", providerError: "BAD", providerStatus: null, responseTx: null })),
     diagnostic("post", { httpStatus: 400, check: "http_status", providerError: "BAD" }));
   for (const bad of [{ post: "not_reached", httpStatus: 400 }, { providerError: "BAD", httpStatus: 200 }, { providerStatus: "QUEUED", check: "http_status" },
-    { check: "invented" }, { stage: "invented" }, { extra: 1 }, { httpStatus: 99 }, { stage: "launch" }, { stage: "runner", post: "sent" }, { post: undefined }]) {
+    { check: "invented" }, { stage: "invented" }, { extra: 1 }, { httpStatus: 99 }, { stage: "launch" }, { stage: "runner", post: "sent" }, { post: undefined },
+    // An answer check ran on a sent POST's own 2xx answer, at the response stage (the body check also at the POST).
+    { check: "response_kind" }, { check: "response_kind", httpStatus: 200 }, { stage: "response", check: "response_kind", httpStatus: null },
+    { stage: "response", check: "response_body", httpStatus: 500 }]) {
     assert.throws(() => validateSubmitDiagnostic({ ...diagnostic("post", { httpStatus: 400, check: "http_status" }), ...bad }), { details: { reason: "mm_gasless_submit_unknown" } });
   }
   assert.equal(submitErrorCode(JSON.stringify({ error: { code: "A_B" } })), "A_B");

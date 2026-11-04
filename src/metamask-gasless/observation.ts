@@ -37,13 +37,12 @@ export interface MetaMaskGaslessObserver {
   readonly rpc: MetaMaskGaslessRpcPort;
   readonly environmentName: string;
 }
-export interface MetaMaskGaslessProviderRead {
-  readonly hint: MetaMaskGaslessProviderObservation | null;
-  readonly failure: MetaMaskGaslessFailureReason | null;
-  readonly diagnostic?: MetaMaskSubmitDiagnostic;
-  /** Which answer check refused this observation's own job read, if one did. */
-  readonly observeDiagnostic?: MetaMaskObserveDiagnostic;
-}
+/** The accepted job status, or the reason it was refused; never both, never neither. */
+export type MetaMaskGaslessProviderRead =
+  | { readonly hint: MetaMaskGaslessProviderObservation; readonly failure: null }
+  | { readonly hint: null; readonly failure: MetaMaskGaslessFailureReason; readonly diagnostic?: MetaMaskSubmitDiagnostic;
+    /** Which answer check refused this observation's own job read, if one did. */
+    readonly observeDiagnostic?: MetaMaskObserveDiagnostic };
 export function metaMaskGaslessProviderObservation(value: unknown,
   op: MetaMaskGaslessOperationRecord): MetaMaskGaslessProviderObservation {
   const p = mmExact(value, ["observedAt", "requestIdHash", "status", "txHash"], "mm_gasless_evidence_invalid");
@@ -194,11 +193,9 @@ export class MetaMaskGaslessObservationService {
   }
 }
 
-/** `readProvider` returns either the accepted job status or the reason it was refused, never neither. */
 function providerReadReport(read: MetaMaskGaslessProviderRead): MetaMaskGaslessProviderReadReport {
-  if (read.hint !== null) return { ok: true, status: read.hint.status, txHash: read.hint.txHash !== null };
-  if (read.failure === null) return mmFail("mm_gasless_internal");
-  return { ok: false, reason: read.failure, diagnostic: read.observeDiagnostic ?? null };
+  return read.hint !== null ? { ok: true, status: read.hint.status, txHash: read.hint.txHash !== null }
+    : { ok: false, reason: read.failure, diagnostic: read.observeDiagnostic ?? null };
 }
 
 function closedProvider(provider: MetaMaskGaslessProviderObservation): boolean {
