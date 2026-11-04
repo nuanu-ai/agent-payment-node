@@ -210,6 +210,10 @@ tokens, seed phrases or private keys.
   `operation recover-provider-request` binds an independently known request to an ambiguous transfer without replaying it.
 - **MetaMask Smart Account**: APN keeps one encrypted session account and the ERC-7715 grant; each transfer derives one
   exact child delegation after foreground approval. `wallet permission list|sync|disable|forget` manage the binding.
+  A consent that stops in the browser names where in `error.details`: `consent_step` is the page's last step
+  (`provider_choice` or the wallet method it called last), and when that call threw, `provider_error_code` and
+  `provider_error_message` are the wallet's own code and message (printable ASCII, at most 160 characters, unverified).
+  The page shows the same step. Retrying the same `wallet connect` reuses the pending intent and its session.
 
 Provider balance is never spending authority; the owner allowlist and profile policy still apply.
 

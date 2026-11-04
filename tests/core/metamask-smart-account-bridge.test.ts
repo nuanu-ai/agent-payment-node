@@ -306,8 +306,51 @@ test("served browser preserves missing-provider fail-closed behavior", async () 
   await waitFor(() => browser.posts.length > 0, "missing-provider result");
   assert.deepEqual(browser.posts[0], {
     token: "a".repeat(64),
-    outcome: { ok: false, code: "missing_provider" },
+    outcome: { ok: false, code: "missing_provider", diagnostic: { step: "provider_choice", provider_code: null, provider_message: null } },
   });
+});
+
+test("served browser names the wallet call that threw, with the wallet's code and printable message", async () => {
+  const OWNER = "0x1111111111111111111111111111111111111111";
+  const calls: string[] = [];
+  const answers: Record<string, unknown> = { eth_requestAccounts: [OWNER], eth_accounts: [OWNER], wallet_switchEthereumChain: null, eth_chainId: "0x2105" };
+  const provider: BrowserProvider = {
+    request: async (request) => {
+      const method = (request as { method: string }).method;
+      calls.push(method);
+      if (method in answers) return answers[method];
+      throw Object.assign(new Error(`The method "${method}" does not exist / is not available.\u0007\u202e${"x".repeat(200)}`), { code: -32601 });
+    },
+  };
+  const browser = await runServedBrowser({ ethereum: provider });
+  await waitFor(() => browser.document.buttons().length > 0, "provider choice");
+  browser.document.buttons()[0]?.click();
+  await waitFor(() => browser.posts.length > 0, "failed consent result");
+  assert.deepEqual(calls, ["eth_requestAccounts", "wallet_switchEthereumChain", "eth_chainId", "eth_accounts", "wallet_getSupportedExecutionPermissions"]);
+  const message = `The method "wallet_getSupportedExecutionPermissions" does not exist / is not available.??${"x".repeat(200)}`.slice(0, 160);
+  assert.deepEqual(browser.posts[0], { token: "a".repeat(64), outcome: { ok: false, code: "provider_protocol",
+    diagnostic: { step: "wallet_getSupportedExecutionPermissions", provider_code: -32601, provider_message: message } } });
+  assert.equal(browser.document.status.textContent,
+    "Permission stopped safely at wallet_getSupportedExecutionPermissions (wallet error -32601). You may close this tab.");
+});
+
+test("served browser keeps the step of a refusal that no wallet call threw", async () => {
+  const OWNER = "0x1111111111111111111111111111111111111111";
+  const provider: BrowserProvider = {
+    request: async (request) => {
+      const method = (request as { method: string }).method;
+      if (method === "eth_requestAccounts" || method === "eth_accounts") return [OWNER];
+      if (method === "eth_chainId") return "0x1";
+      if (method === "wallet_switchEthereumChain") return null;
+      throw Object.assign(new Error("unexpected"), { code: 4200 });
+    },
+  };
+  const browser = await runServedBrowser({ ethereum: provider });
+  await waitFor(() => browser.document.buttons().length > 0, "provider choice");
+  browser.document.buttons()[0]?.click();
+  await waitFor(() => browser.posts.length > 0, "wrong chain result");
+  assert.deepEqual(browser.posts[0], { token: "a".repeat(64), outcome: { ok: false, code: "wrong_chain",
+    diagnostic: { step: "eth_chainId", provider_code: null, provider_message: null } } });
 });
 
 test("loopback consent fails closed on a wrong origin or token and never accepts a follow-up", async () => {

@@ -2,6 +2,10 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.90 — 2026-11-05
+
+- MetaMask Smart Account: when `wallet connect` or `wallet permission sync` stops in the browser consent page, the error now says where. `error.details.consent_step` is the page's last step (`provider_choice` or the wallet method it called last, such as `wallet_getSupportedExecutionPermissions` or `wallet_requestExecutionPermissions`). When that call threw, `provider_error_code` and `provider_error_message` carry the wallet's own code and message, reduced to printable ASCII of at most 160 characters. The page shows the step and code too. Before, every thrown wallet call other than a user rejection ended as "MetaMask returned an unsupported foreground consent result" with nothing more. QA hit this on a live connect on 0.5.89. Refusals and the pending intent are unchanged: retrying the same connect reuses the same session.
+
 ## 0.5.89 — 2026-11-04
 
 - LI.FI bridges: an unsent operation whose call still names FeeForwarder v2.0.0 now gets no signature, not even for its token approval. `bridge approve` ends one still awaiting approval as `failed_before_effect` (`unsent_apn_reprepare_required`) before the approval prompt. `operation resume` ends an approved one that sent nothing the same way; a guarded WBTC one is ended only after its foreground confirmation. The transfer is then prepared again. In 0.5.88 the check before the send read only whether the Diamond allowlists v2.1.0, so such an operation could have had its approval signed and sent, and only the bridge call's pre-sign simulation would then have refused it. Such an operation cannot occur in practice: a prepared operation expires within five minutes, and the switch came hours before 0.5.88. QA reproduced it with a synthetic record and a fixed clock, without signing or sending.
