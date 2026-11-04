@@ -1,5 +1,6 @@
 import { evmAccountProfileHashes } from "../evm-account-aliases.js";
 import { mmObservationRpcEnv } from "./chain/rpc.js";
+import { jobTxOutput } from "./client/job-tx.js";
 import { ApnError } from "../errors.js";
 import { OperationService } from "../operation-service.js";
 import { canonicalOperationId } from "../transfer-policy.js";
@@ -201,7 +202,8 @@ export class MetaMaskGaslessService {
         const unsaved = step.unsaved === undefined ? {} : { transient_observation: { phase: step.unsaved.observation.phase,
                 reason: step.unsaved.observation.reason, observed_at: step.unsaved.observation.observedAt, scan_cursor: step.unsaved.cursor } };
         return { ...result, ...(step.warning === undefined ? {} : { transient_warning: step.warning }), ...unsaved,
-            ...(step.submitDiagnostic === undefined ? {} : { submit_diagnostic: submitDiagnosticOutput(step.submitDiagnostic) }) };
+            ...(step.submitDiagnostic === undefined ? {} : { submit_diagnostic: submitDiagnosticOutput(step.submitDiagnostic) }),
+            ...(step.providerRead === undefined ? {} : { provider_read: providerReadOutput(step.providerRead) }) };
     }
     dependencies() {
         if (this.context.metaMaskGasless === undefined)
@@ -236,6 +238,12 @@ export class MetaMaskGaslessService {
 }
 /** The submit diagnostic in the output's own key style. */
 function submitDiagnosticOutput(d) {
-    return { stage: d.stage, post: d.post, http_status: d.httpStatus, check: d.check, provider_error: d.providerError, provider_status: d.providerStatus };
+    return { stage: d.stage, post: d.post, http_status: d.httpStatus, check: d.check, provider_error: d.providerError, provider_status: d.providerStatus,
+        response_tx: jobTxOutput(d.responseTx) };
+}
+/** This call's own provider job read in the output's key style: the status it accepted, or the reason and refused check. */
+function providerReadOutput(r) {
+    return r.ok ? { ok: true, status: r.status, tx_hash: r.txHash } : { ok: false, reason: r.reason, check: r.diagnostic?.check ?? null,
+        provider_status: r.diagnostic?.providerStatus ?? null, response_tx: jobTxOutput(r.diagnostic?.responseTx ?? null) };
 }
 //# sourceMappingURL=service.js.map
