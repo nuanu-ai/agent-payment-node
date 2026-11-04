@@ -4,7 +4,7 @@ Release artifacts, their SHA-256 digests and provenance for every version are on
 
 ## 0.5.89 — 2026-11-04
 
-- LI.FI bridges: an unsent operation whose call still names FeeForwarder v2.0.0 now gets no signature, not even for its token approval. `bridge approve` or `operation resume` ends it as `failed_before_effect` (`unsent_apn_reprepare_required`) before the approval prompt, and the transfer is prepared again. In 0.5.88 the check before the send read only whether the Diamond allowlists v2.1.0, so such an operation could have had its approval signed and sent, and only the bridge call would then have failed. Such an operation cannot occur in practice: a prepared operation expires within five minutes, and the switch came hours before 0.5.88. QA reproduced it with a synthetic record and a fixed clock, without signing or sending.
+- LI.FI bridges: an unsent operation whose call still names FeeForwarder v2.0.0 now gets no signature, not even for its token approval. `bridge approve` ends one still awaiting approval as `failed_before_effect` (`unsent_apn_reprepare_required`) before the approval prompt. `operation resume` ends an approved one that sent nothing the same way; a guarded WBTC one is ended only after its foreground confirmation. The transfer is then prepared again. In 0.5.88 the check before the send read only whether the Diamond allowlists v2.1.0, so such an operation could have had its approval signed and sent, and only the bridge call's pre-sign simulation would then have refused it. Such an operation cannot occur in practice: a prepared operation expires within five minutes, and the switch came hours before 0.5.88. QA reproduced it with a synthetic record and a fixed clock, without signing or sending.
 
 ## 0.5.88 — 2026-11-04
 
