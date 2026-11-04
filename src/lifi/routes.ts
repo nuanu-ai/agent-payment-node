@@ -2,7 +2,8 @@ import { hashObject, sha256 } from "../canonical.js";
 import type { BridgeChainId } from "./chains.js";
 import type { Address } from "../model.js";
 import { bridgeAssetAddress, bridgeAssetRow, bridgeAssetTool, bridgeChain, bridgeCrossNativeConversion, bridgeDestinationChain, bridgeExecutionDestination, bridgeExecutionSource, bridgeFeeAsset, bridgeNativeCoin, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination, type BridgeAsset } from "./asset-registry.js";
-import { decodeBridgeCall } from "./decode.js";
+import { FEE_FORWARDER } from "./abi.js";
+import { bridgeFeeForwarder, decodeBridgeCall } from "./decode.js";
 import type { BridgeFee, BridgeMaterialization, BridgeRouteRequest, BridgeTool } from "./model.js";
 import type { LifiResponse } from "./ports.js";
 import { LIFI_ROUTE_RESPONSE_BYTES } from "./provider.js";
@@ -100,6 +101,8 @@ export function materializeBridgeRoute(selected: ParsedBridgeRoute, response: Li
     materializedStepHash: hashObject(step), transactionDigest: "",
   };
   const m = { ...materialization, transactionDigest: hashObject(materialization.transaction) }, decoded = decodeBridgeCall(m);
+  // The Diamond no longer allowlists the replaced FeeForwarder, so a route through it would revert on chain.
+  if (bridgeFeeForwarder(m) !== FEE_FORWARDER) bridgeFailure("APN_PROVIDER_PROTOCOL", "fee_forwarder_retired");
   if (bridgeHex(step.transactionId, 32, 32) !== decoded.transactionId) bridgeFailure("APN_PROVIDER_PROTOCOL", "provider_transfer_id");
   const subs = list(step.includedSteps, 8, "included_step_count").map((s) => bridgeRecord(s));
   if (bridgeCrossNativeConversion(request)) assertBnbEffectGraph(subs, request, decoded.bridgeAmountAtomic, m.quotedOutputAtomic, m.minimumOutputAtomic);

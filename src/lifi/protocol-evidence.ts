@@ -1,7 +1,8 @@
 import { decodeEventLog, keccak256 } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
 import type { Address, Hex } from "../model.js";
-import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
+import { bridgeEventsAbi, EVENT_TOPICS, FEE_RECIPIENT } from "./abi.js";
+import { bridgeFeeForwarder } from "./decode.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
 import type { AcrossCorrelation, BridgeDestinationProof, BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSourceProof, DecodedBridgeCall, StargateCorrelation } from "./model.js";
@@ -39,7 +40,7 @@ export function bridgeSourceProof(materialization: BridgeMaterialization, decode
   // `decoded` is the stored decode of this materialization, re-derived and compared when the record was loaded.
   if (receipt.chainId !== decoded.sourceChainId) fail("source_binding");
   validateReceipt(receipt);
-  validateCommonSourceEvents(decoded, receipt);
+  validateCommonSourceEvents(decoded, receipt, bridgeFeeForwarder(materialization));
   const nativeStargate = decoded.tool === "stargateV2" && decoded.sourceToken === BRIDGE_ZERO_ADDRESS;
   if (nativeStargate) validateNativeStargateSource(decoded, materialization);
   else if (decoded.sourceToken === BRIDGE_ZERO_ADDRESS) nativeMovement(decoded.sourceChainId, receipt, "wrap", decoded.bridgeAmountAtomic);
@@ -107,14 +108,15 @@ function validateStoredSource(source: BridgeSourceProof, decoded: DecodedBridgeC
   fail("stored_correlation_kind");
 }
 
-function validateCommonSourceEvents(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt): void {
+/** `feeForwarder` is the one the materialized call names: an operation prepared before 2026-11-04 called v2.0.0. */
+function validateCommonSourceEvents(decoded: DecodedBridgeCall, receipt: BridgeProtocolReceipt, feeForwarder: Address): void {
   const lifi = oneEvent(receipt, BRIDGE_DIAMOND, EVENT_TOPICS.lifiTransferStarted, "LiFiTransferStarted") as { bridgeData: BridgeEventData };
   const b = lifi.bridgeData;
   if (b.transactionId.toLowerCase() !== decoded.transactionId || b.bridge !== decoded.bridgeName || b.integrator !== decoded.integrator ||
     b.referrer !== decoded.referrer || b.sendingAssetId !== decoded.sourceToken || b.receiver !== decoded.recipient ||
     b.minAmount.toString() !== decoded.bridgeAmountAtomic || b.destinationChainId !== BigInt(decoded.destinationChainId) ||
     !b.hasSourceSwaps || b.hasDestinationCall !== (decoded.composite !== undefined)) fail("LiFiTransferStarted");
-  const fees = oneEvent(receipt, FEE_FORWARDER, EVENT_TOPICS.feesForwarded, "FeesForwarded") as { token: Address; distributions: readonly { recipient: Address; amount: bigint }[] };
+  const fees = oneEvent(receipt, feeForwarder, EVENT_TOPICS.feesForwarded, "FeesForwarded") as { token: Address; distributions: readonly { recipient: Address; amount: bigint }[] };
   if (fees.token !== decoded.sourceToken || fees.distributions.length !== 1 || fees.distributions[0]!.recipient !== FEE_RECIPIENT ||
     fees.distributions[0]!.amount.toString() !== decoded.feeAmountAtomic) fail("FeesForwarded");
 }

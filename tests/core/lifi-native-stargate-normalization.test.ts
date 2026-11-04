@@ -11,10 +11,15 @@ import { parseReceiptLogs } from "../../src/lifi/rpc-proof-codec.js";
 import { materializeBridgeRoute, parseBridgeRoutes } from "../../src/lifi/routes.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
 import { eventLog, mutateEvent } from "./lifi-event-fixtures.js";
+import { feeForwarderV20Materialization, readdressFeeForwarder } from "./lifi-capture.js";
 
 const captured = JSON.parse(readFileSync(new URL("../../../tests/core/lifi-fixtures/native-stargate-paid-source-20261007.json", import.meta.url), "utf8"));
-const selected = parseBridgeRoutes(captured.quoteResponse, captured.request, captured.sender).find(row => row.choice.routeId === "658caddf-d3b2-4a90-9f81-97b718e55b8b")!;
-const m = materializeBridgeRoute(selected, captured.stepResponse, captured.request, captured.sender).materialization;
+// The paid source ran on 2026-10-07 through FeeForwarder v2.0.0. A fresh route must now name the current FeeForwarder,
+// so its record is rebuilt from the re-addressed capture with v2.0.0 restored in the call: the transaction bytes are the
+// recorded ones; the response and step hashes come from the re-addressed JSON and are not re-checked on load.
+const current = JSON.parse(readdressFeeForwarder(JSON.stringify(captured)));
+const selected = parseBridgeRoutes(current.quoteResponse, current.request, current.sender).find(row => row.choice.routeId === "658caddf-d3b2-4a90-9f81-97b718e55b8b")!;
+const m = feeForwarderV20Materialization(materializeBridgeRoute(selected, current.stepResponse, current.request, current.sender).materialization);
 const d = decodeBridgeCall(m), raw = captured.sourceReceipt;
 const block = { numberAtomic: BigInt(raw.blockNumber).toString(), hash: raw.blockHash, timestampAtomic: BigInt(raw.logs[0].blockTimestamp).toString() };
 const receipt: BridgeProtocolReceipt = { chainId: 1, transactionHash: raw.transactionHash, blockNumberAtomic: block.numberAtomic,

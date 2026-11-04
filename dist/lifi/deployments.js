@@ -115,7 +115,7 @@ export function bridgeDeployment(chainId, peerChainId, tool, token) {
     const destinationOnly = (chainId === 143 || chainId === 59144) && peerChainId === 1 && tool === "across" && asset.kind === "native";
     const diamondHash = DIAMOND_HASH[chainId];
     const commonCode = [...(destinationOnly ? [] : [code(BRIDGE_DIAMOND, diamondHash ?? bridgeFailure("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "diamond_deployment")),
-            code(FEE_FORWARDER, "0x7ee455a6853068874bfd201f93d6383ed6d88934a922316db5575b057e2ebe74")]),
+            code(FEE_FORWARDER, "0x99a76627aece8903612e0246c10f13a46e511a0a074d9a4e68987a28c78ebd52")]),
         ...(asset.kind === "native" ? proxyCode(wrapped.address, wrapped.code) : proxyCode(asset.address, asset.code))];
     const reads = [...(destinationOnly ? [] : [
             call(BRIDGE_DIAMOND, "isContractSelectorWhitelisted", [FEE_FORWARDER, FEE_FORWARDER_SELECTOR], TRUE_WORD),

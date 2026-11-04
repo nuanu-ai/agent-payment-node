@@ -1,6 +1,6 @@
 import { decodeFunctionData, encodeFunctionData, getAddress } from "viem";
 import { sha256 } from "../canonical.js";
-import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER, FEE_FORWARDER_NATIVE_SELECTOR, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
+import { ACROSS_SELECTOR, acrossBridgeAbi, FEE_FORWARDER_NATIVE_SELECTOR, FEE_FORWARDER_SELECTOR, FEE_RECIPIENT, feeForwarderAbi, RECORDED_FEE_FORWARDERS, STARGATE_SELECTOR, stargateBridgeAbi } from "./abi.js";
 import { BRIDGE_ASSET_REGISTRY, BRIDGE_QUOTE_DESTINATIONS, bridgeAssetRow, bridgeFeeAsset, bridgeNativeDenominationConversion, bridgeNativePrincipal, bridgeQuoteDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_MAX_CALLDATA_BYTES, BRIDGE_MAX_GAS, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHex, bridgeUint } from "./validation.js";
 import { BNB_COMPOSITE, decodeBnbCompositeMessage } from "./bnb-composite.js";
@@ -51,6 +51,21 @@ export function decodeBridgeCall(materialization) {
         fail("ABI_decode");
     }
     return fail("tool_selector");
+}
+/** The FeeForwarder a materialization's one fee step calls, after `decodeBridgeCall` accepted it. */
+export function bridgeFeeForwarder(materialization) {
+    const data = bridgeHex(materialization.transaction.data, BRIDGE_MAX_CALLDATA_BYTES), selector = data.slice(0, 10);
+    const abi = materialization.tool === "across" && selector === ACROSS_SELECTOR ? acrossBridgeAbi
+        : materialization.tool === "stargateV2" && selector === STARGATE_SELECTOR ? stargateBridgeAbi : fail("tool_selector");
+    let swaps;
+    try {
+        swaps = decodeFunctionData({ abi, data }).args[1];
+    }
+    catch {
+        return fail("ABI_decode");
+    }
+    const forwarder = swaps.length === 1 ? swaps[0].callTo : undefined;
+    return forwarder !== undefined && RECORDED_FEE_FORWARDERS.includes(forwarder) ? forwarder : fail("fee_swap");
 }
 function decodeAcross(m, bridge, swaps, across, data, sourceAmount, minimum, value) {
     const bnb = m.request.fromChainId === 1 && m.request.toChainId === 56;
@@ -113,7 +128,8 @@ function decodeCommon(m, bridge, swaps, sourceAmount, destinationCall = false) {
         bridge.destinationChainId !== BigInt(request.toChainId) || !bridge.hasSourceSwaps || bridge.hasDestinationCall !== destinationCall || bridge.minAmount <= 0n || bridge.minAmount >= sourceAmount || swaps.length !== 1)
         fail("bridge_data");
     const swap = swaps[0];
-    if (swap.callTo !== FEE_FORWARDER || swap.approveTo !== FEE_FORWARDER || swap.sendingAssetId !== request.fromToken ||
+    // A stored record may name the FeeForwarder it was prepared with; a new route must name the current one (routes.ts).
+    if (!RECORDED_FEE_FORWARDERS.includes(swap.callTo) || swap.approveTo !== swap.callTo || swap.sendingAssetId !== request.fromToken ||
         swap.receivingAssetId !== request.fromToken || swap.fromAmount !== sourceAmount || !swap.requiresDeposit)
         fail("fee_swap");
     // The fee forwarder takes the principal in its own kind: `forwardNativeFees` for the native coin, else the token call.

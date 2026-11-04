@@ -15,6 +15,7 @@ import { bridgeUint } from "../../src/lifi/validation.js";
 import { temporaryState, savedBridgeOperations } from "./helpers.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_KEY, LIFI_SYNTHETIC_SENDER, lifiFixture, lifiRoute } from "./lifi-helpers.js";
 import { findStored } from "./stored-operations.js";
+import { lifiCapture } from "./lifi-capture.js";
 
 test("LI.FI integer parsing preserves exact USDC and wei boundaries without coercion or rounding", () => {
   assert.equal(bridgeDecimal("0.000001", 6, true), "1"); assert.equal(bridgeDecimal("10.123456", 6, true), "10123456"); assert.equal(bridgeDecimal("0", 6), "0");
@@ -25,7 +26,7 @@ test("LI.FI integer parsing preserves exact USDC and wei boundaries without coer
 });
 
 test("captured Base USDC to Arbitrum USDC Stargate V2 envelope stays exactly bound", async () => {
-  const captured = JSON.parse(await readFile(join("tests/core/lifi-fixtures", "lifi-base-arbitrum-usdc-stargate-step-20260921.json"), "utf8")) as any;
+  const captured = lifiCapture("lifi-base-arbitrum-usdc-stargate-step-20260921.json") as any;
   const sender = captured.request.fromAddress;
   const request = {
     fromChainId: captured.request.fromChainId, toChainId: captured.request.toChainId,

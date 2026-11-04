@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { keccak256, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
@@ -14,10 +13,11 @@ import { BRIDGE_ZERO_ADDRESS } from "../../src/lifi/validation.js";
 import { temporaryState } from "./helpers.js";
 import { LIFI_RECIPIENT, LIFI_SYNTHETIC_KEY, LIFI_SYNTHETIC_SENDER, lifiFixture } from "./lifi-helpers.js";
 import { capturedBytecode, chainDouble, chainEnvironment, type ReceiptRoute } from "./lifi-source-observation-helpers.js";
+import { lifiCapture } from "./lifi-capture.js";
 
 type Route = { readonly request: Pick<BridgeRouteRequest, "fromChainId" | "toChainId" | "fromToken" | "toToken">; readonly tool: BridgeTool };
 const code = await capturedBytecode();
-const bnb = JSON.parse(await readFile("tests/core/lifi-fixtures/bnb-composite-fly-20260921.json", "utf8")).decoded;
+const bnb = lifiCapture("bnb-composite-fly-20260921.json").decoded;
 /** Every admitted destination of an execution source, with the destination token the pair admits. */
 const DESTINATION_ROUTES: Route[] = ([1, 8453, 42161] as const).flatMap((chainId) => [BRIDGE_ASSET_REGISTRY[chainId].nativeCoin, ...BRIDGE_ASSET_REGISTRY[chainId].tokens]
   .flatMap((asset) => asset.peers.flatMap((peer) => (["across", "stargateV2"] as const).flatMap((tool): Route[] => {

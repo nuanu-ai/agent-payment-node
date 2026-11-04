@@ -1,6 +1,7 @@
 import { decodeEventLog, keccak256 } from "viem";
 import { canonicalJson, sha256 } from "../canonical.js";
-import { bridgeEventsAbi, EVENT_TOPICS, FEE_FORWARDER, FEE_RECIPIENT } from "./abi.js";
+import { bridgeEventsAbi, EVENT_TOPICS, FEE_RECIPIENT } from "./abi.js";
+import { bridgeFeeForwarder } from "./decode.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { bridgeEndpointId, bridgeProtocolEmitter } from "./deployments.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD, bridgeAddress, bridgeFailure, bridgeHash, bridgeHex, bridgeUint } from "./validation.js";
@@ -10,7 +11,7 @@ export function bridgeSourceProof(materialization, decoded, receipt) {
     if (receipt.chainId !== decoded.sourceChainId)
         fail("source_binding");
     validateReceipt(receipt);
-    validateCommonSourceEvents(decoded, receipt);
+    validateCommonSourceEvents(decoded, receipt, bridgeFeeForwarder(materialization));
     const nativeStargate = decoded.tool === "stargateV2" && decoded.sourceToken === BRIDGE_ZERO_ADDRESS;
     if (nativeStargate)
         validateNativeStargateSource(decoded, materialization);
@@ -87,7 +88,8 @@ function validateStoredSource(source, decoded) {
     }
     fail("stored_correlation_kind");
 }
-function validateCommonSourceEvents(decoded, receipt) {
+/** `feeForwarder` is the one the materialized call names: an operation prepared before 2026-11-04 called v2.0.0. */
+function validateCommonSourceEvents(decoded, receipt, feeForwarder) {
     const lifi = oneEvent(receipt, BRIDGE_DIAMOND, EVENT_TOPICS.lifiTransferStarted, "LiFiTransferStarted");
     const b = lifi.bridgeData;
     if (b.transactionId.toLowerCase() !== decoded.transactionId || b.bridge !== decoded.bridgeName || b.integrator !== decoded.integrator ||
@@ -95,7 +97,7 @@ function validateCommonSourceEvents(decoded, receipt) {
         b.minAmount.toString() !== decoded.bridgeAmountAtomic || b.destinationChainId !== BigInt(decoded.destinationChainId) ||
         !b.hasSourceSwaps || b.hasDestinationCall !== (decoded.composite !== undefined))
         fail("LiFiTransferStarted");
-    const fees = oneEvent(receipt, FEE_FORWARDER, EVENT_TOPICS.feesForwarded, "FeesForwarded");
+    const fees = oneEvent(receipt, feeForwarder, EVENT_TOPICS.feesForwarded, "FeesForwarded");
     if (fees.token !== decoded.sourceToken || fees.distributions.length !== 1 || fees.distributions[0].recipient !== FEE_RECIPIENT ||
         fees.distributions[0].amount.toString() !== decoded.feeAmountAtomic)
         fail("FeesForwarded");

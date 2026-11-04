@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeFunctionData, getAddress, keccak256, parseAbiParameters, parseTransaction } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { ApnCore } from "../../src/core.js";
@@ -27,6 +25,7 @@ import { activateDirectPolicy, WIDE_CAPS } from "./direct-allowlist-helpers.js";
 import { bridgeMechanism } from "../../src/lifi/allowlist.js";
 import { findStored } from "./stored-operations.js";
 import { TEST_LOCK_WAIT_MS } from "./helpers.js";
+import { lifiCapture } from "./lifi-capture.js";
 
 export type LifiJson = Record<string, any>;
 export const LIFI_SYNTHETIC_KEY = `0x${"01".repeat(32)}` as Hex;
@@ -45,7 +44,7 @@ export class LifiApproval implements BridgeApprovalPort {
 }
 export async function lifiSteps(pair: "eth-base" | "base-arb" | "arb-eth" | "eth-linea" | "eth-monad" | "eth-bnb", now: Date): Promise<LifiJson[]> {
   if (pair === "eth-bnb") {
-    const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", "bnb-composite-fly-20260921.json"), "utf8")) as LifiJson;
+    const capture = lifiCapture("bnb-composite-fly-20260921.json") as LifiJson;
     const step = structuredClone(capture.materializationResponse), decoded = decodeFunctionData({ abi: acrossBridgeAbi, data: step.transactionRequest.data });
     const args = structuredClone(decoded.args) as unknown as any[], messageType = parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address");
     const message = decodeAbiParameters(messageType, args[2].message);
@@ -58,7 +57,7 @@ export async function lifiSteps(pair: "eth-base" | "base-arb" | "arb-eth" | "eth
     return [step];
   }
   if (pair === "eth-linea" || pair === "eth-monad") {
-    const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", "lifi-ethereum-linea-native-across-20260920.json"), "utf8")) as LifiJson;
+    const capture = lifiCapture("lifi-ethereum-linea-native-across-20260920.json") as LifiJson;
     const step = structuredClone(capture.stepResponse);
     if (pair === "eth-linea") return [step];
     const output = "21000000000000000000", minimum = "20900000000000000000";
@@ -82,7 +81,7 @@ export async function lifiSteps(pair: "eth-base" | "base-arb" | "arb-eth" | "eth
   }
   const steps: LifiJson[] = [];
   for (const filename of ["lifi-across-step-transactions-20260908.json", "lifi-stargate-taxi-step-transactions-20260908.json"]) {
-    const row = (JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", filename), "utf8")) as LifiJson).rows[pair];
+    const row = (lifiCapture(filename) as LifiJson).rows[pair];
     const step: LifiJson = structuredClone(row.step);
     const abi = step.tool === "across" ? acrossBridgeAbi : stargateBridgeAbi;
     const decoded = decodeFunctionData({ abi, data: step.transactionRequest.data }), args = structuredClone(decoded.args) as unknown as any[];
@@ -260,7 +259,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   }
   let capturedRoutes: LifiJson | undefined;
   if ((pair === "eth-linea" || pair === "eth-bnb") && options.provider === undefined) {
-    const capture = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", pair === "eth-bnb" ? "bnb-composite-fly-20260921.json" : "lifi-ethereum-linea-native-across-20260920.json"), "utf8")) as LifiJson;
+    const capture = lifiCapture(pair === "eth-bnb" ? "bnb-composite-fly-20260921.json" : "lifi-ethereum-linea-native-across-20260920.json") as LifiJson;
     capturedRoutes = structuredClone(capture.routeResponse);
     if (pair === "eth-bnb") {
       const route = capturedRoutes!.routes[0]; route.fromAddress = LIFI_SYNTHETIC_SENDER; route.toAddress = LIFI_SYNTHETIC_SENDER;

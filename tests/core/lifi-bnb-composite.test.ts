@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import test from "node:test";
 import { decodeAbiParameters, encodeFunctionData, encodeFunctionResult, parseAbi, parseAbiParameters } from "viem";
 import type { Address, Hex } from "../../src/model.js";
@@ -16,8 +14,9 @@ import { ApnCore } from "../../src/core.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { LifiProvider } from "../../src/lifi/provider.js";
 import { findStored } from "./stored-operations.js";
+import { lifiCapture } from "./lifi-capture.js";
 
-const fixture = JSON.parse(readFileSync(resolve("tests/core/lifi-fixtures/bnb-composite-fly-20260921.json"), "utf8")) as {
+const fixture = lifiCapture("bnb-composite-fly-20260921.json") as {
   routeResponse: { routes: Record<string, unknown>[] }; materializationRequest: Record<string, unknown>; materializationResponse: unknown;
   decoded: { bridgeData: { transactionId: Hex; receiver: Address }; acrossData: { message: Hex };
     destination: { swaps: readonly [{ fromAmount: string; callData: Hex }] }; flyPackedPayloadKeccak256: Hex; destinationMessageKeccak256: Hex };

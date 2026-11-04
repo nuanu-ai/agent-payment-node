@@ -5,7 +5,16 @@ export const ACROSS_SELECTOR = "0x1794958f" as Hex;
 export const STARGATE_SELECTOR = "0xa6010a66" as Hex;
 export const FEE_FORWARDER_SELECTOR = "0x332d746b" as Hex;
 export const FEE_FORWARDER_NATIVE_SELECTOR = "0x0e8ae67f" as Hex;
-export const FEE_FORWARDER = "0xCE40449B773a3E6E5e769ADb4e567179d4828cbd" as Address;
+/**
+ * LI.FI FeeForwarder v2.1.0 (Sourcify exact match, lifinance/contracts src/Periphery/FeeForwarder.sol). On 2026-11-04
+ * Diamond transactions on Ethereum, Base and Arbitrum allowlisted it and de-allowlisted v2.0.0; the deployment records
+ * are in lifinance/contracts#2611. A new route must name it; `forwardERC20Fees` and `forwardNativeFees` are unchanged.
+ */
+export const FEE_FORWARDER = "0xDe2b920506EE931a6A2ABDF566526220214FBbAE" as Address;
+/** LI.FI FeeForwarder v2.0.0, the one operations prepared before 2026-11-04 called. Only their records and receipts name it. */
+export const FEE_FORWARDER_V2_0 = "0xCE40449B773a3E6E5e769ADb4e567179d4828cbd" as Address;
+/** The FeeForwarders a stored operation may name: the current one and the one it replaced. */
+export const RECORDED_FEE_FORWARDERS: readonly Address[] = [FEE_FORWARDER, FEE_FORWARDER_V2_0];
 export const FEE_RECIPIENT = "0xC06ebbefD94032B85424D51906e2A335EFAe264B" as Address;
 export const LAYER_ZERO_ENDPOINT = getAddress("0x1a44076050125825900e736c501f859c50fe728c");
 

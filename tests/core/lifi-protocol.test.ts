@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 import test from "node:test";
 import { decodeEventLog, decodeFunctionData, encodeAbiParameters, encodeEventTopics, encodeFunctionData, getAbiItem, getAddress } from "viem";
 import type { AbiParameter } from "viem";
@@ -14,6 +12,7 @@ import type { BridgeLog, BridgeMaterialization, BridgeProtocolReceipt, BridgeSou
 import { bridgeDestinationProof, bridgeSourceProof } from "../../src/lifi/protocol-evidence.js";
 import { BRIDGE_ASSET_REGISTRY } from "../../src/lifi/asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_ZERO_ADDRESS, BRIDGE_ZERO_WORD } from "../../src/lifi/validation.js";
+import { lifiCapture } from "./lifi-capture.js";
 
 const usdc = (chainId: 1 | 8453 | 42161) => BRIDGE_ASSET_REGISTRY[chainId].tokens.find((row) => row.symbol === "USDC")!.address;
 
@@ -27,7 +26,7 @@ async function fixtures(): Promise<BridgeMaterialization[]> {
   const names = ["lifi-across-step-transactions-20260908.json", "lifi-stargate-taxi-step-transactions-20260908.json"];
   const output: BridgeMaterialization[] = [];
   for (const name of names) {
-    const parsed = JSON.parse(await readFile(resolve("tests/core/lifi-fixtures", name), "utf8")) as Json;
+    const parsed = lifiCapture(name) as Json;
     for (const row of Object.values(parsed.rows as Json) as Json[]) output.push(materialization(row));
   }
   return output;
