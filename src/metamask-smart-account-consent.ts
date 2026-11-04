@@ -127,13 +127,13 @@ export const CONSENT_STEPS = ["provider_choice", "eth_requestAccounts", "wallet_
 const PROVIDER_MESSAGE_MAX = 160;
 
 /**
- * Where a stopped consent stopped. `after_grant` is true once MetaMask answered the permission request, so a grant may
- * exist. The provider code and message are the wallet's own, unverified, and present only when that wallet call itself
+ * Where a stopped consent stopped. `permission_requested` is true once the page sent MetaMask the permission request, so a
+ * grant may exist unless MetaMask answered with a rejection. The provider code and message are the wallet's own, unverified, and present only when that wallet call itself
  * threw; the page keeps printable ASCII of the message, at most 160 characters.
  */
 interface BrowserDiagnostic {
   readonly step: typeof CONSENT_STEPS[number];
-  readonly after_grant: boolean;
+  readonly permission_requested: boolean;
   readonly provider_code: number | null;
   readonly provider_message: string | null;
 }
@@ -145,9 +145,9 @@ interface Callback {
 }
 
 function isDiagnostic(value: unknown): value is BrowserDiagnostic {
-  if (!isPlainRecord(value) || !exactKeys(value, ["step", "after_grant", "provider_code", "provider_message"])) return false;
+  if (!isPlainRecord(value) || !exactKeys(value, ["step", "permission_requested", "provider_code", "provider_message"])) return false;
   const code = value.provider_code, message = value.provider_message;
-  return (CONSENT_STEPS as readonly unknown[]).includes(value.step) && typeof value.after_grant === "boolean" &&
+  return (CONSENT_STEPS as readonly unknown[]).includes(value.step) && typeof value.permission_requested === "boolean" &&
     (code === null || (Number.isSafeInteger(code) && Math.abs(code as number) <= 2_147_483_648)) &&
     (message === null || (typeof message === "string" && message.length <= PROVIDER_MESSAGE_MAX && /^[\x20-\x7e]*$/u.test(message)));
 }
@@ -179,7 +179,7 @@ const BROWSER_LOGIC = String.raw`
 const token = location.hash.slice(1);
 history.replaceState(null, "", "/");
 const setStatus = (value) => { document.getElementById("status").textContent = value; };
-let step = "provider_choice", afterGrant = false, walletError;
+let step = "provider_choice", permissionRequested = false, walletError;
 const call = async (provider, method, params) => {
   step = method;
   try { return await provider.request({ method, params }); }
@@ -194,7 +194,7 @@ const failure = (code, error) => {
     const message = error === undefined || error === null ? undefined : error.message;
     if (typeof message === "string") providerMessage = message.replace(/[^\x20-\x7e]/gu, "?").slice(0, ${PROVIDER_MESSAGE_MAX});
   } catch { /* An accessor-hostile error keeps only its step. */ }
-  return { ok: false, code, diagnostic: { step, after_grant: afterGrant, provider_code: providerCode, provider_message: providerMessage } };
+  return { ok: false, code, diagnostic: { step, permission_requested: permissionRequested, provider_code: providerCode, provider_message: providerMessage } };
 };
 const post = async (outcome) => {
   await fetch(config.callback, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token, outcome }) });
@@ -309,8 +309,8 @@ const sameAccount = async (provider, owner) => {
     }
     const request = { chainId: config.chainId, from: owner, to: config.sessionAddress, permission: { type: "erc20-token-allowance", isAdjustmentAllowed: true, data: { tokenAddress: config.tokenAddress, allowanceAmount: "0x" + BigInt(config.capAtomic).toString(16), startTime: config.startsAtUnix, justification: "Allow this APN session to spend up to the selected Base USDC cap." } }, rules: [{ type: "expiry", data: { timestamp: config.expiresAtUnix } }] };
     if (!(await sameAccount(provider, owner)) || !active(await accountCode(provider, owner))) return await post(failure("changed_account"));
+    permissionRequested = true;
     const permission_responses = await call(provider, "wallet_requestExecutionPermissions", [request]);
-    afterGrant = true;
     const finalChain = await call(provider, "eth_chainId", []);
     if (String(finalChain).toLowerCase() !== config.chainId) return await post(failure("changed_account"));
     if (!(await sameAccount(provider, owner))) return await post(failure("changed_account"));
@@ -360,7 +360,7 @@ function rejectHttp(response: ServerResponse, reject: (error: unknown) => void):
 function browserFailure(code: BrowserFailure, diagnostic: BrowserDiagnostic): ApnError {
   const failure = classifiedBrowserFailure(code);
   return new ApnError(failure.code, failure.message, { ...failure.details, consent_step: diagnostic.step,
-    consent_after_grant: diagnostic.after_grant,
+    consent_permission_requested: diagnostic.permission_requested,
     ...(diagnostic.provider_code === null ? {} : { provider_error_code: diagnostic.provider_code }),
     ...(diagnostic.provider_message === null ? {} : { provider_error_message: diagnostic.provider_message }) });
 }

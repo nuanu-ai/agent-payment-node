@@ -141,7 +141,7 @@ test("served browser preserves missing-provider fail-closed behavior", async () 
   await waitFor(() => browser.posts.length > 0, "missing-provider result");
   assert.deepEqual(browser.posts[0], {
     token: "a".repeat(64),
-    outcome: { ok: false, code: "missing_provider", diagnostic: { step: "provider_choice", after_grant: false, provider_code: null, provider_message: null } },
+    outcome: { ok: false, code: "missing_provider", diagnostic: { step: "provider_choice", permission_requested: false, provider_code: null, provider_message: null } },
   });
 });
 

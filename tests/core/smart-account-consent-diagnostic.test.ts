@@ -63,35 +63,35 @@ test("the page names the wallet call that threw, with the wallet's code and prin
   });
   const message = `The method "wallet_getSupportedExecutionPermissions" does not exist.???${"x".repeat(200)}`.slice(0, 160);
   assert.deepEqual(outcome, { ok: false, code: "provider_protocol", diagnostic: { step: "wallet_getSupportedExecutionPermissions",
-    after_grant: false, provider_code: -32601, provider_message: message } });
+    permission_requested: false, provider_code: -32601, provider_message: message } });
   assert.equal(status, "Permission stopped safely at wallet_getSupportedExecutionPermissions (wallet error -32601). You may close this tab.");
   assert.equal(error.code, "APN_PROVIDER_PROTOCOL");
   assert.deepEqual(failureEnvelope("wallet.connect", "request", error, true).error?.details, { retryable: false,
-    consent_step: "wallet_getSupportedExecutionPermissions", consent_after_grant: false, provider_error_code: -32601, provider_error_message: message });
+    consent_step: "wallet_getSupportedExecutionPermissions", consent_permission_requested: false, provider_error_code: -32601, provider_error_message: message });
 });
 
 test("a refused answer names the call it came from and carries no wallet error", async () => {
   const { outcome, error } = await pageOutcome((method) => method === "eth_chainId" ? "0x1" : healthy(method));
-  assert.deepEqual(outcome.diagnostic, { step: "eth_chainId", after_grant: false, provider_code: null, provider_message: null });
+  assert.deepEqual(outcome.diagnostic, { step: "eth_chainId", permission_requested: false, provider_code: null, provider_message: null });
   assert.deepEqual([error.code, error.details.consent_step, "provider_error_code" in error.details], ["APN_CHAIN_MISMATCH", "eth_chainId", false]);
 });
 
-test("a check after MetaMask answered the permission request says so and names the answer that failed", async () => {
+test("a check after the permission request says so and names the answer that failed", async () => {
   const chain = await pageOutcome((method, call) => method === "eth_chainId" && call === 2 ? "0x1" : healthy(method));
-  assert.deepEqual(chain.outcome.diagnostic, { step: "eth_chainId", after_grant: true, provider_code: null, provider_message: null });
-  assert.deepEqual([chain.error.code, chain.error.details.consent_after_grant], ["APN_PROFILE_DRIFT", true]);
+  assert.deepEqual(chain.outcome.diagnostic, { step: "eth_chainId", permission_requested: true, provider_code: null, provider_message: null });
+  assert.deepEqual([chain.error.code, chain.error.details.consent_permission_requested], ["APN_PROFILE_DRIFT", true]);
   const code = await pageOutcome((method, call) => method === "eth_getCode" && call === 3 ? "0x" : healthy(method));
-  assert.deepEqual(code.outcome.diagnostic, { step: "eth_getCode", after_grant: true, provider_code: null, provider_message: null });
+  assert.deepEqual(code.outcome.diagnostic, { step: "eth_getCode", permission_requested: true, provider_code: null, provider_message: null });
   const account = await pageOutcome((method, call) => method === "eth_accounts" && call === 3 ? ["0x3333333333333333333333333333333333333333"] : healthy(method));
-  assert.deepEqual(account.outcome.diagnostic, { step: "eth_accounts", after_grant: true, provider_code: null, provider_message: null });
+  assert.deepEqual(account.outcome.diagnostic, { step: "eth_accounts", permission_requested: true, provider_code: null, provider_message: null });
   const before = await pageOutcome((method, call) => method === "eth_getCode" && call === 1 ? "0x" : healthy(method));
-  assert.deepEqual([before.outcome.diagnostic.step, before.outcome.diagnostic.after_grant], ["eth_getCode", false]);
+  assert.deepEqual([before.outcome.diagnostic.step, before.outcome.diagnostic.permission_requested], ["eth_getCode", false]);
 });
 
 test("a sync that selects another account stops at owner_match", async () => {
   const other = "0x4444444444444444444444444444444444444444";
   const { outcome, error } = await pageOutcome((method) => method === "eth_requestAccounts" || method === "eth_accounts" ? [other] : healthy(method), "sync");
-  assert.deepEqual(outcome, { ok: false, code: "changed_account", diagnostic: { step: "owner_match", after_grant: false, provider_code: null, provider_message: null } });
+  assert.deepEqual(outcome, { ok: false, code: "changed_account", diagnostic: { step: "owner_match", permission_requested: false, provider_code: null, provider_message: null } });
   assert.equal(error.code, "APN_PROFILE_DRIFT");
 });
 
@@ -100,29 +100,35 @@ test("an error whose properties throw still ends the consent, and the page's own
     if (method !== "eth_requestAccounts") return healthy(method);
     throw Object.defineProperties({}, { code: { get: () => { throw new Error("code"); } }, message: { get: () => { throw new Error("message"); } } });
   });
-  assert.deepEqual(hostile.outcome, { ok: false, code: "provider_protocol", diagnostic: { step: "eth_requestAccounts", after_grant: false,
+  assert.deepEqual(hostile.outcome, { ok: false, code: "provider_protocol", diagnostic: { step: "eth_requestAccounts", permission_requested: false,
     provider_code: null, provider_message: null } });
   const own = await pageOutcome((method) => method === "eth_requestAccounts"
     ? [{ toString: () => { throw Object.assign(new Error("page"), { code: 4001 }); } }] : healthy(method));
-  assert.deepEqual(own.outcome, { ok: false, code: "provider_protocol", diagnostic: { step: "eth_requestAccounts", after_grant: false,
+  assert.deepEqual(own.outcome, { ok: false, code: "provider_protocol", diagnostic: { step: "eth_requestAccounts", permission_requested: false,
     provider_code: null, provider_message: null } });
   const rejected = await pageOutcome((method) => {
     if (method === "wallet_requestExecutionPermissions") throw Object.assign(new Error("User rejected the request."), { code: 4001 });
     return healthy(method);
   });
-  assert.deepEqual([rejected.error.code, rejected.error.details.provider_error_code, rejected.error.details.consent_after_grant],
-    ["APN_PROVIDER_SESSION_REQUIRED", 4001, false]);
+  assert.deepEqual([rejected.error.code, rejected.error.details.provider_error_code, rejected.error.details.consent_permission_requested],
+    ["APN_PROVIDER_SESSION_REQUIRED", 4001, true]);
+  const lost = await pageOutcome((method) => {
+    if (method === "wallet_requestExecutionPermissions") throw Object.assign(new Error("Internal JSON-RPC error."), { code: -32603 });
+    return healthy(method);
+  });
+  assert.deepEqual(lost.outcome.diagnostic, { step: "wallet_requestExecutionPermissions", permission_requested: true, provider_code: -32603,
+    provider_message: "Internal JSON-RPC error." });
 });
 
 test("a failure callback without the exact diagnostic is a protocol violation", async () => {
-  const diagnostic = { step: "eth_chainId", after_grant: false, provider_code: null, provider_message: null };
+  const diagnostic = { step: "eth_chainId", permission_requested: false, provider_code: null, provider_message: null };
   for (const boundary of [2 ** 31, -(2 ** 31)]) {
     assert.equal((await posted({ ok: false, code: "provider_protocol", diagnostic: { ...diagnostic, provider_code: boundary } })).status, 204);
   }
   const malformed: unknown[] = [
     { ok: false, code: "provider_protocol" },
     { ok: false, code: "provider_protocol", diagnostic: { step: "eth_chainId", provider_code: null, provider_message: null } },
-    { ok: false, code: "provider_protocol", diagnostic: { ...diagnostic, after_grant: "false" } },
+    { ok: false, code: "provider_protocol", diagnostic: { ...diagnostic, permission_requested: "false" } },
     { ok: false, code: "provider_protocol", diagnostic: { ...diagnostic, step: "eth_sendTransaction" } },
     { ok: false, code: "provider_protocol", diagnostic: { ...diagnostic, provider_code: 1.5 } },
     { ok: false, code: "provider_protocol", diagnostic: { ...diagnostic, provider_code: "4001" } },
