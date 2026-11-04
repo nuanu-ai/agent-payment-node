@@ -1,3 +1,4 @@
+import { takeObserveDiagnostic } from "./client/observe-diagnostic.js";
 import { mmDispatchIntent } from "./dispatch.js";
 import { mmPrivateHash } from "./identity.js";
 import { assertMetaMaskGaslessObservable, metaMaskGaslessObservationRoom, metaMaskGaslessObservationUnchanged } from "./journal/transitions.js";
@@ -37,13 +38,18 @@ export class MetaMaskGaslessObservationService {
      * disabled before any redemption. Anything else is reported, never saved.
      */
     async run(op, submitted) {
+        const own = {};
+        const step = await this.once(op, submitted, own);
+        return own.read === undefined ? step : { ...step, providerRead: providerReadReport(own.read) };
+    }
+    async once(op, submitted, own) {
         const abandoned = op.state === "abandoned_unknown";
         if ((op.terminal && !abandoned) || op.submissionAttempts !== 1)
             return { operation: op };
         try {
             this.clock.check(op);
             assertMetaMaskGaslessObservable(op);
-            const result = submitted ?? await this.readProvider(op);
+            const result = submitted ?? (own.read = await this.readProvider(op));
             this.clock.check(op, result.hint === null ? [] : [result.hint.observedAt]);
             const providerObservation = this.retainProvider(op, result.hint);
             let chain;
@@ -122,7 +128,8 @@ export class MetaMaskGaslessObservationService {
             if (reason === "mm_gasless_clock")
                 throw error;
             this.clock.check(op);
-            return { hint: null, failure: reason };
+            const diagnostic = takeObserveDiagnostic(error);
+            return { hint: null, failure: reason, ...(diagnostic === undefined ? {} : { observeDiagnostic: diagnostic }) };
         }
     }
     retainProvider(op, current) {
@@ -165,6 +172,10 @@ export class MetaMaskGaslessObservationService {
             provider?.status === "unavailable" ? "mm_gasless_provider_unavailable" : "mm_gasless_pending");
         return { ...base, state: usableHint ? "submitted_pending" : "unknown_finality", failure: mmFailure(reason) };
     }
+}
+function providerReadReport(read) {
+    return read.hint !== null ? { ok: true, status: read.hint.status, txHash: read.hint.txHash !== null }
+        : { ok: false, reason: read.failure, diagnostic: read.observeDiagnostic ?? null };
 }
 function closedProvider(provider) {
     return MM_CLOSED_PROVIDER_STATUSES.includes(provider.status);

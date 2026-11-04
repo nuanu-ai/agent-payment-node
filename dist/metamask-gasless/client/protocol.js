@@ -1,5 +1,6 @@
 import { readDataRecord, validateReadDiagnostic } from "./read-diagnostic.js";
 import { validateSubmitDiagnostic } from "./submit-diagnostic.js";
+import { validateObserveDiagnostic } from "./observe-diagnostic.js";
 import { isPlainRecord } from "../../canonical.js";
 import { MM_PROVIDER_STATUSES } from "../model.js";
 import { mmAssertProfileBinding, mmBinding, mmPrivateHash } from "../identity.js";
@@ -39,7 +40,9 @@ export function helperResponse(value, request) {
         const readMode = request.mode === "inspect" || request.mode === "quote" ? request.mode : null;
         const hasDiagnostic = readMode !== null && Object.hasOwn(value, "diagnostic");
         const hasSubmitDiagnostic = request.mode === "submit" && Object.hasOwn(value, "submitDiagnostic");
-        const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : []), ...(hasSubmitDiagnostic ? ["submitDiagnostic"] : [])], responseReason(request.mode));
+        const hasObserveDiagnostic = request.mode === "observe" && Object.hasOwn(value, "observeDiagnostic");
+        const r = mmExact(value, ["version", "ok", "failure", ...(hasDiagnostic ? ["diagnostic"] : []), ...(hasSubmitDiagnostic ? ["submitDiagnostic"] : []),
+            ...(hasObserveDiagnostic ? ["observeDiagnostic"] : [])], responseReason(request.mode));
         const f = mmExact(readMode === null ? r.failure : readDataRecord(r.failure), ["code", "reason"], responseReason(request.mode));
         if (typeof f.reason !== "string" || !Object.hasOwn(MM_REASON_CODES, f.reason) || f.reason === "mm_gasless_success" ||
             MM_REASON_CODES[f.reason] !== f.code)
@@ -47,6 +50,9 @@ export function helperResponse(value, request) {
         if (hasSubmitDiagnostic)
             return { version: MM_HELPER_VERSION, ok: false, failure: f,
                 submitDiagnostic: validateSubmitDiagnostic(r.submitDiagnostic) };
+        if (hasObserveDiagnostic)
+            return { version: MM_HELPER_VERSION, ok: false, failure: f,
+                observeDiagnostic: validateObserveDiagnostic(r.observeDiagnostic) };
         if (hasDiagnostic) {
             const diagnostic = validateReadDiagnostic(r.diagnostic, readMode);
             return { version: MM_HELPER_VERSION, ok: false, failure: f, diagnostic };

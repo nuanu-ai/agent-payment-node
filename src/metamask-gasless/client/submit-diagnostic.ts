@@ -1,11 +1,13 @@
 import { ApnError } from "../../errors.js";
 import { mmError, mmFail, type MetaMaskGaslessFailureReason } from "../reasons.js";
+import { jobTxDetails, takeJobTx, validateJobTx, type MetaMaskJobTx } from "./job-tx.js";
 import { readDataRecord } from "./read-diagnostic.js";
 
 /**
  * Where a MetaMask gasless submit stopped, as closed facts only: the
- * helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, and the
- * provider's error code or job status when they have a closed token form. No body, URL, header or identifier leaves.
+ * helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, the
+ * provider's error code or job status when they have a closed token form, and how the answer's `tx` compared with the
+ * request when that check refused it (job-tx.ts). No body, URL, header or identifier leaves.
  * It is shown with the attempt's own output and never stored: the outcome stays unknown whatever it says.
  */
 /** `launch` is before the helper process exists; `runner` is the parent's view of a helper that ran and failed. */
@@ -29,15 +31,20 @@ export interface MetaMaskSubmitDiagnostic {
   readonly check: SubmitCheck;
   /** The provider's error code from a non-2xx answer, when it is an upper-case token. */
   readonly providerError: string | null;
-  /** The job status of a 2xx answer APN does not recognize, when it is an upper-case token. */
+  /** The job status of a 2xx answer that APN does not recognize or whose `tx` it refused, when it is an upper-case token. */
   readonly providerStatus: string | null;
+  /** The answer's `tx` compared with the request, exactly when the `response_tx` check refused it. */
+  readonly responseTx: MetaMaskJobTx | null;
 }
 const STAGES: readonly string[] = ["launch", "runner", "private_state", "sdk_load", "hydrate", "binding", "body", "post", "response", "complete", "helper_response"];
 const POSTS: readonly string[] = ["not_reached", "refused", "sent", "unknown"];
 const CHECKS: readonly string[] = ["none", "body_mismatch", "duplicate_request", "unexpected_request", "deadline", "clock", "session",
   "http_status", "no_answer", "response_body", "response_request_id", "response_kind", "response_status", "response_tx", "response_hash",
   "incomplete", "runner_launch", "runner_exit", "runner_timeout", "runner_output", "response_invalid", "unclassified"];
-const KEYS = ["mode", "stage", "post", "httpStatus", "check", "providerError", "providerStatus"] as const;
+const KEYS = ["mode", "stage", "post", "httpStatus", "check", "providerError", "providerStatus", "responseTx"] as const;
+const WITH_STATUS: readonly string[] = ["response_status", "response_tx"];
+/** Checks of the POST's own 2xx answer; only the body check can refuse it before the SDK returned it. */
+const ANSWERED: readonly string[] = ["response_body", "response_request_id", "response_kind", "response_status", "response_tx", "response_hash"];
 const TOKEN = /^[A-Z][A-Z0-9_]{0,39}$/u;
 const BEFORE_ANSWER: readonly string[] = ["launch", "private_state", "sdk_load", "hydrate", "binding", "body", "post"];
 
@@ -58,19 +65,23 @@ export function submitErrorCode(body: string): string | null {
 export function validateSubmitDiagnostic(value: unknown): MetaMaskSubmitDiagnostic {
   const d = readDataRecord(value);
   const status = d.httpStatus;
+  const responseTx = d.responseTx === null || d.responseTx === undefined ? d.responseTx : validateJobTx(d.responseTx, "mm_gasless_submit_unknown");
   if (Object.keys(d).length !== KEYS.length || KEYS.some(key => !Object.hasOwn(d, key)) || d.mode !== "submit" ||
     typeof d.stage !== "string" || !STAGES.includes(d.stage) || typeof d.post !== "string" || !POSTS.includes(d.post) ||
     !(status === null || typeof status === "number" && Number.isSafeInteger(status) && status >= 100 && status <= 599) ||
     status !== null && d.post !== "sent" ||
     typeof d.check !== "string" || !CHECKS.includes(d.check) ||
     !(d.providerError === null || submitToken(d.providerError) !== null) || !(d.providerStatus === null || submitToken(d.providerStatus) !== null) ||
-    d.providerError !== null && (status === null || status < 300) || d.providerStatus !== null && d.check !== "response_status" ||
+    d.providerError !== null && (status === null || status < 300) || d.providerStatus !== null && !WITH_STATUS.includes(String(d.check)) ||
+    responseTx === undefined || (responseTx !== null) !== (d.check === "response_tx") ||
+    ANSWERED.includes(String(d.check)) && (d.post !== "sent" || status === null || status < 200 || status >= 300 ||
+      d.stage !== "response" && !(d.check === "response_body" && d.stage === "post")) ||
     d.stage === "launch" && d.post !== "not_reached" || (d.stage === "runner" || d.stage === "helper_response") && d.post !== "unknown" ||
     // Only stages up to the POST can prove it did not leave; only APN's body check at the POST refuses it unsent.
     d.post === "not_reached" && !BEFORE_ANSWER.includes(String(d.stage)) || d.post === "refused" && d.stage !== "post") {
     mmFail("mm_gasless_submit_unknown");
   }
-  return Object.freeze(Object.fromEntries(KEYS.map(key => [key, d[key]]))) as unknown as MetaMaskSubmitDiagnostic;
+  return Object.freeze({ ...Object.fromEntries(KEYS.map(key => [key, d[key]])), responseTx }) as unknown as MetaMaskSubmitDiagnostic;
 }
 
 export function submitDiagnostic(stage: SubmitStage, facts: Omit<MetaMaskSubmitDiagnostic, "mode" | "stage">): MetaMaskSubmitDiagnostic {
@@ -80,7 +91,7 @@ export function submitDiagnostic(stage: SubmitStage, facts: Omit<MetaMaskSubmitD
 export function runnerDiagnostic(check: Extract<SubmitCheck, "runner_launch" | "runner_exit" | "runner_timeout" | "runner_output" | "response_invalid">,
   started: boolean): MetaMaskSubmitDiagnostic {
   return submitDiagnostic(started ? (check === "response_invalid" ? "helper_response" : "runner") : "launch",
-    { post: started ? "unknown" : "not_reached", httpStatus: null, check, providerError: null, providerStatus: null });
+    { post: started ? "unknown" : "not_reached", httpStatus: null, check, providerError: null, providerStatus: null, responseTx: null });
 }
 
 /** The submit failure as an APN error whose details carry the diagnostic as flat fields (ErrorDetail values only). */
@@ -88,7 +99,7 @@ export function submitFailureError(reason: MetaMaskGaslessFailureReason, d: Meta
   const base = mmError(reason);
   return new ApnError(base.code, base.message, { ...base.details, submitStage: d.stage, submitPost: d.post, submitCheck: d.check,
     ...(d.httpStatus === null ? {} : { submitHttpStatus: d.httpStatus }), ...(d.providerError === null ? {} : { submitProviderError: d.providerError }),
-    ...(d.providerStatus === null ? {} : { submitProviderStatus: d.providerStatus }) });
+    ...(d.providerStatus === null ? {} : { submitProviderStatus: d.providerStatus }), ...jobTxDetails("submit", d.responseTx) });
 }
 
 /** The diagnostic a submit failure carried across the helper boundary, if any. */
@@ -99,6 +110,7 @@ export function takeSubmitDiagnostic(error: unknown): MetaMaskSubmitDiagnostic |
     return submitDiagnostic(x.submitStage as SubmitStage, { post: x.submitPost as SubmitPost, check: x.submitCheck as SubmitCheck,
       httpStatus: typeof x.submitHttpStatus === "number" ? x.submitHttpStatus : null,
       providerError: typeof x.submitProviderError === "string" ? x.submitProviderError : null,
-      providerStatus: typeof x.submitProviderStatus === "string" ? x.submitProviderStatus : null });
+      providerStatus: typeof x.submitProviderStatus === "string" ? x.submitProviderStatus : null,
+      responseTx: takeJobTx("submit", x, "mm_gasless_submit_unknown") });
   } catch { return undefined; }
 }

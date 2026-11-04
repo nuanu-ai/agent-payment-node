@@ -35,7 +35,7 @@ async function dispatchable(t: import("node:test").TestContext, chainId = 8453 a
   return { home, operation: intent(home.binding, chainId, quote, built.result as MetaMaskGaslessUnsignedResult) };
 }
 const diagnostic = (stage: string, facts: Record<string, unknown>) => ({ mode: "submit", stage, post: "sent", httpStatus: null, check: "unclassified",
-  providerError: null, providerStatus: null, ...facts });
+  providerError: null, providerStatus: null, responseTx: null, ...facts });
 
 test("the provider's answer to the one POST is reported as closed facts: status, error code, refused check, unknown job status", async (t) => {
   const { home, operation } = await dispatchable(t);
@@ -127,10 +127,13 @@ test("the parent carries the diagnostic, including a runner that failed, and nev
 });
 
 test("the closed diagnostic form refuses everything it does not define", () => {
-  assert.deepEqual(validateSubmitDiagnostic(submitDiagnostic("post", { post: "sent", httpStatus: 400, check: "http_status", providerError: "BAD", providerStatus: null })),
+  assert.deepEqual(validateSubmitDiagnostic(submitDiagnostic("post", { post: "sent", httpStatus: 400, check: "http_status", providerError: "BAD", providerStatus: null, responseTx: null })),
     diagnostic("post", { httpStatus: 400, check: "http_status", providerError: "BAD" }));
   for (const bad of [{ post: "not_reached", httpStatus: 400 }, { providerError: "BAD", httpStatus: 200 }, { providerStatus: "QUEUED", check: "http_status" },
-    { check: "invented" }, { stage: "invented" }, { extra: 1 }, { httpStatus: 99 }, { stage: "launch" }, { stage: "runner", post: "sent" }, { post: undefined }]) {
+    { check: "invented" }, { stage: "invented" }, { extra: 1 }, { httpStatus: 99 }, { stage: "launch" }, { stage: "runner", post: "sent" }, { post: undefined },
+    // An answer check ran on a sent POST's own 2xx answer, at the response stage (the body check also at the POST).
+    { check: "response_kind" }, { check: "response_kind", httpStatus: 200 }, { stage: "response", check: "response_kind", httpStatus: null },
+    { stage: "response", check: "response_body", httpStatus: 500 }]) {
     assert.throws(() => validateSubmitDiagnostic({ ...diagnostic("post", { httpStatus: 400, check: "http_status" }), ...bad }), { details: { reason: "mm_gasless_submit_unknown" } });
   }
   assert.equal(submitErrorCode(JSON.stringify({ error: { code: "A_B" } })), "A_B");
@@ -145,13 +148,13 @@ test("approve shows where its own submit stopped and keeps the outcome unknown; 
     const f = await mmFixture(root), { id } = await f.prepare();
     f.rpc.phase = "pending"; f.rpc.candidate = null;
     f.provider.submitError = submitFailureError("mm_gasless_submit_unknown", submitDiagnostic("post",
-      { post: "sent", httpStatus: 400, check: "http_status", providerError: "INVALID_DELEGATION", providerStatus: null }));
+      { post: "sent", httpStatus: 400, check: "http_status", providerError: "INVALID_DELEGATION", providerStatus: null, responseTx: null }));
     const approved = await f.core.execute({ command: "gasless.transfer.approve", operationId: id });
     assert.equal(approved.ok, true, JSON.stringify(approved.error));
     const shown = approved.operation as Record<string, unknown>;
     assert.deepEqual([shown.state, shown.reason], ["unknown_finality", "mm_gasless_submit_unknown"]);
     assert.deepEqual(shown.submit_diagnostic, { stage: "post", post: "sent", http_status: 400, check: "http_status", provider_error: "INVALID_DELEGATION",
-      provider_status: null });
+      provider_status: null, response_tx: null });
     assert.equal(JSON.stringify(await f.record(id)).includes("INVALID_DELEGATION"), false, "the journal keeps no diagnostic");
     const later = await f.restart().execute({ command: "operation.status", operationId: id });
     assert.equal("submit_diagnostic" in (later.operation as Record<string, unknown>), false);

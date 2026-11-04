@@ -274,7 +274,7 @@ test("client rejects malformed job identity after one request and emits only clo
     { homeDirectory: home.home, now: () => NOW, exchange });
   assert.deepEqual(result, { version: MM_HELPER_VERSION, ok: false,
     failure: { code: "APN_OPERATION_BLOCKED", reason: "mm_gasless_submit_unknown" }, submitDiagnostic: { mode: "submit", stage: "response",
-      post: "sent", httpStatus: 200, check: "response_request_id", providerError: null, providerStatus: null } });
+      post: "sent", httpStatus: 200, check: "response_request_id", providerError: null, providerStatus: null, responseTx: null } });
   assert.equal(exchange.requests.length, 1); assert.equal(JSON.stringify(result).includes(SECRET), false);
 });
 
@@ -296,7 +296,7 @@ test("client preserves fixed auth failures without retry and maps one 404 observ
     { homeDirectory: home.home, now: () => NOW, exchange: submitAuth });
   assert.deepEqual(deniedSubmit, { version: MM_HELPER_VERSION, ok: false,
     failure: { code: "APN_PROVIDER_SESSION_REQUIRED", reason: "mm_gasless_session_unavailable" }, submitDiagnostic: { mode: "submit", stage: "post",
-      post: "sent", httpStatus: 401, check: "session", providerError: null, providerStatus: null } });
+      post: "sent", httpStatus: 401, check: "session", providerError: null, providerStatus: null, responseTx: null } });
   assert.equal(submitAuth.requests.length, 1);
 
   const missing = new SdkExchange(chainId, 404);

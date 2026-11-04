@@ -1,9 +1,11 @@
 import { ApnError } from "../../errors.js";
 import { type MetaMaskGaslessFailureReason } from "../reasons.js";
+import { type MetaMaskJobTx } from "./job-tx.js";
 /**
  * Where a MetaMask gasless submit stopped, as closed facts only: the
- * helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, and the
- * provider's error code or job status when they have a closed token form. No body, URL, header or identifier leaves.
+ * helper stage, whether APN's network policy let the one POST out, its HTTP status, the check that refused, the
+ * provider's error code or job status when they have a closed token form, and how the answer's `tx` compared with the
+ * request when that check refused it (job-tx.ts). No body, URL, header or identifier leaves.
  * It is shown with the attempt's own output and never stored: the outcome stays unknown whatever it says.
  */
 /** `launch` is before the helper process exists; `runner` is the parent's view of a helper that ran and failed. */
@@ -24,8 +26,10 @@ export interface MetaMaskSubmitDiagnostic {
     readonly check: SubmitCheck;
     /** The provider's error code from a non-2xx answer, when it is an upper-case token. */
     readonly providerError: string | null;
-    /** The job status of a 2xx answer APN does not recognize, when it is an upper-case token. */
+    /** The job status of a 2xx answer that APN does not recognize or whose `tx` it refused, when it is an upper-case token. */
     readonly providerStatus: string | null;
+    /** The answer's `tx` compared with the request, exactly when the `response_tx` check refused it. */
+    readonly responseTx: MetaMaskJobTx | null;
 }
 /** An upper-case token, or null: provider text never crosses as anything else. */
 export declare function submitToken(value: unknown): string | null;

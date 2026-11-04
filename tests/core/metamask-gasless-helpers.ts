@@ -64,6 +64,8 @@ export class MmTestProvider implements MetaMaskGaslessProviderPort {
   /** Thrown by submit when set, as the provider client would throw it. */
   submitError: unknown;
   failObserve = false;
+  /** Thrown by observe when set, as the provider client would throw it. */
+  observeError: unknown;
   failInspect = false;
   status: MetaMaskGaslessProviderObservation["status"] = "broadcasted";
   txHash: Hex | null = mmTestWord("transaction-a");
@@ -101,7 +103,8 @@ export class MmTestProvider implements MetaMaskGaslessProviderPort {
     return this.hint(intent);
   }
   async observe(intent: MetaMaskGaslessIntent) {
-    this.calls.push("observe"); if (this.failObserve) throw new Error("private_observe_canary"); return this.hint(intent);
+    this.calls.push("observe"); if (this.observeError !== undefined) throw this.observeError;
+    if (this.failObserve) throw new Error("private_observe_canary"); return this.hint(intent);
   }
   hint(intent: MetaMaskGaslessIntent): MetaMaskGaslessProviderObservation {
     return { observedAt: this.now.toISOString(), requestIdHash: mmPrivateHash("request-id", intent.requestId),

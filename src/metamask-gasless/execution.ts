@@ -120,7 +120,7 @@ export class MetaMaskGaslessExecution {
       throw error;
     }
     const step = await this.observation.run(op, submitted);
-    return submitted.diagnostic === undefined ? step : { ...step, submitDiagnostic: submitted.diagnostic };
+    return submitted.hint !== null || submitted.diagnostic === undefined ? step : { ...step, submitDiagnostic: submitted.diagnostic };
   }
 
   /**
