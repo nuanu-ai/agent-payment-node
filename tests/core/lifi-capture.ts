@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { hashObject } from "../../src/canonical.js";
+import { hashObject, sha256 } from "../../src/canonical.js";
 import type { Hex } from "../../src/model.js";
 import { FEE_FORWARDER, FEE_FORWARDER_V2_0 } from "../../src/lifi/abi.js";
 import type { BridgeMaterialization } from "../../src/lifi/model.js";
+import { bridgeIntentBinding, type BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 
 /**
  * A LI.FI route or step capture recorded before 2026-11-04, re-addressed to the current FeeForwarder. That day LI.FI
@@ -32,4 +33,29 @@ export function feeForwarderV20Materialization(m: BridgeMaterialization): Bridge
   if (m.transaction.data.split(current).length !== 3) throw new Error("expected callTo and approveTo of one fee step");
   const transaction = { ...m.transaction, data: m.transaction.data.replaceAll(current, replaced) as Hex };
   return { ...m, transaction, transactionDigest: hashObject(transaction) };
+}
+
+/**
+ * An awaiting-approval record exactly as an APN before the switch stored it for the same route: the call (in the
+ * materialization and the bridge envelope) names FeeForwarder v2.0.0, and every hash that covers it is recomputed.
+ */
+export function feeForwarderV20Record(op: BridgeOperationRecord): BridgeOperationRecord {
+  if (op.state !== "awaiting_approval" || op.transitions.length !== 1) throw new Error("expected a freshly prepared record");
+  const raw = structuredClone(op) as any;
+  const m = feeForwarderV20Materialization(op.intent.materialization);
+  raw.intent.materialization = m;
+  raw.intent.decoded.dataHash = sha256(Buffer.from(m.transaction.data.slice(2), "hex"));
+  for (const effect of raw.effects) {
+    if (effect.role !== "bridge") continue;
+    const { envelopeHash: _previous, ...body } = { ...effect.envelope, data: m.transaction.data };
+    effect.envelope = { ...body, envelopeHash: hashObject(body) };
+  }
+  raw.fingerprint = hashObject(bridgeIntentBinding(raw));
+  const [first] = raw.transitions;
+  first.effects = first.effects.map((snapshot: any) => ({ ...snapshot,
+    envelopeHash: raw.effects.find((effect: any) => effect.role === snapshot.role).envelope.envelopeHash }));
+  first.previousHash = raw.fingerprint;
+  delete first.transitionHash; first.transitionHash = hashObject(first);
+  delete raw.integrityHash; raw.integrityHash = hashObject(raw);
+  return raw as BridgeOperationRecord;
 }
