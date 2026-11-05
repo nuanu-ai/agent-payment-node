@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { failureEnvelope } from "../../src/output.js";
-import { LoopbackMetaMaskConsent } from "../../src/metamask-smart-account-consent.js";
+import { allocateConsentPort, LoopbackMetaMaskConsent } from "../../src/metamask-smart-account-consent.js";
 import { assertSmartAccountPreflight } from "../../src/metamask-smart-account-grant.js";
 import type { Address } from "../../src/model.js";
 
@@ -30,7 +30,7 @@ async function browserOutcome(code: string) {
       body: JSON.stringify({ token: opened.hash.slice(1), outcome: { ok: false, code, diagnostic: { step: "eth_getCode", permission_requested: false, provider_code: null, provider_message: null } } }) });
     assert.equal(callback.status, 204);
   }, 1_000);
-  try { await consent.request(REQUEST); } catch (error) { return error as Error & { code: string; details: Record<string, unknown> }; }
+  try { await consent.request({ ...REQUEST, port: await allocateConsentPort() }); } catch (error) { return error as Error & { code: string; details: Record<string, unknown> }; }
   assert.fail("the consent was accepted");
 }
 

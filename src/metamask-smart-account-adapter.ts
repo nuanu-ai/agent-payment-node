@@ -17,7 +17,7 @@ import {
   type GrantedSmartAccountPermissionRecord,
   type SmartAccountPermissionRecord,
 } from "./metamask-smart-account-record.js";
-import type { SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
+import { allocateConsentPort, type SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
 import { pendingPermissionNextActions } from "./provider-permission-output.js";
 import type { SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
 import type {
@@ -128,6 +128,7 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
     let record = await this.store.load(intent.profileHash);
     if (record === null) {
       if (instant.unix >= intent.expiresAtUnix) invalidInput("Permission expiry must be in the future.");
+      const consentPort = await allocateConsentPort();
       const session = this.sessionKeys.create();
       record = {
         schema_version: SMART_ACCOUNT_PERMISSION_RECORD_VERSION,
@@ -147,6 +148,7 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
         updated_at: instant.iso,
         max_observed_unix: instant.unix,
         revocation_freshness: "never_synced",
+        consent_port: consentPort,
       };
       await this.store.save(record);
     } else {
@@ -161,9 +163,18 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
       throw new ApnError("APN_INVALID_INPUT", "The pending permission intent expired before consent.", { reason: "permission_intent_expired",
         nextActions: pendingPermissionNextActions(intent.profile, projectPendingPermissionBinding(record), instant.unix) });
     }
+    let port = record.consent_port;
+    if (port === undefined) {
+      // A pending intent from before 0.5.91 gets its origin now, saved before MetaMask sees it.
+      port = await allocateConsentPort();
+      const withPort = { ...record, consent_port: port, updated_at: monotonicTimestamp(record.updated_at, instant.iso) };
+      if (!await this.store.compareAndSet(record, withPort)) staleConsentResult();
+      record = withPort;
+    }
     await assertMetaMaskSmartAccountPackageIdentity();
     const pending = record;
     const observation = await this.consent.request({
+      port,
       sessionAddress: pending.session_address,
       capAtomic: pending.requested_cap_atomic,
       startsAtUnix: pending.starts_at_unix,
@@ -224,10 +235,13 @@ export class MetaMaskSmartAccountAdapter implements ProviderPermissionLifecycleP
     assertRevision(record, expectedRevision);
     const effective = projectPermissionBinding(record, instant.unix);
     if (effective.state === "expired" || ["revoked", "drift_blocked"].includes(effective.state)) terminalLifecycle(effective.state);
+    // MetaMask lists a permission only to the exact origin that requested it; from any other origin an empty list proves
+    // nothing, so a permission whose consent origin was not recorded is never concluded present or absent.
+    if (record.consent_port === undefined) consentOriginUnrecorded(record);
     await assertMetaMaskSmartAccountPackageIdentity();
     let preflight: ReturnType<typeof assertSmartAccountPreflight>;
     try {
-      const observed = await this.consent.sync({ ownerAddress: record.owner_address });
+      const observed = await this.consent.sync({ port: record.consent_port, ownerAddress: record.owner_address });
       preflight = assertSmartAccountPreflight(observed);
     } catch (error) {
       await this.saveTransition(record, {
@@ -438,4 +452,14 @@ function unavailableX402Material(): X402PaymentMaterialPort {
     recover: unavailable,
     markExposed: unavailable,
   };
+}
+
+function consentOriginUnrecorded(record: GrantedSmartAccountPermissionRecord): never {
+  throw new ApnError("APN_PROVIDER_EFFECT_UNAVAILABLE", "This permission was granted before APN recorded its consent origin, and MetaMask lists a " +
+    "permission only to that origin, so sync cannot check it.", { retryable: false, reason: "consent_origin_unrecorded", nextActions: [
+    `Check in MetaMask whether the permission for session ${record.session_address} is still granted; APN cannot sync it.`,
+    `To get a permission APN can sync, the owner may forget this one with apn wallet permission forget --profile ${record.profile}, ` +
+      `--expected-revision set to the profile revision apn wallet permission list --profile ${record.profile} shows ` +
+      "(MetaMask-side authority may remain), and connect again.",
+  ] });
 }

@@ -4,6 +4,16 @@ import { createServer } from "node:http";
 import { exactKeys, isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { BASE_CHAIN_HEX, smartAccountEnvironment, smartAccountInactive } from "./metamask-smart-account-grant.js";
+import { isConsentPort } from "./metamask-smart-account-record.js";
+/** A loopback port the system has free now, for a new permission's consent origin; the caller saves it before use. */
+export async function allocateConsentPort() {
+    const server = createServer();
+    const port = await listen(server, 0);
+    await closeServer(server);
+    if (!isConsentPort(port))
+        throw new ApnError("APN_INTERNAL", "The system gave no usable loopback port for MetaMask consent.");
+    return port;
+}
 const CALLBACK_PATH = "/callback";
 const MAX_BODY_BYTES = 256 * 1024;
 const DEADLINE_MS = 5 * 60_000;
@@ -24,6 +34,8 @@ export class LoopbackMetaMaskConsent {
         return await this.run({ mode: "sync", ...input });
     }
     async run(config) {
+        if (!isConsentPort(config.port))
+            throw new ApnError("APN_INTERNAL", "MetaMask consent port is invalid.");
         const token = randomBytes(32).toString("hex");
         let used = false;
         let settle;
@@ -32,7 +44,14 @@ export class LoopbackMetaMaskConsent {
         const server = createServer((request, response) => {
             void this.handle(request, response, config, token, () => used, () => { used = true; }, settle, fail);
         });
-        const port = await listen(server);
+        const port = await listen(server, config.port).catch((error) => {
+            if (error?.code !== "EADDRINUSE")
+                throw error;
+            throw new ApnError("APN_PROVIDER_UNAVAILABLE", `The MetaMask consent port 127.0.0.1:${config.port} of this permission is in use; ` +
+                "free it and retry the same command.", { retryable: true, reason: "consent_port_in_use", consent_port: config.port, nextActions: [
+                    `Find what listens on 127.0.0.1:${config.port} (lsof -nP -iTCP:${config.port} -sTCP:LISTEN), stop it, then rerun the same command.`
+                ] });
+        });
         const origin = `http://127.0.0.1:${port}`;
         const timer = setTimeout(() => fail?.(new ApnError("APN_PROVIDER_UNAVAILABLE", "MetaMask foreground consent timed out safely; retry the same connect intent.", { retryable: true })), this.deadlineMs);
         try {
@@ -108,8 +127,9 @@ function isCallback(value) {
 }
 function browserScript(config) {
     const environment = smartAccountEnvironment();
+    const { port: _port, ...pageConfig } = config;
     const publicConfig = {
-        ...config,
+        ...pageConfig,
         chainId: BASE_CHAIN_HEX,
         tokenAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
         implementation: environment.implementations.EIP7702StatelessDeleGatorImpl,
@@ -317,10 +337,10 @@ function classifiedBrowserFailure(code) {
         return new ApnError("APN_CHAIN_MISMATCH", "MetaMask did not remain on Base chain 8453.", { retryable: true });
     return new ApnError("APN_PROVIDER_PROTOCOL", "MetaMask returned an unsupported foreground consent result.", { retryable: false });
 }
-async function listen(server) {
+async function listen(server, port) {
     await new Promise((resolve, reject) => {
         server.once("error", reject);
-        server.listen(0, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
+        server.listen(port, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
     });
     const address = server.address();
     if (address === null || typeof address === "string")

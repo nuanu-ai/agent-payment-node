@@ -2694,7 +2694,7 @@ function exactSmartAccountReceipt(transactionHash: Hex, amountAtomic: string): R
   };
 }
 
-function validObservation(input: SmartAccountConsentRequest) {
+function validObservation(input: Omit<SmartAccountConsentRequest, "port">) {
   const environment = smartAccountEnvironment();
   const periodEnforcer = requiredHex(environment.caveatEnforcers.ERC20PeriodTransferEnforcer);
   const valueEnforcer = requiredHex(environment.caveatEnforcers.ValueLteEnforcer);

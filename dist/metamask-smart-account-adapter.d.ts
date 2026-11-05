@@ -1,5 +1,5 @@
 import type { Address, Hex } from "./model.js";
-import type { SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
+import { type SmartAccountConsentPort } from "./metamask-smart-account-consent.js";
 import type { SmartAccountPermissionStorePort } from "./encrypted-smart-account-permission-store.js";
 import type { DirectExecutionPort, ProviderAdapterBundle, ProviderPermissionBinding, ProviderPermissionConnectIntent, ProviderPermissionLifecyclePort, ProviderPendingPermissionBinding, X402PaymentMaterialPort } from "./provider-ports.js";
 export { METAMASK_SMART_ACCOUNT_PROVIDER_ID } from "./metamask-smart-account-record.js";

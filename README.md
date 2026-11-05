@@ -216,7 +216,12 @@ tokens, seed phrases or private keys.
   wallet's own code and message (printable ASCII, at most 160 characters, unverified). `consent_permission_requested`
   is true when the page had already sent MetaMask the permission request: unless MetaMask answered with a rejection
   (4001), it may then hold a grant for this session, so check it there before retrying. The page shows the same step.
-  Retrying the same `wallet connect` reuses the pending intent and its session.
+  MetaMask lists a permission only to the page origin that requested it, so each permission keeps one consent origin,
+  `http://127.0.0.1:<port>`: the port is saved before its first consent and reused by every retry of the same
+  `wallet connect` (which also reuses the pending intent and its session) and by `wallet permission sync`. A busy port
+  refuses with `consent_port_in_use` before the browser opens; free it and retry. A permission connected before 0.5.91
+  has no recorded origin, and `wallet permission sync` refuses it with `consent_origin_unrecorded` without changing
+  it.
 
 Provider balance is never spending authority; the owner allowlist and profile policy still apply.
 

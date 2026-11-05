@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LoopbackMetaMaskConsent } from "../../src/metamask-smart-account-consent.js";
+import { allocateConsentPort, LoopbackMetaMaskConsent } from "../../src/metamask-smart-account-consent.js";
 import { REQUEST, runServedBrowser, waitFor, type BrowserProvider } from "./smart-account-browser-harness.js";
 
 test("loopback consent keeps its capability in the fragment and serves an exact no-store origin", async () => {
@@ -44,7 +44,7 @@ test("loopback consent keeps its capability in the fragment and serves an exact 
     });
     assert.equal(callback.status, 204);
   }, 1_000);
-  assert.deepEqual(await consent.request(REQUEST), expected);
+  assert.deepEqual(await consent.request({ ...REQUEST, port: await allocateConsentPort() }), expected);
   assert.match(servedHtml, /id="providers"/u);
   assert.match(servedHtml, /unverified/iu);
   assert.doesNotMatch(servedScript, /info\.rdns === "io\.metamask"/u);
@@ -166,14 +166,14 @@ test("loopback consent fails closed on a wrong origin or token and never accepts
       secondAttemptAccepted = false;
     }
   }, 1_000);
-  await assert.rejects(consent.request(REQUEST), (error: any) => error.code === "APN_PROVIDER_PROTOCOL");
+  await assert.rejects(consent.request({ ...REQUEST, port: await allocateConsentPort() }), (error: any) => error.code === "APN_PROVIDER_PROTOCOL");
   assert.equal(secondAttemptAccepted, false);
 });
 
 test("loopback consent deadline also bounds a browser opener that never resolves", async () => {
   const consent = new LoopbackMetaMaskConsent(async () => await new Promise<void>(() => undefined), 10);
   const started = Date.now();
-  await assert.rejects(consent.request(REQUEST), (error: any) =>
+  await assert.rejects(consent.request({ ...REQUEST, port: await allocateConsentPort() }), (error: any) =>
     error.code === "APN_PROVIDER_UNAVAILABLE" && error.details?.retryable === true
   );
   assert.ok(Date.now() - started < 1_000);
@@ -184,7 +184,7 @@ test("loopback consent refuses the exact callback after its deadline", async () 
   const consent = new LoopbackMetaMaskConsent(async (openedUrl) => {
     opened = new URL(openedUrl);
   }, 10);
-  await assert.rejects(consent.request(REQUEST), (error: any) =>
+  await assert.rejects(consent.request({ ...REQUEST, port: await allocateConsentPort() }), (error: any) =>
     error.code === "APN_PROVIDER_UNAVAILABLE" && error.details?.retryable === true
   );
   await assert.rejects(fetch(`${opened.origin}/callback`, {
@@ -196,7 +196,7 @@ test("loopback consent refuses the exact callback after its deadline", async () 
 
 test("loopback consent maps browser launch failure without leaking its cause", async () => {
   const consent = new LoopbackMetaMaskConsent(async () => { throw new Error("PROTECTED_CANARY"); }, 1_000);
-  await assert.rejects(consent.request(REQUEST), (error: any) =>
+  await assert.rejects(consent.request({ ...REQUEST, port: await allocateConsentPort() }), (error: any) =>
     error.code === "APN_PROVIDER_UNAVAILABLE" && !String(error.message).includes("PROTECTED_CANARY")
   );
 });
@@ -221,6 +221,6 @@ test("loopback consent rejects unknown routes, non-exact callback shapes and ove
       assert.equal(response.status, 400);
       assert.equal(response.headers.get("location"), null);
     }, 1_000);
-    await assert.rejects(consent.request(REQUEST), (error: any) => error.code === "APN_PROVIDER_PROTOCOL");
+    await assert.rejects(consent.request({ ...REQUEST, port: await allocateConsentPort() }), (error: any) => error.code === "APN_PROVIDER_PROTOCOL");
   }
 });

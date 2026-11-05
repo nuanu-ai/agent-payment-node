@@ -5,8 +5,14 @@ import { exactKeys, isPlainRecord } from "./canonical.js";
 import type { Address } from "./model.js";
 import { ApnError } from "./errors.js";
 import { BASE_CHAIN_HEX, smartAccountEnvironment, smartAccountInactive } from "./metamask-smart-account-grant.js";
+import { isConsentPort } from "./metamask-smart-account-record.js";
 
+/**
+ * MetaMask keeps an Advanced Permission for the exact origin that requested it and lists it only to that origin, so the
+ * consent page of one permission is always served from the same loopback port: the one its record saved.
+ */
 export interface SmartAccountConsentRequest {
+  readonly port: number;
   readonly sessionAddress: Address;
   readonly capAtomic: string;
   readonly startsAtUnix: number;
@@ -14,7 +20,17 @@ export interface SmartAccountConsentRequest {
 }
 
 export interface SmartAccountConsentSync {
+  readonly port: number;
   readonly ownerAddress: Address;
+}
+
+/** A loopback port the system has free now, for a new permission's consent origin; the caller saves it before use. */
+export async function allocateConsentPort(): Promise<number> {
+  const server = createServer();
+  const port = await listen(server, 0);
+  await closeServer(server);
+  if (!isConsentPort(port)) throw new ApnError("APN_INTERNAL", "The system gave no usable loopback port for MetaMask consent.");
+  return port;
 }
 
 export interface SmartAccountConsentPort {
@@ -47,6 +63,7 @@ export class LoopbackMetaMaskConsent implements SmartAccountConsentPort {
   }
 
   private async run(config: BrowserConfig): Promise<unknown> {
+    if (!isConsentPort(config.port)) throw new ApnError("APN_INTERNAL", "MetaMask consent port is invalid.");
     const token = randomBytes(32).toString("hex");
     let used = false;
     let settle: ((value: unknown) => void) | undefined;
@@ -55,7 +72,12 @@ export class LoopbackMetaMaskConsent implements SmartAccountConsentPort {
     const server = createServer((request, response) => {
       void this.handle(request, response, config, token, () => used, () => { used = true; }, settle!, fail!);
     });
-    const port = await listen(server);
+    const port = await listen(server, config.port).catch((error: unknown) => {
+      if ((error as { code?: unknown } | null)?.code !== "EADDRINUSE") throw error;
+      throw new ApnError("APN_PROVIDER_UNAVAILABLE", `The MetaMask consent port 127.0.0.1:${config.port} of this permission is in use; ` +
+        "free it and retry the same command.", { retryable: true, reason: "consent_port_in_use", consent_port: config.port, nextActions: [
+        `Find what listens on 127.0.0.1:${config.port} (lsof -nP -iTCP:${config.port} -sTCP:LISTEN), stop it, then rerun the same command.`] });
+    });
     const origin = `http://127.0.0.1:${port}`;
     const timer = setTimeout(() => fail?.(new ApnError(
       "APN_PROVIDER_UNAVAILABLE",
@@ -165,8 +187,9 @@ function isCallback(value: unknown): value is Callback {
 
 function browserScript(config: BrowserConfig): string {
   const environment = smartAccountEnvironment();
+  const { port: _port, ...pageConfig } = config;
   const publicConfig = {
-    ...config,
+    ...pageConfig,
     chainId: BASE_CHAIN_HEX,
     tokenAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
     implementation: environment.implementations.EIP7702StatelessDeleGatorImpl,
@@ -375,10 +398,10 @@ function classifiedBrowserFailure(code: BrowserFailure): ApnError {
   return new ApnError("APN_PROVIDER_PROTOCOL", "MetaMask returned an unsupported foreground consent result.", { retryable: false });
 }
 
-async function listen(server: Server): Promise<number> {
+async function listen(server: Server, port: number): Promise<number> {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
+    server.listen(port, "127.0.0.1", () => { server.removeListener("error", reject); resolve(); });
   });
   const address = server.address();
   if (address === null || typeof address === "string") throw new ApnError("APN_INTERNAL", "MetaMask loopback listener did not bind safely.");
