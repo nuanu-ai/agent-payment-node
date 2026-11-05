@@ -4,6 +4,7 @@ export { FileStargateTokenJournal, stargateV2TokenCanonicalReceipt } from "./tok
 export type * from "./token-model.js";
 export declare function prepareStargateV2Token(request: StargateTokenPreparationRequest, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
 export declare function executeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
+/** Network observation only: it may advance an attempted effect and can never sign or broadcast. */
 export declare function observeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
 /** Explicit foreground cleanup. Observation remains separate and never invokes this signer path. */
 export declare function cleanupStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal): Promise<StargateTokenOperation>;
