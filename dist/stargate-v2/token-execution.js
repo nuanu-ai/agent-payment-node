@@ -178,11 +178,12 @@ async function afterSentEffect(id, journal, error, command) {
     if (op === null || effect === undefined || transactionHash === undefined)
         return error;
     const then = command === "observe" ? "without sending anything" : effect === "approval"
-        ? "and, once it is safe, continues with the bridge after its usual checks" : "and finishes the operation";
+        ? "and, once that is safe, continues with the bridge after its usual checks" : "until its outcome is proven";
     return new ApnError(error.code, error.message, { ...error.details, sent_effect: effect, sent_transaction_hash: transactionHash,
         operation_phase: op.phase, nextActions: [`Once the RPC answers again, rerun apn stargate token ${command} --operation ${id}: ` +
-                `it observes the sent ${effect} transaction, which is never sent again, ${then}.`] });
+                `it observes the sent ${effect} transaction (never sent again) ${then}.`] });
 }
+/** Network observation only: it may advance an attempted effect and can never sign or broadcast. */
 export async function observeStargateV2Token(id, ports, journal) {
     try {
         return await observeLocked(id, ports, journal);

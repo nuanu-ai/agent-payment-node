@@ -20,7 +20,7 @@ test("an RPC refusal while a sent approval is observed names the sent transactio
     assert.equal(error.details?.sent_transaction_hash, s.journal.value!.approvalTransactionHash);
     const actions = error.details?.nextActions as readonly string[];
     assert.equal(actions.length, 1); assert.ok(actions[0]!.includes(`rerun apn stargate token execute --operation ${id}:`));
-    assert.match(actions[0]!, /never sent again, and, once it is safe, continues with the bridge/u);
+    assert.match(actions[0]!, /\(never sent again\) and, once that is safe, continues with the bridge/u);
     return true;
   });
   assert.equal(s.journal.value!.phase, "allowance_submitted"); assert.equal(s.counts().sends, 1);
