@@ -153,13 +153,18 @@ export async function executeStargateV2Token(id, ports, journal) {
 }
 const SENT_PHASES = Object.freeze({ allowance_submission_started: "approval",
     allowance_unknown_finality: "approval", allowance_submitted: "approval", submission_started: "bridge", unknown_finality: "bridge", submitted: "bridge" });
+/** RPC availability failures; a protocol or state refusal would only repeat on a rerun and keeps its own advice. */
+function rpcUnavailable(error) {
+    return error.code === "APN_RPC_RATE_LIMITED" || error.code === "APN_RPC_AMBIGUOUS" ||
+        (error.code === "APN_RPC_CONFIG" && (error.details?.reason === "rpc_status" || error.details?.reason === "rpc_result"));
+}
 /**
- * A failure while a sent approval or bridge transaction is being observed (an RPC refusal, a rate limit) leaves that
- * transaction in the journal; rerunning the same command observes it and never sends it again. The error says so
- * instead of the generic advice for its code. Any other failure is returned unchanged.
+ * An RPC that stops answering while a sent approval or bridge transaction is observed leaves that transaction in the
+ * journal; rerunning the same command observes it and never sends it again. The error says so instead of the generic
+ * advice for its code. Any other failure is returned unchanged.
  */
 async function afterSentEffect(id, journal, error, command) {
-    if (!(error instanceof ApnError))
+    if (!(error instanceof ApnError) || !rpcUnavailable(error))
         return error;
     let op;
     try {
@@ -172,10 +177,12 @@ async function afterSentEffect(id, journal, error, command) {
     const transactionHash = effect === "approval" ? op?.approvalTransactionHash : op?.transactionHash;
     if (op === null || effect === undefined || transactionHash === undefined)
         return error;
-    return new ApnError(error.code, error.message, { ...error.details, sent_effect: effect, sent_transaction_hash: transactionHash, operation_phase: op.phase,
-        nextActions: [`Rerun after the RPC is reachable again; the sent ${effect} transaction is observed, not sent again: apn stargate token ${command} --operation ${id}`] });
+    const then = command === "observe" ? "without sending anything" : effect === "approval"
+        ? "and, once it is safe, continues with the bridge after its usual checks" : "and finishes the operation";
+    return new ApnError(error.code, error.message, { ...error.details, sent_effect: effect, sent_transaction_hash: transactionHash,
+        operation_phase: op.phase, nextActions: [`Once the RPC answers again, rerun apn stargate token ${command} --operation ${id}: ` +
+                `it observes the sent ${effect} transaction, which is never sent again, ${then}.`] });
 }
-/** Network observation only: it may advance an attempted effect and can never sign or broadcast. */
 export async function observeStargateV2Token(id, ports, journal) {
     try {
         return await observeLocked(id, ports, journal);

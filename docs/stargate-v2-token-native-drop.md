@@ -88,11 +88,13 @@ Terminal states: `observed`, `cleaned` and `abandoned_unknown`. Non-terminal sta
 `post_approval_quote_bound`, `submission_started`, `submitted`, `unknown_finality`, `cleanup_required`,
 `cleanup_submission_started`, `cleanup_submitted` and `cleanup_unknown_finality`.
 
-When `execute` or `observe` fails while a sent approval or bridge transaction is being observed (phases
+When the RPC stops answering (a non-200 status, a rate limit, a transport failure) while `execute` or `observe`
+observes a sent approval or bridge transaction (phases
 `allowance_submission_started`, `allowance_submitted`, `allowance_unknown_finality`, `submission_started`, `submitted`
 and `unknown_finality`), the error keeps its code and adds `sent_effect` (`approval` or `bridge`),
 `sent_transaction_hash` and `operation_phase`. Its next action is the same command, which observes that transaction
-and never sends it again. An RPC answer other than 200 names its status in `httpStatus`; a 429 is `APN_RPC_RATE_LIMITED`.
+and never sends it again; after an approval, `execute` then continues with the bridge after its usual checks. A protocol
+or state refusal keeps its own error and advice. An RPC answer other than 200 names its status in `httpStatus`; a 429 is `APN_RPC_RATE_LIMITED`.
 
 ### Prepare
 

@@ -40,7 +40,7 @@ export interface GaslessObservationPort {
   diagnostic?(): GaslessObservationDiagnostic | null;
 }
 export interface GaslessObservationDiagnostic {
-  /** The refusal that made the RPC unavailable: `http_<status>` or the transport's reason; null when none. */
+  /** The refusal that made the RPC unavailable: `http_<status>`, APN's transport reason (`transport_*`) or the error code; null when none. */
   readonly cause: string | null;
   /** The code of the last JSON-RPC error the endpoint returned, unverified; its message is provider text and is not kept. */
   readonly rpcErrorCode: number | null;
