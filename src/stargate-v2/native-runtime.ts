@@ -19,6 +19,11 @@ import { stargateFundsRefusal } from "./funds.js";
 
 const DESTINATION_POOL = getAddress("0xe9aBA835f813ca05E50A6C0ce65D0D74390F7dE7");
 function blocked(reason: string): never { throw new ApnError("APN_RPC_CONFIG", `Stargate native runtime unavailable: ${reason}.`, { reason }); }
+/** A rate limit is not a configuration fault; every non-200 status is named so the caller can tell them apart. */
+function statusRefusal(status: number): never {
+  if (status === 429) throw new ApnError("APN_RPC_RATE_LIMITED", "Stargate RPC answered HTTP 429.", { reason: "rpc_status", httpStatus: 429, retryable: true });
+  throw new ApnError("APN_RPC_CONFIG", `Stargate native runtime unavailable: rpc_status ${status}.`, { reason: "rpc_status", httpStatus: status });
+}
 function quantity(value: unknown): bigint {
   if (typeof value !== "string" || !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$/u.test(value)) throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate RPC quantity.");
   return BigInt(value);
@@ -73,7 +78,7 @@ export class StargateJsonRpc {
     const body = canonicalJson(calls.map((item, index) => ({ jsonrpc: "2.0", id: ids[index], method: item.method, params: item.params })));
     if (Buffer.byteLength(body) > 2 * 1024 * 1024) throw new ApnError("APN_RPC_PROTOCOL", "Stargate batch request too large.");
     const response = await this.https.request(this.endpoint, "POST", body, 2 * 1024 * 1024, "APN_RPC_CONFIG");
-    if (response.status !== 200) blocked("rpc_status");
+    if (response.status !== 200) statusRefusal(response.status);
     return parseRpcBatchResultEnvelope(response.body, ids);
   }
   async call(method: string, params: readonly unknown[]): Promise<unknown> {
@@ -84,7 +89,7 @@ export class StargateJsonRpc {
     }
     const id = String(++this.sequence), response = await this.https.request(this.endpoint, "POST",
       canonicalJson({ jsonrpc: "2.0", id, method, params }), 2 * 1024 * 1024, "APN_RPC_CONFIG");
-    if (response.status !== 200) blocked("rpc_status"); const body = record(JSON.parse(response.body));
+    if (response.status !== 200) statusRefusal(response.status); const body = record(JSON.parse(response.body));
     if (body.jsonrpc !== "2.0" || String(body.id) !== id || !Object.hasOwn(body, "result") || Object.hasOwn(body, "error")) blocked("rpc_result");
     return method === "eth_getTransactionByHash" ? transactionByHash(body.result, params[0]) : body.result;
   }

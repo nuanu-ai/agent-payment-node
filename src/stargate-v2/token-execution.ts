@@ -139,11 +139,33 @@ export async function prepareStargateV2Token(request: StargateTokenPreparationRe
 }
 export async function executeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
   const initial = await journal.load(id); if (initial === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
-  return await journal.withOwnerLock(initial.owner, async () =>
-    await journal.withLock(id, async () => await executeLocked(id, ports, journal)));
+  try {
+    return await journal.withOwnerLock(initial.owner, async () =>
+      await journal.withLock(id, async () => await executeLocked(id, ports, journal)));
+  } catch (error) { throw await afterSentEffect(id, journal, error, "execute"); }
+}
+const SENT_PHASES: Readonly<Record<string, "approval" | "bridge">> = Object.freeze({ allowance_submission_started: "approval",
+  allowance_unknown_finality: "approval", allowance_submitted: "approval", submission_started: "bridge", unknown_finality: "bridge", submitted: "bridge" });
+/**
+ * A failure while a sent approval or bridge transaction is being observed (an RPC refusal, a rate limit) leaves that
+ * transaction in the journal; rerunning the same command observes it and never sends it again. The error says so
+ * instead of the generic advice for its code. Any other failure is returned unchanged.
+ */
+async function afterSentEffect(id: string, journal: StargateTokenJournal, error: unknown, command: "execute" | "observe"): Promise<unknown> {
+  if (!(error instanceof ApnError)) return error;
+  let op: StargateTokenOperation | null;
+  try { op = await journal.load(id); } catch { return error; }
+  const effect = op === null ? undefined : SENT_PHASES[op.phase];
+  const transactionHash = effect === "approval" ? op?.approvalTransactionHash : op?.transactionHash;
+  if (op === null || effect === undefined || transactionHash === undefined) return error;
+  return new ApnError(error.code, error.message, { ...error.details, sent_effect: effect, sent_transaction_hash: transactionHash, operation_phase: op.phase,
+    nextActions: [`Rerun after the RPC is reachable again; the sent ${effect} transaction is observed, not sent again: apn stargate token ${command} --operation ${id}`] });
 }
 /** Network observation only: it may advance an attempted effect and can never sign or broadcast. */
 export async function observeStargateV2Token(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
+  try { return await observeLocked(id, ports, journal); } catch (error) { throw await afterSentEffect(id, journal, error, "observe"); }
+}
+async function observeLocked(id: string, ports: StargateTokenExecutionPorts, journal: StargateTokenJournal) {
   return await journal.withLock(id, async () => {
     let op = await journal.load(id); if (op === null) fail("APN_OPERATION_BLOCKED", "operation_missing");
     op = await reconcileUsageOrCleanup(op, ports, journal);

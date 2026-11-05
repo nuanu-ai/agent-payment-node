@@ -54,6 +54,8 @@ export class GaslessObservationRpc {
     pendingReads = new Map();
     lastRequestAt = null;
     unavailable = false;
+    cause = null;
+    rpcErrorCode = null;
     constructor(chainId, rpcUrl, environmentName, transport = new GaslessHttps(), pacing = defaultPacing(), maxBatchItems) {
         this.transport = transport;
         this.pacing = pacing;
@@ -73,6 +75,8 @@ export class GaslessObservationRpc {
     }
     async observeWithinInvocation(intent, identity, cursor) {
         this.unavailable = false;
+        this.cause = null;
+        this.rpcErrorCode = null;
         // The saved intent (validated against its own hashes) names the contracts; today's registry pins are not consulted,
         // so an operation sent before a pin update stays observable. Only the chain must match.
         validateGaslessIntent(intent);
@@ -85,8 +89,13 @@ export class GaslessObservationRpc {
         // No state is read at the prepare block: every proof is the receipt plus current safe/latest state (archive-free).
         const result = await observeGasless({ chainId: this.chainId, rpcOrigin: this.rpcOrigin, rpc: this.rpcCall }, intent, identity, cursor);
         if (this.unavailable)
-            throw observationUnavailable();
+            throw observationUnavailable(this.cause);
         return { ...result, source: gaslessObservationSource(intent, this.environmentName, this) };
+    }
+    diagnostic() {
+        if (this.cause === null && this.rpcErrorCode === null)
+            return null;
+        return { cause: this.cause, rpcErrorCode: this.rpcErrorCode };
     }
     async call(method, params) {
         if (!READ_METHODS.has(method))
@@ -115,7 +124,7 @@ export class GaslessObservationRpc {
                 const requests = chunk.map(({ id, method, params }) => ({ jsonrpc: "2.0", id, method, params }));
                 const response = await this.request(canonicalJson(requests.length === 1 ? requests[0] : requests), session);
                 if (chunk.length === 1) {
-                    results.set(chunk[0].id, parseObservationResult(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), chunk[0].id));
+                    results.set(chunk[0].id, this.result(rpcRecord(rpcJson(response.body, MAX_RESPONSE)), chunk[0].id));
                     continue;
                 }
                 const rows = rpcJson(response.body, MAX_RESPONSE);
@@ -127,7 +136,7 @@ export class GaslessObservationRpc {
                     if (typeof id !== "string" || !expected.has(id) || results.has(id)) {
                         gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_response");
                     }
-                    results.set(id, parseObservationResult(record, id));
+                    results.set(id, this.result(record, id));
                 }
             }
             for (const read of reads)
@@ -138,28 +147,39 @@ export class GaslessObservationRpc {
                 read.reject(error);
         }
     }
+    /** A JSON-RPC error still refuses the read; only its numeric code is kept for the diagnostic. */
+    result(record, id) {
+        const error = record.error;
+        if (error !== null && typeof error === "object" && !Array.isArray(error)) {
+            const code = error.code;
+            if (typeof code === "number" && Number.isSafeInteger(code))
+                this.rpcErrorCode = code;
+        }
+        return parseObservationResult(record, id);
+    }
     async request(body, session) {
         const pending = this.queue.then(async () => {
             if (this.unavailable)
-                throw observationUnavailable();
+                throw observationUnavailable(this.cause);
             if (this.lastRequestAt !== null) {
                 const remaining = this.pacing.minimumIntervalMs - (this.pacing.monotonicNow() - this.lastRequestAt);
                 if (remaining > 0)
                     await this.pacing.sleep(remaining);
             }
             if (this.unavailable)
-                throw observationUnavailable();
+                throw observationUnavailable(this.cause);
             try {
                 session.reserve();
                 this.lastRequestAt = this.pacing.monotonicNow();
                 const response = await this.transport.request(this.endpoint, "POST", body, MAX_RESPONSE, "APN_RPC_CONFIG", () => session.assertActive());
                 if (response.status !== 200) {
+                    this.cause = `http_${response.status}`;
                     try {
                         session.rejectHttp(response.status);
                     }
                     catch (error) {
                         if (response.status === 408 || response.status === 429 || response.status >= 500)
-                            throw observationUnavailable();
+                            throw observationUnavailable(this.cause);
                         throw error;
                     }
                 }
@@ -167,11 +187,12 @@ export class GaslessObservationRpc {
             }
             catch (error) {
                 this.unavailable = true;
+                this.cause ??= error instanceof ApnError ? String(error.details?.reason ?? error.code) : "transport_failure";
                 if (error instanceof ApnError && error.details?.reason === "gasless_observation_rpc_unavailable")
                     throw error;
                 if (error instanceof ApnError && error.code === "APN_RPC_PROTOCOL")
                     throw error;
-                throw observationUnavailable();
+                throw observationUnavailable(this.cause);
             }
         });
         this.queue = pending.then(() => undefined, () => undefined);
@@ -188,9 +209,9 @@ function parseObservationResult(record, id) {
         gaslessFailure("APN_RPC_PROTOCOL", "gasless_observation_rpc_error");
     return record.result;
 }
-function observationUnavailable() {
+function observationUnavailable(cause) {
     return new ApnError("APN_RPC_AMBIGUOUS", "Explicit observation RPC is unavailable.", {
-        reason: "gasless_observation_rpc_unavailable", retryable: true,
+        reason: "gasless_observation_rpc_unavailable", retryable: true, ...(cause === null ? {} : { cause }),
     });
 }
 //# sourceMappingURL=observation-rpc.js.map

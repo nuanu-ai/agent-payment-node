@@ -36,6 +36,14 @@ export interface GaslessObservationPort {
   readonly rpcOrigin: string;
   readonly rpcEndpointHash: string;
   observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
+  /** What stopped the last observe() of an explicitly selected RPC, for display only; never stored or trusted. */
+  diagnostic?(): GaslessObservationDiagnostic | null;
+}
+export interface GaslessObservationDiagnostic {
+  /** The refusal that made the RPC unavailable: `http_<status>` or the transport's reason; null when none. */
+  readonly cause: string | null;
+  /** The code of the last JSON-RPC error the endpoint returned, unverified; its message is provider text and is not kept. */
+  readonly rpcErrorCode: number | null;
 }
 export type GaslessObservationRpcFactory = (chainId: GaslessChainId, environmentName: string) => GaslessObservationPort;
 export interface GaslessRpcPort extends GaslessObservationPort {
