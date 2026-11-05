@@ -37,9 +37,10 @@ export declare class TransferService {
      * Re-read under that lock without nesting another operation lock or changing the established lock order. */
     private retireExpiredDirectTransfers;
     /**
-     * The operation stays started after a refused, interrupted or timed-out approval: its reservation is held until
-     * resume classifies it, and an approval that Native proved ended before the wallet was opened is closed there.
-     * A classified refusal names that one resume; an unclassified fault keeps its own identity.
+     * The operation stays started after a refused, interrupted or timed-out approval, with its reservation held. When
+     * Native proved that the approval ended before the wallet was opened, resume ends it before effect and releases the
+     * reservation, so the error names the started operation's own next actions (resume with this invocation's RPC).
+     * Any other failure, or one whose proof cannot be read, keeps its own error and code-based next actions.
      */
     private afterFailedApproval;
     private failBeforeEffect;

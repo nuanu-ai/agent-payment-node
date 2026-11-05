@@ -402,7 +402,7 @@ test("refused foreground approval never loads the key and missing signature reco
   const loads = setup.wrapping.loads;
   await assert.rejects(setup.core.transfer.approve(prepared.operation_id), (error: unknown) => error instanceof ApnError &&
     error.code === "APN_OPERATION_BLOCKED" && error.message === "refused" &&
-    JSON.stringify(error.details?.nextActions) === JSON.stringify([`apn operation resume --operation ${prepared.operation_id}`]));
+    Array.isArray(error.details?.nextActions) && error.details.nextActions[0] === `apn operation resume --operation ${prepared.operation_id} --rpc-url <https-url>`);
   assert.equal(setup.wrapping.loads, loads);
   const declined = (await setup.state.findOperation(prepared.operation_id))!;
   assert.equal(declined.state, "started"); assert.ok(declined.allowlistLease);

@@ -224,7 +224,7 @@ export class TransferService {
                 effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload));
             }
             catch (error) {
-                throw this.afterFailedApproval(operation, error);
+                throw await this.afterFailedApproval(operation, error);
             }
             const effect = parseEffect(effectValue);
             await verifyEffect(effect, operation);
@@ -305,14 +305,26 @@ export class TransferService {
         }
     }
     /**
-     * The operation stays started after a refused, interrupted or timed-out approval: its reservation is held until
-     * resume classifies it, and an approval that Native proved ended before the wallet was opened is closed there.
-     * A classified refusal names that one resume; an unclassified fault keeps its own identity.
+     * The operation stays started after a refused, interrupted or timed-out approval, with its reservation held. When
+     * Native proved that the approval ended before the wallet was opened, resume ends it before effect and releases the
+     * reservation, so the error names the started operation's own next actions (resume with this invocation's RPC).
+     * Any other failure, or one whose proof cannot be read, keeps its own error and code-based next actions.
      */
-    afterFailedApproval(operation, error) {
+    async afterFailedApproval(operation, error) {
         if (!(error instanceof ApnError))
             return error;
-        return new ApnError(error.code, error.message, { ...error.details, nextActions: [`apn operation resume --operation ${operation.operationId}`] });
+        const journal = new DirectPublicEffectJournal(this.context.state);
+        let proven = false;
+        try {
+            proven = await this.context.state.withLocks([walletCustodyLock(this.context.state, operation.profile)], async () => await journal.noPrivateEntry(operation));
+        }
+        catch {
+            return error;
+        }
+        if (!proven)
+            return error;
+        const view = withInvocationRpc(publicOperation(operation), this.context.rpcUrl);
+        return new ApnError(error.code, error.message, { ...error.details, nextActions: view.next_actions });
     }
     async failBeforeEffect(operation, reason) {
         await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
