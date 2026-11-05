@@ -231,7 +231,9 @@ export class TransferService {
       operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
       const custodyPayload = directCustodyPayload(operation);
       // A failed native call may have lost its response after signing. Classification cannot decrypt custody here.
-      const effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload));
+      let effectValue: unknown;
+      try { effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload)); }
+      catch (error) { throw this.afterFailedApproval(operation, error); }
       const effect = parseEffect(effectValue);
       await verifyEffect(effect, operation);
       operation = await this.transition(
@@ -319,6 +321,17 @@ export class TransferService {
       await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
       await this.transition(operation, "failed_before_effect", true, "approval_window_expired", "durable_pre_effect_failure");
     }
+  }
+
+  /**
+   * The operation stays started after a refused, interrupted or timed-out approval: its reservation is held until
+   * resume classifies it, and an approval that Native proved ended before the wallet was opened is closed there.
+   * A classified refusal names that one resume; an unclassified fault keeps its own identity.
+   */
+  private afterFailedApproval(operation: LocalOperationRecord, error: unknown): unknown {
+    if (!(error instanceof ApnError)) return error;
+    return new ApnError(error.code, error.message,
+      { ...error.details, nextActions: [`apn operation resume --operation ${operation.operationId}`] });
   }
 
   private async failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never> {

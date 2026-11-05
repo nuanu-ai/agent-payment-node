@@ -400,7 +400,9 @@ test("refused foreground approval never loads the key and missing signature reco
   await ensureDirectWallet(setup);
   const prepared = await setup.core.transfer.prepare(EVM_REQUEST) as { operation_id: string };
   const loads = setup.wrapping.loads;
-  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), /refused/u);
+  await assert.rejects(setup.core.transfer.approve(prepared.operation_id), (error: unknown) => error instanceof ApnError &&
+    error.code === "APN_OPERATION_BLOCKED" && error.message === "refused" &&
+    JSON.stringify(error.details?.nextActions) === JSON.stringify([`apn operation resume --operation ${prepared.operation_id}`]));
   assert.equal(setup.wrapping.loads, loads);
   const declined = (await setup.state.findOperation(prepared.operation_id))!;
   assert.equal(declined.state, "started"); assert.ok(declined.allowlistLease);

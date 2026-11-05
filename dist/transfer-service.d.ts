@@ -36,6 +36,12 @@ export declare class TransferService {
     /** Caller holds the profile lock shared by approval and prepare; all local lifecycle writers take it first.
      * Re-read under that lock without nesting another operation lock or changing the established lock order. */
     private retireExpiredDirectTransfers;
+    /**
+     * The operation stays started after a refused, interrupted or timed-out approval: its reservation is held until
+     * resume classifies it, and an approval that Native proved ended before the wallet was opened is closed there.
+     * A classified refusal names that one resume; an unclassified fault keeps its own identity.
+     */
+    private afterFailedApproval;
     private failBeforeEffect;
     private transition;
     private persist;
