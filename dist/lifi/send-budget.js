@@ -11,7 +11,7 @@ const ACCOUNT_BATCH = 1, RAW_SEND = 1;
 /** One full guard: the source check with the account in one batch, plus the destination check where that role reads. */
 export function bridgeGuardPosts(request, tool) {
     const destination = bridgeDeploymentCheck(request.toChainId, request.fromChainId, tool, request.toToken, "destination");
-    return ACCOUNT_BATCH + (destination.reads.length > 0 || destination.bnbPool ? 1 : 0);
+    return ACCOUNT_BATCH + (destination.reads.length > 0 ? 1 : 0);
 }
 /** Prepare: the source check with the account, and the destination head with its role's check. */
 export function bridgePreparePostBudget() { return 2 + BRIDGE_SEND_STEP_RETRY_POSTS; }

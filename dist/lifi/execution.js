@@ -8,7 +8,7 @@ import { validateMaterial } from "./effect-store.js";
 import { BridgeObservation, replaceEffect } from "./observation.js";
 import { BRIDGE_PRE_SIGN_RPC_RATE_LIMITED, BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, retainedUnsentBridgeRpcFailure } from "./operation-model.js";
 import { assertBridgeOwner } from "./owner.js";
-import { publicBridgeOperation } from "./receipt.js";
+import { bridgeCompositeReturn, publicBridgeOperation } from "./receipt.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import { bridgeRpcBudgetDeferred } from "./rpc-session-helpers.js";
@@ -71,7 +71,7 @@ export class BridgeExecution {
     }
     async confirmForeground(op, approval) {
         return await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
-            exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op) });
+            exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op), compositeReturn: bridgeCompositeReturn(op) });
     }
     async approved(op, approvedAt) {
         // Consent cannot extend the original exact materialization expiry.

@@ -22,7 +22,7 @@ async function renderApproval(summary: ReturnType<typeof publicBridgeOperation>,
   const tty = new TtyBridgeApproval({ isTerminal: () => true, openTerminal: async () => ({ fd: 143,
     write: async (text) => { printed += text; }, read: async function* () { yield Buffer.from(`${phrase}\n`); }, close: async () => {} }) });
   assert.equal(await tty.confirm({ operationId, fingerprint, exactPhrase: phrase,
-    summary: { ...summary, expires_at: new Date(Date.now() + 60_000).toISOString() } as typeof summary }), true);
+    summary: { ...summary, expires_at: new Date(Date.now() + 60_000).toISOString() } as typeof summary, compositeReturn: null }), true);
   return printed;
 }
 

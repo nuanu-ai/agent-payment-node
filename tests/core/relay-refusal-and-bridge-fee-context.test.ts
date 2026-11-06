@@ -70,7 +70,7 @@ for (const [pair, line] of [
   const tty = new TtyBridgeApproval({ isTerminal: () => true, openTerminal: async () => ({ fd: 123, write: async (text) => { printed += text; },
     read: async function* () { yield Buffer.from("REJECT\n"); }, close: async () => {} }) });
   assert.equal(await tty.confirm({ operationId: id, fingerprint: operation.fingerprint, exactPhrase: approvalCode("bridge", operation.fingerprint),
-    summary: publicBridgeOperation(operation) }), false);
+    summary: publicBridgeOperation(operation), compositeReturn: null }), false);
   const feeLines = printed.split("\n").filter((text) => /native fee is checked before sending/u.test(text));
   assert.deepEqual(feeLines.map((text) => text.trim()), [line]);
   assert.equal(s.source.submissions.length, 0);

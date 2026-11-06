@@ -223,7 +223,7 @@ export async function guardBridgeEffect(op, role, source, destination, now, depl
     if (source.chainId !== m.request.fromChainId || destination.chainId !== m.request.toChainId)
         bridgeFailure("APN_RPC_CONFIG", "bridge_RPC_chain_identity");
     const destinationCheck = bridgeDeploymentCheck(m.request.toChainId, m.request.fromChainId, m.tool, m.request.toToken, "destination");
-    if (deploymentCheck && (destinationCheck.reads.length > 0 || destinationCheck.bnbPool)) {
+    if (deploymentCheck && destinationCheck.reads.length > 0) {
         await preSignRpc(rpcBoundary(role, "destination_deployment_refresh", "destination", destination.chainId, "deployment_refresh"), async () => await destination.deploymentCheck(m.tool, m.request.fromChainId, m.request.toToken, "destination"));
     }
     const envelope = effect.envelope, c = envelope.economics;

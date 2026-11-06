@@ -2,7 +2,8 @@ import { hashObject } from "../canonical.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeNativePrincipal } from "./asset-registry.js";
 import type { BridgeOperationRecord } from "./operation-model.js";
 import { validateBridgeOperation } from "./operation-validation.js";
-import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY } from "./validation.js";
+import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure } from "./validation.js";
+import type { BridgeCompositeReturn } from "./ports.js";
 import type { LegacyBridgeOperationRecord, StoredBridgeOperationRecord } from "./legacy-operation.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
 
@@ -207,4 +208,13 @@ export function currentBridgeReceiptCandidates(op: BridgeOperationRecord): reado
 function receiptWithoutObservationTelemetry(receipt: Record<string, unknown>): Record<string, unknown> {
   const body = structuredClone(receipt); delete body.receipt_hash; delete body.observation_rpc_telemetry;
   return { ...body, receipt_hash: hashObject(body) };
+}
+
+/** What the consent states about the composite's WETH: the fill, Fly's input and the remainder returned without the floor. */
+export function bridgeCompositeReturn(op: BridgeOperationRecord): BridgeCompositeReturn | null {
+  const d = op.intent.decoded;
+  if (d.composite === undefined) return null;
+  if (d.protocol.kind !== "across") return bridgeFailure("APN_STATE_CORRUPT", "bnb_composite_protocol");
+  return { fillWethAtomic: d.protocol.outputAmountAtomic, swappedWethAtomic: d.composite.inputAmountAtomic,
+    unswappedWethReturnAtomic: (BigInt(d.protocol.outputAmountAtomic) - BigInt(d.composite.inputAmountAtomic)).toString() };
 }

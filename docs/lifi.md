@@ -392,10 +392,22 @@ the re-check right before the send reads only the account batch; consent resets 
 ### Ethereum ETH to BNB composite
 
 The only BNB route is LI.FI fee collection followed by Across V4 to `ReceiverAcrossV4`, then one Fly destination swap
-from BSC WETH to native BNB. APN decodes the full destination message and compressed Fly program. It requires exactly
-the pinned WETH approval, one Balancer `GIVEN_IN` WETH/WBNB pool call, the WBNB unwrap, the Core native balance read and
-the native return to the Fly router. The signed Fly header, raw payload hash, owner output floor, retention bound, self
+from BSC WETH to native BNB. APN decodes the full destination message and reads Fly's packed program the way Fly's
+router does: only its header, which carries the Executor as recipient, WETH in and native out, the exact input amount,
+the deadline, the output floor, the expected output, the retention bound, the consumer, no transfer from the router, the
+signature and no swap fees. The header must be signed by the pinned Fly signer, and its floor must be the owner's output
+floor. The rest of the program is Fly Core's route for that one quote (which pools, how many hops, how it unwraps),
+which Fly chooses by liquidity and changes from quote to quote; it is not signed and APN does not interpret it. The router
+itself pays the Executor only through the signed retention rule and reverts unless the Executor's native balance grew by
+at least the signed floor, so the route cannot deliver less native BNB than the floor; the Receiver then returns the
+whole fill as WETH. That floor is the guarantee: a route may deliver anything at or above it, and above the expected
+output the router keeps at most the signed retention. The signed header, raw payload hash, owner output floor, retention bound, self
 recipient and source debit caps are part of the durable operation integrity binding.
+
+Across fills more WETH than the Fly input (2–5% of the fill in the captured quotes), and LI.FI's Executor returns the
+rest to the recipient as WETH after the swap. The router does not protect that WETH: it waits at LI.FI's shared
+Executor while Fly's unsigned route runs. The bridge consent shows the fill, the Fly input and that remainder next to
+the statement that only the minimum native output is guaranteed.
 
 | Contract (BNB Smart Chain) | Address |
 | --- | --- |
@@ -404,16 +416,19 @@ recipient and source debit caps are part of the durable operation integrity bind
 | LI.FI Executor | `0x2dfaDAB8266483beD9Fd9A292Ce56596a2D1378D` |
 | Fly router | `0x20F6ee51340aDEed01A59B0e65cB3703f3dc860c` |
 | Fly Core | `0x09ad820aac5779683b481c4674208a4e1b024afa` |
-| Balancer Vault | `0xA82f327BBbf0667356d2935c6532D164B06cEceD` |
 | WETH / WBNB | `0x2170Ed0880ac9A755fd29B2688956BD959F933F8` / `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` |
 
-Before execution APN reads the Fly signer allowlist, Fly/Core linkage and whitelist, the Receiver's Executor and
-SpokePool, the Across buffers, and the Vault pool registration with its complete five-token list in exact order, WETH
-as input and WBNB as output. Completion requires the canonical Across message hash and a safe BNB transaction whose
-complete bounded `callTracer` subtree matches the SpokePool, Receiver, Executor, Fly, Core, Vault, pool swap, WBNB
-unwrap and native-return hierarchy; the digest covers the whole validated subtree. Vault output must equal the unwrap
-amount, retention math must equal the Fly-to-Executor and Executor-to-self value, and the self balance delta must cover
-that delivery.
+Before execution APN reads the Fly signer allowlist, the Fly/Core linkage and whitelist, the Receiver's Executor and
+SpokePool, and the Across buffers. Completion requires the canonical Across message hash and a safe BNB transaction
+whose bounded `callTracer` tree holds exactly one SpokePool call to the Receiver with that message and the fill amount.
+Proxy `DELEGATECALL`s and `STATICCALL` reads are looked through; every state-changing call of the Receiver, the
+Executor and the Fly router must be the expected one, in order: the Executor's deposit of the fill, its allowance reset
+and raise when the standing one is short, the Fly call, its return of the WETH the swap did not take, and its native
+payment to the recipient. Inside Fly Core only the native settlement is read: the router's payment to the Executor must
+equal the retention rule applied to what Core paid the router, and the Executor must forward that plus anything Core
+paid it directly. The proof records the WETH the Executor returned above the Fly input as `returnedWethAtomic` next
+to the native delivery, each with its Transfer log or balance delta; a fill whose returned WETH did not arrive is a
+`protocol_mismatch`. A reverted swap returns the whole fill as WETH. The digest covers the whole tree.
 
 Destination outcomes are durable across restart: `completed_native` is the only successful BNB delivery;
 `recovered_weth` (unswapped WETH returned to the recipient), `below_floor` and `protocol_mismatch` end as

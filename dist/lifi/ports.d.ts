@@ -54,6 +54,7 @@ export interface BridgeRpcPort {
         composite?: Readonly<{
             message: Hex;
             call: BnbCompositeCall;
+            fillAmountAtomic: string;
         }>;
     }>, options?: BridgeObservationOptions): Promise<{
         readonly transaction: BridgeTransactionProof;
@@ -68,6 +69,7 @@ export interface BridgeRpcPort {
         composite?: Readonly<{
             message: Hex;
             call: BnbCompositeCall;
+            fillAmountAtomic: string;
         }>;
     }>, options?: BridgeObservationOptions): Promise<{
         readonly transaction: BridgeDestinationTransactionProof;
@@ -94,11 +96,19 @@ export interface BridgeCustodyPort {
     load(operation: BridgeOperationRecord, role: "approval" | "bridge"): Promise<BridgeSealedMaterial | null>;
     seal(operation: BridgeOperationRecord, role: "approval" | "bridge", owner: BridgeOwner, beforeSign?: BridgeAuthorityCheck): Promise<BridgeSealedMaterial>;
 }
+/** Across fills more WETH than Fly swaps; LI.FI's Executor returns the rest after the swap, outside the router's floor. */
+export interface BridgeCompositeReturn {
+    readonly fillWethAtomic: string;
+    readonly swappedWethAtomic: string;
+    readonly unswappedWethReturnAtomic: string;
+}
 export interface BridgeApprovalPort {
     confirm(input: {
         readonly operationId: string;
         readonly fingerprint: string;
         readonly exactPhrase: string;
         readonly summary: Readonly<Record<string, unknown>>;
+        /** The Ethereum -> BNB composite's WETH outside the native guarantee; null on every other route. */
+        readonly compositeReturn: BridgeCompositeReturn | null;
     }): Promise<boolean>;
 }

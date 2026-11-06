@@ -97,7 +97,7 @@ export const destinationProofSchema = z.strictObject({ tool: toolSchema, chainId
         valueAtomic: uintSchema, traceHash: hashSchema }).nullable(),
     compositeTrace: z.strictObject({ outcome: z.enum(["completed_native", "recovered_weth", "below_floor", "protocol_mismatch"]),
         transactionHash: wordSchema, inputAmountAtomic: uintSchema, vaultOutputAtomic: uintSchema.nullable(),
-        deliveredAmountAtomic: uintSchema, retainedAmountAtomic: uintSchema, traceHash: hashSchema }).nullable().optional(),
+        deliveredAmountAtomic: uintSchema, retainedAmountAtomic: uintSchema, returnedWethAtomic: uintSchema.optional(), traceHash: hashSchema }).nullable().optional(),
     safeBlock: blockSchema, rpcOrigin: originSchema, transactionProofHash: hashSchema });
 export const scanSchema = z.strictObject({ startBlock: blockSchema, nextBlockAtomic: uintSchema, previousEndBlock: blockSchema.nullable() });
 export const providerObservationSchema = z.strictObject({ status: z.enum(["not_found", "pending", "completed_observed", "partial_observed", "refund_observed", "failed_observed", "unknown"]),

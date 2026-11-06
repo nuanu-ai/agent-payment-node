@@ -1,7 +1,7 @@
 import { hashObject } from "../canonical.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeNativePrincipal } from "./asset-registry.js";
 import { validateBridgeOperation } from "./operation-validation.js";
-import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY } from "./validation.js";
+import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure } from "./validation.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
 export function bridgeNextActions(op) {
     if (op.terminal)
@@ -192,5 +192,15 @@ function receiptWithoutObservationTelemetry(receipt) {
     delete body.receipt_hash;
     delete body.observation_rpc_telemetry;
     return { ...body, receipt_hash: hashObject(body) };
+}
+/** What the consent states about the composite's WETH: the fill, Fly's input and the remainder returned without the floor. */
+export function bridgeCompositeReturn(op) {
+    const d = op.intent.decoded;
+    if (d.composite === undefined)
+        return null;
+    if (d.protocol.kind !== "across")
+        return bridgeFailure("APN_STATE_CORRUPT", "bnb_composite_protocol");
+    return { fillWethAtomic: d.protocol.outputAmountAtomic, swappedWethAtomic: d.composite.inputAmountAtomic,
+        unswappedWethReturnAtomic: (BigInt(d.protocol.outputAmountAtomic) - BigInt(d.composite.inputAmountAtomic)).toString() };
 }
 //# sourceMappingURL=receipt.js.map

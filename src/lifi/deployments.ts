@@ -76,8 +76,6 @@ export function bridgeDeployment(chainId: BridgeChainId, peerChainId: BridgeChai
       code: [
         code(BNB_COMPOSITE.flyRouter, "0xaffe8098fa7a152f718c07de0ea7657382e535a301aaf12f89bbba8f91e4b352"),
         code(BNB_COMPOSITE.core, "0xc3508fb257eee0d20085dfdf41a56e95e8912ca82e3d0a9a9f6e696a261ed1cd"),
-        code(BNB_COMPOSITE.vault, "0x6a4e88ca30a16ae895be058f307388265b2c66a79fdd7bbcdcd9ee8bc2053b01"),
-        code(BNB_COMPOSITE.poolId.slice(0, 42), "0x2b3cdb059e60c9fafdc7c9f66eb07f53c9be869b5d5799422872c88c173d2b27"),
         code(BNB_COMPOSITE.executor, "0x60134c855342605905c28c4d6bb3d8bf04beff523cdf7e05028a345d8d0c9713"),
         code(BNB_COMPOSITE.receiver, "0x63e17243f25e66ca76ad9a7a6e640c7eec84caa6382881121c9cccf9f1855002"),
         code(spoke, "0x932cddc50793da935ccf915651ad67f6b746e9936fcc5614f0ff492563782c75"),

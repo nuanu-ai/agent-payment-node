@@ -1,4 +1,5 @@
 import type { BridgeOperationRecord } from "./operation-model.js";
+import type { BridgeCompositeReturn } from "./ports.js";
 import type { LegacyBridgeOperationRecord, StoredBridgeOperationRecord } from "./legacy-operation.js";
 export declare function bridgeNextActions(op: BridgeOperationRecord): readonly string[];
 export declare function bridgeProofClass(op: BridgeOperationRecord): string;
@@ -490,3 +491,5 @@ export type BridgeReceipt = ReturnType<typeof bridgeReceipt>;
 /** Exact current-v1 receipt emitted before denomination-aware asset bounds were added. */
 export declare function previousCurrentBridgeReceipt(op: BridgeOperationRecord): Record<string, unknown>;
 export declare function currentBridgeReceiptCandidates(op: BridgeOperationRecord): readonly unknown[];
+/** What the consent states about the composite's WETH: the fill, Fly's input and the remainder returned without the floor. */
+export declare function bridgeCompositeReturn(op: BridgeOperationRecord): BridgeCompositeReturn | null;

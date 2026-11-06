@@ -1,7 +1,7 @@
 import { ApnError } from "../errors.js";
 import { directEvmNetwork, type DirectEvmChainId } from "../evm-direct-networks.js";
 import { exactChainConsent, type TtyTransferApprovalOptions } from "../tty-approval.js";
-import type { BridgeApprovalPort } from "./ports.js";
+import type { BridgeApprovalPort, BridgeCompositeReturn } from "./ports.js";
 import type { publicBridgeOperation } from "./receipt.js";
 
 export class TtyBridgeApproval implements BridgeApprovalPort {
@@ -35,11 +35,7 @@ export class TtyBridgeApproval implements BridgeApprovalPort {
       `LI.FI route: ${s.route.route_id}; tool: ${s.route.tool}`, `Source chain: eip155:${s.transfer.fromChainId}`,
       `Destination chain: eip155:${s.transfer.toChainId}`, `Source ${from.symbol}: ${from.token}`, `Destination ${to.symbol}: ${to.token}`,
       `Sender: ${s.transfer.sender}`, `Recipient: ${s.transfer.recipient}`, ...economics,
-      ...(s.route.composite === undefined ? [] : [
-        `Destination program: Across ReceiverAcrossV4 -> LI.FI Executor -> Fly WETH/WBNB pool -> native BNB`,
-        `Fly payload: ${s.route.composite.payload_hash}; deadline ${s.route.composite.deadline_atomic}; maximum retention ${s.route.composite.maximum_retention_bps} basis points`,
-        "Recovery outcome: a destination swap failure may return unswapped WETH; APN does not count that as native BNB completion.",
-      ]),
+      ...(s.route.composite === undefined ? [] : compositeLines(s.route.composite, input.compositeReturn)),
       `Unitemized protocol fee: ${s.fees.implicit_protocol_token_fee_atomic} ${from.symbol} atomic`,
       `Allowance at prepare: ${s.transfer.allowance_atomic_at_prepare} atomic`, `Spender: ${s.transfer.spender}`,
       ...(native ? ["Native principal: sent as the bridge transaction value; no approval effect; approval cap 0."]
@@ -59,6 +55,18 @@ export class TtyBridgeApproval implements BridgeApprovalPort {
       throw error;
     }
   }
+}
+
+function compositeLines(composite: NonNullable<ReturnType<typeof publicBridgeOperation>["route"]["composite"]>,
+  weth: BridgeCompositeReturn | null): string[] {
+  if (weth === null) throw new ApnError("APN_STATE_CORRUPT", "The BNB composite consent has no WETH accounting.", { reason: "bnb_composite_consent" });
+  return [
+    "Destination program: Across ReceiverAcrossV4 -> LI.FI Executor -> Fly router -> Fly Core route (unsigned, chosen by Fly for this quote) -> native BNB",
+    `Fly payload: ${composite.payload_hash}; deadline ${composite.deadline_atomic}; maximum retention ${composite.maximum_retention_bps} basis points`,
+    "Guaranteed: only the minimum native destination output, which Fly's router enforces; above it, delivery depends on Fly's route.",
+    `WETH: Across fills ${weth.fillWethAtomic} atomic, Fly swaps ${weth.swappedWethAtomic}; the other ${weth.unswappedWethReturnAtomic} atomic is returned as WETH after the swap, without the router's protection.`,
+    "Recovery outcome: a destination swap failure may return unswapped WETH; APN does not count that as native BNB completion.",
+  ];
 }
 
 /** What the pre-send fee check bounds on the source network, by its fee model (each source names its own network, never Base for all). */
