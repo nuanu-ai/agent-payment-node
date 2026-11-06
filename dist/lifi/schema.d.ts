@@ -350,6 +350,7 @@ export declare const destinationProofSchema: z.ZodObject<{
         vaultOutputAtomic: z.ZodNullable<z.ZodString>;
         deliveredAmountAtomic: z.ZodString;
         retainedAmountAtomic: z.ZodString;
+        returnedWethAtomic: z.ZodOptional<z.ZodString>;
         traceHash: z.ZodString;
     }, z.core.$strict>>>;
     safeBlock: z.ZodObject<{
@@ -984,6 +985,7 @@ export declare const transitionSchema: z.ZodObject<{
             vaultOutputAtomic: z.ZodNullable<z.ZodString>;
             deliveredAmountAtomic: z.ZodString;
             retainedAmountAtomic: z.ZodString;
+            returnedWethAtomic: z.ZodOptional<z.ZodString>;
             traceHash: z.ZodString;
         }, z.core.$strict>>>;
         safeBlock: z.ZodObject<{
@@ -1767,6 +1769,7 @@ export declare const operationSchema: z.ZodObject<{
                 vaultOutputAtomic: z.ZodNullable<z.ZodString>;
                 deliveredAmountAtomic: z.ZodString;
                 retainedAmountAtomic: z.ZodString;
+                returnedWethAtomic: z.ZodOptional<z.ZodString>;
                 traceHash: z.ZodString;
             }, z.core.$strict>>>;
             safeBlock: z.ZodObject<{
@@ -2117,6 +2120,7 @@ export declare const operationSchema: z.ZodObject<{
             vaultOutputAtomic: z.ZodNullable<z.ZodString>;
             deliveredAmountAtomic: z.ZodString;
             retainedAmountAtomic: z.ZodString;
+            returnedWethAtomic: z.ZodOptional<z.ZodString>;
             traceHash: z.ZodString;
         }, z.core.$strict>>>;
         safeBlock: z.ZodObject<{

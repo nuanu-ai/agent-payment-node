@@ -13,8 +13,6 @@ export interface BridgeDeploymentCheck {
     readonly token: Address;
     readonly role: "source" | "destination";
     readonly reads: readonly CheckRead[];
-    /** The BNB composite destination also proves its Balancer pool registration and tokens. */
-    readonly bnbPool: boolean;
     readonly contractHash: string;
 }
 /**
@@ -25,7 +23,7 @@ export interface BridgeDeploymentCheck {
  * fee forwarder's owner and the Base fee predeploys are not pinned: they change on legitimate upgrades, while exact
  * calldata decoding, the exact-amount allowance, the fresh simulation and the receipt log proofs from the registry's
  * emitters keep the effect bound. A destination cannot touch the source funds and its delivery is proven from its own
- * receipt, so only the BNB composite, whose delivery depends on third-party routing configuration, reads anything there.
+ * receipt, so only the BNB composite, whose delivery depends on Fly's router configuration, reads anything there.
  */
 export declare function bridgeDeploymentCheck(chainId: BridgeChainId, peerChainId: BridgeChainId, tool: BridgeTool, token: Address, role: "source" | "destination"): BridgeDeploymentCheck;
 /** The check's reads at the moving head, never cached: each answer must equal its reviewed value. */

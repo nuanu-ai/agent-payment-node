@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodeAbiParameters, encodeFunctionData, encodeFunctionResult, parseAbi, parseAbiParameters } from "viem";
 import type { Address, Hex } from "../../src/model.js";
-import { BNB_COMPOSITE, decodeBnbCompositeMessage, decodeFlyProgram, verifyBnbCompositeTrace, verifyBnbPoolConfiguration, verifyFlyHeaderSignature } from "../../src/lifi/bnb-composite.js";
+import { BNB_COMPOSITE, decodeBnbCompositeMessage, decodeFlyProgram, verifyFlyHeaderSignature } from "../../src/lifi/bnb-composite.js";
 import { materializeBridgeRoute, parseBridgeRoutes } from "../../src/lifi/routes.js";
 import type { BridgeRouteRequest } from "../../src/lifi/model.js";
 import { decodeBridgeCall } from "../../src/lifi/decode.js";
@@ -25,8 +24,11 @@ const request: BridgeRouteRequest = { fromChainId: 1, toChainId: 56,
   fromToken: "0x0000000000000000000000000000000000000000", toToken: "0x0000000000000000000000000000000000000000",
   amountAtomic: "200000000000000", recipient: "0x823A3a5BaB1186141b32fC65F8E25Ca24c679Ce7",
   minOutputAtomic: "626451146422467", maxNativeDebitWei: "300000000000000", maxRouteFeeAtomic: "30000000000000", slippageBps: 50 };
-const DESTINATION_TX_SENDER = "0x2222222222222222222222222222222222222222" as Address;
-const DESTINATION_TX_CALLDATA = "0x12345678deadbeef" as Hex;
+// LI.FI's 2026-11-05 quote for the same lane: Fly now routes WETH -> BTCB -> WBNB -> BNB in a 704-byte program.
+const live = lifiCapture("bnb-composite-fly-20261105.json").decoded as {
+  bridgeData: { transactionId: Hex; receiver: Address }; acrossData: { message: Hex };
+  destination: { swaps: readonly [{ fromAmount: string; callData: Hex }] }; flyPackedPayloadBytes: number;
+};
 
 test("strict BNB composite decoder accepts the frozen LI.FI Across -> Fly graph", () => {
   const out = decodeBnbCompositeMessage(fixture.decoded.acrossData.message, fixture.decoded.bridgeData.transactionId, fixture.decoded.bridgeData.receiver);
@@ -64,120 +66,26 @@ test("canonical source message and destination trace prove BNB success while rec
   const receipt = makeDestinationReceipt(decoded, source), proof = bridgeDestinationProof(source, m, decoded, receipt);
   assert.equal(proof.amountAtomic, decoded.composite!.expectedOutputAtomic);
   assert.equal(proof.compositeTrace!.outcome, "completed_native");
-  const recovered = { ...receipt, logs: [...receipt.logs, eventLog(BNB_COMPOSITE.weth, "Transfer", {
-    from: BNB_COMPOSITE.receiver, to: decoded.recipient, value: BigInt(decoded.composite!.inputAmountAtomic),
+  // Across fills more WETH than the Fly input; the Executor's return of the rest is proven by its Transfer log.
+  const filled = (source.correlation as { outputAmountAtomic: string }).outputAmountAtomic;
+  const returned = (BigInt(filled) - BigInt(decoded.composite!.inputAmountAtomic)).toString();
+  assert.equal(proof.compositeTrace!.returnedWethAtomic, returned); assert.notEqual(returned, "0");
+  const withoutReturn = { ...receipt, logs: receipt.logs.slice(0, -1) };
+  assert.throws(() => bridgeDestinationProof(source, m, decoded, withoutReturn), /bnb_returned_weth/u);
+  assert.throws(() => bridgeDestinationProof(source, m, decoded, { ...receipt, compositeTrace: { ...receipt.compositeTrace!,
+    returnedWethAtomic: "0" } }), /bnb_returned_weth/u);
+  const recovered = { ...withoutReturn, logs: [...withoutReturn.logs, eventLog(BNB_COMPOSITE.weth, "Transfer", {
+    from: BNB_COMPOSITE.receiver, to: decoded.recipient, value: BigInt(filled),
   })], nativeBalance: { ...receipt.nativeBalance!, afterBalanceAtomic: receipt.nativeBalance!.beforeBalanceAtomic, deltaAtomic: "0" },
     compositeTrace: { ...receipt.compositeTrace!, outcome: "recovered_weth" as const, vaultOutputAtomic: null,
-      deliveredAmountAtomic: "0", retainedAmountAtomic: "0" } };
+      deliveredAmountAtomic: "0", retainedAmountAtomic: "0", returnedWethAtomic: filled } };
   assert.equal(bridgeDestinationProof(source, m, decoded, recovered).compositeTrace?.outcome, "recovered_weth");
+  // The Receiver returns the whole fill, not the smaller Fly input.
+  assert.throws(() => bridgeDestinationProof(source, m, decoded, { ...recovered, logs: [...withoutReturn.logs, eventLog(BNB_COMPOSITE.weth,
+    "Transfer", { from: BNB_COMPOSITE.receiver, to: decoded.recipient, value: BigInt(decoded.composite!.inputAmountAtomic) })] }), /bnb_recovery_evidence/u);
   assert.throws(() => bridgeDestinationProof(source, m, decoded, { ...receipt, compositeTrace: null }), /bnb_destination_trace/u);
-});
-
-test("complete callTracer subtree binds every required call, amount and return dependency", () => {
-  const call = decodeBnbCompositeMessage(fixture.decoded.acrossData.message, fixture.decoded.bridgeData.transactionId, fixture.decoded.bridgeData.receiver);
-  const trace = canonicalTrace(call), tx = `0x${"12".repeat(32)}` as Hex;
-  const proof = verifyTrace(trace, tx, fixture.decoded.acrossData.message, call);
-  assert.deepEqual({ outcome: proof.outcome, vault: proof.vaultOutputAtomic, delivered: proof.deliveredAmountAtomic,
-    retained: proof.retainedAmountAtomic, hash: proof.traceHash.length },
-  { outcome: "completed_native", vault: call.expectedOutputAtomic, delivered: call.expectedOutputAtomic, retained: "0", hash: 64 });
-  const paths: readonly (readonly (string | number)[])[] = [
-    ["calls", 1, "to"], ["calls", 1, "input"], ["calls", 1, "calls", 0, "input"],
-    ["calls", 1, "calls", 1, "to"], ["calls", 1, "calls", 1, "input"],
-    ["calls", 1, "calls", 1, "calls", 0, "input"], ["calls", 1, "calls", 1, "calls", 1, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "to"], ["calls", 1, "calls", 1, "calls", 2, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 0, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "to"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 0, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1, "output"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1, "calls", 0, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1, "calls", 1, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1, "calls", 2, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 2, "input"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 3, "value"],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 2, "value"],
-    ["calls", 1, "calls", 1, "calls", 3, "value"],
-  ];
-  for (const path of paths) {
-    const changed = structuredClone(trace) as any; let owner = changed;
-    for (const key of path.slice(0, -1)) owner = owner[key as any];
-    const key = path.at(-1)!; owner[key as any] = key === "value" ? "0x1" : key === "to"
-      ? "0x1111111111111111111111111111111111111111" : key === "output" ? `0x${"00".repeat(32)}` : "0xdeadbeef";
-    assert.equal(verifyTrace(changed, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch", path.join("."));
-  }
-  const extra = structuredClone(trace) as any;
-  extra.calls[1].calls[1].calls.push(frame(BNB_COMPOSITE.executor, BNB_COMPOSITE.weth, "0x095ea7b3", 0n));
-  assert.equal(verifyTrace(extra, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch");
-  const reordered = structuredClone(trace) as any;
-  reordered.calls[1].calls[1].calls.reverse();
-  assert.equal(verifyTrace(reordered, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch");
-  const framePaths = [["calls", 0], ["calls", 1], ["calls", 1, "calls", 0], ["calls", 1, "calls", 1],
-    ["calls", 1, "calls", 1, "calls", 2], ["calls", 1, "calls", 1, "calls", 2, "calls", 1],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1, "calls", 0],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1, "calls", 1],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 1, "calls", 2],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 2],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 1, "calls", 3],
-    ["calls", 1, "calls", 1, "calls", 2, "calls", 2], ["calls", 1, "calls", 1, "calls", 3]] as const;
-  for (const path of framePaths) {
-    const failed = structuredClone(trace) as any; let node = failed;
-    for (const key of path) node = node[key as any]; node.error = "execution reverted";
-    assert.equal(verifyTrace(failed, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch", `error:${path.join(".")}`);
-  }
-
-  const nodes = tracePaths(trace);
-  for (const path of nodes.slice(1)) {
-    const changed = structuredClone(trace) as any, node = atPath(changed, path); node.from = "0x1111111111111111111111111111111111111111";
-    assert.equal(verifyTrace(changed, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch", `from:${path.join(".")}`);
-  }
-  for (const path of nodes) {
-    const original = atPath(trace, path);
-    const changed = structuredClone(trace) as any, node = atPath(changed, path); node.type = original.type === "CALL" ? "STATICCALL" : "CALL";
-    assert.equal(verifyTrace(changed, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch", `type:${path.join(".")}`);
-  }
-  for (const path of nodes.filter((path) => {
-    const node = atPath(trace, path); return node.to === BNB_COMPOSITE.weth || node.to === BNB_COMPOSITE.wbnb;
-  })) {
-    const node = atPath(trace, path); if (node.input.slice(0, 10) === "0x2e1a7d4d") continue;
-    for (const output of ["0x", `0x${"0".repeat(64)}`, "0x01"] as const) {
-      const changed = structuredClone(trace) as any; atPath(changed, path).output = output;
-      assert.equal(verifyTrace(changed, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch", `return:${path.join(".")}`);
-    }
-  }
-  const fallback = structuredClone(trace) as any;
-  fallback.calls.push(frame(BNB_COMPOSITE.spokePool, call.finalReceiver, "0x", 0n));
-  assert.equal(verifyTrace(fallback, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch");
-  const extraRead = structuredClone(trace) as any;
-  extraRead.calls[1].calls[1].calls[2].calls.push({ ...frame(BNB_COMPOSITE.flyRouter, BNB_COMPOSITE.core, "0x12345678", 0n), type: "STATICCALL" });
-  assert.equal(verifyTrace(extraRead, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch");
-  for (const mutation of [
-    (value: any) => { value.input = "0xdeadbeef"; },
-    (value: any) => { value.calls[1].calls[1].calls[2].calls[1].input = "0x158f6894"; },
-    (value: any) => { value.calls[1].calls[1].calls[2].calls[1].calls[2].calls = []; },
-    (value: any) => { value.calls[1].calls[1].calls[2].calls[1].calls[2].calls[0].value = "0x1"; },
-    (value: any) => { value.calls[1].calls[1].calls[2].calls[1].calls[2].calls[0].to = call.finalReceiver; },
-  ]) {
-    const changed = structuredClone(trace) as any; mutation(changed);
-    assert.equal(verifyTrace(changed, tx, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch");
-  }
-  assert.equal(verifyBnbCompositeTrace(trace, tx, fixture.decoded.acrossData.message, call,
-    { sender: "0x1111111111111111111111111111111111111111", calldata: DESTINATION_TX_CALLDATA }).outcome, "protocol_mismatch");
-  assert.equal(verifyBnbCompositeTrace(trace, tx, fixture.decoded.acrossData.message, call,
-    { sender: DESTINATION_TX_SENDER, calldata: "0xdeadbeef" }).outcome, "protocol_mismatch");
-});
-
-test("caught Fly execution proves recovered WETH without any Executor native delivery", () => {
-  const call = decodeBnbCompositeMessage(fixture.decoded.acrossData.message, fixture.decoded.bridgeData.transactionId, fixture.decoded.bridgeData.receiver);
-  const trace = canonicalTrace(call) as any, receiver = trace.calls[1], executor = receiver.calls[1];
-  executor.error = "execution reverted"; executor.output = "0x"; executor.calls = [];
-  receiver.calls = [receiver.calls[0], executor,
-    tokenFrame(BNB_COMPOSITE.receiver, BNB_COMPOSITE.weth, "transfer", [call.finalReceiver, BigInt(call.inputAmountAtomic)]), receiver.calls[2]];
-  const proof = verifyTrace(trace, `0x${"34".repeat(32)}` as Hex, fixture.decoded.acrossData.message, call);
-  assert.equal(proof.outcome, "recovered_weth"); assert.equal(proof.deliveredAmountAtomic, "0");
-  const leaked = structuredClone(trace) as any;
-  leaked.calls[1].calls[1].calls = [frame(BNB_COMPOSITE.executor, call.finalReceiver, "0x", 1n)];
-  assert.equal(verifyTrace(leaked, `0x${"34".repeat(32)}` as Hex, fixture.decoded.acrossData.message, call).outcome, "protocol_mismatch");
+  const { returnedWethAtomic: _omitted, ...older } = receipt.compositeTrace!;
+  assert.throws(() => bridgeDestinationProof(source, m, decoded, { ...receipt, compositeTrace: older }), /bnb_destination_trace/u);
 });
 
 test("BNB destination outcomes survive restart, finalize spent usage and never resend", async (t) => {
@@ -228,42 +136,52 @@ test("Fly header signature binds chain, router, caller, assets and output bounds
   await assert.rejects(verifyFlyHeaderSignature(call, "0x1111111111111111111111111111111111111111"));
 });
 
-test("Vault pool configuration pins registration and the complete token order", () => {
-  const abi = parseAbi(["function getPool(bytes32) view returns (address,uint8)", "function getPoolTokens(bytes32) view returns (address[],uint256[],uint256)"]);
-  const pool = BNB_COMPOSITE.poolId.slice(0, 42) as Address;
-  const registration = (address = pool, specialization = 1) => encodeFunctionResult({ abi, functionName: "getPool", result: [address, specialization] });
-  const tokens = (rows: readonly Address[]) => encodeFunctionResult({ abi, functionName: "getPoolTokens", result: [rows, rows.map(() => 1n), 123n] });
-  assert.deepEqual(verifyBnbPoolConfiguration(registration(), tokens(BNB_COMPOSITE.poolTokens)).tokens, BNB_COMPOSITE.poolTokens);
-  assert.throws(() => verifyBnbPoolConfiguration(registration("0x1111111111111111111111111111111111111111"), tokens(BNB_COMPOSITE.poolTokens)));
-  assert.throws(() => verifyBnbPoolConfiguration(registration(pool, 0), tokens(BNB_COMPOSITE.poolTokens)));
-  assert.throws(() => verifyBnbPoolConfiguration(registration(), tokens([...BNB_COMPOSITE.poolTokens].reverse())));
-  assert.throws(() => verifyBnbPoolConfiguration(registration(), tokens([...BNB_COMPOSITE.poolTokens, pool])));
-  assert.throws(() => verifyBnbPoolConfiguration("0x1234", "0x5678"));
-});
-
-test("strict BNB composite decoder rejects every security-bound payload region", () => {
-  const call = fixture.decoded.destination.swaps[0].callData;
-  const mutations = [
-    [0, 0xff], [4 + 32, 0xff], // selector / ABI length
-    [4 + 64 + 0, 0xff], [4 + 64 + 2, 0xff], [4 + 64 + 4, 0xff], [4 + 64 + 24, 0xff], [4 + 64 + 44, 0xff],
-    [4 + 64 + 64, 0xff], [4 + 64 + 96, 0xff], [4 + 64 + 99, 0xff], [4 + 64 + 102, 0xff], [4 + 64 + 137, 0xff],
-    [4 + 64 + 140, 1], [4 + 64 + 206, 1], [4 + 64 + 229, 0xff], [4 + 64 + 249, 0xff],
-    [4 + 64 + 271, 0xff], [4 + 64 + 289, 0xff], [4 + 64 + 297, 0xff], [4 + 64 + 329, 0xff],
-    [4 + 64 + 412, 0xff], [4 + 64 + 421, 0xff], [4 + 64 + 430, 0xff], [4 + 64 + 439, 0xff], [4 + 64 + 448, 0xff],
-  ] as const;
-  for (const [at, value] of mutations) assert.throws(() => decodeFlyProgram(mutate(call, at, value), fixture.decoded.bridgeData.receiver,
-    BigInt(fixture.decoded.destination.swaps[0].fromAmount)), { name: "ApnError" }, `mutation at ${at}`);
-});
-
-test("every non-quote Fly VM byte is frozen against mutation", () => {
-  const call = fixture.decoded.destination.swaps[0].callData;
-  const dynamic = [[64, 96], [105, 137], [141, 206], [208, 212], [213, 220], [221, 228], [229, 231], [272, 278]];
-  for (let payloadByte = 0; payloadByte < 457; payloadByte++) {
-    if (dynamic.some(([start, end]) => payloadByte >= start! && payloadByte < end!)) continue;
-    const absolute = 68 + payloadByte, current = Buffer.from(call.slice(2), "hex")[absolute]!;
-    assert.throws(() => decodeFlyProgram(mutate(call, absolute, current ^ 1), fixture.decoded.bridgeData.receiver,
-      BigInt(fixture.decoded.destination.swaps[0].fromAmount)), { name: "ApnError" }, `payload byte ${payloadByte}`);
+test("the Fly decoder reads the router's header and rejects every header field APN binds", () => {
+  for (const [name, call, amount] of [["2026-09-21", fixture.decoded.destination.swaps[0].callData, fixture.decoded.destination.swaps[0].fromAmount],
+    ["2026-11-05", live.destination.swaps[0].callData, live.destination.swaps[0].fromAmount]] as const) {
+    const mutations = [
+      [0, 0xff], [4 + 31, 0x40], [4 + 63, 0xff], // selector, ABI offset, ABI length
+      [68 + 4, 0xff], [68 + 24, 0xff], [68 + 44, 0xff], [68 + 64, 0xff], // recipient, input, output, amount
+      [68 + 96, 0x07], [68 + 99, 0x07], [68 + 102, 0x07], [68 + 137, 0x07], // compact words: shift not a whole byte
+      [68 + 97, 0xff], [68 + 100, 0xff], [68 + 103, 0xff], [68 + 138, 0xff], // compact words: pointer outside the payload
+      [68 + 140, 1], [68 + 173, 0xff], [68 + 205, 29], [68 + 206, 1], // transfer mode, high s, v, fee count
+    ] as const;
+    for (const [at, value] of mutations) assert.throws(() => decodeFlyProgram(mutate(call, at, value), fixture.decoded.bridgeData.receiver,
+      BigInt(amount)), { name: "ApnError" }, `${name}: mutation at ${at}`);
   }
+});
+
+test("the 2026-11-05 multi-hop Fly program decodes and carries Fly's own signature over its header", async () => {
+  assert.equal(live.flyPackedPayloadBytes, 704);
+  const call = decodeBnbCompositeMessage(live.acrossData.message, live.bridgeData.transactionId, live.bridgeData.receiver);
+  assert.deepEqual({ input: call.inputAmountAtomic, min: call.minimumOutputAtomic, expected: call.expectedOutputAtomic,
+    deadline: call.deadlineAtomic, retention: call.maximumRetentionBps },
+  { input: "380515570688779", min: "1226879077233883", expected: "1233044298727521", deadline: "1793916262", retention: 500 });
+  assert.equal((await verifyFlyHeaderSignature(call, BNB_COMPOSITE.signer)).signer, BNB_COMPOSITE.signer);
+});
+
+test("the route after the header is opaque: Fly does not sign it and APN does not interpret it", async () => {
+  // Payload bytes 207+ that no compact header word points at (they point at 208..230 here) are Fly Core's route.
+  const call = live.destination.swaps[0].callData, amount = BigInt(live.destination.swaps[0].fromAmount);
+  const original = decodeFlyProgram(call, live.bridgeData.receiver, amount);
+  for (const payloadByte of [207, 232, 400, 600, 703]) {
+    const absolute = 68 + payloadByte, current = Buffer.from(call.slice(2), "hex")[absolute]!;
+    const changed = decodeFlyProgram(mutate(call, absolute, current ^ 1), live.bridgeData.receiver, amount);
+    assert.deepEqual({ ...changed, payloadHash: original.payloadHash }, original, `payload byte ${payloadByte}`);
+    assert.notEqual(changed.payloadHash, original.payloadHash);
+    await verifyFlyHeaderSignature(changed, BNB_COMPOSITE.signer);
+  }
+  // The bytes a header word points at are header values: changing one changes the signed value, so the signature fails.
+  const floorByte = 68 + 219, floor = Buffer.from(call.slice(2), "hex")[floorByte]!;
+  const lowered = decodeFlyProgram(mutate(call, floorByte, floor ^ 1), live.bridgeData.receiver, amount);
+  assert.notEqual(lowered.minimumOutputAtomic, original.minimumOutputAtomic);
+  await assert.rejects(verifyFlyHeaderSignature(lowered, BNB_COMPOSITE.signer));
+});
+
+test("the Fly payload must hold the router's whole header and stay within APN's bound", () => {
+  const program = (length: number) => `0x${BNB_COMPOSITE.selector.slice(2)}${(32n).toString(16).padStart(64, "0")}${BigInt(length).toString(16).padStart(64, "0")}${"00".repeat(Math.ceil(length / 32) * 32)}` as Hex;
+  assert.throws(() => decodeFlyProgram(program(206), fixture.decoded.bridgeData.receiver, 1n), /fly_abi_bounds/u);
+  assert.throws(() => decodeFlyProgram(program(3073), fixture.decoded.bridgeData.receiver, 1n), /bounded_hex|fly_abi_bounds/u);
 });
 
 test("strict BNB composite decoder rejects outer transaction, recipient, amount and extra-swap mutations", () => {
@@ -287,75 +205,3 @@ function capturedMaterialization() {
   return materializeBridgeRoute(routes[0]!, { status: 200, body: JSON.stringify(fixture.materializationResponse) }, request, request.recipient);
 }
 
-const traceAbi = parseAbi([
-  "function handleV3AcrossMessage(address,uint256,address,bytes)",
-  "function swapAndCompleteBridgeTokens(bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address,address)",
-  "function approve(address,uint256)", "function transfer(address,uint256)", "function transferFrom(address,address,uint256)",
-  "function withdraw(uint256)",
-  "function swap((bytes32 poolId,uint8 kind,address assetIn,address assetOut,uint256 amount,bytes userData),(address sender,bool fromInternalBalance,address recipient,bool toInternalBalance),uint256,uint256) returns (uint256)",
-  "function onSwap((uint8 kind,address tokenIn,address tokenOut,uint256 amount,bytes32 poolId,uint256 lastChangeBlock,address from,address to,bytes userData),uint256,uint256) view returns (uint256)",
-]);
-function canonicalTrace(call: ReturnType<typeof decodeBnbCompositeMessage>): Record<string, any> {
-  const [, swaps] = decodeAbiParameters(parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address"), fixture.decoded.acrossData.message);
-  const amount = BigInt(call.inputAmountAtomic), output = BigInt(call.expectedOutputAtomic), relayer = DESTINATION_TX_SENDER;
-  const vaultData = encodeFunctionData({ abi: traceAbi, functionName: "swap", args: [
-    { poolId: BNB_COMPOSITE.poolId, kind: 0, assetIn: BNB_COMPOSITE.weth, assetOut: BNB_COMPOSITE.wbnb, amount, userData: "0x" },
-    { sender: BNB_COMPOSITE.core, fromInternalBalance: false, recipient: BNB_COMPOSITE.core, toInternalBalance: false }, 0n, BigInt(call.deadlineAtomic),
-  ] });
-  const core = frame(BNB_COMPOSITE.flyRouter, BNB_COMPOSITE.core, coreTraceInput(call.flyCalldata), 0n, [
-    tokenFrame(BNB_COMPOSITE.core, BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.vault, amount]),
-    frame(BNB_COMPOSITE.core, BNB_COMPOSITE.vault, vaultData, 0n, [
-      { ...frame(BNB_COMPOSITE.vault, BNB_COMPOSITE.pool, encodeFunctionData({ abi: traceAbi, functionName: "onSwap", args: [
-        { kind: 0, tokenIn: BNB_COMPOSITE.weth, tokenOut: BNB_COMPOSITE.wbnb, amount, poolId: BNB_COMPOSITE.poolId,
-          lastChangeBlock: 123n, from: BNB_COMPOSITE.core, to: BNB_COMPOSITE.core, userData: "0x" }, 1n, 1n,
-      ] }), 0n, [], `0x${output.toString(16).padStart(64, "0")}`), type: "STATICCALL" },
-      tokenFrame(BNB_COMPOSITE.vault, BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.core, BNB_COMPOSITE.vault, amount]),
-      tokenFrame(BNB_COMPOSITE.vault, BNB_COMPOSITE.wbnb, "transfer", [BNB_COMPOSITE.core, output]),
-    ], `0x${output.toString(16).padStart(64, "0")}`),
-    frame(BNB_COMPOSITE.core, BNB_COMPOSITE.wbnb, encodeFunctionData({ abi: traceAbi, functionName: "withdraw", args: [output] }), 0n,
-      [frame(BNB_COMPOSITE.wbnb, BNB_COMPOSITE.core, "0x", output)]),
-    frame(BNB_COMPOSITE.core, BNB_COMPOSITE.flyRouter, "0x", output),
-  ]);
-  const fly = frame(BNB_COMPOSITE.executor, BNB_COMPOSITE.flyRouter, call.flyCalldata, 0n, [
-    tokenFrame(BNB_COMPOSITE.flyRouter, BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.executor, BNB_COMPOSITE.core, amount]),
-    core, frame(BNB_COMPOSITE.flyRouter, BNB_COMPOSITE.executor, "0x", output),
-  ]);
-  const executorData = encodeFunctionData({ abi: traceAbi, functionName: "swapAndCompleteBridgeTokens", args: [
-    call.transactionId, swaps, BNB_COMPOSITE.weth, call.finalReceiver,
-  ] });
-  const executor = frame(BNB_COMPOSITE.receiver, BNB_COMPOSITE.executor, executorData, 0n, [
-    tokenFrame(BNB_COMPOSITE.executor, BNB_COMPOSITE.weth, "transferFrom", [BNB_COMPOSITE.receiver, BNB_COMPOSITE.executor, amount]),
-    tokenFrame(BNB_COMPOSITE.executor, BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.flyRouter, amount]),
-    fly, frame(BNB_COMPOSITE.executor, call.finalReceiver, "0x", output),
-  ]);
-  const handler = encodeFunctionData({ abi: traceAbi, functionName: "handleV3AcrossMessage",
-    args: [BNB_COMPOSITE.weth, amount, relayer, fixture.decoded.acrossData.message] });
-  const receiver = frame(BNB_COMPOSITE.spokePool, BNB_COMPOSITE.receiver, handler, 0n, [
-    tokenFrame(BNB_COMPOSITE.receiver, BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, amount]), executor,
-    tokenFrame(BNB_COMPOSITE.receiver, BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.executor, 0n]),
-  ]);
-  return frame(relayer, BNB_COMPOSITE.spokePool, DESTINATION_TX_CALLDATA, 0n, [
-    tokenFrame(BNB_COMPOSITE.spokePool, BNB_COMPOSITE.weth, "transfer", [BNB_COMPOSITE.receiver, amount]), receiver,
-  ]);
-}
-function frame(from: Address, to: Address, input: Hex, value: bigint, calls: readonly unknown[] = [], output: Hex = "0x") {
-  return { type: "CALL", from, to, value: `0x${value.toString(16)}`, input, output, calls };
-}
-function tokenFrame(from: Address, to: Address, name: "approve" | "transfer" | "transferFrom" | "withdraw", args: readonly unknown[]) {
-  return frame(from, to, encodeFunctionData({ abi: traceAbi, functionName: name, args: args as never }), 0n, [],
-    name === "withdraw" ? "0x" : `0x${"0".repeat(63)}1`);
-}
-function coreTraceInput(flyCalldata: Hex): Hex {
-  const raw = Buffer.from(flyCalldata.slice(2), "hex"), length = Number(BigInt(`0x${raw.subarray(36, 68).toString("hex")}`));
-  return `0x158f6894${raw.subarray(4, 68 + length).toString("hex")}`;
-}
-function verifyTrace(trace: unknown, transactionHash: Hex, message: Hex, call: ReturnType<typeof decodeBnbCompositeMessage>) {
-  return verifyBnbCompositeTrace(trace, transactionHash, message, call,
-    { sender: DESTINATION_TX_SENDER, calldata: DESTINATION_TX_CALLDATA });
-}
-function tracePaths(root: any): readonly (readonly (string | number)[])[] {
-  const result: (string | number)[][] = [];
-  const visit = (node: any, path: (string | number)[]) => { result.push(path); node.calls.forEach((child: any, index: number) => visit(child, [...path, "calls", index])); };
-  visit(root, []); return result;
-}
-function atPath(root: any, path: readonly (string | number)[]): any { return path.reduce((value, key) => value[key], root); }

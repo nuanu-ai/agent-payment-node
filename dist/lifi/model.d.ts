@@ -175,9 +175,12 @@ export interface BridgeCompositeTraceProof {
     readonly outcome: "completed_native" | "recovered_weth" | "below_floor" | "protocol_mismatch";
     readonly transactionHash: Hex;
     readonly inputAmountAtomic: string;
+    /** The native value Fly's router received from Core (gross output before retention); null unless the swap ran. */
     readonly vaultOutputAtomic: string | null;
     readonly deliveredAmountAtomic: string;
     readonly retainedAmountAtomic: string;
+    /** WETH sent back to the recipient (the fill above the Fly input, or all of it when the swap reverted); absent before 0.5.93. */
+    readonly returnedWethAtomic?: string;
     readonly traceHash: string;
 }
 export interface BridgeNativeTransferProof {

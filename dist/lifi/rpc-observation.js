@@ -1,6 +1,6 @@
 import { ApnError } from "../errors.js";
 import { evmRpcAddress, evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../evm-rpc-codec.js";
-import { verifyBnbCompositeTrace } from "./bnb-composite.js";
+import { verifyBnbCompositeTrace } from "./bnb-composite-trace.js";
 import { hashObject } from "../canonical.js";
 import { rpcBlockValue, rpcExpectedChainValue } from "./rpc-batch-codec.js";
 import { bridgeActualFees } from "./rpc-fees.js";
@@ -107,7 +107,7 @@ export async function observeCanonical(c, hash, expected, nativeDelivery, includ
         if (nativeDelivery.composite === undefined)
             nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
         else
-            compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call, { sender: identity.from, calldata: bridgeHex(tx.input, 24_576, undefined, "APN_RPC_PROTOCOL") });
+            compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call, { sender: identity.from, calldata: bridgeHex(tx.input, 24_576, undefined, "APN_RPC_PROTOCOL"), amountAtomic: nativeDelivery.composite.fillAmountAtomic });
     }
     return { transaction: { chainId: c.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: c.origin, ...identity,
             ...(fees ?? {}), status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },

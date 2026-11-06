@@ -52,7 +52,7 @@ async function observeDestination({ request, tool }: Route, receipt: ReceiptRout
     const canonical = await rpc.observeDestination!(hash); assert(canonical?.transaction.safeBlock);
     const call = decodeBnbCompositeMessage(bnb.acrossData.message, bnb.bridgeData.transactionId, bnb.bridgeData.receiver);
     const found = await rpc.observeDestination!(hash, { recipient: LIFI_RECIPIENT, from: emitter, minimumAmountAtomic: "1",
-      composite: { message: bnb.acrossData.message, call } }).catch((error: ApnError) => error);
+      composite: { message: bnb.acrossData.message, call, fillAmountAtomic: bnb.acrossData.outputAmount } }).catch((error: ApnError) => error);
     if (!(found instanceof Error)) assert.equal(found?.receipt.compositeTrace?.outcome, "protocol_mismatch");
     else { assert.equal(found.code, "APN_RPC_BUDGET_EXCEEDED"); outcome = `budget:${found.details?.reason}`; }
   } else {

@@ -221,7 +221,11 @@ export class BridgeObservation {
     async destinationCandidate(op, hash, destination) {
         const request = op.intent.materialization.request;
         const proveNativeDelta = bridgeProviderBoundNativeDestination(request);
-        const bnb = op.intent.decoded.composite !== undefined;
+        const bnb = op.intent.decoded.composite !== undefined, protocol = op.intent.decoded.protocol;
+        // The composite exists only on the Across lane; its fill amount is the deposit's output the FilledRelay proves.
+        const across = protocol.kind === "across" ? protocol : null;
+        if (bnb && across === null)
+            bridgeFailure("APN_STATE_CORRUPT", "bnb_composite_protocol");
         let canonical = null;
         const observe = async (transactionHash, nativeDelivery) => destination.observeDestination === undefined
             ? await destination.observe(transactionHash, undefined, nativeDelivery)
@@ -238,7 +242,7 @@ export class BridgeObservation {
         const found = requireSafeDestination(await observe(hash, proveNativeDelta ? { recipient: request.recipient,
             from: bnb ? BNB_COMPOSITE.executor : bridgeProtocolEmitter(request.toChainId, "across", request.toToken),
             ...(bnb ? { minimumAmountAtomic: op.intent.decoded.minimumOutputAtomic,
-                composite: { message: op.intent.decoded.protocol.kind === "across" ? op.intent.decoded.protocol.message : "0x", call: op.intent.decoded.composite } } : { amountAtomic: op.sourceProof.correlation.kind === "across"
+                composite: { message: across.message, call: op.intent.decoded.composite, fillAmountAtomic: across.outputAmountAtomic } } : { amountAtomic: op.sourceProof.correlation.kind === "across"
                     ? op.sourceProof.correlation.outputAmountAtomic : op.intent.decoded.minimumOutputAtomic }) } : undefined));
         if (canonical !== null && (!bridgeSame(proofIdentity(canonical.transaction), proofIdentity(found.transaction)) ||
             !bridgeSame(canonical.receipt.logs, found.receipt.logs)))

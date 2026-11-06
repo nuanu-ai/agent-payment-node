@@ -194,13 +194,17 @@ export class LifiTestRpc implements BridgeRpcPort {
       let shaped = generated;
       if (d.composite !== undefined && this.destinationCompositeOutcome !== "completed_native") {
         const outcome = this.destinationCompositeOutcome, amount = outcome === "below_floor" ? (BigInt(d.minimumOutputAtomic) - 1n).toString() : "0";
+        const filled = source.correlation.kind === "across" ? source.correlation.outputAmountAtomic : "0";
+        // A reverted swap leaves no Executor return: the Receiver sends the whole fill back as WETH instead.
+        const recovered = generated.logs.filter((log) => !(log.address === BNB_COMPOSITE.weth && log.topics[1]?.endsWith(BNB_COMPOSITE.executor.slice(2).toLowerCase())));
         shaped = { ...generated,
-          logs: outcome === "recovered_weth" ? [...generated.logs, eventLog(BNB_COMPOSITE.weth, "Transfer", {
-            from: BNB_COMPOSITE.receiver, to: d.recipient, value: BigInt(d.composite.inputAmountAtomic),
+          logs: outcome === "recovered_weth" ? [...recovered, eventLog(BNB_COMPOSITE.weth, "Transfer", {
+            from: BNB_COMPOSITE.receiver, to: d.recipient, value: BigInt(filled),
           })] : generated.logs,
           nativeBalance: { ...generated.nativeBalance!, afterBalanceAtomic: (100n + BigInt(amount)).toString(), deltaAtomic: amount },
           compositeTrace: { ...generated.compositeTrace!, outcome, deliveredAmountAtomic: amount,
-            vaultOutputAtomic: outcome === "below_floor" ? amount : null, retainedAmountAtomic: "0" } };
+            vaultOutputAtomic: outcome === "below_floor" ? amount : null, retainedAmountAtomic: "0",
+            ...(outcome === "recovered_weth" ? { returnedWethAtomic: filled } : {}) } };
       }
       const receipt = { ...shaped, transactionHash: hash, blockNumberAtomic: "2000", blockHash: destinationBlock.hash,
           ...(generated.nativeTransfer === undefined || generated.nativeTransfer === null ? {} : { nativeTransfer: {

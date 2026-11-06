@@ -42,13 +42,13 @@ export interface BridgeRpcPort {
   feeQuotes?(envelopes: readonly Pick<BridgeEnvelope, "economics">[]): Promise<readonly EvmFeeQuote[]>;
   send(rawTransaction: Hex, beforeSend?: BridgeAuthorityCheck): Promise<Hex>;
   observe(transactionHash: Hex, expected?: BridgeEnvelope, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string;
-    composite?: Readonly<{ message: Hex; call: BnbCompositeCall }> }>, options?: BridgeObservationOptions): Promise<{
+    composite?: Readonly<{ message: Hex; call: BnbCompositeCall; fillAmountAtomic: string }> }>, options?: BridgeObservationOptions): Promise<{
     readonly transaction: BridgeTransactionProof;
     readonly receipt: BridgeProtocolReceipt;
   } | null>;
   /** Destination delivery observation omits relayer-paid transaction fee evidence. */
   observeDestination?(transactionHash: Hex, nativeDelivery?: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string;
-    composite?: Readonly<{ message: Hex; call: BnbCompositeCall }> }>, options?: BridgeObservationOptions): Promise<{
+    composite?: Readonly<{ message: Hex; call: BnbCompositeCall; fillAmountAtomic: string }> }>, options?: BridgeObservationOptions): Promise<{
     readonly transaction: BridgeDestinationTransactionProof;
     readonly receipt: BridgeProtocolReceipt;
   } | null>;

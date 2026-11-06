@@ -188,16 +188,24 @@ function acrossDestination(source, decoded, receipt) {
             if (trace === undefined || trace === null || trace.transactionHash !== receipt.transactionHash ||
                 trace.inputAmountAtomic !== decoded.composite.inputAmountAtomic || !/^[a-f0-9]{64}$/u.test(trace.traceHash))
                 fail("bnb_destination_trace");
-            const recovered = events(receipt, BNB_COMPOSITE.weth, EVENT_TOPICS.transfer, "Transfer");
-            const exactRecovered = recovered.filter((x) => x.from === BNB_COMPOSITE.receiver && x.to === decoded.recipient &&
-                x.value.toString() === decoded.composite.inputAmountAtomic);
+            // WETH back to the recipient: the Receiver returns the whole fill when the swap reverted; the Executor returns the
+            // fill above the Fly input after a swap. Each movement has exactly one Transfer log of the trace's amount.
+            const filled = c.outputAmountAtomic, returned = trace.returnedWethAtomic;
+            if (returned === undefined)
+                return fail("bnb_destination_trace");
+            const weth = events(receipt, BNB_COMPOSITE.weth, EVENT_TOPICS.transfer, "Transfer");
+            const toRecipient = (from, value) => weth.filter((x) => x.from === from && x.to === decoded.recipient && x.value.toString() === value);
+            const exactRecovered = toRecipient(BNB_COMPOSITE.receiver, filled);
             if (trace.outcome === "recovered_weth") {
-                if (exactRecovered.length !== 1 || trace.deliveredAmountAtomic !== "0" || BigInt(balance.deltaAtomic) !== 0n)
+                if (exactRecovered.length !== 1 || returned !== filled || trace.deliveredAmountAtomic !== "0" || BigInt(balance.deltaAtomic) !== 0n)
                     fail("bnb_recovery_evidence");
             }
             else if (exactRecovered.length !== 0)
                 fail("bnb_recovery_conflict");
             if (trace.outcome === "completed_native" || trace.outcome === "below_floor") {
+                if (returned !== (BigInt(filled) - BigInt(decoded.composite.inputAmountAtomic)).toString() ||
+                    (returned !== "0" && toRecipient(BNB_COMPOSITE.executor, returned).length !== 1))
+                    fail("bnb_returned_weth");
                 if (trace.vaultOutputAtomic === null || BigInt(trace.deliveredAmountAtomic) <= 0n ||
                     BigInt(balance.deltaAtomic) < BigInt(trace.deliveredAmountAtomic) ||
                     (trace.outcome === "completed_native") !== (BigInt(trace.deliveredAmountAtomic) >= BigInt(decoded.minimumOutputAtomic)))

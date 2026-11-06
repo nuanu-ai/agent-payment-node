@@ -53,14 +53,17 @@ export function makeDestinationReceipt(d: DecodedBridgeCall, source: BridgeSourc
     });
     if (d.destinationToken === BRIDGE_ZERO_ADDRESS) {
       if (d.composite !== undefined) {
-        const amount = d.composite.expectedOutputAtomic, result = receipt(d.destinationChainId, [fill]);
+        // The Executor returns the fill above the Fly input to the recipient as WETH.
+        const amount = d.composite.expectedOutputAtomic, returned = BigInt(c.outputAmountAtomic) - BigInt(d.composite.inputAmountAtomic);
+        const result = receipt(d.destinationChainId, returned > 0n ? [fill, eventLog(BNB_COMPOSITE.weth, "Transfer", {
+          from: BNB_COMPOSITE.executor, to: d.recipient, value: returned })] : [fill]);
         const beforeBlock = { numberAtomic: "122", hash: `0x${"bc".repeat(32)}` as Hex, timestampAtomic: "1" };
         return { ...result, nativeBalance: { recipient: d.recipient, beforeBlock,
           afterBlock: { numberAtomic: result.blockNumberAtomic, hash: result.blockHash, timestampAtomic: "2" }, beforeBalanceAtomic: "100",
           afterBalanceAtomic: (100n + BigInt(amount)).toString(), deltaAtomic: amount },
           nativeTransfer: null, compositeTrace: { outcome: "completed_native", transactionHash: result.transactionHash,
             inputAmountAtomic: d.composite.inputAmountAtomic, vaultOutputAtomic: amount, deliveredAmountAtomic: amount,
-            retainedAmountAtomic: "0", traceHash: "a".repeat(64) } };
+            retainedAmountAtomic: "0", returnedWethAtomic: returned.toString(), traceHash: "a".repeat(64) } };
       }
       const wrapped = BRIDGE_ASSET_REGISTRY[d.destinationChainId].nativeCoin.wrapped;
       const unwrap = wrapped.events === "weth9" ? eventLog(wrapped.address, "Withdrawal", { src: emitter, wad: BigInt(c.outputAmountAtomic) })

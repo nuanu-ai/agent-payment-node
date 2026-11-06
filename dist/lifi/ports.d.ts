@@ -54,6 +54,7 @@ export interface BridgeRpcPort {
         composite?: Readonly<{
             message: Hex;
             call: BnbCompositeCall;
+            fillAmountAtomic: string;
         }>;
     }>, options?: BridgeObservationOptions): Promise<{
         readonly transaction: BridgeTransactionProof;
@@ -68,6 +69,7 @@ export interface BridgeRpcPort {
         composite?: Readonly<{
             message: Hex;
             call: BnbCompositeCall;
+            fillAmountAtomic: string;
         }>;
     }>, options?: BridgeObservationOptions): Promise<{
         readonly transaction: BridgeDestinationTransactionProof;
