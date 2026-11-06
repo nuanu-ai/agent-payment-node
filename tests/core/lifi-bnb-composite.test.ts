@@ -128,10 +128,15 @@ test("the BNB consent names Fly's unsigned route, the native-only guarantee and 
     summary: { ...publicBridgeOperation(operation), expires_at: new Date(Date.now() + 600_000).toISOString() }, compositeReturn: weth };
   assert.equal(await tty.confirm(input), false);
   for (const text of ["Fly Core route (unsigned, chosen by Fly for this quote)", "Guaranteed: only the minimum native destination output",
-    `Across fills ${weth.fillWethAtomic} atomic, Fly swaps ${weth.swappedWethAtomic}`, `other ${weth.unswappedWethReturnAtomic} atomic is returned as WETH after the swap, without the router's protection`]) {
+    `Across fills ${weth.fillWethAtomic} atomic, Fly swaps ${weth.swappedWethAtomic}`, `other ${weth.unswappedWethReturnAtomic} atomic is returned as WETH after the swap, without the router's protection`,
+    `Fly retention: when the swap beats Fly's signed expected output, the router keeps up to ${operation.intent.decoded.composite!.maximumRetentionBps} basis points of the swap output but pays at least that expected output.`]) {
     assert.ok(printed.includes(text), text);
   }
   assert.ok(!printed.includes("WETH/WBNB pool"));
+  printed = "";
+  const composite = { ...input.summary.route.composite!, maximum_retention_bps: 10_000 };
+  assert.equal(await tty.confirm({ ...input, summary: { ...input.summary, route: { ...input.summary.route, composite } } }), false);
+  assert.ok(printed.includes("keeps up to 10000 basis points of the swap output but pays at least that expected output (10000: Fly keeps everything above expected)."));
   await assert.rejects(tty.confirm({ ...input, compositeReturn: null }), /no WETH accounting/u);
 });
 
@@ -184,12 +189,17 @@ test("the Fly decoder reads the router's header and rejects every header field A
   }
 });
 
-test("Fly retention up to 10000 basis points decodes; above it the router could not pay any surplus", () => {
-  const swap = live.destination.swaps[0], at = 68 + 137, calldata = Buffer.from(swap.callData.slice(2), "hex");
-  assert.equal(decodeFlyProgram(swap.callData, fixture.decoded.bridgeData.receiver, BigInt(swap.fromAmount)).maximumRetentionBps, 500);
-  // One more byte under the compact word: still a whole-byte shift inside the payload, now a retention above 10000.
-  assert.throws(() => decodeFlyProgram(mutate(swap.callData, at, calldata[at]! - 8), fixture.decoded.bridgeData.receiver,
-    BigInt(swap.fromAmount)), /fly_economics/u);
+test("Fly retention up to 10000 basis points decodes; above it the router reverts every swap that beats expected", () => {
+  const swap = live.destination.swaps[0], calldata = Buffer.from(swap.callData.slice(2), "hex");
+  const decode = (bps: number) => {
+    // The retention word is two bytes (shift 240) at the router-calldata offset its compact pointer names.
+    const out = Buffer.from(calldata), word = out.readUInt16BE(68 + 138); out.writeUInt16BE(bps, word);
+    return decodeFlyProgram(`0x${out.toString("hex")}`, fixture.decoded.bridgeData.receiver, BigInt(swap.fromAmount));
+  };
+  assert.equal(calldata[68 + 137], 240);
+  assert.equal(decode(500).maximumRetentionBps, 500);
+  assert.equal(decode(10_000).maximumRetentionBps, 10_000);
+  assert.throws(() => decode(10_001), /fly_economics/u);
 });
 
 test("the 2026-11-05 multi-hop Fly program decodes and carries Fly's own signature over its header", async () => {

@@ -402,8 +402,9 @@ itself pays the Executor only through the signed retention rule and reverts unle
 at least the signed floor, so the route cannot deliver less native BNB than the floor; the Receiver then returns the
 whole fill as WETH. That floor is the guarantee: a route may deliver anything at or above it. Retention only splits
 output above the signed expected output: the router then pays the larger of that expected output and the output less the
-signed retention share, so at 10000 basis points, which every live quote carries since 2026-11-06, Fly keeps all output
-above expected and the Executor gets exactly the expected output. APN accepts retention up to 10000; above it the
+signed retention share. Fly signs retention per quote (500 in the 2026-11-05 capture, 10000 in the real fill and in every
+quote QA drew on 2026-11-06); at 10000 Fly keeps all output above expected and the router pays the Executor exactly the
+expected output. APN accepts retention up to 10000; above it the
 router's checked subtraction would revert every swap that beats expected. The signed header, raw payload hash, owner output floor, retention bound, self
 recipient and source debit caps are part of the durable operation integrity binding.
 

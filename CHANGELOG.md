@@ -4,7 +4,7 @@ Release artifacts, their SHA-256 digests and provenance for every version are on
 
 ## 0.5.94 — 2026-11-06
 
-- Ethereum ETH to BNB (LI.FI Across + Fly): prepare accepts Fly's retention up to 10000 basis points instead of 500. Every live Fly quote now carries 10000 (QA saw it on 0.0003–0.001 ETH), so 0.5.93 refused each prepare with `fly_economics`. Retention never touches the guaranteed floor: the router applies it only when the swap beats Fly's signed expected output, and then still pays at least that expected output, so at 10000 Fly keeps all output above expected. Above 10000 the router's subtraction would revert every swap that beats expected, so that stays refused. The approval screen says what the signed retention does.
+- Ethereum ETH to BNB (LI.FI Across + Fly): prepare accepts Fly's retention up to 10000 basis points instead of 500. Fly signs retention per quote, and every quote QA drew on 2026-11-06 (0.0003–0.001 ETH) carried 10000, so 0.5.93 refused each prepare with `fly_economics`. Retention never touches the guaranteed floor: the router applies it only when the swap beats Fly's signed expected output, and then still pays at least that expected output, so at 10000 Fly keeps all output above expected. Above 10000 the router's subtraction would revert every swap that beats expected, so that stays refused. The approval screen says what the signed retention does.
 
 ## 0.5.93 — 2026-11-06
 
