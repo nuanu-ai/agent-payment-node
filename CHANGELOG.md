@@ -2,6 +2,10 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.94 — 2026-11-06
+
+- Ethereum ETH to BNB (LI.FI Across + Fly): prepare accepts Fly's retention up to 10000 basis points instead of 500. Every live Fly quote now carries 10000 (QA saw it on 0.0003–0.001 ETH), so 0.5.93 refused each prepare with `fly_economics`. Retention never touches the guaranteed floor: the router applies it only when the swap beats Fly's signed expected output, and then still pays at least that expected output, so at 10000 Fly keeps all output above expected. Above 10000 the router's subtraction would revert every swap that beats expected, so that stays refused. The approval screen says what the signed retention does.
+
 ## 0.5.93 — 2026-11-06
 
 - Ethereum ETH to BNB (LI.FI Across + Fly): prepare no longer requires one frozen Fly program. Fly picks its route by liquidity and changes it from quote to quote (on 2026-11-05 a 704-byte WETH → BTCB → WBNB → BNB route replaced the 457-byte Balancer one APN pinned, so every prepare failed `fly_program_shape` or `fly_abi_bounds`). APN now reads only the header Fly's router reads and signs: the Executor as recipient, WETH in, native out, the exact input, deadline, output floor, expected output, retention (still at most 500 bps), consumer, no router transfer, a well-formed signature from the pinned Fly signer and no swap fees. The route after it is opaque, because the router itself reverts unless the Executor's native balance grows by at least the signed floor. The payload bound is 3072 bytes, and the Balancer Vault and pool reads before the send are gone.

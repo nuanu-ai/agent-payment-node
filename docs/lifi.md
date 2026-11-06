@@ -400,8 +400,11 @@ floor. The rest of the program is Fly Core's route for that one quote (which poo
 which Fly chooses by liquidity and changes from quote to quote; it is not signed and APN does not interpret it. The router
 itself pays the Executor only through the signed retention rule and reverts unless the Executor's native balance grew by
 at least the signed floor, so the route cannot deliver less native BNB than the floor; the Receiver then returns the
-whole fill as WETH. That floor is the guarantee: a route may deliver anything at or above it, and above the expected
-output the router keeps at most the signed retention. The signed header, raw payload hash, owner output floor, retention bound, self
+whole fill as WETH. That floor is the guarantee: a route may deliver anything at or above it. Retention only splits
+output above the signed expected output: the router then pays the larger of that expected output and the output less the
+signed retention share, so at 10000 basis points, which every live quote carries since 2026-11-06, Fly keeps all output
+above expected and the Executor gets exactly the expected output. APN accepts retention up to 10000; above it the
+router's checked subtraction would revert every swap that beats expected. The signed header, raw payload hash, owner output floor, retention bound, self
 recipient and source debit caps are part of the durable operation integrity binding.
 
 Across fills more WETH than the Fly input (2–5% of the fill in the captured quotes), and LI.FI's Executor returns the

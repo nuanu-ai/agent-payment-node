@@ -184,6 +184,14 @@ test("the Fly decoder reads the router's header and rejects every header field A
   }
 });
 
+test("Fly retention up to 10000 basis points decodes; above it the router could not pay any surplus", () => {
+  const swap = live.destination.swaps[0], at = 68 + 137, calldata = Buffer.from(swap.callData.slice(2), "hex");
+  assert.equal(decodeFlyProgram(swap.callData, fixture.decoded.bridgeData.receiver, BigInt(swap.fromAmount)).maximumRetentionBps, 500);
+  // One more byte under the compact word: still a whole-byte shift inside the payload, now a retention above 10000.
+  assert.throws(() => decodeFlyProgram(mutate(swap.callData, at, calldata[at]! - 8), fixture.decoded.bridgeData.receiver,
+    BigInt(swap.fromAmount)), /fly_economics/u);
+});
+
 test("the 2026-11-05 multi-hop Fly program decodes and carries Fly's own signature over its header", async () => {
   assert.equal(live.flyPackedPayloadBytes, 704);
   const call = decodeBnbCompositeMessage(live.acrossData.message, live.bridgeData.transactionId, live.bridgeData.receiver);
