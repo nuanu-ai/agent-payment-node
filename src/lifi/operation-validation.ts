@@ -202,8 +202,11 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
       (op.intent.decoded.composite === undefined && (BigInt(p.amountAtomic) < BigInt(m.request.minOutputAtomic) || p.amountAtomic !== (s.sourceProof.correlation.kind === "across"
         ? s.sourceProof.correlation.outputAmountAtomic : s.sourceProof.correlation.amountReceivedAtomic)))) bridgeCorrupt();
   }
-  if (s.providerObservation?.status === "completed_observed") {
-    const p = s.providerObservation;
+  // A PARTIAL that backs a destination proof is held to COMPLETED's checks; a parked one without a proof is not read here.
+  const settled = s.providerObservation?.status === "completed_observed" ||
+    s.destinationProof !== null && bridgeProviderSettled(op.intent.decoded, s.providerObservation) ? s.providerObservation : null;
+  if (settled !== null) {
+    const p = settled;
     if (p.responseHash === null || !isEvmTransactionHash(p.destinationTransactionHash) || s.sourceProof === null ||
       bridge.phase !== "safe_success" || bridge.transactionHash !== s.sourceProof.transactionHash ||
       (s.destinationProof !== null && s.destinationProof.transactionHash !== p.destinationTransactionHash) ||

@@ -69,7 +69,7 @@ function compositeLines(composite, weth, expiresAt) {
         `Fly retention: when the swap beats Fly's signed expected output, the router keeps up to ${composite.maximum_retention_bps} basis points of the swap output but pays at least that expected output${composite.maximum_retention_bps === 10_000 ? " (10000: Fly keeps everything above expected)" : ""}.`,
         "Guaranteed: only the minimum native destination output, which Fly's router enforces; above it, delivery depends on Fly's route.",
         `WETH: Across fills ${weth.fillWethAtomic} atomic, Fly swaps ${weth.swappedWethAtomic}; the other ${weth.unswappedWethReturnAtomic} atomic is returned as WETH after the swap, without the router's protection.`,
-        `Fly deadline: this approval closes at ${expiresAt}, the earliest of Fly's signed deadline and any deadline inside its route; the Across fill must reach BSC before it, or the swap reverts and the WETH comes back.`,
+        `Fly deadline: this approval closes at ${expiresAt}, no later than Fly's deadline (the earlier of its signed one and any inside its route). The Across fill lands on BSC some seconds after sending and must arrive before Fly's deadline; a later fill reverts the swap and the WETH comes back.`,
         "Recovery outcome: a destination swap failure may return unswapped WETH; APN does not count that as native BNB completion.",
     ];
 }

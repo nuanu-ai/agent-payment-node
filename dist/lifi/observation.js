@@ -235,7 +235,10 @@ export class BridgeObservation {
             try {
                 validateBnbFilledRelay(op.sourceProof, op.intent.materialization, op.intent.decoded, canonical.receipt);
             }
-            catch {
+            // A provider-named transaction without this deposit's FilledRelay says nothing about the deposit: keep observing.
+            catch (error) {
+                if (error instanceof ApnError && error.details?.reason === "destination_fill_unmatched")
+                    throw error;
                 throw new BnbProtocolMismatch();
             }
         }

@@ -220,7 +220,8 @@ export class BridgeObservation {
     if (bnb) {
       canonical = requireSafeDestination(await observe(hash));
       try { validateBnbFilledRelay(op.sourceProof!, op.intent.materialization, op.intent.decoded, canonical.receipt); }
-      catch { throw new BnbProtocolMismatch(); }
+      // A provider-named transaction without this deposit's FilledRelay says nothing about the deposit: keep observing.
+      catch (error) { if (error instanceof ApnError && error.details?.reason === "destination_fill_unmatched") throw error; throw new BnbProtocolMismatch(); }
     }
     const found = requireSafeDestination(await observe(hash, proveNativeDelta ? { recipient: request.recipient,
       from: bnb ? BNB_COMPOSITE.executor : bridgeProtocolEmitter(request.toChainId, "across", request.toToken),

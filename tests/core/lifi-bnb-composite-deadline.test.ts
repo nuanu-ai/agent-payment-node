@@ -16,6 +16,8 @@ const revert = lifiCapture("bsc-across-fly-revert-20261106.json") as { relay: { 
 // The 2026-09-21 quote the eth-bnb fixture prepares, and the 2026-11-05 multi-hop one.
 const september = lifiCapture("bnb-composite-fly-20260921.json") as { decoded: { flyPackedPayload: Hex; acrossData: { message: Hex; quoteTimestamp: number } } };
 const november = lifiCapture("bnb-composite-fly-20261105.json") as { decoded: { acrossData: { message: Hex; quoteTimestamp: number } } };
+// Another user's successful 2026-11-05 fill: its multi-hop route carried the same kind of deadline.
+const filled = lifiCapture("bsc-across-fly-fill-20261105.json") as { relay: { message: Hex } };
 
 function decoded(message: Hex) {
   const [transactionId, , finalReceiver] = decodeAbiParameters(MESSAGE, message);
@@ -29,6 +31,8 @@ test("the earliest deadline inside Fly's unsigned route caps the signed one", ()
   // A value before the quote time is not a deadline of this quote; one after the signed deadline cannot bind first.
   assert.equal(flyRouteDeadline(call, 1793963619n), 1793963859n);
   assert.equal(flyRouteDeadline({ ...call, deadlineAtomic: "1793963600" }, 1793963500n), 1793963600n);
+  const fill = decoded(filled.relay.message), header = BigInt(fill.deadlineAtomic);
+  assert.equal(flyRouteDeadline(fill, header - 300n), header - 241n);
   for (const capture of [september, november]) {
     const routeless = decoded(capture.decoded.acrossData.message);
     assert.equal(flyRouteDeadline(routeless, BigInt(capture.decoded.acrossData.quoteTimestamp)), BigInt(routeless.deadlineAtomic));
@@ -60,7 +64,7 @@ test("a deadline inside Fly's route closes the approval window, and a passed one
   await assert.rejects((await fixture(now)).prepare("across", "bnb-route-expired-001"), /fly_route_deadline/u);
 });
 
-test("LI.FI's DONE/PARTIAL for a reverted Fly swap goes to the trace, which proves the WETH came back and frees the usage", async (t) => {
+test("LI.FI's DONE/PARTIAL for a reverted Fly swap goes to the trace, which proves the WETH came back and finalizes the usage", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root, "eth-bnb");
   // Where 0.5.94 left QA's operation: PARTIAL without a destination proof, parked as unknown finality.
@@ -90,4 +94,32 @@ test("on PARTIAL the trace still decides: a swap that delivered native BNB compl
   await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
   const record = (await findStored(s.core.bridges.records, prepared.id))!;
   assert.equal(record.state, "completed"); assert.equal(record.destinationProof?.compositeTrace?.outcome, "completed_native");
+});
+
+test("a LI.FI-named BSC transaction without this deposit's fill leaves the operation observable, never a terminal mismatch", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "eth-bnb"), observe = s.destination.observe.bind(s.destination);
+  s.provider.statusValue = "partial_observed";
+  // The named transaction exists and is safe, but no FilledRelay of the pinned SpokePool is in it.
+  s.destination.observe = async (...args: Parameters<typeof observe>) => {
+    const found = await observe(...args);
+    return found === null ? null : { ...found, receipt: { ...found.receipt, logs: found.receipt.logs.filter((log: { address: string }) =>
+      log.address.toLowerCase() !== "0x4e8e101924ede233c13e2d8622dc8aed2872d505") } };
+  };
+  const prepared = await s.prepare("across", "bnb-unmatched-001");
+  await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+  const record = (await findStored(s.core.bridges.records, prepared.id))!;
+  assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "evidence_unavailable");
+  assert.equal(record.destinationProof, null);
+});
+
+test("PARTIAL on a native lane without the composite still parks the operation unproved", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "eth-linea");
+  s.provider.statusValue = "partial_observed";
+  const prepared = await s.prepare("across", "linea-partial-001");
+  await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+  const record = (await findStored(s.core.bridges.records, prepared.id))!;
+  assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "provider_partial_observed_unproved");
+  assert.equal(record.destinationProof, null);
 });
