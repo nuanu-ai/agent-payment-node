@@ -246,8 +246,11 @@ function acrossFilledRelay(source, decoded, receipt) {
     // that one must match the whole stored tuple. None, or two, leave the delivery unproven.
     const fills = events(receipt, emitter, EVENT_TOPICS.filledRelay, "FilledRelay");
     const ours = fills.filter((x) => x.originChainId === BigInt(c.originChainId) && x.depositId.toString() === c.depositId);
+    // An unmatched fill carries its reason as a detail: the BNB composite reads it to keep observing instead of failing.
+    if (ours.length === 0)
+        bridgeFailure("APN_RPC_PROTOCOL", "destination_fill_unmatched", {});
     if (ours.length !== 1)
-        fail(ours.length === 0 ? "destination_fill_unmatched" : "destination_fill_ambiguous");
+        fail("destination_fill_ambiguous");
     const e = ours[0], info = e.relayExecutionInfo;
     const messageHash = decoded.composite === undefined ? BRIDGE_ZERO_WORD : keccak256(decoded.protocol.kind === "across" ? decoded.protocol.message : "0x");
     if (e.originChainId !== BigInt(c.originChainId) || e.depositId.toString() !== c.depositId || e.inputToken.toLowerCase() !== c.inputToken ||

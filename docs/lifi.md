@@ -408,6 +408,16 @@ expected output. APN accepts retention up to 10000; above it the
 router's checked subtraction would revert every swap that beats expected. The signed header, raw payload hash, owner output floor, retention bound, self
 recipient and source debit caps are part of the durable operation integrity binding.
 
+Fly's route can carry deadlines of its own that the signed header does not cover: on 2026-11-06 a hop reverted
+`0x3e9e7bf1(deadline, now)` at a deadline 241 s before the header's, because the approval came after it. APN reads every
+4-byte big-endian value in the route bytes from the Across quote time up to the header deadline as a possible route
+deadline (an ABI or compact word of any width holds one); the earliest closes the approval window, and prepare refuses a
+route whose deadline has already passed. A chance match only shortens the window. APN adds no margin for the fill itself:
+current multi-hop routes put their deadline about 60 s after the quote, and QA's fill landed 24 s after the approval, so
+any fixed margin would refuse those quotes outright. The consent names the closing time and says the Across fill, which
+lands some seconds after sending, has to reach BSC before Fly's deadline; a later fill reverts the swap and returns the
+WETH, which APN proves and closes.
+
 Across fills more WETH than the Fly input (2–5% of the fill in the captured quotes), and LI.FI's Executor returns the
 rest to the recipient as WETH after the swap. The router does not protect that WETH: it waits at LI.FI's shared
 Executor while Fly's unsigned route runs. The bridge consent shows the fill, the Fly input and that remainder next to
@@ -432,7 +442,11 @@ payment to the recipient. Inside Fly Core only the native settlement is read: th
 equal the retention rule applied to what Core paid the router, and the Executor must forward that plus anything Core
 paid it directly. The proof records the WETH the Executor returned above the Fly input as `returnedWethAtomic` next
 to the native delivery, each with its Transfer log or balance delta; a fill whose returned WETH did not arrive is a
-`protocol_mismatch`. A reverted swap returns the whole fill as WETH. The digest covers the whole tree.
+`protocol_mismatch`. A reverted swap returns the whole fill as WETH. The digest covers the whole tree. LI.FI reports such a
+fill as DONE/PARTIAL; on this lane PARTIAL leads to the same trace proof as COMPLETED, and the trace alone decides the
+outcome, so a reverted swap ends as `destination_failed` with `recovered_weth` and its usage is finalized as spent. A
+transaction LI.FI names that holds no FilledRelay of this deposit proves nothing about it and leaves the operation
+observable (`evidence_unavailable`), never a terminal mismatch.
 
 Destination outcomes are durable across restart: `completed_native` is the only successful BNB delivery;
 `recovered_weth` (unswapped WETH returned to the recipient), `below_floor` and `protocol_mismatch` end as

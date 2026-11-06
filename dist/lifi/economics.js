@@ -3,6 +3,7 @@ import { validateEconomics } from "../transfer-policy.js";
 import { bridgeNativePrincipal } from "./asset-registry.js";
 import { bridgeDeploymentCheck } from "./deployment-check.js";
 import { bridgeDeployment } from "./deployments.js";
+import { flyRouteDeadline } from "./bnb-composite.js";
 import { FEE_FORWARDER } from "./abi.js";
 import { bridgeFeeForwarder } from "./decode.js";
 import { ApnError } from "../errors.js";
@@ -143,7 +144,7 @@ export function bridgeExpiry(m, decoded, account, preparedAt, now) {
             if (candidate < expires)
                 expires = candidate;
         if (decoded.composite !== undefined) {
-            const flyDeadline = BigInt(decoded.composite.deadlineAtomic) * 1000n;
+            const flyDeadline = flyRouteDeadline(decoded.composite, BigInt(p.quoteTimestamp)) * 1000n;
             if (flyDeadline < expires)
                 expires = flyDeadline;
         }
@@ -163,6 +164,8 @@ function assertProtocolTime(m, decoded, account) {
     if (decoded.composite !== undefined && (now >= BigInt(decoded.composite.deadlineAtomic) || BigInt(decoded.composite.deadlineAtomic) > BigInt(p.fillDeadline))) {
         bridgeFailure("APN_REPREPARE_REQUIRED", "fly_deadline_validity");
     }
+    if (decoded.composite !== undefined && now >= flyRouteDeadline(decoded.composite, BigInt(p.quoteTimestamp)))
+        bridgeFailure("APN_REPREPARE_REQUIRED", "fly_route_deadline");
 }
 export function assertBridgeRemaining(op, now) {
     if (Date.parse(op.intent.expiresAt) - now < BRIDGE_MIN_REMAINING_MS)

@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 import type { Hex } from "../model.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
 import type { BridgeDestinationTransactionProof, BridgeTransactionProof } from "./model.js";
-import { BRIDGE_TELEMETRY_ROWS, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
+import { BRIDGE_TELEMETRY_ROWS, bridgeProviderSettled, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
 import { bridgeDeployment, bridgeProtocolEmitter } from "./deployments.js";
@@ -127,7 +127,7 @@ export class BridgeObservation {
     const hint = op.providerObservation?.destinationTransactionHash;
     const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
     if (providerBoundNative) {
-      if (op.providerObservation?.status !== "completed_observed" || !isEvmTransactionHash(hint)) return await this.waiting(op);
+      if (!bridgeProviderSettled(op.intent.decoded, op.providerObservation) || !isEvmTransactionHash(hint)) return await this.waiting(op);
       const destination = this.destination(), beforeTelemetry = destination.readTelemetry?.() ?? null;
       let proof: BridgeVerifiedDestinationProof;
       try {
@@ -220,7 +220,8 @@ export class BridgeObservation {
     if (bnb) {
       canonical = requireSafeDestination(await observe(hash));
       try { validateBnbFilledRelay(op.sourceProof!, op.intent.materialization, op.intent.decoded, canonical.receipt); }
-      catch { throw new BnbProtocolMismatch(); }
+      // A provider-named transaction without this deposit's FilledRelay says nothing about the deposit: keep observing.
+      catch (error) { if (error instanceof ApnError && error.details?.reason === "destination_fill_unmatched") throw error; throw new BnbProtocolMismatch(); }
     }
     const found = requireSafeDestination(await observe(hash, proveNativeDelta ? { recipient: request.recipient,
       from: bnb ? BNB_COMPOSITE.executor : bridgeProtocolEmitter(request.toChainId, "across", request.toToken),
@@ -305,7 +306,9 @@ function reusableProviderObservation(op: BridgeOperationRecord): boolean {
   if (op.sourceProof === null || bridge?.role !== "bridge" || bridge.phase !== "safe_success" ||
     bridge.transactionHash !== op.sourceProof.transactionHash || observation.responseHash === null ||
     !isEvmTransactionHash(observation.destinationTransactionHash)) bridgeFailure("APN_STATE_CORRUPT", "durable_bridge_provider_binding");
-  return op.failure?.observationRpc?.reason !== "destination_transaction_reverted";
+  // A named transaction that reverted or holds no fill of this deposit is asked about again, so the operation can move on.
+  const reason = op.failure?.observationRpc?.reason;
+  return reason !== "destination_transaction_reverted" && reason !== "destination_fill_unmatched";
 }
 function requireSafeDestination<T extends { readonly transaction: { readonly safeBlock: unknown | null; readonly status: "success" | "reverted" } }>(observation: T | null): T {
   if (observation === null || observation.transaction.safeBlock === null) throw new DestinationPending();

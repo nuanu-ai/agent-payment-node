@@ -1,7 +1,7 @@
 import { hashObject, sha256 } from "../canonical.js";
 import { decodeBridgeCall } from "./decode.js";
 import { bridgeApprovalPolicyBinding, bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
-import { BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot, type BridgeEffect, type BridgeEffectPhase,
+import { BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeProviderSettled, bridgeSnapshot, type BridgeEffect, type BridgeEffectPhase,
   type BridgeEffectSnapshot, type BridgeOperationRecord, type BridgeState, type BridgeTransition } from "./operation-model.js";
 import { legacyBridgeOperationSchema, operationSchema } from "./schema.js";
 import { bridgeExecutionDestination, bridgeNativeDenominationConversion, bridgeProviderBoundNativeDestination, validateBridgeRequest } from "./asset-registry.js";
@@ -185,8 +185,8 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
       (p.fillType === 2 && (p.relayerCredit !== BRIDGE_ZERO_WORD || p.repaymentChainIdAtomic !== "0"))
       : p.fillType !== null || p.relayerCredit !== null || p.repaymentChainIdAtomic !== null) bridgeCorrupt();
     const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
-    if (!legacy && providerBoundNative && (s.providerObservation?.status !== "completed_observed" ||
-      s.providerObservation.destinationTransactionHash !== p.transactionHash || p.nativeBalance === null || p.nativeBalance.recipient !== m.request.recipient)) bridgeCorrupt();
+    if (!legacy && providerBoundNative && (!bridgeProviderSettled(op.intent.decoded, s.providerObservation) ||
+      s.providerObservation!.destinationTransactionHash !== p.transactionHash || p.nativeBalance === null || p.nativeBalance.recipient !== m.request.recipient)) bridgeCorrupt();
     if (!legacy && providerBoundNative && op.intent.decoded.composite === undefined &&
       (p.nativeTransfer === null || p.nativeTransfer.transactionHash !== p.transactionHash || p.nativeTransfer.to !== m.request.recipient ||
        p.nativeTransfer.valueAtomic !== p.amountAtomic || BigInt(p.nativeBalance!.deltaAtomic) < BigInt(m.request.minOutputAtomic))) bridgeCorrupt();
@@ -202,8 +202,11 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
       (op.intent.decoded.composite === undefined && (BigInt(p.amountAtomic) < BigInt(m.request.minOutputAtomic) || p.amountAtomic !== (s.sourceProof.correlation.kind === "across"
         ? s.sourceProof.correlation.outputAmountAtomic : s.sourceProof.correlation.amountReceivedAtomic)))) bridgeCorrupt();
   }
-  if (s.providerObservation?.status === "completed_observed") {
-    const p = s.providerObservation;
+  // A PARTIAL that backs a destination proof is held to COMPLETED's checks; a parked one without a proof is not read here.
+  const settled = s.providerObservation?.status === "completed_observed" ||
+    s.destinationProof !== null && bridgeProviderSettled(op.intent.decoded, s.providerObservation) ? s.providerObservation : null;
+  if (settled !== null) {
+    const p = settled;
     if (p.responseHash === null || !isEvmTransactionHash(p.destinationTransactionHash) || s.sourceProof === null ||
       bridge.phase !== "safe_success" || bridge.transactionHash !== s.sourceProof.transactionHash ||
       (s.destinationProof !== null && s.destinationProof.transactionHash !== p.destinationTransactionHash) ||

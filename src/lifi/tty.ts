@@ -35,7 +35,7 @@ export class TtyBridgeApproval implements BridgeApprovalPort {
       `LI.FI route: ${s.route.route_id}; tool: ${s.route.tool}`, `Source chain: eip155:${s.transfer.fromChainId}`,
       `Destination chain: eip155:${s.transfer.toChainId}`, `Source ${from.symbol}: ${from.token}`, `Destination ${to.symbol}: ${to.token}`,
       `Sender: ${s.transfer.sender}`, `Recipient: ${s.transfer.recipient}`, ...economics,
-      ...(s.route.composite === undefined ? [] : compositeLines(s.route.composite, input.compositeReturn)),
+      ...(s.route.composite === undefined ? [] : compositeLines(s.route.composite, input.compositeReturn, s.expires_at)),
       `Unitemized protocol fee: ${s.fees.implicit_protocol_token_fee_atomic} ${from.symbol} atomic`,
       `Allowance at prepare: ${s.transfer.allowance_atomic_at_prepare} atomic`, `Spender: ${s.transfer.spender}`,
       ...(native ? ["Native principal: sent as the bridge transaction value; no approval effect; approval cap 0."]
@@ -58,7 +58,7 @@ export class TtyBridgeApproval implements BridgeApprovalPort {
 }
 
 function compositeLines(composite: NonNullable<ReturnType<typeof publicBridgeOperation>["route"]["composite"]>,
-  weth: BridgeCompositeReturn | null): string[] {
+  weth: BridgeCompositeReturn | null, expiresAt: string): string[] {
   if (weth === null) throw new ApnError("APN_STATE_CORRUPT", "The BNB composite consent has no WETH accounting.", { reason: "bnb_composite_consent" });
   return [
     "Destination program: Across ReceiverAcrossV4 -> LI.FI Executor -> Fly router -> Fly Core route (unsigned, chosen by Fly for this quote) -> native BNB",
@@ -66,6 +66,7 @@ function compositeLines(composite: NonNullable<ReturnType<typeof publicBridgeOpe
     `Fly retention: when the swap beats Fly's signed expected output, the router keeps up to ${composite.maximum_retention_bps} basis points of the swap output but pays at least that expected output${composite.maximum_retention_bps === 10_000 ? " (10000: Fly keeps everything above expected)" : ""}.`,
     "Guaranteed: only the minimum native destination output, which Fly's router enforces; above it, delivery depends on Fly's route.",
     `WETH: Across fills ${weth.fillWethAtomic} atomic, Fly swaps ${weth.swappedWethAtomic}; the other ${weth.unswappedWethReturnAtomic} atomic is returned as WETH after the swap, without the router's protection.`,
+    `Fly deadline: this approval closes at ${expiresAt}, no later than Fly's deadline (the earlier of its signed one and any inside its route). The Across fill lands on BSC some seconds after sending and must arrive before Fly's deadline; a later fill reverts the swap and the WETH comes back.`,
     "Recovery outcome: a destination swap failure may return unswapped WETH; APN does not count that as native BNB completion.",
   ];
 }

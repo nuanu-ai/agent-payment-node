@@ -13,6 +13,13 @@ export const BRIDGE_PRE_SIGN_RPC_RATE_LIMITED = "pre_sign_rpc_rate_limited";
 export const BRIDGE_PRE_SIGN_RPC_UNAVAILABLE = "pre_sign_rpc_unavailable";
 /** Telemetry is diagnostics, not evidence: a transition keeps only the latest rows and a telemetry-only change adds none. */
 export const BRIDGE_TELEMETRY_ROWS = 8;
+/**
+ * The provider statuses after which a destination proof is read. LI.FI reports the BNB composite whose Fly swap reverted,
+ * so that the Receiver returned the fill as WETH, as DONE/PARTIAL; there the canonical trace, not the provider, decides.
+ */
+export function bridgeProviderSettled(decoded, observation) {
+    return observation?.status === "completed_observed" || decoded.composite !== undefined && observation?.status === "partial_observed";
+}
 export const BRIDGE_TERMINAL = ["completed", "destination_failed", "failed_before_effect", "failed_after_approval", "failed_confirmed_revert"];
 export function bridgeIntentBinding(operation) {
     return { schemaVersion: operation.schemaVersion, kind: operation.kind, profileHash: operation.profileHash,
