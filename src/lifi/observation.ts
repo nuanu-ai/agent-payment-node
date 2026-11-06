@@ -306,7 +306,9 @@ function reusableProviderObservation(op: BridgeOperationRecord): boolean {
   if (op.sourceProof === null || bridge?.role !== "bridge" || bridge.phase !== "safe_success" ||
     bridge.transactionHash !== op.sourceProof.transactionHash || observation.responseHash === null ||
     !isEvmTransactionHash(observation.destinationTransactionHash)) bridgeFailure("APN_STATE_CORRUPT", "durable_bridge_provider_binding");
-  return op.failure?.observationRpc?.reason !== "destination_transaction_reverted";
+  // A named transaction that reverted or holds no fill of this deposit is asked about again, so the operation can move on.
+  const reason = op.failure?.observationRpc?.reason;
+  return reason !== "destination_transaction_reverted" && reason !== "destination_fill_unmatched";
 }
 function requireSafeDestination<T extends { readonly transaction: { readonly safeBlock: unknown | null; readonly status: "success" | "reverted" } }>(observation: T | null): T {
   if (observation === null || observation.transaction.safeBlock === null) throw new DestinationPending();

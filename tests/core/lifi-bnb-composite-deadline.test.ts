@@ -97,20 +97,28 @@ test("on PARTIAL the trace still decides: a swap that delivered native BNB compl
 });
 
 test("a LI.FI-named BSC transaction without this deposit's fill leaves the operation observable, never a terminal mismatch", async (t) => {
-  const temporary = await temporaryState(); t.after(temporary.cleanup);
-  const s = await lifiFixture(temporary.root, "eth-bnb"), observe = s.destination.observe.bind(s.destination);
-  s.provider.statusValue = "partial_observed";
-  // The named transaction exists and is safe, but no FilledRelay of the pinned SpokePool is in it.
-  s.destination.observe = async (...args: Parameters<typeof observe>) => {
-    const found = await observe(...args);
-    return found === null ? null : { ...found, receipt: { ...found.receipt, logs: found.receipt.logs.filter((log: { address: string }) =>
-      log.address.toLowerCase() !== "0x4e8e101924ede233c13e2d8622dc8aed2872d505") } };
-  };
-  const prepared = await s.prepare("across", "bnb-unmatched-001");
-  await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
-  const record = (await findStored(s.core.bridges.records, prepared.id))!;
-  assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "evidence_unavailable");
-  assert.equal(record.destinationProof, null);
+  for (const status of ["partial_observed", "completed_observed"] as const) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    const s = await lifiFixture(temporary.root, "eth-bnb"), observe = s.destination.observe.bind(s.destination);
+    s.provider.statusValue = status;
+    // The named transaction exists and is safe, but no FilledRelay of the pinned SpokePool is in it.
+    s.destination.observe = async (...args: Parameters<typeof observe>) => {
+      const found = await observe(...args);
+      return found === null ? null : { ...found, receipt: { ...found.receipt, logs: found.receipt.logs.filter((log: { address: string }) =>
+        log.address.toLowerCase() !== "0x4e8e101924ede233c13e2d8622dc8aed2872d505") } };
+    };
+    const prepared = await s.prepare("across", `bnb-unmatched-${status}`);
+    await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+    let record = (await findStored(s.core.bridges.records, prepared.id))!;
+    assert.equal(record.state, "unknown_finality", status); assert.equal(record.failure?.reason, "evidence_unavailable");
+    assert.equal(record.failure?.observationRpc?.reason, "destination_fill_unmatched"); assert.equal(record.destinationProof, null);
+    // Even a COMPLETED answer is asked again on resume, and the operation completes once the provider and the chain agree.
+    const asked = s.provider.statusCalls;
+    s.destination.observe = observe; s.provider.statusValue = "completed_observed";
+    await s.core.execute({ command: "operation.resume", operationId: prepared.id });
+    record = (await findStored(s.core.bridges.records, prepared.id))!;
+    assert.ok(s.provider.statusCalls > asked, status); assert.equal(record.state, "completed", status);
+  }
 });
 
 test("PARTIAL on a native lane without the composite still parks the operation unproved", async (t) => {
