@@ -2,7 +2,8 @@ import { hashObject } from "../canonical.js";
 import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeNativePrincipal } from "./asset-registry.js";
 import type { BridgeOperationRecord } from "./operation-model.js";
 import { validateBridgeOperation } from "./operation-validation.js";
-import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY } from "./validation.js";
+import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure } from "./validation.js";
+import type { BridgeCompositeReturn } from "./ports.js";
 import type { LegacyBridgeOperationRecord, StoredBridgeOperationRecord } from "./legacy-operation.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
 
@@ -63,15 +64,10 @@ function projectBridgeOperation(op: BridgeOperationRecord, legacy: boolean) {
       request_hash: m.requestHash, response_hash: m.responseHash, route_hash: m.routeHash, step_hash: m.stepHash,
       materialized_step_hash: m.materializedStepHash, transaction_digest: m.transactionDigest,
       lifi_transaction_id: i.decoded.transactionId, included_step_identities: m.includedStepIdentities,
-      ...(i.decoded.composite === undefined || i.decoded.protocol.kind !== "across" ? {} : { composite: { kind: i.decoded.composite.kind,
+      ...(i.decoded.composite === undefined ? {} : { composite: { kind: i.decoded.composite.kind,
         payload_hash: i.decoded.composite.payloadHash, message_hash: i.decoded.composite.messageHash,
         input_amount_atomic: i.decoded.composite.inputAmountAtomic, deadline_atomic: i.decoded.composite.deadlineAtomic,
         maximum_retention_bps: i.decoded.composite.maximumRetentionBps,
-        // Across fills more WETH than Fly swaps; the Executor returns the rest as WETH. Fly's router guarantees only the
-        // native floor, and that WETH waits at LI.FI's shared Executor while Fly's unsigned route runs.
-        fill_weth_atomic: i.decoded.protocol.outputAmountAtomic,
-        unswapped_weth_return_atomic: (BigInt(i.decoded.protocol.outputAmountAtomic) - BigInt(i.decoded.composite.inputAmountAtomic)).toString(),
-        guaranteed: "native_minimum_output_only" as const,
         recovery: "unswapped_WETH_is_not_native_BNB_success" as const } }) },
     asset: { from, to, native_principal_admitted: nativePrincipal },
     ...(legacy ? {} : { asset_bounds: assetBounds }),
@@ -212,4 +208,13 @@ export function currentBridgeReceiptCandidates(op: BridgeOperationRecord): reado
 function receiptWithoutObservationTelemetry(receipt: Record<string, unknown>): Record<string, unknown> {
   const body = structuredClone(receipt); delete body.receipt_hash; delete body.observation_rpc_telemetry;
   return { ...body, receipt_hash: hashObject(body) };
+}
+
+/** What the consent states about the composite's WETH: the fill, Fly's input and the remainder returned without the floor. */
+export function bridgeCompositeReturn(op: BridgeOperationRecord): BridgeCompositeReturn | null {
+  const d = op.intent.decoded;
+  if (d.composite === undefined) return null;
+  if (d.protocol.kind !== "across") return bridgeFailure("APN_STATE_CORRUPT", "bnb_composite_protocol");
+  return { fillWethAtomic: d.protocol.outputAmountAtomic, swappedWethAtomic: d.composite.inputAmountAtomic,
+    unswappedWethReturnAtomic: (BigInt(d.protocol.outputAmountAtomic) - BigInt(d.composite.inputAmountAtomic)).toString() };
 }

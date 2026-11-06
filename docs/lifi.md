@@ -400,14 +400,14 @@ floor. The rest of the program is Fly Core's route for that one quote (which poo
 which Fly chooses by liquidity and changes from quote to quote; it is not signed and APN does not interpret it. The router
 itself pays the Executor only through the signed retention rule and reverts unless the Executor's native balance grew by
 at least the signed floor, so the route cannot deliver less native BNB than the floor; the Receiver then returns the
-whole fill as WETH. That floor is the guarantee: a route may deliver anything from the floor to the expected output,
-like any swap within its slippage. The signed header, raw payload hash, owner output floor, retention bound, self
+whole fill as WETH. That floor is the guarantee: a route may deliver anything at or above it, and above the expected
+output the router keeps at most the signed retention. The signed header, raw payload hash, owner output floor, retention bound, self
 recipient and source debit caps are part of the durable operation integrity binding.
 
 Across fills more WETH than the Fly input (2–5% of the fill in the captured quotes), and LI.FI's Executor returns the
 rest to the recipient as WETH after the swap. The router does not protect that WETH: it waits at LI.FI's shared
-Executor while Fly's unsigned route runs. The operation shows it as `route.composite.unswapped_weth_return_atomic`
-next to `guaranteed: "native_minimum_output_only"`.
+Executor while Fly's unsigned route runs. The bridge consent shows the fill, the Fly input and that remainder next to
+the statement that only the minimum native output is guaranteed.
 
 | Contract (BNB Smart Chain) | Address |
 | --- | --- |

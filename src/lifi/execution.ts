@@ -11,7 +11,7 @@ import { BRIDGE_PRE_SIGN_RPC_RATE_LIMITED, BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, reta
   type BridgePreSignRpcFailure } from "./operation-model.js";
 import { assertBridgeOwner } from "./owner.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProviderPort } from "./ports.js";
-import { publicBridgeOperation } from "./receipt.js";
+import { bridgeCompositeReturn, publicBridgeOperation } from "./receipt.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
 import { BridgeAllowlistGate } from "./allowlist.js";
 import type { BridgeRpcPhysicalBudget } from "./rpc.js";
@@ -54,7 +54,7 @@ export class BridgeExecution {
   }
   private async confirmForeground(op: BridgeOperationRecord, approval: BridgeApprovalPort): Promise<boolean> {
     return await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
-      exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op) });
+      exactPhrase: approvalCode("bridge", op.fingerprint), summary: publicBridgeOperation(op), compositeReturn: bridgeCompositeReturn(op) });
   }
   private async approved(op: BridgeOperationRecord, approvedAt: number): Promise<BridgeOperationRecord> {
     // Consent cannot extend the original exact materialization expiry.

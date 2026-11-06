@@ -231,7 +231,7 @@ test("LI.FI TTY requires the bound approval code and shows both chain economics 
   let printed = "", closed = 0, supplied = phrase;
   const tty = new TtyBridgeApproval({ isTerminal: () => true, openTerminal: async () => ({ fd: 123,
     write: async (text) => { printed += text; }, read: async function* () { yield Buffer.from(`${supplied}\n`); }, close: async () => { closed++; } }) });
-  const input = { operationId: id, fingerprint: operation.fingerprint, exactPhrase: phrase, summary };
+  const input = { operationId: id, fingerprint: operation.fingerprint, exactPhrase: phrase, summary, compositeReturn: null };
   assert.equal(await tty.confirm(input), true); assert.equal(closed, 1);
   for (const value of [phrase, operation.intent.expiresAt, "eip155:1", "eip155:8453", "10000000 USDC atomic", "approval:", "bridge:", "separate included approval costs gas", "Ethereum (eip155:1) native fee is checked before sending; gas limit x maxFeePerGas caps it on-chain.", summary.rpc_origins.destination]) assert.ok(printed.includes(value), value);
   assert.ok(!printed.includes(operation.effects[1]!.envelope.data)); supplied = `APPROVE BRIDGE ${operation.fingerprint}`;

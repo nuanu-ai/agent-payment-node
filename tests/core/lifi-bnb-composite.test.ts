@@ -13,6 +13,9 @@ import { ApnCore } from "../../src/core.js";
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 import { LifiProvider } from "../../src/lifi/provider.js";
 import { findStored } from "./stored-operations.js";
+import { TtyBridgeApproval } from "../../src/lifi/tty.js";
+import { bridgeCompositeReturn, publicBridgeOperation } from "../../src/lifi/receipt.js";
+import { approvalCode } from "../../src/approval-code.js";
 import { lifiCapture } from "./lifi-capture.js";
 
 const fixture = lifiCapture("bnb-composite-fly-20260921.json") as {
@@ -104,14 +107,40 @@ test("BNB destination outcomes survive restart, finalize spent usage and never r
     assert.equal(lease?.state, "finalized"); assert.equal(s.source.submissions.length, 1);
     const restarted = new ApnCore({ state: s.state, bridge: s.dependencies, clock: { now: () => new Date(s.now) } });
     const status = await restarted.execute({ command: "operation.status", operationId: prepared.id });
-    const composite = (status.operation as any).route?.composite ?? (status.receipt as any)?.route?.composite;
-    assert.deepEqual([composite?.guaranteed, composite?.unswapped_weth_return_atomic], ["native_minimum_output_only",
-      (BigInt(record.intent.decoded.protocol.kind === "across" ? record.intent.decoded.protocol.outputAmountAtomic : 0)
-        - BigInt(record.intent.decoded.composite!.inputAmountAtomic)).toString()]);
     assert.equal((status.operation as any).reason, outcome); assert.equal((status.operation as any).terminal, true);
     await restarted.execute({ command: "operation.resume", operationId: prepared.id });
     assert.equal(s.source.submissions.length, 1);
   }
+});
+
+test("the BNB consent names Fly's unsigned route, the native-only guarantee and the WETH returned outside it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  // The captured Fly quote expired in September, so the route is prepared on the fixture clock and only the consent's own
+  // wall-clock expiry is moved ahead.
+  const s = await lifiFixture(temporary.root, "eth-bnb"), { id, operation } = await s.prepare("across", "bnb-consent-001");
+  const weth = bridgeCompositeReturn(operation)!, protocol = operation.intent.decoded.protocol as { outputAmountAtomic: string };
+  assert.deepEqual(weth, { fillWethAtomic: protocol.outputAmountAtomic, swappedWethAtomic: operation.intent.decoded.composite!.inputAmountAtomic,
+    unswappedWethReturnAtomic: (BigInt(protocol.outputAmountAtomic) - BigInt(operation.intent.decoded.composite!.inputAmountAtomic)).toString() });
+  let printed = "";
+  const tty = new TtyBridgeApproval({ isTerminal: () => true, openTerminal: async () => ({ fd: 123, write: async (text) => { printed += text; },
+    read: async function* () { yield Buffer.from("REJECT\n"); }, close: async () => {} }) });
+  const input = { operationId: id, fingerprint: operation.fingerprint, exactPhrase: approvalCode("bridge", operation.fingerprint),
+    summary: { ...publicBridgeOperation(operation), expires_at: new Date(Date.now() + 600_000).toISOString() }, compositeReturn: weth };
+  assert.equal(await tty.confirm(input), false);
+  for (const text of ["Fly Core route (unsigned, chosen by Fly for this quote)", "Guaranteed: only the minimum native destination output",
+    `Across fills ${weth.fillWethAtomic} atomic, Fly swaps ${weth.swappedWethAtomic}`, `other ${weth.unswappedWethReturnAtomic} atomic is returned as WETH after the swap, without the router's protection`]) {
+    assert.ok(printed.includes(text), text);
+  }
+  assert.ok(!printed.includes("WETH/WBNB pool"));
+  await assert.rejects(tty.confirm({ ...input, compositeReturn: null }), /no WETH accounting/u);
+});
+
+test("the bridge service hands the composite's WETH accounting to the consent port", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "eth-bnb"), prepared = await s.prepare("across", "bnb-consent-002");
+  const result = await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  assert.deepEqual((s.approval.calls[0] as { compositeReturn: unknown }).compositeReturn, bridgeCompositeReturn(prepared.operation));
 });
 
 test("BNB destination RPC absence remains evidence_unavailable and observe-only across restart", async (t) => {
