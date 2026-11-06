@@ -185,6 +185,9 @@ export declare function publicBridgeOperation(op: BridgeOperationRecord): {
             input_amount_atomic: string;
             deadline_atomic: string;
             maximum_retention_bps: number;
+            fill_weth_atomic: string;
+            unswapped_weth_return_atomic: string;
+            guaranteed: "native_minimum_output_only";
             recovery: "unswapped_WETH_is_not_native_BNB_success";
         };
         route_id: string;
@@ -441,6 +444,9 @@ export declare function bridgeReceipt(op: BridgeOperationRecord): {
             input_amount_atomic: string;
             deadline_atomic: string;
             maximum_retention_bps: number;
+            fill_weth_atomic: string;
+            unswapped_weth_return_atomic: string;
+            guaranteed: "native_minimum_output_only";
             recovery: "unswapped_WETH_is_not_native_BNB_success";
         };
         route_id: string;

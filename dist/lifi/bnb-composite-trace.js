@@ -14,6 +14,11 @@ const TRACE_TYPES = new Set(["CALL", "STATICCALL", "DELEGATECALL", "CALLCODE", "
 const VALUE_TRANSFERS = new Set(["CALL", "CREATE", "CREATE2", "SELFDESTRUCT"]);
 const MAX_UINT256 = (1n << 256n) - 1n;
 /**
+ * Shape bounds on the decoded tree. Fly Core's route and a relayer's other fills in the same transaction are not ours to
+ * size, so the bounds only keep the walk finite: the RPC answer itself is capped at 1 MiB.
+ */
+const TRACE_DEPTH = 64, TRACE_FRAMES = 8192, TRACE_CALLS = 2048, TRACE_HEX_BYTES = 1024 * 1024;
+/**
  * Validate the bounded callTracer tree of the Across fill into the Across/Fly composite. Proxies (the SpokePool, BSC's
  * Binance-peg WETH) run through DELEGATECALL and contracts read balances and allowances through STATICCALL; neither
  * moves value, so each frame's effects are its state-changing calls with those wrappers and reads looked through.
@@ -137,20 +142,21 @@ function netNative(node, account) {
     return net;
 }
 function traceNode(raw, bounded, depth) {
-    if (depth > 32 || ++bounded.count > 1024 || raw === null || typeof raw !== "object" || Array.isArray(raw))
+    if (depth > TRACE_DEPTH || ++bounded.count > TRACE_FRAMES || raw === null || typeof raw !== "object" || Array.isArray(raw))
         fail("bnb_trace_shape");
     const r = raw, allowed = new Set(["type", "from", "to", "value", "input", "output", "error", "revertReason", "calls", "gas", "gasUsed"]);
     if (Object.keys(r).some((key) => !allowed.has(key)) || typeof r.type !== "string" || !TRACE_TYPES.has(r.type))
         fail("bnb_trace_shape");
     const calls = r.calls === undefined ? [] : r.calls;
-    if (!Array.isArray(calls) || calls.length > 256)
+    if (!Array.isArray(calls) || calls.length > TRACE_CALLS)
         fail("bnb_trace_shape");
+    const failedCreate = (r.type === "CREATE" || r.type === "CREATE2") && typeof r.error === "string" && r.to === undefined;
     let from, to, input, output, value;
     try {
         from = getAddress(String(r.from));
-        to = getAddress(String(r.to));
-        input = bridgeHex(r.input ?? "0x", 24_576);
-        output = bridgeHex(r.output ?? "0x", 24_576);
+        to = failedCreate ? null : getAddress(String(r.to));
+        input = bridgeHex(r.input ?? "0x", TRACE_HEX_BYTES);
+        output = bridgeHex(r.output ?? "0x", TRACE_HEX_BYTES);
         value = BigInt(String(r.value ?? "0x0"));
     }
     catch {
@@ -163,9 +169,13 @@ function traceNode(raw, bounded, depth) {
 }
 /** Frames that took effect: none under a reverted frame. */
 function live(node) { return node.error !== null ? [] : [node, ...node.calls.flatMap(live)]; }
-/** The calls a frame made itself, through proxy DELEGATECALLs and without STATICCALL reads, which move no value. */
+/**
+ * The calls a frame made itself, through proxy DELEGATECALLs and without STATICCALL reads, which move no value. A
+ * reverted DELEGATECALL stays as itself, so the exact checks see it instead of the calls it undid.
+ */
 function effects(node) {
-    return node.calls.flatMap((child) => child.type === "STATICCALL" ? [] : child.type === "DELEGATECALL" ? effects(child) : [child]);
+    return node.calls.flatMap((child) => child.type === "STATICCALL" ? []
+        : child.type === "DELEGATECALL" ? child.error !== null ? [child] : effects(child) : [child]);
 }
 function handlerMessage(frame) {
     try {
@@ -177,11 +187,14 @@ function handlerMessage(frame) {
     }
 }
 function traceProjection(node) { return { ...node, value: node.value.toString(), calls: node.calls.map(traceProjection) }; }
-/** Code run by DELEGATECALL or CALLCODE executes as its caller, so the calls it makes come from the caller's address. */
+/**
+ * Code run by DELEGATECALL or CALLCODE executes as its caller, so the calls it makes come from the caller's address. A
+ * reverted CREATE has no reported address to compare its constructor's calls with; they were undone with it.
+ */
 function assertCallerTree(node) {
     const context = node.type === "DELEGATECALL" || node.type === "CALLCODE" ? node.from : node.to;
     for (const child of node.calls) {
-        if (child.from !== context)
+        if (context !== null && child.from !== context)
             mismatch();
         assertCallerTree(child);
     }

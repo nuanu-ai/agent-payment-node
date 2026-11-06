@@ -104,6 +104,10 @@ test("BNB destination outcomes survive restart, finalize spent usage and never r
     assert.equal(lease?.state, "finalized"); assert.equal(s.source.submissions.length, 1);
     const restarted = new ApnCore({ state: s.state, bridge: s.dependencies, clock: { now: () => new Date(s.now) } });
     const status = await restarted.execute({ command: "operation.status", operationId: prepared.id });
+    const composite = (status.operation as any).route?.composite ?? (status.receipt as any)?.route?.composite;
+    assert.deepEqual([composite?.guaranteed, composite?.unswapped_weth_return_atomic], ["native_minimum_output_only",
+      (BigInt(record.intent.decoded.protocol.kind === "across" ? record.intent.decoded.protocol.outputAmountAtomic : 0)
+        - BigInt(record.intent.decoded.composite!.inputAmountAtomic)).toString()]);
     assert.equal((status.operation as any).reason, outcome); assert.equal((status.operation as any).terminal, true);
     await restarted.execute({ command: "operation.resume", operationId: prepared.id });
     assert.equal(s.source.submissions.length, 1);
@@ -144,7 +148,7 @@ test("the Fly decoder reads the router's header and rejects every header field A
       [68 + 4, 0xff], [68 + 24, 0xff], [68 + 44, 0xff], [68 + 64, 0xff], // recipient, input, output, amount
       [68 + 96, 0x07], [68 + 99, 0x07], [68 + 102, 0x07], [68 + 137, 0x07], // compact words: shift not a whole byte
       [68 + 97, 0xff], [68 + 100, 0xff], [68 + 103, 0xff], [68 + 138, 0xff], // compact words: pointer outside the payload
-      [68 + 140, 1], [68 + 173, 0xff], [68 + 205, 29], [68 + 206, 1], // transfer mode, high s, v, fee count
+      [68 + 140, 1], [68 + 206, 1], // transfer mode, fee count
     ] as const;
     for (const [at, value] of mutations) assert.throws(() => decodeFlyProgram(mutate(call, at, value), fixture.decoded.bridgeData.receiver,
       BigInt(amount)), { name: "ApnError" }, `${name}: mutation at ${at}`);
@@ -158,6 +162,13 @@ test("the 2026-11-05 multi-hop Fly program decodes and carries Fly's own signatu
     deadline: call.deadlineAtomic, retention: call.maximumRetentionBps },
   { input: "380515570688779", min: "1226879077233883", expected: "1233044298727521", deadline: "1793916262", retention: 500 });
   assert.equal((await verifyFlyHeaderSignature(call, BNB_COMPOSITE.signer)).signer, BNB_COMPOSITE.signer);
+  // Prepare refuses the signature forms the router refuses; a stored record is only re-decoded, never re-verified.
+  const signature = Buffer.from(call.signature.slice(2), "hex");
+  const highS = Buffer.from(signature); highS.fill(0xff, 32, 64);
+  const badV = Buffer.from(signature); badV[64] = 29;
+  for (const form of [highS, badV, signature.subarray(0, 64)]) {
+    await assert.rejects(verifyFlyHeaderSignature({ ...call, signature: `0x${form.toString("hex")}` }, BNB_COMPOSITE.signer), /fly_signature_form/u);
+  }
 });
 
 test("the route after the header is opaque: Fly does not sign it and APN does not interpret it", async () => {

@@ -47,7 +47,7 @@ export function decodeBnbCompositeMessage(message, expectedTransactionId, expect
 /**
  * Reads `swapWithBackendSignature(bytes)` the way Fly's router does (`LibRouter.getData`) and checks only that header:
  * the Executor as recipient, WETH in, native out, the exact input amount, the compact deadline, output floor, expected
- * output and retention words, the consumer, no transfer from the router, the signature form and no swap fees. The bytes
+ * output and retention words, the consumer, no transfer from the router, the signature and no swap fees. The bytes
  * after the header are Fly Core's route for this one quote (pools, hops, wrapping), which Fly picks by liquidity and
  * changes from quote to quote. APN does not interpret them: the router pays the Executor only through the signed retention
  * rule and reverts unless the Executor's native balance grew by at least the signed `amountOutMin`, whatever the route did.
@@ -74,8 +74,6 @@ export function decodeFlyProgram(calldata, _expectedRecipient, expectedAmount) {
         fail("fly_economics");
     if (p[140] !== 0)
         fail("fly_transfer_mode");
-    if (uint(p, 173, 32) > SECP256K1_HALF_ORDER || (p[205] !== 27 && p[205] !== 28))
-        fail("fly_signature_form");
     if (p[206] !== 0)
         fail("fly_fee_count");
     const consumerId = `0x${p.subarray(105, 137).toString("hex")}`;
@@ -84,7 +82,10 @@ export function decodeFlyProgram(calldata, _expectedRecipient, expectedAmount) {
     return { deadlineAtomic: deadline.toString(), minimumOutputAtomic: minimum.toString(), expectedOutputAtomic: expected.toString(),
         maximumRetentionBps: Number(retention), consumerId, signature, payloadHash: keccak256(`0x${p.toString("hex")}`) };
 }
-/** Rebuild Fly's exact no-fee EIP-712 header authorization; the router checks the same digest against its signer list. */
+/**
+ * Rebuild Fly's exact no-fee EIP-712 header authorization; the router checks the same digest against its signer list
+ * and refuses the signature forms it would reject. Prepare runs this; a stored record is only re-decoded.
+ */
 export async function verifyFlyHeaderSignature(call, authorizedSigner) {
     const typed = { domain: { name: "Dex Aggregator", version: "1", chainId: 56, verifyingContract: BNB_COMPOSITE.flyRouter },
         primaryType: "Swap",
@@ -98,7 +99,10 @@ export async function verifyFlyHeaderSignature(call, authorizedSigner) {
             fromAsset: BNB_COMPOSITE.weth, toAsset: "0x0000000000000000000000000000000000000000",
             deadline: BigInt(call.deadlineAtomic), amountOutMin: BigInt(call.minimumOutputAtomic), expectedAmountOut: BigInt(call.expectedOutputAtomic),
             consumerId: call.consumerId, maxRetentionBps: BigInt(call.maximumRetentionBps), transferFromRouter: false } };
-    const digest = hashTypedData(typed);
+    const digest = hashTypedData(typed), signature = Buffer.from(call.signature.slice(2), "hex");
+    if (signature.length !== 65 || BigInt(`0x${signature.subarray(32, 64).toString("hex")}`) > SECP256K1_HALF_ORDER ||
+        (signature[64] !== 27 && signature[64] !== 28))
+        fail("fly_signature_form");
     let signer;
     try {
         signer = getAddress(await recoverTypedDataAddress({ ...typed, signature: call.signature }));

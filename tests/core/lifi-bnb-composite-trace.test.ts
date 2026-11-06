@@ -225,3 +225,16 @@ test("a real BSC fill of the same Across -> Executor -> Fly WETH lane verifies f
   assert.equal(verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, { ...realCall, maximumRetentionBps: 10_000,
     expectedOutputAtomic: "385013129963143883" }, fill).outcome, "protocol_mismatch");
 });
+
+test("reverted creations and reverted proxy calls are read for what they undid", () => {
+  // callTracer omits the address of a CREATE2 that reverted; inside Fly Core that is just part of the route.
+  const created = fillTrace(); at(created, CORE).calls.splice(1, 0, { type: "CREATE2", from: BNB_COMPOSITE.core, value: "0x0",
+    input: "0x6080", error: "execution reverted", calls: [{ type: "CALL", from: "0x4444444444444444444444444444444444444444",
+      to: BNB_COMPOSITE.flyRouter, value: "0x5", input: "0x" }] });
+  assert.equal(verify(created).outcome, "completed_native");
+  // A delivery made under a DELEGATECALL that reverted did not happen.
+  const wrapped = fillTrace(), executor = at(wrapped, EXECUTOR), delivery = executor.calls.pop();
+  executor.calls.push({ ...frame(BNB_COMPOSITE.executor, "0x4444444444444444444444444444444444444444", "0x12", 0n,
+    [delivery], "0x", "DELEGATECALL"), error: "execution reverted" });
+  assert.equal(verify(wrapped).outcome, "protocol_mismatch");
+});

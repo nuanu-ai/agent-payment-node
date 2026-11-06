@@ -197,7 +197,8 @@ function acrossDestination(source, decoded, receipt) {
             const toRecipient = (from, value) => weth.filter((x) => x.from === from && x.to === decoded.recipient && x.value.toString() === value);
             const exactRecovered = toRecipient(BNB_COMPOSITE.receiver, filled);
             if (trace.outcome === "recovered_weth") {
-                if (exactRecovered.length !== 1 || returned !== filled || trace.deliveredAmountAtomic !== "0" || BigInt(balance.deltaAtomic) !== 0n)
+                // The Receiver's whole-fill WETH log is the proof; unrelated BNB reaching the recipient in the block may move its balance.
+                if (exactRecovered.length !== 1 || returned !== filled || trace.deliveredAmountAtomic !== "0")
                     fail("bnb_recovery_evidence");
             }
             else if (exactRecovered.length !== 0)
