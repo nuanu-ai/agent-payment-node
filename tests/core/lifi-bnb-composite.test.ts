@@ -129,7 +129,8 @@ test("the BNB consent names Fly's unsigned route, the native-only guarantee and 
   assert.equal(await tty.confirm(input), false);
   for (const text of ["Fly Core route (unsigned, chosen by Fly for this quote)", "Guaranteed: only the minimum native destination output",
     `Across fills ${weth.fillWethAtomic} atomic, Fly swaps ${weth.swappedWethAtomic}`, `other ${weth.unswappedWethReturnAtomic} atomic is returned as WETH after the swap, without the router's protection`,
-    `Fly retention: when the swap beats Fly's signed expected output, the router keeps up to ${operation.intent.decoded.composite!.maximumRetentionBps} basis points of the swap output but pays at least that expected output.`]) {
+    `Fly retention: when the swap beats Fly's signed expected output, the router keeps up to ${operation.intent.decoded.composite!.maximumRetentionBps} basis points of the swap output but pays at least that expected output.`,
+    `Fly deadline: this approval closes at ${input.summary.expires_at}, the earliest of Fly's signed deadline and any deadline inside its route; the Across fill must reach BSC before it, or the swap reverts and the WETH comes back.`]) {
     assert.ok(printed.includes(text), text);
   }
   assert.ok(!printed.includes("WETH/WBNB pool"));

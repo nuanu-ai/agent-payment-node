@@ -1,6 +1,6 @@
 import { hashObject } from "../canonical.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
-import { BRIDGE_TELEMETRY_ROWS, retainedUnsentBridgeRpcFailure } from "./operation-model.js";
+import { BRIDGE_TELEMETRY_ROWS, bridgeProviderSettled, retainedUnsentBridgeRpcFailure } from "./operation-model.js";
 import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
 import { bridgeDeployment, bridgeProtocolEmitter } from "./deployments.js";
 import { BNB_COMPOSITE } from "./bnb-composite.js";
@@ -132,7 +132,7 @@ export class BridgeObservation {
         const hint = op.providerObservation?.destinationTransactionHash;
         const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
         if (providerBoundNative) {
-            if (op.providerObservation?.status !== "completed_observed" || !isEvmTransactionHash(hint))
+            if (!bridgeProviderSettled(op.intent.decoded, op.providerObservation) || !isEvmTransactionHash(hint))
                 return await this.waiting(op);
             const destination = this.destination(), beforeTelemetry = destination.readTelemetry?.() ?? null;
             let proof;

@@ -2,7 +2,7 @@ import { hashObject } from "../canonical.js";
 import type { Hex } from "../model.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
 import type { BridgeDestinationTransactionProof, BridgeTransactionProof } from "./model.js";
-import { BRIDGE_TELEMETRY_ROWS, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
+import { BRIDGE_TELEMETRY_ROWS, bridgeProviderSettled, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
 import { bridgeDeployment, bridgeProtocolEmitter } from "./deployments.js";
@@ -127,7 +127,7 @@ export class BridgeObservation {
     const hint = op.providerObservation?.destinationTransactionHash;
     const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
     if (providerBoundNative) {
-      if (op.providerObservation?.status !== "completed_observed" || !isEvmTransactionHash(hint)) return await this.waiting(op);
+      if (!bridgeProviderSettled(op.intent.decoded, op.providerObservation) || !isEvmTransactionHash(hint)) return await this.waiting(op);
       const destination = this.destination(), beforeTelemetry = destination.readTelemetry?.() ?? null;
       let proof: BridgeVerifiedDestinationProof;
       try {

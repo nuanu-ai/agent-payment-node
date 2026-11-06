@@ -237,6 +237,21 @@ test("a real BSC fill of the same Across -> Executor -> Fly WETH lane verifies f
     expectedOutputAtomic: "385013129963143883" }, fill).outcome, "protocol_mismatch");
 });
 
+test("QA's real fill whose Fly route hit its own deadline proves, from its public trace, that the whole fill came back as WETH", async () => {
+  // Across deposit 4886518, filled through a relayer contract; a hop inside Fly's route reverted 0x3e9e7bf1(deadline, now).
+  const real = lifiCapture("bsc-across-fly-revert-20261106.json") as { transaction: { hash: Hex; from: Address; input: Hex };
+    relay: { outputAmount: string; message: Hex }; trace: unknown };
+  const [transactionId, , finalReceiver] = decodeAbiParameters(parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address"), real.relay.message);
+  const realCall = decodeBnbCompositeMessage(real.relay.message, transactionId, finalReceiver);
+  assert.equal((await verifyFlyHeaderSignature(realCall, BNB_COMPOSITE.signer)).signer, BNB_COMPOSITE.signer);
+  const fill = { sender: getAddress(real.transaction.from), calldata: real.transaction.input, amountAtomic: real.relay.outputAmount };
+  const proof = verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, realCall, fill);
+  assert.deepEqual({ outcome: proof.outcome, gross: proof.vaultOutputAtomic, delivered: proof.deliveredAmountAtomic, returned: proof.returnedWethAtomic },
+    { outcome: "recovered_weth", gross: null, delivered: "0", returned: "286765125030554" });
+  assert.equal(verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, realCall,
+    { ...fill, amountAtomic: (BigInt(fill.amountAtomic) + 1n).toString() }).outcome, "protocol_mismatch");
+});
+
 test("reverted creations and reverted proxy calls are read for what they undid", () => {
   // callTracer omits the address of a CREATE2 that reverted; inside Fly Core that is just part of the route.
   const created = fillTrace(); at(created, CORE).calls.splice(1, 0, { type: "CREATE2", from: BNB_COMPOSITE.core, value: "0x0",

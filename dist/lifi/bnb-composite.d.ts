@@ -48,3 +48,15 @@ export declare function verifyFlyHeaderSignature(call: Pick<BnbCompositeCall, "d
     digest: Hex;
     signer: Address;
 }>>;
+/**
+ * One compact header word as the router reads it: `calldataload(pointer) >> shift`, the leading (256 - shift) / 8
+ * bytes at an absolute calldata pointer. Only whole bytes inside the payload are accepted.
+ */
+/**
+ * The earliest deadline Fly's route can enforce on BSC. The route after the signed header is opaque, but a hop may pass an
+ * absolute deadline to its pool: on 2026-11-06 one reverted `0x3e9e7bf1(deadline, now)` at a deadline 241 s before the
+ * header's own, after the approval had already passed it. Every 4-byte big-endian value in the route from the Across quote
+ * time up to the header deadline is taken as such a deadline (an ABI or compact word of any width holds one), so a chance
+ * match only shortens the approval window. Without one, the header deadline stands.
+ */
+export declare function flyRouteDeadline(call: Pick<BnbCompositeCall, "flyCalldata" | "deadlineAtomic">, quoteTimestamp: bigint): bigint;
