@@ -35,6 +35,9 @@ export declare function decodeBnbCompositeMessage(message: Hex, expectedTransact
  * after the header are Fly Core's route for this one quote (pools, hops, wrapping), which Fly picks by liquidity and
  * changes from quote to quote. APN does not interpret them: the router pays the Executor only through the signed retention
  * rule and reverts unless the Executor's native balance grew by at least the signed `amountOutMin`, whatever the route did.
+ * Retention only splits output above the signed expected output: the router then pays the larger of that expected output
+ * and the output less `maxRetentionBps` of it, so 10000 (Fly signs it per quote; QA's quotes carried it) leaves Fly everything
+ * above expected and never touches the floor. Above 10000 the router's checked subtraction reverts every swap that beats expected.
  */
 export declare function decodeFlyProgram(calldata: Hex, _expectedRecipient: Address, expectedAmount: bigint): Omit<BnbCompositeCall, "kind" | "transactionId" | "finalReceiver" | "inputAmountAtomic" | "messageHash" | "flyCalldata">;
 /**

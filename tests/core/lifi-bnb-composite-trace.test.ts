@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeAbiParameters, encodeFunctionData, getAddress, parseAbi, parseAbiParameters } from "viem";
 import type { Address, Hex } from "../../src/model.js";
-import { BNB_COMPOSITE, decodeBnbCompositeMessage } from "../../src/lifi/bnb-composite.js";
+import { BNB_COMPOSITE, decodeBnbCompositeMessage, verifyFlyHeaderSignature } from "../../src/lifi/bnb-composite.js";
 import { verifyBnbCompositeTrace } from "../../src/lifi/bnb-composite-trace.js";
 import { lifiCapture } from "./lifi-capture.js";
 
@@ -64,11 +64,12 @@ function coreRoute(gross: bigint, direct = 0n): Frame {
   ], `0x${"0".repeat(128)}`);
 }
 
-interface Shape { gross?: bigint; direct?: bigint; approve?: boolean; filled?: bigint }
+interface Shape { gross?: bigint; direct?: bigint; approve?: boolean; filled?: bigint; retention?: bigint }
 /** The fill as a real BSC trace shows it: proxied SpokePool and WETH, balance and allowance reads, Executor approvals. */
 function fillTrace(shape: Shape = {}): Frame {
   const gross = shape.gross ?? EXPECTED + EXPECTED / 1000n, direct = shape.direct ?? 0n, filled = shape.filled ?? FILLED;
-  const paid = gross <= EXPECTED ? gross : [EXPECTED, gross - gross * 500n / 10_000n].reduce((a, b) => a > b ? a : b);
+  const retention = shape.retention ?? BigInt(call.maximumRetentionBps);
+  const paid = gross <= EXPECTED ? gross : [EXPECTED, gross - gross * retention / 10_000n].reduce((a, b) => a > b ? a : b);
   const [, swaps] = decodeAbiParameters(parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address"), MESSAGE);
   const E = BNB_COMPOSITE.executor, R = BNB_COMPOSITE.receiver, W = BNB_COMPOSITE.weth, F = BNB_COMPOSITE.flyRouter;
   const fly = frame(E, F, call.flyCalldata, 0n, [
@@ -90,8 +91,8 @@ function fillTrace(shape: Shape = {}): Frame {
     token(BNB_COMPOSITE.spokePool, W, "transferFrom", [RELAYER, R, filled]), handler,
   ], "0x", "DELEGATECALL")]);
 }
-function verify(trace: unknown, filled = FILLED) {
-  return verifyBnbCompositeTrace(trace, `0x${"12".repeat(32)}`, MESSAGE, call, { sender: RELAYER, calldata: CALLDATA, amountAtomic: filled.toString() });
+function verify(trace: unknown, filled = FILLED, signed = call) {
+  return verifyBnbCompositeTrace(trace, `0x${"12".repeat(32)}`, MESSAGE, signed, { sender: RELAYER, calldata: CALLDATA, amountAtomic: filled.toString() });
 }
 const at = (root: any, path: readonly (string | number)[]): any => path.reduce((value, key) => value[key], root);
 const HANDLER = ["calls", 0, "calls", 1] as const, EXECUTOR = [...HANDLER, "calls", 1] as const;
@@ -195,6 +196,15 @@ test("the trace is bound to its transaction, the fill amount, one handler and co
   }
 });
 
+test("at 10000 basis points a swap that beats expected pays exactly the expected output", () => {
+  const all = { ...call, maximumRetentionBps: 10_000 }, gross = EXPECTED * 2n;
+  const proof = verify(fillTrace({ gross, retention: 10_000n }), FILLED, all);
+  assert.deepEqual([proof.outcome, proof.deliveredAmountAtomic, proof.retainedAmountAtomic],
+    ["completed_native", EXPECTED.toString(), (gross - EXPECTED).toString()]);
+  // The same swap paid under a 500 bps rule hands the Executor more than a 10000 bps header allows: that is not this quote.
+  assert.equal(verify(fillTrace({ gross, retention: 500n }), FILLED, all).outcome, "protocol_mismatch");
+});
+
 test("a reverted swap proves the whole fill came back as WETH", () => {
   const trace = fillTrace(), handler = at(trace, HANDLER), executor = handler.calls[1];
   executor.error = "execution reverted"; executor.output = "0x";
@@ -205,15 +215,16 @@ test("a reverted swap proves the whole fill came back as WETH", () => {
   assert.equal(verify(short).outcome, "protocol_mismatch");
 });
 
-test("a real BSC fill of the same Across -> Executor -> Fly WETH lane verifies from its public callTracer tree", () => {
-  // Another user's fill (block 131908889). Its quote let Fly retain all surplus (10000 bps), which APN's prepare refuses,
-  // so the call is rebuilt from the relayed message; the delivery tree is exactly what BSC executed.
+test("a real BSC fill of the same Across -> Executor -> Fly WETH lane verifies from its public callTracer tree", async () => {
+  // Another user's fill (block 131908889). Its quote lets Fly keep all output above expected (10000 bps), as the quotes QA
+  // drew on 2026-11-06 did; prepare decodes the same header, and the delivery tree is exactly what BSC executed.
   const real = lifiCapture("bsc-across-fly-fill-20261105.json") as { transaction: { hash: Hex; from: Address; input: Hex };
     relay: { outputAmount: string; message: Hex }; trace: unknown };
-  const [transactionId, swaps, finalReceiver] = decodeAbiParameters(parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address"), real.relay.message);
-  assert.throws(() => decodeBnbCompositeMessage(real.relay.message, transactionId, finalReceiver), /fly_economics/u);
-  const realCall = { ...call, transactionId, finalReceiver, inputAmountAtomic: swaps[0]!.fromAmount.toString(), flyCalldata: swaps[0]!.callData,
-    expectedOutputAtomic: "385416243211316729", minimumOutputAtomic: "371359950613945893", maximumRetentionBps: 10_000 };
+  const [transactionId, , finalReceiver] = decodeAbiParameters(parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address"), real.relay.message);
+  const realCall = decodeBnbCompositeMessage(real.relay.message, transactionId, finalReceiver);
+  assert.deepEqual({ expected: realCall.expectedOutputAtomic, minimum: realCall.minimumOutputAtomic, retention: realCall.maximumRetentionBps },
+    { expected: "385416243211316729", minimum: "371359950613945893", retention: 10_000 });
+  assert.equal((await verifyFlyHeaderSignature(realCall, BNB_COMPOSITE.signer)).signer, BNB_COMPOSITE.signer);
   const fill = { sender: getAddress(real.transaction.from), calldata: real.transaction.input, amountAtomic: real.relay.outputAmount };
   const proof = verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, realCall, fill);
   assert.deepEqual({ outcome: proof.outcome, gross: proof.vaultOutputAtomic, delivered: proof.deliveredAmountAtomic,
@@ -222,7 +233,7 @@ test("a real BSC fill of the same Across -> Executor -> Fly WETH lane verifies f
   assert.equal(verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, realCall,
     { ...fill, amountAtomic: (BigInt(fill.amountAtomic) - 1n).toString() }).outcome, "protocol_mismatch");
   // Had the signed expected output been one wei lower, the router would have kept that wei: paying it all is a mismatch.
-  assert.equal(verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, { ...realCall, maximumRetentionBps: 10_000,
+  assert.equal(verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, { ...realCall,
     expectedOutputAtomic: "385013129963143883" }, fill).outcome, "protocol_mismatch");
 });
 
