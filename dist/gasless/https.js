@@ -177,7 +177,7 @@ function abortable(promise, signal) {
 }
 function failure(code, reason) {
     const publicCode = code === "APN_RPC_CONFIG" ? "APN_RPC_AMBIGUOUS" : "APN_PROVIDER_UNAVAILABLE";
-    return new ApnError(publicCode, `Gasless transport failed: ${reason}.`);
+    return new ApnError(publicCode, `Gasless transport failed: ${reason}.`, { reason: `transport_${reason}` });
 }
 function send(endpoint, method, body, addresses, maximumBytes, deadline, code) {
     return new Promise((resolve, reject) => {

@@ -113,12 +113,12 @@ function quoteFeeModel(chainId: DirectEvmChainId) {
   return feeModel === undefined ? {} : { feeModel };
 }
 
-export function evmCore(root: string, rpc = new EvmTestRpc(), wrapping = new EvmWrappingSecret(), approval = new EvmApproval(), wrapNative?: (native: NativePort) => NativePort) {
+export function evmCore(root: string, rpc = new EvmTestRpc(), wrapping = new EvmWrappingSecret(), approval = new EvmApproval(), wrapNative?: (native: NativePort) => NativePort, rpcUrl?: string) {
   const state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS }), clock = new TestClock();
   clock.value = new Date();
   const local = new LocalWalletNative(state, wrapping, approval);
   const native = wrapNative?.(local) ?? local;
-  const core = new ApnCore({ state, rpc, native, clock });
+  const core = new ApnCore({ state, rpc, native, clock, ...(rpcUrl === undefined ? {} : { rpcUrl }) });
   return { core, state, rpc, wrapping, approval, local, clock };
 }
 

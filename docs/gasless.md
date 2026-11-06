@@ -362,6 +362,14 @@ signed intent, original endpoint identities, sealed material and earlier transit
 operation's next action repeats the option. Terminal resume, status and receipt calls use saved evidence without
 network access.
 
+When a Local operation's observation through the named RPC does not complete, the `resume` output adds
+`observation_rpc_diagnostic`: the RPC origin, `cause` (`http_<status>` for a non-200 answer, APN's transport
+reason such as `transport_request_deadline`, or the error code; null when the endpoint answered) and
+`rpc_error_code`, the numeric code of the last JSON-RPC error the endpoint returned. It is shown with that call only
+and is never stored. The endpoint's error message is provider text and is not included. A 408, 429 or 5xx answer or a
+transport failure records `gasless_observation_rpc_unavailable`; any other status is a protocol refusal
+(`gasless_receipt_unresolved`).
+
 ## Local wallet on Avalanche (x402 facilitator)
 
 A local wallet sends Avalanche C-Chain USDC without holding AVAX. The owner signs one EIP-3009

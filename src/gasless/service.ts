@@ -139,9 +139,12 @@ export class GaslessService {
           if (op.terminal || op.bootstrap.signingAttempts === 0) return publicGaslessOperation(op);
           const factory = this.dependencies().observationRpcFor;
           if (factory === undefined) gaslessFailure("APN_RPC_CONFIG", "gasless_observation_rpc_unavailable");
-          const observer = new GaslessObservationService(factory(op.intent.request.chainId, environmentName),
-            async (previous, patch) => await this.save(previous, patch), environmentName);
-          return publicGaslessOperation(await observer.run(op));
+          const rpc = factory(op.intent.request.chainId, environmentName);
+          const observer = new GaslessObservationService(rpc, async (previous, patch) => await this.save(previous, patch), environmentName);
+          const observed = await observer.run(op), diagnostic = observed.terminal ? null : rpc.diagnostic?.() ?? null;
+          // Shown with this call only, never stored: what the selected RPC answered when it could not complete the step.
+          return diagnostic === null ? publicGaslessOperation(observed) : { ...publicGaslessOperation(observed),
+            observation_rpc_diagnostic: { rpc_origin: rpc.rpcOrigin, cause: diagnostic.cause, rpc_error_code: diagnostic.rpcErrorCode } };
         });
       }
       return await this.locked(operationId, async (op) => publicGaslessOperation(

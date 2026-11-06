@@ -231,7 +231,9 @@ export class TransferService {
       operation = await this.transition(operation, "started", false, "foreground_signing_started", "durable_pre_effect", { allowlistLease });
       const custodyPayload = directCustodyPayload(operation);
       // A failed native call may have lost its response after signing. Classification cannot decrypt custody here.
-      const effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload));
+      let effectValue: unknown;
+      try { effectValue = await this.context.requireNative().request(this.context.nativeRequest("directTransfer.approveAndSign", custodyPayload)); }
+      catch (error) { throw await this.afterFailedApproval(operation, error); }
       const effect = parseEffect(effectValue);
       await verifyEffect(effect, operation);
       operation = await this.transition(
@@ -319,6 +321,25 @@ export class TransferService {
       await new DirectPublicEffectJournal(this.context.state).assertUnstarted(operation);
       await this.transition(operation, "failed_before_effect", true, "approval_window_expired", "durable_pre_effect_failure");
     }
+  }
+
+  /**
+   * The operation stays started after a refused, interrupted or timed-out approval, with its reservation held. When
+   * Native proved that the approval ended before the wallet was opened, resume ends it before effect and releases the
+   * reservation, so the error names the started operation's own next actions (resume with this invocation's RPC).
+   * Any other failure, or one whose proof cannot be read, keeps its own error and code-based next actions.
+   */
+  private async afterFailedApproval(operation: LocalOperationRecord, error: unknown): Promise<unknown> {
+    if (!(error instanceof ApnError)) return error;
+    const journal = new DirectPublicEffectJournal(this.context.state);
+    let proven = false;
+    try {
+      proven = await this.context.state.withLocks([walletCustodyLock(this.context.state, operation.profile)],
+        async () => await journal.noPrivateEntry(operation));
+    } catch { return error; }
+    if (!proven) return error;
+    const view = withInvocationRpc(publicOperation(operation), this.context.rpcUrl) as { readonly next_actions: readonly string[] };
+    return new ApnError(error.code, error.message, { ...error.details, nextActions: view.next_actions });
   }
 
   private async failBeforeEffect(operation: LocalOperationRecord, reason: string): Promise<never> {

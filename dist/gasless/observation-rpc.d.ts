@@ -1,6 +1,6 @@
 import { type GaslessTransport } from "./https.js";
 import type { GaslessChainId, GaslessCursor, GaslessEffectIdentity, GaslessIntent, GaslessObservation } from "./model.js";
-import type { GaslessObservationPort, GaslessObservationRpcFactory } from "./ports.js";
+import type { GaslessObservationDiagnostic, GaslessObservationPort, GaslessObservationRpcFactory } from "./ports.js";
 export interface GaslessObservationPacing {
     readonly minimumIntervalMs: number;
     monotonicNow(): number;
@@ -23,10 +23,15 @@ export declare class GaslessObservationRpc implements GaslessObservationPort {
     private readonly pendingReads;
     private lastRequestAt;
     private unavailable;
+    private cause;
+    private rpcErrorCode;
     constructor(chainId: GaslessChainId, rpcUrl: string, environmentName: string, transport?: GaslessTransport, pacing?: GaslessObservationPacing, maxBatchItems?: number | undefined);
     observe(intent: GaslessIntent, identity: GaslessEffectIdentity, cursor: GaslessCursor): Promise<GaslessObservation>;
     private observeWithinInvocation;
+    diagnostic(): GaslessObservationDiagnostic | null;
     private call;
     private flushReads;
+    /** A JSON-RPC error still refuses the read; only its numeric code is kept for the diagnostic. */
+    private result;
     private request;
 }
