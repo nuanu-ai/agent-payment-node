@@ -5,6 +5,7 @@ import { temporaryState } from "./helpers.js";
 import { LIFI_DESTINATION_HASH, lifiFixture } from "./lifi-helpers.js";
 import { ApnError } from "../../src/errors.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
+import { bridgeAtTransition, transitionBridge } from "../../src/lifi/transitions.js";
 import { observationRpcFailure } from "../../src/lifi/observation-diagnostics.js";
 import { findStored } from "./stored-operations.js";
 
@@ -226,7 +227,12 @@ test("LI.FI unchanged polling does not grow history, including changed provider 
 test("LI.FI interruption after durable destination evidence derives its receipt and rechecks the same delivery", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
-  s.core.bridges.records.persist = async (op) => { await persist(op); if (op.destinationProof !== null) throw new Error("synthetic interruption after the durable write"); };
+  // 0.5.96 saved the destination proof as its own transition; the run was interrupted right after that durable write.
+  s.core.bridges.records.persist = async (op) => {
+    if (op.destinationProof === null) return await persist(op);
+    await persist(transitionBridge(bridgeAtTransition(op, op.transitions.length - 2), { destinationProof: op.destinationProof }, op.updatedAt));
+    throw new Error("synthetic interruption after the durable write");
+  };
   const first = await s.core.execute({ command: "bridge.approve", operationId: id }); assert.equal(first.ok, false);
   const previous = (await findStored(s.core.bridges.records, id))!; assert.ok(previous.destinationProof); assert.equal(previous.terminal, false);
   const restart = await lifiFixture(temporary.root, "eth-base", { ...s, initializeWallet: false });
@@ -239,9 +245,15 @@ test("LI.FI interruption after durable destination evidence derives its receipt 
 test("LI.FI validated safe destination proof resumes locally without destination or provider RPC", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await lifiFixture(temporary.root);
   const { id } = await s.prepare(); const persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
-  s.core.bridges.records.persist = async (op) => { await persist(op); if (op.destinationProof !== null) throw new Error("synthetic durable boundary"); };
+  // As 0.5.96 left it: the proof saved on its own, the run stopped before the end.
+  s.core.bridges.records.persist = async (op) => {
+    if (op.destinationProof === null) return await persist(op);
+    await persist(transitionBridge(bridgeAtTransition(op, op.transitions.length - 2), { destinationProof: op.destinationProof }, op.updatedAt));
+    throw new Error("synthetic durable boundary");
+  };
   assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false);
   s.core.bridges.records.persist = persist; const previous = (await findStored(s.core.bridges.records, id))!;
+  assert.equal(previous.terminal, false);
   const destinationCalls = s.destination.calls.length, providerCalls = s.provider.statusCalls;
   s.destination.changedBlock = true;
   const result = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(result.ok, true, result.error?.message);

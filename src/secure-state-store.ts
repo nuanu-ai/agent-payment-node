@@ -252,7 +252,7 @@ export class SecureStateStore {
       let info = await handle.stat();
       if (await releasePublishedTemporary(target, info)) info = await handle.stat();
       validateFile(info);
-      if (info.size > MAX_STATE_BYTES) stateCorrupt("State file exceeds the size limit.");
+      if (info.size > this.stateByteLimit()) stateCorrupt("State file exceeds the size limit.");
       const bytes = await handle.readFile();
       let text: string;
       try {
@@ -275,6 +275,9 @@ export class SecureStateStore {
     }
   }
 
+  /** The largest file this store reads or writes; a store whose own records bound themselves may admit more. */
+  protected stateByteLimit(): number { return MAX_STATE_BYTES; }
+
   /** Optional internal assertion seam for specialized create-only stores. */
   protected async beforeCreateOnlyPublication(_relativePath: string, _value: unknown): Promise<void> {}
 
@@ -282,7 +285,7 @@ export class SecureStateStore {
     const target = this.resolveRelative(relativePath);
     const parent = dirname(target);
     const serialized = `${canonicalJson(value)}\n`;
-    if (Buffer.byteLength(serialized, "utf8") > MAX_STATE_BYTES) stateCorrupt("State file exceeds the size limit.");
+    if (Buffer.byteLength(serialized, "utf8") > this.stateByteLimit()) stateCorrupt("State file exceeds the size limit.");
     await this.assertNoSymlinkAncestors(target);
     validateDirectory(await lstat(parent), parent === this.root);
     const parentBefore = await stat(parent);

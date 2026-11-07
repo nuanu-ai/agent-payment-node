@@ -29,14 +29,17 @@ export function transitionBridge(op, patch, at) {
         return op;
     // Ordinary transitions stop short of the bounds, keeping room for closing proofs and the terminal transition.
     const kind = bridgeTransitionKind(oldMeaning, newMeaning);
-    let result = appended(op, next, at), refusal = bridgeCapacityRefusal(kind, result);
+    let result = appended(op, next, at), refusal = bridgeCapacityRefusal(kind, result, false);
     if (refusal === "bridge_record_capacity" && kind !== "ordinary" && (next.observationTelemetry?.length ?? 0) > 0) {
         // Telemetry is diagnostics, not evidence: a closing or terminal transition drops its rows rather than go unrecorded.
         result = appended(op, { ...next, observationTelemetry: [] }, at);
-        refusal = bridgeCapacityRefusal(kind, result);
+        refusal = bridgeCapacityRefusal(kind, result, false);
     }
+    // Only then may a terminal transition pass the 1 MiB bound that earlier releases read.
+    if (refusal === "bridge_record_capacity" && kind === "terminal")
+        refusal = bridgeCapacityRefusal(kind, result, true);
     if (refusal !== null)
-        bridgeFailure("APN_OPERATION_BLOCKED", refusal);
+        bridgeFailure("APN_OPERATION_BLOCKED", refusal, {});
     validateBridgeContinuity(op, result);
     return result;
 }

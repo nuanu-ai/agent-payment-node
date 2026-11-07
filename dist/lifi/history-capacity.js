@@ -1,8 +1,15 @@
 import { canonicalJson } from "../canonical.js";
+import { ApnError } from "../errors.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
 import { BRIDGE_CLOSING_TRANSITIONS, BRIDGE_HISTORY_LIMIT, BRIDGE_TERMINAL } from "./operation-model.js";
-/** The state store refuses to read a larger file: canonical JSON and its newline. */
+/** The file bound every released reader admits (canonical JSON and its newline); only a terminal journal may pass it. */
 export const BRIDGE_FILE_LIMIT = 1024 * 1024;
+/**
+ * A terminal transition that fits no 1 MiB file even without its telemetry (a journal an earlier release filled, with
+ * less room than one state copy) may pass that bound by one more copy. The bridge reader admits it; 0.5.96 and earlier
+ * do not read such a file.
+ */
+export const BRIDGE_TERMINAL_FILE_LIMIT = BRIDGE_FILE_LIMIT + 64 * 1024;
 /**
  * Room an ordinary transition leaves for the closing ones. Each transition copies the whole mutable state, 10-12 KiB
  * once the source proofs exist, so this holds the few closing proofs a resume can add and the terminal transition.
@@ -33,10 +40,22 @@ const RESERVE_BYTES = { ordinary: CLOSING_RESERVE_BYTES,
 export function bridgeHistoryAdmits(kind, transitions) {
     return transitions <= MAX_TRANSITIONS[kind];
 }
-/** The capacity reason that refuses `record`, whose newest transition is of `kind`; null when it may be written. */
-export function bridgeCapacityRefusal(kind, record) {
+/**
+ * The capacity reason that refuses `record`, whose newest transition is of `kind`; null when it may be written. With
+ * `overflow` a terminal transition is measured against the terminal file limit instead of the 1 MiB one.
+ */
+export function bridgeCapacityRefusal(kind, record, overflow) {
     if (!bridgeHistoryAdmits(kind, record.transitions.length))
         return "bridge_history_capacity";
-    return Buffer.byteLength(canonicalJson(record), "utf8") + 1 + RESERVE_BYTES[kind] > BRIDGE_FILE_LIMIT ? "bridge_record_capacity" : null;
+    const limit = overflow && kind === "terminal" ? BRIDGE_TERMINAL_FILE_LIMIT : BRIDGE_FILE_LIMIT;
+    return bridgeFileBytes(record) + RESERVE_BYTES[kind] > limit ? "bridge_record_capacity" : null;
+}
+export function bridgeFileBytes(value) {
+    return Buffer.byteLength(canonicalJson(value), "utf8") + 1;
+}
+/** Whether `error` is a journal capacity refusal: nothing was written, and the same change can be tried again later. */
+export function bridgeCapacityRefused(error) {
+    return error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED" &&
+        (error.details?.reason === "bridge_history_capacity" || error.details?.reason === "bridge_record_capacity");
 }
 //# sourceMappingURL=history-capacity.js.map

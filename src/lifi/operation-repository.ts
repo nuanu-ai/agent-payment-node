@@ -1,7 +1,7 @@
-import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
+import { hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
-import { BRIDGE_FILE_LIMIT } from "./history-capacity.js";
+import { BRIDGE_FILE_LIMIT, BRIDGE_TERMINAL_FILE_LIMIT, bridgeFileBytes } from "./history-capacity.js";
 import { type BridgeOperationRecord } from "./operation-model.js";
 import { assertBridgeAppend, bridgeCorrupt, validateBridgeOperation } from "./operation-validation.js";
 import { bridgeReceipt, currentBridgeReceiptCandidates, type BridgeReceipt } from "./receipt.js";
@@ -13,6 +13,8 @@ import { adaptLegacyBridgeOperation, isLegacyBridgeOperation,
 
 export class BridgeOperationRepository extends SecureStateStore {
   private initialized: Promise<void> | undefined;
+  /** A terminal journal may pass 1 MiB (history-capacity.ts); every other one is held to it on load and write. */
+  protected override stateByteLimit(): number { return BRIDGE_TERMINAL_FILE_LIMIT; }
   private async ready(): Promise<void> {
     this.initialized ??= (async () => {
       await super.initialize(); await this.ensureDirectory("bridge-operations");
@@ -34,12 +36,15 @@ export class BridgeOperationRepository extends SecureStateStore {
       op = adaptLegacyBridgeOperation(value);
     }
     if (op.profileHash !== profileHash || op.operationId !== operationId) bridgeCorrupt();
+    if (!op.terminal && bridgeFileBytes(value) > BRIDGE_FILE_LIMIT) bridgeCorrupt();
     return op;
   }
   async writeOperation(op: BridgeOperationRecord): Promise<void> {
     validateBridgeOperation(op); await this.ready();
-    // The hard read limit only: the room kept for closing and terminal transitions is enforced where they are made.
-    if (Buffer.byteLength(canonicalJson(op), "utf8") + 1 > BRIDGE_FILE_LIMIT) bridgeFailure("APN_OPERATION_BLOCKED", "bridge_record_capacity");
+    // The hard limits only: the room kept for closing and terminal transitions is enforced where they are made.
+    if (bridgeFileBytes(op) > (op.terminal ? BRIDGE_TERMINAL_FILE_LIMIT : BRIDGE_FILE_LIMIT)) {
+      bridgeFailure("APN_OPERATION_BLOCKED", "bridge_record_capacity", {});
+    }
     // `op` is validated above and `previous` when it is loaded; only the append structure remains to check.
     const previous = await this.loadOperation(op.profileHash, op.operationId);
     if (previous !== null) assertBridgeAppend(previous, op);
