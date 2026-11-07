@@ -112,9 +112,8 @@ export class BridgeObservation {
 
   async destinationProof(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
     if (op.sourceProof === null || op.effects.some((e) => e.phase !== "safe_success")) return op;
-    if (op.destinationProof !== null) {
-      return await this.finish(op);
-    }
+    // A proof saved by an earlier run settles exactly as it would have then: a run may die between the save and the end.
+    if (op.destinationProof !== null) return await this.settleProof(op);
     const m = op.intent.materialization;
     if (!reusableProviderObservation(op)) {
       let observation = null;
@@ -141,12 +140,8 @@ export class BridgeObservation {
         return await this.save(op, { state: "unknown_finality", observationTelemetry: telemetry,
           failure: destinationObservationFailure("evidence_unavailable", error) });
       }
-      op = await this.save(op, { destinationProof: proof, observationTelemetry: appendObservationTelemetry(op, "destination_observation",
-        "bridge", "success", beforeTelemetry, destination.readTelemetry?.() ?? null) });
-      const outcome = proof.compositeTrace?.outcome;
-      if (outcome === undefined || outcome === null || outcome === "completed_native") return await this.finish(op, outcome ?? "delivery_correlated");
-      if (outcome === "recovered_weth" || outcome === "below_floor" || outcome === "protocol_mismatch") return await this.finishDestinationFailure(op, outcome);
-      return await this.save(op, { state: "unknown_finality", failure: { reason: "evidence_unavailable", residualAllowance: null } });
+      return await this.settleProof(await this.save(op, { destinationProof: proof, observationTelemetry: appendObservationTelemetry(op,
+        "destination_observation", "bridge", "success", beforeTelemetry, destination.readTelemetry?.() ?? null) }));
     }
     // Destination correlation is bound to the provider-named transaction and its canonical receipt logs.
     if (isEvmTransactionHash(hint)) {
@@ -194,6 +189,13 @@ export class BridgeObservation {
    * Proven delivery needs no residual read: the allowance was exactly the principal (or the native constant zero) and the
    * proven source Transfer consumed exactly that amount, so the residual at the safe bridge block is zero.
    */
+  /** The end a saved destination proof decides: a composite's trace outcome, else a correlated delivery. */
+  private async settleProof(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
+    const outcome = op.destinationProof!.compositeTrace?.outcome;
+    if (outcome === undefined || outcome === null || outcome === "completed_native") return await this.finish(op, outcome ?? "delivery_correlated");
+    if (outcome === "recovered_weth" || outcome === "below_floor" || outcome === "protocol_mismatch") return await this.finishDestinationFailure(op, outcome);
+    return await this.save(op, { state: "unknown_finality", failure: { reason: "evidence_unavailable", residualAllowance: null } });
+  }
   private async finish(op: BridgeOperationRecord, reason = "delivery_correlated"): Promise<BridgeOperationRecord> {
     const proof = op.effects.at(-1)!.safeProof!;
     return await this.save(op, { state: "completed",

@@ -42,6 +42,8 @@ export declare class BridgeObservation {
      * Proven delivery needs no residual read: the allowance was exactly the principal (or the native constant zero) and the
      * proven source Transfer consumed exactly that amount, so the residual at the safe bridge block is zero.
      */
+    /** The end a saved destination proof decides: a composite's trace outcome, else a correlated delivery. */
+    private settleProof;
     private finish;
     private finishDestinationFailure;
     private destinationCandidate;

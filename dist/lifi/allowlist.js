@@ -3,6 +3,7 @@ import { activeAssetPolicyFromState, loadActiveAssetPolicyRegistry } from "../al
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, } from "../asset-usage-ledger.js";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { ApnError } from "../errors.js";
 import { bridgeAssetRow, bridgeExecutionSource, bridgeExecutionSourceCaip2, bridgeProviderBoundNativeDestination } from "./asset-registry.js";
 import { bridgeAddress, bridgeFailure, bridgeSame, bridgeUint } from "./validation.js";
@@ -31,7 +32,7 @@ export class BridgeAllowlistGate {
         const evaluation = { chain: subject.chain, asset: subject.asset, rail: "bridge", mechanism, amountAtomic: request.amountAtomic,
             dailyUsageAtomic: usage.amountAtomic, asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() };
         const admission = evaluate(active.registry, evaluation);
-        exactMechanism(admission, mechanism);
+        exactMechanism(admission, mechanism, request.recipient);
         return { schemaVersion: BRIDGE_ALLOWLIST_SCHEMA, policyDigest: active.digest, policyRevision: active.revision, activationDigest: active.activationDigest,
             ...subject, mechanism };
     }
@@ -54,7 +55,7 @@ export class BridgeAllowlistGate {
         }
         const admission = evaluate(active.registry, { chain: binding.chain, asset: binding.asset, rail: "bridge", mechanism, amountAtomic: binding.amountAtomic,
             dailyUsageAtomic: "0", asOfDate: this.context.clock.now().toISOString().slice(0, 10), asOf: this.context.clock.now().toISOString() });
-        exactMechanism(admission, mechanism);
+        exactMechanism(admission, mechanism, binding.selfRecipient);
         return active;
     }
     async reserve(op) {
@@ -194,9 +195,14 @@ export function bridgeMechanism(tool) {
 function isBridgeMechanism(value) {
     return bridgeSame(value, LIFI_ACROSS_BRIDGE_MECHANISM) || bridgeSame(value, LIFI_STARGATE_BRIDGE_MECHANISM);
 }
-function exactMechanism(admission, expected) {
+/**
+ * The admission must name this exact mechanism, and its recipient pin (the row's or, with alternatives, the selected
+ * mechanism's) must list the recipient. Prepare (admit), approval, reservation and first send (confirm) all pass here.
+ */
+function exactMechanism(admission, expected, recipient) {
     if (!bridgeMechanismAdmitted(admission, expected))
         refuse("bridge_mechanism_mismatch", "The owner policy lacks the exact LI.FI bridge mechanism pin.");
+    assertRecipientAdmitted({ admission, mechanism: expected, recipient });
 }
 function evaluate(registry, input) {
     try {
