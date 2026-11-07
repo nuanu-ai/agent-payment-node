@@ -78,12 +78,14 @@ A primary receipt read is "refused" above in these cases:
 
 Any other refusal fails the read without a fallback, including any other HTTP 403. When an unresolved operation records
 an RPC refusal (an HTTP status, or a history the endpoint does not serve) as its `observation_rpc_failure`, its status
-adds one `next_actions` entry naming the variable to set:
-- for a receipt: the receipt reader;
-- for a pinned state read or a trace: the archive;
-- for anything else: the chain's primary `APN_<CHAIN>_RPC_URL`.
+and the output of `bridge approve` and `operation resume` add one `next_actions` entry naming the variable to set:
+- the receipt reader, when the receipt reader refused, when a receipt read was refused, or when the archive refused a
+  batch (the archive reads batches only for receipts);
+- the archive, when the archive refused any other read, or when the primary refused a trace or a native-fill balance;
+- the chain's primary `APN_<CHAIN>_RPC_URL` otherwise.
 
-Receipts keep the plain next actions.
+An operation that needed an archive and had none (`explicit_archive_RPC_required`) names the archive. Receipts keep the
+plain next actions.
 
 LI.FI is reached at the fixed origin `https://li.quest/v1`. Set `APN_LIFI_API_KEY` to send authenticated requests; the
 key is used only for that API base.

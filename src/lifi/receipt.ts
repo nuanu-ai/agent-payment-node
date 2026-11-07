@@ -15,27 +15,31 @@ export function bridgeNextActions(op: BridgeOperationRecord): readonly string[] 
   if (op.state === "awaiting_approval") return [`apn bridge approve --operation ${op.operationId}`];
   return [`apn operation resume --operation ${op.operationId}`, `apn operation status --operation ${op.operationId}`];
 }
-const READER_REASONS: ReadonlySet<string> = new Set(["bridge_RPC_HTTP_status", "historical_receipt_unavailable",
-  "explicit_archive_RPC_required", "distinct_archive_RPC_required"]);
-/** Reads the archive role serves: state pinned to a block, and traces. */
-const ARCHIVE_METHODS: ReadonlySet<string> = new Set(["eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_call", "debug_traceTransaction"]);
+/** The observation reads a primary refusal of which an archive serves: a trace, and the hash-pinned native-fill balances. */
+const ARCHIVE_METHODS: ReadonlySet<string> = new Set(["debug_traceTransaction", "eth_getBalance"]);
 /**
  * Status only, never a receipt: an unresolved operation whose stored observation failure is an RPC's own refusal (an
- * HTTP status, or a history it does not serve) names the one variable whose endpoint serves that read. A receipt goes
- * to the receipt reader, a pinned state read or a trace to the archive, anything else to the chain's primary. APN never
- * picks an endpoint; the owner names one and resumes.
+ * HTTP status, or a history it does not serve) names the one variable whose endpoint serves that read. APN never picks
+ * an endpoint; the owner names one and resumes. The endpoint role decides first: the receipt reader, and an archive
+ * read as a batch or for a receipt, stand for the receipt route (a separate receipt reader takes receipts off the
+ * archive); any other archive read is the archive's. A primary refusal goes by its method.
  */
 function rpcReaderAction(op: BridgeOperationRecord): readonly string[] {
   const failure = op.failure?.observationRpc;
-  if (op.terminal || op.state === "awaiting_approval" || failure === undefined ||
-    failure.httpStatus === undefined && (failure.reason === undefined || !READER_REASONS.has(failure.reason))) return [];
+  if (op.terminal || op.state === "awaiting_approval" || failure === undefined) return [];
   const request = op.intent.materialization.request, chainId = failure.stage.startsWith("source_") ? request.fromChainId : request.toChainId;
-  const method = failure.rpcMethod, variable = method === "eth_getTransactionReceipt" ? BRIDGE_RECEIPT_RPC_ENV[chainId]
-    : method !== undefined && ARCHIVE_METHODS.has(method) || failure.reason === "explicit_archive_RPC_required" ||
-      failure.reason === "distinct_archive_RPC_required" ? BRIDGE_ARCHIVE_RPC_ENV[chainId] : BRIDGE_RPC_ENV[chainId];
+  const resume = `then rerun: apn operation resume --operation ${op.operationId}`;
+  if (failure.reason === "explicit_archive_RPC_required") {
+    return [`Chain ${chainId} needs an archive endpoint for this proof: set ${BRIDGE_ARCHIVE_RPC_ENV[chainId]}, ${resume}`];
+  }
+  if (failure.httpStatus === undefined && failure.reason !== "bridge_RPC_HTTP_status" && failure.reason !== "historical_receipt_unavailable") return [];
+  const role = failure.endpointRole ?? "primary", method = failure.rpcMethod;
+  const receiptRoute = role === "receipt" || method === "eth_getTransactionReceipt" || role === "archive" && method === undefined;
+  const variable = receiptRoute ? BRIDGE_RECEIPT_RPC_ENV[chainId]
+    : role === "archive" || method !== undefined && ARCHIVE_METHODS.has(method) ? BRIDGE_ARCHIVE_RPC_ENV[chainId] : BRIDGE_RPC_ENV[chainId];
   const refusal = failure.httpStatus === undefined ? failure.reason : `HTTP ${failure.httpStatus}`;
-  return [`The ${failure.endpointRole ?? "primary"} RPC of chain ${chainId} refused ${method ?? "a read"} (${refusal}). ` +
-    `If it keeps refusing, set ${variable} to an HTTPS endpoint that serves this read, then rerun: apn operation resume --operation ${op.operationId}`];
+  return [`The ${role} RPC of chain ${chainId} refused ${method ?? "a read"} (${refusal}). ` +
+    `If it keeps refusing, set ${variable} to an HTTPS endpoint that serves this read, ${resume}`];
 }
 export function bridgeProofClass(op: BridgeOperationRecord): string {
   if (op.state === "completed") return "rpc_safe_correlated";

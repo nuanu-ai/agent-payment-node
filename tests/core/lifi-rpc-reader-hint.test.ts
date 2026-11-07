@@ -53,28 +53,39 @@ test("a refusal with another sign-up link, or from another origin, never falls b
   }
 });
 
+const refused = (role: string, method: string | undefined, status: string, variable: string) => (id: string) =>
+  `The ${role} RPC of chain 56 refused ${method ?? "a read"} (HTTP ${status}). If it keeps refusing, set ${variable} ` +
+  `to an HTTPS endpoint that serves this read, then rerun: apn operation resume --operation ${id}`;
 for (const row of [
-  { method: "eth_getTransactionReceipt", variable: "APN_BNB_RECEIPT_RPC_URL" },
-  { method: "debug_traceTransaction", variable: "APN_BNB_ARCHIVE_RPC_URL" },
-  { method: "eth_getLogs", variable: "APN_BNB_RPC_URL" },
-]) test(`an RPC refusal of ${row.method} stored on an unresolved bridge names ${row.variable} in status only`, async (t) => {
+  { name: "a primary receipt", details: { rpcMethod: "eth_getTransactionReceipt", httpStatus: "403", endpointRole: "primary" },
+    expected: refused("primary", "eth_getTransactionReceipt", "403", "APN_BNB_RECEIPT_RPC_URL") },
+  { name: "a primary trace", details: { rpcMethod: "debug_traceTransaction", httpStatus: "403", endpointRole: "primary" },
+    expected: refused("primary", "debug_traceTransaction", "403", "APN_BNB_ARCHIVE_RPC_URL") },
+  { name: "a primary log read", details: { rpcMethod: "eth_getLogs", httpStatus: "403", endpointRole: "primary" },
+    expected: refused("primary", "eth_getLogs", "403", "APN_BNB_RPC_URL") },
+  // Keyless Tatum as the archive standing in for a receipt reader: the receipt batch is refused with 402, no method.
+  { name: "an archive receipt batch", details: { httpStatus: "402", endpointRole: "archive" },
+    expected: refused("archive", undefined, "402", "APN_BNB_RECEIPT_RPC_URL") },
+  { name: "an archive trace", details: { rpcMethod: "debug_traceTransaction", httpStatus: "402", endpointRole: "archive" },
+    expected: refused("archive", "debug_traceTransaction", "402", "APN_BNB_ARCHIVE_RPC_URL") },
+  { name: "a receipt reader chain check", details: { rpcMethod: "eth_chainId", httpStatus: "503", endpointRole: "receipt" },
+    expected: refused("receipt", "eth_chainId", "503", "APN_BNB_RECEIPT_RPC_URL") },
+  { name: "a missing archive", details: { reason: "explicit_archive_RPC_required" },
+    expected: (id: string) => `Chain 56 needs an archive endpoint for this proof: set APN_BNB_ARCHIVE_RPC_URL, then rerun: apn operation resume --operation ${id}` },
+]) test(`${row.name} refusal stored on an unresolved bridge names its reader in status only`, async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await lifiFixture(temporary.root, "eth-bnb");
   s.provider.statusValue = "completed_observed";
   s.destination.observe = async () => {
-    throw new ApnError("APN_RPC_PROTOCOL", "Bridge validation failed: bridge_RPC_HTTP_status.",
-      { rpcMethod: row.method, httpStatus: "403", attempts: "1", endpointRole: "primary" });
+    throw new ApnError("APN_RPC_PROTOCOL", "Bridge validation failed: bridge_RPC_HTTP_status.", { attempts: "1", ...row.details });
   };
-  const prepared = await s.prepare("across", `bnb-reader-hint-${row.method}`);
+  const prepared = await s.prepare("across", `bnb-reader-hint-${row.name.replaceAll(" ", "-")}`);
   await s.core.execute({ command: "bridge.approve", operationId: prepared.id });
   const record = (await findStored(s.core.bridges.records, prepared.id))!;
-  assert.equal(record.terminal, false); assert.equal(record.failure?.observationRpc?.httpStatus, 403, JSON.stringify({ state: record.state, failure: record.failure }));
+  assert.equal(record.terminal, false, JSON.stringify({ state: record.state, failure: record.failure }));
   assert.equal(record.failure?.observationRpc?.stage.startsWith("destination_"), true);
   const plain = [`apn operation resume --operation ${prepared.id}`, `apn operation status --operation ${prepared.id}`];
-  const actions = publicBridgeOperation(record).next_actions;
-  assert.deepEqual(actions.slice(0, 2), plain); assert.equal(actions.length, 3);
-  assert.equal(actions[2], `The primary RPC of chain 56 refused ${row.method} (HTTP 403). If it keeps refusing, set ${row.variable} ` +
-    `to an HTTPS endpoint that serves this read, then rerun: apn operation resume --operation ${prepared.id}`);
+  assert.deepEqual(publicBridgeOperation(record).next_actions, [...plain, row.expected(prepared.id)]);
   // Stored receipts hash their next actions: the receipt keeps the plain ones, so a receipt written earlier still verifies.
   assert.deepEqual(bridgeReceipt(record).next_actions, plain);
 });
