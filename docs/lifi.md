@@ -465,7 +465,7 @@ and raise when the standing one is short, the Fly call, its return of the WETH t
 payment to the recipient. Inside Fly Core only the native settlement is read: the router's payment to the Executor must
 equal the retention rule applied to what Core paid the router, and the Executor must forward that plus anything Core
 paid it directly. The proof records the WETH the Executor returned above the Fly input as `returnedWethAtomic` next
-to the native delivery, each with its Transfer log or balance delta; a fill whose returned WETH did not arrive is a
+to the native delivery, the WETH proved by its Transfer log and the delivery by its trace; a fill whose returned WETH did not arrive is a
 `protocol_mismatch`. A reverted swap returns the whole fill as WETH. The digest covers the whole tree. LI.FI reports such a
 fill as DONE/PARTIAL; on this lane PARTIAL leads to the same trace proof as COMPLETED, and the trace alone decides the
 outcome, so a reverted swap ends as `destination_failed` with `recovered_weth` and its usage is finalized as spent. A
@@ -546,10 +546,10 @@ limits, recoverable. An exhausted read budget defers to the next resume and neve
   of the output amount from the destination SpokePool (`Withdrawal(src)` from WETH9, or a `Transfer` to the zero
   address from aeWETH).
 - **Linea and Monad native fills.** The destination transaction must also expose one bounded `debug_traceTransaction`
-  `callTracer` call from the pinned SpokePool to the bound profile owner for exactly the `FilledRelay` output. The safe
-  canonical transaction and block bind that trace; the balance delta from the previous block to the receipt block
-  corroborates it but cannot replace it. For Linea, Monad and the BNB composite, the destination primary RPC, or its
-  archive reader, must support `debug_traceTransaction` with `callTracer`.
+  `callTracer` call from the pinned SpokePool to the bound profile owner for exactly the `FilledRelay` output; it and every
+  frame above it must have succeeded. The safe canonical transaction and block bind that trace, which is the proof. The
+  balance delta across the block only corroborates it (BNB composite too): the owner may spend in that block, so a short
+  delta is kept and a negative one stored as `nativeBalance: null`. The destination primary RPC, or its archive reader, must support `debug_traceTransaction` with `callTracer`, as for the BNB composite.
 - **Stargate delivery.** A nonzero GUID, source endpoint, receiver and amount matching `OFTReceived` from the pool,
   with a transfer of the admitted destination token, including a later successful retry of a cached delivery.
 - **Ethereum to Base native Stargate.** Source observation requires `OFTSent.amountSentLD` to equal the bridge amount

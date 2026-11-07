@@ -4,20 +4,26 @@ import type { Address, Hex } from "../model.js";
 import type { BridgeBlock, BridgeLog } from "./model.js";
 import { bridgeFailure, bridgeHex } from "./validation.js";
 
+/**
+ * The one native value CALL from the pinned payer to the recipient in a bounded callTracer tree. It is the delivery proof,
+ * so it must have taken effect: the frame and every frame above it succeeded. A reverted ancestor undoes a child that
+ * callTracer still reports without an error of its own.
+ */
 export function exactNativeTransfer(value: unknown, transactionHash: Hex, expected: Readonly<{ recipient: Address; from: Address; amountAtomic?: string; minimumAmountAtomic?: string }>) {
   if ((expected.amountAtomic === undefined) === (expected.minimumAmountAtomic === undefined)) bridgeFailure("APN_INTERNAL", "native_transfer_bound");
   const rows: Array<{ type: "CALL"; from: Address; to: Address; valueAtomic: string; path: string }> = [];
-  const visit = (raw: unknown, path: string, depth: number): void => {
+  const visit = (raw: unknown, path: string, depth: number, ancestorsSucceeded: boolean): void => {
     if (depth > 32 || rows.length > 1024) bridgeFailure("APN_RPC_PROTOCOL", "native_trace_bound");
     const call = evmRpcRecord(raw), from = evmRpcAddress(call.from), to = evmRpcAddress(call.to), valueAtomic = evmRpcQuantity(call.value ?? "0x0").toString();
     const bounded = expected.amountAtomic === undefined ? BigInt(valueAtomic) >= BigInt(expected.minimumAmountAtomic!) : valueAtomic === expected.amountAtomic;
-    if (call.type === "CALL" && call.error === undefined && from === expected.from && to === expected.recipient && bounded) rows.push({ type: "CALL", from, to, valueAtomic, path });
+    const succeeded = ancestorsSucceeded && call.error === undefined;
+    if (call.type === "CALL" && succeeded && from === expected.from && to === expected.recipient && bounded) rows.push({ type: "CALL", from, to, valueAtomic, path });
     if (call.calls !== undefined) {
       if (!Array.isArray(call.calls) || call.calls.length > 256) bridgeFailure("APN_RPC_PROTOCOL", "native_trace_calls");
-      call.calls.forEach((child, index) => visit(child, `${path}.${index}`, depth + 1));
+      call.calls.forEach((child, index) => visit(child, `${path}.${index}`, depth + 1, succeeded));
     }
   };
-  visit(value, "0", 0);
+  visit(value, "0", 0, true);
   if (rows.length !== 1) bridgeFailure("APN_RPC_PROTOCOL", "native_destination_transfer");
   return { transactionHash, from: expected.from, to: expected.recipient, valueAtomic: rows[0]!.valueAtomic, traceHash: hashObject({ transactionHash, delivery: rows[0] }) };
 }

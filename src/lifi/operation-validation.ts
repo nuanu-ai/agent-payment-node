@@ -185,11 +185,13 @@ function validateSnapshot(op: BridgeOperationRecord, s: BridgeTransition, legacy
       (p.fillType === 2 && (p.relayerCredit !== BRIDGE_ZERO_WORD || p.repaymentChainIdAtomic !== "0"))
       : p.fillType !== null || p.relayerCredit !== null || p.repaymentChainIdAtomic !== null) bridgeCorrupt();
     const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
+    // The trace proves a native delivery; the balance delta only corroborates it, and a same-block spend by the recipient
+    // may leave it short (kept) or negative (stored as null, since the schema holds unsigned corroboration only).
     if (!legacy && providerBoundNative && (!bridgeProviderSettled(op.intent.decoded, s.providerObservation) ||
-      s.providerObservation!.destinationTransactionHash !== p.transactionHash || p.nativeBalance === null || p.nativeBalance.recipient !== m.request.recipient)) bridgeCorrupt();
+      s.providerObservation!.destinationTransactionHash !== p.transactionHash || (p.nativeBalance !== null && p.nativeBalance.recipient !== m.request.recipient))) bridgeCorrupt();
     if (!legacy && providerBoundNative && op.intent.decoded.composite === undefined &&
       (p.nativeTransfer === null || p.nativeTransfer.transactionHash !== p.transactionHash || p.nativeTransfer.to !== m.request.recipient ||
-       p.nativeTransfer.valueAtomic !== p.amountAtomic || BigInt(p.nativeBalance!.deltaAtomic) < BigInt(m.request.minOutputAtomic))) bridgeCorrupt();
+       p.nativeTransfer.valueAtomic !== p.amountAtomic)) bridgeCorrupt();
     if (!legacy && op.intent.decoded.composite !== undefined) {
       const trace = p.compositeTrace;
       if (p.nativeTransfer !== null || trace === undefined || trace === null || trace.transactionHash !== p.transactionHash ||

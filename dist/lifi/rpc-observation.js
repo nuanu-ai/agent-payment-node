@@ -87,8 +87,10 @@ export async function observeCanonical(c, hash, expected, nativeDelivery, includ
     let nativeBalance = null, nativeTransfer = null;
     let compositeTrace = null;
     if (nativeDelivery !== undefined) {
-        // No logs prove a native fill: the recipient's balance across the inclusion block and the delivery call trace do.
-        // These are the one genuinely historical read set; an owner-named archive serves them, else the primary for recent blocks.
+        // No logs prove a native fill: the delivery call trace does. The recipient's balance across the inclusion block only
+        // corroborates it and is kept with its sign: the recipient may spend in the same block, so a short or negative delta
+        // is no evidence against the fill. These are the one genuinely historical read set; an owner-named archive serves
+        // them, else the primary for recent blocks.
         if (number === 0n)
             bridgeFailure("APN_RPC_PROTOCOL", "native_balance_genesis");
         const beforeRaw = (await c.batchCall([chainItem(c.chainId), headerItem(number - 1n)]))[1];
@@ -100,8 +102,6 @@ export async function observeCanonical(c, hash, expected, nativeDelivery, includ
             c.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
             c.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
         ]);
-        if (afterBalance < beforeBalance)
-            bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
         nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
             beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
         if (nativeDelivery.composite === undefined)
