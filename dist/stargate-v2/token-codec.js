@@ -19,6 +19,11 @@ export const MAX_TTL_MS = 120_000;
 export const STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS = 30 * 60_000;
 export const STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS = 60_000;
 export const STARGATE_TOKEN_MAX_BRIDGE_GAS = 5000000n;
+/** v6 binds OP Mainnet L1 data and operator fee bounds into the native debit; v5 (0.5.25..) records stay readable as they were. */
+export const STARGATE_TOKEN_SCHEMA = "apn.stargate-v2-token-operation.v6";
+export const STARGATE_TOKEN_SCHEMA_V5 = "apn.stargate-v2-token-operation.v5";
+export const STARGATE_TOKEN_POST_APPROVAL_SCHEMA = "apn.stargate-v2-token-post-approval-quote.v2";
+export const STARGATE_TOKEN_POST_APPROVAL_SCHEMA_V1 = "apn.stargate-v2-token-post-approval-quote.v1";
 export function fail(code, reason) {
     throw new ApnError(code, `Direct Stargate V2 token execution failed closed: ${reason}.`, { reason });
 }

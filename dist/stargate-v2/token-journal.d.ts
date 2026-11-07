@@ -15,7 +15,7 @@ export declare class FileStargateTokenJournal implements StargateTokenJournal {
 }
 export declare function transition(op: StargateTokenOperation | Omit<StargateTokenOperation, "integrityHash">, phase: StargateTokenPhase, reason: string, at: number): StargateTokenOperation;
 export declare function seal(value: Omit<StargateTokenOperation, "integrityHash"> | StargateTokenOperation): StargateTokenOperation;
-/** Every released version (0.5.25..) wrote only token schema v5. */
+/** Released versions wrote token schema v5 (0.5.25..) and then v6; v5 is read exactly as before, without OP-stack fee bounds. */
 export declare function validateRecord(value: unknown): StargateTokenOperation;
 /**
  * Where each phase of a token Stargate journal may go next; a phase with nowhere to go (observed, cleaned, abandoned_unknown)

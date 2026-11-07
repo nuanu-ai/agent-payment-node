@@ -3,7 +3,9 @@ import { ApnError } from "../errors.js";
 
 type FundsReason = "max_native_debit_exceeded" | "insufficient_native_balance";
 /** The known parts of a native debit; `gas` is absent when the refusal comes before eth_estimateGas. */
-interface FundsParts { readonly required: bigint; readonly limit: bigint; readonly principal?: bigint; readonly messagingFee?: bigint; readonly gas?: bigint }
+/** `opStackFees`: the OP-stack L1 data and operator fee upper bounds inside `required` (Optimism token lane only). */
+interface FundsParts { readonly required: bigint; readonly limit: bigint; readonly principal?: bigint; readonly messagingFee?: bigint; readonly gas?: bigint;
+  readonly opStackFees?: bigint }
 
 const wei = (value: bigint) => ({ wei: value.toString(), eth: formatEther(value) });
 
@@ -22,5 +24,6 @@ export function stargateFundsRefusal(reason: FundsReason, parts: FundsParts): ne
     ...(parts.principal === undefined ? {} : { principal_wei: parts.principal.toString() }),
     ...(parts.messagingFee === undefined ? {} : { messaging_fee_wei: parts.messagingFee.toString() }),
     gas_included: parts.gas !== undefined, ...(parts.gas === undefined ? {} : { gas_upper_wei: parts.gas.toString() }),
+    ...(parts.opStackFees === undefined ? {} : { op_stack_fee_upper_wei: parts.opStackFees.toString() }),
   });
 }

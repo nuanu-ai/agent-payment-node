@@ -4,8 +4,12 @@ import { evmFrozenFeeAdmitted } from "../evm-fee-admission.js";
 import { STARGATE_ERC20_ABI, STARGATE_SEND_ABI } from "./abi.js";
 import { assertStargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import { quoteStargateV2Direct } from "./quote.js";
-import { STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, fail, quantity, uint, } from "./token-codec.js";
+import { STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_POST_APPROVAL_SCHEMA, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, fail, hex32, quantity, uint, } from "./token-codec.js";
+import { opStackFeeOf, readStargateOpStackFees } from "./token-op-fees.js";
 import { assertLane, readAllowance, readExecutorCap, readPoolFunctional, readTokenBalance, requoteSend, rpcEnvelope } from "./token-rpc.js";
+/** The stored bounds every check of a v6 operation spends from; a v5 record has none and is never signed again (F3). */
+function boundFees(op) { if (op.opStackFees === undefined)
+    fail("APN_REPREPARE_REQUIRED", "op_stack_fees_unbound_reprepare"); return op.opStackFees; }
 /** The pre-signing reads of a token Stargate send: the fresh post-approval quote, the frozen fee admission and the preflight. */
 export async function createPostApprovalQuote(op, ports) {
     const now = ports.now ?? Date.now;
@@ -76,16 +80,18 @@ export async function createPostApprovalQuote(op, ports) {
     catch {
         fail("APN_REPREPARE_REQUIRED", "post_approval_send_simulation");
     }
-    const approvalDebit = BigInt(op.approvalEnvelope.gasLimitAtomic) * BigInt(op.approvalEnvelope.maxFeePerGasAtomic);
-    const maximumDebit = approvalDebit + exactFee + gasCeiling * BigInt(sendEnvelope.maxFeePerGasAtomic);
+    // F3: the bridge's fresh L1 data and operator fee bounds at the new quote block; the sent approval keeps its prepare bounds.
+    const opStackFees = await readStargateOpStackFees(ports.sourceCall, quote.block, undefined, sendEnvelope), bridgeOpStack = BigInt(opStackFees.totalUpperWei);
+    const approvalDebit = BigInt(op.approvalEnvelope.gasLimitAtomic) * BigInt(op.approvalEnvelope.maxFeePerGasAtomic) + opStackFeeOf(boundFees(op).approval);
+    const maximumDebit = approvalDebit + exactFee + gasCeiling * BigInt(sendEnvelope.maxFeePerGasAtomic) + bridgeOpStack;
     if (maximumDebit > BigInt(op.maxNativeDebitAtomic))
         fail("APN_REPREPARE_REQUIRED", "post_approval_max_native_debit");
-    if (BigInt(prepared.nativeBalanceAtomic) < exactFee + gasCeiling * BigInt(sendEnvelope.maxFeePerGasAtomic))
+    if (BigInt(prepared.nativeBalanceAtomic) < exactFee + gasCeiling * BigInt(sendEnvelope.maxFeePerGasAtomic) + bridgeOpStack)
         fail("APN_REPREPARE_REQUIRED", "post_approval_native_balance");
     const quotedAtMs = now(), expiresAtMs = Math.min(quotedAtMs + STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, Date.parse(op.approvalFinalityDeadline));
     if (expiresAtMs <= quotedAtMs)
         fail("APN_REPREPARE_REQUIRED", "post_approval_quote_expired");
-    const body = { schemaVersion: "apn.stargate-v2-token-post-approval-quote.v1",
+    const body = { schemaVersion: STARGATE_TOKEN_POST_APPROVAL_SCHEMA,
         quotedAt: new Date(quotedAtMs).toISOString(), expiresAt: new Date(expiresAtMs).toISOString(), quote, quoteBlock: quote.block,
         ownerApprovedMinimumOutputAtomic: op.minOutputAtomic,
         ownerApprovedMaximumQuoteLossAtomic: (BigInt(op.amountAtomic) - BigInt(op.minOutputAtomic)).toString(),
@@ -97,7 +103,7 @@ export async function createPostApprovalQuote(op, ports) {
             quotedMaxPriorityFeePerGasWei: quotedPriority.toString() },
         destinationSnapshot: { tokenBalanceAtomic: destinationBalance.tokenAtomic, nativeBalanceAtomic: destinationBalance.nativeAtomic,
             blockNumberAtomic: destinationBalance.blockNumberAtomic, blockHash: destinationBalance.blockHash },
-        bridgeEstimateGasAtomic: estimate.toString(), sendEnvelope, maximumDebitAtomic: maximumDebit.toString() };
+        bridgeEstimateGasAtomic: estimate.toString(), sendEnvelope, opStackFees, maximumDebitAtomic: maximumDebit.toString() };
     return Object.freeze({ ...body, snapshotHash: hashObject(body) });
 }
 /** The one fee rule for a send whose quote was bound in this invocation: the frozen envelope must be includable now. */
@@ -144,9 +150,17 @@ export async function freshPreflight(op, ports, stage) {
     const envelope = stage === "before_approval" ? op.approvalEnvelope : effectiveSendEnvelope;
     if (quantity(nonce).toString() !== envelope.nonceAtomic)
         fail("APN_REPREPARE_REQUIRED", "nonce_changed");
-    const remainingDebit = stage === "before_approval" ? BigInt(op.maximumDebitAtomic)
-        : BigInt(envelope.valueAtomic) + BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic);
-    if (quantity(nativeBalance) < remainingDebit)
+    // F3: fresh L1 data and operator fee bounds of every envelope still to be signed, at the latest block read above; a sent
+    // approval keeps its stored bounds. They count against the owner's cap and the native balance like gas.
+    const head = latest, stored = boundFees(op);
+    const freshFees = await readStargateOpStackFees(ports.sourceCall, { numberAtomic: quantity(head.number).toString(), hash: hex32(head.hash) }, stage === "before_approval" ? envelope : undefined, effectiveSendEnvelope);
+    const gasOf = (e) => BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic);
+    const bridgeDebit = BigInt(effectiveSendEnvelope.valueAtomic) + gasOf(effectiveSendEnvelope) + opStackFeeOf(freshFees.bridge);
+    const approvalDebit = op.approvalEnvelope === undefined ? 0n : gasOf(op.approvalEnvelope) + opStackFeeOf(stage === "before_approval" ? freshFees.approval : stored.approval);
+    // The maximum debit at the signed gas limits stays within the owner's cap; the balance pays what is still to be signed.
+    if (approvalDebit + bridgeDebit > BigInt(op.maxNativeDebitAtomic))
+        fail("APN_REPREPARE_REQUIRED", "recomputed_native_debit");
+    if (quantity(nativeBalance) < (stage === "before_approval" ? approvalDebit : 0n) + bridgeDebit)
         fail("APN_REPREPARE_REQUIRED", "native_balance");
     // One fee rule: each frozen envelope must be includable now; its signed gas × maxFeePerGas is the owner-approved spend bound.
     // Before the approval, the bridge envelope that follows is admitted too, so an already inadmissible fee never buys an approval.
@@ -161,12 +175,6 @@ export async function freshPreflight(op, ports, stage) {
     ]);
     if (quantity(estimate) > BigInt(envelope.gasLimitAtomic))
         fail("APN_REPREPARE_REQUIRED", "gas_limit");
-    if (stage === "before_send") {
-        const approvalGasDebit = op.approvalEnvelope === undefined ? 0n : BigInt(op.approvalEnvelope.gasLimitAtomic) * BigInt(op.approvalEnvelope.maxFeePerGasAtomic);
-        const recomputed = approvalGasDebit + BigInt(envelope.valueAtomic) + quantity(estimate) * BigInt(envelope.maxFeePerGasAtomic);
-        if (recomputed > BigInt(op.maxNativeDebitAtomic))
-            fail("APN_REPREPARE_REQUIRED", "recomputed_native_debit");
-    }
     if (stage === "before_approval") {
         try {
             if (decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "approve", data: simulation }) !== true)

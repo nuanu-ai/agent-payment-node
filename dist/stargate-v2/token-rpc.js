@@ -34,7 +34,8 @@ export function sourceReceipt(op, receipt) {
             return [];
         }
     });
-    if (op.schemaVersion === "apn.stargate-v2-token-operation.v5" && packets.length !== 1)
+    // Every live schema (v5, v6) binds exactly one PacketSent.
+    if (packets.length !== 1)
         fail("APN_RPC_PROTOCOL", "source_packet_sent_count");
     const packet = packets[0];
     if (packet !== undefined && (packet.guid !== event.guid || packet.sender.toLowerCase() !== pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }).toLowerCase() ||
@@ -58,7 +59,7 @@ export function validateDestination(op, source, e) {
     else if (e.nativeDrop?.executor !== STARGATE_TOKEN_DESTINATION_EXECUTOR || e.nativeDrop.success !== true || BigInt(e.nativeDrop.nonceAtomic) < 0n) {
         fail("APN_RPC_PROTOCOL", "destination_native_drop_event");
     }
-    if (op.schemaVersion === "apn.stargate-v2-token-operation.v5" && (source.packet === undefined || e.packetDelivery === undefined ||
+    if ((source.packet === undefined || e.packetDelivery === undefined ||
         e.packetDelivery.endpoint !== LAYERZERO_ENDPOINT_V2 || e.packetDelivery.tokenMessaging !== STARGATE_TOKEN_DESTINATION_MESSAGING ||
         e.packetDelivery.nonceAtomic !== source.packet.nonceAtomic))
         fail("APN_RPC_PROTOCOL", "destination_packet_delivery");

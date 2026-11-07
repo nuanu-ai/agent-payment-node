@@ -16,6 +16,7 @@ export function stargateFundsRefusal(reason, parts) {
         ...(parts.principal === undefined ? {} : { principal_wei: parts.principal.toString() }),
         ...(parts.messagingFee === undefined ? {} : { messaging_fee_wei: parts.messagingFee.toString() }),
         gas_included: parts.gas !== undefined, ...(parts.gas === undefined ? {} : { gas_upper_wei: parts.gas.toString() }),
+        ...(parts.opStackFees === undefined ? {} : { op_stack_fee_upper_wei: parts.opStackFees.toString() }),
     });
 }
 //# sourceMappingURL=funds.js.map

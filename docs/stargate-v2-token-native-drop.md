@@ -57,7 +57,9 @@ journal and require no RPC configuration (except the compatibility closure check
   defaults to zero and then emits no LayerZero options. A nonzero drop must be within the onchain Executor native cap.
 - `--min-output-atomic`: the owner minimum USDC output; required.
 - `--max-native-debit-atomic`: the total native debit cap in wei; required. It must cover approval gas plus the
-  LayerZero message value plus the bridge gas ceiling, all charged at the approved max fee.
+  LayerZero message value plus the bridge gas ceiling, all charged at the approved max fee, plus each transaction's
+  OP Mainnet L1 data fee and operator fee upper bounds (see
+  [OP Mainnet L1 data and operator fees](#op-mainnet-l1-data-and-operator-fees)).
 - `--max-fee-per-gas-wei` and `--max-priority-fee-per-gas-wei`: optional, only as a pair. See
   [Optional EIP-1559 fee ceilings](#optional-eip-1559-fee-ceilings).
 - `--idempotency-key`: required, 8 to 128 safe ASCII characters.
@@ -100,8 +102,9 @@ or state refusal keeps its own error and advice. An RPC answer other than 200 na
 
 Preparation reads the shared usage ledger and the onchain Executor native cap, then performs same-request `quoteOFT` and
 `quoteSend` with the exact Type-3 native-drop bytes. It freezes the principal, quoted minimum output, owner minimum
-output, native drop, LayerZero fee, nonce, gas, EIP-1559 fees, total native debit cap, mechanism pin, and versioned route
-finality policy. The preparation quote expires 60 seconds after preparation.
+output, native drop, LayerZero fee, nonce, gas, EIP-1559 fees, the OP Mainnet L1 data and operator fee bounds
+(`opStackFees`), total native debit cap, mechanism pin, and versioned route finality policy. The preparation quote
+expires 60 seconds after preparation.
 
 ### Allowance and approval
 
@@ -114,7 +117,8 @@ ERC20 approval is a separate durable effect:
 
 When the allowance is zero, preparation simulates only the exact approval. It records the bridge simulation as
 `pending_post_approval` and freezes a conservative bridge gas ceiling bounded by the protocol maximum and the remaining
-owner native-debit budget after approval gas and the LayerZero message value.
+owner native-debit budget after approval gas, the LayerZero message value and the L1 data and operator fee bounds of
+both transactions. The bridge's bounds are read for the protocol maximum gas, the most it can be signed with.
 
 The approval must be signed and durably marked for submission before the preparation quote expires. That marker freezes
 a 30 minute `approvalFinalityWindowMs` and an exact `approvalFinalityDeadline`. Waiting for the exact approval
@@ -129,7 +133,8 @@ snapshots its hash, source block and 60 second local expiry. The integrity-bound
 - the current pool and token code, route finality policy, Executor native-drop cap and policy binding;
 - source token and native balances, exact allowance, pending nonce and fee quote;
 - a fresh finalized destination balance baseline;
-- the exact `eth_call`, the exact `eth_estimateGas`, the bridge envelope and the recomputed maximum debit.
+- the exact `eth_call`, the exact `eth_estimateGas`, the bridge envelope, the bridge's fresh L1 data and operator fee
+  bounds at the new quote block, and the recomputed maximum debit (the approval keeps the bounds frozen at prepare).
 
 The fresh quoted output and LayerZero fee may differ from the preparation quote. APN accepts the fresh quote only when
 its output is at or above the owner-approved minimum and the quote loss, native drop, mechanism, Executor cap, EIP-1559
@@ -138,7 +143,9 @@ quote is never used to sign this bridge.
 
 A restart reuses the one stored post-approval snapshot. A missing snapshot can be recreated through read-only quoting;
 a stored snapshot can never be rewritten. The bridge must be signed and durably marked before the stored post-approval
-quote expires.
+quote expires; with an existing exact allowance (no approval), before the preparation quote expires. The expiry is
+checked again after signing, so a wait for the custody lock or the usage ledger cannot carry the send past it: such a
+send is never marked or broadcast and the operation enters `cleanup_required`.
 
 ### Send safety
 
@@ -181,6 +188,27 @@ reason `stargate_token_abandon_not_eligible`; run `apn stargate token status` fi
 Its foreground consent names any signed approval, send or cleanup and the pool allowance. It reads and writes only the
 journal and never signs or sends.
 
+### OP Mainnet L1 data and operator fees
+
+OP Mainnet charges every transaction an L1 data fee and an operator fee on top of gas times the fee per gas. The
+signed fee fields bound neither, so APN reads their upper bounds from the GasPriceOracle predeploy
+(`0x420000000000000000000000000000000000000F`, `getL1FeeUpperBound` for the envelope's exact unsigned EIP-1559 size
+and `getOperatorFee` for its gas limit), the same oracle direct transfers use. Every envelope at one check is read at
+one block pinned by hash.
+
+- `prepare` reads both envelopes at the quote block and stores them in `opStackFees` (unsigned bytes, gas, L1 data
+  fee bound, operator fee bound, total). `maximumDebitAtomic` and the native-balance check include them, and the
+  consent screen shows each bound.
+- Before the approval is signed, APN re-reads both envelopes' bounds; before the bridge is signed, the bridge's (the
+  post-approval quote reads them when it is bound). The maximum debit at the signed gas limits with the fresh bounds
+  must stay within the cap, and the native balance must pay what is still to be signed. Otherwise nothing is signed:
+  a refused approval leaves the operation `approved` (`APN_REPREPARE_REQUIRED`, `recomputed_native_debit`); a refused
+  bridge enters `cleanup_required`, as any failed bridge preflight does.
+- A failed or malformed oracle read refuses; a bound is never assumed zero.
+
+The bounds are upper estimates at the read block: the oracle reads the current L1 prices, and a later L1 price rise
+can still raise the fee the chain charges. APN re-reads them before each signature for that reason.
+
 ## Delivery proof
 
 ### Source
@@ -222,7 +250,8 @@ Successful operations emit canonical receipt schema `apn.stargate-v2-token-recei
 owner-approved minimum output and maximum quote loss separately from the initial and post-approval quoted outputs and
 message fees. It also binds the preparation quote and expiry, the 30 minute approval-finality window, the exact approval
 marker and deadline, and the post-approval snapshot hash, quote block and expiry. The receipt's effective quote, minimum
-output, message fee, Executor cap and maximum debit come from the post-approval snapshot.
+output, message fee, Executor cap and maximum debit (with the L1 data and operator fee bounds for a v6 operation) come
+from the post-approval snapshot.
 
 ## Optional EIP-1559 fee ceilings
 
@@ -238,13 +267,26 @@ fresh RPC quote.
 - The signed envelope always uses the approved pair.
 
 `maxNativeDebitAtomic` must cover approval gas plus the LayerZero message value plus the bridge gas ceiling, all charged
-at the approved max fee.
+at the approved max fee, plus each transaction's L1 data and operator fee upper bounds.
 
 ## Compatibility
 
-New preparations use operation schema v5 and require the pinned policy plus `pinned_v2` provenance. Every released
-version wrote only v5. Schemas v1 through v4 were written only by pre-release builds, and records of those schemas can
-still exist. A frozen read-only reader (`src/legacy/stargate-v2/`) reads them:
+New preparations use operation schema v6 and require the pinned policy plus `pinned_v2` provenance. v6 adds
+`opStackFees` and counts it in `maximumDebitAtomic`; its post-approval quote is
+`apn.stargate-v2-token-post-approval-quote.v2`, which adds the bridge's fresh bounds.
+
+Released versions before v6 wrote v5. A v5 record is read exactly as before (`status`, `observe`, `receipt`, `cleanup`,
+`apn operation abandon`), but its cap left out the L1 data and operator fees and its frozen record cannot take them, so
+`execute` signs no new approval or bridge for it (reason `op_stack_fees_unbound_reprepare`):
+
+- in `prepared` or `approved` it refuses with `APN_REPREPARE_REQUIRED` before the consent screen; prepare again with a
+  new idempotency key;
+- once its approval landed (`allowance_observed` or `post_approval_quote_bound`) it enters `cleanup_required`, and
+  `apn stargate token cleanup` revokes the allowance;
+- a sent approval, bridge or cleanup is observed to its end as before.
+
+Schemas v1 through v4 were written only by pre-release builds, and records of those schemas can still exist. A frozen
+read-only reader (`src/legacy/stargate-v2/`) reads them:
 
 - Each claims its Optimism account until it is terminal (`observed` or `cleaned`). Nothing signs, sends, cleans up or
   resumes it.

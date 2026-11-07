@@ -1,12 +1,13 @@
 import { approvalCode } from "../approval-code.js";
 import { exactChainConsent } from "../tty-approval.js";
+const opStackRow = (name, fee) => `${name} ${fee.l1DataFeeUpperWei} + ${fee.operatorFeeUpperWei} wei ETH (for ${fee.unsignedBytesAtomic} unsigned bytes and ${fee.gasAtomic} gas)`;
 export class TtyStargateTokenApproval {
     options;
     constructor(options = {}) {
         this.options = options;
     }
     async approve(op) {
-        const code = approvalCode("bridge", op.integrityHash), fees = op.feeApproval, simulation = op.bridgeSimulation;
+        const code = approvalCode("bridge", op.integrityHash), fees = op.feeApproval, simulation = op.bridgeSimulation, opStack = op.opStackFees;
         await exactChainConsent([
             "Agent Payment Node Stargate V2 USDC bridge approval",
             `Profile: ${op.profile}`,
@@ -18,7 +19,12 @@ export class TtyStargateTokenApproval {
             `Owner-approved minimum Polygon USDC output: ${op.minOutputAtomic}; maximum quote loss: ${BigInt(op.amountAtomic) - BigInt(op.minOutputAtomic)} atomic USDC`,
             `Native drop: ${op.nativeDropAtomic} wei POL; onchain Executor cap: ${op.executorNativeCapAtomic}`,
             `Initial quoted LayerZero fee: ${op.quote.quote.nativeMessageFeeAtomic} wei ETH; initial prepared maximum source native debit: ${op.maximumDebitAtomic} wei ETH`,
-            `Owner-approved source native debit cap: ${op.maxNativeDebitAtomic} wei ETH`,
+            ...(opStack === undefined ? [] : [
+                `OP Mainnet L1 data fee + operator fee upper bounds (GasPriceOracle ${opStack.oracle} at block ${opStack.block.numberAtomic}): ` +
+                    [...(opStack.approval === undefined ? [] : [opStackRow("approval", opStack.approval)]), opStackRow("bridge", opStack.bridge)].join("; ") +
+                    `; total ${opStack.totalUpperWei} wei ETH. The signed transactions do not bound these fees; APN re-reads them before each signature.`,
+            ]),
+            `Owner-approved source native debit cap: ${op.maxNativeDebitAtomic} wei ETH. It covers the LayerZero message value, each transaction's gas limit at the approved max fee per gas, and each transaction's OP Mainnet L1 data and operator fee upper bounds.`,
             `Source token/pool: ${op.sourceToken} / ${op.sourcePool}; destination token/pool: ${op.destinationToken} / ${op.destinationPool}`,
             `Allowance: ${op.allowanceRequired ? `separate exact approval for ${op.amountAtomic}` : "already exactly equal to principal"}`,
             `EIP-1559 fee approval: ${fees.provenance}; quoted max/priority: ${fees.quotedMaxFeePerGasWei} / ${fees.quotedMaxPriorityFeePerGasWei} wei per gas; approved max/priority: ${fees.approvedMaxFeePerGasWei} / ${fees.approvedMaxPriorityFeePerGasWei} wei per gas`,
@@ -31,7 +37,7 @@ export class TtyStargateTokenApproval {
             ...(op.approvalFinalityWindowMs === undefined ? [] : [
                 `Approval safe-finality window after the durable submission marker: ${Math.floor(op.approvalFinalityWindowMs / 60_000)} minutes`,
                 "After exact approval reaches safe finality, APN obtains and persists a new short-lived quote. Its output and LayerZero fee may change.",
-                "APN accepts that fresh quote only when output remains at or above the owner-approved minimum and the maximum quote loss, native drop and Executor cap, EIP-1559 fee ceilings, total native debit cap, policy, and mechanism remain within these approved bounds.",
+                "APN accepts that fresh quote only when output remains at or above the owner-approved minimum and the maximum quote loss, native drop and Executor cap, EIP-1559 fee ceilings, total native debit cap (with the bridge's fresh L1 data and operator fee bounds), policy, and mechanism remain within these approved bounds.",
                 "The preparation quote is never used to sign the post-approval bridge.",
             ]),
             "Every approval or bridge broadcast is durably marked first. Ambiguous results are observed and never resent.",

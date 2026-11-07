@@ -97,8 +97,27 @@ export interface StargateTokenPolicyBinding {
         readonly reference: string;
     }>;
 }
+/** OP Mainnet GasPriceOracle upper bounds for one frozen envelope, read for at least its unsigned bytes and gas limit. */
+export interface StargateTokenOpStackFee {
+    readonly unsignedBytesAtomic: string;
+    readonly gasAtomic: string;
+    readonly l1DataFeeUpperWei: string;
+    readonly operatorFeeUpperWei: string;
+}
+/** The L1 data and operator fees the signed fee fields do not bound, read at one pinned block; part of the native debit. */
+export interface StargateTokenOpStackFees {
+    readonly oracle: Address;
+    readonly block: Readonly<{
+        readonly numberAtomic: string;
+        readonly hash: Hex;
+    }>;
+    readonly approval?: StargateTokenOpStackFee;
+    readonly bridge: StargateTokenOpStackFee;
+    readonly totalUpperWei: string;
+}
 export interface StargateTokenPostApprovalQuote {
-    readonly schemaVersion: "apn.stargate-v2-token-post-approval-quote.v1";
+    /** v1 belongs to v5 operations and has no `opStackFees`; v2 (v6 operations) binds the bridge's fresh bounds. */
+    readonly schemaVersion: "apn.stargate-v2-token-post-approval-quote.v1" | "apn.stargate-v2-token-post-approval-quote.v2";
     readonly quotedAt: string;
     readonly expiresAt: string;
     readonly quote: StargateV2QuoteEvidence;
@@ -131,11 +150,13 @@ export interface StargateTokenPostApprovalQuote {
     }>;
     readonly bridgeEstimateGasAtomic: string;
     readonly sendEnvelope: StargateTokenEnvelope;
+    readonly opStackFees?: StargateTokenOpStackFees;
     readonly maximumDebitAtomic: string;
     readonly snapshotHash: string;
 }
 export interface StargateTokenOperation {
-    readonly schemaVersion: "apn.stargate-v2-token-operation.v5";
+    /** v5 records (no `opStackFees`) are read as before but sign no new approval or bridge; see docs Compatibility. */
+    readonly schemaVersion: "apn.stargate-v2-token-operation.v5" | "apn.stargate-v2-token-operation.v6";
     readonly operationId: string;
     readonly profile: string;
     readonly profileHash: string;
@@ -184,6 +205,8 @@ export interface StargateTokenOperation {
         readonly prepareStatus: "succeeded" | "pending_post_approval";
         readonly gasCeilingAtomic: string;
     }>;
+    /** Present exactly on v6: the approval and bridge bounds read at the quote block, included in `maximumDebitAtomic`. */
+    readonly opStackFees?: StargateTokenOpStackFees;
     readonly approvalFinalityWindowMs?: number;
     readonly approvalSubmissionStartedAt?: string;
     readonly approvalFinalityDeadline?: string;
