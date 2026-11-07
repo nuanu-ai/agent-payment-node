@@ -15,6 +15,7 @@ import { TtyStargateTokenApproval } from "./token-tty.js";
 import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW } from "./destination-scan.js";
 import { legacyStargateStatusAfter } from "../legacy/stargate-v2/status.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
+import { readEvmReceiptFeeFields } from "../evm-direct-actual-fee.js";
 import { uint } from "./token-codec.js";
 import { stargateFundsRefusal } from "./funds.js";
 function stargateUsageState(state) {
@@ -205,8 +206,17 @@ function assertServiceUsageTarget(op) {
 }
 /** BRDG-31: the source proof is the pinned pool's OFTSent and the endpoint's PacketSent naming the pinned TokenMessaging as
  * sender (checked in sourceReceipt); TokenMessaging's runtime code is not re-read after the send. */
+/** The shared safe-receipt reader, plus the receipt's own fee fields as the node answered them (the approval's actual fee). */
 export async function confirmedStargateTokenSourceReceipt(rpc, transactionHash, finalityTag) {
-    return await confirmedStargateSourceReceipt(rpc, transactionHash, finalityTag);
+    let raw;
+    const reading = { call: async (method, params) => {
+            const value = await rpc.call(method, params);
+            if (method === "eth_getTransactionReceipt")
+                raw = value;
+            return value;
+        } };
+    const receipt = await confirmedStargateSourceReceipt(reading, transactionHash, finalityTag);
+    return receipt === null ? null : { ...receipt, feeFields: readEvmReceiptFeeFields(record(raw)) };
 }
 function logPosition(log) { return [quantity(log.blockNumber), quantity(log.logIndex)]; }
 function atOrBefore(a, b) { const x = logPosition(a), y = logPosition(b); return x[0] < y[0] || (x[0] === y[0] && x[1] <= y[1]); }

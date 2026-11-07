@@ -1,10 +1,12 @@
 import { decodeFunctionResult, encodeFunctionData, serializeTransaction, type Hex } from "viem";
 import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
+import { deriveEvmActualFee, validateEvmActualFee, type EvmActualFee } from "../evm-direct-actual-fee.js";
 import { directEvmNetwork } from "../evm-direct-networks.js";
 import { OP_STACK_GAS_ORACLE, OP_STACK_GAS_ORACLE_ABI } from "../evm-direct-reads.js";
 import type { EvmRpcCall } from "../evm-ports.js";
-import { STARGATE_TOKEN_SOURCE_CHAIN, UINT, fail, hex32, uint } from "./token-codec.js";
-import type { StargateTokenEnvelope, StargateTokenOpStackFee, StargateTokenOpStackFees } from "./token-model.js";
+import { HASH, STARGATE_TOKEN_SOURCE_CHAIN, UINT, fail, hex32, uint } from "./token-codec.js";
+import type { StargateTokenConfirmedReceipt, StargateTokenEnvelope, StargateTokenOpStackFee, StargateTokenOpStackFees,
+  StargateTokenOperation } from "./token-model.js";
 
 type PinnedBlock = Readonly<{ numberAtomic: string; hash: Hex }>;
 
@@ -67,4 +69,41 @@ export function validateStargateOpStackFees(value: unknown, block: PinnedBlock, 
   const total = (approval === undefined ? 0n : opStackFeeOf(row(fees.approval, approval))) + opStackFeeOf(row(fees.bridge, bridge));
   if (total.toString() !== fees.totalUpperWei) bad();
   return fees;
+}
+
+/** The approval's actual fee from its own safe receipt, only when the receipt carries every part of OP Mainnet's charge. */
+export function approvalActualFee(op: StargateTokenOperation, receipt: StargateTokenConfirmedReceipt): EvmActualFee | undefined {
+  const e = op.approvalEnvelope; if (e === undefined || receipt.feeFields === undefined) return undefined;
+  const fee = deriveEvmActualFee({ chainId: STARGATE_TOKEN_SOURCE_CHAIN, transactionHash: receipt.transactionHash, blockNumberAtomic: receipt.blockNumberAtomic,
+    gasLimitAtomic: e.gasLimitAtomic, maxFeePerGasAtomic: e.maxFeePerGasAtomic, receiptFields: receipt.feeFields }, "op-stack");
+  return fee.complete ? fee : undefined;
+}
+
+/**
+ * What a sent approval costs the owner's cap: its actual fee once its safe receipt proved every part, otherwise its gas
+ * limit at the signed max fee plus the larger of its prepare and approval-marker L1 data and operator fee bounds. A v6
+ * record always has the prepare bound; with no bound at all the bridge is refused, never charged zero.
+ */
+export function approvalNativeCharge(op: StargateTokenOperation): bigint {
+  const e = op.approvalEnvelope; if (e === undefined) return 0n;
+  if (op.approvalActualFee !== undefined) return BigInt(op.approvalActualFee.totalFeeAtomic!);
+  const bounds = [op.opStackFees?.approval, op.submissionOpStackFees?.approval].filter(fee => fee !== undefined).map(opStackFeeOf);
+  if (bounds.length === 0) fail("APN_REPREPARE_REQUIRED", "approval_fee_unknown");
+  return BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic) + bounds.reduce((a, b) => a > b ? a : b);
+}
+
+/** The approval fee evidence of a v6 record binds its own approval: marker bounds for both envelopes, a complete own-receipt fee. */
+export function validateApprovalFeeEvidence(op: StargateTokenOperation): void {
+  const bad = (): never => fail("APN_STATE_CORRUPT", "approval_fee_binding"), e = op.approvalEnvelope;
+  if ((op.submissionOpStackFees !== undefined || op.approvalActualFee !== undefined) && (e === undefined || op.approvalTransactionHash === undefined)) bad();
+  if (op.submissionOpStackFees !== undefined) {
+    const block = (op.submissionOpStackFees as { readonly block?: unknown }).block;
+    if (!isPlainRecord(block) || typeof block.numberAtomic !== "string" || !UINT.test(block.numberAtomic) || typeof block.hash !== "string" || !HASH.test(block.hash)) bad();
+    validateStargateOpStackFees(op.submissionOpStackFees, block as { numberAtomic: string; hash: Hex }, e, op.sendEnvelope);
+  }
+  if (op.approvalActualFee !== undefined) {
+    let fee: EvmActualFee; try { fee = validateEvmActualFee(op.approvalActualFee); } catch { return bad(); }
+    if (!fee.complete || fee.chainId !== STARGATE_TOKEN_SOURCE_CHAIN || fee.feeModel !== "op-stack" || fee.transactionHash !== op.approvalTransactionHash ||
+      fee.gasLimitAtomic !== e!.gasLimitAtomic || fee.maxFeePerGasAtomic !== e!.maxFeePerGasAtomic) bad();
+  }
 }

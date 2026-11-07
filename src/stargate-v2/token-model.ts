@@ -1,4 +1,5 @@
 import type { Hex } from "viem";
+import type { EvmActualFee, EvmReceiptFeeFields } from "../evm-direct-actual-fee.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { NeverLandsCheck } from "../evm-finalized-proof.js";
 import type { Address } from "../model.js";
@@ -77,6 +78,10 @@ export interface StargateTokenOperation {
     readonly prepareStatus: "succeeded" | "pending_post_approval"; readonly gasCeilingAtomic: string }>;
   /** Present exactly on v6: the approval and bridge bounds read at the quote block, included in `maximumDebitAtomic`. */
   readonly opStackFees?: StargateTokenOpStackFees;
+  /** v6, written with the approval marker (0.5.98..): the fresh bounds the before-approval check admitted. */
+  readonly submissionOpStackFees?: StargateTokenOpStackFees;
+  /** v6, written when the approval is safe (0.5.98..): its actual fee from its own receipt, when the receipt carries every part. */
+  readonly approvalActualFee?: EvmActualFee;
   readonly approvalFinalityWindowMs?: number; readonly approvalSubmissionStartedAt?: string;
   readonly approvalFinalityDeadline?: string; readonly postApprovalQuote?: StargateTokenPostApprovalQuote;
   readonly sendEnvelope: StargateTokenEnvelope; readonly maximumDebitAtomic: string; readonly preparedAt: string; readonly expiresAt: string;
@@ -96,7 +101,9 @@ export interface StargateTokenPreparedEnvelope { readonly nonceAtomic: string; r
   readonly maxPriorityFeePerGasAtomic: string; readonly nativeBalanceAtomic: string }
 export interface StargateTokenRawLog { readonly address: Address; readonly topics: readonly Hex[]; readonly data: Hex }
 export interface StargateTokenConfirmedReceipt { readonly transactionHash: Hex; readonly status: "success" | "reverted";
-  readonly blockNumberAtomic: string; readonly blockHash: Hex; readonly finality: StargateV2FinalityTag; readonly logs: readonly StargateTokenRawLog[] }
+  readonly blockNumberAtomic: string; readonly blockHash: Hex; readonly finality: StargateV2FinalityTag; readonly logs: readonly StargateTokenRawLog[];
+  /** The receipt's own fee fields as the node answered them; absent when the port does not read them. */
+  readonly feeFields?: EvmReceiptFeeFields }
 export interface StargateTokenExecutionPorts {
   readonly sourceCall: EvmRpcCall; readonly destinationCall: EvmRpcCall;
   readonly destinationBalances: (recipient: Address, finalityTag: StargateV2FinalityTag) => Promise<Readonly<{ tokenAtomic: string; nativeAtomic: string; blockNumberAtomic: string; blockHash: Hex }>>;

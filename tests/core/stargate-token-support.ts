@@ -43,6 +43,13 @@ export function unreleasedV3TokenFixture(operation: StargateTokenOperation): Sta
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v3" as const };
   return { ...body, integrityHash: hashObject(body) } as unknown as StargateTokenOperation;
 }
+/** A v5 record as 0.5.25..0.5.96 wrote it: the same operation without any v6 fee evidence, its debit without the bounds. */
+export function asV5TokenFixture(op: StargateTokenOperation): StargateTokenOperation {
+  const { integrityHash: _integrity, opStackFees, submissionOpStackFees: _submission, approvalActualFee: _actual, ...rest } = op;
+  const body = { ...rest, schemaVersion: "apn.stargate-v2-token-operation.v5" as const,
+    maximumDebitAtomic: (BigInt(op.maximumDebitAtomic) - BigInt(opStackFees!.totalUpperWei)).toString() };
+  return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
+}
 export async function seedTokenFixture(root: string, operation: StargateTokenOperation): Promise<void> {
   const directory = join(root, "stargate-v2-token"); await mkdir(directory, { recursive: true, mode: 0o700 });
   await writeFile(join(directory, `${operation.operationId}.json`), `${canonicalJson(operation)}\n`, { mode: 0o600 });
@@ -65,7 +72,8 @@ export function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErr
   sourcePacketMutation?: "sender"|"receiver"|"guid";
   postApprovalNativeCap?: bigint; confirmPolicyErrorAfterApproval?: boolean; nowMs?: number; saveErrorPhaseOnce?: string; saveErrorAfterSave?: boolean;
   followErrorOnce?: "submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert";
-  destinationMutation?: "guid"|"native"|"token"; l1Fee?: bigint; l1FeeAfterApproval?: bigint; oracleFailure?: "error"|"empty" } = {}) {
+  destinationMutation?: "guid"|"native"|"token"; l1Fee?: bigint; l1FeeAfterApproval?: bigint; oracleFailure?: "error"|"empty";
+  approvalFeeFields?: Readonly<Record<string, string>> } = {}) {
   let allowance = options.allowance ?? 0n, approvalConsumed = false, sends = 0, signs = 0, approvals = 0, receiptCalls = 0, approvalPolls = 0, nonce = 7n;
   let nowMs = options.nowMs ?? 2_000_000_000_000;
   let preparedApprovals = 0, preparedBridges = 0, bridgeEstimates = 0, bridgeCalls = 0;
@@ -131,7 +139,8 @@ export function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErr
       usageState = target; return usageState; },
     sendRawTransaction: async raw => { sends++; if (options.sendErrorAt === sends) throw new Error("timeout"); if (options.advanceNonceOnSend) nonce++; return keccak256(raw); },
     waitSourceReceipt: async tx => { receiptCalls++; if (["cleanup_submission_started","cleanup_submitted","cleanup_unknown_finality"].includes(journal.value?.phase ?? "")) { allowance=0n; return { transactionHash:tx,status:"success",blockNumberAtomic:"22",blockHash:BLOCK,finality:"safe",logs:[] }; }
-      if (!approvalConsumed && (options.allowance ?? 0n) === 0n) { approvalPolls++; if (approvalPolls <= (options.approvalPendingPolls ?? 0)) return null; allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [] }; }
+      if (!approvalConsumed && (options.allowance ?? 0n) === 0n) { approvalPolls++; if (approvalPolls <= (options.approvalPendingPolls ?? 0)) return null; allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [],
+        ...(options.approvalFeeFields === undefined ? {} : { feeFields: options.approvalFeeFields }) }; }
       if (options.bridgeRevert && receiptCalls === 1) return { transactionHash: tx, status: "reverted", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [] };
       if (!options.residualAfterBridge || receiptCalls > 1) allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const received=approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, received]); const packetTopics=encodeEventTopics({abi:LAYERZERO_ENDPOINT_V2_ABI,eventName:"PacketSent"}) as readonly Hex[];const packetData=encodeAbiParameters(parseAbiParameters("bytes encodedPayload,bytes options,address sendLibrary"),[packetPayload(options.sourcePacketMutation),"0x",STARGATE_TOKEN_SOURCE_POOL]);return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: LAYERZERO_ENDPOINT_V2, topics:packetTopics,data:packetData },{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
     observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: (approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT).toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : BigInt(input.minimumAmountAtomic))).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : BigInt(input.minimumAmountAtomic)).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString(), nativeDrop: { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: PACKET_NONCE.toString(), success: true }, packetDelivery:{endpoint:LAYERZERO_ENDPOINT_V2,tokenMessaging:STARGATE_TOKEN_DESTINATION_MESSAGING,nonceAtomic:PACKET_NONCE.toString(),transactionHash:DEST_BLOCK,blockNumberAtomic:"30",blockHash:DEST_BLOCK,logIndexAtomic:"1"} }), now: () => nowMs };

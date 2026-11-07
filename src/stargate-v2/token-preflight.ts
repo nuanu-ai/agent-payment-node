@@ -8,8 +8,8 @@ import {
   STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS,
   STARGATE_TOKEN_POST_APPROVAL_SCHEMA, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, fail, hex32, quantity, uint,
 } from "./token-codec.js";
-import type { StargateTokenEnvelope, StargateTokenExecutionPorts, StargateTokenOperation, StargateTokenPostApprovalQuote } from "./token-model.js";
-import { opStackFeeOf, readStargateOpStackFees } from "./token-op-fees.js";
+import type { StargateTokenEnvelope, StargateTokenExecutionPorts, StargateTokenOperation, StargateTokenOpStackFees, StargateTokenPostApprovalQuote } from "./token-model.js";
+import { approvalNativeCharge, opStackFeeOf, readStargateOpStackFees } from "./token-op-fees.js";
 import { assertLane, readAllowance, readExecutorCap, readPoolFunctional, readTokenBalance, requoteSend, rpcEnvelope } from "./token-rpc.js";
 
 /** The stored bounds every check of a v6 operation spends from; a v5 record has none and is never signed again (F3). */
@@ -68,9 +68,10 @@ export async function createPostApprovalQuote(op: StargateTokenOperation, ports:
   try { const decoded = decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", data: simulation as Hex });
     if (decoded[1].amountSentLD.toString() !== op.amountAtomic || decoded[1].amountReceivedLD.toString() !== quote.quote.minimumOutputAtomic) throw 0;
   } catch { fail("APN_REPREPARE_REQUIRED", "post_approval_send_simulation"); }
-  // F3: the bridge's fresh L1 data and operator fee bounds at the new quote block; the sent approval keeps its prepare bounds.
-  const opStackFees = await readStargateOpStackFees(ports.sourceCall, quote.block, undefined, sendEnvelope), bridgeOpStack = BigInt(opStackFees.totalUpperWei);
-  const approvalDebit = BigInt(op.approvalEnvelope!.gasLimitAtomic) * BigInt(op.approvalEnvelope!.maxFeePerGasAtomic) + opStackFeeOf(boundFees(op).approval);
+  // F3: the bridge's fresh L1 data and operator fee bounds at the new quote block; the sent approval is charged what it
+  // actually cost by its receipt, or else its larger known bound (`approvalNativeCharge`).
+  boundFees(op); const opStackFees = await readStargateOpStackFees(ports.sourceCall, quote.block, undefined, sendEnvelope), bridgeOpStack = BigInt(opStackFees.totalUpperWei);
+  const approvalDebit = approvalNativeCharge(op);
   const maximumDebit = approvalDebit + exactFee + gasCeiling * BigInt(sendEnvelope.maxFeePerGasAtomic) + bridgeOpStack;
   if (maximumDebit > BigInt(op.maxNativeDebitAtomic)) fail("APN_REPREPARE_REQUIRED", "post_approval_max_native_debit");
   if (BigInt(prepared.nativeBalanceAtomic) < exactFee + gasCeiling * BigInt(sendEnvelope.maxFeePerGasAtomic) + bridgeOpStack)
@@ -99,7 +100,9 @@ export async function sendFeeAdmitted(op: StargateTokenOperation, ports: Stargat
   if (!evmFrozenFeeAdmitted(quantity((latest as Record<string, unknown>).baseFeePerGas), { maxFeePerGasWei: BigInt(e.maxFeePerGasAtomic),
     maxPriorityFeePerGasWei: BigInt(e.maxPriorityFeePerGasAtomic) })) fail("APN_REPREPARE_REQUIRED", "fee_spike");
 }
-export async function freshPreflight(op: StargateTokenOperation, ports: StargateTokenExecutionPorts, stage: "before_approval" | "before_send") {
+/** Returns the fresh OP-stack bounds it admitted; before the approval they are persisted with its marker. */
+export async function freshPreflight(op: StargateTokenOperation, ports: StargateTokenExecutionPorts,
+  stage: "before_approval" | "before_send"): Promise<StargateTokenOpStackFees> {
   const post = stage === "before_send" ? op.postApprovalQuote : undefined;
   if (Date.parse(post?.expiresAt ?? op.expiresAt) <= (ports.now ?? Date.now)()) fail("APN_REPREPARE_REQUIRED", post === undefined ? "expired" : "post_approval_quote_expired");
   const expectedQuote = post?.quote ?? op.quote, expectedCap = BigInt(post?.executorNativeCapAtomic ?? op.executorNativeCapAtomic);
@@ -128,13 +131,14 @@ export async function freshPreflight(op: StargateTokenOperation, ports: Stargate
   const envelope = stage === "before_approval" ? op.approvalEnvelope! : effectiveSendEnvelope;
   if (quantity(nonce).toString() !== envelope.nonceAtomic) fail("APN_REPREPARE_REQUIRED", "nonce_changed");
   // F3: fresh L1 data and operator fee bounds of every envelope still to be signed, at the latest block read above; a sent
-  // approval keeps its stored bounds. They count against the owner's cap and the native balance like gas.
-  const head = latest as Record<string, unknown>, stored = boundFees(op);
+  // approval is charged its actual or larger known cost. They count against the owner's cap and the native balance like gas.
+  const head = latest as Record<string, unknown>; boundFees(op);
   const freshFees = await readStargateOpStackFees(ports.sourceCall, { numberAtomic: quantity(head.number).toString(), hash: hex32(head.hash) },
     stage === "before_approval" ? envelope : undefined, effectiveSendEnvelope);
   const gasOf = (e: StargateTokenEnvelope) => BigInt(e.gasLimitAtomic) * BigInt(e.maxFeePerGasAtomic);
   const bridgeDebit = BigInt(effectiveSendEnvelope.valueAtomic) + gasOf(effectiveSendEnvelope) + opStackFeeOf(freshFees.bridge);
-  const approvalDebit = op.approvalEnvelope === undefined ? 0n : gasOf(op.approvalEnvelope) + opStackFeeOf(stage === "before_approval" ? freshFees.approval : stored.approval);
+  const approvalDebit = op.approvalEnvelope === undefined ? 0n
+    : stage === "before_approval" ? gasOf(op.approvalEnvelope) + opStackFeeOf(freshFees.approval) : approvalNativeCharge(op);
   // The maximum debit at the signed gas limits stays within the owner's cap; the balance pays what is still to be signed.
   if (approvalDebit + bridgeDebit > BigInt(op.maxNativeDebitAtomic)) fail("APN_REPREPARE_REQUIRED", "recomputed_native_debit");
   if (quantity(nativeBalance) < (stage === "before_approval" ? approvalDebit : 0n) + bridgeDebit) fail("APN_REPREPARE_REQUIRED", "native_balance");
@@ -151,4 +155,5 @@ export async function freshPreflight(op: StargateTokenOperation, ports: Stargate
   if (quantity(estimate) > BigInt(envelope.gasLimitAtomic)) fail("APN_REPREPARE_REQUIRED", "gas_limit");
   if (stage === "before_approval") { try { if (decodeFunctionResult({ abi: STARGATE_ERC20_ABI, functionName: "approve", data: simulation as Hex }) !== true) throw 0; } catch { fail("APN_REPREPARE_REQUIRED", "approval_simulation"); } }
   else { try { const decoded = decodeFunctionResult({ abi: STARGATE_SEND_ABI, functionName: "sendToken", data: simulation as Hex }); if (decoded[1].amountSentLD.toString() !== op.amountAtomic || decoded[1].amountReceivedLD.toString() !== expectedQuote.quote.minimumOutputAtomic) throw 0; } catch { fail("APN_REPREPARE_REQUIRED", "send_simulation"); } }
+  return freshFees;
 }

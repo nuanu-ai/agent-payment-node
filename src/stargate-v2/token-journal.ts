@@ -18,7 +18,7 @@ import type {
   StargateAdmission, StargateTokenJournal, StargateTokenOperation, StargateTokenPhase, StargateTokenPostApprovalQuote,
   StargateTokenUsageState,
 } from "./token-model.js";
-import { opStackFeeOf, validateStargateOpStackFees } from "./token-op-fees.js";
+import { approvalNativeCharge, validateApprovalFeeEvidence, validateStargateOpStackFees } from "./token-op-fees.js";
 import { assertLane } from "./token-rpc.js";
 
 export class FileStargateTokenJournal implements StargateTokenJournal {
@@ -78,10 +78,10 @@ function validatePostApprovalQuote(op: StargateTokenOperation, snapshot: Stargat
     // The fresh 2 × base + tip estimate is evidence only; the envelope above is bound to the owner-approved fee fields.
     BigInt(snapshot.sourceSnapshot.quotedMaxPriorityFeePerGasWei) > BigInt(snapshot.sourceSnapshot.quotedMaxFeePerGasWei) ||
     BigInt(snapshot.bridgeEstimateGasAtomic) > BigInt(envelope.gasLimitAtomic)) fail("APN_STATE_CORRUPT", "post_approval_envelope_binding");
-  // v2 (v6 operations) binds the bridge's fresh OP-stack bounds at the quote block; the sent approval keeps its prepare bounds.
-  // A v1 snapshot (v5 operation) is checked exactly as before, without them.
+  // v2 (v6 operations) binds the bridge's fresh OP-stack bounds at the quote block and charges the sent approval its
+  // actual or larger known cost. A v1 snapshot (v5 operation) is checked exactly as before, without them.
   const bridgeOpStack = v5 ? 0n : BigInt(validateStargateOpStackFees(snapshot.opStackFees, snapshot.quoteBlock, undefined, envelope).totalUpperWei);
-  const approvalDebit = BigInt(op.approvalEnvelope!.gasLimitAtomic) * BigInt(op.approvalEnvelope!.maxFeePerGasAtomic) + (v5 ? 0n : opStackFeeOf(op.opStackFees?.approval));
+  const approvalDebit = v5 ? BigInt(op.approvalEnvelope!.gasLimitAtomic) * BigInt(op.approvalEnvelope!.maxFeePerGasAtomic) : approvalNativeCharge(op);
   const bridgeDebit = BigInt(envelope.valueAtomic) + BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic) + bridgeOpStack;
   const maximumDebit = approvalDebit + bridgeDebit;
   if (maximumDebit.toString() !== snapshot.maximumDebitAtomic || maximumDebit > BigInt(op.maxNativeDebitAtomic) ||
@@ -103,6 +103,7 @@ export function validateRecord(value: unknown): StargateTokenOperation { if (!is
     const opStackDebit = raw.schemaVersion === STARGATE_TOKEN_SCHEMA_V5 ? 0n
       : BigInt(validateStargateOpStackFees(raw.opStackFees, raw.quote.block, raw.approvalEnvelope, raw.sendEnvelope).totalUpperWei);
     const totalDebit = approvalDebit + BigInt(raw.sendEnvelope.valueAtomic) + BigInt(raw.sendEnvelope.gasLimitAtomic) * BigInt(raw.sendEnvelope.maxFeePerGasAtomic) + opStackDebit;
+    if (raw.schemaVersion !== STARGATE_TOKEN_SCHEMA_V5) validateApprovalFeeEvidence(raw);
     if (simulation === undefined || simulation.gasCeilingAtomic !== raw.sendEnvelope.gasLimitAtomic || BigInt(simulation.gasCeilingAtomic) < 1n || BigInt(simulation.gasCeilingAtomic) > STARGATE_TOKEN_MAX_BRIDGE_GAS ||
       totalDebit.toString() !== raw.maximumDebitAtomic || totalDebit > BigInt(raw.maxNativeDebitAtomic) ||
       (raw.allowanceRequired ? simulation.mode !== "pending_post_approval" || simulation.prepareStatus !== "pending_post_approval" || raw.initialAllowanceAtomic !== "0" || raw.approvalEnvelope === undefined ||
@@ -180,7 +181,7 @@ function validateAdvance(previous: StargateTokenOperation | null, next: Stargate
   const frozen = (x: StargateTokenOperation) => { const { phase: _p, transitions: _t, integrityHash: _i, approvalTransactionHash: _a, transactionHash: _h,
     residualAllowanceAtomic: _r, sourceReceipt: _s, destinationEvidence: _d, cleanupEnvelope: _ce, cleanupTransactionHash: _ch,
     cleanupReason: _cr, usageState: _us, usageTarget: _ut, approvalSubmissionStartedAt: _asa, approvalFinalityDeadline: _afd,
-    postApprovalQuote: _paq, retiredEffects: _re, ...rest } = x; return rest; };
+    postApprovalQuote: _paq, retiredEffects: _re, submissionOpStackFees: _sof, approvalActualFee: _aaf, ...rest } = x; return rest; };
   // A retired cleanup (appended now, naming exactly the previous cleanup) frees its envelope and hash for the next round.
   const retiredNow = (next.retiredEffects ?? []).slice((previous.retiredEffects ?? []).length);
   const freed = previous.cleanupTransactionHash !== undefined && next.cleanupEnvelope === undefined && next.cleanupTransactionHash === undefined &&
@@ -195,7 +196,11 @@ function validateAdvance(previous: StargateTokenOperation | null, next: Stargate
     (previous.cleanupReason !== undefined && previous.cleanupReason !== next.cleanupReason) ||
     (previous.approvalSubmissionStartedAt !== undefined && previous.approvalSubmissionStartedAt !== next.approvalSubmissionStartedAt) ||
     (previous.approvalFinalityDeadline !== undefined && previous.approvalFinalityDeadline !== next.approvalFinalityDeadline) ||
-    (previous.postApprovalQuote !== undefined && canonicalJson(previous.postApprovalQuote) !== canonicalJson(next.postApprovalQuote))) fail("APN_STATE_CORRUPT", "journal_rewrite");
+    (previous.postApprovalQuote !== undefined && canonicalJson(previous.postApprovalQuote) !== canonicalJson(next.postApprovalQuote)) ||
+    // Approval fee evidence is written once: the bounds with the approval marker, the actual fee when the approval is safe.
+    (previous.submissionOpStackFees !== undefined && canonicalJson(previous.submissionOpStackFees) !== canonicalJson(next.submissionOpStackFees)) ||
+    (next.submissionOpStackFees !== undefined && previous.submissionOpStackFees === undefined && previous.approvalTransactionHash !== undefined) ||
+    (previous.approvalActualFee !== undefined && canonicalJson(previous.approvalActualFee) !== canonicalJson(next.approvalActualFee))) fail("APN_STATE_CORRUPT", "journal_rewrite");
   if (previous.usageTarget !== undefined && next.usageTarget !== previous.usageTarget &&
     !(previous.usageTarget === "reserved" && next.usageTarget === "failed_before_effect") &&
     !(next.usageTarget === undefined && next.usageState !== undefined)) fail("APN_STATE_CORRUPT", "usage_target_rewrite");

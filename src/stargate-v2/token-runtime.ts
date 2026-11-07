@@ -24,6 +24,7 @@ import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_W
 import type { StargateTokenUsageState } from "./token-model.js";
 import { legacyStargateStatusAfter, type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
+import { readEvmReceiptFeeFields } from "../evm-direct-actual-fee.js";
 import { uint } from "./token-codec.js";
 import { stargateFundsRefusal } from "./funds.js";
 
@@ -144,9 +145,14 @@ function assertServiceUsageTarget(op: StargateTokenOperation): void {
 
 /** BRDG-31: the source proof is the pinned pool's OFTSent and the endpoint's PacketSent naming the pinned TokenMessaging as
  * sender (checked in sourceReceipt); TokenMessaging's runtime code is not re-read after the send. */
+/** The shared safe-receipt reader, plus the receipt's own fee fields as the node answered them (the approval's actual fee). */
 export async function confirmedStargateTokenSourceReceipt(rpc: Pick<StargateJsonRpc, "call">, transactionHash: Hex,
   finalityTag: Parameters<typeof confirmedStargateSourceReceipt>[2]) {
-  return await confirmedStargateSourceReceipt(rpc, transactionHash, finalityTag);
+  let raw: unknown;
+  const reading = { call: async (method: string, params: readonly unknown[]) => { const value = await rpc.call(method, params);
+    if (method === "eth_getTransactionReceipt") raw = value; return value; } };
+  const receipt = await confirmedStargateSourceReceipt(reading, transactionHash, finalityTag);
+  return receipt === null ? null : { ...receipt, feeFields: readEvmReceiptFeeFields(record(raw)) };
 }
 
 function logPosition(log: Record<string, unknown>) { return [quantity(log.blockNumber), quantity(log.logIndex)] as const; }

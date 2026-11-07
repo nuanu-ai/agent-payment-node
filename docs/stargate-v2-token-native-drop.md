@@ -26,6 +26,11 @@ mechanism pin
 `{ "provider": "stargate-v2", "reference": "eip155:10:0xcE8CcA271Ebc0533920C83d39F417ED6A0abB7D0/eip155:137:0x9Aa02D4Fae7F58b8E8f34c66E756cC734DAc7fe4" }`.
 Records missing their policy, and any route or policy drift, are corrupt before effects.
 
+This lane pays only the owner's own address. If this `bridge` admission pins `recipients`, the list must include the
+owner: a pin without it refuses at prepare, at the approval and at the usage hold
+(`APN_ALLOWLIST_REFUSED`, `allowlist_recipient_not_admitted`). An admission without `recipients` does not restrict
+recipients.
+
 ## Commands and environment
 
 ```text
@@ -145,7 +150,13 @@ A restart reuses the one stored post-approval snapshot. A missing snapshot can b
 a stored snapshot can never be rewritten. The bridge must be signed and durably marked before the stored post-approval
 quote expires; with an existing exact allowance (no approval), before the preparation quote expires. The expiry is
 checked again after signing, so a wait for the custody lock or the usage ledger cannot carry the send past it: such a
-send is never marked or broadcast and the operation enters `cleanup_required`.
+send is never marked or broadcast and the operation enters `cleanup_required` with that reason
+(`expired_before_marker` or `post_approval_quote_expired_before_marker`).
+
+When the RPC is unavailable (a transport failure, a non-200 answer, a 429 or a JSON-RPC error result) while the
+post-approval quote or the bridge preflight reads the chain, nothing is decided: the error is returned as it is, the
+operation keeps its phase, and the next `execute` reads again. Its deadlines still apply: past the approval-finality
+deadline or the post-approval quote expiry, it enters `cleanup_required`.
 
 ### Send safety
 
@@ -155,7 +166,8 @@ operation to observation only and never resends. Completion requires zero residu
 Execution durably records the intended shared-ledger reservation before making it and records every later ledger
 transition before applying it. A crash or ledger error is therefore retried idempotently by `execute`, `observe`,
 `cleanup`, or `status` without another signature or broadcast. A reservation cap race or error after approval enters
-`cleanup_required` so the live allowance can be revoked.
+`cleanup_required` so the live allowance can be revoked. A reserved hold whose bridge was never marked for sending
+(an expiry, a refusal, cleanup, or a v5 record) is released as `failed_before_effect`.
 
 ### Cleanup
 
@@ -199,15 +211,22 @@ one block pinned by hash.
 - `prepare` reads both envelopes at the quote block and stores them in `opStackFees` (unsigned bytes, gas, L1 data
   fee bound, operator fee bound, total). `maximumDebitAtomic` and the native-balance check include them, and the
   consent screen shows each bound.
-- Before the approval is signed, APN re-reads both envelopes' bounds; before the bridge is signed, the bridge's (the
-  post-approval quote reads them when it is bound). The maximum debit at the signed gas limits with the fresh bounds
-  must stay within the cap, and the native balance must pay what is still to be signed. Otherwise nothing is signed:
+- Before the approval is signed, APN re-reads both envelopes' bounds and writes them with the approval marker
+  (`submissionOpStackFees`); before the bridge is signed, the bridge's (the post-approval quote reads them when it is
+  bound). The maximum debit at the signed gas limits with the fresh bounds must stay within the cap, and the native
+  balance must pay what is still to be signed.
+- Once the approval is safe, it is charged what it actually paid: gas used times the effective gas price plus the
+  receipt's `l1Fee` and operator fee (`approvalActualFee`, derived by the direct-transfer receipt rule). When the receipt
+  lacks a part of that charge, it is charged its gas limit at the signed max fee plus the larger of its prepare and
+  approval-marker bounds. If the approval plus the bridge's maximum no longer fits the cap, the bridge is not signed.
+  Otherwise nothing is signed:
   a refused approval leaves the operation `approved` (`APN_REPREPARE_REQUIRED`, `recomputed_native_debit`); a refused
   bridge enters `cleanup_required`, as any failed bridge preflight does.
 - A failed or malformed oracle read refuses; a bound is never assumed zero.
 
-The bounds are upper estimates at the read block: the oracle reads the current L1 prices, and a later L1 price rise
-can still raise the fee the chain charges. APN re-reads them before each signature for that reason.
+"Upper bound" is Optimism's practical bound at the L1 prices of the read block (`getL1FeeUpperBound` assumes the worst
+compression of the given size), not a hard maximum: a later L1 price rise can still raise the fee the chain charges.
+APN re-reads them before each signature for that reason, and charges a sent approval its actual fee.
 
 ## Delivery proof
 
@@ -279,8 +298,8 @@ Released versions before v6 wrote v5. A v5 record is read exactly as before (`st
 `apn operation abandon`), but its cap left out the L1 data and operator fees and its frozen record cannot take them, so
 `execute` signs no new approval or bridge for it (reason `op_stack_fees_unbound_reprepare`):
 
-- in `prepared` or `approved` it refuses with `APN_REPREPARE_REQUIRED` before the consent screen; prepare again with a
-  new idempotency key;
+- in `prepared` it refuses with `APN_REPREPARE_REQUIRED` before the consent screen, and in `approved` (consent already
+  given) before anything is signed; prepare again with a new idempotency key;
 - once its approval landed (`allowance_observed` or `post_approval_quote_bound`) it enters `cleanup_required`, and
   `apn stargate token cleanup` revokes the allowance;
 - a sent approval, bridge or cleanup is observed to its end as before.

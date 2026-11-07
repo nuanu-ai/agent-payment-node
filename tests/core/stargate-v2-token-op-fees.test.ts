@@ -10,7 +10,7 @@ import { executeStargateV2Token, FileStargateTokenJournal, prepareStargateV2Toke
 import { unsignedEnvelopeBytes } from "../../src/stargate-v2/token-op-fees.js";
 import { TtyStargateTokenApproval } from "../../src/stargate-v2/token-tty.js";
 import { temporaryState } from "./helpers.js";
-import { AMOUNT, BLOCK, FEE, L1_FEE, operatorFee, request, seedTokenFixture, setup } from "./stargate-token-support.js";
+import { AMOUNT, BLOCK, FEE, L1_FEE, asV5TokenFixture, operatorFee, request, seedTokenFixture, setup } from "./stargate-token-support.js";
 
 /**
  * F3: OP Mainnet charges each transaction an L1 data fee and an operator fee that gas x max fee per gas does not bound.
@@ -20,13 +20,7 @@ const APPROVAL_GAS = 100_000n, BRIDGE_GAS = 100_000n, MAX_GAS = 5_000_000n;
 const fee = (gas: bigint) => L1_FEE + operatorFee(gas);
 const blocked = (reason: string, check?: (details: Record<string, unknown>) => void) => (error: any) => {
   assert.equal(error.details?.reason, reason); check?.(error.details); return true; };
-/** A v5 record as 0.5.25.. wrote it: the same operation without the bounds, its debit without them. */
-function asV5(op: StargateTokenOperation): StargateTokenOperation {
-  const { integrityHash: _integrity, opStackFees, ...rest } = op;
-  const body = { ...rest, schemaVersion: "apn.stargate-v2-token-operation.v5" as const,
-    maximumDebitAtomic: (BigInt(op.maximumDebitAtomic) - BigInt(opStackFees!.totalUpperWei)).toString() };
-  return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
-}
+const asV5 = asV5TokenFixture;
 
 test("prepare stores both envelopes' bounds read at the quote block and spends them before the staged gas ceiling", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const state = new StateStore(temporary.root); await state.initialize();
@@ -152,5 +146,6 @@ test("M1: an existing-allowance bridge whose prepare quote expires while signing
     s.advance(15_001); return await s.ports.signer.signTransaction(tx); } } };
   await assert.rejects(executeStargateV2Token(prepared.operationId, ports, s.journal), (e: any) => e.code === "APN_REPREPARE_REQUIRED" && e.details.reason === "expired_before_marker");
   const op = s.journal.value!; assert.equal(op.phase, "cleanup_required"); assert.equal(op.transactionHash, undefined); assert.equal(op.usageState, "failed_before_effect");
+  assert.equal(op.cleanupReason, "expired_before_marker");
   assert.equal(s.journal.history.some(entry => entry.phase === "submission_started"), false); assert.equal(s.counts().sends, 0);
 });

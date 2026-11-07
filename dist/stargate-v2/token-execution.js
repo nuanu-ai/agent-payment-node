@@ -8,7 +8,7 @@ import { createPostApprovalQuote, freshPreflight, sendFeeAdmitted } from "./toke
 import { quoteStargateV2Direct } from "./quote.js";
 import { MAX_TTL_MS, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_SCHEMA, STARGATE_TOKEN_SCHEMA_V5, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, address, encodeStargateNativeDrop, fail, uint, } from "./token-codec.js";
 import { seal, transition } from "./token-journal.js";
-import { readStargateOpStackFees } from "./token-op-fees.js";
+import { approvalActualFee, readStargateOpStackFees } from "./token-op-fees.js";
 import { assertLane, readAllowance, readExecutorCap, readPoolConfig, readPoolFunctional, readTokenBalance, requoteSend, rpcEnvelope, sourceReceipt, validateDestination, verifySignedEnvelope, } from "./token-rpc.js";
 export { LAYERZERO_ENDPOINT_V2, STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_DESTINATION_EXECUTOR, STARGATE_TOKEN_DESTINATION_MESSAGING, STARGATE_TOKEN_DESTINATION_POOL, STARGATE_TOKEN_DESTINATION_TOKEN, STARGATE_TOKEN_MAX_BRIDGE_GAS, STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_EXECUTOR, STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_POOL, STARGATE_TOKEN_SOURCE_TOKEN, encodeStargateNativeDrop, } from "./token-codec.js";
 import { stargateFundsRefusal } from "./funds.js";
@@ -240,14 +240,17 @@ async function executeLocked(id, ports, journal) {
     // A v5 record's cap left out the OP-stack L1 data and operator fees, and its frozen record cannot take them: it signs no new
     // approval or bridge. Before any effect it is prepared again; a landed approval goes to the consented allowance cleanup.
     if (op.schemaVersion === STARGATE_TOKEN_SCHEMA_V5) {
-        if (op.phase === "prepared" || op.phase === "approved")
+        if (op.phase === "prepared" || op.phase === "approved") {
+            await releaseUnsentHold(op, ports, journal);
             fail("APN_REPREPARE_REQUIRED", "op_stack_fees_unbound_reprepare");
+        }
         return await requireCleanup(op, ports, journal, "op_stack_fees_unbound_reprepare");
     }
     if (Date.parse(op.expiresAt) <= now() &&
         !(op.allowanceRequired && ["allowance_observed", "post_approval_quote_bound"].includes(op.phase))) {
         if (op.phase === "allowance_observed")
             return await requireCleanup(op, ports, journal, "expired_after_allowance");
+        await releaseUnsentHold(op, ports, journal);
         fail("APN_REPREPARE_REQUIRED", "expired");
     }
     if (op.phase === "prepared") {
@@ -258,7 +261,7 @@ async function executeLocked(id, ports, journal) {
         await journal.save(op);
     }
     if (op.allowanceRequired && op.phase === "approved") {
-        await freshPreflight(op, ports, "before_approval");
+        const submissionOpStackFees = await freshPreflight(op, ports, "before_approval");
         await ports.confirmPolicy(op);
         const raw = await ports.signer.signTransaction(op.approvalEnvelope);
         await verifySignedEnvelope(raw, op.owner, op.approvalEnvelope);
@@ -268,7 +271,7 @@ async function executeLocked(id, ports, journal) {
         const approvalFinalityDeadline = new Date(markerAt + (op.approvalFinalityWindowMs ?? 0)).toISOString();
         const hash = keccak256(raw);
         op = transition({ ...op, approvalTransactionHash: hash,
-            approvalSubmissionStartedAt: new Date(markerAt).toISOString(), approvalFinalityDeadline }, "allowance_submission_started", "approval_attempt_marked_before_send", markerAt);
+            approvalSubmissionStartedAt: new Date(markerAt).toISOString(), approvalFinalityDeadline, submissionOpStackFees }, "allowance_submission_started", "approval_attempt_marked_before_send", markerAt);
         await journal.save(op);
         try {
             if ((await ports.sendRawTransaction(raw)).toLowerCase() !== hash.toLowerCase())
@@ -298,6 +301,8 @@ async function executeLocked(id, ports, journal) {
                 postApprovalQuote = await createPostApprovalQuote(op, ports);
             }
             catch (error) {
+                if (error instanceof ApnError && rpcUnavailable(error))
+                    throw error; // the RPC, not the quote: the next execute quotes again
                 return await requireCleanup(op, ports, journal, error instanceof ApnError ? `post_approval_quote_${String(error.details?.reason ?? error.code)}` : "post_approval_quote_unavailable");
             }
             op = transition({ ...op, postApprovalQuote }, "post_approval_quote_bound", "fresh_post_approval_quote_bound", now());
@@ -319,6 +324,8 @@ async function executeLocked(id, ports, journal) {
             fail("APN_REPREPARE_REQUIRED", "signer_identity_changed");
     }
     catch (error) {
+        if (error instanceof ApnError && rpcUnavailable(error))
+            throw error; // nothing decided: the next execute retries
         return await requireCleanup(op, ports, journal, error instanceof ApnError ? String(error.details?.reason ?? error.code) : "bridge_preflight_failed");
     }
     op = await markUsageTarget(op, "reserved", journal);
@@ -343,13 +350,8 @@ async function executeLocked(id, ports, journal) {
         if (now() >= Date.parse(op.postApprovalQuote?.expiresAt ?? op.expiresAt))
             fail("APN_REPREPARE_REQUIRED", op.postApprovalQuote === undefined ? "expired_before_marker" : "post_approval_quote_expired_before_marker");
     }
-    catch (error) {
-        op = await requireCleanup(op, ports, journal, "bridge_signing_failed");
-        op = await markUsageTarget(op, "failed_before_effect", journal);
-        try {
-            await reconcileUsage(op, ports, journal);
-        }
-        catch { /* durable target retries */ }
+    catch (error) { // requireCleanup releases the hold: no marker, so the bridge was never sent.
+        await requireCleanup(op, ports, journal, error instanceof ApnError && typeof error.details?.reason === "string" ? error.details.reason : "bridge_signing_failed");
         throw error;
     }
     const hash = keccak256(raw);
@@ -398,7 +400,9 @@ async function observeAllowance(op, ports, journal) {
     const allowance = await readAllowance(ports.sourceCall, op.owner, op.finalityPolicy.source.blockTag);
     if (allowance !== BigInt(op.amountAtomic))
         fail("APN_RPC_PROTOCOL", "approval_allowance_not_exact");
-    op = transition(op, "allowance_observed", "exact_allowance_safe", now);
+    // v6: what the approval actually paid, from its own safe receipt, is what the bridge's cap check charges for it.
+    const actual = op.schemaVersion === STARGATE_TOKEN_SCHEMA ? approvalActualFee(op, receipt) : undefined;
+    op = transition(actual === undefined ? op : { ...op, approvalActualFee: actual }, "allowance_observed", "exact_allowance_safe", now);
     await journal.save(op);
     return op;
 }
@@ -462,6 +466,7 @@ async function requireCleanup(op, ports, journal, reason, forceApprovalZero = fa
         fail("APN_OPERATION_BLOCKED", "unexpected_residual_allowance");
     op = transition({ ...op, residualAllowanceAtomic: residual.toString(), cleanupReason: reason }, "cleanup_required", residual === 0n ? "cleanup_not_needed_allowance_already_zero" : "explicit_cleanup_required", (ports.now ?? Date.now)());
     await journal.save(op);
+    op = await releaseUnsentHold(op, ports, journal);
     if (residual === 0n && !forceApprovalZero) {
         op = await finishCleanup(op, ports, journal, "zero_residual_allowance_proven");
     }
@@ -585,6 +590,18 @@ async function finishCleanup(op, ports, journal, reason) {
         op = await reconcileUsage(op, ports, journal);
     }
     return op;
+}
+/** A reserved hold whose bridge provably never left (no send marker, so no broadcast) is released, idempotently. */
+async function releaseUnsentHold(op, ports, journal) {
+    if (op.transactionHash !== undefined || op.usageState !== "reserved" || op.usageTarget !== undefined)
+        return op;
+    op = await markUsageTarget(op, "failed_before_effect", journal);
+    try {
+        return await reconcileUsage(op, ports, journal);
+    }
+    catch {
+        return op; /* durable target retries */
+    }
 }
 async function markUsageTarget(op, target, journal) {
     op = seal({ ...op, usageTarget: target });
