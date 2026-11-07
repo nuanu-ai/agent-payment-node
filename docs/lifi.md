@@ -558,9 +558,9 @@ limits, recoverable. An exhausted read budget defers to the next resume and neve
   address from aeWETH).
 - **Linea and Monad native fills.** The destination transaction must also expose one bounded `debug_traceTransaction`
   `callTracer` call from the pinned SpokePool to the bound profile owner for exactly the `FilledRelay` output; it and every
-  frame above it must have succeeded. The safe canonical transaction and block bind that trace, which is the proof. The
-  balance delta across the block only corroborates it (BNB composite too): the owner may spend in that block, so a short
-  delta is kept and a negative one stored as `nativeBalance: null`. The destination primary RPC, or its archive reader, must support `debug_traceTransaction` with `callTracer`, as for the BNB composite.
+  frame above it must have succeeded, and the trace's root must be the verified transaction's own successful call (same
+  sender, target and calldata). The safe canonical transaction and block bind that trace, which is the proof. The
+  balance delta across the block only corroborates it (BNB composite too): the owner may spend in that block, so a short delta is kept and a negative one stored as `nativeBalance: null`. The destination primary RPC, or its archive reader, must support `debug_traceTransaction` with `callTracer`, as for the BNB composite.
 - **Stargate delivery.** A nonzero GUID, source endpoint, receiver and amount matching `OFTReceived` from the pool,
   with a transfer of the admitted destination token, including a later successful retry of a cached delivery.
 - **Ethereum to Base native Stargate.** Source observation requires `OFTSent.amountSentLD` to equal the bridge amount

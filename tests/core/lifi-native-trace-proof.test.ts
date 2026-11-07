@@ -46,12 +46,41 @@ test("a delivery CALL that succeeded under a reverted parent frame does not prov
     return result;
   });
   assert.equal(control!.receipt.nativeTransfer?.valueAtomic, capture.expected.amountAtomic);
-  for (const reverted of [(trace: any) => trace.calls[0], (trace: any) => trace, delivery]) {
+  for (const reverted of [(trace: any) => trace.calls[0], delivery]) {
     await assert.rejects(observeCaptured((method, _params, result) => {
       if (method === "debug_traceTransaction") reverted(result).error = "execution reverted";
       return result;
     }), /native_destination_transfer/u);
   }
+});
+
+test("the trace proves the fill only when its root is the verified transaction: a successful CALL with its sender, target and calldata", async () => {
+  const withRoot = (change: (root: any) => void) => observeCaptured((method, _params, result) => {
+    if (method === "debug_traceTransaction") change(result);
+    return result;
+  });
+  // The comparison is canonical: address and hex case in the RPC answer do not matter.
+  const recased = await withRoot((root) => { root.from = `0x${root.from.slice(2).toUpperCase()}`;
+    root.to = `0x${root.to.slice(2).toUpperCase()}`; root.input = `0x${root.input.slice(2).toUpperCase()}`; });
+  assert.equal(recased!.receipt.nativeTransfer?.valueAtomic, capture.expected.amountAtomic);
+  const other = "0x1111111111111111111111111111111111111111";
+  for (const [name, change] of [
+    ["sender", (root: any) => { root.from = other; }], ["target", (root: any) => { root.to = other; }],
+    ["calldata", (root: any) => { root.input = `${root.input}00`; }], ["missing calldata", (root: any) => { delete root.input; }],
+    ["type", (root: any) => { root.type = "DELEGATECALL"; }], ["error", (root: any) => { root.error = "execution reverted"; }],
+  ] as const) await assert.rejects(withRoot(change), /native_trace_transaction|bounded_hex/u, name);
+});
+
+test("a reverted provider-named transaction is reported as reverted without reading a native proof it cannot carry", async () => {
+  const read: string[] = [];
+  const observed = await observeCaptured((method, _params, result: any) => {
+    read.push(method);
+    if (method === "eth_getTransactionReceipt") result.status = "0x0";
+    return result;
+  });
+  assert.equal(observed!.transaction.status, "reverted");
+  assert.deepEqual([observed!.receipt.nativeTransfer, observed!.receipt.nativeBalance], [null, null]);
+  assert.deepEqual(read.filter((method) => method === "debug_traceTransaction" || method === "eth_getBalance"), []);
 });
 
 type Fixture = Awaited<ReturnType<typeof lifiFixture>>;
