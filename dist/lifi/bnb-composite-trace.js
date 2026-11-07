@@ -35,7 +35,9 @@ export function verifyBnbCompositeTrace(raw, transactionHash, message, call, fil
     const input = BigInt(call.inputAmountAtomic), filled = BigInt(fill.amountAtomic);
     try {
         assertCallerTree(root);
-        if (root.type !== "CALL" || root.error !== null || root.from !== fill.sender || root.input !== fill.calldata || filled < input)
+        // Addresses are checksummed on both sides (getAddress), so the comparison ignores the RPC answer's case.
+        if (root.type !== "CALL" || root.error !== null || root.from !== getAddress(fill.sender) || root.to !== getAddress(fill.target) ||
+            root.input !== fill.calldata || filled < input)
             mismatch();
         // A relayer may batch fills: exactly one live SpokePool call to the Receiver carries this deposit's message.
         const handlers = live(root).filter((frame) => frame.type === "CALL" && frame.from === BNB_COMPOSITE.spokePool &&

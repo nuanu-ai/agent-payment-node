@@ -110,7 +110,7 @@ export async function observeCanonical(c, hash, expected, nativeDelivery, includ
         if (nativeDelivery.composite === undefined)
             nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery, { sender: identity.from, target: identity.to, calldata });
         else
-            compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call, { sender: identity.from, calldata, amountAtomic: nativeDelivery.composite.fillAmountAtomic });
+            compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call, { sender: identity.from, target: identity.to, calldata, amountAtomic: nativeDelivery.composite.fillAmountAtomic });
     }
     return { transaction: { chainId: c.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: c.origin, ...identity,
             ...(fees ?? {}), status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },
