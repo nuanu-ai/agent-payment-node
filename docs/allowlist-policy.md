@@ -207,6 +207,12 @@ one rail can only narrow another rail; it never widens it.
 
 The ledger does not record a mechanism reference. All alternatives of a `bridge` admission share its one daily limit.
 
+A day's usage is every proved spend whose effect falls on that UTC day, plus every hold whose outcome is not proved
+(`reserved`, `submitted`, `unknown_finality`). An unproved hold counts on every day, not only the day it was made,
+because its effect could still land on any later day. An operation the owner abandons (`abandoned_unknown`) proves
+nothing, so its hold stays `unknown_finality` and keeps narrowing the account's daily limit for that chain and asset.
+Abandonment never releases it. A hold whose operation proved that nothing was sent no longer counts.
+
 ## Example: both Ethereum USDC Relay routes
 
 To admit both Ethereum USDC Relay routes for a profile:

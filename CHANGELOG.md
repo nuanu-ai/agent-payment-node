@@ -2,6 +2,12 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.96 — 2026-11-08
+
+- Bridge RPC readers: PublicNode changed the text of its keyless historical-read refusal to `Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode`, and APN matched only the earlier text. A refused primary receipt on Base or Ethereum therefore stopped falling back to the configured `APN_<CHAIN>_ARCHIVE_RPC_URL`, and BSC and Arbitrum were never recognized at all. QA's resume of a BSC operation hit this refusal and needed a separate `APN_BNB_RECEIPT_RPC_URL`. APN now accepts both texts, exactly as written, from the keyless Ethereum, Base, BSC and Arbitrum roots. Any other text or origin still fails without a fallback.
+- An unresolved bridge operation whose stored `observation_rpc_failure` is an RPC refusal (an HTTP status, or a history the endpoint does not serve) now gets a third `next_actions` entry. It names the endpoint role, method and status, and the chain's `APN_<CHAIN>_RECEIPT_RPC_URL` and `APN_<CHAIN>_ARCHIVE_RPC_URL`. The docs now say both readers must accept JSON-RPC batches. The keyless Tatum gateway refuses batches with HTTP 402, which is what QA saw; the public BSC NodeReal endpoint accepts them.
+- Docs: how daily caps count holds whose outcome is unproved. Such a hold counts on every UTC day, and an abandoned operation's hold stays `unknown_finality`.
+
 ## 0.5.95 — 2026-11-06
 
 - Ethereum ETH to BNB (LI.FI Across + Fly), completion: a fill whose Fly swap reverted no longer waits forever. LI.FI reports it as DONE/PARTIAL, and APN used to read the destination trace only after COMPLETED, so the operation stayed `unknown_finality` (`provider_partial_observed_unproved`) holding its Ethereum claim and usage reservation, with no way to close it. On this lane PARTIAL now leads to the same trace proof, and the trace decides: QA's real reverted fill (Across deposit 4886518) proves `recovered_weth` with the whole 286765125030554 WETH back at the recipient, and the operation ends as `destination_failed`. An operation already parked this way closes with `apn operation resume` and a BSC archive RPC that serves `debug_traceTransaction`; its usage reservation is finalized as spent. A BSC transaction LI.FI names that holds no fill of this deposit no longer ends the operation as `protocol_mismatch`: it stays observable (`evidence_unavailable`) and LI.FI is asked again on the next resume, even after COMPLETED.

@@ -63,6 +63,15 @@ Optional readers exist for each bridge chain (`ETHEREUM`, `BASE`, `ARBITRUM`, `B
 
 No bridge command requires either reader. Every bridge command works on keyless primary endpoints alone.
 
+Both readers must accept JSON-RPC batches: APN reads the chain identity and the receipt in one batch (only
+`https://mainnet.base.org` as a Base receipt reader is read one call at a time) and batches historical state reads.
+A keyless endpoint that refuses batches does not work as either reader. On 2026-11-08 the keyless Tatum gateway refused
+them with HTTP 402, and the public BSC NodeReal endpoint accepted them. A primary refusal counts as "refused" above when it is
+PublicNode's historical-read refusal (`archive requests require a personal token`, with or without its sign-up link)
+from its keyless Ethereum, Base, BSC or Arbitrum root. Any other refusal fails the read without a fallback. When an
+operation records an RPC refusal (an HTTP status or a history the endpoint does not serve) as its
+`observation_rpc_failure`, its `next_actions` names that chain's two readers.
+
 LI.FI is reached at the fixed origin `https://li.quest/v1`. Set `APN_LIFI_API_KEY` to send authenticated requests; the
 key is used only for that API base.
 

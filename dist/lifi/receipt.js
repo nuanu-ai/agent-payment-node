@@ -3,12 +3,29 @@ import { BRIDGE_ASSET_REGISTRY, bridgeAssetRow, bridgeNativePrincipal } from "./
 import { validateBridgeOperation } from "./operation-validation.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure } from "./validation.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
+import { BRIDGE_ARCHIVE_RPC_ENV, BRIDGE_RECEIPT_RPC_ENV } from "./rpc-archive.js";
 export function bridgeNextActions(op) {
     if (op.terminal)
         return op.state === "completed" ? [] : ["apn bridge prepare --help"];
     if (op.state === "awaiting_approval")
         return [`apn bridge approve --operation ${op.operationId}`];
-    return [`apn operation resume --operation ${op.operationId}`, `apn operation status --operation ${op.operationId}`];
+    return [`apn operation resume --operation ${op.operationId}`, `apn operation status --operation ${op.operationId}`, ...rpcReaderAction(op)];
+}
+const READER_REASONS = new Set(["bridge_RPC_HTTP_status", "historical_receipt_unavailable",
+    "explicit_archive_RPC_required", "distinct_archive_RPC_required"]);
+/**
+ * A stored observation failure that is an RPC's own refusal (an HTTP status, or a history it does not serve) names the
+ * chain's optional receipt and archive readers. APN never picks an endpoint; the owner names one and resumes.
+ */
+function rpcReaderAction(op) {
+    const failure = op.failure?.observationRpc;
+    if (failure === undefined || failure.httpStatus === undefined && (failure.reason === undefined || !READER_REASONS.has(failure.reason)))
+        return [];
+    const request = op.intent.materialization.request, chainId = failure.stage.startsWith("source_") ? request.fromChainId : request.toChainId;
+    const refusal = failure.httpStatus === undefined ? failure.reason : `HTTP ${failure.httpStatus}`;
+    return [`The ${failure.endpointRole ?? "primary"} RPC of chain ${chainId} refused ${failure.rpcMethod ?? "a read"} (${refusal}). ` +
+            `Set ${BRIDGE_RECEIPT_RPC_ENV[chainId]} (receipts) and ${BRIDGE_ARCHIVE_RPC_ENV[chainId]} (historical state and traces) ` +
+            `to HTTPS endpoints that serve them and accept JSON-RPC batches, then rerun: apn operation resume --operation ${op.operationId}`];
 }
 export function bridgeProofClass(op) {
     if (op.state === "completed")
