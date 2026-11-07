@@ -1,6 +1,7 @@
 import { canonicalJson, hashObject, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { SecureStateStore, stateIdentifier } from "../secure-state-store.js";
+import { BRIDGE_FILE_LIMIT } from "./history-capacity.js";
 import {} from "./operation-model.js";
 import { assertBridgeAppend, bridgeCorrupt, validateBridgeOperation } from "./operation-validation.js";
 import { bridgeReceipt, currentBridgeReceiptCandidates } from "./receipt.js";
@@ -45,7 +46,8 @@ export class BridgeOperationRepository extends SecureStateStore {
     async writeOperation(op) {
         validateBridgeOperation(op);
         await this.ready();
-        if (Buffer.byteLength(canonicalJson(op), "utf8") + 1 > 1024 * 1024)
+        // The hard read limit only: the room kept for closing and terminal transitions is enforced where they are made.
+        if (Buffer.byteLength(canonicalJson(op), "utf8") + 1 > BRIDGE_FILE_LIMIT)
             bridgeFailure("APN_OPERATION_BLOCKED", "bridge_record_capacity");
         // `op` is validated above and `previous` when it is loaded; only the append structure remains to check.
         const previous = await this.loadOperation(op.profileHash, op.operationId);

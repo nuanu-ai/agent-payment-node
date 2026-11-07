@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isSolanaTransactionSignature } from "../rail-status-binding.js";
 import { bridgeAddress, bridgeIso, bridgeUint } from "./validation.js";
+import { BRIDGE_CLOSING_TRANSITIONS, BRIDGE_HISTORY_LIMIT } from "./operation-model.js";
 export const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 export const hexSchema = z.string().regex(/^0x(?:[a-f0-9]{2})*$/u).max(24_578);
 export const wordSchema = z.string().regex(/^0x[a-f0-9]{64}$/u);
@@ -177,7 +178,7 @@ export const operationSchema = z.strictObject({ ...mutableFields, schemaVersion:
         materialization: materializationSchema, decoded: z.unknown(), sourceDeployment: deploymentSchema, destinationDeployment: deploymentSchema,
         sourceAccount: accountSchema, destinationStartBlock: blockSchema, sourceRpcOrigin: originSchema, destinationRpcOrigin: originSchema,
         preparedAt: isoSchema, expiresAt: isoSchema, policyHash: hashSchema, implicitProtocolFeeAtomic: uintSchema, allowlist: z.unknown().nullable() }),
-    transitions: z.array(transitionSchema).min(1).max(512), integrityHash: hashSchema });
+    transitions: z.array(transitionSchema).min(1).max(BRIDGE_HISTORY_LIMIT + BRIDGE_CLOSING_TRANSITIONS), integrityHash: hashSchema });
 /*
  * Records written before the Linea allowlist/usage-lease journal upgrade kept the
  * same durable version string. Keep their exact historical shapes separate from

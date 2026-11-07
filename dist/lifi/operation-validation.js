@@ -3,6 +3,7 @@ import { decodeBridgeCall } from "./decode.js";
 import { bridgeApprovalPolicyBinding, bridgeApprovalRequired, bridgeNativePrincipalWei } from "./economics.js";
 import { BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeProviderSettled, bridgeSnapshot } from "./operation-model.js";
 import { legacyBridgeOperationSchema, operationSchema } from "./schema.js";
+import { bridgeHistoryAdmits, bridgeTransitionKind } from "./history-capacity.js";
 import { bridgeExecutionDestination, bridgeNativeDenominationConversion, bridgeProviderBoundNativeDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD, bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
 import { approvalData } from "./transaction.js";
@@ -49,7 +50,7 @@ function validateBridgeOperationShape(value, legacy) {
         bridgeCorrupt();
     validateIntent(op, legacy);
     let previous;
-    for (const entry of op.transitions) {
+    for (const [index, entry] of op.transitions.entries()) {
         const { transitionHash, ...entryBody } = entry;
         if (hashObject(entryBody) !== transitionHash || entry.previousHash !== (previous?.transitionHash ?? op.fingerprint))
             bridgeCorrupt();
@@ -59,8 +60,12 @@ function validateBridgeOperationShape(value, legacy) {
                 entry.providerObservation !== null || entry.failure !== null || (!legacy && entry.usageLease !== null) || !bridgeSame(entry.destinationScan, { startBlock: op.intent.destinationStartBlock, nextBlockAtomic: op.intent.destinationStartBlock.numberAtomic, previousEndBlock: null }))
                 bridgeCorrupt();
         }
-        else
+        else {
             validateTransition(previous, entry, legacy);
+            // Past the released bound a journal holds only closing transitions, and only the terminal one in its last slot.
+            if (!bridgeHistoryAdmits(bridgeTransitionKind(previous, entry), index + 1))
+                bridgeCorrupt();
+        }
         validateSnapshot(op, entry, legacy);
         previous = entry;
     }

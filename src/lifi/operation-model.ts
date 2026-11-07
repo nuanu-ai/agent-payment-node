@@ -184,6 +184,13 @@ export const BRIDGE_PRE_SIGN_RPC_RATE_LIMITED = "pre_sign_rpc_rate_limited";
 export const BRIDGE_PRE_SIGN_RPC_UNAVAILABLE = "pre_sign_rpc_unavailable";
 /** Telemetry is diagnostics, not evidence: a transition keeps only the latest rows and a telemetry-only change adds none. */
 export const BRIDGE_TELEMETRY_ROWS = 8;
+/** Any transition is journaled while the history is shorter than this: the bound every released journal was written under. */
+export const BRIDGE_HISTORY_LIMIT = 512;
+/**
+ * Past that bound, at most this many more transitions, each a closing one (history-capacity.ts); the last of them is
+ * kept for the terminal transition. A journal an earlier release filled to the bound can therefore still end.
+ */
+export const BRIDGE_CLOSING_TRANSITIONS = 8;
 /**
  * The provider statuses after which a destination proof is read. LI.FI reports the BNB composite whose Fly swap reverted,
  * so that the Receiver returned the fill as WETH, as DONE/PARTIAL; there the canonical trace, not the provider, decides.

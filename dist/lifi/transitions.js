@@ -1,4 +1,5 @@
-import { canonicalJson, hashObject } from "../canonical.js";
+import { hashObject } from "../canonical.js";
+import { bridgeCapacityRefusal, bridgeTransitionKind } from "./history-capacity.js";
 import { BRIDGE_TELEMETRY_ROWS, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot, sealBridgeOperation } from "./operation-model.js";
 import { validateBridgeContinuity, validateBridgeOperation } from "./operation-validation.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
@@ -26,16 +27,24 @@ export function transitionBridge(op, patch, at) {
         } });
     if (bridgeSame(observationMeaning(oldMeaning), observationMeaning(newMeaning)))
         return op;
-    if (op.transitions.length >= 512)
-        bridgeFailure("APN_OPERATION_BLOCKED", "bridge_history_capacity");
-    const entry = { ...newMeaning, at, previousHash: op.transitions.at(-1).transitionHash };
-    const { integrityHash: _old, ...body } = next;
-    const result = sealBridgeOperation({ ...body, updatedAt: at, terminal: BRIDGE_TERMINAL.includes(next.state),
-        transitions: [...op.transitions, { ...entry, transitionHash: hashObject(entry) }] });
-    if (Buffer.byteLength(canonicalJson(result), "utf8") + 1 > 1024 * 1024)
-        bridgeFailure("APN_OPERATION_BLOCKED", "bridge_record_capacity");
+    // Ordinary transitions stop short of the bounds, keeping room for closing proofs and the terminal transition.
+    const kind = bridgeTransitionKind(oldMeaning, newMeaning);
+    let result = appended(op, next, at), refusal = bridgeCapacityRefusal(kind, result);
+    if (refusal === "bridge_record_capacity" && kind !== "ordinary" && (next.observationTelemetry?.length ?? 0) > 0) {
+        // Telemetry is diagnostics, not evidence: a closing or terminal transition drops its rows rather than go unrecorded.
+        result = appended(op, { ...next, observationTelemetry: [] }, at);
+        refusal = bridgeCapacityRefusal(kind, result);
+    }
+    if (refusal !== null)
+        bridgeFailure("APN_OPERATION_BLOCKED", refusal);
     validateBridgeContinuity(op, result);
     return result;
+}
+function appended(op, next, at) {
+    const entry = { ...bridgeSnapshot(next), at, previousHash: op.transitions.at(-1).transitionHash };
+    const { integrityHash: _old, ...body } = next;
+    return sealBridgeOperation({ ...body, updatedAt: at, terminal: BRIDGE_TERMINAL.includes(next.state),
+        transitions: [...op.transitions, { ...entry, transitionHash: hashObject(entry) }] });
 }
 export function bridgeAtTransition(op, index) {
     const s = op.transitions[index];

@@ -4,6 +4,7 @@ import { bridgeApprovalPolicyBinding, bridgeApprovalRequired, bridgeNativePrinci
 import { BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeProviderSettled, bridgeSnapshot, type BridgeEffect, type BridgeEffectPhase,
   type BridgeEffectSnapshot, type BridgeOperationRecord, type BridgeState, type BridgeTransition } from "./operation-model.js";
 import { legacyBridgeOperationSchema, operationSchema } from "./schema.js";
+import { bridgeHistoryAdmits, bridgeTransitionKind } from "./history-capacity.js";
 import { bridgeExecutionDestination, bridgeNativeDenominationConversion, bridgeProviderBoundNativeDestination, validateBridgeRequest } from "./asset-registry.js";
 import { BRIDGE_DIAMOND, BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, BRIDGE_MAX_GAS, BRIDGE_ZERO_WORD,
   bridgeFailure, bridgeHeadroomWei, bridgeSame, bridgeUint } from "./validation.js";
@@ -50,7 +51,7 @@ function validateBridgeOperationShape(value: unknown, legacy: boolean): BridgeOp
   if (integrityHash !== hashObject(body) || op.fingerprint !== hashObject(bridgeIntentBinding(op))) bridgeCorrupt();
   validateIntent(op, legacy);
   let previous: BridgeTransition | undefined;
-  for (const entry of op.transitions) {
+  for (const [index, entry] of op.transitions.entries()) {
     const { transitionHash, ...entryBody } = entry;
     if (hashObject(entryBody) !== transitionHash || entry.previousHash !== (previous?.transitionHash ?? op.fingerprint)) bridgeCorrupt();
     if (previous === undefined) {
@@ -58,7 +59,11 @@ function validateBridgeOperationShape(value: unknown, legacy: boolean): BridgeOp
         entry.effects.some((e) => e.phase !== "unsealed") || entry.sourceProof !== null || entry.destinationProof !== null ||
         entry.providerObservation !== null || entry.failure !== null || (!legacy && entry.usageLease !== null) || !bridgeSame(entry.destinationScan,
           { startBlock: op.intent.destinationStartBlock, nextBlockAtomic: op.intent.destinationStartBlock.numberAtomic, previousEndBlock: null })) bridgeCorrupt();
-    } else validateTransition(previous, entry, legacy);
+    } else {
+      validateTransition(previous, entry, legacy);
+      // Past the released bound a journal holds only closing transitions, and only the terminal one in its last slot.
+      if (!bridgeHistoryAdmits(bridgeTransitionKind(previous, entry), index + 1)) bridgeCorrupt();
+    }
     validateSnapshot(op, entry, legacy);
     previous = entry;
   }
