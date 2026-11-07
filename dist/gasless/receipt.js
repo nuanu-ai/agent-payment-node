@@ -59,7 +59,9 @@ export function publicGaslessOperation(op) {
         permission: { entry_point: i.entryPoint, paymaster: i.paymaster, delegate: i.delegate,
             initial_designation: i.initialSnapshot.delegation,
             observed_designation: proof?.safeAccount.delegation ?? invalidation?.headAccount.delegation ?? null,
-            delegation_persists: invalidation === undefined || invalidation.headAccount.delegation === "expected",
+            // A proof read at latest may see the owner's later revocation; older proofs always read "expected" (unchanged).
+            delegation_persists: proof !== null ? proof.safeAccount.delegation === "expected"
+                : invalidation === undefined || invalidation.headAccount.delegation === "expected",
             permit_deadline: "MAX_UINT256", permit_amount_atomic: i.feeCapAtomic,
             initial_allowance_atomic: i.initialSnapshot.allowanceAtomic,
             residual_allowance_atomic: proof?.safeAccount.allowanceAtomic ?? invalidation?.headAccount.allowanceAtomic ?? null,

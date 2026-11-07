@@ -13,15 +13,25 @@ export function validateGaslessSettlement(i: GaslessIntent, userOperationHash: H
     (p.accountBlock !== undefined && (BigInt(p.accountBlock.numberAtomic) < BigInt(p.safeBlock.numberAtomic) ||
       BigInt(p.accountBlock.timestampAtomic) < BigInt(p.safeBlock.timestampAtomic) ||
       (p.accountBlock.numberAtomic === p.safeBlock.numberAtomic && !gaslessSame(p.accountBlock, p.safeBlock)))) ||
-    !consumed(i, p.effectAccount) || !consumed(i, p.safeAccount)) gaslessFailure("APN_STATE_CORRUPT", "gasless_settlement_binding");
+    !consumed(i, p.effectAccount, p.accountBlock !== undefined) || !consumed(i, p.safeAccount, p.accountBlock !== undefined)) {
+    gaslessFailure("APN_STATE_CORRUPT", "gasless_settlement_binding");
+  }
   const prefund = gaslessUint(a.prefundAtomic, true), refund = gaslessUint(a.refundAtomic), fee = gaslessUint(a.feeAtomic);
   if (prefund > BigInt(i.feeCapAtomic) || refund > prefund || fee !== prefund - refund ||
     (a.success ? a.deliveredAtomic !== i.recipientAtomic || a.branch !== "sponsored" : a.deliveredAtomic !== "0") ||
     (a.branch !== "sponsored" && (a.success || refund !== 0n))) gaslessFailure("APN_STATE_CORRUPT", "gasless_settlement_economics");
   return p;
 }
-function consumed(i: GaslessIntent, a: GaslessAccountState): boolean {
-  return a.owner === i.owner.address && a.delegation === "expected" &&
+/**
+ * The nonces live in the token and the EntryPoint, not in the account's code, and only grow: they prove the signed
+ * permit and UserOperation consumed whatever the account's code is now. A latest-head read (`accountBlock`, since
+ * 0.5.43) is taken after the effect, so the owner may already have revoked the delegation (code `0x`, read "empty"):
+ * that is reported, never a reason to hold the close. Older reads (inclusion and safe block) still need "expected".
+ * Code delegating to any other contract is not accepted: the account read refuses it (`gasless_delegation_identity`),
+ * so the stored vocabulary stays the two states every released reader knows.
+ */
+function consumed(i: GaslessIntent, a: GaslessAccountState, readAfterEffect: boolean): boolean {
+  return a.owner === i.owner.address && (a.delegation === "expected" || (readAfterEffect && a.delegation === "empty")) &&
     BigInt(a.permitNonceAtomic) > BigInt(i.initialSnapshot.permitNonceAtomic) &&
     BigInt(a.entryPointNonceAtomic) > BigInt(i.initialSnapshot.entryPointNonceAtomic) &&
     BigInt(a.eoaNonceAtomic) >= BigInt(i.initialSnapshot.eoaNonceAtomic) + (i.initialSnapshot.delegation === "empty" ? 1n : 0n);
