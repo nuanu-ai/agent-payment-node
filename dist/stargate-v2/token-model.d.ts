@@ -273,6 +273,7 @@ export interface StargateTokenExecutionPorts {
     readonly admitPolicy: (input: Readonly<{
         profile: string;
         owner: Address;
+        recipient: Address;
         amountAtomic: string;
         operationId: string;
     }>) => Promise<StargateTokenPolicyBinding>;

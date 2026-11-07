@@ -94,7 +94,7 @@ export interface StargateTokenExecutionPorts {
   readonly signer: Readonly<{ kind: "imported_evm_signer"; address: Address; signTransaction: (tx: StargateTokenEnvelope) => Promise<Hex> }>;
   readonly signerIdentity: () => Promise<Readonly<{ profile: string; address: Address }>>; readonly approve: (operation: StargateTokenOperation) => Promise<void>;
   readonly approveCleanup: (operation: StargateTokenOperation) => Promise<void>;
-  readonly admitPolicy: (input: Readonly<{ profile: string; owner: Address; amountAtomic: string; operationId: string }>) => Promise<StargateTokenPolicyBinding>;
+  readonly admitPolicy: (input: Readonly<{ profile: string; owner: Address; recipient: Address; amountAtomic: string; operationId: string }>) => Promise<StargateTokenPolicyBinding>;
   readonly confirmPolicy: (operation: StargateTokenOperation) => Promise<void>;
   readonly reserveUsage: (operation: StargateTokenOperation) => Promise<StargateTokenUsageState>;
   readonly followUsage: (operation: StargateTokenOperation, state: Exclude<StargateTokenUsageState, "reserved">) => Promise<StargateTokenUsageState>;

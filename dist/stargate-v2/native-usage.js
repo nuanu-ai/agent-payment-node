@@ -1,5 +1,6 @@
 import { getAddress } from "viem";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { canonicalJson, domainHash } from "../canonical.js";
@@ -24,7 +25,7 @@ export class StargateNativeUsage {
     }
     async admitPolicy(input) {
         const active = await this.active(input.profile, input.owner), at = new Date(this.now());
-        this.admit(active, input.amountAtomic, at, (await this.ledger.usage(usageIdentity(input.owner), at)).amountAtomic);
+        this.admit(active, input.amountAtomic, at, (await this.ledger.usage(usageIdentity(input.owner), at)).amountAtomic, input.recipient);
         return { policyDigest: active.digest, policyRevision: active.revision, mechanism: { ...STARGATE_NATIVE_MECHANISM } };
     }
     /** Before signing: the active policy must still be the prepared one, and the principal is held under the shared caps. */
@@ -39,12 +40,13 @@ export class StargateNativeUsage {
         const identity = usageIdentity(op.owner), reservationId = assetUsageReservationId(identity, usageKey(op.operationId)), at = new Date(this.now());
         const existing = await this.ledger.load(identity, reservationId);
         if (existing !== null) {
-            // A retry after an interrupted pre-sign step keeps its own hold instead of counting it twice.
+            // A retry after an interrupted pre-sign step keeps its own hold instead of counting it twice; the pin still applies.
+            this.admit(active, op.amountAtomic, at, "0", op.recipient);
             if (existing.state !== "reserved" || existing.policyDigest !== binding.policyDigest || existing.amountAtomic !== op.amountAtomic)
                 throw corrupt("Stargate native usage reservation does not match the unsigned operation.");
             return;
         }
-        this.admit(active, op.amountAtomic, at, (await this.ledger.usage(identity, at)).amountAtomic);
+        this.admit(active, op.amountAtomic, at, (await this.ledger.usage(identity, at)).amountAtomic, op.recipient);
         const reservation = await this.ledger.reserve({ ...identity, registry: active.registry, rail: "bridge", mechanism: binding.mechanism,
             amountAtomic: op.amountAtomic, idempotencyKey: usageKey(op.operationId), now: at });
         if (reservation.state !== "reserved")
@@ -85,11 +87,13 @@ export class StargateNativeUsage {
             throw refused("Stargate native execution requires an active owner policy for this EVM account.");
         return active;
     }
-    admit(active, amountAtomic, at, dailyUsageAtomic) {
+    /** The exact mechanism, the caps, and the owner's recipient pin (the lane pays the owner, who must still be listed). */
+    admit(active, amountAtomic, at, dailyUsageAtomic, recipient) {
         const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:1", asset: { kind: "native", identifier: null }, rail: "bridge",
             amountAtomic, dailyUsageAtomic, asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString(), mechanism: STARGATE_NATIVE_MECHANISM });
         if (!bridgeMechanismAdmitted(admission, STARGATE_NATIVE_MECHANISM))
             throw refused("The active bridge mechanism pin does not authorize this exact Stargate V2 native lane.");
+        assertRecipientAdmitted({ admission, mechanism: STARGATE_NATIVE_MECHANISM, recipient });
     }
 }
 //# sourceMappingURL=native-usage.js.map

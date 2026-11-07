@@ -166,7 +166,7 @@ test("BRDG-35: native usage admits the exact lane, holds the principal idempoten
   await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [nativeBridgeAdmission()], now });
   const state = new StateStore(temporary.root); await state.initialize(); const usage = new StargateNativeUsage(state, () => now.getTime());
   const ledger = new AssetUsageLedger(temporary.root), identity = { account: OWNER, chain: "eip155:1", asset: { kind: "native" as const, identifier: null } };
-  const policy = await usage.admitPolicy({ profile: "owner", owner: OWNER, amountAtomic: "100" });
+  const policy = await usage.admitPolicy({ profile: "owner", owner: OWNER, recipient: OWNER, amountAtomic: "100" });
   assert.deepEqual(policy.mechanism, STARGATE_NATIVE_MECHANISM);
   const op = (id: string, amountAtomic = "100") => ({ operationId: id.repeat(64), profile: "owner", owner: OWNER, amountAtomic, policy, integrityHash: "b".repeat(64) } as any);
   await usage.reserve(op("1")); await usage.reserve(op("1"));
@@ -190,9 +190,9 @@ test("BRDG-35: native usage refuses another bridge pin and a changed owner polic
   const temporary = await temporaryState(); t.after(temporary.cleanup); const now = new Date("2026-09-20T10:00:00.000Z");
   await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [nativeBridgeAdmission({ provider: "stargate-v2", reference: "eip155:1:other" })], now });
   const state = new StateStore(temporary.root); await state.initialize(); const usage = new StargateNativeUsage(state, () => now.getTime());
-  await assert.rejects(usage.admitPolicy({ profile: "owner", owner: OWNER, amountAtomic: "100" }), (error: any) => error.code === "APN_ALLOWLIST_REFUSED");
+  await assert.rejects(usage.admitPolicy({ profile: "owner", owner: OWNER, recipient: OWNER, amountAtomic: "100" }), (error: any) => error.code === "APN_ALLOWLIST_REFUSED");
   await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [nativeBridgeAdmission()], now });
-  const policy = await usage.admitPolicy({ profile: "owner", owner: OWNER, amountAtomic: "100" });
+  const policy = await usage.admitPolicy({ profile: "owner", owner: OWNER, recipient: OWNER, amountAtomic: "100" });
   await activateDirectPolicy(temporary.root, "owner", { accounts: { evm: OWNER }, admissions: [nativeBridgeAdmission()], now });
   await assert.rejects(usage.reserve({ operationId: "7".repeat(64), profile: "owner", owner: OWNER, amountAtomic: "100", policy, integrityHash: "b".repeat(64) } as any),
     (error: any) => error.code === "APN_ALLOWLIST_REFUSED");

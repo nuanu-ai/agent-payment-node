@@ -1,9 +1,10 @@
 import { decodeEventLog, decodeFunctionResult, encodeEventTopics, encodeFunctionData, getAddress, keccak256, pad, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity, type AssetUsageState } from "../asset-usage-ledger.js";
 import { canonicalJson, domainHash } from "../canonical.js";
-import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
+import { loadActiveAssetPolicyRegistry, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { EncryptedWalletStore } from "../encrypted-wallet-store.js";
 import { ApnError } from "../errors.js";
 import type { WrappingSecretPort } from "../macos-keychain.js";
@@ -93,10 +94,10 @@ export class StargateTokenService {
       signer, signerIdentity: async () => await this.local.identity(profile, owner), approve: async op => await new TtyStargateTokenApproval().approve(op),
       approveCleanup: async op => await new TtyStargateTokenApproval().approveCleanup(op),
       admitPolicy: async input => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, input.profile); if (active === null || active.accounts.evm !== input.owner) throw new ApnError("APN_ALLOWLIST_REFUSED", "Stargate token execution requires an active owner policy for this EVM account.");
-        const identity = usageIdentity(input.owner), at = new Date(this.now()), current = await this.usage.usage(identity, at);
-        const admission = evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "bridge", amountAtomic: input.amountAtomic, dailyUsageAtomic: current.amountAtomic, asOfDate: at.toISOString().slice(0,10), asOf: at.toISOString() });
-        requireMechanism(admission.asset.mechanismPins?.bridge); return { policyDigest: active.digest, policyRevision: active.revision, mechanism: STARGATE_TOKEN_MECHANISM }; },
-      confirmPolicy: async op => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile); if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision || active.accounts.evm !== op.owner || canonicalJson(op.policy.mechanism) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again."); const at = new Date(this.now()); const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN }, rail: "bridge", amountAtomic: op.amountAtomic, dailyUsageAtomic: (await this.usage.usage(usageIdentity(op.owner), at)).amountAtomic, asOfDate: at.toISOString().slice(0,10), asOf: at.toISOString() }); requireMechanism(admission.asset.mechanismPins?.bridge); },
+        const at = new Date(this.now()), current = await this.usage.usage(usageIdentity(input.owner), at);
+        admitToken(active, { amountAtomic: input.amountAtomic, dailyUsageAtomic: current.amountAtomic, recipient: input.recipient, at });
+        return { policyDigest: active.digest, policyRevision: active.revision, mechanism: STARGATE_TOKEN_MECHANISM }; },
+      confirmPolicy: async op => { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile); if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision || active.accounts.evm !== op.owner || canonicalJson(op.policy.mechanism) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again."); const at = new Date(this.now()); admitToken(active, { amountAtomic: op.amountAtomic, dailyUsageAtomic: (await this.usage.usage(usageIdentity(op.owner), at)).amountAtomic, recipient: op.recipient, at }); },
       reserveUsage: async op => await this.reserveUsage(op),
       followUsage: async (op, target) => await this.followUsage(op, target),
       sendRawTransaction: async raw => { const returned = hash(await source.call("eth_sendRawTransaction", [raw])); if (returned !== keccak256(raw)) throw new Error("hash"); return returned; }, waitSourceReceipt: async (txHash, finalityTag) => await confirmedStargateTokenSourceReceipt(source, txHash, finalityTag),
@@ -106,7 +107,10 @@ export class StargateTokenService {
   }
   private async reserveUsage(op: StargateTokenOperation): Promise<StargateTokenUsageState> { const active = await loadActiveAssetPolicyRegistry({ state: this.state, clock: { now: () => new Date(this.now()) } }, op.profile);
     if (active === null || active.digest !== op.policy.policyDigest || active.revision !== op.policy.policyRevision) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active Stargate owner policy changed; prepare again.");
-    const at = new Date(this.now()); return stargateUsageState((await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
+    const at = new Date(this.now());
+    // The hold is taken only under the pin: the reservation (and its reconcile path) checks the recipient again.
+    admitToken(active, { amountAtomic: op.amountAtomic, dailyUsageAtomic: "0", recipient: op.recipient, at });
+    return stargateUsageState((await this.usage.reserve({ ...usageIdentity(op.owner), registry: active.registry, rail: "bridge", amountAtomic: op.amountAtomic,
       idempotencyKey: usageKey(op.operationId), now: at })).state); }
   private async followUsage(op: StargateTokenOperation, target: Exclude<StargateTokenUsageState, "reserved">): Promise<StargateTokenUsageState> {
     const identity = usageIdentity(op.owner), reservationId = assetUsageReservationId(identity, usageKey(op.operationId));
@@ -226,6 +230,13 @@ export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc,
 
 function usageIdentity(owner: Address): AssetUsageIdentity { return { account: owner, chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN } }; }
 function usageKey(operationId: string): string { return `apn.stargate-token-usage:${operationId}`; }
+/** The exact single Stargate pin, the caps, and the owner's recipient pin (the lane pays the owner, who must still be listed). */
+function admitToken(active: ActiveAssetPolicy, input: Readonly<{ amountAtomic: string; dailyUsageAtomic: string; recipient: Address; at: Date }>): void {
+  const admission = evaluateAssetPolicy(active.registry, { chain: "eip155:10", asset: { kind: "token", identifier: STARGATE_TOKEN_SOURCE_TOKEN },
+    rail: "bridge", amountAtomic: input.amountAtomic, dailyUsageAtomic: input.dailyUsageAtomic, asOfDate: input.at.toISOString().slice(0, 10), asOf: input.at.toISOString() });
+  requireMechanism(admission.asset.mechanismPins?.bridge);
+  assertRecipientAdmitted({ admission, mechanism: STARGATE_TOKEN_MECHANISM, recipient: input.recipient });
+}
 function requireMechanism(pin: unknown): void {
   if (canonicalJson(pin) !== canonicalJson(STARGATE_TOKEN_MECHANISM)) throw new ApnError("APN_ALLOWLIST_REFUSED", "The active bridge mechanism pin does not authorize this exact Stargate V2 lane.");
 }
