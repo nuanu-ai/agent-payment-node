@@ -209,9 +209,13 @@ The ledger does not record a mechanism reference. All alternatives of a `bridge`
 
 A day's usage is every proved spend whose effect falls on that UTC day, plus every hold whose outcome is not proved
 (`reserved`, `submitted`, `unknown_finality`). An unproved hold counts on every day, not only the day it was made,
-because its effect could still land on any later day. An operation the owner abandons (`abandoned_unknown`) proves
-nothing, so its hold stays `unknown_finality` and keeps narrowing the account's daily limit for that chain and asset.
-Abandonment never releases it. A hold whose operation proved that nothing was sent no longer counts.
+because its effect could still land on any later day. A hold whose operation proved that nothing was sent no longer
+counts. Abandonment (`abandoned_unknown`) proves nothing and never releases a hold; what it does with the hold depends
+on the family:
+- A swap or an x402 payment charges the hold as spent on the day of abandonment (`finalized`), so it stops counting
+  after that UTC day.
+- A MetaMask native transfer or a Local gasless transfer keeps the hold open (`submitted` or `unknown_finality`). It
+  narrows the account's daily limit for that chain and asset on every later day too.
 
 ## Example: both Ethereum USDC Relay routes
 

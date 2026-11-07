@@ -63,14 +63,27 @@ Optional readers exist for each bridge chain (`ETHEREUM`, `BASE`, `ARBITRUM`, `B
 
 No bridge command requires either reader. Every bridge command works on keyless primary endpoints alone.
 
-Both readers must accept JSON-RPC batches: APN reads the chain identity and the receipt in one batch (only
-`https://mainnet.base.org` as a Base receipt reader is read one call at a time) and batches historical state reads.
-A keyless endpoint that refuses batches does not work as either reader. On 2026-11-08 the keyless Tatum gateway refused
-them with HTTP 402, and the public BSC NodeReal endpoint accepted them. A primary refusal counts as "refused" above when it is
-PublicNode's historical-read refusal (`archive requests require a personal token`, with or without its sign-up link)
-from its keyless Ethereum, Base, BSC or Arbitrum root. Any other refusal fails the read without a fallback. When an
-operation records an RPC refusal (an HTTP status or a history the endpoint does not serve) as its
-`observation_rpc_failure`, its `next_actions` names that chain's two readers.
+A receipt reader, and an archive standing in for a missing receipt reader, read the chain identity and the receipt in
+one JSON-RPC batch. The exception is `https://mainnet.base.org` as a Base receipt reader, which is read one call at a
+time. Historical state reads and traces go to the archive one call at a time. So an endpoint that refuses batches can
+serve as the archive only beside a receipt reader that accepts them. On 2026-11-08 the keyless Tatum gateway refused
+batches with HTTP 402, and the public BSC NodeReal endpoint accepted them.
+
+A primary receipt read is "refused" above in these cases:
+- HTTP 408 or 5xx, an ambiguous transport, or a provider outage;
+- a JSON-RPC error that says the history is pruned or missing (`missing trie node`, `pruned`, `historical … unavailable`),
+  unless it mentions a credential;
+- PublicNode's historical-read refusal (`archive requests require a personal token`, with or without its sign-up link)
+  from its keyless Ethereum, Base, BSC or Arbitrum root.
+
+Any other refusal fails the read without a fallback, including any other HTTP 403. When an unresolved operation records
+an RPC refusal (an HTTP status, or a history the endpoint does not serve) as its `observation_rpc_failure`, its status
+adds one `next_actions` entry naming the variable to set:
+- for a receipt: the receipt reader;
+- for a pinned state read or a trace: the archive;
+- for anything else: the chain's primary `APN_<CHAIN>_RPC_URL`.
+
+Receipts keep the plain next actions.
 
 LI.FI is reached at the fixed origin `https://li.quest/v1`. Set `APN_LIFI_API_KEY` to send authenticated requests; the
 key is used only for that API base.

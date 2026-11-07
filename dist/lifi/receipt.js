@@ -4,28 +4,37 @@ import { validateBridgeOperation } from "./operation-validation.js";
 import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure } from "./validation.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
 import { BRIDGE_ARCHIVE_RPC_ENV, BRIDGE_RECEIPT_RPC_ENV } from "./rpc-archive.js";
+import { BRIDGE_RPC_ENV } from "./rpc-transport.js";
+/** The next actions a receipt binds. Stored receipts hash them, so they never change for a transition already written. */
 export function bridgeNextActions(op) {
     if (op.terminal)
         return op.state === "completed" ? [] : ["apn bridge prepare --help"];
     if (op.state === "awaiting_approval")
         return [`apn bridge approve --operation ${op.operationId}`];
-    return [`apn operation resume --operation ${op.operationId}`, `apn operation status --operation ${op.operationId}`, ...rpcReaderAction(op)];
+    return [`apn operation resume --operation ${op.operationId}`, `apn operation status --operation ${op.operationId}`];
 }
 const READER_REASONS = new Set(["bridge_RPC_HTTP_status", "historical_receipt_unavailable",
     "explicit_archive_RPC_required", "distinct_archive_RPC_required"]);
+/** Reads the archive role serves: state pinned to a block, and traces. */
+const ARCHIVE_METHODS = new Set(["eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_call", "debug_traceTransaction"]);
 /**
- * A stored observation failure that is an RPC's own refusal (an HTTP status, or a history it does not serve) names the
- * chain's optional receipt and archive readers. APN never picks an endpoint; the owner names one and resumes.
+ * Status only, never a receipt: an unresolved operation whose stored observation failure is an RPC's own refusal (an
+ * HTTP status, or a history it does not serve) names the one variable whose endpoint serves that read. A receipt goes
+ * to the receipt reader, a pinned state read or a trace to the archive, anything else to the chain's primary. APN never
+ * picks an endpoint; the owner names one and resumes.
  */
 function rpcReaderAction(op) {
     const failure = op.failure?.observationRpc;
-    if (failure === undefined || failure.httpStatus === undefined && (failure.reason === undefined || !READER_REASONS.has(failure.reason)))
+    if (op.terminal || op.state === "awaiting_approval" || failure === undefined ||
+        failure.httpStatus === undefined && (failure.reason === undefined || !READER_REASONS.has(failure.reason)))
         return [];
     const request = op.intent.materialization.request, chainId = failure.stage.startsWith("source_") ? request.fromChainId : request.toChainId;
+    const method = failure.rpcMethod, variable = method === "eth_getTransactionReceipt" ? BRIDGE_RECEIPT_RPC_ENV[chainId]
+        : method !== undefined && ARCHIVE_METHODS.has(method) || failure.reason === "explicit_archive_RPC_required" ||
+            failure.reason === "distinct_archive_RPC_required" ? BRIDGE_ARCHIVE_RPC_ENV[chainId] : BRIDGE_RPC_ENV[chainId];
     const refusal = failure.httpStatus === undefined ? failure.reason : `HTTP ${failure.httpStatus}`;
-    return [`The ${failure.endpointRole ?? "primary"} RPC of chain ${chainId} refused ${failure.rpcMethod ?? "a read"} (${refusal}). ` +
-            `Set ${BRIDGE_RECEIPT_RPC_ENV[chainId]} (receipts) and ${BRIDGE_ARCHIVE_RPC_ENV[chainId]} (historical state and traces) ` +
-            `to HTTPS endpoints that serve them and accept JSON-RPC batches, then rerun: apn operation resume --operation ${op.operationId}`];
+    return [`The ${failure.endpointRole ?? "primary"} RPC of chain ${chainId} refused ${method ?? "a read"} (${refusal}). ` +
+            `If it keeps refusing, set ${variable} to an HTTPS endpoint that serves this read, then rerun: apn operation resume --operation ${op.operationId}`];
 }
 export function bridgeProofClass(op) {
     if (op.state === "completed")
@@ -38,7 +47,12 @@ export function bridgeProofClass(op) {
         return "effect_observation_pending";
     return "durable_pre_effect";
 }
+/** The operation as status and commands show it: the receipt's projection, plus an RPC reader action where one applies. */
 export function publicBridgeOperation(op) {
+    const view = bridgeOperationView(op), reader = rpcReaderAction(op);
+    return reader.length === 0 ? view : { ...view, next_actions: [...view.next_actions, ...reader] };
+}
+function bridgeOperationView(op) {
     validateBridgeOperation(op);
     return projectBridgeOperation(op, false);
 }
@@ -183,7 +197,7 @@ function assetProjection(chainId, token) {
         native_coin: { symbol: row.nativeCoin.symbol, decimals: row.nativeCoin.decimals } };
 }
 export function bridgeReceipt(op) {
-    const body = { ...publicBridgeOperation(op), schema_version: "apn.bridge-receipt.v1", operation_binding_hash: op.integrityHash };
+    const body = { ...bridgeOperationView(op), schema_version: "apn.bridge-receipt.v1", operation_binding_hash: op.integrityHash };
     return { ...body, receipt_hash: hashObject(body) };
 }
 /** Exact current-v1 receipt emitted before denomination-aware asset bounds were added. */

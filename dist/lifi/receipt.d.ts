@@ -1,8 +1,10 @@
 import type { BridgeOperationRecord } from "./operation-model.js";
 import type { BridgeCompositeReturn } from "./ports.js";
 import type { LegacyBridgeOperationRecord, StoredBridgeOperationRecord } from "./legacy-operation.js";
+/** The next actions a receipt binds. Stored receipts hash them, so they never change for a transition already written. */
 export declare function bridgeNextActions(op: BridgeOperationRecord): readonly string[];
 export declare function bridgeProofClass(op: BridgeOperationRecord): string;
+/** The operation as status and commands show it: the receipt's projection, plus an RPC reader action where one applies. */
 export declare function publicBridgeOperation(op: BridgeOperationRecord): {
     observation_rpc_telemetry: {
         schema_version: "apn.bridge-observation-telemetry.v1";
