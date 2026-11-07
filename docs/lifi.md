@@ -63,6 +63,30 @@ Optional readers exist for each bridge chain (`ETHEREUM`, `BASE`, `ARBITRUM`, `B
 
 No bridge command requires either reader. Every bridge command works on keyless primary endpoints alone.
 
+A receipt reader, and an archive standing in for a missing receipt reader, read the chain identity and the receipt in
+one JSON-RPC batch. The exception is `https://mainnet.base.org` as a Base receipt reader, which is read one call at a
+time. Historical state reads and traces go to the archive one call at a time. So an endpoint that refuses batches can
+serve as the archive only beside a receipt reader that accepts them. On 2026-11-08 the keyless Tatum gateway refused
+batches with HTTP 402, and the public BSC NodeReal endpoint accepted them.
+
+A primary receipt read is "refused" above in these cases:
+- HTTP 408 or 5xx, an ambiguous transport, or a provider outage;
+- a JSON-RPC error that says the history is pruned or missing (`missing trie node`, `pruned`, `historical … unavailable`),
+  unless it mentions a credential;
+- PublicNode's historical-read refusal (`archive requests require a personal token`, with or without its sign-up link)
+  from its keyless Ethereum, Base, BSC or Arbitrum root.
+
+Any other refusal fails the read without a fallback, including any other HTTP 403. When an unresolved operation records
+an RPC refusal (an HTTP status, or a history the endpoint does not serve) as its `observation_rpc_failure`, its status
+and the output of `bridge approve` and `operation resume` add one `next_actions` entry naming the variable to set:
+- the receipt reader, when the receipt reader refused, when a receipt read was refused, or when the archive refused a
+  batch (the archive reads batches only for receipts);
+- the archive, when the archive refused any other read, or when the primary refused a trace or a native-fill balance;
+- the chain's primary `APN_<CHAIN>_RPC_URL` otherwise.
+
+An operation that needed an archive and had none (`explicit_archive_RPC_required`) names the archive. Receipts keep the
+plain next actions.
+
 LI.FI is reached at the fixed origin `https://li.quest/v1`. Set `APN_LIFI_API_KEY` to send authenticated requests; the
 key is used only for that API base.
 

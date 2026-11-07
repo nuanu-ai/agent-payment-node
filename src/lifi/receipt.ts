@@ -6,11 +6,40 @@ import { BRIDGE_FEE_HEADROOM_BPS, BRIDGE_FEE_HEADROOM_POLICY, bridgeFailure } fr
 import type { BridgeCompositeReturn } from "./ports.js";
 import type { LegacyBridgeOperationRecord, StoredBridgeOperationRecord } from "./legacy-operation.js";
 import { isLegacyBridgeOperation } from "./legacy-operation.js";
+import { BRIDGE_ARCHIVE_RPC_ENV, BRIDGE_RECEIPT_RPC_ENV } from "./rpc-archive.js";
+import { BRIDGE_RPC_ENV } from "./rpc-transport.js";
 
+/** The next actions a receipt binds. Stored receipts hash them, so they never change for a transition already written. */
 export function bridgeNextActions(op: BridgeOperationRecord): readonly string[] {
   if (op.terminal) return op.state === "completed" ? [] : ["apn bridge prepare --help"];
   if (op.state === "awaiting_approval") return [`apn bridge approve --operation ${op.operationId}`];
   return [`apn operation resume --operation ${op.operationId}`, `apn operation status --operation ${op.operationId}`];
+}
+/** The observation reads a primary refusal of which an archive serves: a trace, and the hash-pinned native-fill balances. */
+const ARCHIVE_METHODS: ReadonlySet<string> = new Set(["debug_traceTransaction", "eth_getBalance"]);
+/**
+ * Status only, never a receipt: an unresolved operation whose stored observation failure is an RPC's own refusal (an
+ * HTTP status, or a history it does not serve) names the one variable whose endpoint serves that read. APN never picks
+ * an endpoint; the owner names one and resumes. The endpoint role decides first: the receipt reader, and an archive
+ * read as a batch or for a receipt, stand for the receipt route (a separate receipt reader takes receipts off the
+ * archive); any other archive read is the archive's. A primary refusal goes by its method.
+ */
+function rpcReaderAction(op: BridgeOperationRecord): readonly string[] {
+  const failure = op.failure?.observationRpc;
+  if (op.terminal || op.state === "awaiting_approval" || failure === undefined) return [];
+  const request = op.intent.materialization.request, chainId = failure.stage.startsWith("source_") ? request.fromChainId : request.toChainId;
+  const resume = `then rerun: apn operation resume --operation ${op.operationId}`;
+  if (failure.reason === "explicit_archive_RPC_required") {
+    return [`Chain ${chainId} needs an archive endpoint for this proof: set ${BRIDGE_ARCHIVE_RPC_ENV[chainId]}, ${resume}`];
+  }
+  if (failure.httpStatus === undefined && failure.reason !== "bridge_RPC_HTTP_status" && failure.reason !== "historical_receipt_unavailable") return [];
+  const role = failure.endpointRole ?? "primary", method = failure.rpcMethod;
+  const receiptRoute = role === "receipt" || method === "eth_getTransactionReceipt" || role === "archive" && method === undefined;
+  const variable = receiptRoute ? BRIDGE_RECEIPT_RPC_ENV[chainId]
+    : role === "archive" || method !== undefined && ARCHIVE_METHODS.has(method) ? BRIDGE_ARCHIVE_RPC_ENV[chainId] : BRIDGE_RPC_ENV[chainId];
+  const refusal = failure.httpStatus === undefined ? failure.reason : `HTTP ${failure.httpStatus}`;
+  return [`The ${role} RPC of chain ${chainId} refused ${method ?? "a read"} (${refusal}). ` +
+    `If it keeps refusing, set ${variable} to an HTTPS endpoint that serves this read, ${resume}`];
 }
 export function bridgeProofClass(op: BridgeOperationRecord): string {
   if (op.state === "completed") return "rpc_safe_correlated";
@@ -19,7 +48,12 @@ export function bridgeProofClass(op: BridgeOperationRecord): string {
   if (op.effects.some((e) => e.submissionAttempts === 1)) return "effect_observation_pending";
   return "durable_pre_effect";
 }
+/** The operation as status and commands show it: the receipt's projection, plus an RPC reader action where one applies. */
 export function publicBridgeOperation(op: BridgeOperationRecord) {
+  const view = bridgeOperationView(op), reader = rpcReaderAction(op);
+  return reader.length === 0 ? view : { ...view, next_actions: [...view.next_actions, ...reader] };
+}
+function bridgeOperationView(op: BridgeOperationRecord) {
   validateBridgeOperation(op);
   return projectBridgeOperation(op, false);
 }
@@ -182,7 +216,7 @@ function assetProjection(chainId: BridgeOperationRecord["intent"]["materializati
     native_coin: { symbol: row.nativeCoin.symbol, decimals: row.nativeCoin.decimals } };
 }
 export function bridgeReceipt(op: BridgeOperationRecord) {
-  const body = { ...publicBridgeOperation(op), schema_version: "apn.bridge-receipt.v1" as const, operation_binding_hash: op.integrityHash };
+  const body = { ...bridgeOperationView(op), schema_version: "apn.bridge-receipt.v1" as const, operation_binding_hash: op.integrityHash };
   return { ...body, receipt_hash: hashObject(body) };
 }
 export type BridgeReceipt = ReturnType<typeof bridgeReceipt>;

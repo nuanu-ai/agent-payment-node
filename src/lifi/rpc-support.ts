@@ -78,13 +78,23 @@ export function isReceiptFallbackError(error: unknown): boolean {
   const status = Number(error.details?.httpStatus);
   return status === 408 || status >= 500 && status <= 599;
 }
-const PUBLICNODE_ARCHIVE_MESSAGE = "archive requests require a personal token";
+/**
+ * PublicNode's refusal of a historical read on its keyless endpoints, in its first wording and in the wording with its
+ * sign-up link (seen on 2026-11-08 from Base, BSC and Arbitrum). Any other text is not this refusal.
+ */
+const PUBLICNODE_ARCHIVE_MESSAGES: ReadonlySet<string> = new Set(["archive requests require a personal token",
+  "archive requests require a personal token. get one at: https://www.allnodes.com/publicnode"]);
+/** The keyless PublicNode roots whose historical receipt refusal is known (Linea's served the receipt on 2026-11-08). */
+const PUBLICNODE_RECEIPT_ORIGINS: Readonly<Partial<Record<BridgeChainId, string>>> = {
+  1: "https://ethereum-rpc.publicnode.com", 56: "https://bsc-rpc.publicnode.com",
+  8453: "https://base-rpc.publicnode.com", 42161: "https://arbitrum-one-rpc.publicnode.com",
+};
 export function historicalReceiptUnavailable(value: unknown, chainId: BridgeChainId, target: URL, method: string): boolean {
   let error: Record<string, unknown>;
   try { error = evmRpcRecord(value); } catch { return false; }
   if (!Number.isSafeInteger(error.code) || typeof error.message !== "string" || error.message.length > 1024) return false;
   const message = normalizeProviderMessage(error.message);
-  if (message === PUBLICNODE_ARCHIVE_MESSAGE) return isPublicNodeReceiptRequest(chainId, target, method);
+  if (PUBLICNODE_ARCHIVE_MESSAGES.has(message)) return isPublicNodeReceiptRequest(chainId, target, method);
   if (credentialOrAuthorizationMessage(message)) return false;
   return message.includes("missing trie node") || message.includes("pruned") ||
     message.includes("historical") && ["unavailable", "not available", "unsupported", "not supported"].some((part) => message.includes(part));
@@ -92,17 +102,16 @@ export function historicalReceiptUnavailable(value: unknown, chainId: BridgeChai
 export function knownPublicNodeReceiptCapability(chainId: BridgeChainId, target: URL, method: string, body: string): boolean {
   if (!isPublicNodeReceiptRequest(chainId, target, method)) return false;
   const trimmed = body.trim();
-  if (normalizeProviderMessage(trimmed) === PUBLICNODE_ARCHIVE_MESSAGE) return true;
+  if (PUBLICNODE_ARCHIVE_MESSAGES.has(normalizeProviderMessage(trimmed))) return true;
   if (trimmed.length === 0 || trimmed.length > 4096) return false;
   try {
     const value = evmRpcRecord(JSON.parse(trimmed)), error = evmRpcRecord(value.error);
-    return typeof error.message === "string" && normalizeProviderMessage(error.message) === PUBLICNODE_ARCHIVE_MESSAGE;
+    return typeof error.message === "string" && PUBLICNODE_ARCHIVE_MESSAGES.has(normalizeProviderMessage(error.message));
   } catch { return false; }
 }
 function isPublicNodeReceiptRequest(chainId: BridgeChainId, target: URL, method: string): boolean {
   if (method !== "eth_getTransactionReceipt" || target.pathname !== "/" || target.search !== "") return false;
-  return chainId === 8453 && target.origin === "https://base-rpc.publicnode.com" ||
-    chainId === 1 && target.origin === "https://ethereum-rpc.publicnode.com";
+  return PUBLICNODE_RECEIPT_ORIGINS[chainId] === target.origin;
 }
 function normalizeProviderMessage(message: string): string { return message.trim().toLowerCase(); }
 function credentialOrAuthorizationMessage(message: string): boolean {
