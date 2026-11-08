@@ -3,6 +3,7 @@ import test from "node:test";
 import { ApnError } from "../../src/errors.js";
 import { OP_STACK_GAS_ORACLE } from "../../src/evm-direct-reads.js";
 import { StateStore } from "../../src/state.js";
+import { StargateJsonRpc } from "../../src/stargate-v2/native-runtime.js";
 import { executeStargateV2Token, FileStargateTokenJournal, prepareStargateV2Token, type StargateTokenExecutionPorts } from "../../src/stargate-v2/token-execution.js";
 import { temporaryState } from "./helpers.js";
 import { AMOUNT, FEE, L1_FEE, asV5TokenFixture, operatorFee, request, setup } from "./stargate-token-support.js";
@@ -73,6 +74,21 @@ test("an unavailable RPC before the bridge keeps the phase, and the next execute
   assert.equal(staged.journal.value?.phase, "allowance_observed"); assert.equal(staged.journal.value?.postApprovalQuote, undefined);
   const observed = await executeStargateV2Token(second.operationId, b.ports, staged.journal);
   assert.equal(observed.phase, "observed"); assert.deepEqual(staged.counts(), { sends: 2, signs: 2, approvals: 1 });
+});
+
+test("a reverted call before the bridge is the chain's answer, not an outage: it goes to cleanup with its own reason", async () => {
+  // The RPC client classifies a JSON-RPC execution revert apart from any other error result.
+  const answer = (error: unknown) => new StargateJsonRpc("https://rpc.example", { request: async (_url: string, _verb: string, body: string | null) =>
+    ({ status: 200, body: JSON.stringify({ jsonrpc: "2.0", id: (JSON.parse(body!) as { id: string }).id, error }) }) });
+  for (const error of [{ code: 3, message: "execution reverted", data: "0x" }, { code: -32000, message: "Execution reverted: paused" }])
+    await assert.rejects(answer(error).call("eth_call", [{}, "latest"]), (e: any) => e.details?.reason === "rpc_execution_reverted");
+  await assert.rejects(answer({ code: -32000, message: "header not found" }).call("eth_call", [{}, "latest"]), (e: any) => e.details?.reason === "rpc_result");
+  const reverted = new ApnError("APN_RPC_CONFIG", "Stargate native runtime unavailable: rpc_execution_reverted.", { reason: "rpc_execution_reverted" });
+  const staged = setup(), op = await prepareStargateV2Token(request({ idempotencyKey: "reverted-post-approval" }), staged.ports, staged.journal);
+  const b = flaky(staged, reverted, true);
+  await executeStargateV2Token(op.operationId, b.ports, staged.journal).catch(() => undefined);
+  assert.notEqual(staged.journal.value?.phase, "allowance_observed"); assert.notEqual(staged.journal.value?.cleanupReason, undefined);
+  assert.equal(staged.counts().sends, 1);
 });
 
 test("a reserved hold whose bridge was never marked is released on expiry and on a v5 record", async () => {

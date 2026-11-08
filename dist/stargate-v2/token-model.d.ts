@@ -208,9 +208,9 @@ export interface StargateTokenOperation {
     }>;
     /** Present exactly on v6: the approval and bridge bounds read at the quote block, included in `maximumDebitAtomic`. */
     readonly opStackFees?: StargateTokenOpStackFees;
-    /** v6, written with the approval marker (0.5.98..): the fresh bounds the before-approval check admitted. */
+    /** v6, written with the approval marker (0.5.97..): the fresh bounds the before-approval check admitted. */
     readonly submissionOpStackFees?: StargateTokenOpStackFees;
-    /** v6, written when the approval is safe (0.5.98..): its actual fee from its own receipt, when the receipt carries every part. */
+    /** v6, written when the approval is safe (0.5.97..): its actual fee from its own receipt, when the receipt carries every part. */
     readonly approvalActualFee?: EvmActualFee;
     readonly approvalFinalityWindowMs?: number;
     readonly approvalSubmissionStartedAt?: string;

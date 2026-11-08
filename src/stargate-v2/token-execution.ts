@@ -417,6 +417,8 @@ async function finishCleanup(op: StargateTokenOperation, ports: StargateTokenExe
   const delivered = op.sourceReceipt !== undefined && op.destinationEvidence !== undefined;
   op = transition(op, delivered ? "observed" : "cleaned", reason, (ports.now ?? Date.now)()); await journal.save(op);
   if (delivered) { op = await markUsageTarget(op, "finalized", journal); op = await reconcileUsage(op, ports, journal); }
+  // Not delivered: a hold taken before a send marker that never came (an earlier release could leave one) is released.
+  else op = await releaseUnsentHold(op, ports, journal);
   return op;
 }
 /** A reserved hold whose bridge provably never left (no send marker, so no broadcast) is released, idempotently. */

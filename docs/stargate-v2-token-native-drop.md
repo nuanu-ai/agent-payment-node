@@ -27,7 +27,7 @@ mechanism pin
 Records missing their policy, and any route or policy drift, are corrupt before effects.
 
 This lane pays only the owner's own address. If this `bridge` admission pins `recipients`, the list must include the
-owner: a pin without it refuses at prepare, at the approval and at the usage hold
+owner: a pin without it refuses at prepare, before the approval, at the usage hold and before the send
 (`APN_ALLOWLIST_REFUSED`, `allowlist_recipient_not_admitted`). An admission without `recipients` does not restrict
 recipients.
 

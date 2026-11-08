@@ -589,6 +589,9 @@ async function finishCleanup(op, ports, journal, reason) {
         op = await markUsageTarget(op, "finalized", journal);
         op = await reconcileUsage(op, ports, journal);
     }
+    // Not delivered: a hold taken before a send marker that never came (an earlier release could leave one) is released.
+    else
+        op = await releaseUnsentHold(op, ports, journal);
     return op;
 }
 /** A reserved hold whose bridge provably never left (no send marker, so no broadcast) is released, idempotently. */

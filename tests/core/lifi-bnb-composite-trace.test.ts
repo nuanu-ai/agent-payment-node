@@ -159,12 +159,15 @@ test("every effect outside Fly Core is exact", () => {
       const changed = fillTrace(); at(changed, path)[key] = replacement;
       // The relayer's WETH movement into the Receiver is the SpokePool's business, proven by FilledRelay instead.
       if (tolerated.has(path.join("."))) continue;
+      // The root is the transaction itself: a root that differs from it is an RPC answer to read again, not an outcome.
+      if (path.length === 0) { assert.throws(() => verify(changed), /native_trace_transaction/u, `${key}:root`); continue; }
       assert.equal(verify(changed).outcome, "protocol_mismatch", `${key}:${path.join(".")}`);
     }
   }
   for (const path of [...outside.filter((path) => !tolerated.has(path.join("."))), CORE]) {
     const failed = fillTrace(); at(failed, path).error = "execution reverted";
     if (path.join(".") === EXECUTOR.join(".")) continue;
+    if (path.length === 0) { assert.throws(() => verify(failed), /native_trace_transaction/u, "error:root"); continue; }
     assert.equal(verify(failed).outcome, "protocol_mismatch", `error:${path.join(".")}`);
   }
   const extra = fillTrace(); at(extra, EXECUTOR).calls.splice(12, 0, token(BNB_COMPOSITE.executor, BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.flyRouter, 0n]));
@@ -176,15 +179,14 @@ test("every effect outside Fly Core is exact", () => {
 });
 
 test("the trace is bound to its transaction, the fill amount, one handler and consistent callers", () => {
-  assert.equal(verifyBnbCompositeTrace(fillTrace(), `0x${"12".repeat(32)}`, MESSAGE, call,
-    { sender: "0x3333333333333333333333333333333333333333", target: BNB_COMPOSITE.spokePool, calldata: CALLDATA, amountAtomic: FILLED.toString() }).outcome, "protocol_mismatch");
-  assert.equal(verifyBnbCompositeTrace(fillTrace(), `0x${"12".repeat(32)}`, MESSAGE, call,
-    { sender: RELAYER, target: BNB_COMPOSITE.spokePool, calldata: "0xdeadbeef", amountAtomic: FILLED.toString() }).outcome, "protocol_mismatch");
-  // The root's target is the verified transaction's too: a trace of the same calldata sent elsewhere is not this fill.
-  assert.equal(verifyBnbCompositeTrace(fillTrace(), `0x${"12".repeat(32)}`, MESSAGE, call,
-    { sender: RELAYER, target: "0x3333333333333333333333333333333333333333", calldata: CALLDATA, amountAtomic: FILLED.toString() }).outcome, "protocol_mismatch");
-  const retargeted = fillTrace(); retargeted.to = "0x3333333333333333333333333333333333333333";
-  assert.equal(verify(retargeted).outcome, "protocol_mismatch");
+  // A root that is not the verified transaction (sender, target, calldata) is an RPC answer to read again: it throws a
+  // retryable APN_RPC_PROTOCOL instead of ending a possibly delivered operation as protocol_mismatch.
+  const rereads = (fill: Partial<{ sender: Address; target: Address; calldata: Hex }>, trace: unknown = fillTrace()) => assert.throws(() =>
+    verifyBnbCompositeTrace(trace, `0x${"12".repeat(32)}`, MESSAGE, call, { sender: RELAYER, target: BNB_COMPOSITE.spokePool, calldata: CALLDATA,
+      amountAtomic: FILLED.toString(), ...fill }), (error: any) => error.code === "APN_RPC_PROTOCOL" && /native_trace_transaction/u.test(error.message));
+  rereads({ sender: "0x3333333333333333333333333333333333333333" }); rereads({ calldata: "0xdeadbeef" });
+  rereads({ target: "0x3333333333333333333333333333333333333333" });
+  const retargeted = fillTrace(); retargeted.to = "0x3333333333333333333333333333333333333333"; rereads({}, retargeted);
   // Address case in the bound transaction or in the RPC answer does not matter.
   const recased = fillTrace(); recased.to = recased.to.toLowerCase() as Address; recased.from = recased.from.toLowerCase() as Address;
   assert.equal(verifyBnbCompositeTrace(recased, `0x${"12".repeat(32)}`, MESSAGE, call, { sender: RELAYER.toLowerCase() as Address,

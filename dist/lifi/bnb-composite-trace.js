@@ -33,11 +33,14 @@ export function verifyBnbCompositeTrace(raw, transactionHash, message, call, fil
     const root = traceNode(raw, { count: 0 }, 0);
     const traceHash = hashObject({ transactionHash, root: traceProjection(root) });
     const input = BigInt(call.inputAmountAtomic), filled = BigInt(fill.amountAtomic);
+    // The root must be the verified transaction itself. A trace of anything else says nothing about this fill, so it is an
+    // RPC answer to read again (retryable), never a terminal outcome. Addresses are checksummed on both sides.
+    if (root.type !== "CALL" || root.error !== null || root.from !== getAddress(fill.sender) || root.to !== getAddress(fill.target) ||
+        root.input !== fill.calldata)
+        bridgeFailure("APN_RPC_PROTOCOL", "native_trace_transaction");
     try {
         assertCallerTree(root);
-        // Addresses are checksummed on both sides (getAddress), so the comparison ignores the RPC answer's case.
-        if (root.type !== "CALL" || root.error !== null || root.from !== getAddress(fill.sender) || root.to !== getAddress(fill.target) ||
-            root.input !== fill.calldata || filled < input)
+        if (filled < input)
             mismatch();
         // A relayer may batch fills: exactly one live SpokePool call to the Receiver carries this deposit's message.
         const handlers = live(root).filter((frame) => frame.type === "CALL" && frame.from === BNB_COMPOSITE.spokePool &&
