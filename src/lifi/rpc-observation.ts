@@ -97,9 +97,13 @@ export async function observeCanonical(c: BridgeObservationContext, hash: Hex, e
     BigInt(fees.effectiveGasPriceAtomic) > BigInt(identity.maxFeePerGasAtomic))) bridgeFailure("APN_RPC_PROTOCOL", "receipt_execution_fee_bounds");
   let nativeBalance: BridgeProtocolReceipt["nativeBalance"] = null, nativeTransfer: BridgeProtocolReceipt["nativeTransfer"] = null;
   let compositeTrace: BridgeProtocolReceipt["compositeTrace"] = null;
-  if (nativeDelivery !== undefined) {
-    // No logs prove a native fill: the recipient's balance across the inclusion block and the delivery call trace do.
-    // These are the one genuinely historical read set; an owner-named archive serves them, else the primary for recent blocks.
+  // A reverted transaction delivers nothing and has no successful root frame to bind a trace to: its native proof is not
+  // read, so the caller sees the reverted status and asks the provider again instead of failing on the trace.
+  if (nativeDelivery !== undefined && status === 1n) {
+    // No logs prove a native fill: the delivery call trace does, bound at its root to the verified transaction. The
+    // recipient's balance across the inclusion block only corroborates it and is kept with its sign: the recipient may
+    // spend in the same block, so a short or negative delta is no evidence against the fill. These are the one genuinely
+    // historical read set; an owner-named archive serves them, else the primary for recent blocks.
     if (number === 0n) bridgeFailure("APN_RPC_PROTOCOL", "native_balance_genesis");
     const beforeRaw = (await c.batchCall([chainItem(c.chainId), headerItem(number - 1n)]))[1] as Record<string, unknown>;
     const before = { numberAtomic: (number - 1n).toString(), hash: evmRpcHex(beforeRaw.hash, 32), timestampAtomic: evmRpcQuantity(beforeRaw.timestamp).toString() };
@@ -109,12 +113,12 @@ export async function observeCanonical(c: BridgeObservationContext, hash: Hex, e
       c.call("eth_getBalance", [nativeDelivery.recipient, { blockHash: block.hash, requireCanonical: true }]).then(evmRpcQuantity),
       c.call("debug_traceTransaction", [hash, { tracer: "callTracer", tracerConfig: { onlyTopCall: false, withLog: false } }]),
     ]);
-    if (afterBalance < beforeBalance) bridgeFailure("APN_RPC_PROTOCOL", "native_balance_delta_negative");
     nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
       beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
-    if (nativeDelivery.composite === undefined) nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery);
+    const calldata = bridgeHex(tx.input, 128 * 1024, undefined, "APN_RPC_PROTOCOL");
+    if (nativeDelivery.composite === undefined) nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery, { sender: identity.from, target: identity.to, calldata });
     else compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call,
-      { sender: identity.from, calldata: bridgeHex(tx.input, 128 * 1024, undefined, "APN_RPC_PROTOCOL"), amountAtomic: nativeDelivery.composite.fillAmountAtomic });
+      { sender: identity.from, target: identity.to, calldata, amountAtomic: nativeDelivery.composite.fillAmountAtomic });
   }
   return { transaction: { chainId: c.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: c.origin, ...identity,
     ...(fees ?? {}), status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },

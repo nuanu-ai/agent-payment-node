@@ -29,6 +29,13 @@ function hash(value) {
         throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate RPC hash.");
     return value.toLowerCase();
 }
+/** JSON-RPC's execution-revert answer: code 3, or the geth-family "execution reverted" message. */
+function executionReverted(error) {
+    if (typeof error !== "object" || error === null || Array.isArray(error))
+        return false;
+    const { code, message } = error;
+    return code === 3 || typeof message === "string" && message.toLowerCase().includes("execution reverted");
+}
 function record(value) {
     if (value === null || typeof value !== "object" || Array.isArray(value))
         throw new ApnError("APN_RPC_PROTOCOL", "Malformed Stargate RPC object.");
@@ -100,6 +107,9 @@ export class StargateJsonRpc {
         if (response.status !== 200)
             statusRefusal(response.status);
         const body = record(JSON.parse(response.body));
+        // A reverted call or estimate is the chain's answer, not an outage: it gets its own reason so no caller retries it as one.
+        if (body.jsonrpc === "2.0" && String(body.id) === id && Object.hasOwn(body, "error") && executionReverted(body.error))
+            blocked("rpc_execution_reverted");
         if (body.jsonrpc !== "2.0" || String(body.id) !== id || !Object.hasOwn(body, "result") || Object.hasOwn(body, "error"))
             blocked("rpc_result");
         return method === "eth_getTransactionByHash" ? transactionByHash(body.result, params[0]) : body.result;

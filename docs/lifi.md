@@ -465,7 +465,7 @@ and raise when the standing one is short, the Fly call, its return of the WETH t
 payment to the recipient. Inside Fly Core only the native settlement is read: the router's payment to the Executor must
 equal the retention rule applied to what Core paid the router, and the Executor must forward that plus anything Core
 paid it directly. The proof records the WETH the Executor returned above the Fly input as `returnedWethAtomic` next
-to the native delivery, each with its Transfer log or balance delta; a fill whose returned WETH did not arrive is a
+to the native delivery, the WETH proved by its Transfer log and the delivery by its trace; a fill whose returned WETH did not arrive is a
 `protocol_mismatch`. A reverted swap returns the whole fill as WETH. The digest covers the whole tree. LI.FI reports such a
 fill as DONE/PARTIAL; on this lane PARTIAL leads to the same trace proof as COMPLETED, and the trace alone decides the
 outcome, so a reverted swap ends as `destination_failed` with `recovered_weth` and its usage is finalized as spent. A
@@ -495,6 +495,19 @@ Status and receipt read the saved operation. Resume performs one bounded recover
 | `failed_before_effect` | Nothing was sent |
 | `failed_after_approval` | A safe approval was paid; the bridge was never sent |
 | `failed_confirmed_revert` | The source transaction reverted at the safe head |
+
+### Journal bounds
+
+Each change appends a transition that copies the whole state (10-12 KiB once source proofs exist), to at most 512
+transitions in a file of at most 1 MiB. A poll that changes only timestamps or telemetry adds none; a flip between
+`destination_pending` and `unknown_finality`, or new RPC failure details, does. Such an ordinary change is recorded only
+below 512 transitions with 128 KiB of the file free; otherwise resume refuses it (`APN_OPERATION_BLOCKED`,
+`bridge_history_capacity` or `bridge_record_capacity`) and changes nothing. Closing evidence (an effect's first safe
+proof, a provider observation naming a new or now settled destination transaction) is recorded while 32 KiB stay free,
+up to seven past the 512th transition; a provider hint with no room left still guides the read and is saved with the
+end. The destination proof is saved in the same transition as the end it decides, and that terminal transition always
+is: as the 520th at most, up to 1 MiB, without its read telemetry if only that does not fit, and up to 64 KiB past
+1 MiB in a journal an earlier release filled. A delivered bridge thus still ends `completed`.
 
 ### Signing and sending
 
@@ -546,10 +559,10 @@ limits, recoverable. An exhausted read budget defers to the next resume and neve
   of the output amount from the destination SpokePool (`Withdrawal(src)` from WETH9, or a `Transfer` to the zero
   address from aeWETH).
 - **Linea and Monad native fills.** The destination transaction must also expose one bounded `debug_traceTransaction`
-  `callTracer` call from the pinned SpokePool to the bound profile owner for exactly the `FilledRelay` output. The safe
-  canonical transaction and block bind that trace; the balance delta from the previous block to the receipt block
-  corroborates it but cannot replace it. For Linea, Monad and the BNB composite, the destination primary RPC, or its
-  archive reader, must support `debug_traceTransaction` with `callTracer`.
+  `callTracer` call from the pinned SpokePool to the bound profile owner for exactly the `FilledRelay` output; it and every
+  frame above it must have succeeded, and the trace's root must be the verified transaction's own successful call (same
+  sender, target and calldata). The safe canonical transaction and block bind that trace, which is the proof. The
+  balance delta across the block only corroborates it (BNB composite too): the owner may spend in that block, so a short delta is kept and a negative one stored as `nativeBalance: null`. The destination primary RPC, or its archive reader, must support `debug_traceTransaction` with `callTracer`, as for the BNB composite.
 - **Stargate delivery.** A nonzero GUID, source endpoint, receiver and amount matching `OFTReceived` from the pool,
   with a transfer of the admitted destination token, including a later successful retry of a cached delivery.
 - **Ethereum to Base native Stargate.** Source observation requires `OFTSent.amountSentLD` to equal the bridge amount
@@ -944,6 +957,10 @@ Stargate native pools (asset ID 13) are `0x77b2043768d28E9C9aB44E1aBfC95944bcE57
   `historical_receipt_unavailable`; journals that already hold `unsent_apn_rpc_ambiguous` keep their recorded final
   outcome. A journal with a long telemetry history loads and is compacted on its next real change; a poll that changes
   only telemetry adds no transition, and a transition keeps at most the latest 8 telemetry rows.
+- **Journal bounds.** A journal an earlier release filled to 512 transitions or to 1 MiB loads unchanged and still takes
+  its terminal transition ([Journal bounds](#journal-bounds)); a destination proof such a release saved on its own
+  settles on the next resume. Releases up to 0.5.96 refuse a journal longer than 512 transitions or larger than 1 MiB,
+  so do not downgrade once one exists.
 - **1Click records** of schema v1 and v2 are read as the `base-usdc-to-tron-usdt` lane with their original status output,
   operation IDs and nonce reservation path; v3 records carry the lane. Ethereum nonce reservations are scoped under
   `eip155-1`.

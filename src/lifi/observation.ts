@@ -3,6 +3,7 @@ import type { Hex } from "../model.js";
 import { isEvmTransactionHash } from "../rail-status-binding.js";
 import type { BridgeDestinationTransactionProof, BridgeTransactionProof } from "./model.js";
 import { BRIDGE_TELEMETRY_ROWS, bridgeProviderSettled, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable, type BridgeOperationRecord, type BridgeVerifiedDestinationProof } from "./operation-model.js";
+import { bridgeCapacityRefused } from "./history-capacity.js";
 import type { BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeDestinationProof, bridgeSourceProof, validateBnbFilledRelay } from "./protocol-evidence.js";
 import { bridgeDeployment, bridgeProtocolEmitter } from "./deployments.js";
@@ -16,6 +17,8 @@ import type { RpcReadTelemetry } from "./rpc.js";
 import { bridgeRpcBudgetDeferred } from "./rpc-session-helpers.js";
 
 export type BridgeSave = (op: BridgeOperationRecord, patch: Partial<BridgeMutable>) => Promise<BridgeOperationRecord>;
+/** Fields read in this pass and not yet saved; they join the next save, so a new proof lands with its end in one transition. */
+type Carried = Partial<Pick<BridgeMutable, "providerObservation" | "destinationProof" | "observationTelemetry">>;
 type LazyRpc = BridgeRpcPort | (() => BridgeRpcPort);
 export class BridgeObservation {
   constructor(private readonly sourcePort: LazyRpc, private readonly destinationPort: LazyRpc,
@@ -112,22 +115,26 @@ export class BridgeObservation {
 
   async destinationProof(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
     if (op.sourceProof === null || op.effects.some((e) => e.phase !== "safe_success")) return op;
-    if (op.destinationProof !== null) {
-      return await this.finish(op);
-    }
+    // A proof saved on its own (by 0.5.96 and earlier, or a run that died then) settles exactly as a new one.
+    if (op.destinationProof !== null) return await this.settleProof(op, {});
     const m = op.intent.materialization;
+    let unsaved: Carried = {};
     if (!reusableProviderObservation(op)) {
       let observation = null;
       try {
         observation = await this.provider.status({ transactionHash: op.sourceProof.transactionHash, tool: m.tool,
           fromChainId: m.request.fromChainId, toChainId: m.request.toChainId });
       } catch { /* Provider availability is independent of canonical chain evidence. */ }
-      if (observation !== null) op = await this.save(op, { providerObservation: observation });
+      // A hint the journal has no room for still guides this pass and is recorded by its end: flapping cannot block it.
+      if (observation !== null) {
+        try { op = await this.save(op, { providerObservation: observation }); }
+        catch (error) { if (!bridgeCapacityRefused(error)) throw error; unsaved = { providerObservation: observation }; }
+      }
     }
-    const hint = op.providerObservation?.destinationTransactionHash;
+    const provider = unsaved.providerObservation ?? op.providerObservation, hint = provider?.destinationTransactionHash;
     const providerBoundNative = bridgeProviderBoundNativeDestination(m.request);
     if (providerBoundNative) {
-      if (!bridgeProviderSettled(op.intent.decoded, op.providerObservation) || !isEvmTransactionHash(hint)) return await this.waiting(op);
+      if (!bridgeProviderSettled(op.intent.decoded, provider) || !isEvmTransactionHash(hint)) return await this.waiting(op, unsaved);
       const destination = this.destination(), beforeTelemetry = destination.readTelemetry?.() ?? null;
       let proof: BridgeVerifiedDestinationProof;
       try {
@@ -136,17 +143,13 @@ export class BridgeObservation {
         if (bridgeRpcBudgetDeferred(error)) return op;
         const telemetry = appendObservationTelemetry(op, "destination_observation", "bridge",
           error instanceof DestinationPending ? "missing" : "failure", beforeTelemetry, destination.readTelemetry?.() ?? null);
-        if (error instanceof DestinationPending) return await this.waiting(op, telemetry);
-        if (error instanceof BnbProtocolMismatch) return await this.finishDestinationFailure(await this.save(op, { observationTelemetry: telemetry }), "protocol_mismatch");
-        return await this.save(op, { state: "unknown_finality", observationTelemetry: telemetry,
+        if (error instanceof DestinationPending) return await this.waiting(op, { ...unsaved, observationTelemetry: telemetry });
+        if (error instanceof BnbProtocolMismatch) return await this.finishDestinationFailure(op, "protocol_mismatch", unsaved);
+        return await this.save(op, { ...unsaved, state: "unknown_finality", observationTelemetry: telemetry,
           failure: destinationObservationFailure("evidence_unavailable", error) });
       }
-      op = await this.save(op, { destinationProof: proof, observationTelemetry: appendObservationTelemetry(op, "destination_observation",
-        "bridge", "success", beforeTelemetry, destination.readTelemetry?.() ?? null) });
-      const outcome = proof.compositeTrace?.outcome;
-      if (outcome === undefined || outcome === null || outcome === "completed_native") return await this.finish(op, outcome ?? "delivery_correlated");
-      if (outcome === "recovered_weth" || outcome === "below_floor" || outcome === "protocol_mismatch") return await this.finishDestinationFailure(op, outcome);
-      return await this.save(op, { state: "unknown_finality", failure: { reason: "evidence_unavailable", residualAllowance: null } });
+      return await this.settleProof(op, { ...unsaved, destinationProof: proof, observationTelemetry: appendObservationTelemetry(op,
+        "destination_observation", "bridge", "success", beforeTelemetry, destination.readTelemetry?.() ?? null) });
     }
     // Destination correlation is bound to the provider-named transaction and its canonical receipt logs.
     if (isEvmTransactionHash(hint)) {
@@ -157,15 +160,15 @@ export class BridgeObservation {
         if (bridgeRpcBudgetDeferred(error)) return op;
         const telemetry = appendObservationTelemetry(op, "destination_observation", "bridge",
           error instanceof DestinationPending ? "missing" : "failure", beforeTelemetry, destination.readTelemetry?.() ?? null);
-        if (error instanceof DestinationPending) return await this.waiting(op, telemetry);
-        return await this.save(op, { state: "unknown_finality", observationTelemetry: telemetry,
+        if (error instanceof DestinationPending) return await this.waiting(op, { ...unsaved, observationTelemetry: telemetry });
+        return await this.save(op, { ...unsaved, state: "unknown_finality", observationTelemetry: telemetry,
           failure: destinationObservationFailure("destination_observation_unavailable", error) });
       }
-      if (proof !== null) return await this.finish(await this.save(op, { destinationProof: proof,
+      if (proof !== null) return await this.finish(op, "delivery_correlated", { ...unsaved, destinationProof: proof,
         observationTelemetry: appendObservationTelemetry(op, "destination_observation", "bridge", "success", beforeTelemetry,
-          destination.readTelemetry?.() ?? null) }));
+          destination.readTelemetry?.() ?? null) });
     }
-    return await this.waiting(op);
+    return await this.waiting(op, unsaved);
   }
 
   async residual(op: BridgeOperationRecord) {
@@ -191,17 +194,31 @@ export class BridgeObservation {
     return { amountAtomic: account.allowanceAtomic, block: account.block, rpcOrigin: account.rpcOrigin };
   }
   /**
+   * The end a destination proof decides: a composite's trace outcome, else a correlated delivery. A new proof (in
+   * `carried`) is saved in the same terminal transition as its end, which the journal always admits; a proof saved on its
+   * own earlier settles the same way. Only an undecided trace keeps a proof without an end.
+   */
+  private async settleProof(op: BridgeOperationRecord, carried: Carried): Promise<BridgeOperationRecord> {
+    const outcome = (carried.destinationProof ?? op.destinationProof)!.compositeTrace?.outcome;
+    if (outcome === undefined || outcome === null || outcome === "completed_native") return await this.finish(op, outcome ?? "delivery_correlated", carried);
+    if (outcome === "recovered_weth" || outcome === "below_floor" || outcome === "protocol_mismatch") return await this.finishDestinationFailure(op, outcome, carried);
+    return await this.save(op, { ...carried, state: "unknown_finality", failure: { reason: "evidence_unavailable", residualAllowance: null } });
+  }
+  /**
    * Proven delivery needs no residual read: the allowance was exactly the principal (or the native constant zero) and the
    * proven source Transfer consumed exactly that amount, so the residual at the safe bridge block is zero.
    */
-  private async finish(op: BridgeOperationRecord, reason = "delivery_correlated"): Promise<BridgeOperationRecord> {
+  private async finish(op: BridgeOperationRecord, reason: string, carried: Carried): Promise<BridgeOperationRecord> {
     const proof = op.effects.at(-1)!.safeProof!;
-    return await this.save(op, { state: "completed",
+    return await this.save(op, { ...carried, state: "completed",
       failure: { reason, residualAllowance: { amountAtomic: "0", block: proof.block, rpcOrigin: proof.rpcOrigin } } });
   }
-  private async finishDestinationFailure(op: BridgeOperationRecord, reason: "recovered_weth" | "below_floor" | "protocol_mismatch"): Promise<BridgeOperationRecord> {
-    const residual = await this.residualObservation(op);
-    return await this.save(op, { state: "destination_failed", observationTelemetry: residual.observationTelemetry,
+  /** The residual is read first, so a new proof and this end are still one save. */
+  private async finishDestinationFailure(op: BridgeOperationRecord, reason: "recovered_weth" | "below_floor" | "protocol_mismatch",
+    carried: Carried): Promise<BridgeOperationRecord> {
+    const residual = await this.residualObservation(carried.observationTelemetry === undefined ? op
+      : { ...op, observationTelemetry: carried.observationTelemetry });
+    return await this.save(op, { ...carried, state: "destination_failed", observationTelemetry: residual.observationTelemetry,
       failure: residual.ok ? { reason, residualAllowance: residual.value, residualAllowanceStatus: "observed" } :
         { reason, residualAllowance: null, residualAllowanceStatus: "unavailable" } });
   }
@@ -244,10 +261,10 @@ export class BridgeObservation {
     return { ...proof, safeBlock, rpcOrigin: destination.origin,
       transactionProofHash: hashObject(proofIdentity(found.transaction)) };
   }
-  private async waiting(op: BridgeOperationRecord, observationTelemetry?: BridgeMutable["observationTelemetry"]): Promise<BridgeOperationRecord> {
-    const provider = op.providerObservation?.status;
+  private async waiting(op: BridgeOperationRecord, carried: Carried): Promise<BridgeOperationRecord> {
+    const provider = (carried.providerObservation ?? op.providerObservation)?.status;
     const exceptional = provider !== undefined && !["not_found", "pending", "completed_observed"].includes(provider);
-    return await this.save(op, { state: exceptional ? "unknown_finality" : "destination_pending", ...(observationTelemetry === undefined ? {} : { observationTelemetry }),
+    return await this.save(op, { ...carried, state: exceptional ? "unknown_finality" : "destination_pending",
       failure: exceptional ? { reason: `provider_${provider}_unproved`, residualAllowance: null } : null });
   }
 }

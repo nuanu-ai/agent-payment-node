@@ -259,7 +259,7 @@ the profile guard.
 
 **Completion.** The bundler supplies only a candidate transaction location. Completion needs independent canonical RPC
 evidence: authenticated outer transaction and block membership, the exact EntryPoint event, USDC prefund, refund and
-delivery logs, consumed nonces and the expected delegation. Another owner's operation batched in the same transaction is
+delivery logs, and consumed nonces. Another owner's operation batched in the same transaction is
 allowed; several operations for this owner in one transaction are ambiguous and cannot close this payment. A reverted
 outer transaction does not prove that signed permissions can no longer be used.
 
@@ -273,7 +273,11 @@ proven by header membership. The verdict waits until the receipt's block is at o
 finalized) and that block's hash still matches a header read at its height; a receipt above safe is "not yet" and a
 hash mismatch is a reorg, never a terminal. The residual allowance, nonces and delegation are then read at the latest
 head, which every keyless node serves even where the safe head trails by more than its state window (Arbitrum,
-Unichain); nonces only grow, so they show the consumed permission. An invalidated-permission proof, which has no
+Unichain); nonces only grow, so they show the consumed permission whatever the account's code. A delegation the owner
+revoked after the transfer (code `0x`) is reported (`observed_designation: empty`, `delegation_persists: false`) and
+does not hold the close. Code delegated to another contract is refused as unknown: the operation stays `unknown_finality`
+until the owner revokes it or delegates back to the pinned implementation, and the next resume completes it (`abandon`
+would hide the proven transfer). An invalidated-permission proof, which has no
 receipt to anchor it, still reads the account at the safe head and at the latest head; on a node that refuses safe-head
 state it stays unresolved until it can. An already-sent operation is observed through the contracts and protocol hash
 saved in its own intent, so a later registry pin update cannot strand it.
@@ -984,6 +988,8 @@ These notes matter only for operations prepared by older releases.
   and a higher current fee stops the action without changing its approved budget.
 - **Revert closes.** Local records written before APN 0.5.43 may remain `failed_effects_pending`; the next observation
   closes them.
+- **Revoked delegation.** Only an account read at the latest head (APN 0.5.43 and later) may show it revoked; older
+  reads still need the pinned delegation. Releases up to 0.5.96 reject a record completed with a revoked delegation.
 - **Receipts.** A receipt saved by an earlier release whose only difference from today's projection is the proof class
   it named is accepted and repaired the next time the operation is read.
 - **Observation RPC.** `--observation-rpc-env` needs APN 0.5.12 or later for Local operations and 0.5.16 or later for

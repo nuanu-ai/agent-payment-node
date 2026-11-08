@@ -39,6 +39,8 @@ export declare class SecureStateStore {
      * on the opened file itself, then strict UTF-8, JSON and canonical-bytes checks of the content.
      */
     protected readJson(relativePath: string): Promise<unknown | null>;
+    /** The largest file this store reads or writes; a store whose own records bound themselves may admit more. */
+    protected stateByteLimit(): number;
     /** Optional internal assertion seam for specialized create-only stores. */
     protected beforeCreateOnlyPublication(_relativePath: string, _value: unknown): Promise<void>;
     protected writeJson(relativePath: string, value: unknown, createOnly?: boolean): Promise<void>;

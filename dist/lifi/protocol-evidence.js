@@ -184,7 +184,7 @@ function acrossDestination(source, decoded, receipt) {
     const emitter = bridgeProtocolEmitter(decoded.destinationChainId, "across", decoded.destinationToken);
     if (decoded.destinationToken === BRIDGE_ZERO_ADDRESS) {
         if (decoded.composite !== undefined) {
-            const balance = nativeBalanceProof(decoded, receipt), trace = receipt.compositeTrace;
+            const balance = nativeBalanceCorroboration(decoded, receipt), trace = receipt.compositeTrace;
             if (trace === undefined || trace === null || trace.transactionHash !== receipt.transactionHash ||
                 trace.inputAmountAtomic !== decoded.composite.inputAmountAtomic || !/^[a-f0-9]{64}$/u.test(trace.traceHash))
                 fail("bnb_destination_trace");
@@ -207,8 +207,8 @@ function acrossDestination(source, decoded, receipt) {
                 if (returned !== (BigInt(filled) - BigInt(decoded.composite.inputAmountAtomic)).toString() ||
                     (returned !== "0" && toRecipient(BNB_COMPOSITE.executor, returned).length !== 1))
                     fail("bnb_returned_weth");
+                // The trace's Executor payment is the delivery; the recipient's balance only corroborates it.
                 if (trace.vaultOutputAtomic === null || BigInt(trace.deliveredAmountAtomic) <= 0n ||
-                    BigInt(balance.deltaAtomic) < BigInt(trace.deliveredAmountAtomic) ||
                     (trace.outcome === "completed_native") !== (BigInt(trace.deliveredAmountAtomic) >= BigInt(decoded.minimumOutputAtomic)))
                     fail("bnb_native_outcome");
             }
@@ -218,13 +218,12 @@ function acrossDestination(source, decoded, receipt) {
             fromChainId: decoded.sourceChainId, toChainId: decoded.destinationChainId,
             fromToken: decoded.sourceToken, toToken: decoded.destinationToken,
         });
-        const balance = providerBound ? nativeBalanceProof(decoded, receipt) : null;
+        const balance = providerBound ? nativeBalanceCorroboration(decoded, receipt) : null;
         const transfer = providerBound ? nativeTransferProof(decoded, receipt, emitter, c.outputAmountAtomic) : null;
         // The pinned SpokePool unwraps a native fill and sends the value to the recipient; the value send itself has no
-        // log, so the credit is proved by the exact relay tuple plus the unwrap of exactly the output from the SpokePool.
+        // log, so the credit is proved by the exact relay tuple, the unwrap of exactly the output from the SpokePool and,
+        // on Linea and Monad, the traced CALL of exactly that value to the recipient. The balance delta only corroborates it.
         nativeMovement(decoded.destinationChainId, receipt, "unwrap", c.outputAmountAtomic);
-        if (balance !== null && BigInt(balance.deltaAtomic) < BigInt(c.outputAmountAtomic))
-            fail("native_destination_balance");
         return destinationResult(source, decoded, receipt, info.updatedOutputAmount.toString(), info.fillType, relayerCredit, repaymentChainIdAtomic, balance, transfer);
     }
     // A batched fill moves other recipients' tokens in the same receipt: exactly one movement may carry this fill's credit
@@ -285,7 +284,7 @@ function stargateDestination(source, decoded, receipt, nativePin) {
         // At the pinned StargatePoolNative bytecode, OFTReceived follows the successful native _outflow CALL.
         // A recipient may spend in the same block, so block-boundary balance is corroboration, not delivery proof.
         const transfer = receipt.nativeTransfer == null ? null : nativeTransferProof(decoded, receipt, emitter, amount);
-        const balance = receipt.nativeBalance == null ? null : nativeStargateBalanceCorroboration(decoded, receipt);
+        const balance = receipt.nativeBalance == null ? null : nativeBalanceCorroboration(decoded, receipt);
         return destinationResult(source, decoded, receipt, amount, null, null, null, balance, transfer);
     }
     const transfers = events(receipt, decoded.destinationToken, EVENT_TOPICS.transfer, "Transfer");
@@ -340,23 +339,19 @@ function nativeTransferProof(decoded, receipt, emitter, amountAtomic) {
         fail("native_destination_transfer");
     return proof;
 }
-function nativeBalanceProof(decoded, receipt) {
+/**
+ * The recipient's balance across the inclusion block, bound to the recipient and the receipt's block. It corroborates a
+ * delivery the trace proves and never decides one: the recipient may spend in the same block, so a short or negative
+ * delta is no evidence against the fill. A short delta is recorded as read; the durable schema stores unsigned
+ * corroboration only, so a negative one is recorded as none.
+ */
+function nativeBalanceCorroboration(decoded, receipt) {
     const proof = receipt.nativeBalance;
     if (proof === undefined || proof === null || proof.recipient !== decoded.recipient || proof.afterBlock.numberAtomic !== receipt.blockNumberAtomic ||
-        proof.afterBlock.hash !== receipt.blockHash || BigInt(proof.beforeBlock.numberAtomic) + 1n !== BigInt(proof.afterBlock.numberAtomic) ||
-        BigInt(proof.afterBalanceAtomic) < BigInt(proof.beforeBalanceAtomic) ||
-        BigInt(proof.afterBalanceAtomic) - BigInt(proof.beforeBalanceAtomic) !== BigInt(proof.deltaAtomic))
-        fail("native_destination_balance");
-    return proof;
-}
-function nativeStargateBalanceCorroboration(decoded, receipt) {
-    const proof = receipt.nativeBalance;
-    if (proof.recipient !== decoded.recipient || proof.afterBlock.numberAtomic !== receipt.blockNumberAtomic ||
         proof.afterBlock.hash !== receipt.blockHash || BigInt(proof.beforeBlock.numberAtomic) + 1n !== BigInt(proof.afterBlock.numberAtomic) ||
         !/^-?[0-9]+$/u.test(proof.deltaAtomic) ||
         BigInt(proof.afterBalanceAtomic) - BigInt(proof.beforeBalanceAtomic) !== BigInt(proof.deltaAtomic))
         fail("native_destination_balance");
-    // The durable schema stores unsigned corroboration only. A same-block spend can make the net delta negative.
     return BigInt(proof.deltaAtomic) < 0n ? null : proof;
 }
 function validateReceipt(receipt) {

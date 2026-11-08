@@ -92,7 +92,8 @@ function fillTrace(shape: Shape = {}): Frame {
   ], "0x", "DELEGATECALL")]);
 }
 function verify(trace: unknown, filled = FILLED, signed = call) {
-  return verifyBnbCompositeTrace(trace, `0x${"12".repeat(32)}`, MESSAGE, signed, { sender: RELAYER, calldata: CALLDATA, amountAtomic: filled.toString() });
+  return verifyBnbCompositeTrace(trace, `0x${"12".repeat(32)}`, MESSAGE, signed, { sender: RELAYER, target: BNB_COMPOSITE.spokePool,
+    calldata: CALLDATA, amountAtomic: filled.toString() });
 }
 const at = (root: any, path: readonly (string | number)[]): any => path.reduce((value, key) => value[key], root);
 const HANDLER = ["calls", 0, "calls", 1] as const, EXECUTOR = [...HANDLER, "calls", 1] as const;
@@ -158,12 +159,15 @@ test("every effect outside Fly Core is exact", () => {
       const changed = fillTrace(); at(changed, path)[key] = replacement;
       // The relayer's WETH movement into the Receiver is the SpokePool's business, proven by FilledRelay instead.
       if (tolerated.has(path.join("."))) continue;
+      // The root is the transaction itself: a root that differs from it is an RPC answer to read again, not an outcome.
+      if (path.length === 0) { assert.throws(() => verify(changed), /native_trace_transaction/u, `${key}:root`); continue; }
       assert.equal(verify(changed).outcome, "protocol_mismatch", `${key}:${path.join(".")}`);
     }
   }
   for (const path of [...outside.filter((path) => !tolerated.has(path.join("."))), CORE]) {
     const failed = fillTrace(); at(failed, path).error = "execution reverted";
     if (path.join(".") === EXECUTOR.join(".")) continue;
+    if (path.length === 0) { assert.throws(() => verify(failed), /native_trace_transaction/u, "error:root"); continue; }
     assert.equal(verify(failed).outcome, "protocol_mismatch", `error:${path.join(".")}`);
   }
   const extra = fillTrace(); at(extra, EXECUTOR).calls.splice(12, 0, token(BNB_COMPOSITE.executor, BNB_COMPOSITE.weth, "approve", [BNB_COMPOSITE.flyRouter, 0n]));
@@ -175,10 +179,18 @@ test("every effect outside Fly Core is exact", () => {
 });
 
 test("the trace is bound to its transaction, the fill amount, one handler and consistent callers", () => {
-  assert.equal(verifyBnbCompositeTrace(fillTrace(), `0x${"12".repeat(32)}`, MESSAGE, call,
-    { sender: "0x3333333333333333333333333333333333333333", calldata: CALLDATA, amountAtomic: FILLED.toString() }).outcome, "protocol_mismatch");
-  assert.equal(verifyBnbCompositeTrace(fillTrace(), `0x${"12".repeat(32)}`, MESSAGE, call,
-    { sender: RELAYER, calldata: "0xdeadbeef", amountAtomic: FILLED.toString() }).outcome, "protocol_mismatch");
+  // A root that is not the verified transaction (sender, target, calldata) is an RPC answer to read again: it throws a
+  // retryable APN_RPC_PROTOCOL instead of ending a possibly delivered operation as protocol_mismatch.
+  const rereads = (fill: Partial<{ sender: Address; target: Address; calldata: Hex }>, trace: unknown = fillTrace()) => assert.throws(() =>
+    verifyBnbCompositeTrace(trace, `0x${"12".repeat(32)}`, MESSAGE, call, { sender: RELAYER, target: BNB_COMPOSITE.spokePool, calldata: CALLDATA,
+      amountAtomic: FILLED.toString(), ...fill }), (error: any) => error.code === "APN_RPC_PROTOCOL" && /native_trace_transaction/u.test(error.message));
+  rereads({ sender: "0x3333333333333333333333333333333333333333" }); rereads({ calldata: "0xdeadbeef" });
+  rereads({ target: "0x3333333333333333333333333333333333333333" });
+  const retargeted = fillTrace(); retargeted.to = "0x3333333333333333333333333333333333333333"; rereads({}, retargeted);
+  // Address case in the bound transaction or in the RPC answer does not matter.
+  const recased = fillTrace(); recased.to = recased.to.toLowerCase() as Address; recased.from = recased.from.toLowerCase() as Address;
+  assert.equal(verifyBnbCompositeTrace(recased, `0x${"12".repeat(32)}`, MESSAGE, call, { sender: RELAYER.toLowerCase() as Address,
+    target: BNB_COMPOSITE.spokePool.toLowerCase() as Address, calldata: CALLDATA, amountAtomic: FILLED.toString() }).outcome, "completed_native");
   assert.equal(verify(fillTrace(), FILLED + 1n).outcome, "protocol_mismatch");
   assert.equal(verify(fillTrace({ filled: INPUT - 1n }), INPUT - 1n).outcome, "protocol_mismatch");
   // A batched fill of another deposit beside ours does not matter; a second handler of our message does.
@@ -218,14 +230,14 @@ test("a reverted swap proves the whole fill came back as WETH", () => {
 test("a real BSC fill of the same Across -> Executor -> Fly WETH lane verifies from its public callTracer tree", async () => {
   // Another user's fill (block 131908889). Its quote lets Fly keep all output above expected (10000 bps), as the quotes QA
   // drew on 2026-11-06 did; prepare decodes the same header, and the delivery tree is exactly what BSC executed.
-  const real = lifiCapture("bsc-across-fly-fill-20261105.json") as { transaction: { hash: Hex; from: Address; input: Hex };
+  const real = lifiCapture("bsc-across-fly-fill-20261105.json") as { transaction: { hash: Hex; from: Address; to: Address; input: Hex };
     relay: { outputAmount: string; message: Hex }; trace: unknown };
   const [transactionId, , finalReceiver] = decodeAbiParameters(parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address"), real.relay.message);
   const realCall = decodeBnbCompositeMessage(real.relay.message, transactionId, finalReceiver);
   assert.deepEqual({ expected: realCall.expectedOutputAtomic, minimum: realCall.minimumOutputAtomic, retention: realCall.maximumRetentionBps },
     { expected: "385416243211316729", minimum: "371359950613945893", retention: 10_000 });
   assert.equal((await verifyFlyHeaderSignature(realCall, BNB_COMPOSITE.signer)).signer, BNB_COMPOSITE.signer);
-  const fill = { sender: getAddress(real.transaction.from), calldata: real.transaction.input, amountAtomic: real.relay.outputAmount };
+  const fill = { sender: getAddress(real.transaction.from), target: getAddress(real.transaction.to), calldata: real.transaction.input, amountAtomic: real.relay.outputAmount };
   const proof = verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, realCall, fill);
   assert.deepEqual({ outcome: proof.outcome, gross: proof.vaultOutputAtomic, delivered: proof.deliveredAmountAtomic,
     retained: proof.retainedAmountAtomic, returned: proof.returnedWethAtomic },
@@ -239,12 +251,12 @@ test("a real BSC fill of the same Across -> Executor -> Fly WETH lane verifies f
 
 test("QA's real fill whose Fly route hit its own deadline proves, from its public trace, that the whole fill came back as WETH", async () => {
   // Across deposit 4886518, filled through a relayer contract; a hop inside Fly's route reverted 0x3e9e7bf1(deadline, now).
-  const real = lifiCapture("bsc-across-fly-revert-20261106.json") as { transaction: { hash: Hex; from: Address; input: Hex };
+  const real = lifiCapture("bsc-across-fly-revert-20261106.json") as { transaction: { hash: Hex; from: Address; to: Address; input: Hex };
     relay: { outputAmount: string; message: Hex }; trace: unknown };
   const [transactionId, , finalReceiver] = decodeAbiParameters(parseAbiParameters("bytes32,(address callTo,address approveTo,address sendingAssetId,address receivingAssetId,uint256 fromAmount,bytes callData,bool requiresDeposit)[],address"), real.relay.message);
   const realCall = decodeBnbCompositeMessage(real.relay.message, transactionId, finalReceiver);
   assert.equal((await verifyFlyHeaderSignature(realCall, BNB_COMPOSITE.signer)).signer, BNB_COMPOSITE.signer);
-  const fill = { sender: getAddress(real.transaction.from), calldata: real.transaction.input, amountAtomic: real.relay.outputAmount };
+  const fill = { sender: getAddress(real.transaction.from), target: getAddress(real.transaction.to), calldata: real.transaction.input, amountAtomic: real.relay.outputAmount };
   const proof = verifyBnbCompositeTrace(real.trace, real.transaction.hash, real.relay.message, realCall, fill);
   assert.deepEqual({ outcome: proof.outcome, gross: proof.vaultOutputAtomic, delivered: proof.deliveredAmountAtomic, returned: proof.returnedWethAtomic },
     { outcome: "recovered_weth", gross: null, delivered: "0", returned: "286765125030554" });

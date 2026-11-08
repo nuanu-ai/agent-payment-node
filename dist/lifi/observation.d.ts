@@ -39,10 +39,17 @@ export declare class BridgeObservation {
     }>;
     private residualFrom;
     /**
+     * The end a destination proof decides: a composite's trace outcome, else a correlated delivery. A new proof (in
+     * `carried`) is saved in the same terminal transition as its end, which the journal always admits; a proof saved on its
+     * own earlier settles the same way. Only an undecided trace keeps a proof without an end.
+     */
+    private settleProof;
+    /**
      * Proven delivery needs no residual read: the allowance was exactly the principal (or the native constant zero) and the
      * proven source Transfer consumed exactly that amount, so the residual at the safe bridge block is zero.
      */
     private finish;
+    /** The residual is read first, so a new proof and this end are still one save. */
     private finishDestinationFailure;
     private destinationCandidate;
     private waiting;

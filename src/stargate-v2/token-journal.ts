@@ -11,13 +11,14 @@ import { STARGATE_SEND_ABI } from "./abi.js";
 import { assertStargateV2RouteFinalityPolicy } from "./finality-policy.js";
 import {
   STARGATE_TOKEN_APPROVAL_FINALITY_WINDOW_MS, STARGATE_TOKEN_DESTINATION_CHAIN, STARGATE_TOKEN_MAX_BRIDGE_GAS,
-  STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_SOURCE_CHAIN,
-  STARGATE_TOKEN_SOURCE_POOL, UINT, address, fail,
+  STARGATE_TOKEN_MECHANISM, STARGATE_TOKEN_POST_APPROVAL_QUOTE_TTL_MS, STARGATE_TOKEN_POST_APPROVAL_SCHEMA, STARGATE_TOKEN_POST_APPROVAL_SCHEMA_V1,
+  STARGATE_TOKEN_SCHEMA, STARGATE_TOKEN_SCHEMA_V5, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_SOURCE_POOL, UINT, address, fail,
 } from "./token-codec.js";
 import type {
   StargateAdmission, StargateTokenJournal, StargateTokenOperation, StargateTokenPhase, StargateTokenPostApprovalQuote,
   StargateTokenUsageState,
 } from "./token-model.js";
+import { approvalNativeCharge, validateApprovalFeeEvidence, validateStargateOpStackFees } from "./token-op-fees.js";
 import { assertLane } from "./token-rpc.js";
 
 export class FileStargateTokenJournal implements StargateTokenJournal {
@@ -51,7 +52,8 @@ function validatePostApprovalQuote(op: StargateTokenOperation, snapshot: Stargat
   const { snapshotHash, ...body } = snapshot;
   const { quoteHash, ...quoteBody } = snapshot.quote;
   const validIso = (value: unknown) => typeof value === "string" && Number.isFinite(Date.parse(value)) && new Date(Date.parse(value)).toISOString() === value;
-  if (snapshot.schemaVersion !== "apn.stargate-v2-token-post-approval-quote.v1" || hashObject(body) !== snapshotHash ||
+  const v5 = op.schemaVersion === STARGATE_TOKEN_SCHEMA_V5;
+  if (snapshot.schemaVersion !== (v5 ? STARGATE_TOKEN_POST_APPROVAL_SCHEMA_V1 : STARGATE_TOKEN_POST_APPROVAL_SCHEMA) || hashObject(body) !== snapshotHash ||
     hashObject(quoteBody) !== quoteHash || canonicalJson(snapshot.quoteBlock) !== canonicalJson(snapshot.quote.block)) fail("APN_STATE_CORRUPT", "post_approval_quote_integrity");
   try { assertLane(snapshot.quote); } catch { fail("APN_STATE_CORRUPT", "post_approval_quote_lane"); }
   if (!validIso(snapshot.quotedAt) || !validIso(snapshot.expiresAt) || snapshot.quote.recipient !== op.recipient ||
@@ -76,25 +78,32 @@ function validatePostApprovalQuote(op: StargateTokenOperation, snapshot: Stargat
     // The fresh 2 × base + tip estimate is evidence only; the envelope above is bound to the owner-approved fee fields.
     BigInt(snapshot.sourceSnapshot.quotedMaxPriorityFeePerGasWei) > BigInt(snapshot.sourceSnapshot.quotedMaxFeePerGasWei) ||
     BigInt(snapshot.bridgeEstimateGasAtomic) > BigInt(envelope.gasLimitAtomic)) fail("APN_STATE_CORRUPT", "post_approval_envelope_binding");
-  const approvalDebit = BigInt(op.approvalEnvelope!.gasLimitAtomic) * BigInt(op.approvalEnvelope!.maxFeePerGasAtomic);
-  const maximumDebit = approvalDebit + BigInt(envelope.valueAtomic) + BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic);
+  // v2 (v6 operations) binds the bridge's fresh OP-stack bounds at the quote block and charges the sent approval its
+  // actual or larger known cost. A v1 snapshot (v5 operation) is checked exactly as before, without them.
+  const bridgeOpStack = v5 ? 0n : BigInt(validateStargateOpStackFees(snapshot.opStackFees, snapshot.quoteBlock, undefined, envelope).totalUpperWei);
+  const approvalDebit = v5 ? BigInt(op.approvalEnvelope!.gasLimitAtomic) * BigInt(op.approvalEnvelope!.maxFeePerGasAtomic) : approvalNativeCharge(op);
+  const bridgeDebit = BigInt(envelope.valueAtomic) + BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic) + bridgeOpStack;
+  const maximumDebit = approvalDebit + bridgeDebit;
   if (maximumDebit.toString() !== snapshot.maximumDebitAtomic || maximumDebit > BigInt(op.maxNativeDebitAtomic) ||
-    BigInt(snapshot.sourceSnapshot.nativeBalanceAtomic) < BigInt(envelope.valueAtomic) + BigInt(envelope.gasLimitAtomic) * BigInt(envelope.maxFeePerGasAtomic))
-    fail("APN_STATE_CORRUPT", "post_approval_debit_binding");
+    BigInt(snapshot.sourceSnapshot.nativeBalanceAtomic) < bridgeDebit) fail("APN_STATE_CORRUPT", "post_approval_debit_binding");
   const decoded = decodeFunctionData({ abi: STARGATE_SEND_ABI, data: envelope.data });
   if (decoded.functionName !== "sendToken" || decoded.args[0].amountLD.toString() !== op.amountAtomic ||
     decoded.args[0].minAmountLD.toString() !== snapshot.quote.quote.minimumOutputAtomic || decoded.args[0].extraOptions !== op.options ||
     decoded.args[1].nativeFee.toString() !== snapshot.quote.quote.nativeMessageFeeAtomic || decoded.args[2] !== op.owner)
     fail("APN_STATE_CORRUPT", "post_approval_calldata_binding");
 }
-/** Every released version (0.5.25..) wrote only token schema v5. */
-export function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRecord(value) || value.schemaVersion !== "apn.stargate-v2-token-operation.v5") fail("APN_STATE_CORRUPT", "schema"); const raw = value as unknown as StargateTokenOperation, { integrityHash, ...body } = raw; if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
+/** Released versions wrote token schema v5 (0.5.25..) and then v6; v5 is read exactly as before, without OP-stack fee bounds. */
+export function validateRecord(value: unknown): StargateTokenOperation { if (!isPlainRecord(value) || (value.schemaVersion !== STARGATE_TOKEN_SCHEMA_V5 && value.schemaVersion !== STARGATE_TOKEN_SCHEMA)) fail("APN_STATE_CORRUPT", "schema"); const raw = value as unknown as StargateTokenOperation, { integrityHash, ...body } = raw; if (hashObject(body) !== integrityHash || raw.transitions.at(-1)?.phase !== raw.phase || raw.operationId.length !== 64) fail("APN_STATE_CORRUPT", "integrity");
   const record = raw;
   assertStargateV2RouteFinalityPolicy(raw.finalityPolicy, STARGATE_TOKEN_SOURCE_CHAIN, STARGATE_TOKEN_DESTINATION_CHAIN); if (raw.finalityPolicyProvenance !== "pinned_v2") fail("APN_STATE_CORRUPT", "finality_policy_provenance");
   {
     const simulation = raw.bridgeSimulation;
     const approvalDebit = raw.approvalEnvelope === undefined ? 0n : BigInt(raw.approvalEnvelope.gasLimitAtomic) * BigInt(raw.approvalEnvelope.maxFeePerGasAtomic);
-    const totalDebit = approvalDebit + BigInt(raw.sendEnvelope.valueAtomic) + BigInt(raw.sendEnvelope.gasLimitAtomic) * BigInt(raw.sendEnvelope.maxFeePerGasAtomic);
+    // v5 is checked exactly as before; v6 binds its OP-stack bounds to both envelopes and the quote block.
+    const opStackDebit = raw.schemaVersion === STARGATE_TOKEN_SCHEMA_V5 ? 0n
+      : BigInt(validateStargateOpStackFees(raw.opStackFees, raw.quote.block, raw.approvalEnvelope, raw.sendEnvelope).totalUpperWei);
+    const totalDebit = approvalDebit + BigInt(raw.sendEnvelope.valueAtomic) + BigInt(raw.sendEnvelope.gasLimitAtomic) * BigInt(raw.sendEnvelope.maxFeePerGasAtomic) + opStackDebit;
+    if (raw.schemaVersion !== STARGATE_TOKEN_SCHEMA_V5) validateApprovalFeeEvidence(raw);
     if (simulation === undefined || simulation.gasCeilingAtomic !== raw.sendEnvelope.gasLimitAtomic || BigInt(simulation.gasCeilingAtomic) < 1n || BigInt(simulation.gasCeilingAtomic) > STARGATE_TOKEN_MAX_BRIDGE_GAS ||
       totalDebit.toString() !== raw.maximumDebitAtomic || totalDebit > BigInt(raw.maxNativeDebitAtomic) ||
       (raw.allowanceRequired ? simulation.mode !== "pending_post_approval" || simulation.prepareStatus !== "pending_post_approval" || raw.initialAllowanceAtomic !== "0" || raw.approvalEnvelope === undefined ||
@@ -172,7 +181,7 @@ function validateAdvance(previous: StargateTokenOperation | null, next: Stargate
   const frozen = (x: StargateTokenOperation) => { const { phase: _p, transitions: _t, integrityHash: _i, approvalTransactionHash: _a, transactionHash: _h,
     residualAllowanceAtomic: _r, sourceReceipt: _s, destinationEvidence: _d, cleanupEnvelope: _ce, cleanupTransactionHash: _ch,
     cleanupReason: _cr, usageState: _us, usageTarget: _ut, approvalSubmissionStartedAt: _asa, approvalFinalityDeadline: _afd,
-    postApprovalQuote: _paq, retiredEffects: _re, ...rest } = x; return rest; };
+    postApprovalQuote: _paq, retiredEffects: _re, submissionOpStackFees: _sof, approvalActualFee: _aaf, ...rest } = x; return rest; };
   // A retired cleanup (appended now, naming exactly the previous cleanup) frees its envelope and hash for the next round.
   const retiredNow = (next.retiredEffects ?? []).slice((previous.retiredEffects ?? []).length);
   const freed = previous.cleanupTransactionHash !== undefined && next.cleanupEnvelope === undefined && next.cleanupTransactionHash === undefined &&
@@ -187,7 +196,11 @@ function validateAdvance(previous: StargateTokenOperation | null, next: Stargate
     (previous.cleanupReason !== undefined && previous.cleanupReason !== next.cleanupReason) ||
     (previous.approvalSubmissionStartedAt !== undefined && previous.approvalSubmissionStartedAt !== next.approvalSubmissionStartedAt) ||
     (previous.approvalFinalityDeadline !== undefined && previous.approvalFinalityDeadline !== next.approvalFinalityDeadline) ||
-    (previous.postApprovalQuote !== undefined && canonicalJson(previous.postApprovalQuote) !== canonicalJson(next.postApprovalQuote))) fail("APN_STATE_CORRUPT", "journal_rewrite");
+    (previous.postApprovalQuote !== undefined && canonicalJson(previous.postApprovalQuote) !== canonicalJson(next.postApprovalQuote)) ||
+    // Approval fee evidence is written once: the bounds with the approval marker, the actual fee when the approval is safe.
+    (previous.submissionOpStackFees !== undefined && canonicalJson(previous.submissionOpStackFees) !== canonicalJson(next.submissionOpStackFees)) ||
+    (next.submissionOpStackFees !== undefined && previous.submissionOpStackFees === undefined && previous.approvalTransactionHash !== undefined) ||
+    (previous.approvalActualFee !== undefined && canonicalJson(previous.approvalActualFee) !== canonicalJson(next.approvalActualFee))) fail("APN_STATE_CORRUPT", "journal_rewrite");
   if (previous.usageTarget !== undefined && next.usageTarget !== previous.usageTarget &&
     !(previous.usageTarget === "reserved" && next.usageTarget === "failed_before_effect") &&
     !(next.usageTarget === undefined && next.usageState !== undefined)) fail("APN_STATE_CORRUPT", "usage_target_rewrite");

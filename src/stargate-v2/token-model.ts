@@ -1,4 +1,5 @@
 import type { Hex } from "viem";
+import type { EvmActualFee, EvmReceiptFeeFields } from "../evm-direct-actual-fee.js";
 import type { EvmRpcCall } from "../evm-ports.js";
 import type { NeverLandsCheck } from "../evm-finalized-proof.js";
 import type { Address } from "../model.js";
@@ -37,8 +38,15 @@ export interface StargateTokenDestinationEvidence { readonly emitter: Address; r
     readonly transactionHash: Hex; readonly blockNumberAtomic: string; readonly blockHash: Hex; readonly logIndexAtomic: string }> }
 export interface StargateTokenPolicyBinding { readonly policyDigest: string; readonly policyRevision: number;
   readonly mechanism: Readonly<{ readonly provider: string; readonly reference: string }> }
+/** OP Mainnet GasPriceOracle upper bounds for one frozen envelope, read for at least its unsigned bytes and gas limit. */
+export interface StargateTokenOpStackFee { readonly unsignedBytesAtomic: string; readonly gasAtomic: string;
+  readonly l1DataFeeUpperWei: string; readonly operatorFeeUpperWei: string }
+/** The L1 data and operator fees the signed fee fields do not bound, read at one pinned block; part of the native debit. */
+export interface StargateTokenOpStackFees { readonly oracle: Address; readonly block: Readonly<{ readonly numberAtomic: string; readonly hash: Hex }>;
+  readonly approval?: StargateTokenOpStackFee; readonly bridge: StargateTokenOpStackFee; readonly totalUpperWei: string }
 export interface StargateTokenPostApprovalQuote {
-  readonly schemaVersion: "apn.stargate-v2-token-post-approval-quote.v1";
+  /** v1 belongs to v5 operations and has no `opStackFees`; v2 (v6 operations) binds the bridge's fresh bounds. */
+  readonly schemaVersion: "apn.stargate-v2-token-post-approval-quote.v1" | "apn.stargate-v2-token-post-approval-quote.v2";
   readonly quotedAt: string; readonly expiresAt: string; readonly quote: StargateV2QuoteEvidence;
   readonly ownerApprovedMinimumOutputAtomic: string; readonly ownerApprovedMaximumQuoteLossAtomic: string;
   readonly quoteBlock: Readonly<{ readonly numberAtomic: string; readonly hash: Hex }>;
@@ -51,10 +59,11 @@ export interface StargateTokenPostApprovalQuote {
   readonly destinationSnapshot: Readonly<{ readonly tokenBalanceAtomic: string; readonly nativeBalanceAtomic: string;
     readonly blockNumberAtomic: string; readonly blockHash: Hex }>;
   readonly bridgeEstimateGasAtomic: string; readonly sendEnvelope: StargateTokenEnvelope;
-  readonly maximumDebitAtomic: string; readonly snapshotHash: string;
+  readonly opStackFees?: StargateTokenOpStackFees; readonly maximumDebitAtomic: string; readonly snapshotHash: string;
 }
 export interface StargateTokenOperation {
-  readonly schemaVersion: "apn.stargate-v2-token-operation.v5"; readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string; readonly owner: Address; readonly recipient: Address;
+  /** v5 records (no `opStackFees`) are read as before but sign no new approval or bridge; see docs Compatibility. */
+  readonly schemaVersion: "apn.stargate-v2-token-operation.v5" | "apn.stargate-v2-token-operation.v6"; readonly operationId: string; readonly profile: string; readonly profileHash: string; readonly idempotencyHash: string; readonly owner: Address; readonly recipient: Address;
   readonly finalityPolicy: StargateV2RouteFinalityPolicy; readonly finalityPolicyProvenance: StargateV2FinalityPolicyProvenance; readonly amountAtomic: string; readonly nativeDropAtomic: string; readonly maxNativeDebitAtomic: string; readonly minOutputAtomic: string;
   readonly sourceToken: Address; readonly destinationToken: Address; readonly sourcePool: Address; readonly destinationPool: Address;
   readonly sourceEid: 30111; readonly destinationEid: 30109; readonly executor: Address; readonly executorNativeCapAtomic: string;
@@ -67,6 +76,12 @@ export interface StargateTokenOperation {
     readonly quotedMaxPriorityFeePerGasWei: string; readonly approvedMaxFeePerGasWei: string; readonly approvedMaxPriorityFeePerGasWei: string }>;
   readonly bridgeSimulation?: Readonly<{ readonly mode: "exact_at_prepare" | "pending_post_approval";
     readonly prepareStatus: "succeeded" | "pending_post_approval"; readonly gasCeilingAtomic: string }>;
+  /** Present exactly on v6: the approval and bridge bounds read at the quote block, included in `maximumDebitAtomic`. */
+  readonly opStackFees?: StargateTokenOpStackFees;
+  /** v6, written with the approval marker (0.5.97..): the fresh bounds the before-approval check admitted. */
+  readonly submissionOpStackFees?: StargateTokenOpStackFees;
+  /** v6, written when the approval is safe (0.5.97..): its actual fee from its own receipt, when the receipt carries every part. */
+  readonly approvalActualFee?: EvmActualFee;
   readonly approvalFinalityWindowMs?: number; readonly approvalSubmissionStartedAt?: string;
   readonly approvalFinalityDeadline?: string; readonly postApprovalQuote?: StargateTokenPostApprovalQuote;
   readonly sendEnvelope: StargateTokenEnvelope; readonly maximumDebitAtomic: string; readonly preparedAt: string; readonly expiresAt: string;
@@ -86,7 +101,9 @@ export interface StargateTokenPreparedEnvelope { readonly nonceAtomic: string; r
   readonly maxPriorityFeePerGasAtomic: string; readonly nativeBalanceAtomic: string }
 export interface StargateTokenRawLog { readonly address: Address; readonly topics: readonly Hex[]; readonly data: Hex }
 export interface StargateTokenConfirmedReceipt { readonly transactionHash: Hex; readonly status: "success" | "reverted";
-  readonly blockNumberAtomic: string; readonly blockHash: Hex; readonly finality: StargateV2FinalityTag; readonly logs: readonly StargateTokenRawLog[] }
+  readonly blockNumberAtomic: string; readonly blockHash: Hex; readonly finality: StargateV2FinalityTag; readonly logs: readonly StargateTokenRawLog[];
+  /** The receipt's own fee fields as the node answered them; absent when the port does not read them. */
+  readonly feeFields?: EvmReceiptFeeFields }
 export interface StargateTokenExecutionPorts {
   readonly sourceCall: EvmRpcCall; readonly destinationCall: EvmRpcCall;
   readonly destinationBalances: (recipient: Address, finalityTag: StargateV2FinalityTag) => Promise<Readonly<{ tokenAtomic: string; nativeAtomic: string; blockNumberAtomic: string; blockHash: Hex }>>;
@@ -94,7 +111,7 @@ export interface StargateTokenExecutionPorts {
   readonly signer: Readonly<{ kind: "imported_evm_signer"; address: Address; signTransaction: (tx: StargateTokenEnvelope) => Promise<Hex> }>;
   readonly signerIdentity: () => Promise<Readonly<{ profile: string; address: Address }>>; readonly approve: (operation: StargateTokenOperation) => Promise<void>;
   readonly approveCleanup: (operation: StargateTokenOperation) => Promise<void>;
-  readonly admitPolicy: (input: Readonly<{ profile: string; owner: Address; amountAtomic: string; operationId: string }>) => Promise<StargateTokenPolicyBinding>;
+  readonly admitPolicy: (input: Readonly<{ profile: string; owner: Address; recipient: Address; amountAtomic: string; operationId: string }>) => Promise<StargateTokenPolicyBinding>;
   readonly confirmPolicy: (operation: StargateTokenOperation) => Promise<void>;
   readonly reserveUsage: (operation: StargateTokenOperation) => Promise<StargateTokenUsageState>;
   readonly followUsage: (operation: StargateTokenOperation, state: Exclude<StargateTokenUsageState, "reserved">) => Promise<StargateTokenUsageState>;

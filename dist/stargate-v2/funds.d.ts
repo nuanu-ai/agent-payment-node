@@ -1,11 +1,13 @@
 type FundsReason = "max_native_debit_exceeded" | "insufficient_native_balance";
 /** The known parts of a native debit; `gas` is absent when the refusal comes before eth_estimateGas. */
+/** `opStackFees`: the OP-stack L1 data and operator fee upper bounds inside `required` (Optimism token lane only). */
 interface FundsParts {
     readonly required: bigint;
     readonly limit: bigint;
     readonly principal?: bigint;
     readonly messagingFee?: bigint;
     readonly gas?: bigint;
+    readonly opStackFees?: bigint;
 }
 /**
  * A native debit the owner's cap or the wallet's ETH cannot cover, refused by name with its numbers and no provider text.

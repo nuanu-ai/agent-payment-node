@@ -10,6 +10,7 @@ export declare class StargateNativeUsage {
     admitPolicy(input: Readonly<{
         profile: string;
         owner: Address;
+        recipient: Address;
         amountAtomic: string;
     }>): Promise<StargateNativePolicyBinding>;
     /** Before signing: the active policy must still be the prepared one, and the principal is held under the shared caps. */
@@ -17,5 +18,6 @@ export declare class StargateNativeUsage {
     /** Idempotent: brings the hold to the state the journal proves, and never reopens a terminal hold. */
     follow(op: StargateNativeOperation, target: StargateNativeUsageTarget): Promise<void>;
     private active;
+    /** The exact mechanism, the caps, and the owner's recipient pin (the lane pays the owner, who must still be listed). */
     private admit;
 }

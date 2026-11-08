@@ -354,8 +354,9 @@ test("Linea execution refuses active policy drift before signing or sending", as
   assert.equal(s.source.submissions.length, 0); assert.equal(record.usageLease, null);
 });
 
+// A short balance delta is no refusal: the owner may spend in the same block (lifi-native-trace-proof.test.ts).
 test("Linea native completion refuses missing or misbound trace delivery and corroborating balance evidence", async (t) => {
-  for (const mutation of ["absent", "insufficient", "recipient", "block", "unrelated-credit", "unrelated-debit", "trace-from", "trace-recipient", "trace-value", "trace-hash"] as const) {
+  for (const mutation of ["absent", "recipient", "block", "unrelated-credit", "unrelated-debit", "trace-from", "trace-recipient", "trace-value", "trace-hash"] as const) {
     const temporary = await temporaryState(); t.after(temporary.cleanup);
     const s = await lifiFixture(temporary.root, "eth-linea");
     s.provider.statusValue = "completed_observed";
@@ -365,7 +366,6 @@ test("Linea native completion refuses missing or misbound trace delivery and cor
       if (observed === null || args[1] !== undefined) return observed;
       const receipt: any = structuredClone(observed.receipt);
       if (mutation === "absent") delete receipt.nativeBalance;
-      if (mutation === "insufficient") { receipt.nativeBalance.afterBalanceAtomic = receipt.nativeBalance.beforeBalanceAtomic; receipt.nativeBalance.deltaAtomic = "0"; }
       if (mutation === "recipient") receipt.nativeBalance.recipient = "0x1111111111111111111111111111111111111111";
       if (mutation === "block") receipt.nativeBalance.afterBlock.hash = `0x${"ff".repeat(32)}`;
       if (mutation === "unrelated-credit") { receipt.nativeBalance.afterBalanceAtomic = (BigInt(receipt.nativeBalance.afterBalanceAtomic) + 1n).toString(); receipt.nativeBalance.deltaAtomic = (BigInt(receipt.nativeBalance.deltaAtomic) + 1n).toString(); delete receipt.nativeTransfer; }

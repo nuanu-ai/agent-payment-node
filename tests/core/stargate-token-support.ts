@@ -13,6 +13,7 @@ import { cleanupStargateV2Token, encodeStargateNativeDrop, executeStargateV2Toke
 import { StateStore } from "../../src/state.js";
 import { evmAddressLock } from "../../src/evm-address-ownership.js";
 import { TtyStargateTokenApproval } from "../../src/stargate-v2/token-tty.js";
+import { OP_STACK_GAS_ORACLE, OP_STACK_GAS_ORACLE_ABI } from "../../src/evm-direct-reads.js";
 import assert from "node:assert/strict";
 
 /** The token Stargate execution fixture: an in-memory journal and scripted ports (shared by the execution and exit tests). */
@@ -20,25 +21,34 @@ export const KEY = `0x${"11".repeat(32)}` as Hex, ACCOUNT = privateKeyToAccount(
 export const BLOCK = `0x${"ab".repeat(32)}` as Hex, DEST_BLOCK = `0x${"cd".repeat(32)}` as Hex, GUID = `0x${"ef".repeat(32)}` as Hex;
 export const AMOUNT = 100_000n, DROP = 50_000_000_000_000_000n, FEE = 1000n, NATIVE_CAP = 100_000_000_000_000_000n;
 export const PACKET_NONCE = 7n;
+/** The scripted OP Mainnet GasPriceOracle: a flat L1 data fee bound per transaction and an operator fee of gas / 10_000. */
+export const L1_FEE = 700n, operatorFee = (gas: bigint) => gas / 10_000n;
 export const packetPayload = (mutation?: "sender"|"receiver"|"guid") => (`0x01${PACKET_NONCE.toString(16).padStart(16,"0")}${(30111).toString(16).padStart(8,"0")}${(mutation==="sender"?OWNER:STARGATE_TOKEN_SOURCE_MESSAGING).slice(2).toLowerCase().padStart(64,"0")}${(30109).toString(16).padStart(8,"0")}${(mutation==="receiver"?OWNER:STARGATE_TOKEN_DESTINATION_MESSAGING).slice(2).toLowerCase().padStart(64,"0")}${(mutation==="guid"?BLOCK:GUID).slice(2)}00`) as Hex;
 export function unreleasedV1TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
   const { integrityHash: _integrity, finalityPolicy: _policy, finalityPolicyProvenance: _provenance, bridgeSimulation: _simulation, feeApproval: _fees,
     approvalFinalityWindowMs: _window, approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline,
-    postApprovalQuote: _post, ...current } = operation;
+    postApprovalQuote: _post, opStackFees: _opStack, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v1" as const };
   return { ...body, integrityHash: hashObject(body) } as unknown as StargateTokenOperation;
 }
 export function unreleasedV2TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
   const { integrityHash: _integrity, bridgeSimulation: _simulation, feeApproval: _fees, approvalFinalityWindowMs: _window,
-    approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline, postApprovalQuote: _post, ...current } = operation;
+    approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline, postApprovalQuote: _post, opStackFees: _opStack, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v2" as const };
   return { ...body, integrityHash: hashObject(body) } as unknown as StargateTokenOperation;
 }
 export function unreleasedV3TokenFixture(operation: StargateTokenOperation): StargateTokenOperation {
   const { integrityHash: _integrity, feeApproval: _fees, approvalFinalityWindowMs: _window,
-    approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline, postApprovalQuote: _post, ...current } = operation;
+    approvalSubmissionStartedAt: _started, approvalFinalityDeadline: _deadline, postApprovalQuote: _post, opStackFees: _opStack, ...current } = operation;
   const body = { ...current, schemaVersion: "apn.stargate-v2-token-operation.v3" as const };
   return { ...body, integrityHash: hashObject(body) } as unknown as StargateTokenOperation;
+}
+/** A v5 record as 0.5.25..0.5.96 wrote it: the same operation without any v6 fee evidence, its debit without the bounds. */
+export function asV5TokenFixture(op: StargateTokenOperation): StargateTokenOperation {
+  const { integrityHash: _integrity, opStackFees, submissionOpStackFees: _submission, approvalActualFee: _actual, ...rest } = op;
+  const body = { ...rest, schemaVersion: "apn.stargate-v2-token-operation.v5" as const,
+    maximumDebitAtomic: (BigInt(op.maximumDebitAtomic) - BigInt(opStackFees!.totalUpperWei)).toString() };
+  return { ...body, integrityHash: hashObject(body) } as StargateTokenOperation;
 }
 export async function seedTokenFixture(root: string, operation: StargateTokenOperation): Promise<void> {
   const directory = join(root, "stargate-v2-token"); await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -62,11 +72,13 @@ export function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErr
   sourcePacketMutation?: "sender"|"receiver"|"guid";
   postApprovalNativeCap?: bigint; confirmPolicyErrorAfterApproval?: boolean; nowMs?: number; saveErrorPhaseOnce?: string; saveErrorAfterSave?: boolean;
   followErrorOnce?: "submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert";
-  destinationMutation?: "guid"|"native"|"token" } = {}) {
+  destinationMutation?: "guid"|"native"|"token"; l1Fee?: bigint; l1FeeAfterApproval?: bigint; oracleFailure?: "error"|"empty";
+  approvalFeeFields?: Readonly<Record<string, string>> } = {}) {
   let allowance = options.allowance ?? 0n, approvalConsumed = false, sends = 0, signs = 0, approvals = 0, receiptCalls = 0, approvalPolls = 0, nonce = 7n;
   let nowMs = options.nowMs ?? 2_000_000_000_000;
   let preparedApprovals = 0, preparedBridges = 0, bridgeEstimates = 0, bridgeCalls = 0;
   let usageState: "reserved"|"submitted"|"unknown_finality"|"finalized"|"failed_before_effect"|"failed_confirmed_revert"|"released_unsubmitted" = "reserved", followFailed = false;
+  let l1Fee = options.l1Fee ?? L1_FEE; const oracleReads: { functionName: string; argument: bigint; at: unknown }[] = [];
   const sourceCall: StargateTokenExecutionPorts["sourceCall"] = async (method, params) => {
     if (method === "eth_chainId") return "0xa";
     if (method === "eth_getBlockByNumber") return { number: "0x10", hash: BLOCK, baseFeePerGas: `0x${(approvalConsumed ? (options.feeSpikeAfterApproval ? 2n : options.baseFeeAfterApproval ?? 0n) : options.baseFeeBeforeApproval ?? 0n).toString(16)}` };
@@ -80,6 +92,11 @@ export function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErr
       return "0x15f90"; }
     if (method !== "eth_call") throw new Error(`unexpected ${method}`);
     const data = (params[0] as { data: Hex }).data;
+    if ((params[0] as { to: string }).to === OP_STACK_GAS_ORACLE) { const d = decodeFunctionData({ abi: OP_STACK_GAS_ORACLE_ABI, data });
+      oracleReads.push({ functionName: d.functionName, argument: d.args[0], at: params[1] });
+      if (options.oracleFailure === "error") throw new Error("oracle read failed"); if (options.oracleFailure === "empty") return "0x";
+      const value = d.functionName === "getOperatorFee" ? operatorFee(d.args[0]) : approvalConsumed ? (options.l1FeeAfterApproval ?? l1Fee) : l1Fee;
+      return encodeFunctionResult({ abi: OP_STACK_GAS_ORACLE_ABI, functionName: "getL1FeeUpperBound", result: value }); }
     try { const d = decodeFunctionData({ abi: STARGATE_QUOTE_ABI, data });
       if (d.functionName === "quoteOFT") { const received=approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT;
         return encodeAbiParameters(STARGATE_QUOTE_OFT_OUTPUT, [{ minAmountLD: 1n, maxAmountLD: 10_000_000n }, received===AMOUNT?[]:[{feeAmountLD:received-AMOUNT,description:"fresh quote degradation"}], { amountSentLD: AMOUNT, amountReceivedLD: received }]); }
@@ -122,11 +139,13 @@ export function setup(options: { allowance?: bigint; nativeCap?: bigint; sendErr
       usageState = target; return usageState; },
     sendRawTransaction: async raw => { sends++; if (options.sendErrorAt === sends) throw new Error("timeout"); if (options.advanceNonceOnSend) nonce++; return keccak256(raw); },
     waitSourceReceipt: async tx => { receiptCalls++; if (["cleanup_submission_started","cleanup_submitted","cleanup_unknown_finality"].includes(journal.value?.phase ?? "")) { allowance=0n; return { transactionHash:tx,status:"success",blockNumberAtomic:"22",blockHash:BLOCK,finality:"safe",logs:[] }; }
-      if (!approvalConsumed && (options.allowance ?? 0n) === 0n) { approvalPolls++; if (approvalPolls <= (options.approvalPendingPolls ?? 0)) return null; allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [] }; }
+      if (!approvalConsumed && (options.allowance ?? 0n) === 0n) { approvalPolls++; if (approvalPolls <= (options.approvalPendingPolls ?? 0)) return null; allowance = AMOUNT; approvalConsumed = true; return { transactionHash: tx, status: "success", blockNumberAtomic: "20", blockHash: BLOCK, finality: "safe", logs: [],
+        ...(options.approvalFeeFields === undefined ? {} : { feeFields: options.approvalFeeFields }) }; }
       if (options.bridgeRevert && receiptCalls === 1) return { transactionHash: tx, status: "reverted", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [] };
       if (!options.residualAfterBridge || receiptCalls > 1) allowance = 0n; const topics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTSent", args: { guid: GUID, fromAddress: OWNER } }) as readonly Hex[]; const received=approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT; const data = encodeAbiParameters(parseAbiParameters("uint32 dstEid,uint256 amountSentLD,uint256 amountReceivedLD"), [30109, AMOUNT, received]); const packetTopics=encodeEventTopics({abi:LAYERZERO_ENDPOINT_V2_ABI,eventName:"PacketSent"}) as readonly Hex[];const packetData=encodeAbiParameters(parseAbiParameters("bytes encodedPayload,bytes options,address sendLibrary"),[packetPayload(options.sourcePacketMutation),"0x",STARGATE_TOKEN_SOURCE_POOL]);return { transactionHash: tx, status: "success", blockNumberAtomic: "21", blockHash: BLOCK, finality: "safe", logs: [{ address: LAYERZERO_ENDPOINT_V2, topics:packetTopics,data:packetData },{ address: STARGATE_TOKEN_SOURCE_POOL, topics, data }] }; },
     observeDestination: async input => ({ emitter: STARGATE_TOKEN_DESTINATION_POOL, sourceTransactionHash: input.sourceTransactionHash, guid: options.destinationMutation === "guid" ? BLOCK : input.guid, sourceEid: 30111, destinationTransactionHash: DEST_BLOCK, logIndexAtomic: "0", blockNumberAtomic: "30", blockHash: DEST_BLOCK, finality: input.finalityTag, recipient: input.recipient, amountReceivedAtomic: (approvalConsumed ? (options.postApprovalMinimumOutput ?? AMOUNT) : AMOUNT).toString(), tokenBalanceBeforeAtomic: input.tokenBalanceBeforeAtomic, tokenBalanceAfterAtomic: (BigInt(input.tokenBalanceBeforeAtomic) + (options.destinationMutation === "token" ? 1n : BigInt(input.minimumAmountAtomic))).toString(), tokenDeltaAtomic: (options.destinationMutation === "token" ? 1n : BigInt(input.minimumAmountAtomic)).toString(), nativeBalanceBeforeAtomic: input.nativeBalanceBeforeAtomic, nativeBalanceAfterAtomic: (BigInt(input.nativeBalanceBeforeAtomic) + (options.destinationMutation === "native" ? 1n : DROP)).toString(), nativeDeltaAtomic: (options.destinationMutation === "native" ? 1n : DROP).toString(), nativeDrop: { executor: STARGATE_TOKEN_DESTINATION_EXECUTOR, nonceAtomic: PACKET_NONCE.toString(), success: true }, packetDelivery:{endpoint:LAYERZERO_ENDPOINT_V2,tokenMessaging:STARGATE_TOKEN_DESTINATION_MESSAGING,nonceAtomic:PACKET_NONCE.toString(),transactionHash:DEST_BLOCK,blockNumberAtomic:"30",blockHash:DEST_BLOCK,logIndexAtomic:"1"} }), now: () => nowMs };
-  return { ports, journal, counts: () => ({ sends, signs, approvals }), simulations: () => ({ preparedApprovals, preparedBridges, bridgeEstimates, bridgeCalls }), advance: (ms:number) => { nowMs += ms; } };
+  return { ports, journal, counts: () => ({ sends, signs, approvals }), simulations: () => ({ preparedApprovals, preparedBridges, bridgeEstimates, bridgeCalls }), advance: (ms:number) => { nowMs += ms; },
+    oracleReads: () => oracleReads, setL1Fee: (value: bigint) => { l1Fee = value; } };
 }
 export const request = (changes: Partial<Parameters<typeof prepareStargateV2Token>[0]> = {}) => ({ profile: "owner", owner: OWNER, recipient: OWNER, amountAtomic: AMOUNT.toString(), nativeDropAtomic: DROP.toString(), minOutputAtomic: "99000", maxNativeDebitAtomic: "10000000000000000", idempotencyKey: "stargate-token-001", ...changes });
 

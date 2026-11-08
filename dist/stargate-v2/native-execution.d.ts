@@ -175,6 +175,7 @@ export interface StargateNativeExecutionPorts {
     readonly admitPolicy: (input: Readonly<{
         profile: string;
         owner: Address;
+        recipient: Address;
         amountAtomic: string;
     }>) => Promise<StargateNativePolicyBinding>;
     /** Confirms the active owner policy is the prepared one and holds the principal under the shared caps. */

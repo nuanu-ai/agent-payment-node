@@ -4,6 +4,8 @@ import { type BridgeReceipt } from "./receipt.js";
 import { type LegacyBridgeOperationRecord, type StoredBridgeOperationRecord } from "./legacy-operation.js";
 export declare class BridgeOperationRepository extends SecureStateStore {
     private initialized;
+    /** A terminal journal may pass 1 MiB (history-capacity.ts); every other one is held to it on load and write. */
+    protected stateByteLimit(): number;
     private ready;
     loadOperation(profileHash: string, operationId: string): Promise<BridgeOperationRecord | null>;
     loadStoredOperation(profileHash: string, operationId: string): Promise<StoredBridgeOperationRecord | null>;

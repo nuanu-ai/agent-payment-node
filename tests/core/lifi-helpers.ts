@@ -250,7 +250,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
   clockNow?: () => Date;
   maxNativeDebitWei?: string;
   policy?: false | { readonly maximumPerTransferAtomic?: string; readonly dailyLimitAtomic?: string;
-    readonly provider?: string; readonly reference?: string };
+    readonly provider?: string; readonly reference?: string; readonly recipients?: readonly string[] };
 } = {}) {
   const now = options.now ?? new Date(pair === "eth-bnb" ? "2026-09-20T16:23:00.000Z" : pair === "eth-linea" || pair === "eth-monad" ? "2026-09-20T10:54:00.000Z" : "2026-09-08T12:00:00.000Z"), state = new StateStore(root, { lockWaitMs: TEST_LOCK_WAIT_MS }), profile = "lifi-local";
   const wrapping = options.wrapping ?? new LifiWrapping(), wallets = new EncryptedWalletStore(state, wrapping);
@@ -281,6 +281,7 @@ export async function lifiFixture(root: string, pair: "eth-base" | "base-arb" | 
         : { kind: "token" as const, identifier: a.fromToken.address }), rail: "bridge", ...caps,
       mechanism: { provider: options.policy?.provider ?? mechanism.provider,
         reference: options.policy?.reference ?? mechanism.reference },
+      ...(options.policy?.recipients === undefined ? {} : { recipients: [...options.policy.recipients] }),
     }] });
   };
   await activatePolicy("across");

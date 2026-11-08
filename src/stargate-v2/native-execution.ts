@@ -96,7 +96,7 @@ export interface StargateNativeExecutionPorts {
   readonly signer: Readonly<{ kind: "imported_evm_signer"; address: Address; signTransaction: (tx: StargateNativeEnvelope) => Promise<Hex> }>;
   readonly signerIdentity: () => Promise<Readonly<{ profile: string; address: Address }>>;
   readonly approve: (operation: StargateNativeOperation) => Promise<void>;
-  readonly admitPolicy: (input: Readonly<{ profile: string; owner: Address; amountAtomic: string }>) => Promise<StargateNativePolicyBinding>;
+  readonly admitPolicy: (input: Readonly<{ profile: string; owner: Address; recipient: Address; amountAtomic: string }>) => Promise<StargateNativePolicyBinding>;
   /** Confirms the active owner policy is the prepared one and holds the principal under the shared caps. */
   readonly reserveUsage: (operation: StargateNativeOperation) => Promise<void>;
   readonly followUsage: (operation: StargateNativeOperation, target: StargateNativeUsageTarget) => Promise<void>;
@@ -200,7 +200,7 @@ export async function prepareStargateV2NativeEth(request: StargateNativePreparat
   const checkedSource = sourceBlock as Record<string, unknown>;
   if (rpcQuantity(checkedSource.number) !== BigInt(quote.block.numberAtomic) ||
     hex32(checkedSource.hash) !== quote.block.hash) fail("APN_RPC_PROTOCOL", "source_block_changed_after_prepare_reads");
-  const policy = await ports.admitPolicy({ profile, owner, amountAtomic: amount.toString() });
+  const policy = await ports.admitPolicy({ profile, owner, recipient, amountAtomic: amount.toString() });
   const preparedMs = now(), preparedAt = new Date(preparedMs).toISOString(), expiresAt = new Date(preparedMs + ttl).toISOString();
   const body = {
     schemaVersion: "apn.stargate-v2-native-operation.v3" as const, operationId, profile, profileHash, idempotencyHash, policy,
