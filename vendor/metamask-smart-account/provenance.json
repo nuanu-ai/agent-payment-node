@@ -70,10 +70,10 @@
       "name": "@scure/base",
       "version": "1.2.6"
     },
-    "@x402/evm@2.23.0": {
+    "@x402/evm@2.30.0": {
       "license": "Apache-2.0",
       "name": "@x402/evm",
-      "version": "2.23.0"
+      "version": "2.30.0"
     },
     "abitype@1.2.3": {
       "license": "MIT",
@@ -2492,40 +2492,34 @@
       "sha256": "6d65435f74ae0704032c93aff057c79e478f9149f5e13429d9abeb51fb3a3e03"
     },
     {
-      "bytes": 433,
-      "file": "dist/esm/chunk-BJTO5JO5.mjs",
-      "identity": "@x402/core@2.23.0",
-      "sha256": "1c521b4fbee4089393c982b94b5f8a4f81b1043c2f8cd1848d0d6056430e761f"
+      "bytes": 5950,
+      "file": "dist/esm/chunk-XW2CWVLZ.mjs",
+      "identity": "@x402/core@2.30.0",
+      "sha256": "b5dd34a002e670ba7baf5f1aa011324c1c4ac6022315b08088500575995752cb"
     },
     {
-      "bytes": 5837,
-      "file": "dist/esm/chunk-UQQR4X3S.mjs",
-      "identity": "@x402/core@2.23.0",
-      "sha256": "a7756bf22635f58e52dce87753863e51f407a38f5c32382a1076c39bd6cb9a62"
-    },
-    {
-      "bytes": 819,
+      "bytes": 843,
       "file": "dist/esm/utils/index.mjs",
-      "identity": "@x402/core@2.23.0",
-      "sha256": "69e63ee6329b1a39018517ce175e650163c5254d40f2d44739526ea2d1dd9fe2"
+      "identity": "@x402/core@2.30.0",
+      "sha256": "39ba6fca86e71d2c8e55140e60e7e0deaa0984c18867b4585a8b28e36c211637"
     },
     {
-      "bytes": 6518,
-      "file": "dist/esm/chunk-53LRAEB5.mjs",
-      "identity": "@x402/evm@2.23.0",
-      "sha256": "c5b3a76d8740e2ef1b71bb7e6bc55531f591672abbee88e380f6f20fd55be1fc"
+      "bytes": 13915,
+      "file": "dist/esm/chunk-GPMYUGHX.mjs",
+      "identity": "@x402/evm@2.30.0",
+      "sha256": "5802e69bd06c922f660bed2f18d27cc25647d937065fc7c5c7165287a16eaac9"
     },
     {
-      "bytes": 13889,
-      "file": "dist/esm/chunk-SGFNIWGK.mjs",
-      "identity": "@x402/evm@2.23.0",
-      "sha256": "65a67f8b6ff4db5b1b8ee9a079721d7fa23a4f914962feb54aa69e49949d325c"
+      "bytes": 8340,
+      "file": "dist/esm/chunk-LQQ3M4DU.mjs",
+      "identity": "@x402/evm@2.30.0",
+      "sha256": "f5b8a0b09b26caf290a8ab4a8d5c20c6f066a61a663faba5ccf9b3326afcbc6e"
     },
     {
-      "bytes": 5104,
+      "bytes": 5126,
       "file": "dist/esm/exact/server/index.mjs",
-      "identity": "@x402/evm@2.23.0",
-      "sha256": "b8fa7634dfe0e37d1433e42334a9b7d4510069f69561323da56e90493c899619"
+      "identity": "@x402/evm@2.30.0",
+      "sha256": "ece083ee374514fc53cb4d8b9bf7b346b81a901b3e1745375b0ec5a44b86053b"
     },
     {
       "bytes": 1993,
@@ -7467,9 +7461,9 @@
       "identity": "@scure/base@1.2.6"
     },
     {
-      "bytesInOutput": 533,
-      "file": "dist/esm/chunk-SGFNIWGK.mjs",
-      "identity": "@x402/evm@2.23.0"
+      "bytesInOutput": 559,
+      "file": "dist/esm/chunk-GPMYUGHX.mjs",
+      "identity": "@x402/evm@2.30.0"
     },
     {
       "bytesInOutput": 1603,
@@ -8673,15 +8667,15 @@
       "name": "@scure/bip39",
       "version": "1.6.0"
     },
-    "@x402/core@2.23.0": {
+    "@x402/core@2.30.0": {
       "license": "Apache-2.0",
       "name": "@x402/core",
-      "version": "2.23.0"
+      "version": "2.30.0"
     },
-    "@x402/evm@2.23.0": {
+    "@x402/evm@2.30.0": {
       "license": "Apache-2.0",
       "name": "@x402/evm",
-      "version": "2.23.0"
+      "version": "2.30.0"
     },
     "abitype@1.2.3": {
       "license": "MIT",

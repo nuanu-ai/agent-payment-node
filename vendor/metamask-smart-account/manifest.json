@@ -138,8 +138,8 @@
       "sha256": "07329d4e4c93d60e5bcfe71c4813e5d18c06609c66a89bbf68411012f0e4f173"
     },
     "x402-client.mjs": {
-      "bytes": 3159,
-      "sha256": "8170e116bc5762cfdfcbe032599710223bb1dac131f54de69c63a708e6453d80"
+      "bytes": 3185,
+      "sha256": "e45430a96aefef0cdce46593a9b1b6ed6102f7402ef8fb8669b8981a444b74d6"
     }
   },
   "schemaVersion": "apn.metamask-smart-account.v1",
