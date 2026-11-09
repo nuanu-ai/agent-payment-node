@@ -806,7 +806,8 @@ limit on every day. Status brings the hold to what the journal proves:
 | `failed_proven_superseded` | `released_unsubmitted` |
 
 Submit and status report the hold as `usageHold`: `null` when the operation holds nothing (records written before
-0.5.98, or a submit refused before the hold, such as a declined consent). A
+0.5.98, or a submit refused before the hold, such as a declined consent), and also from a submit whose deposit was
+sent but whose hold could not be settled right then; status settles and reports it. A
 late deposit that 1Click refunds still counts as spent: the refund is not an effect APN proves.
 
 **Submit** is keyless and fails closed. APN first requests a dry quote (no deposit address), then an actual exact-input

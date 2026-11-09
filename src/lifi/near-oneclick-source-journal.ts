@@ -188,6 +188,8 @@ export class OneClickSourceJournal extends SecureStateStore {
    */
   async advance(id: string, expectedHash: string, phase: OneClickSourceRecord["phase"],
     changes: Partial<OneClickSourceRecord> = {}, releasedReservation?: string, sealGuard?: () => Promise<void>): Promise<OneClickSourceRecord> {
+    // A seal always names its caller's own state check; there is no unguarded seal.
+    if (phase === "sealed" && sealGuard === undefined) blocked();
     await this.initialize();
     return this.withLocks([`oneclick:${id}`, `oneclick-nonces`], async () => {
       const prior = await this.load(id); if (prior === null || prior.integrityHash !== expectedHash) blocked();
@@ -195,7 +197,7 @@ export class OneClickSourceJournal extends SecureStateStore {
       // Past the deadline nothing is sealed: status releases an unsigned record's usage hold from then on, under this lock.
       if (phase === "sealed" && Date.now() >= Date.parse(prior.effectiveDeadline)) bridgeFailure("APN_OPERATION_BLOCKED", "oneclick_source_quote_expired_before_seal");
       // The caller's own state check (its usage hold is still held) runs under the lock status releases that hold under.
-      if (phase === "sealed") await sealGuard?.();
+      if (phase === "sealed") await sealGuard!();
       const { integrityHash: _old, ...body } = prior;
       const next = { ...body, ...changes, phase, updatedAt: new Date().toISOString() };
       // Validate the exact sealed transaction before reserving its nonce, so a rejected seal leaves no reservation.

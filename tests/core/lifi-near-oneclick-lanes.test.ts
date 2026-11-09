@@ -188,11 +188,11 @@ test("v3 native records seal only the exact Ethereum value transfer and reserve 
   record = await journal.advance(record.operationId, record.integrityHash, "signing_started");
   const fees = { nonce: 7, gas: 21000n, maxFeePerGas: 2100000000n, maxPriorityFeePerGas: 100000000n, accessList: [] } as const;
   const wrongChain = await account.signTransaction({ type: "eip1559", chainId: 8453, to: deposit, value: BigInt(amount), ...fees });
-  await assert.rejects(journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: wrongChain, transactionHash: keccak256(wrongChain) }));
+  await assert.rejects(journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: wrongChain, transactionHash: keccak256(wrongChain) }, undefined, async () => {}));
   const wrongValue = await account.signTransaction({ type: "eip1559", chainId: 1, to: deposit, value: BigInt(amount) + 1n, ...fees });
-  await assert.rejects(journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: wrongValue, transactionHash: keccak256(wrongValue) }));
+  await assert.rejects(journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: wrongValue, transactionHash: keccak256(wrongValue) }, undefined, async () => {}));
   const raw = await account.signTransaction({ type: "eip1559", chainId: 1, to: deposit, value: BigInt(amount), ...fees });
-  record = await journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) });
+  record = await journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, undefined, async () => {});
   assert.equal(record.rawTransaction, raw);
   assert.deepEqual(await journal.reservation(`oneclick-source-nonces/${"b".repeat(64)}/eip155-1/${payer.toLowerCase()}-7.json`),
     { operationId: record.operationId, transactionHash: keccak256(raw) });

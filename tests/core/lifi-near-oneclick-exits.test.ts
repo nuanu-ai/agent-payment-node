@@ -37,7 +37,7 @@ async function setup(t: test.TestContext) {
   record = await journal.advance(record.operationId, record.integrityHash, "signing_started");
   const raw = await ACCOUNT.signTransaction({ type: "eip1559", chainId: 8453, to: TOKEN, data, value: 0n, nonce: 7, gas: 100000n,
     maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 100000000n, accessList: [] });
-  record = await journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) });
+  record = await journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, undefined, async () => {});
   record = await journal.advance(record.operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
   record = await journal.advance(record.operationId, record.integrityHash, "unknown_finality");
   sealing.mock.restore();
