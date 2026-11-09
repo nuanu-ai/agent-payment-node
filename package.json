@@ -1,6 +1,6 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.100",
+  "version": "0.5.101",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
@@ -83,8 +83,8 @@
     "@solana-program/system": "0.14.1",
     "@solana-program/token": "0.16.1",
     "@solana/kit": "8.2.0",
-    "@x402/core": "2.23.0",
-    "@x402/evm": "2.23.0",
+    "@x402/core": "2.30.0",
+    "@x402/evm": "2.30.0",
     "awal": "2.12.1",
     "viem": "2.55.19",
     "zod": "4.6.7"
@@ -109,6 +109,9 @@
       "minimatch": "11.0.1"
     },
     "@metamask/fox-sdk": {
+      "zod": "4.6.7"
+    },
+    "awal": {
       "zod": "4.6.7"
     },
     "@solana/web3.js": {

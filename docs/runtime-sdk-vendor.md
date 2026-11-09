@@ -19,7 +19,7 @@ fences keep their existing contracts.
 | Directory | Upstream exports | Manifest SHA256 |
 |---|---|---|
 | `vendor/metamask-evm-sdk` | Agent SDK 6.1.4 root/base/evm, Fox SDK 2.7.0 EVM/keyring, Ethereum controllers 9.12.0 | `05e9601a4ae684223b03efa3d6faa80b5e87c0c734c710baf6090d993539b948` |
-| `vendor/metamask-smart-account` | Smart Account kit 2.0.0 root/actions/contracts/utils/experimental, permission types 2.0.0, delegation core 3.0.0, MetaMask x402 1.0.0 | `ff253d54bfb8082ebb7e753d4125303aa84a421566dc11490936ece27448ddc3` |
+| `vendor/metamask-smart-account` | Smart Account kit 2.0.0 root/actions/contracts/utils/experimental, permission types 2.0.0, delegation core 3.0.0, MetaMask x402 1.0.0 | `7686c8808d0cec368225ec34b5163d4c9fc522d90f7df96204a8555c0447e174` |
 | `vendor/tron-utils` | TronWeb 6.5.0 `utils` | `b0e919b536ce6cd58b0a7e79403a780a0c099560c9e332cd829ccdd12bb36a8b` |
 | `vendor/relay-order-id` | Settlement SDK 0.0.143 `getOrderId` | `2f9961b36d28b97d4a524bb02a0c89e2fa351cd17fb157e1f2f7d13d1f5f3e8e` |
 

@@ -146,6 +146,8 @@ jobs:
             tests/packaging/runtime-metamask-sdk-vendor.test.mjs tests/packaging/runtime-tron-utils-vendor.test.mjs \
             tests/packaging/runtime-relay-order-id-vendor.test.mjs tests/packaging/runtime-smart-account-vendor.test.mjs
           node scripts/core-forbidden-surface.mjs
+          # Exact dependency pins and overrides; outside test:core, but a dependency update must keep them true.
+          node --test tests/packaging/x402-dependency.test.mjs tests/packaging/uuid-dependency.test.mjs
 
   # Gates 2 to 8 of the local release preparation (docs/local-release.md), on a runner.
   release-gates:

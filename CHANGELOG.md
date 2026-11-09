@@ -2,6 +2,12 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.101 — 2026-11-10
+
+- **No zod 3 left in the npm dependency tree.** GHSA-mrhx-c7xc-m3w5 (high): zod before 4.6.6 can exhaust memory validating an oversized array. `@x402/core` and `@x402/evm` move from 2.23.0 to 2.30.0, which require zod 4. The header codecs APN calls now also refuse a decoded value that is not a JSON object; the payment types, the Permit2 proxy ABI and its addresses are unchanged. awal 2.12.1 declares zod 3 but its CLI never imports it, and its one x402 call now resolves to the shared `@x402/core` 2.30; an npm override pins its zod to APN's 4.6.7. The release audit's zod exception, and its install-path scope, are gone. awal's Electron companion, which runs `x402 pay`, still carries its own compiled copy of zod 3 inside its prebuilt bundle, where neither an override nor `npm audit` reaches; it validates the companion's own tool inputs, not the seller's 402 answer.
+- **MetaMask Smart Account vendor bundle** regenerated for `@x402/evm` 2.30.0, with its new loader manifest pin.
+- **CI** also runs the x402 and override pin tests, which used to run only in the local legacy packaging set. The release audit now refuses an exception with an unknown field instead of ignoring it.
+
 ## 0.5.100 — 2026-11-09
 
 - **MetaMask Agent gasless, session token clock skew.** A Mac whose clock ran even one second behind MetaMask's saw a freshly issued CLI token as issued in the future and refused it as `mm_gasless_session_unavailable`; a new login could not fix that. The token's `iat` and `nbf` may now be up to 60 seconds ahead of the local clock. `exp` keeps no tolerance.

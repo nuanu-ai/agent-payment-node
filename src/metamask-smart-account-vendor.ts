@@ -3,7 +3,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = new URL("../vendor/metamask-smart-account/", import.meta.url);
-const MANIFEST_SHA256 = "ff253d54bfb8082ebb7e753d4125303aa84a421566dc11490936ece27448ddc3";
+const MANIFEST_SHA256 = "7686c8808d0cec368225ec34b5163d4c9fc522d90f7df96204a8555c0447e174";
 const MAX_BYTES = 4 * 1024 * 1024;
 const entries = new Set(["smart-utils", "smart-root", "smart-actions", "smart-contracts", "permission-types", "smart-experimental", "x402-client", "delegation-core"]);
 let verified = false;

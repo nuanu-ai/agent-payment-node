@@ -8,7 +8,7 @@ import "./chunk-ZSEVIWSW.mjs";
 import "./chunk-VBXYOQOU.mjs";
 import "./chunk-GQCBBNZL.mjs";
 
-// node_modules/@x402/evm/dist/esm/chunk-SGFNIWGK.mjs
+// node_modules/@x402/evm/dist/esm/chunk-GPMYUGHX.mjs
 var EVM_NETWORK_CHAIN_ID_MAP = {
   ethereum: 1,
   sepolia: 11155111,
@@ -29,6 +29,7 @@ var EVM_NETWORK_CHAIN_ID_MAP = {
   "skale-base-sepolia": 324705682,
   megaeth: 4326,
   monad: 143,
+  "monad-testnet": 10143,
   stable: 988,
   "stable-testnet": 2201,
   celo: 42220,

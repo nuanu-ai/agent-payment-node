@@ -43,6 +43,9 @@ test("MetaMask utils UUID override and production lock closure are exact", async
     "@metamask/fox-sdk": {
         "zod": "4.6.7"
     },
+    "awal": {
+        "zod": "4.6.7"
+    },
     "@solana/web3.js": {
         "jayson": "5.0.0"
     },

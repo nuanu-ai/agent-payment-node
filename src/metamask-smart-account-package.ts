@@ -11,8 +11,8 @@ export const METAMASK_PERMISSION_TYPES_VERSION = "2.0.0" as const;
 export const METAMASK_PERMISSION_TYPES_INTEGRITY = "sha512-NS6NolXd7fDQhMZoEmzyQcLuJ9NtIPntKOAEOMdFQuR8y1HWpN6PYx1BrY6OgHmJ1D/P4vuWlCooDlh+L8CmVw==" as const;
 export const METAMASK_X402_VERSION = "1.0.0" as const;
 export const METAMASK_X402_INTEGRITY = "sha512-jgQ7iCBKPE+k3dPCgEIBKrt1xFLfwyaXVBIa9dxuN5dkXTkQs9X9gmY4V/7wRqN32WoeV4qhEj/L/6qcHw+i9g==" as const;
-export const X402_EVM_VERSION = "2.23.0" as const;
-export const X402_EVM_INTEGRITY = "sha512-Ikaya5c0/qV/pdFRGfGSdlUX3ELZaUgrddsmmXZHPANtIAQ5uFH15+O+9Bt4PqdAXqCuS43WskJ7HgiLn/uW2g==" as const;
+export const X402_EVM_VERSION = "2.30.0" as const;
+export const X402_EVM_INTEGRITY = "sha512-/iaEB820OPJb1JkUqaCTq90FwjbmBB/rAFaH7ZAL2AmcesSVPO/FjdHD2wmXqBzXkEnPG9f6m1SuNpCtVlA9LQ==" as const;
 
 export async function assertMetaMaskSmartAccountPackageIdentity(): Promise<void> {
   verifySmartAccountVendor();
