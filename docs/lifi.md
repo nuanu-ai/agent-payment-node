@@ -503,11 +503,11 @@ transitions in a file of at most 1 MiB. A poll that changes only timestamps or t
 `destination_pending` and `unknown_finality`, or new RPC failure details, does. Such an ordinary change is recorded only
 below 512 transitions with 128 KiB of the file free; otherwise resume refuses it (`APN_OPERATION_BLOCKED`,
 `bridge_history_capacity` or `bridge_record_capacity`) and changes nothing. Closing evidence (an effect's first safe
-proof, its send steps after `signing_started`, a provider observation naming a new or now settled destination
-transaction) is recorded while 32 KiB stay free, up to seven past the 512th transition; a provider hint with no room
-left still guides the read and is saved with the next transition that may pass the bounds. The destination proof is
-saved in the same transition as the end it decides, and that terminal transition always is: as the 520th at most, up
-to 1 MiB, without its read telemetry if only that does not fit.
+proof, its send steps, a provider observation naming a new or now settled destination transaction) is recorded while
+32 KiB stay free, up to twelve past the 512th transition; a provider hint with no room left still guides the read and
+is saved with the next transition that may pass the bounds. The destination proof is saved in the same transition as
+the end it decides, and that terminal transition always is: as the 525th at most, up to 1 MiB, without its read
+telemetry if only that does not fit.
 
 An effect starts its send (its SIGN claim and `signing_started`) only when all four of its send transitions
 (`signing_started`, `sealed`, `submitting` and the save after the send) fit below 512 transitions with 128 KiB of the
@@ -517,20 +517,22 @@ bridge could not follow. RPC failures and recoveries between the two sends add o
 not cover; on a journal already that close to full the bridge's own check may still refuse, and the route then ends
 `failed_after_approval` at expiry. Otherwise resume refuses it the same way before anything is claimed or signed, and once the operation's
 validity runs out it ends in its usual halt (`failed_before_effect`, or `failed_after_approval` once a sent approval is
-safe). Every step after `signing_started` is closing evidence, so an effect that has started signing always records
-its seal, its claimed send and the save after it.
+safe). Every send step is closing evidence, so an effect that has started signing always records its seal, its claimed
+send and the save after it, and a SEND claim that survived in a restored journal whose effect is still `unsealed` is
+always recorded from `signing_started` on and observed, never sent again.
 
 A journal that 0.5.96 or earlier filled kept no such room. There, the terminal transition and evidence a journal can
 record only a bounded number of times may pass 1 MiB, without their read telemetry. That evidence is an effect's first
-safe proof, the destination proof, an effect's send steps after `signing_started` (each happens once), and an effect
-losing an inclusion that was not yet safe (a reorg moved it, or it vanished): a full journal no longer records unsafe
-inclusions, so each effect can lose one only once there. After a file passes 1 MiB at most eight such transitions
-follow, the end included, as past 512. The room past 1 MiB is one copy of the state (at most 64 KiB) for each of them
-and one more for the state's own growth: an open journal may grow to 1.5 MiB, which keeps one copy free for its end,
-and a finished one to 1 MiB + 576 KiB. The reader refuses any file larger than that. Ordinary changes never use this
-room, and a provider hint never does on its own: one that found no room passes it only as part of the next such
-transition. A delivered bridge thus still ends `completed`, even when its journal was already full before the bridge
-transaction was safe or a reorg moved it.
+safe proof, the destination proof, an effect's send steps (entering `signing_started`, `sealed` and `submitting`, and
+leaving `submitting`), and an effect losing an inclusion that was not yet safe (a reorg moved it, or it vanished). A
+full journal records no ordinary change, so there an effect starts signing at most once more (only to record a surviving
+SEND claim), takes each later send step once and loses an unsafe inclusion at most once: six steps per effect. After a
+file passes 1 MiB at most thirteen such transitions follow, the end included, as past 512. The room past 1 MiB is one
+copy of the state (at most 64 KiB) for each of them and one more for the state's own growth: an open journal may grow to
+1 MiB + 832 KiB, which keeps one copy free for its end, and a finished one to 1 MiB + 896 KiB. The reader refuses any
+file larger than that. Ordinary changes never use this room, and a provider hint never does on its own: one that found
+no room passes it only as part of the next such transition. A delivered bridge thus still ends `completed`, even when
+its journal was already full before the bridge transaction was safe or a reorg moved it.
 
 An effect left `signing_started` with nothing sealed (the process stopped before custody sealed it) normally returns to
 `unsealed` on the next resume. When a full journal has no room for that, resume is refused and changes nothing until
@@ -1023,8 +1025,9 @@ Stargate native pools (asset ID 13) are `0x77b2043768d28E9C9aB44E1aBfC95944bcE57
   its first safe proofs and its terminal transition ([Journal bounds](#journal-bounds)); a destination proof such a
   release saved on its own settles on the next resume. Releases up to 0.5.96 refuse a journal longer than 512
   transitions or larger than 1 MiB; 0.5.97 refuses an open journal larger than 1 MiB, a finished one larger than
-  1 MiB + 64 KiB, and a lost inclusion or send step recorded past the 512th transition. Do not downgrade once one
-  exists.
+  1 MiB + 64 KiB, and a lost inclusion or send step recorded past the 512th transition; 0.5.98 refuses a journal longer
+  than 520 transitions, an open one larger than 1.5 MiB, a finished one larger than 1 MiB + 576 KiB, and a SEND
+  claim's catch-up start of signing recorded past the 512th transition. Do not downgrade once one exists.
 - **1Click records** of schema v1 and v2 are read as the `base-usdc-to-tron-usdt` lane with their original status output,
   operation IDs and nonce reservation path; v3 records carry the lane. Ethereum nonce reservations are scoped under
   `eip155-1`.

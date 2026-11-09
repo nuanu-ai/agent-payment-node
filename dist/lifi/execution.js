@@ -294,7 +294,8 @@ export class BridgeExecution {
             bridgeFailure("APN_OPERATION_BLOCKED", "bridge_effect_send_claim_unresolved", {});
         }
         const current = () => op.effects.find((e) => e.role === effect.role);
-        // Ordinary, but only a restored journal lacks signing_started here, a prefix of one that passed the pre-SIGN room check.
+        // Only a restored journal lacks signing_started here, possibly one 0.5.96 filled without any room check. Like every
+        // catch-up step this is bounded evidence (history-capacity.ts), so a claimed send, which may have moved money, is recorded.
         if (current().phase === "unsealed")
             op = await this.save(op, { effects: replaceEffect(op, { ...current(), phase: "signing_started" }) });
         if (current().phase === "signing_started")

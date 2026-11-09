@@ -99,8 +99,8 @@ test("past 512 transitions a journal admits only closing ones, and its last slot
   assert.equal(closed.transitions.length, 513); assert.equal(closed.state, "completed"); assert.equal(validateBridgeOperation(closed), closed);
   assert.equal(twoStep.transitions.length, 514); assert.equal(validateBridgeOperation(twoStep), twoStep);
   assert.throws(() => validateBridgeOperation(tail(written(full, flaky(n)))), { code: "APN_STATE_CORRUPT" });
-  assert.deepEqual([bridgeHistoryAdmits("ordinary", 512), bridgeHistoryAdmits("ordinary", 513), bridgeHistoryAdmits("closing", 519),
-    bridgeHistoryAdmits("closing", 520), bridgeHistoryAdmits("terminal", 520), bridgeHistoryAdmits("terminal", 521)],
+  assert.deepEqual([bridgeHistoryAdmits("ordinary", 512), bridgeHistoryAdmits("ordinary", 513), bridgeHistoryAdmits("closing", 524),
+    bridgeHistoryAdmits("closing", 525), bridgeHistoryAdmits("terminal", 525), bridgeHistoryAdmits("terminal", 526)],
   [true, false, true, false, true, false]);
 });
 
@@ -259,7 +259,7 @@ test("a journal 0.5.96 filled to 512 transitions before the bridge was safe take
   assert.equal(bridgeSafe(ended.transitions[512]!), true); assert.equal(ended.transitions[512]!.providerObservation, null);
 });
 
-test("the reader holds an open journal to 1.5 MiB and a finished one to 1 MiB + 576 KiB", async (t) => {
+test("the reader holds an open journal to 1 MiB + 832 KiB and a finished one to 1 MiB + 896 KiB", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const completed = await completedRecord(temporary.root);
   const proven = completed.transitions.findIndex((entry) => entry.destinationProof !== null);
   const { at: _at, previousHash: _previous, transitionHash: _hash, ...end } = completed.transitions[proven]!;
@@ -280,7 +280,7 @@ test("the reader holds an open journal to 1.5 MiB and a finished one to 1 MiB + 
   let over = open;
   for (; bytes(ended(over)) <= BRIDGE_TERMINAL_FILE_LIMIT; n++) over = appended(over, flaky(n));
   await assert.rejects(load(ended(sealed(over))), { code: "APN_STATE_CORRUPT" });
-  assert.deepEqual([BRIDGE_OPEN_FILE_LIMIT, BRIDGE_TERMINAL_FILE_LIMIT], [1536 * 1024, 1024 * 1024 + 576 * 1024]);
+  assert.deepEqual([BRIDGE_OPEN_FILE_LIMIT, BRIDGE_TERMINAL_FILE_LIMIT], [1024 * 1024 + 832 * 1024, 1024 * 1024 + 896 * 1024]);
 });
 
 test("a reorg of the unsafe bridge inclusion in a journal 0.5.96 filled is recorded past 1 MiB, and the bridge still ends", async (t) => {

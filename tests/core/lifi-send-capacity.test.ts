@@ -8,7 +8,7 @@ import { bridgeCapacityRefusal, bridgeSendRefusal, bridgeTransitionKind } from "
 import type { BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { bridgeAtTransition } from "../../src/lifi/transitions.js";
-import { addedKinds, appended, stoppedSend, withDeferrals } from "./lifi-capacity-helpers.js";
+import { addedKinds, appended, bytes, stoppedSend, withDeferrals } from "./lifi-capacity-helpers.js";
 import { temporaryState } from "./helpers.js";
 import { findStored } from "./stored-operations.js";
 
@@ -109,4 +109,28 @@ test("the first effect to sign reserves room for the later one's send too, so an
   s.now.setTime(Date.parse(op.intent.expiresAt) + 1000);
   const late = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(late.ok, true, late.error?.message);
   assert.equal((await findStored(s.core.bridges.records, id))!.state, "failed_before_effect"); assert.equal(s.source.submissions.length, 0);
+});
+
+test("a restored 0.5.96 journal past the ordinary line with a surviving SEND claim records the claimed send and observes it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  // The bridge was claimed for sending and sealed in custody; the journal restored from before its signing_started, which
+  // 0.5.96 grew with no reserve to about 930 KiB (past the ordinary line), still holds it unsealed.
+  const { s, id, stopped } = await stoppedSend(temporary.root, "base-arb", "bridge", "submitting", "before");
+  const pre = bridgeAtTransition(stopped, stopped.transitions.findIndex((entry) => entry.effects.at(-1)!.phase === "signing_started") - 1);
+  const op = withDeferrals(pre, pre.transitions.length, (next) => bytes(next) <= 930 * 1024), submitted = s.source.submissions.length;
+  assert.equal(op.effects.at(-1)!.phase, "unsealed"); assert.equal(existsSync(claimPath(temporary.root, op, "send", "bridge")), true);
+  assert.ok(bytes(op) + 128 * 1024 > 1024 * 1024, `${bytes(op)}`);
+  await store(temporary.root, op);
+  // signing_started, sealed, submitting and unknown_finality are recorded from the claim and custody; the observation's
+  // own failure detail after them is ordinary and refused, as any ordinary change is there.
+  const first = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(first.error?.message, "Bridge validation failed: bridge_record_capacity.");
+  const caught = (await findStored(s.core.bridges.records, id))!, bridge = caught.effects.at(-1)!;
+  assert.deepEqual(addedKinds(op, caught), ["closing", "closing", "closing", "closing"]);
+  assert.deepEqual([bridge.phase, bridge.submissionAttempts, bridge.transactionHash], ["unknown_finality", 1, stopped.effects.at(-1)!.transactionHash]);
+  assert.equal(s.source.submissions.length, submitted);
+  // Once those exact bytes are seen on chain the bridge completes; APN never sends them itself.
+  s.source.submissions.push((await s.custody.load(op, "bridge"))!.rawTransaction); s.provider.statusValue = "completed_observed";
+  const done = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(done.ok, true, done.error?.message);
+  assert.equal((await findStored(s.core.bridges.records, id))!.state, "completed"); assert.equal(s.source.submissions.length, submitted + 1);
 });

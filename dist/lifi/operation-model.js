@@ -17,10 +17,12 @@ export const BRIDGE_TELEMETRY_ROWS = 8;
 export const BRIDGE_HISTORY_LIMIT = 512;
 /**
  * Past that bound, at most this many more transitions, each a closing one (history-capacity.ts); the last of them is
- * kept for the terminal transition. A journal an earlier release filled to the bound can therefore still end. The room
- * a journal may take past 1 MiB is this many copies of the state and one more (history-capacity.ts).
+ * kept for the terminal transition. No ordinary transition is written there, so each of the at most two effects has at
+ * most six closing steps left (its four send steps, one lost inclusion and its first safe proof: bridgeBoundedEvidence)
+ * and the end saves the destination proof: 2 × 6 + 1. A journal an earlier release filled to the bound can therefore
+ * still end. The room a journal may take past 1 MiB is this many copies of the state and one more (history-capacity.ts).
  */
-export const BRIDGE_CLOSING_TRANSITIONS = 8;
+export const BRIDGE_CLOSING_TRANSITIONS = 13;
 /**
  * The provider statuses after which a destination proof is read. LI.FI reports the BNB composite whose Fly swap reverted,
  * so that the Receiver returned the fill as WETH, as DONE/PARTIAL; there the canonical trace, not the provider, decides.
