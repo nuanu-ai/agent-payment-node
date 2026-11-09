@@ -10,26 +10,31 @@ export declare const BRIDGE_TERMINAL_FILE_LIMIT: number;
 export declare const BRIDGE_OPEN_FILE_LIMIT: number;
 /**
  * `ordinary`: anything that can repeat without moving the operation toward its end (state flips between pending and
- * unknown, failure diagnostics, provider statuses that name nothing new, unsafe inclusions). `closing`: evidence that
- * can only be added a bounded number of times: an effect's first safe proof, the destination proof, the loss of an
- * inclusion that was never safe, or a provider observation naming a destination transaction it had not named, or now
- * settled. `terminal`: the operation's end.
+ * unknown, failure diagnostics, provider statuses that name nothing new, unsafe inclusions, an effect starting to sign
+ * or releasing that start). `closing`: evidence that can only be added a bounded number of times (bridgeBoundedEvidence),
+ * or a provider observation naming a destination transaction it had not named, or now settled. `terminal`: the end.
  */
 export type BridgeTransitionKind = "ordinary" | "closing" | "terminal";
 type Meaning = Pick<BridgeTransition, "state" | "effects" | "destinationProof" | "providerObservation">;
 export declare function bridgeTransitionKind(previous: Meaning, next: Meaning): BridgeTransitionKind;
 /**
- * Whether `next` records closing evidence that past the ordinary bounds can occur only a bounded number of times, unlike
- * a provider hint, which can name a new transaction again:
+ * Whether `next` records closing evidence each effect can add only a bounded number of times, unlike a provider hint,
+ * which can name a new transaction again:
  * - an effect's first safe proof or the destination proof: validation never lets a saved proof be replaced;
- * - an effect losing the inclusion it had recorded before it was safe (a reorg moved it, or it vanished). The phase
- *   rules need this transition before a safe proof at another block. It follows a recorded unsafe inclusion, an
- *   ordinary transition. It takes a slot past 512 transitions, or room past 1 MiB only beyond the closing reserve's
- *   line; the count never falls, and a file never shrinks by more than one copy (only its current state can), less than
- *   the 96 KiB from that line down to the ordinary one. So from there no unsafe inclusion is recorded again, and each
- *   effect loses one at most once.
+ * - an effect's send steps after signing_started: entering sealed, entering submitting, leaving submitting, at most once
+ *   each because the phase rules never return to those phases (signing_started itself can repeat through its release);
+ * - an effect losing an inclusion it had recorded before it was safe (a reorg moved it, or it vanished); the phase rules
+ *   need this before a safe proof at another block. Past 512 transitions, or after the last write that left a file at
+ *   or under 1 MiB, no ordinary write is admitted, so an effect holds at most one unsafe inclusion to lose there: the one
+ *   it had, or the one its single exit from submitting recorded.
  */
 export declare function bridgeBoundedEvidence(previous: Meaning, next: Meaning): boolean;
+/**
+ * Why an effect may not start its send now (null when it may): signing starts only with room for all its send
+ * transitions under the ordinary bounds, so a routine send never needs the closing reserve or the room past 1 MiB.
+ * Refused, nothing is signed or claimed, and the operation can only expire into its halt.
+ */
+export declare function bridgeSendRefusal(op: BridgeOperationRecord): "bridge_history_capacity" | "bridge_record_capacity" | null;
 /** Whether a journal of `transitions` entries may end with a transition of `kind`. */
 export declare function bridgeHistoryAdmits(kind: BridgeTransitionKind, transitions: number): boolean;
 /**

@@ -128,7 +128,8 @@ export class BridgeObservation {
                     fromChainId: m.request.fromChainId, toChainId: m.request.toChainId });
             }
             catch { /* Provider availability is independent of canonical chain evidence. */ }
-            // A hint the journal has no room for still guides this pass and is recorded by its end: flapping cannot block it.
+            // A hint the journal has no room for still guides this pass and is saved with the next transition that may pass
+            // the bounds (the destination proof or the end): flapping cannot block it, and it adds no transition of its own.
             if (observation !== null) {
                 try {
                     op = await this.save(op, { providerObservation: observation });

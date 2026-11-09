@@ -1,4 +1,4 @@
-import { type OperationFamilyAdapter } from "./adapter.js";
+import type { OperationFamilyAdapter } from "./adapter.js";
 import type { OperationRegistry } from "./registry.js";
 import { type OperationIndexStore, type StoredRecordName } from "./store.js";
 import { type OperationIndexEntry, type UnreadableReason } from "./types.js";

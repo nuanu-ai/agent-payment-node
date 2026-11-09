@@ -3,53 +3,26 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { canonicalJson, hashObject } from "../../src/canonical.js";
-import { ApnError } from "../../src/errors.js";
 import { BRIDGE_FILE_LIMIT, BRIDGE_OPEN_FILE_LIMIT, BRIDGE_TERMINAL_FILE_LIMIT, bridgeCapacityRefusal, bridgeHistoryAdmits,
   bridgeTransitionKind } from "../../src/lifi/history-capacity.js";
-import { BRIDGE_TERMINAL, bridgeSnapshot, sealBridgeOperation, type BridgeMutable, type BridgeObservationTelemetry,
-  type BridgeOperationRecord } from "../../src/lifi/operation-model.js";
+import type { BridgeMutable, BridgeObservationTelemetry, BridgeOperationRecord } from "../../src/lifi/operation-model.js";
 import { BridgeOperationRepository } from "../../src/lifi/operation-repository.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { bridgeAtTransition, transitionBridge } from "../../src/lifi/transitions.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
+import { addedKinds, appended, bridgeSafe, bytes, deferred, flaky, refused, sealed, sourceFlaky, stoppedSend, withDeferrals,
+  written } from "./lifi-capacity-helpers.js";
 import { LIFI_DESTINATION_HASH, lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
 import { findStored } from "./stored-operations.js";
 
-const bytes = (op: BridgeOperationRecord) => Buffer.byteLength(canonicalJson(op), "utf8") + 1;
-/**
- * One appended transition exactly as transitionBridge builds it, without its capacity rules: what an earlier release
- * wrote. Its integrity hash is stale (same length) until `sealed`, so long histories are built without rehashing each step.
- */
-function appended(op: BridgeOperationRecord, patch: Partial<BridgeMutable>): BridgeOperationRecord {
-  const next = { ...op, ...patch } as BridgeOperationRecord;
-  const entry = { ...bridgeSnapshot(next), at: op.updatedAt, previousHash: op.transitions.at(-1)!.transitionHash };
-  return { ...next, terminal: BRIDGE_TERMINAL.includes(next.state),
-    transitions: [...op.transitions, { ...entry, transitionHash: hashObject(entry) }] };
-}
-function sealed(op: BridgeOperationRecord): BridgeOperationRecord {
-  const { integrityHash: _old, ...body } = op;
-  return sealBridgeOperation(body);
-}
-const written = (op: BridgeOperationRecord, patch: Partial<BridgeMutable>) => sealed(appended(op, patch));
-/** A destination read that failed with different details on every resume: each one was a new ordinary transition. */
-const flaky = (n: number): Partial<BridgeMutable> => ({ state: "unknown_finality", failure: {
-  reason: "destination_observation_unavailable", residualAllowance: null, observationRpc: {
-    schemaVersion: "apn.bridge-observation-rpc-failure.v1", stage: "destination_receipt", effectRole: "bridge",
-    code: "APN_RPC_PROTOCOL", reason: "bridge_RPC_HTTP_status", rpcMethod: "eth_getTransactionReceipt",
-    httpStatus: 500 + (n % 100), attempts: 1 + (n % 10) } } });
-/** A pre-sign guard deferral flipping between rate limited and unavailable: ordinary transitions of about 2 KiB. */
-const deferred = (n: number): Partial<BridgeMutable> => ({ failure: { residualAllowance: null,
-  reason: n % 2 === 0 ? "pre_sign_rpc_rate_limited" : "pre_sign_rpc_unavailable" } });
 const big = 9_007_199_254_740_991;
 const rows: BridgeObservationTelemetry[] = Array.from({ length: 8 }, () => ({ schemaVersion: "apn.bridge-observation-telemetry.v1",
   stage: "residual_observation", effectRole: "bridge", outcome: "failure", physicalRequests: 10_000, httpAttempts: 10_000,
   logicalRpcItems: 100_000, batchCount: 10_000, maxBatchSize: 33, budgetRejectedBeforeTransport: 10_000,
   attemptsByEndpointRole: { primary: big, receipt: big, archive: big }, attemptsByMethodClass: { chain: big, transaction: big,
     receipt: big, block: big, code: big, storage: big, call: big, logs: big, other: big } }));
-const refused = (reason: string) => (error: unknown) => error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED" &&
-  error.message === `Bridge validation failed: ${reason}.`;
 
 async function completedRecord(root: string): Promise<BridgeOperationRecord> {
   const s = await lifiFixture(root, "base-arb"), { id } = await s.prepare();
@@ -182,13 +155,6 @@ test("a provider hint that keeps changing uses up the closing room but cannot ke
   assert.equal(completed.providerObservation?.destinationTransactionHash, LIFI_DESTINATION_HASH);
 });
 
-/** A source read that failed with different details on every resume, before the bridge was safe: ordinary transitions. */
-const sourceFlaky = (n: number): Partial<BridgeMutable> => ({ state: "unknown_finality", failure: {
-  reason: "source_observation_unavailable", residualAllowance: null, observationRpc: {
-    schemaVersion: "apn.bridge-observation-rpc-failure.v1", stage: "source_receipt", effectRole: "bridge",
-    code: "APN_RPC_PROTOCOL", reason: "bridge_RPC_HTTP_status", rpcMethod: "eth_getTransactionReceipt",
-    httpStatus: 500 + (n % 100), attempts: 1 + (n % 10) } } });
-
 /**
  * A journal 0.5.96 filled while the bridge transaction was included but not yet safe: no reserve kept, at least `room`
  * bytes but less than one more copy left under 1 MiB, and its first safe source proof (a closing transition) to record.
@@ -205,11 +171,6 @@ async function filledBeforeSafeSource(root: string, pair: "base-arb" | "eth-bnb"
   s.source.safeBridge = true;
   return { s, id, op };
 }
-
-/** The kinds of the transitions `after` added to `before`. */
-const addedKinds = (before: BridgeOperationRecord, after: BridgeOperationRecord) => after.transitions.slice(before.transitions.length)
-  .map((entry, index) => bridgeTransitionKind(after.transitions[before.transitions.length + index - 1]!, entry));
-const bridgeSafe = (entry: { readonly effects: readonly { readonly safeProof: unknown }[] }) => entry.effects.at(-1)!.safeProof !== null;
 
 test("a journal 0.5.96 filled before the bridge was safe records that proof past 1 MiB and ends with the right outcome", async (t) => {
   for (const pair of ["base-arb", "eth-bnb"] as const) for (const room of [0, 24 * 1024]) await t.test(`${pair}, ${room} bytes kept`, async (child) => {
@@ -298,7 +259,7 @@ test("a journal 0.5.96 filled to 512 transitions before the bridge was safe take
   assert.equal(bridgeSafe(ended.transitions[512]!), true); assert.equal(ended.transitions[512]!.providerObservation, null);
 });
 
-test("the reader holds an open journal to 1 MiB + 448 KiB and a finished one to 1.5 MiB", async (t) => {
+test("the reader holds an open journal to 1.5 MiB and a finished one to 1 MiB + 576 KiB", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup); const completed = await completedRecord(temporary.root);
   const proven = completed.transitions.findIndex((entry) => entry.destinationProof !== null);
   const { at: _at, previousHash: _previous, transitionHash: _hash, ...end } = completed.transitions[proven]!;
@@ -319,7 +280,7 @@ test("the reader holds an open journal to 1 MiB + 448 KiB and a finished one to 
   let over = open;
   for (; bytes(ended(over)) <= BRIDGE_TERMINAL_FILE_LIMIT; n++) over = appended(over, flaky(n));
   await assert.rejects(load(ended(sealed(over))), { code: "APN_STATE_CORRUPT" });
-  assert.deepEqual([BRIDGE_OPEN_FILE_LIMIT, BRIDGE_TERMINAL_FILE_LIMIT], [1024 * 1024 + 448 * 1024, 1536 * 1024]);
+  assert.deepEqual([BRIDGE_OPEN_FILE_LIMIT, BRIDGE_TERMINAL_FILE_LIMIT], [1536 * 1024, 1024 * 1024 + 576 * 1024]);
 });
 
 test("a reorg of the unsafe bridge inclusion in a journal 0.5.96 filled is recorded past 1 MiB, and the bridge still ends", async (t) => {
@@ -361,17 +322,9 @@ test("past the line a lost inclusion cannot repeat: the unsafe re-inclusion afte
  * transition marks an effect signing_started: the process died before custody sealed anything.
  */
 async function filledAtUnsignedSeal(root: string, pair: "base-arb" | "eth-bnb") {
-  const s = await lifiFixture(root, pair), { id } = await s.prepare(), persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
-  s.core.bridges.records.persist = async (op) => { await persist(op); if (op.effects.at(-1)!.phase === "signing_started") throw new Error("died before custody"); };
-  assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false); s.core.bridges.records.persist = persist;
-  const stopped = (await findStored(s.core.bridges.records, id))!, { at: _at, previousHash: _p, transitionHash: _h, ...marker } = stopped.transitions.at(-1)!;
-  const marked = (from: BridgeOperationRecord) => appended(from, { ...marker,
-    effects: marker.effects.map(({ envelopeHash: _e, ...e }, i) => ({ ...e, envelope: from.effects[i]!.envelope })) });
-  const fits = (next: BridgeOperationRecord) => next.transitions.length <= 512 && bytes(next) <= BRIDGE_FILE_LIMIT;
-  let op = bridgeAtTransition(stopped, stopped.transitions.length - 2), n = 0;
-  while (op.transitions.length < 496 && bytes(op) < BRIDGE_FILE_LIMIT - 64 * 1024) for (let k = 0; k < 8; k++) op = appended(op, deferred(n++));
-  for (; fits(marked(appended(op, deferred(n)))); n++) op = appended(op, deferred(n));
-  op = sealed(marked(op)); assert.equal(validateBridgeOperation(op), op); assert.equal(op.effects.at(-1)!.phase, "signing_started");
+  const { s, id, stopped } = await stoppedSend(root, pair, "signing_started", "after");
+  const op = withDeferrals(stopped, stopped.transitions.length - 1, (next) => next.transitions.length <= 512 && bytes(next) <= BRIDGE_FILE_LIMIT);
+  assert.equal(validateBridgeOperation(op), op); assert.equal(op.effects.at(-1)!.phase, "signing_started");
   await writeFile(join(root, "bridge-operations", op.profileHash, `${id}.json`), `${canonicalJson(op)}\n`);
   return { s, id, op };
 }

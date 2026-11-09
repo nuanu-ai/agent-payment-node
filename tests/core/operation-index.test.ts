@@ -286,3 +286,16 @@ test("terminal records of one walk share durable pointer shards written before t
   assert.equal((await s.index().find(records[0]!.operationId))?.state, "terminal");
   assert.deepEqual(await snapshot(s.root), expected);
 });
+
+test("salvage reads a record only from its family's own stores, under the bound the store names", async (t) => {
+  const s = await setup(t), path = await save(s.root, record(12)), store = new OperationIndexStore(s.root);
+  const recordPath = `test-a/${P1}/${id(12)}.json`, own = { directory: "test-a", perProfile: true };
+  // A damaged index entry naming another family's directory is unreadable as this family's record, not a crash.
+  assert.deepEqual(await store.rawRecord(recordPath, [{ directory: "test-b", perProfile: true }]), { unreadable: "record_not_json" });
+  assert.deepEqual(await store.rawRecord(recordPath, [own]), { value: record(12) });
+  // Past the state store's 1 MiB a record is read only under a store bound that admits it (the bridge store names one).
+  await writeFile(path, `${canonicalJson({ ...record(12), padding: "0".repeat(1024 * 1024) })}\n`);
+  assert.deepEqual(await store.rawRecord(recordPath, [own]), { unreadable: "record_not_json" });
+  const read = await store.rawRecord(recordPath, [{ ...own, recordByteLimit: 2 * 1024 * 1024 }]);
+  assert.equal(read !== null && "value" in read ? (read.value as TestRecord).operationId : null, id(12));
+});

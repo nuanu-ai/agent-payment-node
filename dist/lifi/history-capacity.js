@@ -11,14 +11,15 @@ export const BRIDGE_FILE_LIMIT = 1024 * 1024;
  */
 const BRIDGE_STATE_COPY_BYTES = 64 * 1024;
 /**
- * Room past 1 MiB: one state copy for each of the BRIDGE_CLOSING_TRANSITIONS a journal may take past its released
- * bounds. Only bounded evidence (bridgeBoundedEvidence) and the terminal transition use it: at most three first proofs
- * (an effect's first safe proof, the destination proof; validation never lets a saved proof be replaced), at most two
- * lost inclusions (one per effect, see below) and the end. Each adds its own copy and the record's current state grows
- * by at most one copy in all: at most six copies before the end, within the seven an open journal may use, and seven
- * with it.
+ * Room past 1 MiB. After the last write that left a file at or under 1 MiB, every write passed it, so each was bounded
+ * evidence (bridgeBoundedEvidence) or the end, never an ordinary transition: no effect starts signing and no ordinary
+ * write records an unsafe inclusion after it. Each effect then has at most its three send steps, one lost inclusion and
+ * its first safe proof left, and the bridge's send steps follow an approval already included: at most seven (the
+ * approval's last two and the bridge's five), then the end, which saves the destination proof (observation.ts). That is
+ * BRIDGE_CLOSING_TRANSITIONS transitions, as past 512. Each adds one copy and the current state grows by at most one copy
+ * in all, so the room is one copy more.
  */
-const BRIDGE_OVERFLOW_BYTES = BRIDGE_CLOSING_TRANSITIONS * BRIDGE_STATE_COPY_BYTES;
+const BRIDGE_OVERFLOW_BYTES = (BRIDGE_CLOSING_TRANSITIONS + 1) * BRIDGE_STATE_COPY_BYTES;
 /** The reader's bound for a terminal journal. 0.5.97 reads one only up to 1 MiB + 64 KiB, earlier releases up to 1 MiB. */
 export const BRIDGE_TERMINAL_FILE_LIMIT = BRIDGE_FILE_LIMIT + BRIDGE_OVERFLOW_BYTES;
 /**
@@ -39,22 +40,41 @@ export function bridgeTransitionKind(previous, next) {
     return bridgeBoundedEvidence(previous, next) || newDestinationHint(previous.providerObservation, next.providerObservation) ? "closing" : "ordinary";
 }
 /**
- * Whether `next` records closing evidence that past the ordinary bounds can occur only a bounded number of times, unlike
- * a provider hint, which can name a new transaction again:
+ * Whether `next` records closing evidence each effect can add only a bounded number of times, unlike a provider hint,
+ * which can name a new transaction again:
  * - an effect's first safe proof or the destination proof: validation never lets a saved proof be replaced;
- * - an effect losing the inclusion it had recorded before it was safe (a reorg moved it, or it vanished). The phase
- *   rules need this transition before a safe proof at another block. It follows a recorded unsafe inclusion, an
- *   ordinary transition. It takes a slot past 512 transitions, or room past 1 MiB only beyond the closing reserve's
- *   line; the count never falls, and a file never shrinks by more than one copy (only its current state can), less than
- *   the 96 KiB from that line down to the ordinary one. So from there no unsafe inclusion is recorded again, and each
- *   effect loses one at most once.
+ * - an effect's send steps after signing_started: entering sealed, entering submitting, leaving submitting, at most once
+ *   each because the phase rules never return to those phases (signing_started itself can repeat through its release);
+ * - an effect losing an inclusion it had recorded before it was safe (a reorg moved it, or it vanished); the phase rules
+ *   need this before a safe proof at another block. Past 512 transitions, or after the last write that left a file at
+ *   or under 1 MiB, no ordinary write is admitted, so an effect holds at most one unsafe inclusion to lose there: the one
+ *   it had, or the one its single exit from submitting recorded.
  */
 export function bridgeBoundedEvidence(previous, next) {
     return next.effects.some((effect, index) => {
         const before = previous.effects[index];
-        return before !== undefined && (effect.safeProof !== null && before.safeProof === null ||
-            before.includedProof !== null && before.safeProof === null && effect.includedProof === null);
+        if (before === undefined)
+            return false;
+        const sendStep = before.phase !== effect.phase && SEND_PHASES.includes(before.phase) && effect.phase !== "unsealed";
+        return sendStep || effect.safeProof !== null && before.safeProof === null ||
+            before.includedProof !== null && before.safeProof === null && effect.includedProof === null;
     }) || (previous.destinationProof === null && next.destinationProof !== null);
+}
+const SEND_PHASES = ["signing_started", "sealed", "submitting"];
+/** The transitions one effect's send writes from its SIGN claim: signing_started, sealed, submitting, then the save after the send. */
+const SEND_TRANSITIONS = 4;
+/** What each adds beyond a copy of the current state: two hashes, a time and longer phase names, in the copy and the record. */
+const SEND_GROWTH_BYTES = 1024;
+/**
+ * Why an effect may not start its send now (null when it may): signing starts only with room for all its send
+ * transitions under the ordinary bounds, so a routine send never needs the closing reserve or the room past 1 MiB.
+ * Refused, nothing is signed or claimed, and the operation can only expire into its halt.
+ */
+export function bridgeSendRefusal(op) {
+    if (op.transitions.length + SEND_TRANSITIONS > BRIDGE_HISTORY_LIMIT)
+        return "bridge_history_capacity";
+    const copy = bridgeFileBytes(op.transitions.at(-1)) + SEND_GROWTH_BYTES;
+    return bridgeFileBytes(op) + SEND_TRANSITIONS * copy > BRIDGE_FILE_LIMIT - CLOSING_RESERVE_BYTES ? "bridge_record_capacity" : null;
 }
 function newDestinationHint(previous, next) {
     if (next === null || !isEvmTransactionHash(next.destinationTransactionHash))

@@ -9,7 +9,7 @@ import { validateMaterial } from "./effect-store.js";
 import { BridgeObservation, replaceEffect, type BridgeSave } from "./observation.js";
 import { BRIDGE_PRE_SIGN_RPC_RATE_LIMITED, BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable,
   type BridgeOperationRecord, type BridgePreSignRpcFailure } from "./operation-model.js";
-import { bridgeCapacityRefused } from "./history-capacity.js";
+import { bridgeCapacityRefused, bridgeSendRefusal } from "./history-capacity.js";
 import { assertBridgeOwner } from "./owner.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeCompositeReturn, publicBridgeOperation } from "./receipt.js";
@@ -116,6 +116,9 @@ export class BridgeExecution {
         catch (error) { return budgetExhausted(error) ? op : await this.deferOrHalt(op, error); }
         // Signing commits an effect; leave room for a fresh guard and its single raw send.
         if (this.physicalBudget !== undefined && this.physicalBudget.remaining() < 2) return op;
+        // And room in the journal for all of its send transitions, before any claim; refused, it can only expire.
+        const room = bridgeSendRefusal(op);
+        if (room !== null) bridgeFailure("APN_OPERATION_BLOCKED", room, {});
         if (authority !== undefined) await authority.check(op);
         // Every route: the create-only SIGN claim outside the rollbackable journals binds this effect before custody signs.
         await this.claims().claim(op, effect.role, "sign");
@@ -192,7 +195,8 @@ export class BridgeExecution {
   /**
    * An expired operation whose unsigned seal a full journal could not release: nothing can be signed for it any more.
    * Its sent effects are observed first, then it ends as the guard's expiry ends it, the release folded into that
-   * terminal transition, which the journal always admits. A sent approval that is not yet safe keeps it waiting.
+   * terminal transition, which the journal always admits. While a sent approval is not yet safe that halt is an ordinary
+   * transition, so the resume is refused unchanged until the approval's safe proof is recorded.
    */
   private async haltHeldSeal(op: BridgeOperationRecord, role: "approval" | "bridge", expired: unknown): Promise<BridgeOperationRecord> {
     const observed = await this.observation.sources(op); op = observed.operation;

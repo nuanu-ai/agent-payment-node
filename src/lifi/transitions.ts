@@ -37,7 +37,8 @@ export function transitionBridge(op: BridgeOperationRecord, patch: Partial<Bridg
     result = appended(op, { ...next, observationTelemetry: [] }, at); refusal = bridgeCapacityRefusal(kind, result, false);
   }
   // Only then may bounded evidence or the terminal transition pass the 1 MiB bound that earlier releases read: a journal
-  // 0.5.96 filled has no reserve for them. A new provider hint never does; it is carried to the end (observation.ts).
+  // 0.5.96 filled has no reserve for them. A provider hint never does on its own; one without room is carried
+  // (observation.ts) and passes only with the bounded evidence or end it rides along with, adding no transition.
   if (refusal === "bridge_record_capacity" && (kind === "terminal" || bridgeBoundedEvidence(oldMeaning, newMeaning))) {
     refusal = bridgeCapacityRefusal(kind, result, true);
   }
