@@ -32,12 +32,15 @@ async function setup(t: test.TestContext) {
     quoteRequestDeadline: deadline, quoteDeadline: deadline, effectiveDeadline: deadline, amountInAtomic: "3000000", minAmountOutAtomic: "1251525",
     quotedAmountOutAtomic: "1264167", sourceBlockHash: SOURCE_BLOCK, sourceCall: { to: TOKEN, data, value: "0", nonce: "7", gas: "100000",
       maxFeePerGas: "2000000000", maxPriorityFeePerGas: "100000000", maxNativeDebitWei: "200000000000000" } });
+  // A real run seals before the deadline (the journal refuses a later seal); the clock only passes it afterwards.
+  const sealing = t.mock.method(Date, "now", () => Date.parse(deadline) - 30_000);
   record = await journal.advance(record.operationId, record.integrityHash, "signing_started");
   const raw = await ACCOUNT.signTransaction({ type: "eip1559", chainId: 8453, to: TOKEN, data, value: 0n, nonce: 7, gas: 100000n,
     maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 100000000n, accessList: [] });
   record = await journal.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) });
   record = await journal.advance(record.operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
   record = await journal.advance(record.operationId, record.integrityHash, "unknown_finality");
+  sealing.mock.restore();
   const hash = record.transactionHash!, chain = { finalizedNonce: "0x7", landed: false, known: false, indexed: true }, seen: string[] = [];
   const receipt = () => ({ transactionHash: hash, to: TOKEN, from: ACCOUNT.address, blockNumber: "0x10", blockHash: BLOCK, transactionIndex: "0x0", status: "0x1",
     logs: [{ address: TOKEN, topics: [TRANSFER, pad(ACCOUNT.address).toLowerCase(), pad(DEPOSIT).toLowerCase()], data: toHex(3000000n, { size: 32 }), transactionHash: hash, blockHash: BLOCK }] });

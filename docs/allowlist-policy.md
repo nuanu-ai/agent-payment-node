@@ -97,6 +97,11 @@ once per rail, and each rail keeps its own caps.
   that row. Each reference has its own per-operation cap; `dailyLimitAtomic` is one combined ceiling for the asset and
   rail. Duplicate pins, empty pins, wildcard references and extra fields are refused. The activation screen and status
   show every alternative and its cap.
+- NEAR 1Click deposits (`apn oneclick source submit`) use the `bridge` rail of the payer's origin asset, one mechanism
+  per lane: `{ "provider": "near-1click", "reference": "<lane>.v1" }`. Base USDC admits
+  `base-usdc-to-tron-usdt.v1`; Ethereum ETH (`native` on `eip155:1`) admits `ethereum-eth-to-tron-trx.v1`,
+  `ethereum-eth-to-solana-sol.v1` and `ethereum-eth-to-tron-usdt.v1`, each on its own or as `mechanisms` alternatives.
+  A lane's `recipients` list holds TRON or Solana addresses. See [NEAR 1Click direct lanes](lifi.md#near-1click-direct-lanes).
 
 ### Recipient pins
 
@@ -270,3 +275,5 @@ forge entries. An anchor outside the state directory, such as in the Keychain, i
 | `APN_OPERATION_BLOCKED` / `allowlist_policy_expired` | The active policy passed its `expiresAt`. |
 | `APN_ALLOWLIST_REFUSED` / `allowlist_recipient_not_admitted` | The recipient is not in the admission's `recipients` list. |
 | `APN_ALLOWLIST_REFUSED` / `allowlist_policy_required` | No policy is active for the profile. |
+| `APN_ALLOWLIST_REFUSED` / `oneclick_source_active_owner_policy_required` | 1Click: no active policy, or its EVM account is not the payer. |
+| `APN_ALLOWLIST_REFUSED` / `oneclick_source_mechanism_not_admitted` | 1Click: the origin asset's bridge admission does not pin this lane. |

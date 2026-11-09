@@ -768,6 +768,29 @@ safe ASCII characters. For different assets the only in-band valuation is the qu
 the quote's slippage floor and `--min-output-atomic` is the owner's price floor. Recipients must be canonical: TRON
 base58check for TRX and USDT, a 32-byte Solana base58 key for SOL. `refundTo` is always the payer.
 
+**Owner policy.** Submit requires the profile's active owner allowlist policy, whose EVM account must be the payer.
+The payer's origin asset (Base USDC, or Ethereum ETH) must admit the `bridge` rail with this lane's mechanism,
+`{ "provider": "near-1click", "reference": "<lane>.v1" }`; the amount must fit that lane's per-operation cap and,
+together with the asset's usage for the UTC day, its daily limit; and a `recipients` pin on the lane must list the
+recipient. All of this is checked before any quote, so a refusal makes no network call and stages nothing. After the
+foreground consent the policy and pin are checked again and the principal is held in the usage ledger
+(`oneclick-source:<operation-id>`) before signing. A failure before the transaction is sealed releases the hold, and the
+journal refuses to seal after the effective deadline (`oneclick_source_quote_expired_before_seal`). Status brings the
+hold to what the journal proves:
+
+| Journal | Hold |
+| --- | --- |
+| `prepared`, `signing_started` | `reserved`; released (`failed_before_effect`) once the effective deadline has passed |
+| `sealed` | `reserved` |
+| `submitted_pending` | `submitted` |
+| `submitting`, `unknown_finality` | `unknown_finality` |
+| `source_observed`, safe success | `finalized` (counted on the day status records it) |
+| `source_observed`, safe revert | `failed_confirmed_revert` |
+| `failed_proven_superseded` | `released_unsubmitted` |
+
+Submit and status report the hold as `usageHold` (`null` for records written before 0.5.98, which hold nothing). A
+late deposit that 1Click refunds still counts as spent: the refund is not an effect APN proves.
+
 **Submit** is keyless and fails closed. APN first requests a dry quote (no deposit address), then an actual exact-input
 quote whose echo must match the lane assets, payer, refund address, recipient, amount and a request deadline at most
 180 seconds ahead. The quoted minimum must meet `--min-output-atomic`, the loss must fit `--max-quoted-loss-atomic`,

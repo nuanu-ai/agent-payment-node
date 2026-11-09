@@ -71,6 +71,11 @@ export declare class OneClickSourceJournal extends SecureStateStore {
         operationId: string;
         transactionHash: Hex;
     } | null>;
+    /**
+     * Runs `action` under the record lock while the record is unsigned and its effective deadline has passed. `advance`
+     * refuses to seal past that deadline under the same lock, so no signature can follow what `action` records.
+     */
+    whileUnsignedPastDeadline(id: string, action: (record: OneClickSourceRecord) => Promise<void>): Promise<void>;
     /** Stores the finalized destination proof once; later status answers come from the journal. */
     recordDestination(id: string, expectedHash: string, proof: OneClickDestinationProof): Promise<OneClickSourceRecord>;
     /**

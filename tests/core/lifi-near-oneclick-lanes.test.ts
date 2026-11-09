@@ -172,6 +172,7 @@ test("legacy v1 and v2 records stay readable as the Base USDC to TRON USDT lane"
 
 test("v3 native records seal only the exact Ethereum value transfer and reserve nonces per chain", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup);
+  t.mock.method(Date, "now", () => Date.parse(base.effectiveDeadline) - 60_000); // before the quote deadline, as a real seal is
   const account = privateKeyToAccount(`0x${"1".repeat(64)}`), journal = new TestJournal(temp.root);
   const lane = oneClickLane("ethereum-eth-to-tron-trx"), amount = "2000000000000000";
   const call = oneClickSourceCall(lane, deposit, amount);

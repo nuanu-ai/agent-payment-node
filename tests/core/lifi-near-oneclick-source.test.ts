@@ -40,7 +40,8 @@ test("1Click command binding carries explicit limits", () => {
   if (bound.command === "oneclick.source.submit") assert.equal(bound.recipient, request.recipient);
 });
 
-test("durable 1Click journal seals exact ERC20 transfer and permits one submission", async () => {
+test("durable 1Click journal seals exact ERC20 transfer and permits one submission", async (t) => {
+  t.mock.method(Date, "now", () => now); // before the quote deadline, as a real seal is
   const { privateKeyToAccount } = await import("viem/accounts");
   const { encodeFunctionData, keccak256, parseAbi } = await import("viem");
   const { OneClickSourceJournal } = await import("../../src/lifi/near-oneclick-source-journal.js");
