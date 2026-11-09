@@ -114,8 +114,7 @@ A failed gate leaves an incomplete directory for inspection; it cannot be used a
 
 `scripts/audit-production.mjs` runs `npm audit --omit=dev` against the shrinkwrapped lockfile and fails on every
 production finding at low or above, except the dated exceptions below. Each production exception is limited to the named
-package and major version and to either its install paths or the production packages that may require it, and is refused
-from its expiry onward. A package flagged only through excepted packages is covered too.
+package and major version and to the production packages that may require it, and is refused from its expiry onward. A package flagged only through excepted packages is covered too.
 
 `scripts/audit-vendor-emitted.mjs` sends the exact package versions each vendor bundle's provenance says it emitted to
 npm's bulk advisory service and fails at low or above. It exists because the production audit reads the lockfile, which
@@ -123,16 +122,12 @@ files those packages under dev. It takes only its own exception list, limited to
 
 | Advisory | Package | Gate | Scope | Approved | Expires (00:00 UTC) |
 | --- | --- | --- | --- | --- | --- |
-| GHSA-mrhx-c7xc-m3w5 (npm advisory 1243066) | zod `<4.6.6`, major 3 | Production | zod 3.x installed under `node_modules/awal/` and `node_modules/@x402/` | 2026-10-24 | 2026-11-23 |
 | GHSA-gcqx-w48m-w2h4 (npm advisory 1243505) | deepmerge `>=4.2.0 <=4.3.1`, major 4 | Production | deepmerge 4.x while `@toruslabs/http-helpers` and `@toruslabs/customauth` (under `@metamask/agent-wallet`) are the only production packages that require it | 2026-10-29 | 2026-11-28 |
 | GHSA-gcqx-w48m-w2h4 (npm advisory 1243505) | deepmerge 4.3.1 | Vendor-emitted | The `metamask-evm-sdk` vendor bundle | 2026-10-29 | 2026-11-28 |
 
-### zod (GHSA-mrhx-c7xc-m3w5)
-
-Memory exhaustion when validating oversized constrained collections. APN's own zod is 4.6.7. awal 2.12.x and `@x402/*`
-2.x require zod `^3`, which has no fixed release, and zod 4 breaks their APIs. The affected code runs in the awal child
-process; a hostile seller response could exhaust that child's memory, not APN's process or funds. Remove the exception
-when upstream ships a fix.
+GHSA-mrhx-c7xc-m3w5 (zod `<4.6.6`) needs no exception since 0.5.101: `@x402/core` and `@x402/evm` 2.30 require zod 4,
+and the `awal` override pins awal's declared zod to APN's 4.6.7. The awal CLI never imports zod; its only x402 call is
+`decodePaymentRequiredHeader` from the shared `@x402/core` 2.30.
 
 ### deepmerge (GHSA-gcqx-w48m-w2h4)
 
