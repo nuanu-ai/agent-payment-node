@@ -189,6 +189,9 @@ test("the trace is bound to its transaction, the fill amount, one handler and co
   rereads({ target: "0x3333333333333333333333333333333333333333" }); rereads({ valueAtomic: "1" });
   const retargeted = fillTrace(); retargeted.to = "0x3333333333333333333333333333333333333333"; rereads({}, retargeted);
   const revalued = fillTrace(); revalued.value = "0x1"; rereads({}, revalued);
+  // The root must report its value and input: a missing value is not read as the zero the fill sends.
+  const unvalued: Partial<Frame> = fillTrace(); delete unvalued.value; rereads({}, unvalued);
+  const uninput: Partial<Frame> = fillTrace(); delete uninput.input; rereads({ calldata: "0x" }, uninput);
   // Address case in the bound transaction or in the RPC answer does not matter.
   const recased = fillTrace(); recased.to = recased.to.toLowerCase() as Address; recased.from = recased.from.toLowerCase() as Address;
   assert.equal(verifyBnbCompositeTrace(recased, `0x${"12".repeat(32)}`, MESSAGE, call, { sender: RELAYER.toLowerCase() as Address,

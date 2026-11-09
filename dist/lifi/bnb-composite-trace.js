@@ -30,12 +30,14 @@ const TRACE_DEPTH = 64, TRACE_FRAMES = 8192, TRACE_CALLS = 2048, TRACE_HEX_BYTES
  * mismatch rather than an invitation to retry the source transaction.
  */
 export function verifyBnbCompositeTrace(raw, transactionHash, message, call, fill) {
-    const root = traceNode(raw, { count: 0 }, 0);
+    const root = traceNode(raw, { count: 0 }, 0), reported = raw;
     const traceHash = hashObject({ transactionHash, root: traceProjection(root) });
     const input = BigInt(call.inputAmountAtomic), filled = BigInt(fill.amountAtomic);
     // The root must be the verified transaction itself. A trace of anything else says nothing about this fill, so it is an
-    // RPC answer to read again (retryable), never a terminal outcome. Addresses are checksummed on both sides.
-    if (root.type !== "CALL" || root.error !== null || root.from !== getAddress(fill.sender) || root.to !== getAddress(fill.target) ||
+    // RPC answer to read again (retryable), never a terminal outcome. Addresses are checksummed on both sides. callTracer
+    // always reports the top call's value and input, so the root must carry both: inner frames may omit them, the root not.
+    if (root.type !== "CALL" || root.error !== null || reported.value === undefined || reported.input === undefined ||
+        root.from !== getAddress(fill.sender) || root.to !== getAddress(fill.target) ||
         root.value !== BigInt(fill.valueAtomic) || root.input !== fill.calldata)
         bridgeFailure("APN_RPC_PROTOCOL", "native_trace_transaction");
     try {
