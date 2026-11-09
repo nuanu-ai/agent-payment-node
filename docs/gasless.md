@@ -531,7 +531,9 @@ authenticated command. A refusal for the session says which case it is:
 - `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_session_expired`: the CLI token is past its `exp` and the session keeps a
   refresh token. APN finds this in the local session file, before any network read.
 - `APN_PROVIDER_SESSION_REQUIRED / mm_gasless_session_unavailable`: the session is missing or unreadable, its token has
-  expired with no refresh token, or MetaMask refused the token (HTTP 401 or 403).
+  expired with no refresh token, its `iat` or `nbf` is more than 60 seconds ahead of this Mac's clock, or MetaMask
+  refused the token (HTTP 401 or 403). The 60 seconds absorb a local clock running slightly behind MetaMask's; `exp` has
+  no such allowance. A clock further behind needs fixing on the Mac; a new login does not help.
 
 Both give the same steps, with `mm` written as the pinned client. First `mm auth status --json`: it checks the token
 with MetaMask and renews an invalid one; the renewal writes only the token pair, not the project, wallet or trading

@@ -119,6 +119,12 @@ function validateRemote(value: unknown): void {
   if (value.namespace !== "solana") mmAddress(value.address, "mm_gasless_state_corrupt");
 }
 
+/**
+ * How far this Mac's clock may lag MetaMask's when a token says it was issued (`iat`) or becomes valid (`nbf`): a fresh
+ * login cannot fix a slow local clock. Owner decision 2026-11-09. `exp` keeps no tolerance.
+ */
+const JWT_CLOCK_SKEW_MS = 60_000;
+
 /** A token past `exp` beside a stored refresh token is one `mm` renews on its next authenticated command, never APN. */
 function validateJwt(token: string, projectId: string, nowMs: number, refreshable: boolean): void {
   const parts = token.split(".");
@@ -137,7 +143,7 @@ function validateJwt(token: string, projectId: string, nowMs: number, refreshabl
   if (Number(payload.exp) * 1000 <= nowMs) mmFail(refreshable ? "mm_gasless_session_expired" : "mm_gasless_session_unavailable");
   for (const key of ["nbf", "iat"]) {
     const value = payload[key];
-    if (value !== undefined && (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) * 1000 > nowMs)) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) * 1000 > nowMs + JWT_CLOCK_SKEW_MS)) {
       mmFail("mm_gasless_session_unavailable");
     }
   }
