@@ -83,6 +83,10 @@ The source test command enables Node 24's official module-mock API with `--exper
 `prepare` runs eight gates in order. Each gate's combined output is retained as `gate-<n>.log`, including a refused
 gate's output.
 
+The same eight gates run on GitHub's macOS runners for every pull request and every push to `main`
+(`.github/workflows/core-tests.yml`): gate 1 as eight core shards plus the packaging job, gates 2 to 8 as the
+`release-gates` job.
+
 | Gate | Command | Checks |
 | --- | --- | --- |
 | 1 | `npm run test:core` | Core/source build and tests |

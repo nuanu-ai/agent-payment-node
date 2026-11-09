@@ -1,8 +1,9 @@
 name: Core tests
 
-# The whole core suite runs here, on GitHub's macOS runners, instead of on a developer machine.
-# `dist` publishes the TypeScript build of `dist/` for the tracked copy (the supply-chain job
-# refuses a tracked `dist/` that differs from it).
+# The whole core suite and the other release preparation gates run here, on GitHub's macOS
+# runners, instead of on a developer machine. `dist` publishes the TypeScript build of `dist/`
+# for the tracked copy (the supply-chain job refuses a tracked `dist/` that differs from it);
+# `release-gates` publishes the regenerated vendor bundles.
 
 on:
   pull_request:
@@ -124,3 +125,62 @@ jobs:
             tests/packaging/runtime-metamask-sdk-vendor.test.mjs tests/packaging/runtime-tron-utils-vendor.test.mjs \
             tests/packaging/runtime-relay-order-id-vendor.test.mjs tests/packaging/runtime-smart-account-vendor.test.mjs
           node scripts/core-forbidden-surface.mjs
+
+  # Gates 2 to 8 of the local release preparation (docs/local-release.md), on a runner.
+  release-gates:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Use the pinned release Node toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15.0"
+          cache: npm
+
+      - name: Install the exact dependency graph without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      # A dependency update commits these regenerated bundles; the checks below compare them with the tracked copies.
+      - name: Regenerate the four SDK vendor bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/vendor"
+          mkdir "$out"
+          node scripts/build-sdk-vendor.mjs --out-dir "$out/metamask-evm-sdk"
+          node scripts/build-sdk-vendor.mjs --smart-account --out-dir "$out/metamask-smart-account"
+          node scripts/build-sdk-vendor.mjs --tron-utils --out-dir "$out/tron-utils"
+          node scripts/build-sdk-vendor.mjs --relay-order-id --out-dir "$out/relay-order-id"
+
+      - name: Upload the regenerated vendor bundles
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vendor-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/vendor
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Supply-chain and platform tests (gate 2)
+        run: node --test tests/packaging/supply-chain.test.mjs tests/packaging/platform-support.test.mjs
+
+      - name: Exact vendor regeneration (gates 3 to 6)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:metamask-sdk:check
+          npm run build:tron-utils:check
+          npm run build:relay-order-id:check
+          npm run build:smart-account:check
+
+      - name: Production and vendor-emitted audits (gates 7 and 8)
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/audit-production.mjs
+          node scripts/audit-vendor-emitted.mjs
