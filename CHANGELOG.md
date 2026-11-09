@@ -5,7 +5,7 @@ Release artifacts, their SHA-256 digests and provenance for every version are on
 ## 0.5.100 — 2026-11-09
 
 - **MetaMask Agent gasless, session token clock skew.** A Mac whose clock ran even one second behind MetaMask's saw a freshly issued CLI token as issued in the future and refused it as `mm_gasless_session_unavailable`; a new login could not fix that. The token's `iat` and `nbf` may now be up to 60 seconds ahead of the local clock. `exp` keeps no tolerance.
-- **Tests and builds run on GitHub's runners.** The whole core suite now runs in CI on `macos-15` runners in eight shards, with the packaging tests and the forbidden-surface check. The other local release preparation gates run there too: supply-chain and platform tests, exact regeneration of the four vendor bundles, and the production and vendor-emitted audits. CI jobs publish the TypeScript build of `dist/` and the regenerated vendor bundles. Nothing about the installed CLI changes.
+- **Tests and builds run on GitHub's runners.** The whole core suite now runs in CI on `macos-15` runners in eight shards, with the packaging tests and the forbidden-surface check. The other local release preparation gates run there too: supply-chain and platform tests, exact regeneration of the four vendor bundles, and the production and vendor-emitted audits. CI jobs publish the TypeScript build of `dist/` and the regenerated vendor bundles, and a manually dispatched workflow resolves the lockfile for dependency updates. Nothing about the installed CLI changes.
 
 ## 0.5.99 — 2026-11-09
 
