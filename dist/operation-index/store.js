@@ -13,6 +13,7 @@ export const OPERATION_INDEX_DIRECTORY = "operation-index";
 export const OPERATION_INDEX_LOCK = "operation-index";
 const ENTRIES = `${OPERATION_INDEX_DIRECTORY}/entries`, OPEN = `${OPERATION_INDEX_DIRECTORY}/open`;
 const IDEMPOTENCY = `${OPERATION_INDEX_DIRECTORY}/idempotency`, SHARDS = `${OPERATION_INDEX_DIRECTORY}/terminal-pointers`;
+const SERVER_WALK = `${OPERATION_INDEX_DIRECTORY}/server-walk.json`;
 const POINTER_SCHEMA = "apn.operation-index-idempotency.v1", SHARD_SCHEMA = "apn.operation-index-terminal-pointers.v1";
 const SHARD_NAME = /^[a-f0-9]$/u;
 const STATES = ["admitted", "active", "terminal", "unreadable", "released"];
@@ -136,6 +137,21 @@ export class OperationIndexStore extends SecureStateStore {
         if (after.dev !== before.dev || after.ino !== before.ino)
             stateSecurity("State parent changed during an atomic write.");
     }
+    /**
+     * Server mode: present once a full walk of the record stores finished in this state root. Every later record is
+     * admitted through the index before it is written, so the walk is not repeated on each admission or lookup miss.
+     */
+    async serverWalkDone() {
+        try {
+            return await this.readIndex(SERVER_WALK) !== null;
+        }
+        catch (error) {
+            if (error instanceof OperationIndexDamage)
+                return false;
+            throw error;
+        }
+    }
+    async markServerWalk(at) { await this.put(SERVER_WALK, { schemaVersion: "apn.operation-index-server-walk.v1", walkedAt: at }); }
     async putEntry(entry) { await this.put(`${ENTRIES}/${entry.operationId}.json`, entry); }
     async putOpen(entry) { await this.put(`${OPEN}/${entry.operationId}.json`, entry); }
     async dropEntry(operationId) { await this.drop(`${ENTRIES}/${operationId}.json`); }

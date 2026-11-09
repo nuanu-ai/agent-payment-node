@@ -4,6 +4,7 @@ import { lstat, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { isPlainRecord } from "./canonical.js";
 import { ApnError } from "./errors.js";
+import { isServerMode } from "./server-mode.js";
 import { validateProviderProfile } from "./provider-profile.js";
 import { validateEvmOperationWrite } from "./evm-operation-write.js";
 import { validateOperation, validateReceipt, validateWallet } from "./state-integrity.js";
@@ -157,13 +158,10 @@ export class StateStore extends SecureStateStore {
         return validateOperation(value);
     }
     async findOperation(operationId) {
-        const entries = await this.readDirectory("operations");
+        const profiles = await this.profilesHolding("operations", operationId);
         let found = null;
-        for (const entry of entries) {
-            if (!entry.isDirectory() || entry.isSymbolicLink() || !/^[a-f0-9]{64}$/.test(entry.name)) {
-                stateSecurity("Operations root contains an unsafe profile entry.");
-            }
-            const candidate = await this.loadOperation(entry.name, operationId);
+        for (const profileHash of profiles) {
+            const candidate = await this.loadOperation(profileHash, operationId);
             if (candidate !== null) {
                 if (found !== null)
                     stateCorrupt("Operation ID is duplicated across profiles.");
@@ -220,7 +218,7 @@ export class StateStore extends SecureStateStore {
     }
     async findX402Operation(operationId) {
         stateIdentifier(operationId, "x402 operation ID");
-        const profiles = await this.operationProfiles("x402-operations");
+        const profiles = await this.profilesHolding("x402-operations", operationId);
         let found = null;
         for (const profileHash of profiles) {
             const candidate = await this.loadX402Operation(profileHash, operationId);
@@ -283,7 +281,7 @@ export class StateStore extends SecureStateStore {
     }
     async findX402Result(operationId) {
         stateIdentifier(operationId, "x402 operation ID");
-        const profiles = await this.operationProfiles("x402-results");
+        const profiles = await this.profilesHolding("x402-results", operationId);
         let found = null;
         for (const profileHash of profiles) {
             const candidate = await this.loadX402Result(profileHash, operationId);
@@ -370,7 +368,7 @@ export class StateStore extends SecureStateStore {
     }
     async findX402Receipt(operationId) {
         stateIdentifier(operationId, "x402 operation ID");
-        const profiles = await this.operationProfiles("x402-receipts");
+        const profiles = await this.profilesHolding("x402-receipts", operationId);
         let found = null;
         for (const profileHash of profiles) {
             const candidate = await this.loadX402Receipt(profileHash, operationId);
@@ -424,6 +422,22 @@ export class StateStore extends SecureStateStore {
     async writeReceipt(profileHash, receipt) {
         await this.ensureDirectory(join("receipts", profileHash));
         await this.writeJson(join("receipts", profileHash, `${receipt.operationId}.json`), receipt);
+    }
+    /**
+     * The profiles whose folder may hold this operation. In server mode the operation index is authoritative (every
+     * operation is admitted there before its record is written), so one entry read replaces a walk over every profile.
+     */
+    async profilesHolding(rootName, operationId) {
+        if (!isServerMode())
+            return await this.operationProfiles(rootName);
+        stateIdentifier(operationId, "operation ID");
+        const entry = await this.readJson(join("operation-index", "entries", `${operationId}.json`));
+        if (entry === null)
+            return [];
+        if (!isPlainRecord(entry) || entry.operationId !== operationId || typeof entry.profileHash !== "string" || !/^[a-f0-9]{64}$/u.test(entry.profileHash)) {
+            return await this.operationProfiles(rootName);
+        }
+        return [entry.profileHash];
     }
     async operationProfiles(rootName) {
         const entries = await this.readDirectory(rootName);

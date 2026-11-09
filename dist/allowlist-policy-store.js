@@ -5,12 +5,14 @@ import { ALLOWLIST_POLICY_RECORD_SCHEMA, allowlistProfileHash, compileAllowlistP
 import { ALLOWLIST_POLICY_RECORD_SCHEMA_V2, compileAllowlistPolicyOverlayV2, parseAllowlistPolicyFile, sealAllowlistPolicyRecordV2, validateAllowlistPolicyRecordV2, } from "./allowlist-policy-v2.js";
 import { validateAssetPolicyRegistry } from "./asset-policy-registry.js";
 import { SecureStateStore, stateCorrupt } from "./secure-state-store.js";
+import { assertNoGlobalPolicy, bindGlobalPolicy, globalPolicyPath } from "./allowlist-global-policy.js";
 export const ALLOWLIST_POLICY_ACTIVATION_SCHEMA = "apn.allowlist-policy-activation.v1";
 const DIGEST = /^[a-f0-9]{64}$/u;
 export class AllowlistPolicyStore extends SecureStateStore {
     initialized;
     /** Version 1 single-admission staging, retained for the flag-based `prepare` command. */
     async prepare(input) {
+        assertNoGlobalPolicy();
         const { expectedRevision, now, ...overlayInputValue } = input;
         const compiled = compileAllowlistPolicyOverlay(overlayInputValue);
         const preparedAt = instant(now);
@@ -23,6 +25,7 @@ export class AllowlistPolicyStore extends SecureStateStore {
     }
     /** Stage one multi-admission, multi-family revision. Staging never grants execution authority. */
     async stage(input) {
+        assertNoGlobalPolicy();
         const inventory = loadAllowlistInventory();
         const { schemaVersion: _schema, ...policy } = parseAllowlistPolicyFile(input.policy);
         const compiled = compileAllowlistPolicyOverlayV2({ ...policy, profile: input.profile,
@@ -48,6 +51,7 @@ export class AllowlistPolicyStore extends SecureStateStore {
     }
     /** Append one decision only if the chain head still equals the head the human approved against. */
     async appendDecision(profile, expectedHeadDigest, decision) {
+        assertNoGlobalPolicy();
         const profileHash = allowlistProfileHash(profile);
         await this.ready();
         return await this.withLocks([lockKey(profileHash)], async () => {
@@ -98,6 +102,17 @@ export class AllowlistPolicyStore extends SecureStateStore {
         });
     }
     async load(profile, profileHash) {
+        const globalPath = globalPolicyPath();
+        if (globalPath !== null) {
+            // The server's one policy, bound to this profile's own accounts: revision 1, active since the file's effectiveAt.
+            const bound = await bindGlobalPolicy(this.root, globalPath, profile);
+            if (bound === null)
+                return { profile, profileHash, records: [], entries: [] };
+            const entry = sealEntry({ schemaVersion: ALLOWLIST_POLICY_ACTIVATION_SCHEMA, profileHash, sequence: 1, previousEntryDigest: null,
+                status: "active", revision: 1, stagedRecordDigest: bound.record.recordDigest, policyDigest: bound.record.registry.policyDigest,
+                registry: bound.record.registry, approvalFingerprint: bound.approvalFingerprint, decidedAt: bound.decidedAt });
+            return { profile, profileHash, records: [bound.record], entries: [entry] };
+        }
         const records = [];
         for (const entry of await this.readDirectory(`allowlist-policies/${profileHash}`)) {
             if (!entry.isFile() || entry.isSymbolicLink() || !/^v[0-9]{8}\.json$/u.test(entry.name)) {

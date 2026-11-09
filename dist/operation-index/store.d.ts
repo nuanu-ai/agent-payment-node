@@ -38,6 +38,12 @@ export declare class OperationIndexStore extends SecureStateStore {
      * its pointer. A hash that already has its own pointer file keeps using it.
      */
     putTerminal(entries: readonly OperationIndexEntry[], bindPointer: (idempotencyHash: string, operationId: string) => Promise<void>): Promise<void>;
+    /**
+     * Server mode: present once a full walk of the record stores finished in this state root. Every later record is
+     * admitted through the index before it is written, so the walk is not repeated on each admission or lookup miss.
+     */
+    serverWalkDone(): Promise<boolean>;
+    markServerWalk(at: string): Promise<void>;
     putEntry(entry: OperationIndexEntry): Promise<void>;
     putOpen(entry: OperationIndexEntry): Promise<void>;
     dropEntry(operationId: string): Promise<void>;

@@ -10,9 +10,9 @@ const workflowText = ["supply-chain.yml", "release.yml"]
   .map((name) => readFileSync(resolve(sourceRoot, ".github/workflows", name), "utf8"))
   .join("\n");
 
-test("platform support matrix preserves the current macOS-only package contract", () => {
-  assert.deepEqual(packageJson.os, ["darwin"]);
-  assert.deepEqual(packageJson.cpu, ["arm64"]);
+test("platform support matrix records macOS and the Linux server-mode package contract", () => {
+  assert.deepEqual(packageJson.os, ["darwin", "linux"]);
+  assert.deepEqual(packageJson.cpu, ["arm64", "x64"]);
   assert.match(packageJson.scripts["build:native"], /--target aarch64-apple-darwin/u);
   assert.ok(packageJson.files.includes("docs/platform-support.md"));
   assert.equal((workflowText.match(/runs-on: macos-15/gu) ?? []).length, 2);
@@ -21,7 +21,7 @@ test("platform support matrix preserves the current macOS-only package contract"
   assert.match(supportMatrix, /macOS Apple Silicon \(`darwin` \/ `arm64`\).*Supported/su);
   assert.match(supportMatrix, /Homebrew Formula \(`nuanu-ai\/tap\/apn`\)/u);
   assert.match(supportMatrix, /macOS login Keychain.*`\/usr\/bin\/security`/su);
-  assert.match(supportMatrix, /Linux.*Unsupported/su);
+  assert.match(supportMatrix, /Linux.*server mode.*`\/usr\/bin\/flock`.*Supported in server mode/su);
   assert.match(supportMatrix, /Windows.*Unsupported/su);
   for (const requirement of [
     "Credential backend",

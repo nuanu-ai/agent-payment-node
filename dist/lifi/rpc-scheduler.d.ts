@@ -1,3 +1,5 @@
+/** Comma-separated RPC hostnames the server operator runs or pays for; only honored in server mode. No default. */
+export declare const RPC_UNPACED_HOSTS_ENV = "APN_RPC_UNPACED_HOSTS";
 export declare const RPC_RETRY_DELAY_MS = 2000;
 export declare class RpcHttpFailure extends Error {
     readonly method: string;

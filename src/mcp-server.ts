@@ -6,7 +6,8 @@ import type { OutputEnvelope } from "./commands.js";
 import { PRODUCT_VERSION } from "./constants.js";
 import { foregroundHandoffEnvelope } from "./mcp-foreground-handoff.js";
 import { RejectingMcpPolicyApproval } from "./mcp-policy-approval.js";
-import { MCP_FOREGROUND_HANDOFF, MCP_TOOLS, type ProjectedMcpTool } from "./mcp-projection.js";
+import { MCP_FOREGROUND_HANDOFF, MCP_TOOLS, serverMcpTools, type ProjectedMcpTool } from "./mcp-projection.js";
+import { isServerMode } from "./server-mode.js";
 import { failureEnvelope } from "./output.js";
 import { executeBoundCommand, type RuntimeFactoryOptions } from "./runtime-factory.js";
 
@@ -17,10 +18,12 @@ export function createMcpServer(options: McpRuntimeOptions = {}): Server {
     { name: "agent-payment-node", version: PRODUCT_VERSION },
     { capabilities: { tools: {} } },
   );
-  const toolsByName = new Map(MCP_TOOLS.map((tool) => [tool.name, tool]));
+  const serverMode = isServerMode();
+  const tools = serverMode ? serverMcpTools() : MCP_TOOLS;
+  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
   server.setRequestHandler("tools/list", async () => ({
-    tools: [...MCP_TOOLS, MCP_FOREGROUND_HANDOFF].map((tool) => ({
+    tools: [...tools, ...(serverMode ? [] : [MCP_FOREGROUND_HANDOFF])].map((tool) => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema,
@@ -28,14 +31,14 @@ export function createMcpServer(options: McpRuntimeOptions = {}): Server {
   }));
 
   server.setRequestHandler("tools/call", async (request) => {
-    if (request.params.name === MCP_FOREGROUND_HANDOFF.name) {
+    if (!serverMode && request.params.name === MCP_FOREGROUND_HANDOFF.name) {
       return server.projectCallToolResult(mcpResult(foregroundHandoffEnvelope(MCP_FOREGROUND_HANDOFF, request.params.arguments ?? {})), undefined);
     }
     const tool = toolsByName.get(request.params.name);
     if (tool === undefined) {
       throw new ProtocolError(ProtocolErrorCode.MethodNotFound, "Unknown APN MCP tool.");
     }
-    const envelope = await callTool(tool, request.params.arguments ?? {}, options);
+    const envelope = await callTool(tool, request.params.arguments ?? {}, options, serverMode);
     return server.projectCallToolResult(mcpResult(envelope), undefined);
   });
   return server;
@@ -45,15 +48,17 @@ export async function serveMcpStdio(): Promise<void> {
   await createMcpServer().connect(new StdioServerTransport());
 }
 
-/** Projection admits no foreground command except a policy set, whose consent path is refused with a CLI handoff. */
-async function callTool(
+/** Projection admits no foreground command except a policy set, whose consent path is refused with a CLI handoff.
+ * In server mode every projected command runs and its consent is granted by the server's owner policy. */
+export async function callTool(
   tool: ProjectedMcpTool,
   input: unknown,
   options: McpRuntimeOptions,
+  serverMode = false,
 ): Promise<OutputEnvelope> {
   try {
     const bound = bindMcpInput(tool.command, input);
-    const policyApproval = bound.request.command === "wallet.policy.set"
+    const policyApproval = !serverMode && bound.request.command === "wallet.policy.set"
       ? new RejectingMcpPolicyApproval(bound.request)
       : undefined;
     return await executeBoundCommand(bound, {
@@ -65,7 +70,7 @@ async function callTool(
   }
 }
 
-function mcpResult(envelope: OutputEnvelope): {
+export function mcpResult(envelope: OutputEnvelope): {
   readonly structuredContent: OutputEnvelope;
   readonly content: Array<{ readonly type: "text"; readonly text: string }>;
   readonly isError: boolean;

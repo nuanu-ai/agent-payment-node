@@ -1,4 +1,6 @@
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
+import { assertNoGlobalPolicy, globalPolicyPath } from "./allowlist-global-policy.js";
+import { globalWalletPolicy } from "./global-profile-policies.js";
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import { canonicalPolicyInput, policyIncrease, sealProfilePolicy, validateProfilePolicy, } from "./profile-policy.js";
@@ -26,6 +28,9 @@ export class EncryptedProfilePolicy {
         this.clock = clock;
     }
     async load(binding) {
+        const globalPath = globalPolicyPath();
+        if (globalPath !== null)
+            return await globalWalletPolicy(globalPath, binding);
         const value = await this.state.loadEncryptedPolicyEnvelope(policyStorageIdentity(binding));
         if (value === null)
             return null;
@@ -42,6 +47,7 @@ export class EncryptedProfilePolicy {
         }
     }
     async set(binding, input) {
+        assertNoGlobalPolicy();
         const current = await this.loadForSet(binding);
         const { x402Payees: suppliedPayees, ...supplied } = canonicalPolicyInput(input, binding);
         // An omitted payee pin keeps the current one; null removes it.

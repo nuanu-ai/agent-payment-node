@@ -4,7 +4,7 @@ import type { BoundCommand } from "../command-binder.js";
 import type { OutputEnvelope } from "../commands.js";
 import { ApnError } from "../errors.js";
 import { LocalWalletNative } from "../local-wallet-native.js";
-import { MacOSLoginKeychainSecret } from "../macos-keychain.js";
+import { platformWrappingSecret } from "../platform.js";
 import { successEnvelope, failureEnvelope } from "../output.js";
 import { HttpsBaseRpc } from "../rpc.js";
 import type { RuntimeFactoryOptions } from "../runtime-factory-options.js";
@@ -48,7 +48,7 @@ export async function executePermit2ProductionCli(bound: BoundCommand, options: 
       if (saved.exposureAt !== null || saved.exposureJournal !== undefined || saved.terminal || !["prepared", "reserving", "reserved"].includes(saved.state)) return output({ status: publicPermit2Production(saved), code: saved.terminal ? "terminal" : "held" });
     }
     // These constructors are inert. The exact local signer and metadata are checked before unsigned HTTP.
-    const native = options.native ?? new LocalWalletNative(state, options.wrappingSecret ?? new MacOSLoginKeychainSecret(), options.approval);
+    const native = options.native ?? new LocalWalletNative(state, options.wrappingSecret ?? platformWrappingSecret(), options.approval);
     LocalWalletNative.permit2Signer(native, root);
     const wallet = await permit2WalletBinding(state, profile);
     new HttpsBaseRpc(bound.rpcUrl);

@@ -1,4 +1,13 @@
 import { ApnError } from "../errors.js";
+import { isServerMode } from "../server-mode.js";
+
+/** Comma-separated RPC hostnames the server operator runs or pays for; only honored in server mode. No default. */
+export const RPC_UNPACED_HOSTS_ENV = "APN_RPC_UNPACED_HOSTS";
+function unpacedFamily(family: string): boolean {
+  const hosts = process.env[RPC_UNPACED_HOSTS_ENV];
+  if (hosts === undefined || hosts === "" || !isServerMode()) return false;
+  return hosts.split(",").some((host) => host.trim().toLowerCase() === family);
+}
 
 const RPC_ORIGIN_GAP_MS = 750;
 const PIMLICO_PUBLIC_GAP_MS = 3_000;
@@ -38,6 +47,8 @@ export class RpcProviderScheduler {
   schedule(origin: string, now: () => number, wait: (milliseconds: number) => Promise<void>, beforeWait: (milliseconds: number) => void,
     task: () => Promise<unknown>, beforeStart?: () => Promise<void>): Promise<unknown> {
     const family = rpcProviderFamily(origin);
+    // The operator's own nodes (server mode, APN_RPC_UNPACED_HOSTS) take no cross-process pacing: one host serves every profile.
+    if (unpacedFamily(family)) return (async () => { if (beforeStart !== undefined) await beforeStart(); return await task(); })();
     return new Promise((resolve, reject) => { this.queue.push({ family, now, wait, beforeWait, task, beforeStart, resolve, reject }); this.pump(); });
   }
 

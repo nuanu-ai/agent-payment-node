@@ -10,7 +10,7 @@ import { createRelayEthereumSourceRuntime } from "./relay/source-runtime.js";
 import { createRelayNativeSourceRuntime } from "./relay/native-source.js";
 import { ApnError } from "./errors.js";
 import { userInfo } from "node:os";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import type { BoundCommand } from "./command-binder.js";
 import type { CommandRequest, OutputEnvelope } from "./commands.js";
 import { ApnCore } from "./core.js";
@@ -19,7 +19,7 @@ import { refreshOperationIndex } from "./operation-index/refresh.js";
 import { settleBlockerAndRetry } from "./operation-auto-settle.js";
 import { EncryptedProfilePolicy } from "./encrypted-profile-policy.js";
 import { LocalWalletNative } from "./local-wallet-native.js";
-import { MacOSLoginKeychainSecret } from "./macos-keychain.js";
+import { platformWrappingSecret } from "./platform.js";
 import { TtyProfilePolicyApproval } from "./policy-approval.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { StateStore } from "./state.js";
@@ -114,7 +114,7 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
   const state = new StateStore(options.stateRoot ?? effectiveStateRoot());
   const special = createSpecialApnCore(bound, options, state);
   if (special !== null) return special;
-  const wrappingSecret = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+  const wrappingSecret = options.wrappingSecret ?? platformWrappingSecret();
   const approvalLimits = bound.request.command === "circle.approval.prepare" ? {
     maxGasLimitAtomic: bound.request.maxGasLimitAtomic, maxFeePerGasWei: bound.request.maxFeePerGasWei,
     maxPriorityFeePerGasWei: bound.request.maxPriorityFeePerGasWei, maxNativeDebitWei: bound.request.maxNativeDebitWei,
@@ -425,7 +425,15 @@ async function executeBound(bound: BoundCommand, options: RuntimeFactoryOptions,
   return await createApnCore(bound, options, runtimeCommand ?? bound.request.command).execute(bound.request);
 }
 
+/** `APN_STATE_ROOT` (a canonical absolute path) places the state of a server; otherwise it is `~/.apn` of the OS user. */
 export function effectiveStateRoot(): string {
+  const explicit = process.env.APN_STATE_ROOT;
+  if (explicit !== undefined && explicit !== "") {
+    if (!isAbsolute(explicit) || resolve(explicit) !== explicit) {
+      throw new ApnError("APN_STATE_SECURITY", "APN_STATE_ROOT must be a canonical absolute path.");
+    }
+    return explicit;
+  }
   return resolve(userInfo().homedir, ".apn");
 }
 

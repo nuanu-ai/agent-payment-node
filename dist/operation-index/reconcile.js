@@ -1,4 +1,5 @@
 import { ApnError } from "../errors.js";
+import { isServerMode } from "../server-mode.js";
 import { OperationIndexDamage } from "./store.js";
 import { normalizeClaims, OPERATION_INDEX_ENTRY_SCHEMA, profileClaim, unreadableFamilyClaim, unreadableProfileClaim } from "./types.js";
 /** A failure of the file system itself (not of the record's content) is never turned into a quarantine. */
@@ -24,6 +25,14 @@ export class OperationIndexReconciler {
      * Terminal records found by one walk (the bulk after an upgrade) are written together through `putTerminal`.
      */
     async reconcile(force = false) {
+        const server = isServerMode();
+        if (!force && server && await this.store.serverWalkDone())
+            return;
+        await this.walk(force);
+        if (server)
+            await this.store.markServerWalk(new Date().toISOString());
+    }
+    async walk(force) {
         const indexed = force ? new Set() : await this.store.entryIds();
         const seen = new Map();
         for (const adapter of this.registry.values()) {

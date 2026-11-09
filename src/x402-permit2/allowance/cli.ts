@@ -4,7 +4,7 @@ import type { BoundCommand } from "../../command-binder.js";
 import type { OutputEnvelope } from "../../commands.js";
 import { EncryptedProfilePolicy } from "../../encrypted-profile-policy.js";
 import { ApnError } from "../../errors.js";
-import { MacOSLoginKeychainSecret } from "../../macos-keychain.js";
+import { platformWrappingSecret } from "../../platform.js";
 import { refreshOperationIndex } from "../../operation-index/refresh.js";
 import { failureEnvelope, successEnvelope } from "../../output.js";
 import { HttpsBaseRpc } from "../../rpc.js";
@@ -21,7 +21,7 @@ export async function executePermit2AllowanceCli(bound: BoundCommand, options: R
   const request = bound.request, requestId = randomUUID();
   let operationId: string | undefined;
   try {
-    const state = new StateStore(root), wrapping = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+    const state = new StateStore(root), wrapping = options.wrappingSecret ?? platformWrappingSecret();
     const rpc = bound.rpcUrl === undefined ? unavailableRpc() : options.permit2AllowanceRpc ?? publicAllowanceRpc(bound.rpcUrl, state);
     const service = new Permit2AllowanceService(root, { rpc, wrapping, now: () => options.clock?.now() ?? new Date(),
       policy: options.policy ?? new EncryptedProfilePolicy(state, wrapping, { approve: async () => {

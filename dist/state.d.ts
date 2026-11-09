@@ -54,5 +54,10 @@ export declare class StateStore extends SecureStateStore {
     listX402Receipts(profileHash: string): Promise<readonly X402ReceiptRecord[]>;
     loadReceipt(profileHash: string, operationId: string): Promise<ReceiptRecord | null>;
     writeReceipt(profileHash: string, receipt: ReceiptRecord): Promise<void>;
+    /**
+     * The profiles whose folder may hold this operation. In server mode the operation index is authoritative (every
+     * operation is admitted there before its record is written), so one entry read replaces a walk over every profile.
+     */
+    private profilesHolding;
     private operationProfiles;
 }

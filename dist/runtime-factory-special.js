@@ -15,7 +15,7 @@ import { RelayArbitrumSourceFinalityObserver } from "./relay/arbitrum-source-fin
 import { RelayBnbReadOnlyRpc, RelayEthereumFinalityRpc } from "./relay/observe-rpc.js";
 import { ApnError } from "./errors.js";
 import { ApnCore } from "./core.js";
-import { MacOSLoginKeychainSecret } from "./macos-keychain.js";
+import { platformWrappingSecret } from "./platform.js";
 import { HttpsBaseRpc } from "./rpc.js";
 import { TtyRelayArbitrumApprovalConfirmation, TtyRelayArbitrumDepositConfirmation } from "./tty-approval.js";
 import { gaslessRpcFactory } from "./gasless/rpc.js";
@@ -58,7 +58,7 @@ export function createSpecialApnCore(bound, options, state) {
         const guard = new EvmDirectRpcGuard(state);
         const rpc = options.relayArbitrumApprovalExecuteRpc ?? new HttpsBaseRpc(url);
         const reader = new RelayArbitrumApprovalPreflightReader(url, state, rpc, () => guard);
-        const wrapping = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+        const wrapping = options.wrappingSecret ?? platformWrappingSecret();
         const tty = new TtyRelayArbitrumApprovalConfirmation(options.relayExecuteTtyOptions);
         return new ApnCore({ state, relayArbitrumApprovalExecute: options.relayArbitrumApprovalExecute ??
                 new RelayArbitrumApprovalExecuteService(state, reader, {
@@ -72,7 +72,7 @@ export function createSpecialApnCore(bound, options, state) {
         const guard = new EvmDirectRpcGuard(state);
         const rpc = options.relayArbitrumDepositDispatchRpc ?? new HttpsBaseRpc(url);
         const reader = new RelayArbitrumDepositPreflightReader(url, state, rpc, () => guard);
-        const wrapping = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+        const wrapping = options.wrappingSecret ?? platformWrappingSecret();
         const tty = new TtyRelayArbitrumDepositConfirmation(options.relayExecuteTtyOptions);
         return new ApnCore({ state, relayArbitrumDepositDispatch: options.relayArbitrumDepositDispatch ??
                 new RelayArbitrumDepositDispatchService(state, reader, {

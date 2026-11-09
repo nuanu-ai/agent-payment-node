@@ -1,4 +1,4 @@
-import { type WrappingSecretPort } from "../macos-keychain.js";
+import type { WrappingSecretPort } from "../macos-keychain.js";
 import type { ClockPort } from "../ports.js";
 import { StateStore } from "../state.js";
 import { type RelayAbandonConsentPort } from "./retire-source.js";

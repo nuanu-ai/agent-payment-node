@@ -1,4 +1,5 @@
 import { approvalCode } from "./approval-code.js";
+import { isServerMode, recordServerConsent } from "./server-mode.js";
 import { isatty } from "node:tty";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
@@ -194,6 +195,12 @@ export class TtyTransferApproval implements TransferApprovalPort {
 
   async approve(intent: TransferApprovalIntent): Promise<void> {
     if (Date.now() >= Date.parse(intent.expiresAt)) throw approvalFailure("APN_APPROVAL_EXPIRED", "Transfer approval expired.");
+    if (isServerMode()) {
+      recordServerConsent(["Agent Payment Node approval", `Profile: ${intent.profile}`, `Operation: ${intent.operationId}`,
+        `Sender: ${intent.walletAddress}`, `Recipient: ${intent.recipient}`, `Amount: ${intent.amountAtomic} atomic`,
+        `Expires: ${intent.expiresAt}`, `Fingerprint: ${intent.fingerprint}`]);
+      return;
+    }
     let tty: ApprovalTerminal;
     try {
       tty = await this.openTerminal();
@@ -423,6 +430,10 @@ export class TtyChainPolicyApproval implements ChainPolicyApprovalPort {
 export async function exactChainConsent(lines: readonly string[], phrase: string, expiresAt: string,
   options: TtyTransferApprovalOptions, maximumInputBytes = MAX_APPROVAL_INPUT_BYTES): Promise<void> {
   if (Date.now() >= Date.parse(expiresAt)) throw approvalFailure("APN_APPROVAL_EXPIRED", "The chain approval expired.");
+  if (isServerMode()) {
+    recordServerConsent(lines);
+    return;
+  }
   let terminal: ApprovalTerminal;
   try { terminal = await (options.openTerminal ?? openApprovalTerminal)(); }
   catch { throw approvalFailure("APN_TTY_UNAVAILABLE", "A foreground terminal is required for chain approval."); }

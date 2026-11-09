@@ -5,7 +5,8 @@ import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } f
 import { canonicalJson, sha256 } from "./canonical.js";
 import { ApnError } from "./errors.js";
 import { atomicTemporaryPrefix, releasePublishedTemporary, withoutAtomicTemporaries } from "./atomic-write-temporaries.js";
-import { LOCKF_TIMEOUT_MS, MacosAdvisoryLock } from "./macos-advisory-lock.js";
+import { LOCKF_TIMEOUT_MS } from "./macos-advisory-lock.js";
+import { platformAdvisoryLock } from "./platform.js";
 const FILE_MODE = 0o600;
 const DIRECTORY_MODE = 0o700;
 const MAX_STATE_BYTES = 1024 * 1024;
@@ -74,7 +75,7 @@ export class SecureStateStore {
         if (!Number.isSafeInteger(this.lockWaitMs) || this.lockWaitMs < 0 || this.lockWaitMs > 60_000) {
             throw new ApnError("APN_STATE_SECURITY", "State lock wait must be between 0 and 60000 milliseconds.");
         }
-        this.lockPort = options.lockPort ?? new MacosAdvisoryLock();
+        this.lockPort = options.lockPort ?? platformAdvisoryLock();
     }
     async initialize() {
         await this.assertNoSymlinkAncestors(this.root);

@@ -5,7 +5,7 @@ import { getAddress } from "viem";
 import { allowlistProfileHash } from "../allowlist-policy-overlay.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
-import { MacOSLoginKeychainSecret } from "../macos-keychain.js";
+import { platformWrappingSecret } from "../platform.js";
 import { OperationService } from "../operation-service.js";
 import { RelayRetirementRepository, RelayUnsignedOperationRepository, publicRelayUnsignedOperation } from "../relay-unsigned-operation.js";
 import { StateStore } from "../state.js";
@@ -20,7 +20,7 @@ export class RelayRetireService {
     clock;
     wrapping;
     abandon;
-    constructor(state, clock, wrapping = new MacOSLoginKeychainSecret(), 
+    constructor(state, clock, wrapping = platformWrappingSecret(), 
     /** Required only to abandon a route after its confirmed approval; without it that case is refused. */
     abandon) {
         this.state = state;

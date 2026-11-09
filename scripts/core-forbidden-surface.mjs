@@ -55,12 +55,14 @@ for (const file of files) {
   if (lineCount > 500) violations.push(`${file.slice(productRoot.length + 1)}: ${lineCount} lines exceeds 500`);
   for (const needle of forbidden) {
     if (needle === "node:child_process" && [
-      "macos-keychain.ts", "macos-advisory-lock.ts", "awal-process-adapter.ts",
+      "macos-keychain.ts", "macos-advisory-lock.ts", "linux-advisory-lock.ts", "awal-process-adapter.ts",
       "awal-direct-adapter.ts", "awal-x402-adapter.ts", "metamask-process-runner.ts",
       "metamask-gasless/client/process.ts",
     ].some((name) => file === join(sourceRoot, name))) continue;
     if (["node:child_process", "createServer(", "http://"].includes(needle) &&
       file === join(sourceRoot, "metamask-smart-account-consent.ts")) continue;
+    // Server mode only: the bearer-token HTTP entry (`apn serve http`); "http://" is the URL parser's base, never a request.
+    if (["createServer(", "http://"].includes(needle) && file === join(sourceRoot, "http-server.ts")) continue;
     if (["--chain-id", "--token"].includes(needle) && file === join(sourceRoot, "metamask-direct-adapter.ts")) continue;
     if (needle === "--chain-id" && file === join(sourceRoot, "metamask-x402-adapter.ts")) continue;
     // Exact private vendor handoff only: the claimed owner scope binds the finite validated quote chain.

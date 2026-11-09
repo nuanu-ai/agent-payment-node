@@ -17,6 +17,7 @@ export declare class OperationIndexReconciler {
      * Terminal records found by one walk (the bulk after an upgrade) are written together through `putTerminal`.
      */
     reconcile(force?: boolean): Promise<void>;
+    private walk;
     /** The entry a record yields today: claims and terminality from its own reader, or a quarantine when it is unreadable. */
     derive(adapter: OperationFamilyAdapter, name: StoredRecordName): Promise<OperationIndexEntry | null>;
     fromRecord(adapter: OperationFamilyAdapter, name: StoredRecordName, record: unknown): Promise<OperationIndexEntry | null>;

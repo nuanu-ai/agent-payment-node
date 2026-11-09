@@ -1,6 +1,7 @@
 import { AssetUsageLedger } from "../asset-usage-ledger.js";
 import { loadActiveAssetPolicyRegistry } from "../allowlist-active-policy.js";
 import { ApnError } from "../errors.js";
+import { isServerMode, recordServerConsent } from "../server-mode.js";
 import { GaslessHttps, type GaslessTransport } from "../gasless/https.js";
 import type { Address } from "../model.js";
 import type { ClockPort } from "../ports.js";
@@ -73,6 +74,12 @@ export function usdtApprovalPrompt(bound: UsdtBoundOperation, now: number): { re
 }
 export class TtyUsdtApproval implements UsdtForegroundApproval {
   async approve(bound: UsdtBoundOperation): Promise<void> {
+    if (isServerMode()) {
+      const { text, validUntil } = usdtApprovalPrompt(bound, Date.now());
+      if (Date.now() + 60_000 >= validUntil) throw new ApnError("APN_NATIVE_REJECTED", "Gasless USDT quote expired.", { nativeCode: "APN_APPROVAL_EXPIRED" });
+      recordServerConsent(text.split("\n").slice(0, -2));
+      return;
+    }
     if (process.stdin.isTTY !== true || process.stderr.isTTY !== true) {
       throw new ApnError("APN_NATIVE_REJECTED", "A foreground terminal is required for gasless USDT approval.", { nativeCode: "APN_TTY_UNAVAILABLE" });
     }

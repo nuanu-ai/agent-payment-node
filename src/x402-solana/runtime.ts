@@ -1,7 +1,7 @@
 import { ChainAccountStore } from "../chain-account-store.js";
 import { chainDisplay } from "../chain-policy.js";
 import type { OperationAbandonApprovalPort } from "../operation-abandon-approval.js";
-import { MacOSLoginKeychainSecret } from "../macos-keychain.js";
+import { platformWrappingSecret } from "../platform.js";
 import type { RuntimeFactoryOptions } from "../runtime-factory-options.js";
 import { SolanaRpcPacer } from "../solana/pacing.js";
 import { SolanaRpc, SolanaRpcBudget } from "../solana/rpc.js";
@@ -23,7 +23,7 @@ export function x402SolanaPorts(root: string, options: RuntimeFactoryOptions): X
     new SolanaRpcBudget({ maxPhysicalRequests: 32, minimumIntervalMs: 750, ...(options.solanaRpcNow === undefined ? {} : { now: options.solanaRpcNow }),
       wait: options.solanaRpcWait ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))) }),
     new SolanaRpcPacer(state, options.solanaRpcNow, options.solanaRpcWait));
-  const wrapping = options.wrappingSecret ?? new MacOSLoginKeychainSecret();
+  const wrapping = options.wrappingSecret ?? platformWrappingSecret();
   // Payments only read the owner's policy; creating or raising it stays `wallet policy set` in the foreground.
   const policy = options.policy ?? new EncryptedProfilePolicy(state, wrapping, { approve: async () => {
     throw new ApnError("APN_INTERNAL", "A Solana x402 payment never changes the owner's policy.");

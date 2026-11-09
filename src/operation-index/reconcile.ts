@@ -1,4 +1,5 @@
 import { ApnError } from "../errors.js";
+import { isServerMode } from "../server-mode.js";
 import type { OperationFamilyAdapter } from "./adapter.js";
 import type { OperationRegistry } from "./registry.js";
 import { OperationIndexDamage, type OperationIndexStore, type StoredRecordName } from "./store.js";
@@ -25,6 +26,13 @@ export class OperationIndexReconciler {
    * Terminal records found by one walk (the bulk after an upgrade) are written together through `putTerminal`.
    */
   async reconcile(force = false): Promise<void> {
+    const server = isServerMode();
+    if (!force && server && await this.store.serverWalkDone()) return;
+    await this.walk(force);
+    if (server) await this.store.markServerWalk(new Date().toISOString());
+  }
+
+  private async walk(force: boolean): Promise<void> {
     const indexed = force ? new Set<string>() : await this.store.entryIds();
     const seen = new Map<string, Named[]>();
     for (const adapter of this.registry.values()) {

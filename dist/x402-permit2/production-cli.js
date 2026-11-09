@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { canonicalJson } from "../canonical.js";
 import { ApnError } from "../errors.js";
 import { LocalWalletNative } from "../local-wallet-native.js";
-import { MacOSLoginKeychainSecret } from "../macos-keychain.js";
+import { platformWrappingSecret } from "../platform.js";
 import { successEnvelope, failureEnvelope } from "../output.js";
 import { HttpsBaseRpc } from "../rpc.js";
 import { StateStore } from "../state.js";
@@ -48,7 +48,7 @@ export async function executePermit2ProductionCli(bound, options, root) {
                 return output({ status: publicPermit2Production(saved), code: saved.terminal ? "terminal" : "held" });
         }
         // These constructors are inert. The exact local signer and metadata are checked before unsigned HTTP.
-        const native = options.native ?? new LocalWalletNative(state, options.wrappingSecret ?? new MacOSLoginKeychainSecret(), options.approval);
+        const native = options.native ?? new LocalWalletNative(state, options.wrappingSecret ?? platformWrappingSecret(), options.approval);
         LocalWalletNative.permit2Signer(native, root);
         const wallet = await permit2WalletBinding(state, profile);
         new HttpsBaseRpc(bound.rpcUrl);

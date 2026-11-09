@@ -8,10 +8,12 @@
     "node": ">=24 <27"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "linux"
   ],
   "cpu": [
-    "arm64"
+    "arm64",
+    "x64"
   ],
   "bin": {
     "apn": "bin/apn.js"
@@ -32,6 +34,7 @@
     "docs/gasless.md",
     "docs/evm-assets.md",
     "docs/platform-support.md",
+    "docs/server-mode.md",
     "docs/stargate-v2-direct-quote.md",
     "docs/stargate-v2-native-execution.md",
     "docs/stargate-v2-token-native-drop.md",

@@ -1,4 +1,6 @@
 import { canonicalJson } from "./canonical.js";
+import { assertNoGlobalPolicy, globalPolicyPath } from "./allowlist-global-policy.js";
+import { globalChainPolicy } from "./global-profile-policies.js";
 import { assertChainFeePolicy, assertChainPrincipal, chainAsset, chainDecimal, chainUsage, sealChainPolicy } from "./chain-policy.js";
 import { ChainPolicyStore } from "./chain-policy-store.js";
 import { ApnError } from "./errors.js";
@@ -72,6 +74,7 @@ export class ChainPolicyService {
         return await adapter.balance(account, chainAsset(rail, alias));
     }
     async admit(input) {
+        assertNoGlobalPolicy();
         const profile = canonicalProfile(input.profile);
         const asset = chainAsset(input.rail, input.asset);
         const maximumPerTransferAtomic = chainDecimal(input.maximumPerTransfer, asset.decimals);
@@ -97,7 +100,9 @@ export class ChainPolicyService {
         });
     }
     async requiredPolicy(account, alias) {
-        const policy = await this.policies.load(account, chainAsset(account.rail, alias));
+        const globalPath = globalPolicyPath();
+        const policy = globalPath !== null ? await globalChainPolicy(globalPath, account, alias)
+            : await this.policies.load(account, chainAsset(account.rail, alias));
         if (policy === null)
             throw new ApnError("APN_WALLET_POLICY_REQUIRED", "This mainnet asset is denied until foreground policy admission.");
         return policy;

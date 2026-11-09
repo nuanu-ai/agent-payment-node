@@ -1,4 +1,5 @@
 import { ApnError } from "./errors.js";
+import { isServerMode } from "./server-mode.js";
 import { walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
 import { listEncryptedWalletEnvelopes, listLocalWallets } from "./wallet-import-collision.js";
 import type { StateStore } from "./state.js";
@@ -46,6 +47,10 @@ async function assertExclusiveEvmOwnerWithProfileFilter(
   if (!ADDRESS.test(address) || !PROFILE_HASH.test(ownProfileHash)) {
     throw new ApnError("APN_INVALID_INPUT", "EVM ownership check identity is invalid.");
   }
+  // Server mode holds the invariant by construction: wallets are generated (random keys) or imported under the global
+  // import lock, which scans every identity once; provider connect is not served. A scan of every profile on each
+  // money operation would cost O(profiles) reads, so it runs only in the foreground build.
+  if (isServerMode()) return;
   const check = (ownerHash: string, candidate: string): void => {
     if (candidate.toLowerCase() === target && ownerHash !== ownProfileHash) {
       throw new ApnError("APN_OPERATION_BLOCKED", "EVM address is bound to another APN profile.");

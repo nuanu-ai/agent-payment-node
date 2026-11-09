@@ -8,12 +8,12 @@ contract; it is not a claim about a future port, a published release, or live pa
 | Platform | Distribution | Credential custody | Status |
 | --- | --- | --- | --- |
 | macOS Apple Silicon (`darwin` / `arm64`) | Homebrew Formula (`nuanu-ai/tap/apn`) with Homebrew `node@24` | The APN wrapping secret is stored in the user's macOS login Keychain at `~/Library/Keychains/login.keychain-db` and accessed through `/usr/bin/security` | **Supported** |
-| Linux | No package or release target | No supported credential backend | **Unsupported** |
+| Linux (`linux` / `x64`, `arm64`), server mode | Source checkout of branch `linux-defi-corporate` run with Node 24–26 ([server mode](server-mode.md)) | A wrapping-secret file named by `APN_WRAPPING_SECRET_FILE` (mode 0600/0400, owned by the APN user); util-linux `/usr/bin/flock` for kernel locks | **Supported in server mode** |
 | Windows | No package or release target | No supported credential backend | **Unsupported** |
 
-Why the boundary is macOS on Apple Silicon:
+Why the open-source boundary is macOS on Apple Silicon (server mode is described in [server-mode.md](server-mode.md)):
 
-- The package manifest is restricted to `os: ["darwin"]` and `cpu: ["arm64"]`.
+- The Homebrew Formula ships only for `darwin` / `arm64`; the manifest also admits `linux` / `x64` for server mode.
 - The native release build is fixed to the `aarch64-apple-darwin` target.
 - The runtime depends on macOS login-Keychain custody and the macOS advisory-lock implementation (`/usr/bin/lockf`).
 - Homebrew Formula installation is the supported delivery path. The signed app/Cask lane under `packaging/` is deferred
@@ -26,7 +26,7 @@ signing, publication, installation, or live use.
 The supported Formula also has a [local release preparation and verification lane](local-release.md) with explicit
 unsigned provenance; it does not claim GitHub Actions attestation.
 
-## Required work before a Linux or Windows support claim
+## Required work before a Windows support claim, or a Linux release package
 
 Each target requires all of the following before it can be added to the package or release matrix:
 

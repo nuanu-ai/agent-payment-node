@@ -2,6 +2,7 @@ import { dispatchDiscovery, renderDiscoveryOutput } from "./command-catalog.js";
 import { runCli } from "./cli.js";
 import { MCP_LAUNCH_DESCRIPTOR_JSON } from "./mcp-config.js";
 import { serveMcpStdio } from "./mcp-server.js";
+import { serveHttp } from "./http-server.js";
 import { closedBlockerNotes } from "./output.js";
 
 const argv = process.argv.slice(2);
@@ -16,6 +17,13 @@ if (discovery !== null) {
     await serveMcpStdio();
   } catch {
     process.stderr.write("APN MCP server failed safely.\n");
+    process.exitCode = 1;
+  }
+} else if (argv.length === 2 && argv[0] === "serve" && argv[1] === "http") {
+  try {
+    await serveHttp();
+  } catch (error) {
+    process.stderr.write(`APN HTTP server failed: ${error instanceof Error ? error.message : "unknown error"}\n`);
     process.exitCode = 1;
   }
 } else {

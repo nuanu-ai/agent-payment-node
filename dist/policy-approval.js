@@ -1,5 +1,6 @@
 import { approvalCode } from "./approval-code.js";
 import { isatty } from "node:tty";
+import { isServerMode, recordServerConsent } from "./server-mode.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { loadAllowlistInventory } from "./allowlist-inventory.js";
@@ -25,6 +26,11 @@ export class TtyProfilePolicyApproval {
         this.isTerminal = options.isTerminal ?? isatty;
     }
     async approve(intent) {
+        if (isServerMode()) {
+            recordServerConsent(["Agent Payment Node policy approval", `Change: ${intent.change}`, `Profile: ${intent.profile}`,
+                `Wallet: ${intent.walletAddress}`, `Fingerprint: ${intent.fingerprint}`]);
+            return;
+        }
         let tty;
         try {
             tty = await this.openTerminal();

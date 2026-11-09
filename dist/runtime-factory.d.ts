@@ -16,4 +16,5 @@ export declare function createApnCore(bound: BoundCommand, options?: RuntimeFact
  * prepare refused by a blocker that provably can no longer land settles it in its own runtime and runs once more.
  */
 export declare function executeBoundCommand(bound: BoundCommand, options?: RuntimeFactoryOptions): Promise<OutputEnvelope>;
+/** `APN_STATE_ROOT` (a canonical absolute path) places the state of a server; otherwise it is `~/.apn` of the OS user. */
 export declare function effectiveStateRoot(): string;

@@ -94,15 +94,26 @@ export interface ProjectedMcpTool {
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
-export function projectMcpTools(manifest: unknown = COMMAND_MANIFEST): readonly ProjectedMcpTool[] {
+/** Server mode (APN_SERVER_MODE=1) runs every selected command as a tool: consent comes from the server's owner policy.
+ * Only commands that need a person at a provider's own login page stay out. */
+const SERVER_EXCLUDED = new Set(["wallet connect"]);
+
+export function projectMcpTools(manifest: unknown = COMMAND_MANIFEST, server = false): readonly ProjectedMcpTool[] {
   const names = new Set<string>();
-  return selectedCommands(manifest).filter(runsInMcp).map((command) => {
+  return selectedCommands(manifest).filter((command) => server ? !SERVER_EXCLUDED.has(command.path.join(" ")) : runsInMcp(command)).map((command) => {
     if (command.output.contract !== "apn.cli.v1") throw projectionFailure("A selected command has unsupported output metadata.");
     const name = toolName(command.path);
     if (names.has(name)) throw projectionFailure("Selected commands collide after MCP name projection.");
     names.add(name);
-    return { name, description: toolDescription(command), inputSchema: inputSchema(command), command };
+    return { name, description: toolDescription(command, server), inputSchema: inputSchema(command), command };
   });
+}
+
+let serverTools: readonly ProjectedMcpTool[] | undefined;
+/** The server-mode tool list, projected once per process. */
+export function serverMcpTools(): readonly ProjectedMcpTool[] {
+  serverTools ??= projectMcpTools(COMMAND_MANIFEST, true);
+  return serverTools;
 }
 
 /** The one tool that names the exact foreground CLI command for every selected command MCP cannot run. */
@@ -135,9 +146,13 @@ function toolName(path: readonly string[]): string {
   return `apn_${path.map((token) => token.replaceAll("-", "_")).join("_")}`;
 }
 
-function toolDescription(command: CommandDefinition): string {
+function toolDescription(command: CommandDefinition, server = false): string {
   const lines = [command.summary, `Effect: ${command.effect.class} — ${command.effect.summary}`];
-  if (command.approval.class !== "none") lines.push(`Approval: ${command.approval.class} — ${command.approval.when}`);
+  if (command.approval.class !== "none") {
+    lines.push(server && command.approval.class === "foreground_tty"
+      ? "Approval: granted by the server's owner policy; no human step. Policy caps and frozen terms are still enforced."
+      : `Approval: ${command.approval.class} — ${command.approval.when}`);
+  }
   if (command.states.terminal.length + command.states.non_terminal.length > 0) {
     lines.push(`States: terminal ${command.states.terminal.join(", ") || "none"}; non-terminal ${command.states.non_terminal.join(", ") || "none"}.`);
   }

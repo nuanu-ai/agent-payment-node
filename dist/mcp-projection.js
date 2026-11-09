@@ -72,17 +72,26 @@ const SELECTED_PATHS = [
  * consent part is refused by RejectingMcpPolicyApproval with a CLI handoff. Every other selected foreground command is
  * reachable only through the single foreground handoff tool, which never executes anything. */
 const MCP_RUNS_FOREGROUND = new Set(["wallet policy set"]);
-export function projectMcpTools(manifest = COMMAND_MANIFEST) {
+/** Server mode (APN_SERVER_MODE=1) runs every selected command as a tool: consent comes from the server's owner policy.
+ * Only commands that need a person at a provider's own login page stay out. */
+const SERVER_EXCLUDED = new Set(["wallet connect"]);
+export function projectMcpTools(manifest = COMMAND_MANIFEST, server = false) {
     const names = new Set();
-    return selectedCommands(manifest).filter(runsInMcp).map((command) => {
+    return selectedCommands(manifest).filter((command) => server ? !SERVER_EXCLUDED.has(command.path.join(" ")) : runsInMcp(command)).map((command) => {
         if (command.output.contract !== "apn.cli.v1")
             throw projectionFailure("A selected command has unsupported output metadata.");
         const name = toolName(command.path);
         if (names.has(name))
             throw projectionFailure("Selected commands collide after MCP name projection.");
         names.add(name);
-        return { name, description: toolDescription(command), inputSchema: inputSchema(command), command };
+        return { name, description: toolDescription(command, server), inputSchema: inputSchema(command), command };
     });
+}
+let serverTools;
+/** The server-mode tool list, projected once per process. */
+export function serverMcpTools() {
+    serverTools ??= projectMcpTools(COMMAND_MANIFEST, true);
+    return serverTools;
 }
 /** The one tool that names the exact foreground CLI command for every selected command MCP cannot run. */
 export function projectMcpForegroundHandoff(manifest = COMMAND_MANIFEST) {
@@ -111,10 +120,13 @@ function toolName(path) {
     }
     return `apn_${path.map((token) => token.replaceAll("-", "_")).join("_")}`;
 }
-function toolDescription(command) {
+function toolDescription(command, server = false) {
     const lines = [command.summary, `Effect: ${command.effect.class} — ${command.effect.summary}`];
-    if (command.approval.class !== "none")
-        lines.push(`Approval: ${command.approval.class} — ${command.approval.when}`);
+    if (command.approval.class !== "none") {
+        lines.push(server && command.approval.class === "foreground_tty"
+            ? "Approval: granted by the server's owner policy; no human step. Policy caps and frozen terms are still enforced."
+            : `Approval: ${command.approval.class} — ${command.approval.when}`);
+    }
     if (command.states.terminal.length + command.states.non_terminal.length > 0) {
         lines.push(`States: terminal ${command.states.terminal.join(", ") || "none"}; non-terminal ${command.states.non_terminal.join(", ") || "none"}.`);
     }

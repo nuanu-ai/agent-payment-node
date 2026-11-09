@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { approvalCode } from "../approval-code.js";
 import { ApnError } from "../errors.js";
 import { FINALIZED_RPC_ENV } from "../evm-finalized-proof.js";
-import { MacOSLoginKeychainSecret } from "../macos-keychain.js";
+import { platformWrappingSecret } from "../platform.js";
 import { refreshOperationIndex } from "../operation-index/refresh.js";
 import { failureEnvelope, successEnvelope } from "../output.js";
 import { HttpsBaseRpc } from "../rpc.js";
@@ -35,7 +35,7 @@ export async function executeWalletAllowanceCli(bound, options, root) {
                     open_revoke_operation_id: open?.operationId ?? null, next_actions: nextActions
                 } });
         }
-        const service = new WalletAllowanceRevokeService(root, { rpc, rpcSetting, wrapping: options.wrappingSecret ?? new MacOSLoginKeychainSecret(),
+        const service = new WalletAllowanceRevokeService(root, { rpc, rpcSetting, wrapping: options.wrappingSecret ?? platformWrappingSecret(),
             now: () => options.clock?.now() ?? new Date(), consent: async (record) => await consent(record, options) });
         const { command: _command, ...input } = request;
         const prepared = await service.prepare(input);
