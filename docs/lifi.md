@@ -508,12 +508,20 @@ up to seven past the 512th transition; a provider hint with no room left still g
 end. The destination proof is saved in the same transition as the end it decides, and that terminal transition always
 is: as the 520th at most, up to 1 MiB, without its read telemetry if only that does not fit.
 
-A journal that 0.5.96 or earlier filled kept no such room. There, evidence a journal can add only once (an effect's
-first safe proof, the destination proof) and the terminal transition may pass 1 MiB, without their read telemetry. The
-room past 1 MiB is one copy of the state (at most 64 KiB) for each of the eight transitions a journal may take past
-512: an open journal may grow to 1 MiB + 448 KiB, which keeps one copy free for its end, and a finished one to 1.5 MiB.
-The reader refuses any file larger than that. Ordinary changes and provider hints never use this room. A delivered
-bridge thus still ends `completed`, even when its journal was already full before the bridge transaction was safe.
+A journal that 0.5.96 or earlier filled kept no such room. There, the terminal transition and evidence a journal can
+record only a bounded number of times may pass 1 MiB, without their read telemetry. That evidence is an effect's first
+safe proof, the destination proof, and an effect losing an inclusion that was not yet safe (a reorg moved it, or it
+vanished): a full journal no longer records unsafe inclusions, so each effect can lose one only once there. The room
+past 1 MiB is one copy of the state (at most 64 KiB) for each of the eight transitions a journal may take past 512: an
+open journal may grow to 1 MiB + 448 KiB, which keeps one copy free for its end, and a finished one to 1.5 MiB. The
+reader refuses any file larger than that. Ordinary changes and provider hints never use this room. A delivered bridge
+thus still ends `completed`, even when its journal was already full before the bridge transaction was safe or a reorg
+moved it.
+
+An effect left `signing_started` with nothing sealed (the process stopped before custody sealed it) normally returns to
+`unsealed` on the next resume. When a full journal has no room for that, resume is refused and changes nothing until
+the operation's validity runs out. Then the release is saved in the terminal halt the expiry decides:
+`failed_before_effect`, or `failed_after_approval` once a sent approval is safe.
 
 ### Signing and sending
 
@@ -993,8 +1001,8 @@ Stargate native pools (asset ID 13) are `0x77b2043768d28E9C9aB44E1aBfC95944bcE57
 - **Journal bounds.** A journal an earlier release filled to 512 transitions or to 1 MiB loads unchanged and still takes
   its first safe proofs and its terminal transition ([Journal bounds](#journal-bounds)); a destination proof such a
   release saved on its own settles on the next resume. Releases up to 0.5.96 refuse a journal longer than 512
-  transitions or larger than 1 MiB; 0.5.97 refuses an open journal larger than 1 MiB and a finished one larger
-  than 1 MiB + 64 KiB. Do not downgrade once one exists.
+  transitions or larger than 1 MiB; 0.5.97 refuses an open journal larger than 1 MiB, a finished one larger than
+  1 MiB + 64 KiB, and a lost inclusion recorded past the 512th transition. Do not downgrade once one exists.
 - **1Click records** of schema v1 and v2 are read as the `base-usdc-to-tron-usdt` lane with their original status output,
   operation IDs and nonce reservation path; v3 records carry the lane. Ethereum nonce reservations are scoped under
   `eip155-1`.

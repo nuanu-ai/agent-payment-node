@@ -34,6 +34,12 @@ export declare class BridgeExecution {
      * observe-only path.
      */
     private releaseUnsignedSeal;
+    /**
+     * An expired operation whose unsigned seal a full journal could not release: nothing can be signed for it any more.
+     * Its sent effects are observed first, then it ends as the guard's expiry ends it, the release folded into that
+     * terminal transition, which the journal always admits. A sent approval that is not yet safe keeps it waiting.
+     */
+    private haltHeldSeal;
     /** Catches the journal up with a SEND claim from the exact sealed material, without signing or sending, then observes. */
     private recordClaimedSend;
     private guard;
@@ -45,6 +51,7 @@ export declare class BridgeExecution {
      * operation on the normal expiry path once late. Deterministic refusals halt the unsent effect as before.
      */
     private deferOrHalt;
+    /** `carried`: effects not yet saved (an unsigned seal's release) that this halt records with the outcome they decide. */
     private haltUnsent;
     private terminalFailure;
 }

@@ -5,8 +5,12 @@ import { bridgeConflictDomain, conflictDomainKey, evmConflictDomain, railConflic
 import type { RuntimeContext } from "../runtime.js";
 import type { OperationClaim, OperationFamily, WantedClaims } from "./types.js";
 
-/** One record directory: `<directory>/<id>.json`, or `<directory>/<profileHash>/<id>.json` when per profile. */
-export interface OperationStore { readonly directory: string; readonly perProfile: boolean }
+/**
+ * One record directory: `<directory>/<id>.json`, or `<directory>/<profileHash>/<id>.json` when per profile. A family whose
+ * own reader admits larger record files than the state store does names that bound in `recordByteLimit`, so salvage
+ * reads its records under the same bound.
+ */
+export interface OperationStore { readonly directory: string; readonly perProfile: boolean; readonly recordByteLimit?: number }
 export const RECORD_NAME = /^[a-f0-9]{64}\.json$/u;
 export const STATE_HASH = /^[a-f0-9]{64}$/u;
 

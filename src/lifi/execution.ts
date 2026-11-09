@@ -7,8 +7,9 @@ import type { StateStore } from "../state.js";
 import { assertBridgeRemaining, bridgeTransientRpcFailure, guardBridgeEffect } from "./economics.js";
 import { validateMaterial } from "./effect-store.js";
 import { BridgeObservation, replaceEffect, type BridgeSave } from "./observation.js";
-import { BRIDGE_PRE_SIGN_RPC_RATE_LIMITED, BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeOperationRecord,
-  type BridgePreSignRpcFailure } from "./operation-model.js";
+import { BRIDGE_PRE_SIGN_RPC_RATE_LIMITED, BRIDGE_PRE_SIGN_RPC_UNAVAILABLE, retainedUnsentBridgeRpcFailure, type BridgeEffect, type BridgeMutable,
+  type BridgeOperationRecord, type BridgePreSignRpcFailure } from "./operation-model.js";
+import { bridgeCapacityRefused } from "./history-capacity.js";
 import { assertBridgeOwner } from "./owner.js";
 import type { BridgeApprovalPort, BridgeCustodyPort, BridgeRpcPort, LifiProviderPort } from "./ports.js";
 import { bridgeCompositeReturn, publicBridgeOperation } from "./receipt.js";
@@ -77,7 +78,9 @@ export class BridgeExecution {
   }
   async run(op: BridgeOperationRecord, authority?: BridgeEffectAuthority): Promise<BridgeOperationRecord> {
     if (op.terminal || op.state === "awaiting_approval") return op;
-    op = await this.releaseUnsignedSeal(op);
+    const unsealed = await this.releaseUnsignedSeal(op);
+    if (unsealed.held !== null) return await this.haltHeldSeal(unsealed.op, unsealed.held.role, unsealed.held.expired);
+    op = unsealed.op;
     const haltReason = op.failure?.reason.startsWith("unsent_") ? op.failure.reason : null;
     const refreshed = await this.observation.sources(op); op = refreshed.operation;
     if (!refreshed.reliable) {
@@ -170,13 +173,37 @@ export class BridgeExecution {
    * bytes, and the idempotent SIGN claim proves the same intent), or ends it on the expiry path. A SEND claim keeps its own
    * observe-only path.
    */
-  private async releaseUnsignedSeal(op: BridgeOperationRecord): Promise<BridgeOperationRecord> {
+  private async releaseUnsignedSeal(op: BridgeOperationRecord): Promise<{ op: BridgeOperationRecord;
+    held: { role: "approval" | "bridge"; expired: unknown } | null }> {
     for (const effect of op.effects) {
       if (effect.phase !== "signing_started" || await this.claims().sendClaim(op, effect.role) !== null ||
         await this.custody.load(op, effect.role) !== null) continue;
-      op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "unsealed" }) });
+      try { op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "unsealed" }) }); }
+      catch (error) {
+        // A full journal refuses the release on its own (it is ordinary). Before expiry the resume is refused unchanged
+        // and the next one tries again; once the guard would refuse the effect, the release joins the halt instead.
+        if (!bridgeCapacityRefused(error)) throw error;
+        try { assertBridgeRemaining(op, this.now()); } catch (expired) { return { op, held: { role: effect.role, expired } }; }
+        throw error;
+      }
     }
-    return op;
+    return { op, held: null };
+  }
+  /**
+   * An expired operation whose unsigned seal a full journal could not release: nothing can be signed for it any more.
+   * Its sent effects are observed first, then it ends as the guard's expiry ends it, the release folded into that
+   * terminal transition, which the journal always admits. A sent approval that is not yet safe keeps it waiting.
+   */
+  private async haltHeldSeal(op: BridgeOperationRecord, role: "approval" | "bridge", expired: unknown): Promise<BridgeOperationRecord> {
+    const observed = await this.observation.sources(op); op = observed.operation;
+    if (!observed.reliable) return op;
+    const released = { effects: replaceEffect(op, { ...op.effects.find((e) => e.role === role)!, phase: "unsealed" }) };
+    const reverted = op.effects.findIndex((e) => e.phase === "safe_revert");
+    if (reverted >= 0 && op.effects.slice(0, reverted).every((e) => e.phase === "safe_success")) {
+      return await this.terminalFailure(op, "failed_confirmed_revert", "source_transaction_reverted", null, released);
+    }
+    if (op.effects.some((e) => e.phase === "included_revert" || e.phase === "safe_revert")) return op;
+    return await this.haltUnsent(op, expired, op.failure?.reason.startsWith("unsent_") ? op.failure.reason : undefined, released);
   }
   /** Catches the journal up with a SEND claim from the exact sealed material, without signing or sending, then observes. */
   private async recordClaimedSend(op: BridgeOperationRecord, effect: BridgeEffect,
@@ -233,35 +260,37 @@ export class BridgeExecution {
     if (failure === null) return await this.haltUnsent(op, error);
     return bridgeSame(op.failure, failure) ? op : await this.save(op, { failure });
   }
-  private async haltUnsent(op: BridgeOperationRecord, error: unknown, existingReason?: string): Promise<BridgeOperationRecord> {
-    const retained = retainedUnsentBridgeRpcFailure(op);
+  /** `carried`: effects not yet saved (an unsigned seal's release) that this halt records with the outcome they decide. */
+  private async haltUnsent(op: BridgeOperationRecord, error: unknown, existingReason?: string,
+    carried: Partial<Pick<BridgeMutable, "effects">> = {}): Promise<BridgeOperationRecord> {
+    const view = { ...op, ...carried }, retained = retainedUnsentBridgeRpcFailure(view);
     const reason = retained?.reason ?? existingReason ?? `unsent_${error instanceof ApnError ? error.code.toLowerCase() : "guard_unavailable"}`;
     const classifiedRpc = preSignRpcFailure(error);
-    const classifiedEffect = classifiedRpc === null ? undefined : op.effects.find((effect) => effect.role === classifiedRpc.effectRole);
+    const classifiedEffect = classifiedRpc === null ? undefined : view.effects.find((effect) => effect.role === classifiedRpc.effectRole);
     const preSignRpc = retained?.preSignRpc ?? (classifiedRpc !== null && classifiedEffect?.phase === "unsealed" &&
       classifiedEffect.submissionAttempts === 0 ? classifiedRpc : null);
     const failure = preSignRpc === null ? { reason, residualAllowance: null } : {
       reason: "unsent_apn_rpc_ambiguous", residualAllowance: null, preSignRpc,
       ...(retained?.residualAllowanceStatus === "unavailable" ? { residualAllowanceStatus: "unavailable" as const } : {}),
     };
-    if (op.effects.some((e) => e.phase === "signing_started")) bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_signing_material_unresolved");
-    if (op.effects.every((e) => e.submissionAttempts === 0)) {
+    if (view.effects.some((e) => e.phase === "signing_started")) bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_signing_material_unresolved");
+    if (view.effects.every((e) => e.submissionAttempts === 0)) {
       await this.claims().assertNoUnrecordedSend(op);
-      return await this.save(op, { state: "failed_before_effect", failure });
+      return await this.save(op, { ...carried, state: "failed_before_effect", failure });
     }
-    if (op.effects[0]?.role === "approval" && op.effects[0].phase === "safe_success" && op.effects.at(-1)!.submissionAttempts === 0) {
-      return await this.terminalFailure(op, "failed_after_approval", reason, preSignRpc);
+    if (view.effects[0]?.role === "approval" && view.effects[0].phase === "safe_success" && view.effects.at(-1)!.submissionAttempts === 0) {
+      return await this.terminalFailure(op, "failed_after_approval", reason, preSignRpc, carried);
     }
-    return await this.save(op, { state: "unknown_finality", failure });
+    return await this.save(op, { ...carried, state: "unknown_finality", failure });
   }
   private async terminalFailure(op: BridgeOperationRecord, state: "failed_after_approval" | "failed_confirmed_revert", reason: string,
-    preSignRpc: BridgePreSignRpcFailure | null = null): Promise<BridgeOperationRecord> {
-    const retained = retainedUnsentBridgeRpcFailure(op), diagnostic = preSignRpc ?? retained?.preSignRpc ?? null;
+    preSignRpc: BridgePreSignRpcFailure | null = null, carried: Partial<Pick<BridgeMutable, "effects">> = {}): Promise<BridgeOperationRecord> {
+    const retained = retainedUnsentBridgeRpcFailure({ ...op, ...carried }), diagnostic = preSignRpc ?? retained?.preSignRpc ?? null;
     const failureReason = diagnostic === null ? reason : "unsent_apn_rpc_ambiguous";
     if (state === "failed_after_approval") await this.claims().assertNoUnrecordedSend(op);
     // The residual allowance is reported, never required: an unavailable read keeps the proven terminal outcome.
     const residual = await this.observation.residualObservation(op);
-    return await this.save(op, { state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason,
+    return await this.save(op, { ...carried, state, observationTelemetry: residual.observationTelemetry, failure: { reason: failureReason,
       residualAllowance: residual.ok ? residual.value : null,
       ...(diagnostic === null && residual.ok ? {} : { residualAllowanceStatus: residual.ok ? "observed" as const : "unavailable" as const }),
       ...(diagnostic === null ? {} : { preSignRpc: diagnostic }) } });

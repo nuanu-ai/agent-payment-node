@@ -49,8 +49,8 @@ export declare class OperationIndexStore extends SecureStateStore {
     removeDamaged(): Promise<void>;
     /** Record names of one store, names only. Stage files, `.DS_Store` and other foreign names are not records. */
     recordNames(store: OperationStore): Promise<readonly StoredRecordName[]>;
-    /** The record's bytes as JSON for salvage, or why they cannot be read as such. */
-    rawRecord(recordPath: string): Promise<RawRecord | null>;
+    /** The record's bytes as JSON for salvage, under the bound its store names (if any), or why they cannot be read as such. */
+    rawRecord(recordPath: string, store: OperationStore): Promise<RawRecord | null>;
     private readIndex;
     private indexNames;
     /** The leaf lock may be the first lock a state root sees (a walk over released records, a family's first admission). */

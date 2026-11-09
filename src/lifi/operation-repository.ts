@@ -13,7 +13,7 @@ import { adaptLegacyBridgeOperation, isLegacyBridgeOperation,
 
 export class BridgeOperationRepository extends SecureStateStore {
   private initialized: Promise<void> | undefined;
-  /** Past 1 MiB a file holds only first proofs and an end it had no reserve for (history-capacity.ts), up to this. */
+  /** Past 1 MiB a file holds only bounded evidence and an end it had no reserve for (history-capacity.ts), up to this. */
   protected override stateByteLimit(): number { return BRIDGE_TERMINAL_FILE_LIMIT; }
   private async ready(): Promise<void> {
     this.initialized ??= (async () => {

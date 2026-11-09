@@ -2,10 +2,15 @@ import type { CommandOutcome, CommandRequest } from "../commands.js";
 import { type MoneyConflictDomain } from "../operation-conflict-domain.js";
 import type { RuntimeContext } from "../runtime.js";
 import type { OperationClaim, OperationFamily, WantedClaims } from "./types.js";
-/** One record directory: `<directory>/<id>.json`, or `<directory>/<profileHash>/<id>.json` when per profile. */
+/**
+ * One record directory: `<directory>/<id>.json`, or `<directory>/<profileHash>/<id>.json` when per profile. A family whose
+ * own reader admits larger record files than the state store does names that bound in `recordByteLimit`, so salvage
+ * reads its records under the same bound.
+ */
 export interface OperationStore {
     readonly directory: string;
     readonly perProfile: boolean;
+    readonly recordByteLimit?: number;
 }
 export declare const RECORD_NAME: RegExp;
 export declare const STATE_HASH: RegExp;

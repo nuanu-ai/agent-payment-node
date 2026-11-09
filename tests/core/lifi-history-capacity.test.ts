@@ -11,6 +11,7 @@ import { BRIDGE_TERMINAL, bridgeSnapshot, sealBridgeOperation, type BridgeMutabl
 import { BridgeOperationRepository } from "../../src/lifi/operation-repository.js";
 import { validateBridgeOperation } from "../../src/lifi/operation-validation.js";
 import { bridgeAtTransition, transitionBridge } from "../../src/lifi/transitions.js";
+import { OperationIndex } from "../../src/operation-index/index.js";
 import { OperationService } from "../../src/operation-service.js";
 import { LIFI_DESTINATION_HASH, lifiFixture } from "./lifi-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -319,4 +320,87 @@ test("the reader holds an open journal to 1 MiB + 448 KiB and a finished one to 
   for (; bytes(ended(over)) <= BRIDGE_TERMINAL_FILE_LIMIT; n++) over = appended(over, flaky(n));
   await assert.rejects(load(ended(sealed(over))), { code: "APN_STATE_CORRUPT" });
   assert.deepEqual([BRIDGE_OPEN_FILE_LIMIT, BRIDGE_TERMINAL_FILE_LIMIT], [1024 * 1024 + 448 * 1024, 1536 * 1024]);
+});
+
+test("a reorg of the unsafe bridge inclusion in a journal 0.5.96 filled is recorded past 1 MiB, and the bridge still ends", async (t) => {
+  for (const outcome of ["completed", "failed_confirmed_revert"] as const) await t.test(outcome, async (child) => {
+    const temporary = await temporaryState(); child.after(temporary.cleanup);
+    const { s, id, op } = await filledBeforeSafeSource(temporary.root, "base-arb", 0);
+    // The inclusion moved to another block before it was safe; there it succeeded again, or reverted.
+    s.source.changedBlock = true; if (outcome === "failed_confirmed_revert") s.source.reverted.add("bridge");
+    s.destination.destinationAvailable = true; s.provider.statusValue = "completed_observed";
+    const resumed = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(resumed.ok, true, resumed.error?.message);
+    const ended = (await findStored(s.core.bridges.records, id))!;
+    assert.equal(ended.state, outcome); assert.deepEqual(addedKinds(op, ended), ["closing", "closing", "terminal"]);
+    // The lost inclusion is its own transition, as the phase rules require before a revert; the safe proof follows it.
+    const lost = ended.transitions[op.transitions.length]!.effects.at(-1)!, proven = ended.transitions[op.transitions.length + 1]!.effects.at(-1)!;
+    assert.deepEqual([lost.phase, lost.includedProof], ["unknown_finality", null]);
+    assert.notEqual(proven.safeProof!.block.hash, op.effects.at(-1)!.includedProof!.block.hash);
+    assert.ok(bytes(ended) > BRIDGE_FILE_LIMIT && bytes(ended) <= BRIDGE_TERMINAL_FILE_LIMIT, `${bytes(ended)}`);
+  });
+});
+
+test("past the line a lost inclusion cannot repeat: the unsafe re-inclusion after it is refused, its safe proof is not", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { s, id, op } = await filledBeforeSafeSource(temporary.root, "base-arb", 0);
+  s.source.changedBlock = true; s.source.safeBridge = false;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const refusedResume = await s.core.execute({ command: "operation.resume", operationId: id });
+    assert.equal(refusedResume.error?.message, "Bridge validation failed: bridge_record_capacity.");
+    const stored = (await findStored(s.core.bridges.records, id))!;
+    assert.deepEqual(addedKinds(op, stored), ["closing"]); assert.equal(stored.effects.at(-1)!.includedProof, null);
+  }
+  s.source.safeBridge = true; s.destination.destinationAvailable = true; s.provider.statusValue = "completed_observed";
+  const done = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(done.ok, true, done.error?.message);
+  const ended = (await findStored(s.core.bridges.records, id))!;
+  assert.equal(ended.state, "completed"); assert.deepEqual(addedKinds(op, ended), ["closing", "closing", "terminal"]);
+});
+
+/**
+ * A journal 0.5.96 filled with pre-sign deferrals (to 1 MiB, or to 512 transitions where copies are small) whose last
+ * transition marks an effect signing_started: the process died before custody sealed anything.
+ */
+async function filledAtUnsignedSeal(root: string, pair: "base-arb" | "eth-bnb") {
+  const s = await lifiFixture(root, pair), { id } = await s.prepare(), persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
+  s.core.bridges.records.persist = async (op) => { await persist(op); if (op.effects.at(-1)!.phase === "signing_started") throw new Error("died before custody"); };
+  assert.equal((await s.core.execute({ command: "bridge.approve", operationId: id })).ok, false); s.core.bridges.records.persist = persist;
+  const stopped = (await findStored(s.core.bridges.records, id))!, { at: _at, previousHash: _p, transitionHash: _h, ...marker } = stopped.transitions.at(-1)!;
+  const marked = (from: BridgeOperationRecord) => appended(from, { ...marker,
+    effects: marker.effects.map(({ envelopeHash: _e, ...e }, i) => ({ ...e, envelope: from.effects[i]!.envelope })) });
+  const fits = (next: BridgeOperationRecord) => next.transitions.length <= 512 && bytes(next) <= BRIDGE_FILE_LIMIT;
+  let op = bridgeAtTransition(stopped, stopped.transitions.length - 2), n = 0;
+  while (op.transitions.length < 496 && bytes(op) < BRIDGE_FILE_LIMIT - 64 * 1024) for (let k = 0; k < 8; k++) op = appended(op, deferred(n++));
+  for (; fits(marked(appended(op, deferred(n)))); n++) op = appended(op, deferred(n));
+  op = sealed(marked(op)); assert.equal(validateBridgeOperation(op), op); assert.equal(op.effects.at(-1)!.phase, "signing_started");
+  await writeFile(join(root, "bridge-operations", op.profileHash, `${id}.json`), `${canonicalJson(op)}\n`);
+  return { s, id, op };
+}
+
+test("a journal 0.5.96 filled at an unsigned seal waits until expiry, then ends with the release folded into its halt", async (t) => {
+  for (const pair of ["base-arb", "eth-bnb"] as const) await t.test(pair, async (child) => {
+    const temporary = await temporaryState(); child.after(temporary.cleanup); const { s, id, op } = await filledAtUnsignedSeal(temporary.root, pair);
+    // The release (signing_started back to unsealed) is ordinary: refused for room, nothing changes, the next resume retries.
+    const early = await s.core.execute({ command: "operation.resume", operationId: id });
+    assert.equal(early.ok, false); assert.match(early.error?.message ?? "", /bridge_(record|history)_capacity/u);
+    assert.equal(hashObject(await findStored(s.core.bridges.records, id)), hashObject(op));
+    s.now.setTime(Date.parse(op.intent.expiresAt) + 1000);
+    const late = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(late.ok, true, late.error?.message);
+    const ended = (await findStored(s.core.bridges.records, id))!;
+    assert.equal(ended.state, pair === "base-arb" ? "failed_after_approval" : "failed_before_effect");
+    assert.equal(ended.failure?.reason, "unsent_apn_reprepare_required"); assert.deepEqual(addedKinds(op, ended), ["terminal"]);
+    assert.equal(ended.effects.at(-1)!.phase, "unsealed"); assert.ok(bytes(ended) <= BRIDGE_TERMINAL_FILE_LIMIT, `${bytes(ended)}`);
+    await new OperationService(s.state).assertProfileAvailable(ended.profileHash);
+  });
+});
+
+test("salvage reads a damaged bridge journal past 1 MiB under the bridge bound instead of calling it record_not_json", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { s, id, op } = await filledBeforeSafeSource(temporary.root, "base-arb", 0);
+  let big = op, n = 0;
+  for (; bytes(big) <= BRIDGE_FILE_LIMIT + 64 * 1024; n++) big = appended(big, sourceFlaky(n));
+  // Canonical JSON whose binding the bridge reader refuses: the index quarantines it and salvages what it names.
+  await writeFile(join(temporary.root, "bridge-operations", op.profileHash, `${id}.json`), `${canonicalJson({ ...big, integrityHash: "0".repeat(64) })}\n`);
+  await assert.rejects(new OperationService(s.state).assertProfileAvailable(op.profileHash), { code: "APN_OPERATION_BLOCKED" });
+  const entry = await new OperationIndex(s.state).find(id);
+  assert.deepEqual([entry?.state, entry?.unreadableReason, entry?.idempotencyHash], ["unreadable", "record_invalid", op.idempotencyHash]);
 });

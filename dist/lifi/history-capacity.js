@@ -12,16 +12,18 @@ export const BRIDGE_FILE_LIMIT = 1024 * 1024;
 const BRIDGE_STATE_COPY_BYTES = 64 * 1024;
 /**
  * Room past 1 MiB: one state copy for each of the BRIDGE_CLOSING_TRANSITIONS a journal may take past its released
- * bounds. Only first proofs (an effect's first safe proof, the destination proof: evidence validation admits once, so
- * at most three) and the terminal transition use it. Each adds its own copy and the record's current state grows by at
- * most one copy in all, so a journal any release left within 1 MiB still records them with room to spare.
+ * bounds. Only bounded evidence (bridgeBoundedEvidence) and the terminal transition use it: at most three first proofs
+ * (an effect's first safe proof, the destination proof; validation never lets a saved proof be replaced), at most two
+ * lost inclusions (one per effect, see below) and the end. Each adds its own copy and the record's current state grows
+ * by at most one copy in all: at most six copies before the end, within the seven an open journal may use, and seven
+ * with it.
  */
 const BRIDGE_OVERFLOW_BYTES = BRIDGE_CLOSING_TRANSITIONS * BRIDGE_STATE_COPY_BYTES;
 /** The reader's bound for a terminal journal. 0.5.97 reads one only up to 1 MiB + 64 KiB, earlier releases up to 1 MiB. */
 export const BRIDGE_TERMINAL_FILE_LIMIT = BRIDGE_FILE_LIMIT + BRIDGE_OVERFLOW_BYTES;
 /**
- * The reader's bound for an open journal: a first proof past 1 MiB keeps one copy of room for the terminal transition.
- * 0.5.97 and earlier read an open journal only up to 1 MiB.
+ * The reader's bound for an open journal: bounded evidence past 1 MiB keeps one copy of room for the terminal
+ * transition. 0.5.97 and earlier read an open journal only up to 1 MiB.
  */
 export const BRIDGE_OPEN_FILE_LIMIT = BRIDGE_TERMINAL_FILE_LIMIT - BRIDGE_STATE_COPY_BYTES;
 /**
@@ -34,15 +36,25 @@ const TERMINAL_RESERVE_BYTES = 32 * 1024;
 export function bridgeTransitionKind(previous, next) {
     if (BRIDGE_TERMINAL.includes(next.state))
         return "terminal";
-    return bridgeFirstProof(previous, next) || newDestinationHint(previous.providerObservation, next.providerObservation) ? "closing" : "ordinary";
+    return bridgeBoundedEvidence(previous, next) || newDestinationHint(previous.providerObservation, next.providerObservation) ? "closing" : "ordinary";
 }
 /**
- * Whether `next` adds an effect's first safe proof or the destination proof: closing evidence validation lets a journal
- * add only once (a saved proof can never be replaced), unlike a provider hint, which can name a new transaction again.
+ * Whether `next` records closing evidence that past the ordinary bounds can occur only a bounded number of times, unlike
+ * a provider hint, which can name a new transaction again:
+ * - an effect's first safe proof or the destination proof: validation never lets a saved proof be replaced;
+ * - an effect losing the inclusion it had recorded before it was safe (a reorg moved it, or it vanished). The phase
+ *   rules need this transition before a safe proof at another block. It follows a recorded unsafe inclusion, an
+ *   ordinary transition. It takes a slot past 512 transitions, or room past 1 MiB only beyond the closing reserve's
+ *   line; the count never falls, and a file never shrinks by more than one copy (only its current state can), less than
+ *   the 96 KiB from that line down to the ordinary one. So from there no unsafe inclusion is recorded again, and each
+ *   effect loses one at most once.
  */
-export function bridgeFirstProof(previous, next) {
-    return next.effects.some((effect, index) => effect.safeProof !== null && previous.effects[index]?.safeProof === null) ||
-        (previous.destinationProof === null && next.destinationProof !== null);
+export function bridgeBoundedEvidence(previous, next) {
+    return next.effects.some((effect, index) => {
+        const before = previous.effects[index];
+        return before !== undefined && (effect.safeProof !== null && before.safeProof === null ||
+            before.includedProof !== null && before.safeProof === null && effect.includedProof === null);
+    }) || (previous.destinationProof === null && next.destinationProof !== null);
 }
 function newDestinationHint(previous, next) {
     if (next === null || !isEvmTransactionHash(next.destinationTransactionHash))
@@ -62,7 +74,7 @@ export function bridgeHistoryAdmits(kind, transitions) {
 }
 /**
  * The capacity reason that refuses `record`, whose newest transition is of `kind`; null when it may be written. With
- * `overflow` (for a first proof or the terminal transition only) it is measured against the room past 1 MiB instead.
+ * `overflow` (for bounded evidence or the terminal transition only) it is measured against the room past 1 MiB instead.
  */
 export function bridgeCapacityRefusal(kind, record, overflow) {
     if (!bridgeHistoryAdmits(kind, record.transitions.length))

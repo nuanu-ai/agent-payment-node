@@ -1,5 +1,5 @@
 import { ApnError } from "../errors.js";
-import type { OperationFamilyAdapter } from "./adapter.js";
+import { parseRecordPath, type OperationFamilyAdapter } from "./adapter.js";
 import type { OperationRegistry } from "./registry.js";
 import { OperationIndexDamage, type OperationIndexStore, type StoredRecordName } from "./store.js";
 import { normalizeClaims, OPERATION_INDEX_ENTRY_SCHEMA, profileClaim, unreadableFamilyClaim, unreadableProfileClaim,
@@ -82,7 +82,9 @@ export class OperationIndexReconciler {
    * when nothing names a profile.
    */
   async quarantine(adapter: OperationFamilyAdapter, name: StoredRecordName, reason: UnreadableReason): Promise<OperationIndexEntry | null> {
-    const raw = await this.store.rawRecord(name.recordPath);
+    const store = adapter.stores.find((candidate) => candidate.directory === parseRecordPath(name.recordPath)?.directory);
+    if (store === undefined) throw new Error("Operation record path names no store of its family.");
+    const raw = await this.store.rawRecord(name.recordPath, store);
     if (raw === null) return null;
     const salvaged = "value" in raw ? adapter.salvage(raw.value) : null;
     const profiles = name.profileHash !== null ? [name.profileHash] : salvaged?.profileHashes ?? [];

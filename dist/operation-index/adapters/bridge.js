@@ -1,6 +1,7 @@
 import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
 import { LEGACY_BRIDGE_CLOSURE_REASON, legacyBridgeTerminal } from "../../legacy/lifi-bridge/closure.js";
 import { legacyBridgeOpen, legacyBridgeStatus } from "../../legacy/lifi-bridge/status.js";
+import { BRIDGE_TERMINAL_FILE_LIMIT } from "../../lifi/history-capacity.js";
 import { isLegacyBridgeOperation } from "../../lifi/legacy-operation.js";
 import { BRIDGE_TERMINAL } from "../../lifi/operation-model.js";
 import { BridgeOperationRepository } from "../../lifi/operation-repository.js";
@@ -9,7 +10,7 @@ import { BridgeService } from "../../lifi/service.js";
 import { assertResumeOptions, oneObservationOnly } from "../../operation-command-options.js";
 import { bridgeConflictDomain } from "../../operation-conflict-domain.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageBridge, salvageRecord, standardIdentity } from "../adapter.js";
-const STORE = { directory: "bridge-operations", perProfile: true };
+const STORE = { directory: "bridge-operations", perProfile: true, recordByteLimit: BRIDGE_TERMINAL_FILE_LIMIT };
 export function bridgeDomains(record) {
     return [bridgeConflictDomain(record.intent.sourceDeployment.chainId, record.intent.owner.address)];
 }

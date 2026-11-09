@@ -11,7 +11,7 @@ import { bridgeFailure, bridgeSame } from "./validation.js";
 import { adaptLegacyBridgeOperation, isLegacyBridgeOperation } from "./legacy-operation.js";
 export class BridgeOperationRepository extends SecureStateStore {
     initialized;
-    /** Past 1 MiB a file holds only first proofs and an end it had no reserve for (history-capacity.ts), up to this. */
+    /** Past 1 MiB a file holds only bounded evidence and an end it had no reserve for (history-capacity.ts), up to this. */
     stateByteLimit() { return BRIDGE_TERMINAL_FILE_LIMIT; }
     async ready() {
         this.initialized ??= (async () => {

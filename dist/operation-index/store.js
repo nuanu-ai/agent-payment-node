@@ -50,6 +50,16 @@ export function validateIndexEntry(value, operationId) {
         damaged();
     return value;
 }
+/** A record file of a store whose family reader admits more than the state store's limit, read under that bound. */
+class RecordFileReader extends SecureStateStore {
+    byteLimit;
+    constructor(root, byteLimit) {
+        super(root);
+        this.byteLimit = byteLimit;
+    }
+    stateByteLimit() { return this.byteLimit; }
+    async read(recordPath) { return await this.readJson(recordPath); }
+}
 /** File I/O of `operation-index/` through the secure store (0600 files, atomic writes, strict reads). */
 export class OperationIndexStore extends SecureStateStore {
     ensured = false;
@@ -190,10 +200,11 @@ export class OperationIndexStore extends SecureStateStore {
         }
         return output;
     }
-    /** The record's bytes as JSON for salvage, or why they cannot be read as such. */
-    async rawRecord(recordPath) {
+    /** The record's bytes as JSON for salvage, under the bound its store names (if any), or why they cannot be read as such. */
+    async rawRecord(recordPath, store) {
         try {
-            const value = await this.readJson(recordPath);
+            const value = store.recordByteLimit === undefined ? await this.readJson(recordPath)
+                : await new RecordFileReader(this.root, store.recordByteLimit).read(recordPath);
             return value === null ? null : { value };
         }
         catch (error) {

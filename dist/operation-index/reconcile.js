@@ -1,4 +1,5 @@
 import { ApnError } from "../errors.js";
+import { parseRecordPath } from "./adapter.js";
 import { OperationIndexDamage } from "./store.js";
 import { normalizeClaims, OPERATION_INDEX_ENTRY_SCHEMA, profileClaim, unreadableFamilyClaim, unreadableProfileClaim } from "./types.js";
 /** A failure of the file system itself (not of the record's content) is never turned into a quarantine. */
@@ -97,7 +98,10 @@ export class OperationIndexReconciler {
      * when nothing names a profile.
      */
     async quarantine(adapter, name, reason) {
-        const raw = await this.store.rawRecord(name.recordPath);
+        const store = adapter.stores.find((candidate) => candidate.directory === parseRecordPath(name.recordPath)?.directory);
+        if (store === undefined)
+            throw new Error("Operation record path names no store of its family.");
+        const raw = await this.store.rawRecord(name.recordPath, store);
         if (raw === null)
             return null;
         const salvaged = "value" in raw ? adapter.salvage(raw.value) : null;
