@@ -1,5 +1,5 @@
 import { hashObject } from "../canonical.js";
-import { bridgeCapacityRefusal, bridgeTransitionKind } from "./history-capacity.js";
+import { bridgeCapacityRefusal, bridgeFirstProof, bridgeTransitionKind } from "./history-capacity.js";
 import { BRIDGE_TELEMETRY_ROWS, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot, sealBridgeOperation } from "./operation-model.js";
 import { validateBridgeContinuity, validateBridgeOperation } from "./operation-validation.js";
 import { bridgeFailure, bridgeSame } from "./validation.js";
@@ -35,9 +35,11 @@ export function transitionBridge(op, patch, at) {
         result = appended(op, { ...next, observationTelemetry: [] }, at);
         refusal = bridgeCapacityRefusal(kind, result, false);
     }
-    // Only then may a terminal transition pass the 1 MiB bound that earlier releases read.
-    if (refusal === "bridge_record_capacity" && kind === "terminal")
+    // Only then may a first proof or the terminal transition pass the 1 MiB bound that earlier releases read: a journal
+    // 0.5.96 filled has no reserve for them. A new provider hint never does; it is carried to the end (observation.ts).
+    if (refusal === "bridge_record_capacity" && (kind === "terminal" || bridgeFirstProof(oldMeaning, newMeaning))) {
         refusal = bridgeCapacityRefusal(kind, result, true);
+    }
     if (refusal !== null)
         bridgeFailure("APN_OPERATION_BLOCKED", refusal, {});
     validateBridgeContinuity(op, result);

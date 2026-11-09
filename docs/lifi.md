@@ -506,8 +506,14 @@ below 512 transitions with 128 KiB of the file free; otherwise resume refuses it
 proof, a provider observation naming a new or now settled destination transaction) is recorded while 32 KiB stay free,
 up to seven past the 512th transition; a provider hint with no room left still guides the read and is saved with the
 end. The destination proof is saved in the same transition as the end it decides, and that terminal transition always
-is: as the 520th at most, up to 1 MiB, without its read telemetry if only that does not fit, and up to 64 KiB past
-1 MiB in a journal an earlier release filled. A delivered bridge thus still ends `completed`.
+is: as the 520th at most, up to 1 MiB, without its read telemetry if only that does not fit.
+
+A journal that 0.5.96 or earlier filled kept no such room. There, evidence a journal can add only once (an effect's
+first safe proof, the destination proof) and the terminal transition may pass 1 MiB, without their read telemetry. The
+room past 1 MiB is one copy of the state (at most 64 KiB) for each of the eight transitions a journal may take past
+512: an open journal may grow to 1 MiB + 448 KiB, which keeps one copy free for its end, and a finished one to 1.5 MiB.
+The reader refuses any file larger than that. Ordinary changes and provider hints never use this room. A delivered
+bridge thus still ends `completed`, even when its journal was already full before the bridge transaction was safe.
 
 ### Signing and sending
 
@@ -985,9 +991,10 @@ Stargate native pools (asset ID 13) are `0x77b2043768d28E9C9aB44E1aBfC95944bcE57
   outcome. A journal with a long telemetry history loads and is compacted on its next real change; a poll that changes
   only telemetry adds no transition, and a transition keeps at most the latest 8 telemetry rows.
 - **Journal bounds.** A journal an earlier release filled to 512 transitions or to 1 MiB loads unchanged and still takes
-  its terminal transition ([Journal bounds](#journal-bounds)); a destination proof such a release saved on its own
-  settles on the next resume. Releases up to 0.5.96 refuse a journal longer than 512 transitions or larger than 1 MiB,
-  so do not downgrade once one exists.
+  its first safe proofs and its terminal transition ([Journal bounds](#journal-bounds)); a destination proof such a
+  release saved on its own settles on the next resume. Releases up to 0.5.96 refuse a journal longer than 512
+  transitions or larger than 1 MiB; 0.5.97 refuses an open journal larger than 1 MiB and a finished one larger
+  than 1 MiB + 64 KiB. Do not downgrade once one exists.
 - **1Click records** of schema v1 and v2 are read as the `base-usdc-to-tron-usdt` lane with their original status output,
   operation IDs and nonce reservation path; v3 records carry the lane. Ethereum nonce reservations are scoped under
   `eip155-1`.
