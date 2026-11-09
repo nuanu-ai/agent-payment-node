@@ -152,6 +152,9 @@ and UTC daily caps and the chain's exact mechanism
 { "provider": "local", "reference": "eip155:1:0x0578cFB241215b77442a541325d6A4E6dFE700Ec" }
 ```
 
+- The admission may pin recipients with `recipients` (1 to 16 addresses) on every chain, or with the single
+  `recipient` on Ethereum and Base. An unlisted recipient is refused before any RPC read and again before approval,
+  reservation and first send. See [recipient pins](allowlist-policy.md#recipient-pins).
 - Preparation saves the active policy digest, revision, activation and mechanism.
 - Approval reserves the gross amount in the common asset usage ledger before the first signature. APN rechecks the
   active policy and remaining cap before signing, disclosure and dispatch.
@@ -408,6 +411,9 @@ per-operation and UTC daily caps and this exact mechanism:
 { "provider": "payai-x402-facilitator", "reference": "eip155:43114:https://facilitator.payai.network" }
 ```
 
+The admission may pin recipients with `recipients`; an unlisted recipient is refused at prepare, approval, reservation
+and before the authorization leaves APN.
+
 Approval reserves the gross amount in the common asset usage ledger before the owner signs and rechecks the unchanged
 policy and caps right before the authorization leaves APN. After exposure the full amount stays charged until finalized
 evidence proves delivery (`completed`) or an unused, expired authorization (`expired_unused`, which releases the
@@ -451,7 +457,8 @@ explicit public HTTPS Base RPC before prepare, approve and resume. APN rechecks 
 smart-account proxy, implementation and EntryPoint deployment before the single provider invocation.
 
 **Owner policy.** First activate a Base canonical-USDC `gasless` allowlist admission for the same Coinbase account, with
-positive per-transfer and daily atomic caps, an exact recipient, and this mechanism:
+positive per-transfer and daily atomic caps, a recipient pin (the single `recipient` or a `recipients` list), and this
+mechanism:
 
 ```json
 { "provider": "coinbase-agentic-wallet", "reference": "awal@2.12.1:send_base_usdc:eip155:8453" }
@@ -514,6 +521,9 @@ Use a profile already bound to the intended MetaMask Agent server-wallet address
 The currently selected wallet must resolve to that same address. This path does not create a wallet, change selection,
 refresh a login or complete provider MFA. If the session is unavailable, complete the normal provider login separately
 and continue the saved operation. Observing a dispatched operation never needs the session.
+
+The owner allowlist does not admit this lane: no allowlist cap, usage hold or recipient pin applies, and the limits are
+MetaMask's Guard policy and MFA. See [where pins do not reach](allowlist-policy.md#recipient-pins).
 
 APN only reads the `mm` session; `mm` renews its own CLI access token with the stored refresh token on its next
 authenticated command. A refusal for the session says which case it is:
@@ -908,6 +918,9 @@ permission. Set `APN_BASE_RPC_URL` to an explicit public HTTPS Base RPC (see the
 complete transaction receipts and bounded logs. APN checks the current permission nonce, available allowance, owner USDC
 balance, session state and pinned contract deployments before signing and disclosure. No new grant, account deployment
 or native funding is part of this command. Other networks are not executable through this adapter.
+
+The owner allowlist does not admit this lane: no allowlist cap, usage hold or recipient pin applies, and the limit is the
+root permission's periodic USDC allowance. See [where pins do not reach](allowlist-policy.md#recipient-pins).
 
 The public MetaMask facilitator pays native gas. The fee is zero: the owner's debit and the recipient's credit both
 equal `--amount` (`G = N`, `F = 0`). The owner and session need no native balance.

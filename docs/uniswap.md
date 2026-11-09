@@ -49,6 +49,12 @@ mechanism pin from `inventory`. Without it, `prepare` refuses with
 cap is enforced by the shared usage ledger. Staging and foreground activation
 work as described in [Orca](orca.md#owner-admission).
 
+`--to` may name another address than the paying account. Either `swap`
+admission may pin `recipients`; the `--to` address must then be on each list
+present, or `quote`, `prepare`, approval and the send refuse with
+`allowlist_recipient_not_admitted` (see
+[recipient pins](allowlist-policy.md#recipient-pins)).
+
 ## Pinned contracts
 
 | Role | Address |
