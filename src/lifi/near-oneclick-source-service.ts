@@ -232,6 +232,8 @@ export class OneClickSourceService {
     const lane = oneClickRecordLane(record);
     await journal.whileUnsignedPastDeadline(operationId, async unsigned => await releaseUnsignedOneClickUsage(this.state.root, unsigned, new Date(Date.now())));
     const usage = async (current: OneClickSourceRecord) => await settleOneClickUsage(this.state.root, current, new Date(Date.now()));
+    // The hold follows what the journal already proves before any network read, so a failed read never keeps it open.
+    await usage(record);
     // A finished operation answers from its journal with no RPC: a source proven never to land, a reverted safe source, or a
     // stored finalized destination.
     if (record.phase === "failed_proven_superseded") return statusView(record, lane, null, { status: null, provenance: "not_queried" }, null, await usage(record));
@@ -246,6 +248,8 @@ export class OneClickSourceService {
     if (safe?.safe === true && (safe.status === "success" || safe.status === "reverted") && typeof safe.receiptHash === "string" &&
       ["submitting", "submitted_pending", "unknown_finality"].includes(record.phase)) {
       record = await journal.advance(operationId, record.integrityHash, "source_observed", { sourceReceiptStatus: safe.status, sourceReceiptHash: safe.receiptHash });
+      // Settled at once: the provider status and destination proof below may fail and must not keep the day's cap held.
+      await usage(record);
     }
     // No receipt at all: once another transaction took the source nonce at finality and the node knows neither this
     // transaction nor a receipt, the deposit can never land and the operation ends. Until then it stays open; a deposit

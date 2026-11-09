@@ -811,7 +811,8 @@ journal refuses to seal after the effective deadline (`oneclick_source_quote_exp
 is no longer held (`oneclick_source_usage_hold_not_held`). An evaluation refusal (asset, rail or lane not admitted, a
 cap, the policy window) is `APN_ALLOWLIST_REFUSED` / `oneclick_source_policy_refused`, with the evaluator's words in
 `cause`. The hold changes only when submit or status runs; until then an open hold counts against the asset's daily
-limit on every day. Status brings the hold to what the journal proves:
+limit on every day. Status brings the hold to what the journal proves, first from the saved journal and again right after it saves a
+source outcome, before any provider or destination read, so a failed read never keeps the day's limit held:
 
 | Journal | Hold |
 | --- | --- |
@@ -823,7 +824,8 @@ limit on every day. Status brings the hold to what the journal proves:
 | `source_observed`, safe revert | `failed_confirmed_revert` |
 | `failed_proven_superseded` | `released_unsubmitted` |
 
-Submit and status report the hold as `usageHold`: `null` when the operation holds nothing (records written before
+Deposits submitted before 0.5.98 were never held and are not added to the ledger afterwards, so on the day of the
+upgrade the daily limit does not count them. Submit and status report the hold as `usageHold`: `null` when the operation holds nothing (records written before
 0.5.98, or a submit refused before the hold, such as a declined consent), and also from a submit whose deposit was
 sent but whose hold could not be settled right then; status settles and reports it. A
 late deposit that 1Click refunds still counts as spent: the refund is not an effect APN proves.

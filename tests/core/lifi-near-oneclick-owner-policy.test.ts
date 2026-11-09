@@ -156,3 +156,13 @@ test("settling follows every journal outcome, and a hold another run moved first
     "released_unsubmitted");
   assert.equal(await settleOneClickUsage(h.root, { ...record, operationId: "f".repeat(64) }, new Date(Date.now())), null);
 });
+
+test("status settles the hold as soon as the source outcome is saved, even when the provider status read then fails", async t => {
+  const h = await harness(t);
+  const sent = await h.service.submit(request) as any;
+  assert.equal(sent.usageHold.state, "submitted");
+  h.failStatus();
+  await assert.rejects(h.service.status(sent.operationId), /1Click status unavailable/u);
+  assert.equal((await new OneClickSourceJournal(h.root).load(sent.operationId))?.phase, "source_observed");
+  assert.equal((await hold(h.root, sent.operationId))?.state, "finalized");
+});
