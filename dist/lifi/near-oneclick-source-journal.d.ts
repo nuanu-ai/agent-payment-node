@@ -82,5 +82,5 @@ export declare class OneClickSourceJournal extends SecureStateStore {
      * `releasedReservation` names an earlier operation whose nonce reservation the caller proved dead before consent: its
      * deadline passed and the chain does not know its hash. At most one of the two signed transactions can use the nonce.
      */
-    advance(id: string, expectedHash: string, phase: OneClickSourceRecord["phase"], changes?: Partial<OneClickSourceRecord>, releasedReservation?: string): Promise<OneClickSourceRecord>;
+    advance(id: string, expectedHash: string, phase: OneClickSourceRecord["phase"], changes?: Partial<OneClickSourceRecord>, releasedReservation?: string, sealGuard?: () => Promise<void>): Promise<OneClickSourceRecord>;
 }

@@ -224,7 +224,7 @@ export class OneClickSourceService {
                         ? await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, data: call.data, value: 0n, ...fees })
                         : await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, value: amount, ...fees });
                     // Every pre-send check ran before signing; the sealed bytes go to the single send without a check that could strand them.
-                    record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, releasedReservation);
+                    record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, releasedReservation, async () => await admission.assertHeld());
                 }
                 catch (error) {
                     // Not sealed: the signature never left this process. If this release fails, status releases the hold past the deadline.
@@ -243,7 +243,8 @@ export class OneClickSourceService {
                 catch {
                     record = await journal.advance(operationId, record.integrityHash, "unknown_finality");
                 }
-                const usageHold = await settleOneClickUsage(this.state.root, record, new Date(now()));
+                // The deposit may already be on its way: a settle failure must not hide that. Status settles the same hold again.
+                const usageHold = await settleOneClickUsage(this.state.root, record, new Date(now())).catch(() => null);
                 const common = { operationId, lane: lane.id, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
                     submissionAttempts: 1, oneClickDepositAddress: record.depositAddress, sourceReceiptObserved: false, usageHold };
                 return lane.id === LEGACY_ONECLICK_LANE ? { ...common, tronDestinationDelivered: false } : { ...common, destinationDelivered: false };

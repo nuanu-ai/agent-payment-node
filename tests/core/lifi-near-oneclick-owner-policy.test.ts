@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
-import { OneClickSourceAdmission, oneClickUsageIdentity } from "../../src/lifi/near-oneclick-admission.js";
+import { OneClickSourceAdmission, oneClickUsageIdentity, settleOneClickUsage } from "../../src/lifi/near-oneclick-admission.js";
 import { oneClickLane } from "../../src/lifi/near-oneclick-lanes.js";
 import { OneClickSourceJournal } from "../../src/lifi/near-oneclick-source-journal.js";
 import { oneClickOperationId } from "../../src/lifi/near-oneclick-source-service.js";
@@ -42,7 +42,7 @@ test("a Base USDC bridge admission for another mechanism does not admit the 1Cli
 
 test("the lane's per-operation cap and the owner's recipient pin refuse before any quote", async t => {
   const capped = await harness(t, false, true, undefined, 86_400_000, 0, [{ lane: LANE.id, maximumPerTransferAtomic: "2999999" }]);
-  await assert.rejects(capped.service.submit(request), /per-transfer cap/u);
+  await assert.rejects(capped.service.submit(request), (error: any) => error.details?.reason === "oneclick_source_policy_refused" && /per-transfer cap/u.test(error.details?.cause));
   await untouched(capped);
   const pinned = await harness(t, false, true, undefined, 86_400_000, 0, [{ lane: LANE.id, recipients: ["TCikdGHFWNFWBc9ZqtTh2dmma1mnC4CanS"] }]);
   await assert.rejects(pinned.service.submit(request), (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "allowlist_recipient_not_admitted");
@@ -76,7 +76,7 @@ test("the day's spend counts against the asset's daily limit before the next quo
     rail: "bridge", maximumPerTransferAtomic: "3000000", dailyLimitAtomic: "5000000", mechanism: { provider: "near-1click", reference: `${LANE.id}.v1` } }] });
   const first = await h.service.submit(request) as any;
   await h.service.status(first.operationId);
-  await assert.rejects(h.service.submit({ ...request, idempotencyKey: "oneclick-second-day-cap" }), /daily cap/u);
+  await assert.rejects(h.service.submit({ ...request, idempotencyKey: "oneclick-second-day-cap" }), (error: any) => error.details?.reason === "oneclick_source_policy_refused" && /daily cap/u.test(error.details?.cause));
   assert.equal(h.quotes(), 2); assert.equal(h.sends(), 1);
 });
 
@@ -118,4 +118,41 @@ test("a run that died after the hold leaves it to status, which releases it once
   await h.service.status(id);
   assert.equal((await hold(h.root, id))?.state, "failed_before_effect");
   assert.equal(h.sends(), 0);
+});
+
+test("a hold that status released before the seal refuses the seal, so nothing is signed out or sent", async t => {
+  const h = await harness(t);
+  const reserve = AssetUsageLedger.prototype.reserve;
+  // As if status had released it under a stepped-back clock: the seal checks the hold's state, not only the time.
+  t.mock.method(AssetUsageLedger.prototype, "reserve", async function (this: AssetUsageLedger, ...args: Parameters<typeof reserve>) {
+    const held = await reserve.apply(this, args);
+    await this.transition({ ...oneClickUsageIdentity(LANE, payer), reservationId: held.reservationId, policyDigest: held.policyDigest,
+      state: "failed_before_effect", expectedCurrentStates: ["reserved"], now: new Date(Date.now()), outcomeDigest: "e".repeat(64) });
+    return held;
+  });
+  await assert.rejects(h.service.submit(request), /oneclick_source_usage_hold_not_held/u);
+  assert.equal(h.sends(), 0);
+  assert.equal((await new OneClickSourceJournal(h.root).load(operationId(h.root)))?.phase, "signing_started");
+});
+
+test("settling follows every journal outcome, and a hold another run moved first only shortens the path", async t => {
+  const h = await harness(t, true);
+  const sent = await h.service.submit(request) as any;
+  const record = (await new OneClickSourceJournal(h.root).load(sent.operationId))!;
+  assert.equal(record.phase, "unknown_finality"); assert.equal(sent.usageHold.state, "unknown_finality");
+  // A stale read (another run already moved the hold) makes the first transition fail; the next pass reads it fresh.
+  const load = AssetUsageLedger.prototype.load, stale = (await hold(h.root, sent.operationId))!;
+  let staleReads = 1;
+  t.mock.method(AssetUsageLedger.prototype, "load", async function (this: AssetUsageLedger, ...args: Parameters<typeof load>) {
+    if (staleReads-- > 0) return { ...stale, state: "reserved" as const };
+    return await load.apply(this, args);
+  });
+  const pending = await settleOneClickUsage(h.root, { ...record, phase: "submitted_pending" }, new Date(Date.now()));
+  assert.equal(pending?.state, "unknown_finality");
+  const superseded = await settleOneClickUsage(h.root, { ...record, phase: "failed_proven_superseded", finalizedNonceAtomic: "8" }, new Date(Date.now()));
+  assert.equal(superseded?.state, "released_unsubmitted");
+  // Settled holds are left alone; a record with no hold (written before 0.5.98) answers null.
+  assert.equal((await settleOneClickUsage(h.root, { ...record, phase: "source_observed", sourceReceiptStatus: "success" }, new Date(Date.now())))?.state,
+    "released_unsubmitted");
+  assert.equal(await settleOneClickUsage(h.root, { ...record, operationId: "f".repeat(64) }, new Date(Date.now())), null);
 });

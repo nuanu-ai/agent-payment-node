@@ -321,4 +321,5 @@ forge entries. An anchor outside the state directory, such as in the Keychain, i
 | `APN_INVALID_INPUT` / `recipient_pin_conflict` | An admission carries both `recipient` and `recipients`. |
 | `APN_ALLOWLIST_REFUSED` / `allowlist_policy_required` | No policy is active for the profile. |
 | `APN_ALLOWLIST_REFUSED` / `oneclick_source_active_owner_policy_required` | 1Click: no active policy, or its EVM account is not the payer. |
-| `APN_ALLOWLIST_REFUSED` / `oneclick_source_mechanism_not_admitted` | 1Click: the origin asset's bridge admission does not pin this lane. |
+| `APN_ALLOWLIST_REFUSED` / `oneclick_source_mechanism_not_admitted` | 1Click: the origin asset's single bridge pin is not this lane. |
+| `APN_ALLOWLIST_REFUSED` / `oneclick_source_policy_refused` | 1Click: asset, rail or lane not admitted, a cap, or the policy window (`cause` says which). |

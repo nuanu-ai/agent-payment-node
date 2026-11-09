@@ -29,6 +29,8 @@ export declare class OneClickSourceAdmission {
     private evaluate;
     /** After consent and before signing: the active policy and its pin again; the ledger checks the caps atomically. */
     reserve(): Promise<void>;
+    /** The seal's guard, run under the record lock: the hold this run took is still held, so status has not released it. */
+    assertHeld(): Promise<void>;
     /** Nothing was sealed, so the signature never left this process: the hold is released without counting. */
     releaseBeforeEffect(): Promise<void>;
 }

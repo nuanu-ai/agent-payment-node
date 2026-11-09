@@ -5,6 +5,7 @@ import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { bridgeMechanismAdmitted, evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../asset-usage-ledger.js";
 import { hashObject } from "../canonical.js";
+import { ApnError } from "../errors.js";
 import { oneClickRecordLane } from "./near-oneclick-source-journal.js";
 import { bridgeFailure } from "./validation.js";
 /** One exact bridge mechanism per lane: an owner admits each lane on its own, with its own cap and recipient pin. */
@@ -13,12 +14,16 @@ export function oneClickMechanism(lane) {
 }
 /** The payer's origin asset: Base USDC on the Base lane, Ethereum ETH on the Ethereum lanes. */
 export function oneClickUsageIdentity(lane, payer) {
-    const asset = lane.origin.kind === "native" ? { kind: "native", identifier: null }
-        : { kind: "token", identifier: getAddress(lane.origin.token ?? "") };
+    const token = lane.origin.token;
+    if ((lane.origin.kind === "native") !== (token === null))
+        bridgeFailure("APN_INTERNAL", "oneclick_lane_origin_asset");
+    const asset = token === null ? { kind: "native", identifier: null } : { kind: "token", identifier: getAddress(token) };
     return { account: getAddress(payer), chain: `eip155:${lane.origin.chainId}`, asset };
 }
 const usageKey = (operationId) => `oneclick-source:${operationId}`;
-function refused(reason) { return bridgeFailure("APN_ALLOWLIST_REFUSED", `oneclick_source_${reason}`, {}); }
+function refused(reason, details = {}) {
+    return bridgeFailure("APN_ALLOWLIST_REFUSED", `oneclick_source_${reason}`, details);
+}
 /** The deposit principal is held against the payer's origin-asset bridge caps from before signing until its outcome. */
 export class OneClickSourceAdmission {
     state;
@@ -56,8 +61,17 @@ export class OneClickSourceAdmission {
     }
     async evaluate(active, dailyUsageAtomic) {
         const at = this.now();
-        const admission = evaluateAssetPolicy(active.registry, { chain: this.identity.chain, asset: this.identity.asset, rail: "bridge",
-            mechanism: this.mechanism, amountAtomic: this.amountAtomic, dailyUsageAtomic, asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
+        let admission;
+        try {
+            admission = evaluateAssetPolicy(active.registry, { chain: this.identity.chain, asset: this.identity.asset, rail: "bridge",
+                mechanism: this.mechanism, amountAtomic: this.amountAtomic, dailyUsageAtomic, asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
+        }
+        catch (error) {
+            // Asset, rail or lane not admitted, a cap, or the policy window: one reason, with the evaluator's own words as the cause.
+            if (error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED")
+                refused("policy_refused", { cause: error.message });
+            throw error;
+        }
         if (!bridgeMechanismAdmitted(admission, this.mechanism))
             refused("mechanism_not_admitted");
         assertRecipientAdmitted({ admission, mechanism: this.mechanism, recipient: this.recipient });
@@ -71,6 +85,12 @@ export class OneClickSourceAdmission {
         if (reservation.state !== "reserved")
             refused("usage_hold_unavailable");
         this.policyDigest = reservation.policyDigest;
+    }
+    /** The seal's guard, run under the record lock: the hold this run took is still held, so status has not released it. */
+    async assertHeld() {
+        const hold = await this.ledger.load(this.identity, assetUsageReservationId(this.identity, usageKey(this.operationId)));
+        if (this.policyDigest === null || hold?.state !== "reserved" || hold.policyDigest !== this.policyDigest)
+            refused("usage_hold_not_held");
     }
     /** Nothing was sealed, so the signature never left this process: the hold is released without counting. */
     async releaseBeforeEffect() {
@@ -108,19 +128,26 @@ function path(record, from) {
 export async function settleOneClickUsage(root, record, now) {
     const identity = oneClickUsageIdentity(oneClickRecordLane(record), record.payer), ledger = new AssetUsageLedger(root);
     const reservationId = assetUsageReservationId(identity, usageKey(record.operationId));
-    let hold = await ledger.load(identity, reservationId);
-    if (hold === null)
-        return null;
-    if (OPEN.includes(hold.state) && hold.amountAtomic === record.amountInAtomic) {
-        const outcomeDigest = hashObject({ kind: "oneclick_source_outcome", operationId: record.operationId, phase: record.phase,
-            receiptHash: record.sourceReceiptHash, finalizedNonceAtomic: record.finalizedNonceAtomic ?? null });
-        for (const state of path(record, hold.state)) {
-            const terminal = !OPEN.includes(state);
-            hold = await ledger.transition({ ...identity, reservationId, policyDigest: hold.policyDigest, state, expectedCurrentStates: [hold.state],
-                now, ...(terminal ? { outcomeDigest } : {}) });
+    const outcomeDigest = hashObject({ kind: "oneclick_source_outcome", operationId: record.operationId, phase: record.phase,
+        receiptHash: record.sourceReceiptHash, finalizedNonceAtomic: record.finalizedNonceAtomic ?? null });
+    // One step per pass from a fresh read: a concurrent submit or status that moved the hold first only shortens the path.
+    for (let pass = 0;; pass++) {
+        const hold = await ledger.load(identity, reservationId);
+        if (hold === null)
+            return null;
+        const step = OPEN.includes(hold.state) && hold.amountAtomic === record.amountInAtomic ? path(record, hold.state)[0] : undefined;
+        if (step === undefined)
+            return { reservationId, state: hold.state, amountAtomic: hold.amountAtomic };
+        try {
+            await ledger.transition({ ...identity, reservationId, policyDigest: hold.policyDigest, state: step, expectedCurrentStates: [hold.state],
+                now, ...(OPEN.includes(step) ? {} : { outcomeDigest }) });
+        }
+        catch (error) {
+            const moved = await ledger.load(identity, reservationId);
+            if (pass >= 4 || moved === null || moved.state === hold.state)
+                throw error;
         }
     }
-    return { reservationId, state: hold.state, amountAtomic: hold.amountAtomic };
 }
 /** An unsigned record past its effective deadline can never be sealed (the journal refuses it): its hold is released. */
 export async function releaseUnsignedOneClickUsage(root, record, now) {

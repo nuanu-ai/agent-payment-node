@@ -83,7 +83,14 @@ Foreground approval records `approved`. Before signing, APN:
 - requires the frozen fee envelope to remain includable (otherwise `fee_spike`);
 - simulates the exact frozen call with the frozen value and fee envelope;
 - requires a fresh gas estimate to remain within the frozen gas limit;
-- reopens the encrypted signer profile to verify its address (otherwise `signer_identity_changed`).
+- reopens the encrypted signer profile to verify its address (otherwise `signer_identity_changed`);
+- after signing, checks the prepared expiry again (otherwise `APN_REPREPARE_REQUIRED`, `expired_before_marker`).
+
+The usage hold is taken right before the signer check. Any refusal or failure between the hold and the
+`submission_started` record (a changed signer, a signing failure, a signed transaction that does not match, the expiry
+above) releases the hold at once as `failed_before_effect`, since nothing was sent. Such an operation cannot continue:
+a later `execute` of it is refused with `APN_REPREPARE_REQUIRED` (`usage_released_before_send`), so prepare and approve
+again. A process that dies in that window keeps the hold `reserved`, and the next `execute` reuses it.
 
 APN records `submission_started` and the signed transaction hash before its single `eth_sendRawTransaction` call. Any
 exception or conflicting response becomes `unknown_finality`. Later calls only observe that transaction and never sign or
