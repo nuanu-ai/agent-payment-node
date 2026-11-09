@@ -16,12 +16,13 @@ This branch is separate from the open-source APN and is never merged into `main`
 | Owner allowlist | Staged and activated per profile | One global policy file for every profile; per-profile `allowlist policy stage/activate` is refused |
 | Local x402 wallet policy | `wallet policy set` per profile | `walletPolicies` rows of the global file |
 | Solana/TRON direct admission | `policy admit-solana/-tron` per profile | `chainPolicies` rows of the global file |
-| MCP | Approve/execute only through a handoff to a human | Every command is a tool; `wallet connect` (a provider's own login) is not served |
+| MCP | Approve/execute only through a handoff to a human | Every command is a tool except `wallet connect` (a provider's own login) and every command that writes owner policy, so an agent cannot raise its own caps |
 | HTTP | none | `apn serve http`: tools in the OpenAI format plus calls, behind a bearer token |
 | Wrapping secret | macOS login Keychain | A file (`APN_WRAPPING_SECRET_FILE`) on any platform |
 | Kernel lock | `/usr/bin/lockf` | `/usr/bin/flock` (util-linux) on Linux |
 | Operation lookups | Walk every profile folder | One operation-index entry |
 | Index reconcile | Walks every record store on each admission | Walks once per state root, then admission keeps the index exact |
+| Index locking | One lock for the whole state root around every admission; each admission reads every open operation | One lock per claim taken (the profile, the account on its network); each admission reads only the operations holding the claims it wants. Different profiles never wait for each other |
 | EVM owner scan | Reads every profile on each EVM money operation | Not repeated: generated keys are unique and imports are checked once |
 | RPC pacing | One POST per 750 ms per RPC host for the whole machine | Unpaced for the hosts in `APN_RPC_UNPACED_HOSTS` (the operator's own nodes) |
 
@@ -125,7 +126,7 @@ Every request needs `Authorization: Bearer <token>`. `arguments` may be an objec
 tool call carries. Every argument value is a string, amounts included; a number is refused rather than rounded. At
 most 32 calls run at once; the 33rd answers 503 `APN_HTTP_BUSY`.
 
-The tool list is 116 tools (about 140 KB). Pass `?names=` with the tools an agent needs to keep each model request small.
+The tool list is 109 tools (about 130 KB). Pass `?names=` with the tools an agent needs to keep each model request small.
 
 ## A model through OpenRouter
 
@@ -142,8 +143,9 @@ OPENROUTER_API_KEY_FILE=/etc/apn/openrouter-key APN_HTTP_URL=http://127.0.0.1:84
 
 ## Limits known today
 
-- The operation index keeps one root-wide lock around admission; each admission reads the open (unresolved)
-  operations of every profile. Cost grows with operations in flight, not with profiles.
+- A server state root must always run with `APN_SERVER_MODE=1`: the foreground build refuses it, because only server
+  mode keeps the per-claim markers of the operation index. Records written into the state root by hand are not
+  indexed after the first walk.
 - MetaMask gasless, facilitator and Smart Account families read every record of their family on create; they need
   provider logins and are not a server path.
 - One process serves HTTP; run several behind a balancer only on one shared state root with a POSIX file system.

@@ -70,9 +70,17 @@ export declare class OperationIndex {
     private wantedClaims;
     /** Verifies every colliding open entry against its record; returns those that do not block. */
     private check;
-    /** Writes under the leaf lock only when the colliding set did not grow since it was verified (one retry). */
+    /**
+     * Writes under the leaf lock only when the colliding set did not grow since it was verified (one retry). In server
+     * mode the leaf locks are the claims being taken, not one lock for the whole state root: admissions of different
+     * profiles and accounts run at once, two that take the same claim (one profile, one account) still serialize.
+     */
     private claimUnderLock;
     private openEntries;
+    /** The open entries that may hold one of these claims: every open entry, or in server mode only those its markers name. */
+    private openHolding;
+    /** The leaf locks of a write: the one root lock, or in server mode one lock per claim key written or dropped. */
+    private writeLocks;
     /**
      * Verifies one open entry against its record and keeps the index in step with it. With `wanted`, returns the
      * APN_OPERATION_BLOCKED error when it still blocks that admission, or the entry when its family admits that admission

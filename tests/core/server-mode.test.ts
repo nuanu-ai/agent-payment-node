@@ -102,7 +102,8 @@ test("server mode projects every command as a tool, and the OpenAI export drops 
   const server = serverMcpTools();
   const names = new Set(server.map((tool) => tool.name));
   assert.ok(names.has("apn_pay_transfer_approve") && names.has("apn_bridge_approve") && names.has("apn_swap_solana_jupiter_execute"));
-  assert.equal(names.has("apn_wallet_connect"), false);
+  for (const ownerOnly of ["apn_wallet_connect", "apn_allowlist_policy_activate", "apn_allowlist_policy_stage", "apn_wallet_policy_set",
+    "apn_policy_admit_solana", "apn_policy_admit_tron"]) assert.equal(names.has(ownerOnly), false, ownerOnly);
   assert.equal(MCP_TOOLS.some((tool) => tool.name === "apn_pay_transfer_approve"), false);
   for (const tool of openAiTools(server)) {
     assert.equal(tool.type, "function");

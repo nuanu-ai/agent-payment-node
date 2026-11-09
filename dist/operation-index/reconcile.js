@@ -26,11 +26,18 @@ export class OperationIndexReconciler {
      */
     async reconcile(force = false) {
         const server = isServerMode();
-        if (!force && server && await this.store.serverWalkDone())
+        const walked = await this.store.serverWalkDone();
+        // Claim markers are kept only in server mode, so a server root is never written by the foreground build.
+        if (!server && walked) {
+            throw new ApnError("APN_STATE_SECURITY", "This state root belongs to an APN server; run APN with APN_SERVER_MODE=1.");
+        }
+        if (!force && server && walked)
             return;
         await this.walk(force);
-        if (server)
+        if (server) {
+            await this.store.backfillClaimMarkers();
             await this.store.markServerWalk(new Date().toISOString());
+        }
     }
     async walk(force) {
         const indexed = force ? new Set() : await this.store.entryIds();

@@ -45,9 +45,19 @@ export declare class OperationIndexStore extends SecureStateStore {
     serverWalkDone(): Promise<boolean>;
     markServerWalk(at: string): Promise<void>;
     putEntry(entry: OperationIndexEntry): Promise<void>;
+    /**
+     * An open copy. In server mode the claim markers are written before it and the dropped ones removed after it, so an
+     * open entry is always reachable from every key it holds (a stale marker without an entry is skipped by readers).
+     */
     putOpen(entry: OperationIndexEntry): Promise<void>;
     dropEntry(operationId: string): Promise<void>;
     dropOpen(operationId: string): Promise<void>;
+    /** Server mode: the operations whose open copy may hold this claim key. */
+    claimHolders(key: string): Promise<readonly string[]>;
+    /** Server mode, once per state root: markers for open entries written before the root became a server root. */
+    backfillClaimMarkers(): Promise<void>;
+    private markClaims;
+    private unmarkClaims;
     dropPointer(idempotencyHash: string): Promise<void>;
     /** Create-only when absent; an occupied target reports false so the caller can merge with what is there. */
     putPointer(idempotencyHash: string, operationIds: readonly string[], createOnly: boolean): Promise<boolean>;

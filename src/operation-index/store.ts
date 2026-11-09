@@ -3,8 +3,9 @@ import { constants } from "node:fs";
 import { lstat, open, rename, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { atomicTemporaryPrefix } from "../atomic-write-temporaries.js";
-import { canonicalJson, isPlainRecord } from "../canonical.js";
+import { canonicalJson, isPlainRecord, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { isServerMode } from "../server-mode.js";
 import { isCode, SecureStateStore, stateCorrupt, stateSecurity, validateDirectory } from "../secure-state-store.js";
 import { parseRecordPath, RECORD_NAME, STATE_HASH, type OperationStore } from "./adapter.js";
 import { OPERATION_FAMILIES, OPERATION_INDEX_ENTRY_SCHEMA, type OperationClaim, type OperationIndexEntry } from "./types.js";
@@ -15,6 +16,9 @@ export const OPERATION_INDEX_LOCK = "operation-index";
 const ENTRIES = `${OPERATION_INDEX_DIRECTORY}/entries`, OPEN = `${OPERATION_INDEX_DIRECTORY}/open`;
 const IDEMPOTENCY = `${OPERATION_INDEX_DIRECTORY}/idempotency`, SHARDS = `${OPERATION_INDEX_DIRECTORY}/terminal-pointers`;
 const SERVER_WALK = `${OPERATION_INDEX_DIRECTORY}/server-walk.json`;
+/** Server mode: `claims/<sha256(key)>/<operationId>.json` names each open operation holding that claim key. */
+const CLAIMS = `${OPERATION_INDEX_DIRECTORY}/claims`;
+const claimDirectory = (key: string): string => `${CLAIMS}/${sha256(`operation-index-claim\0${key}`)}`;
 const POINTER_SCHEMA = "apn.operation-index-idempotency.v1", SHARD_SCHEMA = "apn.operation-index-terminal-pointers.v1";
 const SHARD_NAME = /^[a-f0-9]$/u;
 type Pointers = Readonly<Record<string, readonly string[]>>;
@@ -140,9 +144,44 @@ export class OperationIndexStore extends SecureStateStore {
   async markServerWalk(at: string): Promise<void> { await this.put(SERVER_WALK, { schemaVersion: "apn.operation-index-server-walk.v1", walkedAt: at }); }
 
   async putEntry(entry: OperationIndexEntry): Promise<void> { await this.put(`${ENTRIES}/${entry.operationId}.json`, entry); }
-  async putOpen(entry: OperationIndexEntry): Promise<void> { await this.put(`${OPEN}/${entry.operationId}.json`, entry); }
+  /**
+   * An open copy. In server mode the claim markers are written before it and the dropped ones removed after it, so an
+   * open entry is always reachable from every key it holds (a stale marker without an entry is skipped by readers).
+   */
+  async putOpen(entry: OperationIndexEntry): Promise<void> {
+    if (!isServerMode()) { await this.put(`${OPEN}/${entry.operationId}.json`, entry); return; }
+    const prior = await this.openEntry(entry.operationId).catch(error => { if (error instanceof OperationIndexDamage) return null; throw error; });
+    await this.markClaims(entry.operationId, entry.claims.map(claim => claim.key));
+    await this.put(`${OPEN}/${entry.operationId}.json`, entry);
+    const kept = new Set(entry.claims.map(claim => claim.key));
+    await this.unmarkClaims(entry.operationId, (prior?.claims ?? []).map(claim => claim.key).filter(key => !kept.has(key)));
+  }
   async dropEntry(operationId: string): Promise<void> { await this.drop(`${ENTRIES}/${operationId}.json`); }
-  async dropOpen(operationId: string): Promise<void> { await this.drop(`${OPEN}/${operationId}.json`); }
+  async dropOpen(operationId: string): Promise<void> {
+    if (!isServerMode()) { await this.drop(`${OPEN}/${operationId}.json`); return; }
+    const prior = await this.openEntry(operationId).catch(error => { if (error instanceof OperationIndexDamage) return null; throw error; });
+    await this.drop(`${OPEN}/${operationId}.json`);
+    await this.unmarkClaims(operationId, (prior?.claims ?? []).map(claim => claim.key));
+  }
+  /** Server mode: the operations whose open copy may hold this claim key. */
+  async claimHolders(key: string): Promise<readonly string[]> { return await this.indexNames(claimDirectory(key)); }
+  /** Server mode, once per state root: markers for open entries written before the root became a server root. */
+  async backfillClaimMarkers(): Promise<void> {
+    for (const id of await this.openIds()) {
+      const entry = await this.openEntry(id).catch(error => { if (error instanceof OperationIndexDamage) return null; throw error; });
+      if (entry !== null) await this.markClaims(id, entry.claims.map(claim => claim.key));
+    }
+  }
+  private async markClaims(operationId: string, keys: readonly string[]): Promise<void> {
+    await this.ensureIndexDirectories();
+    for (const key of keys) {
+      await this.ensureDirectory(claimDirectory(key));
+      await this.put(`${claimDirectory(key)}/${operationId}.json`, { schemaVersion: "apn.operation-index-claim.v1", operationId, key });
+    }
+  }
+  private async unmarkClaims(operationId: string, keys: readonly string[]): Promise<void> {
+    for (const key of keys) await this.drop(`${claimDirectory(key)}/${operationId}.json`);
+  }
   async dropPointer(idempotencyHash: string): Promise<void> { await this.drop(`${IDEMPOTENCY}/${idempotencyHash}.json`); }
   /** Create-only when absent; an occupied target reports false so the caller can merge with what is there. */
   async putPointer(idempotencyHash: string, operationIds: readonly string[], createOnly: boolean): Promise<boolean> {
@@ -220,7 +259,7 @@ export class OperationIndexStore extends SecureStateStore {
   }
   private async ensureIndexDirectories(): Promise<void> {
     if (this.ensured) return;
-    for (const directory of [ENTRIES, OPEN, IDEMPOTENCY, SHARDS]) await this.ensureDirectory(directory);
+    for (const directory of [ENTRIES, OPEN, IDEMPOTENCY, SHARDS, ...isServerMode() ? [CLAIMS] : []]) await this.ensureDirectory(directory);
     this.ensured = true;
   }
   /** One shard of the backfilled terminal pointers (by the first hex digit of the hash); empty when absent. */

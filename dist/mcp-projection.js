@@ -73,8 +73,13 @@ const SELECTED_PATHS = [
  * reachable only through the single foreground handoff tool, which never executes anything. */
 const MCP_RUNS_FOREGROUND = new Set(["wallet policy set"]);
 /** Server mode (APN_SERVER_MODE=1) runs every selected command as a tool: consent comes from the server's owner policy.
- * Only commands that need a person at a provider's own login page stay out. */
-const SERVER_EXCLUDED = new Set(["wallet connect"]);
+ * Out stay the commands that need a person at a provider's own login page, and every command that writes owner policy:
+ * an agent must never raise its own caps. The operator sets policy in APN_GLOBAL_POLICY_FILE. */
+const SERVER_EXCLUDED = new Set([
+    "wallet connect",
+    "allowlist policy prepare", "allowlist policy stage", "allowlist policy activate", "allowlist policy revoke",
+    "wallet policy set", "policy admit-solana", "policy admit-tron",
+]);
 export function projectMcpTools(manifest = COMMAND_MANIFEST, server = false) {
     const names = new Set();
     return selectedCommands(manifest).filter((command) => server ? !SERVER_EXCLUDED.has(command.path.join(" ")) : runsInMcp(command)).map((command) => {

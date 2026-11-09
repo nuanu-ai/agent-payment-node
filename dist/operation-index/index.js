@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import { canonicalJson, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { isServerMode } from "../server-mode.js";
 import { parseRecordPath } from "./adapter.js";
 import { entryOf, OperationIndexReconciler } from "./reconcile.js";
 import { operationRegistry } from "./registry.js";
@@ -77,7 +78,7 @@ export class OperationIndex {
         return await this.repairing(async () => {
             await this.reconciler.reconcile();
             const beside = [];
-            for (const entry of await this.openEntries()) {
+            for (const entry of await this.openHolding(wanted.claims)) {
                 if (entry.operationId === wanted.except || collidingClaims(entry.claims, wanted.claims).length === 0)
                     continue;
                 const verdict = await this.inspect(entry, wanted);
@@ -107,7 +108,7 @@ export class OperationIndex {
                 // It holds what it wants, its profile and its other names; the quarantine keys it also waits for are never held.
                 claims: normalizeClaims([profileClaim(identity.profileHash), ...wanted.claims, ...wanted.holds ?? []]), state: "admitted",
                 admittedAt: new Date(this.now()).toISOString() });
-            await this.claimUnderLock(own, async () => {
+            await this.claimUnderLock(own, admitted.claims, async () => {
                 const hash = identity.idempotencyHash;
                 const current = await this.store.entry(identity.operationId);
                 if (current !== null && current.state !== "admitted")
@@ -145,7 +146,7 @@ export class OperationIndex {
         const own = { ...wanted, except: operationId };
         await this.repairing(async () => {
             await this.reconciler.reconcile();
-            await this.claimUnderLock(own, async () => {
+            await this.claimUnderLock(own, [...wanted.claims, ...wanted.holds ?? []], async () => {
                 const current = await this.store.entry(operationId);
                 if (current === null)
                     throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
@@ -203,7 +204,7 @@ export class OperationIndex {
             providerId: entry.family, walletAddress: entry.claims.map(claim => claim.key).join(", "), recipient: "unknown",
             amountAtomic: "unknown", amountDecimal: "unknown", chainLabel: "unknown", assetLabel: "unknown", unit: "",
             outcomeNote: `Release the account claims held by ${entry.recordPath} (${reason}). The record file and any ledger reservation stay as they are; the reservation stays charged.` });
-        return await this.state.withLocks([OPERATION_INDEX_LOCK], async () => {
+        return await this.state.withLocks(this.writeLocks(entry.claims), async () => {
             const current = await this.store.entry(operationId);
             if (current === null || canonicalJson(current) !== canonicalJson(entry))
                 throw new ApnError("APN_STATE_BUSY", "The operation changed while the owner was asked; retry.");
@@ -245,7 +246,7 @@ export class OperationIndex {
     /** Verifies every colliding open entry against its record; returns those that do not block. */
     async check(wanted) {
         const all = { ...wanted, claims: this.wantedClaims(wanted) };
-        const open = await this.openEntries();
+        const open = await this.openHolding(all.claims);
         const order = [...this.registry.keys()];
         const colliding = open.filter(entry => entry.operationId !== wanted.except && collidingClaims(entry.claims, all.claims).length > 0)
             .sort((left, right) => order.indexOf(left.family) - order.indexOf(right.family) || (left.operationId < right.operationId ? -1 : 1));
@@ -257,20 +258,28 @@ export class OperationIndex {
             clear.add(entry.operationId);
         }
         // Amortized collection: a few other open entries are verified per check, so open/ stays small without settle().
-        const others = open.filter(entry => !colliding.includes(entry));
+        const collidingIds = new Set(colliding.map(entry => entry.operationId));
+        const others = (await this.store.openIds()).filter(id => !collidingIds.has(id));
         const start = others.length === 0 ? 0 : randomInt(others.length);
-        for (let index = 0; index < Math.min(GC_PER_CHECK, others.length); index += 1)
-            await this.inspect(others[(start + index) % others.length], null);
+        for (let index = 0; index < Math.min(GC_PER_CHECK, others.length); index += 1) {
+            const entry = await this.store.openEntry(others[(start + index) % others.length]);
+            if (entry !== null)
+                await this.inspect(entry, null);
+        }
         return clear;
     }
-    /** Writes under the leaf lock only when the colliding set did not grow since it was verified (one retry). */
-    async claimUnderLock(wanted, write) {
+    /**
+     * Writes under the leaf lock only when the colliding set did not grow since it was verified (one retry). In server
+     * mode the leaf locks are the claims being taken, not one lock for the whole state root: admissions of different
+     * profiles and accounts run at once, two that take the same claim (one profile, one account) still serialize.
+     */
+    async claimUnderLock(wanted, held, write) {
         const all = this.wantedClaims(wanted);
         await this.store.ensureLockDirectory();
         for (let attempt = 0; attempt < 2; attempt += 1) {
             const clear = await this.check(wanted);
-            const done = await this.state.withLocks([OPERATION_INDEX_LOCK], async () => {
-                const now = (await this.openEntries()).filter(entry => entry.operationId !== wanted.except && collidingClaims(entry.claims, all).length > 0);
+            const done = await this.state.withLocks(this.writeLocks(held), async () => {
+                const now = (await this.openHolding(all)).filter(entry => entry.operationId !== wanted.except && collidingClaims(entry.claims, all).length > 0);
                 if (now.some(entry => !clear.has(entry.operationId)))
                     return false;
                 await write();
@@ -289,6 +298,28 @@ export class OperationIndex {
                 entries.push(entry);
         }
         return entries;
+    }
+    /** The open entries that may hold one of these claims: every open entry, or in server mode only those its markers name. */
+    async openHolding(claims) {
+        if (!isServerMode())
+            return await this.openEntries();
+        const ids = new Set();
+        for (const claim of claims)
+            for (const id of await this.store.claimHolders(claim.key))
+                ids.add(id);
+        const entries = [];
+        for (const id of [...ids].sort()) {
+            const entry = await this.store.openEntry(id);
+            if (entry !== null)
+                entries.push(entry);
+        }
+        return entries;
+    }
+    /** The leaf locks of a write: the one root lock, or in server mode one lock per claim key written or dropped. */
+    writeLocks(claims) {
+        if (!isServerMode())
+            return [OPERATION_INDEX_LOCK];
+        return [...new Set(claims.map(claim => `operation-index-claim:${sha256(claim.key)}`))];
     }
     /**
      * Verifies one open entry against its record and keeps the index in step with it. With `wanted`, returns the
@@ -344,7 +375,7 @@ export class OperationIndex {
     }
     /** Drops an entry whose record does not exist (a crashed or failed admission), unless it changed meanwhile. */
     async forget(entry) {
-        await this.state.withLocks([OPERATION_INDEX_LOCK], async () => {
+        await this.state.withLocks(this.writeLocks(entry.claims), async () => {
             const current = await this.store.entry(entry.operationId);
             if (current !== null && canonicalJson(current) === canonicalJson(entry))
                 await this.forgetLocked(current);
