@@ -518,15 +518,18 @@ not cover; on a journal already that close to full the bridge's own check may st
 `failed_after_approval` at expiry. Otherwise resume refuses it the same way before anything is claimed or signed, and once the operation's
 validity runs out it ends in its usual halt (`failed_before_effect`, or `failed_after_approval` once a sent approval is
 safe). Every send step is closing evidence, so an effect that has started signing always records its seal, its claimed
-send and the save after it, and a SEND claim that survived in a restored journal whose effect is still `unsealed` is
-always recorded from `signing_started` on and observed, never sent again.
+send and the save after it. A SEND claim that survived in a restored journal whose effect is still `unsealed` is
+recorded from `signing_started` on and observed, never sent again, provided custody still holds the claimed bytes
+(otherwise `bridge_effect_send_claim_unresolved`); a bridge claim waits for its included approval, and a guarded WBTC
+operation needs a confirmed resume until it expires.
 
 A journal that 0.5.96 or earlier filled kept no such room. There, the terminal transition and evidence a journal can
 record only a bounded number of times may pass 1 MiB, without their read telemetry. That evidence is an effect's first
 safe proof, the destination proof, an effect's send steps (entering `signing_started`, `sealed` and `submitting`, and
 leaving `submitting`), and an effect losing an inclusion that was not yet safe (a reorg moved it, or it vanished). A
 full journal records no ordinary change, so there an effect starts signing at most once more (only to record a surviving
-SEND claim), takes each later send step once and loses an unsafe inclusion at most once: six steps per effect. After a
+SEND claim), takes each later send step once, loses an unsafe inclusion at most once and records its first safe proof: six steps
+per effect. After a
 file passes 1 MiB at most thirteen such transitions follow, the end included, as past 512. The room past 1 MiB is one
 copy of the state (at most 64 KiB) for each of them and one more for the state's own growth: an open journal may grow to
 1 MiB + 832 KiB, which keeps one copy free for its end, and a finished one to 1 MiB + 896 KiB. The reader refuses any
@@ -827,7 +830,9 @@ source outcome, before any provider or destination read, so a failed read never 
 | `failed_proven_superseded` | `released_unsubmitted` |
 
 Deposits submitted before 0.5.98 were never held and are not added to the ledger afterwards, so on the day of the
-upgrade the daily limit does not count them. Submit and status report the hold as `usageHold`: `null` when the operation holds nothing (records written before
+upgrade the daily limit does not count them.
+
+Submit and status report the hold as `usageHold`: `null` when the operation holds nothing (records written before
 0.5.98, or a submit refused before the hold, such as a declined consent), and also from a submit whose deposit was
 sent but whose hold could not be settled right then; status settles and reports it. A
 late deposit that 1Click refunds still counts as spent: the refund is not an effect APN proves.
@@ -1025,8 +1030,8 @@ Stargate native pools (asset ID 13) are `0x77b2043768d28E9C9aB44E1aBfC95944bcE57
   its first safe proofs and its terminal transition ([Journal bounds](#journal-bounds)); a destination proof such a
   release saved on its own settles on the next resume. Releases up to 0.5.96 refuse a journal longer than 512
   transitions or larger than 1 MiB; 0.5.97 refuses an open journal larger than 1 MiB, a finished one larger than
-  1 MiB + 64 KiB, and a lost inclusion or send step recorded past the 512th transition; 0.5.98 refuses a journal longer
-  than 520 transitions, an open one larger than 1.5 MiB, a finished one larger than 1 MiB + 576 KiB, and a SEND
+  1 MiB + 64 KiB, and a lost inclusion or send step recorded past the 512th transition; 0.5.98 refuses an open journal
+  longer than 519 transitions, any journal longer than 520, an open one larger than 1.5 MiB, a finished one larger than 1 MiB + 576 KiB, and a SEND
   claim's catch-up start of signing recorded past the 512th transition. Do not downgrade once one exists.
 - **1Click records** of schema v1 and v2 are read as the `base-usdc-to-tron-usdt` lane with their original status output,
   operation IDs and nonce reservation path; v3 records carry the lane. Ethereum nonce reservations are scoped under
