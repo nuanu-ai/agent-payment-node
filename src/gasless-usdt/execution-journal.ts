@@ -1,5 +1,6 @@
 import { open } from "node:fs/promises";
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "../canonical.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity } from "../asset-usage-ledger.js";
 import { ApnError } from "../errors.js";
@@ -251,6 +252,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
       asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
     if (admission.asset.mechanismPins?.gasless === undefined ||
       canonicalJson(admission.asset.mechanismPins.gasless) !== canonicalJson(USDT_GASLESS.mechanism)) fail("policy_mechanism_changed");
+    assertRecipientAdmitted({ admission, recipient: b.plan.request.recipient });
     return { now: at, registry: active.registry };
   }
   async beforeCustodyPolicyFence(bound: UsdtBoundOperation, port: UsdtPreparePort): Promise<void> {
@@ -275,6 +277,7 @@ export class UsdtExecutionJournal extends SecureStateStore {
       asOfDate: at.toISOString().slice(0, 10), asOf: at.toISOString() });
     if (admission.asset.mechanismPins?.gasless === undefined ||
       canonicalJson(admission.asset.mechanismPins.gasless) !== canonicalJson(USDT_GASLESS.mechanism)) fail("policy_mechanism_changed");
+    assertRecipientAdmitted({ admission, recipient: b.plan.request.recipient });
     return at;
   }
   /** Create a durable intent, then atomically reserve common usage. Retry repairs only the exact planned intent. */

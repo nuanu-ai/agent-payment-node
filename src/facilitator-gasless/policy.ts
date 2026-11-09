@@ -2,6 +2,7 @@ import { getAddress } from "viem";
 import { canonicalJson } from "../canonical.js";
 import { activeAssetPolicyFromState, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity,
   type AssetUsageReservation } from "../asset-usage-ledger.js";
@@ -73,6 +74,8 @@ export class FacilitatorGaslessPolicy {
       (admission.asset.gaslessRecipient !== undefined && admission.asset.gaslessRecipient !== intent.request.recipient)) {
       refused("facilitator_gasless_allowlist_refused");
     }
+    // The owner's recipient list (OD-1): prepare, approval, reservation and the check before the authorization leaves APN.
+    assertRecipientAdmitted({ admission, recipient: intent.request.recipient });
   }
 
   async prepare(intent: Pick<FacilitatorIntent, "profile" | "owner" | "request">, operationId: string): Promise<FacilitatorAllowlistBinding> {

@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
-import { evaluateAssetPolicy } from "../../asset-policy-registry.js";
+import { assertRecipientAdmitted } from "../../allowlist-recipient-pins.js";
+import { evaluateAssetPolicy, type AssetPolicyRegistry } from "../../asset-policy-registry.js";
 import { loadActiveAssetPolicyRegistry } from "../../allowlist-active-policy.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity, type AssetUsageState } from "../../asset-usage-ledger.js";
 import { ApnError } from "../../errors.js";
@@ -9,7 +10,7 @@ import { assetAdmitsSwapMechanism } from "../route-admission.js";
 import type { UniswapTokenQuoteRequest } from "./token-builder.js";
 import type { UniswapTokenOperation } from "./token-operation.js";
 import type { UniswapTokenMaterial } from "./token-material.js";
-import { UNISWAP_TOKEN_MECHANISM_PIN } from "./token-route.js";
+import { UNISWAP_TOKEN_MECHANISM_PIN, type UniswapTokenRoute } from "./token-route.js";
 
 export interface TokenUsageBinding { readonly reservationId: string; readonly state: AssetUsageState }
 type Target = Exclude<AssetUsageState, "reserved">;
@@ -28,12 +29,15 @@ export class UniswapTokenUsage {
     if (!assetAdmitsSwapMechanism(source.asset, UNISWAP_TOKEN_MECHANISM_PIN) || !assetAdmitsSwapMechanism(destination.asset, UNISWAP_TOKEN_MECHANISM_PIN)) {
       blocked("Token pair lacks the exact Uniswap mechanism admission.", "uniswap_token_policy_mechanism");
     }
+    assertRecipientAdmitted({ admission: source, recipient: request.recipient });
+    assertRecipientAdmitted({ admission: destination, recipient: request.recipient });
     return active.digest;
   }
 
   async reserve(op: UniswapTokenOperation): Promise<TokenUsageBinding> {
     const active = await this.active(op.profile, op.account);
     if (active.digest !== op.policyDigest) blocked("The active token swap policy changed.", "uniswap_token_policy_changed");
+    pinned(active.registry, op.route, this.clock.now());
     const lease = await this.ledger.reserve({ ...identityOf(op), registry: active.registry, rail: "swap", amountAtomic: op.route.amountIn,
       idempotencyKey: usageKey(op.operationId), now: this.clock.now() });
     this.assert(op, lease.reservationId, lease.policyDigest, lease.amountAtomic, lease.rail);
@@ -46,6 +50,7 @@ export class UniswapTokenUsage {
     const current = await this.ledger.usage(identity, now);
     evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "swap", amountAtomic: material.route.amountIn,
       dailyUsageAtomic: current.amountAtomic, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
+    pinned(active.registry, material.route, now);
   }
 
   async confirmReserved(op: UniswapTokenOperation): Promise<void> {
@@ -53,6 +58,8 @@ export class UniswapTokenUsage {
     if (active.digest !== op.policyDigest || BigInt(current.amountAtomic) < BigInt(op.route.amountIn)) blocked("Token swap usage or policy changed.", "uniswap_token_policy_changed");
     evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "swap", amountAtomic: op.route.amountIn,
       dailyUsageAtomic: (BigInt(current.amountAtomic) - BigInt(op.route.amountIn)).toString(), asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
+    // Before each signature (approval, swap), never before the cleanup that only revokes the allowance.
+    pinned(active.registry, op.route, now);
   }
 
   async confirmCleanup(op: UniswapTokenOperation): Promise<void> {
@@ -109,6 +116,17 @@ export class UniswapTokenUsage {
     if (id !== assetUsageReservationId(identityOf(op), usageKey(op.operationId)) || policy !== op.policyDigest || amount !== op.route.amountIn || rail !== "swap") {
       corrupt("Uniswap token usage binding changed.");
     }
+  }
+}
+/**
+ * The recipient pin (OD-1) of both swap rows, the spent and the received asset's, still lists the route's recipient.
+ * Only the pins are the point here (the callers check the spent asset's caps against its usage), so usage is zero.
+ */
+function pinned(registry: AssetPolicyRegistry, route: UniswapTokenRoute, now: Date): void {
+  for (const [token, amountAtomic] of [[route.inputToken, route.amountIn], [route.outputToken, route.amountOutMinimum]] as const) {
+    const admission = evaluateAssetPolicy(registry, { chain: "eip155:1", asset: { kind: "token", identifier: token }, rail: "swap",
+      amountAtomic, dailyUsageAtomic: "0", asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
+    assertRecipientAdmitted({ admission, recipient: route.recipient });
   }
 }
 function usageIdentity(account: string, token: string): AssetUsageIdentity { return { account, chain: "eip155:1", asset: { kind: "token", identifier: token } }; }

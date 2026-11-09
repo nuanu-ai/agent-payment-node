@@ -61,7 +61,7 @@ export interface AssetPolicyRow {
   readonly mechanismOptions?: Readonly<{ bridge?: readonly AssetMechanismOption[]; swap?: readonly SwapAdmissionMechanism[] }>;
   /** Optional canonical recipient bound to Ethereum/Base local or Base Coinbase gasless admission. */
   readonly gaslessRecipient?: string;
-  /** Optional owner pins (OD-1) per direct, x402 or single-pin bridge rail; see `allowlist-recipient-pins.ts`. */
+  /** Optional owner pins (OD-1) per admitted rail (a gasless list never beside `gaslessRecipient`); see `allowlist-recipient-pins.ts`. */
   readonly recipients?: AssetRecipientPins;
 }
 
@@ -258,9 +258,10 @@ function validateChain(value: unknown, schema: AssetPolicyRegistrySchema): asser
     if (asset.gaslessRecipient !== undefined && value.chain !== "eip155:1" && value.chain !== "eip155:8453") {
       invalid("A gasless recipient pin requires Ethereum or Base.");
     }
+    // Coinbase gasless needs an owner pin: the single recipient or a recipient list.
     if (asset.mechanismPins?.gasless?.provider === "coinbase-agentic-wallet" &&
-      (value.chain !== "eip155:8453" || asset.gaslessRecipient === undefined)) {
-      invalid("Coinbase gasless admission requires Base and one exact recipient.");
+      (value.chain !== "eip155:8453" || (asset.gaslessRecipient === undefined && asset.recipients?.gasless === undefined))) {
+      invalid("Coinbase gasless admission requires Base and an exact recipient pin.");
     }
     const identity = asset.kind === "native" ? "native" : `token:${asset.identifier}`;
     if (identities.has(identity)) invalid("An asset policy chain contains a duplicate asset identity.");
@@ -320,7 +321,9 @@ function validateAsset(family: AssetPolicyChainFamily, value: unknown, schema: A
     }
   }
   if (value.recipients !== undefined && !rowRecipientPinsValid(value.recipients, value.rails, family,
-    isPlainRecord(value.mechanismOptions) && value.mechanismOptions.bridge !== undefined)) invalid("Asset recipient pins are invalid.");
+    isPlainRecord(value.mechanismOptions) && value.mechanismOptions.bridge !== undefined, value.gaslessRecipient !== undefined)) {
+    invalid("Asset recipient pins are invalid.");
+  }
   const mechanismPins = value.mechanismPins as Record<string, unknown> | undefined;
   const swapPin = mechanismPins?.swap;
   if (value.rails.swap !== (swapPin !== undefined || swapOptions !== undefined)) invalid("Swap admission requires exactly one immutable swap mechanism pin.");

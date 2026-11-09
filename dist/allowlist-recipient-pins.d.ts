@@ -1,14 +1,16 @@
 import type { AssetPolicyAdmission, AssetPolicyChainFamily, AssetRailAdmission } from "./asset-policy-registry.js";
 /**
- * Owner recipient pins (decision OD-1). The owner may pin 1 to 16 exact recipients on a `direct`, `x402` or `bridge`
- * admission row, or on one `mechanismOptions.bridge` alternative. A rail that evaluates such an admission calls
- * `assertRecipientAdmitted` wherever it evaluates the policy: prepare, approval, reservation and first send.
+ * Owner recipient pins (decision OD-1). The owner may pin 1 to 16 exact recipients on an admission row of any rail
+ * (`direct`, `x402`, `gasless`, `bridge`, `swap`), or on one `mechanismOptions.bridge` alternative. A rail that evaluates
+ * such an admission calls `assertRecipientAdmitted` wherever it evaluates the policy: prepare, approval, reservation and
+ * first send. A swap evaluates two rows (source and destination asset), and the pin of each binds it.
  *
  * Absent pin means this policy does not restrict recipients. That is the documented meaning, not a default: the
  * recipient stays a required per-operation input, shown on the foreground consent screen and bound into the operation.
- * Gasless keeps its own single `gaslessRecipient` pin; swap has no recipient.
+ * A gasless row may instead keep its older single `gaslessRecipient` pin (never both); each gasless lane checks that one
+ * itself, so `admittedRecipientPins` returns only the list form.
  */
-export declare const RECIPIENT_PIN_RAILS: readonly ["direct", "x402", "bridge"];
+export declare const RECIPIENT_PIN_RAILS: readonly ["direct", "x402", "gasless", "bridge", "swap"];
 export type RecipientPinRail = (typeof RECIPIENT_PIN_RAILS)[number];
 export declare const MAX_RECIPIENT_PINS = 16;
 /** Registry row field: admitted rail to its pinned recipients. */
@@ -30,12 +32,15 @@ export declare function canonicalRecipient(value: unknown): {
 } | null;
 /**
  * One owner-written pin list exactly as written, or null when invalid: 1 to 16 unique canonical non-zero addresses.
- * `family` binds every entry to the row's chain family (direct, x402); a bridge list passes null, because its recipient
- * lives on the destination chain, which may be another family.
+ * `family` binds every entry to the row's chain family (direct, x402, gasless, swap: the recipient is on the row's own
+ * chain); a bridge list passes null, because its recipient lives on the destination chain, which may be another family.
  */
 export declare function recipientPinList(value: unknown, family: AssetPolicyChainFamily | null): readonly string[] | null;
-/** Registry row check: keys are admitted pin rails, every list is canonical, and a bridge row pin excludes bridge alternatives. */
-export declare function rowRecipientPinsValid(value: unknown, rails: AssetRailAdmission, family: AssetPolicyChainFamily, bridgeAlternatives: boolean): boolean;
+/**
+ * Registry row check: keys are admitted pin rails, every list is canonical, a bridge row pin excludes bridge
+ * alternatives, and a gasless list excludes the row's single gasless recipient.
+ */
+export declare function rowRecipientPinsValid(value: unknown, rails: AssetRailAdmission, family: AssetPolicyChainFamily, bridgeAlternatives: boolean, gaslessRecipient: boolean): boolean;
 /**
  * The pin that governs this admission, or undefined when the policy does not restrict recipients. With bridge
  * alternatives the selected alternative's own pin governs, so `mechanism` must name an admitted alternative.

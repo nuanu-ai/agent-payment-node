@@ -1,4 +1,5 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
+import { assertRecipientAdmitted } from "../../allowlist-recipient-pins.js";
 import { evaluateAssetPolicy } from "../../asset-policy-registry.js";
 import { ApnError } from "../../errors.js";
 import { validateSwapOperation } from "../model.js";
@@ -40,6 +41,8 @@ export class JupiterV1OwnerAdmission {
             const used = await this.usage.usage({ account: account.address, chain: JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain, asset }, now);
             const result = evaluateAssetPolicy(active.registry, { chain: JUPITER_V1_WHIRLPOOL_MECHANISM_PIN.chain, asset, rail: "swap", amountAtomic: amount,
                 dailyUsageAtomic: asset.kind === "native" ? (BigInt(used.amountAtomic) - BigInt(ownReservationAtomic)).toString() : used.amountAtomic, asOfDate: at.slice(0, 10), asOf: at });
+            // Jupiter pays only the owned payer, yet each row's recipient pin (OD-1) still decides: one without it refuses.
+            assertRecipientAdmitted({ admission: result, recipient: account.address });
             admitted = admitted.filter(r => assetAdmitsSwapMechanism(result.asset, r.mechanismPin));
         }
         // New quotes use the current route of the first admitted pool; saved material keeps its own route.
