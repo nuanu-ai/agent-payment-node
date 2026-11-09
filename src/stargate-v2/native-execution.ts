@@ -261,13 +261,21 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   if (!evmFrozenFeeAdmitted(rpcQuantity((head as Record<string, unknown>).baseFeePerGas), { maxFeePerGasWei: BigInt(operation.envelope.maxFeePerGasAtomic),
     maxPriorityFeePerGasWei: BigInt(operation.envelope.maxPriorityFeePerGasAtomic) })) fail("APN_REPREPARE_REQUIRED", "fee_spike");
   await ports.reserveUsage(operation);
-  // Re-read the encrypted profile after every network preflight and immediately before signing.
-  const identity = await ports.signerIdentity();
-  if (canonicalProfile(identity.profile) !== operation.profile || address(identity.address) !== operation.owner ||
-    address(ports.signer.address) !== operation.owner) fail("APN_REPREPARE_REQUIRED", "signer_identity_changed");
-  const raw = await ports.signer.signTransaction(operation.envelope); await verifySignedEnvelope(raw, operation);
-  // A ledger, identity or custody-lock wait must not carry the send past the prepared expiry; no marker yet, so the hold is released.
-  if (Date.parse(operation.expiresAt) <= now()) await expired("expired_before_marker");
+  let raw: Hex;
+  try {
+    // Re-read the encrypted profile after every network preflight and immediately before signing.
+    const identity = await ports.signerIdentity();
+    if (canonicalProfile(identity.profile) !== operation.profile || address(identity.address) !== operation.owner ||
+      address(ports.signer.address) !== operation.owner) fail("APN_REPREPARE_REQUIRED", "signer_identity_changed");
+    raw = await ports.signer.signTransaction(operation.envelope); await verifySignedEnvelope(raw, operation);
+    // A ledger, identity or custody-lock wait must not carry the send past the prepared expiry.
+    if (Date.parse(operation.expiresAt) <= now()) fail("APN_REPREPARE_REQUIRED", "expired_before_marker");
+  } catch (error) {
+    // Held but never marked, so never sent: the hold is released at once and the operation must be prepared again. A
+    // release that fails is left to the expiry path, which releases it later; the caller sees the refusal itself.
+    await ports.followUsage(operation, "failed_before_effect").catch(() => undefined);
+    throw error;
+  }
   const transactionHash = keccak256(raw);
   operation = seal({ ...operation, phase: "submission_started" as const, transactionHash,
     transitions: [...operation.transitions, { phase: "submission_started" as const, at: new Date(now()).toISOString(), reason: "attempt_marked_before_send" }] });
