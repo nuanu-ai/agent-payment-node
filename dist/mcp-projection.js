@@ -92,6 +92,11 @@ export function projectMcpTools(manifest = COMMAND_MANIFEST, server = false) {
         return { name, description: toolDescription(command, server), inputSchema: inputSchema(command), command };
     });
 }
+/** Server mode: what a model needs beside the catalog text, learned from live runs of an OpenRouter model. */
+const SERVER_HINTS = {
+    "x402 inspect": "Omit payer for an ordinary x402 offer (EIP-3009, the usual case): payer switches the inspection to the Permit2 lane only.",
+    "gasless transfer quote": "Ethereum mainnet only; on any other chain call gasless transfer prepare directly.",
+};
 let serverTools;
 /** The server-mode tool list, projected once per process. */
 export function serverMcpTools() {
@@ -138,6 +143,9 @@ function toolDescription(command, server = false) {
     if (command.recovery.length > 0) {
         lines.push(`Next: ${command.recovery.map((item) => `apn ${item.command_path.join(" ")} (${item.when})`).join("; ")}`);
     }
+    const hint = server ? SERVER_HINTS[command.path.join(" ")] : undefined;
+    if (hint !== undefined)
+        lines.push(`Note: ${hint}`);
     return lines.join("\n");
 }
 function inputSchema(command) {
