@@ -127,7 +127,8 @@ files those packages under dev. It takes only its own exception list, limited to
 
 GHSA-mrhx-c7xc-m3w5 (zod `<4.6.6`) needs no exception since 0.5.101: `@x402/core` and `@x402/evm` 2.30 require zod 4,
 and the `awal` override pins awal's declared zod to APN's 4.6.7. The awal CLI never imports zod; its only x402 call is
-`decodePaymentRequiredHeader` from the shared `@x402/core` 2.30.
+`decodePaymentRequiredHeader` from the shared `@x402/core` 2.30. awal's prebuilt Electron companion bundle compiles in
+its own zod 3, which the audit cannot see; it validates the companion's tool inputs, not the seller's 402 answer.
 
 ### deepmerge (GHSA-gcqx-w48m-w2h4)
 

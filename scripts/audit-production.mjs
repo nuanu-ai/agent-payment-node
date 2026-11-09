@@ -26,6 +26,8 @@ export const EXCEPTIONS = Object.freeze([Object.freeze({ advisory: 1243505, ghsa
 export const VENDOR_EXCEPTIONS = Object.freeze([Object.freeze({ advisory: 1243505, ghsa: "GHSA-gcqx-w48m-w2h4", package: "deepmerge",
   versions: Object.freeze(["4.3.1"]), bundles: Object.freeze(["metamask-evm-sdk"]), expires: "2026-11-28T00:00:00.000Z" })]);
 
+/** The fields an exception may carry; anything else, such as a retired scope, is refused rather than ignored. */
+const EXCEPTION_KEYS = Object.freeze(["advisory", "ghsa", "package", "major", "requiredBy", "expires"]);
 const packageName = path => path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
 /** A lockfile row installed under its own name (an npm alias row names the real package). */
 const ownName = (lock, path) => isRecord(lock[path]) && (lock[path].name === undefined || lock[path].name === packageName(path));
@@ -49,6 +51,7 @@ export function classifyAudit(report, lock, nowMs, exceptions) {
       const exception = exceptions.find(item => item.advisory === advisory.source && item.package === name);
       if (exception === undefined) return false;
       if (nowMs >= Date.parse(exception.expires)) { failures.push(`${name}: exception for ${exception.ghsa} expired at ${exception.expires}`); return false; }
+      if (!Object.keys(exception).every(key => EXCEPTION_KEYS.includes(key))) throw new Error(`audit exception for ${exception.ghsa} has an unknown field`);
       if (!Array.isArray(exception.requiredBy)) throw new Error(`audit exception for ${exception.ghsa} needs its requiredBy scope`);
       if (!requiredOnlyBy(lock, name, exception.requiredBy)) return false;
       return Array.isArray(entry.nodes) && entry.nodes.length > 0 && entry.nodes.every(node => packageName(node) === name && ownName(lock, node) &&

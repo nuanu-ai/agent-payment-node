@@ -69,6 +69,14 @@ test("deepmerge 4 required only by the Torus helpers is excepted, with what is f
   assert.throws(() => classifyAudit(deepmergeReport, merged, NOW, unscoped), /needs its requiredBy scope/);
   const expired = classifyAudit(deepmergeReport, merged, Date.parse(EXCEPTIONS[0].expires), EXCEPTIONS);
   assert.ok(expired.failures.some(failure => failure.includes("expired")), JSON.stringify(expired));
+  assert.ok(expired.failures.some(failure => failure.startsWith("@toruslabs/http-helpers:")), "what is flagged through an expired exception fails too");
+  const retiredScope = [{ ...EXCEPTIONS[0], under: ["node_modules/"] }];
+  assert.throws(() => classifyAudit(deepmergeReport, merged, NOW, retiredScope), /unknown field/);
+  const mixed = { vulnerabilities: { deepmerge: { ...deepmergeReport.vulnerabilities.deepmerge,
+    nodes: ["node_modules/deepmerge", "node_modules/@toruslabs/customauth/node_modules/deepmerge"] } } };
+  const mixedLock = { ...merged, "node_modules/@toruslabs/customauth/node_modules/deepmerge": { version: "5.0.0" } };
+  assert.deepEqual(classifyAudit(mixed, mixedLock, NOW, EXCEPTIONS).failures.map(failure => failure.split(":")[0]), ["deepmerge"],
+    "one flagged copy outside the excepted major");
 });
 
 test("the vendored deepmerge is excepted only at 4.3.1, for its advisory, in the MetaMask EVM SDK bundle, until the expiry", () => {
