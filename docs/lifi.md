@@ -511,7 +511,9 @@ to 1 MiB, without its read telemetry if only that does not fit.
 
 An effect starts its send (its SIGN claim and `signing_started`) only when all four of its send transitions
 (`signing_started`, `sealed`, `submitting` and the save after the send) fit below 512 transitions with 128 KiB of the
-file free. Otherwise resume refuses it the same way before anything is claimed or signed, and once the operation's
+file free. The approval of a two-effect route also needs that room for the bridge's four, and for the two observations
+of the approval (included, then safe) before the bridge may sign, so it never goes out when the bridge could not
+follow. Otherwise resume refuses it the same way before anything is claimed or signed, and once the operation's
 validity runs out it ends in its usual halt (`failed_before_effect`, or `failed_after_approval` once a sent approval is
 safe). Every step after `signing_started` is closing evidence, so an effect that has started signing always records
 its seal, its claimed send and the save after it.
@@ -545,6 +547,10 @@ the operation's validity runs out. Then the release is saved in the terminal hal
 - An effect left at `signing_started` with no sealed material and no SEND claim signed and sent nothing. Resume returns
   it to `unsealed`, runs the full guard again and re-signs the identical envelope (RFC 6979 gives the same bytes), or
   ends it on the expiry path.
+- A guarded WBTC effect that custody sealed before its run stopped (no SEND claim) is recorded `sealed` by a resume
+  without foreground confirmation, which signs nothing; only a confirmed run may send it. Once the operation's validity
+  runs out, such a resume ends an unsent effect whose earlier effects are safe, as the expiry ends any other route:
+  `failed_after_approval` or `failed_before_effect`, with the seal kept in custody and never sent.
 - APN records the first submission attempt before calling the RPC. From then on, recovery observes the original hash
   without resending, even if the acknowledgment was lost, the RPC returned a different hash, the quote expired or no
   transaction is visible yet. A timeout or rate limit on the raw send itself is final for that attempt.

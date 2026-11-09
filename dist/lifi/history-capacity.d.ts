@@ -30,11 +30,12 @@ export declare function bridgeTransitionKind(previous: Meaning, next: Meaning): 
  */
 export declare function bridgeBoundedEvidence(previous: Meaning, next: Meaning): boolean;
 /**
- * Why an effect may not start its send now (null when it may): signing starts only with room for all its send
- * transitions under the ordinary bounds, so a routine send never needs the closing reserve or the room past 1 MiB.
- * Refused, nothing is signed or claimed, and the operation can only expire into its halt.
+ * Why the effect `role` may not start its send now (null when it may): signing starts only with room under the ordinary
+ * bounds for its send and, when effects follow it, for the observations before each and their sends too. So the first
+ * effect does not go out while a later one could not, and a routine send never needs the closing reserve or the room
+ * past 1 MiB. Refused, nothing is signed or claimed, and the operation can only expire into its halt.
  */
-export declare function bridgeSendRefusal(op: BridgeOperationRecord): "bridge_history_capacity" | "bridge_record_capacity" | null;
+export declare function bridgeSendRefusal(op: BridgeOperationRecord, role: "approval" | "bridge"): "bridge_history_capacity" | "bridge_record_capacity" | null;
 /** Whether a journal of `transitions` entries may end with a transition of `kind`. */
 export declare function bridgeHistoryAdmits(kind: BridgeTransitionKind, transitions: number): boolean;
 /**

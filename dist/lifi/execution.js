@@ -132,8 +132,15 @@ export class BridgeExecution {
             if (claimedSend !== null)
                 return await this.recordClaimedSend(op, effect, claimedSend);
             if (guardedWbtc(op) && authority === undefined) {
-                if (effect.role === "bridge" && effect.phase === "unsealed" && op.effects[0]?.role === "approval" &&
-                    op.effects[0].phase === "safe_success" && Date.parse(op.intent.expiresAt) <= this.now()) {
+                // An unauthorized run never signs or sends. It records a seal custody already holds (an authorized run stopped
+                // before saving it), which signs nothing; once the validity is gone, an unsent effect after safe ones ends as the
+                // guard's expiry ends it, its seal kept in custody and never sent.
+                if (effect.phase === "signing_started") {
+                    op = await this.recordSeal(op, effect);
+                    effect = op.effects.find((e) => e.role === initial.role);
+                }
+                if ((effect.phase === "unsealed" || effect.phase === "sealed") && Date.parse(op.intent.expiresAt) <= this.now() &&
+                    op.effects.slice(0, op.effects.indexOf(effect)).every((e) => e.phase === "safe_success")) {
                     try {
                         assertBridgeRemaining(op, this.now());
                     }
@@ -153,8 +160,8 @@ export class BridgeExecution {
                 // Signing commits an effect; leave room for a fresh guard and its single raw send.
                 if (this.physicalBudget !== undefined && this.physicalBudget.remaining() < 2)
                     return op;
-                // And room in the journal for all of its send transitions, before any claim; refused, it can only expire.
-                const room = bridgeSendRefusal(op);
+                // And room in the journal for its send and every later effect's, before any claim; refused, it can only expire.
+                const room = bridgeSendRefusal(op, effect.role);
                 if (room !== null)
                     bridgeFailure("APN_OPERATION_BLOCKED", room, {});
                 if (authority !== undefined)
@@ -170,13 +177,8 @@ export class BridgeExecution {
                 effect = op.effects.find((e) => e.role === effect.role);
             }
             if (effect.phase === "signing_started") {
-                const material = await this.custody.load(op, effect.role);
-                if (material === null)
-                    bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_signing_material_missing");
-                await validateMaterial(material, op, effect.role);
-                op = await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "sealed",
-                        transactionHash: material.transactionHash, sealedMaterialHash: material.materialHash }) });
-                effect = op.effects.find((e) => e.role === effect.role);
+                op = await this.recordSeal(op, effect);
+                effect = op.effects.find((e) => e.role === initial.role);
             }
             const material = await this.custody.load(op, effect.role);
             if (material === null)
@@ -225,6 +227,15 @@ export class BridgeExecution {
         return op;
     }
     claims() { return new BridgeEffectClaims(this.state.root); }
+    /** signing_started → sealed from the validated material custody holds; custody signs nothing here. */
+    async recordSeal(op, effect) {
+        const material = await this.custody.load(op, effect.role);
+        if (material === null)
+            bridgeFailure("APN_PROVIDER_EFFECT_UNAVAILABLE", "bridge_committed_signing_material_missing");
+        await validateMaterial(material, op, effect.role);
+        return await this.save(op, { effects: replaceEffect(op, { ...effect, phase: "sealed",
+                transactionHash: material.transactionHash, sealedMaterialHash: material.materialHash }) });
+    }
     /**
      * signing_started with no sealed material and no SEND claim: the process stopped between the durable marker and custody,
      * so nothing was signed into custody and nothing could have been broadcast. The effect returns to unsealed; the normal
@@ -283,6 +294,7 @@ export class BridgeExecution {
             bridgeFailure("APN_OPERATION_BLOCKED", "bridge_effect_send_claim_unresolved", {});
         }
         const current = () => op.effects.find((e) => e.role === effect.role);
+        // Ordinary, but only a restored journal lacks signing_started here, a prefix of one that passed the pre-SIGN room check.
         if (current().phase === "unsealed")
             op = await this.save(op, { effects: replaceEffect(op, { ...current(), phase: "signing_started" }) });
         if (current().phase === "signing_started")

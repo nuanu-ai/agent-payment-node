@@ -15,8 +15,8 @@ import { findStored } from "./stored-operations.js";
 // A LI.FI send whose journal met the ordinary line (1 MiB less 128 KiB, or 512 transitions) on its own, as the 0.5.97
 // writer could: every transition below is one that writer admitted.
 const ordinaryFits = (op: BridgeOperationRecord) => bridgeCapacityRefusal("ordinary", op, false) === null;
-const claimPath = (root: string, op: BridgeOperationRecord, boundary: "sign" | "send") =>
-  join(root, "bridge-effect-claims", op.profileHash, `${op.operationId}-bridge-${boundary}.json`);
+const claimPath = (root: string, op: BridgeOperationRecord, boundary: "sign" | "send", role: "approval" | "bridge") =>
+  join(root, "bridge-effect-claims", op.profileHash, `${op.operationId}-${role}-${boundary}.json`);
 async function store(root: string, op: BridgeOperationRecord): Promise<void> {
   assert.equal(validateBridgeOperation(op), op);
   await writeFile(join(root, "bridge-operations", op.profileHash, `${op.operationId}.json`), `${canonicalJson(op)}\n`);
@@ -26,16 +26,16 @@ test("an effect starts its send only with room for all of it below the ordinary 
   for (const pair of ["base-arb", "eth-bnb"] as const) await t.test(pair, async (child) => {
     const temporary = await temporaryState(); child.after(temporary.cleanup);
     // Just before the bridge's signing_started, where that one transition still fits but not the steps after it.
-    const { s, id, stopped } = await stoppedSend(temporary.root, pair, "signing_started", "after");
+    const { s, id, stopped } = await stoppedSend(temporary.root, pair, "bridge", "signing_started", "after");
     const marked = withDeferrals(stopped, stopped.transitions.length - 1, ordinaryFits);
     const op = bridgeAtTransition(marked, marked.transitions.length - 2), submitted = s.source.submissions.length;
-    assert.equal(op.effects.at(-1)!.phase, "unsealed"); assert.notEqual(bridgeSendRefusal(op), null);
-    await rm(claimPath(temporary.root, op, "sign")); await store(temporary.root, op);
+    assert.equal(op.effects.at(-1)!.phase, "unsealed"); assert.notEqual(bridgeSendRefusal(op, "bridge"), null);
+    await rm(claimPath(temporary.root, op, "sign", "bridge")); await store(temporary.root, op);
     const early = await s.core.execute({ command: "operation.resume", operationId: id });
     assert.equal(early.ok, false); assert.match(early.error?.message ?? "", /bridge_(record|history)_capacity/u);
     // Refused before the SIGN claim: nothing is claimed, sealed or written.
     assert.equal(hashObject(await findStored(s.core.bridges.records, id)), hashObject(op));
-    assert.equal(existsSync(claimPath(temporary.root, op, "sign")), false); assert.equal(await s.custody.load(op, "bridge"), null);
+    assert.equal(existsSync(claimPath(temporary.root, op, "sign", "bridge")), false); assert.equal(await s.custody.load(op, "bridge"), null);
     s.now.setTime(Date.parse(op.intent.expiresAt) + 1000);
     const late = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(late.ok, true, late.error?.message);
     const ended = (await findStored(s.core.bridges.records, id))!;
@@ -48,10 +48,10 @@ test("an effect sealed in custody whose sealed step met the ordinary line record
   for (const late of [false, true]) await t.test(late ? "expired" : "in time", async (child) => {
     const temporary = await temporaryState(); child.after(temporary.cleanup);
     // Custody sealed the bridge, then the sealed save was refused: the journal stays at signing_started, with no SEND claim.
-    const { s, id, stopped } = await stoppedSend(temporary.root, "base-arb", "sealed", "before");
+    const { s, id, stopped } = await stoppedSend(temporary.root, "base-arb", "bridge", "sealed", "before");
     const op = withDeferrals(stopped, stopped.transitions.length - 1, ordinaryFits), material = (await s.custody.load(op, "bridge"))!;
-    assert.equal(op.effects.at(-1)!.phase, "signing_started"); assert.equal(existsSync(claimPath(temporary.root, op, "send")), false);
-    // As an ordinary transition (0.5.98) that step was refused on every resume, before the expiry check could run.
+    assert.equal(op.effects.at(-1)!.phase, "signing_started"); assert.equal(existsSync(claimPath(temporary.root, op, "send", "bridge")), false);
+    // As an ordinary transition (before this fix) that step was refused on every resume, before the expiry check could run.
     const step = appended(op, { effects: op.effects.map((e) => e.role !== "bridge" ? e
       : { ...e, phase: "sealed" as const, transactionHash: material.transactionHash, sealedMaterialHash: material.materialHash }) });
     assert.equal(bridgeCapacityRefusal("ordinary", step, false), "bridge_record_capacity");
@@ -75,10 +75,10 @@ test("an effect sealed in custody whose sealed step met the ordinary line record
 test("an unrecorded SEND claim whose submitting step met the ordinary line is caught up and observed", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   // The SEND claim was written, the submitting save refused; nothing was broadcast, but the claim alone cannot show that.
-  const { s, id, stopped } = await stoppedSend(temporary.root, "base-arb", "submitting", "before");
+  const { s, id, stopped } = await stoppedSend(temporary.root, "base-arb", "bridge", "submitting", "before");
   const start = stopped.transitions.findIndex((entry) => entry.effects.at(-1)!.phase === "signing_started");
   const op = withDeferrals(stopped, start, ordinaryFits), submitted = s.source.submissions.length;
-  assert.equal(op.effects.at(-1)!.phase, "sealed"); assert.equal(existsSync(claimPath(temporary.root, op, "send")), true);
+  assert.equal(op.effects.at(-1)!.phase, "sealed"); assert.equal(existsSync(claimPath(temporary.root, op, "send", "bridge")), true);
   await store(temporary.root, op);
   // The claimed attempt is recorded (submitting, then unknown); only the observation's ordinary failure detail is refused.
   const first = await s.core.execute({ command: "operation.resume", operationId: id });
@@ -90,4 +90,23 @@ test("an unrecorded SEND claim whose submitting step met the ordinary line is ca
   s.source.submissions.push((await s.custody.load(op, "bridge"))!.rawTransaction); s.provider.statusValue = "completed_observed";
   const done = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(done.ok, true, done.error?.message);
   assert.equal((await findStored(s.core.bridges.records, id))!.state, "completed"); assert.equal(s.source.submissions.length, submitted + 1);
+});
+
+test("the first effect to sign reserves room for the later one's send too, so an approval never goes out alone", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { s, id, stopped } = await stoppedSend(temporary.root, "base-arb", "approval", "signing_started", "after");
+  // Before the approval's SIGN, filled until only its own four steps still fit: all the check asked before this fix
+  // (the check for the last effect still counts only its own steps). The bridge's send would then have been refused.
+  const pre = bridgeAtTransition(stopped, stopped.transitions.length - 2);
+  const op = withDeferrals(pre, pre.transitions.length, (next) => bridgeSendRefusal(next, "bridge") === null);
+  assert.equal(op.effects[0]!.phase, "unsealed"); assert.notEqual(bridgeSendRefusal(op, "approval"), null);
+  await rm(claimPath(temporary.root, op, "sign", "approval")); await store(temporary.root, op);
+  const early = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal(early.ok, false); assert.match(early.error?.message ?? "", /bridge_(record|history)_capacity/u);
+  assert.equal(hashObject(await findStored(s.core.bridges.records, id)), hashObject(op));
+  assert.equal(existsSync(claimPath(temporary.root, op, "sign", "approval")), false); assert.equal(s.source.submissions.length, 0);
+  // No approval was sent, so it ends with nothing spent instead of failed_after_approval with its gas and allowance.
+  s.now.setTime(Date.parse(op.intent.expiresAt) + 1000);
+  const late = await s.core.execute({ command: "operation.resume", operationId: id }); assert.equal(late.ok, true, late.error?.message);
+  assert.equal((await findStored(s.core.bridges.records, id))!.state, "failed_before_effect"); assert.equal(s.source.submissions.length, 0);
 });

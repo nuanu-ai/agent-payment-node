@@ -322,7 +322,7 @@ test("past the line a lost inclusion cannot repeat: the unsafe re-inclusion afte
  * transition marks an effect signing_started: the process died before custody sealed anything.
  */
 async function filledAtUnsignedSeal(root: string, pair: "base-arb" | "eth-bnb") {
-  const { s, id, stopped } = await stoppedSend(root, pair, "signing_started", "after");
+  const { s, id, stopped } = await stoppedSend(root, pair, "bridge", "signing_started", "after");
   const op = withDeferrals(stopped, stopped.transitions.length - 1, (next) => next.transitions.length <= 512 && bytes(next) <= BRIDGE_FILE_LIMIT);
   assert.equal(validateBridgeOperation(op), op); assert.equal(op.effects.at(-1)!.phase, "signing_started");
   await writeFile(join(root, "bridge-operations", op.profileHash, `${id}.json`), `${canonicalJson(op)}\n`);

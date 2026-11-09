@@ -26,6 +26,8 @@ export declare class BridgeExecution {
     resume(op: BridgeOperationRecord, approval?: BridgeApprovalPort): Promise<BridgeOperationRecord>;
     run(op: BridgeOperationRecord, authority?: BridgeEffectAuthority): Promise<BridgeOperationRecord>;
     private claims;
+    /** signing_started → sealed from the validated material custody holds; custody signs nothing here. */
+    private recordSeal;
     /**
      * signing_started with no sealed material and no SEND claim: the process stopped between the durable marker and custody,
      * so nothing was signed into custody and nothing could have been broadcast. The effect returns to unsealed; the normal

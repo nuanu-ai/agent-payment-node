@@ -66,15 +66,24 @@ const SEND_TRANSITIONS = 4;
 /** What each adds beyond a copy of the current state: two hashes, a time and longer phase names, in the copy and the record. */
 const SEND_GROWTH_BYTES = 1024;
 /**
- * Why an effect may not start its send now (null when it may): signing starts only with room for all its send
- * transitions under the ordinary bounds, so a routine send never needs the closing reserve or the room past 1 MiB.
- * Refused, nothing is signed or claimed, and the operation can only expire into its halt.
+ * Between one effect's send and the next effect's SIGN, the observations of its inclusion and its safe proof. Those and
+ * the next effect's own steps copy a state that by then also holds that effect's two transaction proofs and up to eight
+ * telemetry rows, at most this much more.
  */
-export function bridgeSendRefusal(op) {
-    if (op.transitions.length + SEND_TRANSITIONS > BRIDGE_HISTORY_LIMIT)
+const OBSERVATION_TRANSITIONS = 2, LATER_GROWTH_BYTES = 8 * 1024;
+/**
+ * Why the effect `role` may not start its send now (null when it may): signing starts only with room under the ordinary
+ * bounds for its send and, when effects follow it, for the observations before each and their sends too. So the first
+ * effect does not go out while a later one could not, and a routine send never needs the closing reserve or the room
+ * past 1 MiB. Refused, nothing is signed or claimed, and the operation can only expire into its halt.
+ */
+export function bridgeSendRefusal(op, role) {
+    const later = (op.effects.length - 1 - op.effects.findIndex((e) => e.role === role)) * (OBSERVATION_TRANSITIONS + SEND_TRANSITIONS);
+    if (op.transitions.length + SEND_TRANSITIONS + later > BRIDGE_HISTORY_LIMIT)
         return "bridge_history_capacity";
     const copy = bridgeFileBytes(op.transitions.at(-1)) + SEND_GROWTH_BYTES;
-    return bridgeFileBytes(op) + SEND_TRANSITIONS * copy > BRIDGE_FILE_LIMIT - CLOSING_RESERVE_BYTES ? "bridge_record_capacity" : null;
+    return bridgeFileBytes(op) + SEND_TRANSITIONS * copy + later * (copy + LATER_GROWTH_BYTES) > BRIDGE_FILE_LIMIT - CLOSING_RESERVE_BYTES
+        ? "bridge_record_capacity" : null;
 }
 function newDestinationHint(previous, next) {
     if (next === null || !isEvmTransactionHash(next.destinationTransactionHash))

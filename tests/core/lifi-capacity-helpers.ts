@@ -49,13 +49,14 @@ export const addedKinds = (before: BridgeOperationRecord, after: BridgeOperation
 export const bridgeSafe = (entry: { readonly effects: readonly { readonly safeProof: unknown }[] }) => entry.effects.at(-1)!.safeProof !== null;
 
 /**
- * A LI.FI approval whose process died at the last effect's `phase` save: just after writing it (`after`), or just before
+ * A LI.FI approval whose process died at the `role` effect's `phase` save: just after writing it (`after`), or just before
  * (`before`: the journal holds the step before, with whatever custody seal or claim the code wrote ahead of the save).
  */
-export async function stoppedSend(root: string, pair: "base-arb" | "eth-bnb", phase: BridgeEffectPhase, when: "before" | "after") {
+export async function stoppedSend(root: string, pair: "base-arb" | "eth-bnb", role: "approval" | "bridge", phase: BridgeEffectPhase,
+  when: "before" | "after") {
   const s = await lifiFixture(root, pair), { id } = await s.prepare(), persist = s.core.bridges.records.persist.bind(s.core.bridges.records);
   s.core.bridges.records.persist = async (op) => {
-    const hit = op.effects.at(-1)!.phase === phase;
+    const hit = op.effects.find((e) => e.role === role)?.phase === phase;
     if (hit && when === "before") throw new Error(`died before ${phase}`);
     await persist(op);
     if (hit) throw new Error(`died after ${phase}`);
