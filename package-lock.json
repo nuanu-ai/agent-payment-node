@@ -1,12 +1,12 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.100",
+  "version": "0.5.101",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@nuanu-ai/apn",
-      "version": "0.5.100",
+      "version": "0.5.101",
       "cpu": [
         "arm64"
       ],
@@ -20,8 +20,8 @@
         "@solana-program/system": "0.14.1",
         "@solana-program/token": "0.16.1",
         "@solana/kit": "8.2.0",
-        "@x402/core": "2.23.0",
-        "@x402/evm": "2.23.0",
+        "@x402/core": "2.30.0",
+        "@x402/evm": "2.30.0",
         "awal": "2.12.1",
         "viem": "2.55.19",
         "zod": "4.6.7"
@@ -11988,23 +11988,49 @@
       }
     },
     "node_modules/@x402/core": {
-      "version": "2.23.0",
-      "resolved": "https://registry.npmjs.org/@x402/core/-/core-2.23.0.tgz",
-      "integrity": "sha512-EFeV0nXbTPPe5FXaD6y9vMgqc+k/ujLXCrUPrQXkmHjHyjC3Ir5tTL1e2FPSkx2+GUGzfpt1wVZb36639ygkWw==",
+      "version": "2.30.0",
+      "resolved": "https://registry.npmjs.org/@x402/core/-/core-2.30.0.tgz",
+      "integrity": "sha512-gvMxCum2QlNI6jI/3NL1jdrmOgtX9sWEWxSIOmeI67/5ndOJvYOtP7JZLSO8o8af+O+A+Vhhjza1NCda0yVppg==",
       "license": "Apache-2.0",
       "dependencies": {
-        "zod": "^3.24.2"
+        "zod": "^4.6.6"
       }
     },
     "node_modules/@x402/evm": {
-      "version": "2.23.0",
-      "resolved": "https://registry.npmjs.org/@x402/evm/-/evm-2.23.0.tgz",
-      "integrity": "sha512-Ikaya5c0/qV/pdFRGfGSdlUX3ELZaUgrddsmmXZHPANtIAQ5uFH15+O+9Bt4PqdAXqCuS43WskJ7HgiLn/uW2g==",
+      "version": "2.30.0",
+      "resolved": "https://registry.npmjs.org/@x402/evm/-/evm-2.30.0.tgz",
+      "integrity": "sha512-/iaEB820OPJb1JkUqaCTq90FwjbmBB/rAFaH7ZAL2AmcesSVPO/FjdHD2wmXqBzXkEnPG9f6m1SuNpCtVlA9LQ==",
       "license": "Apache-2.0",
       "dependencies": {
-        "@x402/core": "~2.23.0",
+        "@x402/core": "~2.30.0",
         "viem": "^2.48.11",
-        "zod": "^3.24.2"
+        "zod": "^4.6.6"
+      }
+    },
+    "node_modules/@x402/extensions": {
+      "version": "2.30.0",
+      "resolved": "https://registry.npmjs.org/@x402/extensions/-/extensions-2.30.0.tgz",
+      "integrity": "sha512-Lqu8hYkFAIhzarWa8V1272tyolFAW7WjHrxQ7we5P0fEZ8oMXOq1hna2X0FXQetZoOFzBDwSWBBMsrqE8ZzvcQ==",
+      "license": "Apache-2.0",
+      "dependencies": {
+        "@noble/curves": "^1.9.0",
+        "@scure/base": "^1.2.6",
+        "@signinwithethereum/siwe": "^4.1.0",
+        "@x402/core": "~2.30.0",
+        "ajv": "^8.18.0",
+        "jose": "^5.9.6",
+        "tweetnacl": "^1.0.3",
+        "viem": "^2.48.11",
+        "zod": "^4.6.6"
+      }
+    },
+    "node_modules/@x402/extensions/node_modules/jose": {
+      "version": "5.10.0",
+      "resolved": "https://registry.npmjs.org/jose/-/jose-5.10.0.tgz",
+      "integrity": "sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==",
+      "license": "MIT",
+      "funding": {
+        "url": "https://github.com/sponsors/panva"
       }
     },
     "node_modules/@xrplf/isomorphic": {
