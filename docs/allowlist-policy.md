@@ -152,7 +152,7 @@ its meaning, and `recipients` with one address does the same on any gasless admi
 | Coinbase Agentic Wallet gasless on Base | Base USDC, `gasless`, `coinbase-agentic-wallet` | required: `recipient` or `recipients` |
 | Gasless USDT on Ethereum | Ethereum USDT, `gasless`, its sponsor mechanism | `recipients` |
 | Uniswap (ETH to token, USDC/USDT), Orca, Jupiter, SunSwap | the spent and the received asset, `swap` | `recipients` on either row |
-| Relay, LI.FI, Circle CCTP V2, Stargate V2, Gas.zip | the source asset, `bridge`, the exact mechanism or alternative | `recipients` |
+| Relay, LI.FI, Circle CCTP V2, Stargate V2, Gas.zip, NEAR 1Click | the source asset, `bridge`, the exact mechanism or alternative | `recipients` |
 
 **Where this policy's pins do not reach.** Some lanes can pay a third party but are not admitted by the owner
 allowlist at all: no admission row, cap or usage hold applies to them, so neither pin can be written for them.
