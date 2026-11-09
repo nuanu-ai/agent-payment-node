@@ -92,10 +92,19 @@ export function projectMcpTools(manifest = COMMAND_MANIFEST, server = false) {
         return { name, description: toolDescription(command, server), inputSchema: inputSchema(command), command };
     });
 }
+/** The owner's rule for server mode: no fee cap, the person sees the fee and what it means. */
+const FEE_NOTE = "Before approving, tell the person in plain words the amount, the fee and what the recipient receives, from these frozen terms, and say why the fee is that size (for example a wallet's first gasless transfer also pays its delegation).";
 /** Server mode: what a model needs beside the catalog text, learned from live runs of an OpenRouter model. */
 const SERVER_HINTS = {
     "x402 inspect": "Omit payer for an ordinary x402 offer (EIP-3009, the usual case): payer switches the inspection to the Permit2 lane only.",
     "gasless transfer quote": "Ethereum mainnet only; on any other chain call gasless transfer prepare directly.",
+    "gasless transfer prepare": FEE_NOTE,
+    "pay transfer prepare": FEE_NOTE,
+    "pay transfer prepare-asset": FEE_NOTE,
+    "pay transfer prepare-solana": FEE_NOTE,
+    "pay transfer prepare-tron": FEE_NOTE,
+    "x402 fetch prepare": FEE_NOTE,
+    "bridge prepare": FEE_NOTE,
 };
 let serverTools;
 /** The server-mode tool list, projected once per process. */
