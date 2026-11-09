@@ -1,6 +1,6 @@
 {
   "name": "@nuanu-ai/apn",
-  "version": "0.5.97",
+  "version": "0.5.98",
   "description": "Local-first Agent Payment Node CLI",
   "type": "module",
   "private": false,
