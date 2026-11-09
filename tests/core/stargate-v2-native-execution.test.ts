@@ -414,6 +414,16 @@ test("BRDG-35: an expired unsent operation releases any hold and never signs", a
   assert.deepEqual(s.usage, ["admit", "failed_before_effect"]); assert.deepEqual(s.counts(), { sends: 0, signs: 0, approvals: 0 });
 });
 
+test("an expiry passed while the hold is taken and the transaction signed refuses before the marker and releases the hold", async () => {
+  const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-expired-before-marker" }), s.ports, s.journal);
+  let clock = Date.parse(prepared.preparedAt); (s.ports as any).now = () => clock;
+  (s.ports as any).reserveUsage = async () => { s.usage.push("reserve"); clock = Date.parse(prepared.expiresAt); };
+  await assert.rejects(executeStargateV2NativeEth(prepared.operationId, s.ports, s.journal),
+    (error: any) => error.code === "APN_REPREPARE_REQUIRED" && error.details.reason === "expired_before_marker");
+  assert.deepEqual(s.usage, ["admit", "reserve", "identity", "failed_before_effect"]); assert.deepEqual(s.counts(), { sends: 0, signs: 1, approvals: 1 });
+  assert.equal(s.journal.value?.phase, "approved"); assert.equal(s.journal.value?.transactionHash, undefined);
+});
+
 test("BRDG-35: a pre-admission v2 prepared operation must be prepared again and never signs", async () => {
   const s = setup(), prepared = await prepareStargateV2NativeEth(request({ idempotencyKey: "native-v2-prepared" }), s.ports, s.journal);
   const { policy: _policy, ...body } = prepared;

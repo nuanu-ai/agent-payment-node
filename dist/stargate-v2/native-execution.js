@@ -205,6 +205,9 @@ async function executeLocked(operationId, ports, journal) {
         fail("APN_REPREPARE_REQUIRED", "signer_identity_changed");
     const raw = await ports.signer.signTransaction(operation.envelope);
     await verifySignedEnvelope(raw, operation);
+    // A ledger, identity or custody-lock wait must not carry the send past the prepared expiry; no marker yet, so the hold is released.
+    if (Date.parse(operation.expiresAt) <= now())
+        await expired("expired_before_marker");
     const transactionHash = keccak256(raw);
     operation = seal({ ...operation, phase: "submission_started", transactionHash,
         transitions: [...operation.transitions, { phase: "submission_started", at: new Date(now()).toISOString(), reason: "attempt_marked_before_send" }] });

@@ -266,6 +266,8 @@ async function executeLocked(operationId: string, ports: StargateNativeExecution
   if (canonicalProfile(identity.profile) !== operation.profile || address(identity.address) !== operation.owner ||
     address(ports.signer.address) !== operation.owner) fail("APN_REPREPARE_REQUIRED", "signer_identity_changed");
   const raw = await ports.signer.signTransaction(operation.envelope); await verifySignedEnvelope(raw, operation);
+  // A ledger, identity or custody-lock wait must not carry the send past the prepared expiry; no marker yet, so the hold is released.
+  if (Date.parse(operation.expiresAt) <= now()) await expired("expired_before_marker");
   const transactionHash = keccak256(raw);
   operation = seal({ ...operation, phase: "submission_started" as const, transactionHash,
     transitions: [...operation.transitions, { phase: "submission_started" as const, at: new Date(now()).toISOString(), reason: "attempt_marked_before_send" }] });
