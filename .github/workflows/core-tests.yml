@@ -1,0 +1,124 @@
+name: Core tests
+
+# The whole core suite runs here, on GitHub's macOS runners, instead of on a developer machine.
+# `dist` publishes the TypeScript build of `dist/` for the tracked copy (the supply-chain job
+# refuses a tracked `dist/` that differs from it).
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dist:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the pinned release Node toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15.0"
+          cache: npm
+
+      - name: Install the exact dependency graph without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Build dist from source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-files -z -- dist | xargs -0 rm
+          npm run build:ts
+          git status --short -- dist
+
+      - name: Upload the built dist
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-${{ github.sha }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  core:
+    runs-on: macos-15
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the pinned release Node toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15.0"
+          cache: npm
+
+      - name: Install the exact dependency graph without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Build the test tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:ts
+          NODE_OPTIONS=--max-old-space-size=4096 npm run build:test
+
+      - name: Run shard ${{ matrix.shard }} of 8
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          APN_CORE_TEST_CONCURRENCY: "4"
+        run: |
+          set -euo pipefail
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < <(ls dist-test/tests/core/*.test.js | sort | awk -v s="$SHARD" '(NR - 1) % 8 == s')
+          echo "shard $SHARD: ${#files[@]} files"
+          node scripts/run-core-tests.mjs "${files[@]}"
+
+  packaging:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the pinned release Node toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.15.0"
+          cache: npm
+
+      - name: Install the exact dependency graph without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Packaging tests and forbidden-surface check (the tail of test:core)
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build:ts
+          node --test tests/packaging/audit-production.test.mjs tests/packaging/installed-runtime-errors.test.mjs \
+            tests/packaging/runtime-dependency-boundary.test.mjs tests/packaging/runtime-reviewed-versions.test.mjs \
+            tests/packaging/runtime-metamask-sdk-vendor.test.mjs tests/packaging/runtime-tron-utils-vendor.test.mjs \
+            tests/packaging/runtime-relay-order-id-vendor.test.mjs tests/packaging/runtime-smart-account-vendor.test.mjs
+          node scripts/core-forbidden-surface.mjs
