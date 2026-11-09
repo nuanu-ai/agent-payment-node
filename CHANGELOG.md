@@ -2,6 +2,15 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.99 — 2026-11-09
+
+Two LOW findings from QA's review of 0.5.98 (Codex, re-checked by Claude). No CRITICAL, HIGH or MEDIUM remained.
+
+- **NEAR 1Click, the usage hold in status.** Status saved a safe source receipt as `source_observed` but settled the usage hold only at the end, after the 1Click status read and the destination proof. A failure in either left the hold `reserved` or `submitted`, counting against the daily limit (also on later UTC days) until a status got through. The hold now follows the saved journal first and again right after the source outcome is saved, before any provider or destination read. Deposits submitted before 0.5.98 were never held and are not added to the ledger afterwards, so on the day of the upgrade the daily limit does not count them.
+- **LI.FI, a restored journal with a surviving send claim.** A journal restored from before its effect signed, already past its ordinary bound (as 0.5.96 could leave one), could not record a SEND claim that survived the restore: the catch-up's first step (`unsealed` → `signing_started`) was an ordinary transition, refused on every resume, so a send that may have moved money was never recorded or observed. Entering `signing_started` is now a send step and bounded evidence like the rest of the send; past the ordinary line it can happen at most once per effect, because the release back to `unsealed` is ordinary and the normal path signs only with room for its whole send. The bounds grow to fit both effects' full catch-up: up to 12 closing transitions past the 512th and then the end (the 525th at most), an open journal up to 1 MiB + 832 KiB and a finished one up to 1 MiB + 896 KiB.
+
+**Downgrade.** 0.5.98 cannot read an open LI.FI journal with more than 519 transitions, any journal with more than 520, an open one over 1.5 MiB, a finished one over 1 MiB + 576 KiB, or a catch-up `signing_started` recorded past the 512th transition.
+
 ## 0.5.98 — 2026-11-09
 
 Fixes from QA's second independent review (Codex, re-checked by Claude) of 0.5.97, and the NEAR 1Click owner-policy gap found while preparing it.

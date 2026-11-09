@@ -12,10 +12,9 @@ export const BRIDGE_FILE_LIMIT = 1024 * 1024;
 const BRIDGE_STATE_COPY_BYTES = 64 * 1024;
 /**
  * Room past 1 MiB. After the last write that left a file at or under 1 MiB, every write passed it, so each was bounded
- * evidence (bridgeBoundedEvidence) or the end, never an ordinary transition: no effect starts signing and no ordinary
- * write records an unsafe inclusion after it. Each effect then has at most its three send steps, one lost inclusion and
- * its first safe proof left, and the bridge's send steps follow an approval already included: at most seven (the
- * approval's last two and the bridge's five), then the end, which saves the destination proof (observation.ts). That is
+ * evidence (bridgeBoundedEvidence) or the end, never an ordinary transition. Each effect then has at most six bounded
+ * steps left: its four send steps (entering signing_started, sealed and submitting, leaving submitting), one lost
+ * inclusion and its first safe proof. Two effects and the end, which saves the destination proof (observation.ts), make
  * BRIDGE_CLOSING_TRANSITIONS transitions, as past 512. Each adds one copy and the current state grows by at most one copy
  * in all, so the room is one copy more.
  */
@@ -43,8 +42,12 @@ export function bridgeTransitionKind(previous, next) {
  * Whether `next` records closing evidence each effect can add only a bounded number of times, unlike a provider hint,
  * which can name a new transaction again:
  * - an effect's first safe proof or the destination proof: validation never lets a saved proof be replaced;
- * - an effect's send steps after signing_started: entering sealed, entering submitting, leaving submitting, at most once
- *   each because the phase rules never return to those phases (signing_started itself can repeat through its release);
+ * - an effect's send steps: entering signing_started, sealed and submitting, and leaving submitting. The last three
+ *   happen at most once each, since the phase rules never return to those phases. An effect re-enters signing_started
+ *   only after its release, which is ordinary (or folded into a terminal halt), so past 512 transitions, or after the
+ *   last write that left a file at or under 1 MiB, it enters signing_started at most once more: the step the catch-up
+ *   of a recorded SEND claim needs on a restored journal (execution.ts). A normal send starts only with room for all its
+ *   steps under the ordinary bounds (bridgeSendRefusal), so it never takes the closing room;
  * - an effect losing an inclusion it had recorded before it was safe (a reorg moved it, or it vanished); the phase rules
  *   need this before a safe proof at another block. Past 512 transitions, or after the last write that left a file at
  *   or under 1 MiB, no ordinary write is admitted, so an effect holds at most one unsafe inclusion to lose there: the one
@@ -60,7 +63,8 @@ export function bridgeBoundedEvidence(previous, next) {
             before.includedProof !== null && before.safeProof === null && effect.includedProof === null;
     }) || (previous.destinationProof === null && next.destinationProof !== null);
 }
-const SEND_PHASES = ["signing_started", "sealed", "submitting"];
+/** The phases a send step leaves; returning to unsealed (the release) is not one. */
+const SEND_PHASES = ["unsealed", "signing_started", "sealed", "submitting"];
 /** The transitions one effect's send writes from its SIGN claim: signing_started, sealed, submitting, then the save after the send. */
 const SEND_TRANSITIONS = 4;
 /** What each adds beyond a copy of the current state: two hashes, a time and longer phase names, in the copy and the record. */

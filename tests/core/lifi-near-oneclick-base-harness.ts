@@ -31,7 +31,7 @@ export async function harness(t: import("node:test").TestContext, sendAmbiguous 
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("imported", key, payer);
   if (policy !== null) await activateOneClickPolicy(tmp.root, payer, policy);
   let sends = 0, approvals = 0, nonce = 7n, actualQuote: unknown, transactionHash: string | null = null, badLog = false, badMembership = false;
-  let baseFee = 1_000_000_000n, rpcPosts = 0, receiptStatus = "0x1", quotes = 0;
+  let baseFee = 1_000_000_000n, rpcPosts = 0, receiptStatus = "0x1", quotes = 0, statusFails = false;
   if (allowConsent) t.mock.method(TtyOneClickSourceApproval.prototype, "approve", async () => {
     approvals++; await onApprove?.(); clockNow += consentAdvanceMs;
   });
@@ -45,8 +45,10 @@ export async function harness(t: import("node:test").TestContext, sendAmbiguous 
       if (!quoteRequest.dry) actualQuote = response;
       return { status: 201, body: JSON.stringify(response) };
     }
-    if (endpoint.startsWith("https://1click.chaindefuser.com/v0/status"))
+    if (endpoint.startsWith("https://1click.chaindefuser.com/v0/status")) {
+      if (statusFails) throw new Error("1Click status unavailable");
       return { status: 200, body: JSON.stringify({ quoteResponse: actualQuote, status: "SUCCESS" }) };
+    }
     assert.equal(verb, "POST"); rpcPosts++;
     const rpc = JSON.parse(body!), { method, params, id } = rpc;
     if (method === "eth_sendRawTransaction") {
@@ -75,6 +77,6 @@ export async function harness(t: import("node:test").TestContext, sendAmbiguous 
   return { root: tmp.root, state, quotes: () => quotes, service: new OneClickSourceService(state, wrapping, { APN_BASE_RPC_URL: "https://base.example.org" }),
     sends: () => sends, approvals: () => approvals, changeNonce: () => { nonce = 8n; },
     tickBaseFee: () => { baseFee += 1n; }, advance: (ms: number) => { clockNow += ms; }, rpcPosts: () => rpcPosts,
-    revert: () => { receiptStatus = "0x0"; },
+    revert: () => { receiptStatus = "0x0"; }, failStatus: () => { statusFails = true; },
     badLog: () => { badLog = true; }, badMembership: () => { badMembership = true; } };
 }
