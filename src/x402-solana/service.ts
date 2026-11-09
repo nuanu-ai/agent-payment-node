@@ -168,6 +168,10 @@ export class X402SolanaService {
       });
     }
     if (record.state !== "signed") return record;
+    // A payment left signed (the process stopped after signing) meets the owner's allowlist and x402 policy again before
+    // its only exposure; refused, the bytes stay unexposed and observe ends the payment once its lifetime has passed.
+    await this.assertOwnerUnchanged(record);
+    await this.currentPolicy(record);
     // The lifetime must still be open at the confirmed height before the single exposure; past it the bytes can never land.
     const height = await readSolanaBlockHeight(this.rpc(), "confirmed");
     if (height >= BigInt(record.lifetime!.lastValidBlockHeight)) {

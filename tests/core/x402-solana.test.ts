@@ -14,7 +14,7 @@ import { x402SolanaUsageIdentity, x402SolanaUsageKey } from "../../src/x402-sola
 import { COMPUTE_BUDGET_PROGRAM, MEMO_PROGRAM, X402_SOLANA_NETWORK } from "../../src/x402-solana/constants.js";
 import { X402SolanaRepository } from "../../src/x402-solana/repository.js";
 import { testRuntime } from "./installed-runtime.js";
-import { PAY_ARGS, feePayerAddress, readySolanaFixture } from "./x402-solana-helpers.js";
+import { PAY_ARGS, admitSolanaX402, feePayerAddress, readySolanaFixture, solanaPolicyArgs } from "./x402-solana-helpers.js";
 
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 type SolanaStatus = { readonly operation_id: string; readonly state: string; readonly pending_reason: string | null; readonly memo: string;
@@ -130,4 +130,30 @@ test("the owner abandons an exposed payment no proof decides; the price stays ch
   assert.equal(abandoned.ok, true, JSON.stringify(abandoned));
   assert.deepEqual(approvals, [`USDC (${SOLANA_USDC})`]);
   assert.equal(await usageState(f.root, f.payer, data(paid).operation_id), "finalized");
+});
+
+test("a payment left signed meets the owner's x402 policy and allowlist again: either changed, nothing is exposed or sent", async (context) => {
+  const f = await readySolana(context), records = new X402SolanaRepository(f.root);
+  // The process stops right after signing: the pre-exposure lifetime read never answers, once.
+  const batch = f.rpc.batch.bind(f.rpc); let stop = true;
+  f.rpc.batch = async (reads) => {
+    if (stop && reads[0]?.method === "getBlockHeight" && (reads[0].params[0] as { commitment: string }).commitment === "confirmed") { stop = false; throw new Error("stopped"); }
+    return await batch(reads);
+  };
+  const id = (await runCli([...PAY_ARGS, "--idempotency-key", "sol-pay-0007"], {}, f.options)).error?.details?.operation_id as string;
+  const unexposed = async () => { const record = (await records.find(id))!; assert.equal(record.state, "signed"); assert.equal(record.exposure, null); };
+  await unexposed();
+  assert.equal((await runCli(solanaPolicyArgs("60000000", "40000"), {}, f.options)).ok, true);
+  const drift = await runCli([...PAY_ARGS, "--idempotency-key", "sol-pay-0007"], {}, f.options);
+  assert.equal(drift.error?.code, "APN_PROFILE_DRIFT", JSON.stringify(drift)); assert.equal(drift.error?.details?.reason, "x402_solana_policy_changed");
+  assert.deepEqual(drift.next_actions, [`apn x402 solana observe --operation ${id}`]);
+  await unexposed();
+  await admitSolanaX402(f.root, f.payer, { maximumPerTransferAtomic: "900000" });
+  const allowlist = await runCli([...PAY_ARGS, "--idempotency-key", "sol-pay-0007"], {}, f.options);
+  assert.equal(allowlist.error?.code, "APN_ALLOWLIST_REFUSED", JSON.stringify(allowlist)); assert.equal(allowlist.error?.details?.reason, "allowlist_policy_changed");
+  await unexposed(); assert.equal(paidCount(f), 0); assert.equal(await usageState(f.root, f.payer, id), "reserved");
+  // Past the lifetime at finalized the signed bytes can never land: observe ends the payment and releases the hold.
+  f.rpc.heights = { confirmed: 1_200n, finalized: 1_100n };
+  assert.equal(data(await runCli(["x402", "solana", "observe", "--operation", id], {}, f.options)).state, "failed_before_effect");
+  assert.equal(await usageState(f.root, f.payer, id), "failed_before_effect"); assert.equal(paidCount(f), 0);
 });
