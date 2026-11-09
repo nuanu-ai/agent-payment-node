@@ -1,6 +1,7 @@
 import { encodeFunctionData, getAddress, parseAbi } from "viem";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import type { ActiveAssetPolicy } from "../allowlist-active-policy.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import type { Address, Hex } from "../model.js";
 import type { UsdtAccountState } from "./engine.js";
 import { USDT_GASLESS, usdtFailure, type UsdtPaymasterPayload, type UsdtTransferPlan, type UsdtTransferRequest } from "./model.js";
@@ -85,6 +86,8 @@ export function requirePolicy(active: ActiveAssetPolicy | null, request: UsdtPol
     BigInt(admission.caps.maximumPerTransferAtomic) <= 0n || BigInt(admission.caps.dailyLimitAtomic) <= 0n) {
     usdtFailure("APN_ALLOWLIST_REFUSED", "gasless_usdt_policy_mechanism");
   }
+  // The owner's recipient list (OD-1); the journal checks it again before the reservation and the submitting marker.
+  assertRecipientAdmitted({ admission, recipient: request.recipient });
   return active;
 }
 

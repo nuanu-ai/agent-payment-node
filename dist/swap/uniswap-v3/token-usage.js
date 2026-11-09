@@ -1,4 +1,5 @@
 import { canonicalJson, domainHash } from "../../canonical.js";
+import { assertRecipientAdmitted } from "../../allowlist-recipient-pins.js";
 import { evaluateAssetPolicy } from "../../asset-policy-registry.js";
 import { loadActiveAssetPolicyRegistry } from "../../allowlist-active-policy.js";
 import { AssetUsageLedger, assetUsageReservationId } from "../../asset-usage-ledger.js";
@@ -25,12 +26,15 @@ export class UniswapTokenUsage {
         if (!assetAdmitsSwapMechanism(source.asset, UNISWAP_TOKEN_MECHANISM_PIN) || !assetAdmitsSwapMechanism(destination.asset, UNISWAP_TOKEN_MECHANISM_PIN)) {
             blocked("Token pair lacks the exact Uniswap mechanism admission.", "uniswap_token_policy_mechanism");
         }
+        assertRecipientAdmitted({ admission: source, recipient: request.recipient });
+        assertRecipientAdmitted({ admission: destination, recipient: request.recipient });
         return active.digest;
     }
     async reserve(op) {
         const active = await this.active(op.profile, op.account);
         if (active.digest !== op.policyDigest)
             blocked("The active token swap policy changed.", "uniswap_token_policy_changed");
+        pinned(active.registry, op.route, this.clock.now());
         const lease = await this.ledger.reserve({ ...identityOf(op), registry: active.registry, rail: "swap", amountAtomic: op.route.amountIn,
             idempotencyKey: usageKey(op.operationId), now: this.clock.now() });
         this.assert(op, lease.reservationId, lease.policyDigest, lease.amountAtomic, lease.rail);
@@ -43,6 +47,7 @@ export class UniswapTokenUsage {
         const current = await this.ledger.usage(identity, now);
         evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "swap", amountAtomic: material.route.amountIn,
             dailyUsageAtomic: current.amountAtomic, asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
+        pinned(active.registry, material.route, now);
     }
     async confirmReserved(op) {
         const active = await this.active(op.profile, op.account), now = this.clock.now(), identity = identityOf(op), current = await this.ledger.usage(identity, now);
@@ -50,6 +55,8 @@ export class UniswapTokenUsage {
             blocked("Token swap usage or policy changed.", "uniswap_token_policy_changed");
         evaluateAssetPolicy(active.registry, { chain: identity.chain, asset: identity.asset, rail: "swap", amountAtomic: op.route.amountIn,
             dailyUsageAtomic: (BigInt(current.amountAtomic) - BigInt(op.route.amountIn)).toString(), asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
+        // Before each signature (approval, swap), never before the cleanup that only revokes the allowance.
+        pinned(active.registry, op.route, now);
     }
     async confirmCleanup(op) {
         await this.current(op);
@@ -122,6 +129,17 @@ export class UniswapTokenUsage {
         if (id !== assetUsageReservationId(identityOf(op), usageKey(op.operationId)) || policy !== op.policyDigest || amount !== op.route.amountIn || rail !== "swap") {
             corrupt("Uniswap token usage binding changed.");
         }
+    }
+}
+/**
+ * The recipient pin (OD-1) of both swap rows, the spent and the received asset's, still lists the route's recipient.
+ * Only the pins are the point here (the callers check the spent asset's caps against its usage), so usage is zero.
+ */
+function pinned(registry, route, now) {
+    for (const [token, amountAtomic] of [[route.inputToken, route.amountIn], [route.outputToken, route.amountOutMinimum]]) {
+        const admission = evaluateAssetPolicy(registry, { chain: "eip155:1", asset: { kind: "token", identifier: token }, rail: "swap",
+            amountAtomic, dailyUsageAtomic: "0", asOfDate: now.toISOString().slice(0, 10), asOf: now.toISOString() });
+        assertRecipientAdmitted({ admission, recipient: route.recipient });
     }
 }
 function usageIdentity(account, token) { return { account, chain: "eip155:1", asset: { kind: "token", identifier: token } }; }

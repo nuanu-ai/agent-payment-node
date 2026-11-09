@@ -1,5 +1,5 @@
 import { hashObject } from "../canonical.js";
-import { bridgeCapacityRefusal, bridgeTransitionKind } from "./history-capacity.js";
+import { bridgeBoundedEvidence, bridgeCapacityRefusal, bridgeTransitionKind } from "./history-capacity.js";
 import { BRIDGE_TELEMETRY_ROWS, BRIDGE_TERMINAL, bridgeIntentBinding, bridgeSnapshot, sealBridgeOperation,
   type BridgeEffect, type BridgeIntent, type BridgeMutable, type BridgeOperationRecord } from "./operation-model.js";
 import { validateBridgeContinuity, validateBridgeOperation } from "./operation-validation.js";
@@ -36,8 +36,12 @@ export function transitionBridge(op: BridgeOperationRecord, patch: Partial<Bridg
     // Telemetry is diagnostics, not evidence: a closing or terminal transition drops its rows rather than go unrecorded.
     result = appended(op, { ...next, observationTelemetry: [] }, at); refusal = bridgeCapacityRefusal(kind, result, false);
   }
-  // Only then may a terminal transition pass the 1 MiB bound that earlier releases read.
-  if (refusal === "bridge_record_capacity" && kind === "terminal") refusal = bridgeCapacityRefusal(kind, result, true);
+  // Only then may bounded evidence or the terminal transition pass the 1 MiB bound that earlier releases read: a journal
+  // 0.5.96 filled has no reserve for them. A provider hint never does on its own; one without room is carried
+  // (observation.ts) and passes only with the bounded evidence or end it rides along with, adding no transition.
+  if (refusal === "bridge_record_capacity" && (kind === "terminal" || bridgeBoundedEvidence(oldMeaning, newMeaning))) {
+    refusal = bridgeCapacityRefusal(kind, result, true);
+  }
   if (refusal !== null) bridgeFailure("APN_OPERATION_BLOCKED", refusal, {});
   validateBridgeContinuity(op, result);
   return result;

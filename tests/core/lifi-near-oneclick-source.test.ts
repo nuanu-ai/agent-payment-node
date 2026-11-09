@@ -40,7 +40,8 @@ test("1Click command binding carries explicit limits", () => {
   if (bound.command === "oneclick.source.submit") assert.equal(bound.recipient, request.recipient);
 });
 
-test("durable 1Click journal seals exact ERC20 transfer and permits one submission", async () => {
+test("durable 1Click journal seals exact ERC20 transfer and permits one submission", async (t) => {
+  t.mock.method(Date, "now", () => now); // before the quote deadline, as a real seal is
   const { privateKeyToAccount } = await import("viem/accounts");
   const { encodeFunctionData, keccak256, parseAbi } = await import("viem");
   const { OneClickSourceJournal } = await import("../../src/lifi/near-oneclick-source-journal.js");
@@ -63,7 +64,7 @@ test("durable 1Click journal seals exact ERC20 transfer and permits one submissi
     record = await repo.advance(record.operationId, record.integrityHash, "signing_started");
     const raw = await account.signTransaction({ type: "eip1559", chainId: 8453, to: token, data, value: 0n,
       nonce: 7, gas: 100000n, maxFeePerGas: 2000000000n, maxPriorityFeePerGas: 100000000n, accessList: [] });
-    record = await repo.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) });
+    record = await repo.advance(record.operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, undefined, async () => {});
     assert.equal((await repo.load(record.operationId))?.rawTransaction, raw);
     record = await repo.advance(record.operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
     await assert.rejects(repo.advance(record.operationId, record.integrityHash, "submitting"));

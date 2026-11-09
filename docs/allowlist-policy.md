@@ -80,8 +80,8 @@ Each admission:
 | `dailyLimitAtomic` | Positive daily cap in atomic units (UTC day). |
 | `mechanism` | Required for every rail except `direct` (see below). |
 | `mechanisms` | `bridge` only: 2 to 16 alternatives, instead of `mechanism` and `maximumPerTransferAtomic`. |
-| `recipient` | Optional single recipient pin on some `gasless` admissions. |
-| `recipients` | Optional list of 1 to 16 recipients on `direct`, `x402` and single-pin `bridge` admissions. |
+| `recipient` | Optional single recipient pin on Ethereum and Base `gasless` admissions (see below). Never beside `recipients`. |
+| `recipients` | Optional list of 1 to 16 recipients on any admission, except a `bridge` row with `mechanisms` (see below). |
 
 Each admission is one exact frozen identity, one rail and the owner's caps for that rail. The same asset may appear
 once per rail, and each rail keeps its own caps.
@@ -97,34 +97,83 @@ once per rail, and each rail keeps its own caps.
   that row. Each reference has its own per-operation cap; `dailyLimitAtomic` is one combined ceiling for the asset and
   rail. Duplicate pins, empty pins, wildcard references and extra fields are refused. The activation screen and status
   show every alternative and its cap.
+- NEAR 1Click deposits (`apn oneclick source submit`) use the `bridge` rail of the payer's origin asset, one mechanism
+  per lane: `{ "provider": "near-1click", "reference": "<lane>.v1" }`. Base USDC admits
+  `base-usdc-to-tron-usdt.v1`; Ethereum ETH (`native` on `eip155:1`) admits `ethereum-eth-to-tron-trx.v1`,
+  `ethereum-eth-to-solana-sol.v1` and `ethereum-eth-to-tron-usdt.v1`, each on its own or as `mechanisms` alternatives.
+  A lane's `recipients` list holds TRON or Solana addresses. See [NEAR 1Click direct lanes](lifi.md#near-1click-direct-lanes).
 
 ### Recipient pins
 
-**`recipients` (direct, x402, bridge).** A list of 1 to 16 unique, canonical, non-zero addresses (EVM in checksum form,
-Solana base58, TRON base58).
+A recipient pin restricts who an admission may pay. There are two forms, and a row carries at most one of them.
 
-- On `direct` and `x402` every address belongs to the admission's own network family. On `bridge` the recipient is on
-  the destination chain, so any family is accepted.
-- A `bridge` admission with `mechanisms` puts the optional `recipients` list on each alternative instead, and that
-  alternative's list governs it; the row itself cannot carry one.
-- When a list is present, an operation whose recipient (for x402, the payee) is not in it is refused with
-  `APN_ALLOWLIST_REFUSED` and reason `allowlist_recipient_not_admitted`, at prepare, approval, reservation and first
-  send.
-- **Without `recipients` the policy does not restrict recipients.** The recipient stays a required per-operation input
-  that the foreground approval screen shows. This is the documented meaning of an absent list, not a default.
+**`recipients` (every rail).** A list of 1 to 16 unique, canonical, non-zero addresses (EVM in checksum form, Solana
+base58, TRON base58). `direct`, `x402`, `gasless`, `bridge` and `swap` admissions accept it.
+
+- On `direct`, `x402`, `gasless` and `swap` the recipient is on the admission's own network, so every address belongs to
+  that network's family. On `bridge` the recipient is on the destination chain, so any family is accepted.
+- A `bridge` admission with `mechanisms` puts the optional list on each alternative instead, and that alternative's
+  list governs it; the row itself cannot carry one. A `swap` admission with `mechanisms` carries one list for the row,
+  and it applies to every admitted route.
+- The recipient is the transfer's recipient on `direct` and `gasless`, the seller's payee on `x402`, the recipient on
+  the destination chain on `bridge`, and the address that receives the swap output on `swap`.
+- A swap evaluates two `swap` admissions: the asset it spends and the asset it receives. Each list either row carries
+  binds the swap, so with lists on both rows the recipient must be on both.
+- Lanes that can pay only the owner's own account are bound too: a list that does not name that account refuses them.
+  These are the Jupiter, Orca and SunSwap swaps, both Stargate V2 lanes, Gas.zip and the BNB, Monad and Linea native
+  bridge routes.
+- When a list is present, an operation whose recipient is not on it is refused with `APN_ALLOWLIST_REFUSED` and reason
+  `allowlist_recipient_not_admitted` before anything is signed: at prepare, and again at approval, reservation and
+  first send wherever the lane has those steps.
+- **Without a pin the policy does not restrict recipients.** The recipient stays a required per-operation input that
+  the foreground approval screen shows. This is the documented meaning of an absent pin, not a default.
 - Activation and status list each pin as `Recipients pinned (n): …`.
-- `swap` and `gasless` admissions cannot carry `recipients`.
 
-**`recipient` (gasless).** Ethereum and Base `local` gasless admissions may add
-`"recipient": "<canonical checksummed EVM address>"` to pin one exact transfer recipient.
+**`recipient` (gasless, single address).** Ethereum and Base `local` gasless admissions may add
+`"recipient": "<canonical checksummed EVM address>"` to pin one exact transfer recipient. This is the older form; it keeps
+its meaning, and `recipients` with one address does the same on any gasless admission.
 
-- Base `coinbase-agentic-wallet` gasless admissions require it. Their mechanism is exactly
-  `{ "provider": "coinbase-agentic-wallet", "reference": "awal@2.12.1:send_base_usdc:eip155:8453" }` for canonical Base
-  USDC.
+- A row with both `recipient` and `recipients` is refused (`recipient_pin_conflict`).
+- Base `coinbase-agentic-wallet` gasless admissions require a pin: `recipient` or `recipients`. Their mechanism is
+  exactly `{ "provider": "coinbase-agentic-wallet", "reference": "awal@2.12.1:send_base_usdc:eip155:8453" }` for
+  canonical Base USDC.
 - A different recipient is refused before the prepare RPC and rechecked before approval, reservation and first send.
-- `local` admissions without `recipient` do not restrict recipients.
 - Other rails and networks cannot carry this field. Wildcard, zero and noncanonical addresses are refused.
 - The activation screen and status show the pin.
+
+**Which admission governs each lane.**
+
+| Lane | Admission (chain, asset, rail, mechanism) | Pin |
+| --- | --- | --- |
+| Direct EVM, Solana and TRON transfers; MetaMask native transfer | the sent asset, `direct` | `recipients` |
+| x402 merchant, x402 Permit2, x402 Solana | the paid asset, `x402`, the lane's mechanism | `recipients` |
+| Local gasless on Ethereum, Optimism, Unichain, Polygon PoS, Base, Arbitrum One | the chain's USDC, `gasless`, `local` | `recipients`; `recipient` on Ethereum and Base |
+| Local gasless on Avalanche (PayAI facilitator) | Avalanche USDC, `gasless`, `payai-x402-facilitator` | `recipients` |
+| Coinbase Agentic Wallet gasless on Base | Base USDC, `gasless`, `coinbase-agentic-wallet` | required: `recipient` or `recipients` |
+| Gasless USDT on Ethereum | Ethereum USDT, `gasless`, its sponsor mechanism | `recipients` |
+| Uniswap (ETH to token, USDC/USDT), Orca, Jupiter, SunSwap | the spent and the received asset, `swap` | `recipients` on either row |
+| Relay, LI.FI, Circle CCTP V2, Stargate V2, Gas.zip, NEAR 1Click | the source asset, `bridge`, the exact mechanism or alternative | `recipients` |
+
+**Where this policy's pins do not reach.** Some lanes can pay a third party but are not admitted by the owner
+allowlist at all: no admission row, cap or usage hold applies to them, so neither pin can be written for them.
+
+- Gasless transfers from a MetaMask Agent server wallet or a MetaMask Smart Account profile.
+- Direct USDC transfers (`pay transfer`) from a Coinbase Agentic Wallet, MetaMask Agent server wallet or MetaMask
+  Smart Account profile.
+
+Their limits are the provider's: the Agent wallet's Guard policy and MFA, the Smart Account's root permission, the
+Coinbase wallet's own controls. Pinning their recipients first needs these lanes to require an allowlist admission (with
+caps and usage accounting), which would change what every existing profile has to stage. That is a separate change.
+
+Local x402 payments (`x402 fetch`, including the MetaMask Agent and Smart Account payers) and Coinbase Agentic Wallet
+x402 payments are governed by the profile policy, not the allowlist. Their payee pin is the profile policy's
+`x402Payees` (`apn wallet policy set --x402-payees`), and a `recipients` list on an `x402` admission does not apply to
+them.
+
+**Compatibility.** APN 0.5.97 and earlier cannot read `recipients` on a `gasless` or `swap` admission, nor a Coinbase
+gasless admission pinned only by `recipients`. They refuse to stage such a file. Once one such revision is staged for a
+profile, they also refuse that profile's whole policy state as corrupt (`APN_STATE_CORRUPT`), because every read checks
+every staged revision, even a revoked or replaced one. Do not downgrade a profile below 0.5.98 after staging one.
 
 ### File requirements
 
@@ -269,4 +318,8 @@ forge entries. An anchor outside the state directory, such as in the Keychain, i
 | `APN_STATE_CORRUPT` | A staged or activation file was tampered with, or the chain is broken. |
 | `APN_OPERATION_BLOCKED` / `allowlist_policy_expired` | The active policy passed its `expiresAt`. |
 | `APN_ALLOWLIST_REFUSED` / `allowlist_recipient_not_admitted` | The recipient is not in the admission's `recipients` list. |
+| `APN_INVALID_INPUT` / `recipient_pin_conflict` | An admission carries both `recipient` and `recipients`. |
 | `APN_ALLOWLIST_REFUSED` / `allowlist_policy_required` | No policy is active for the profile. |
+| `APN_ALLOWLIST_REFUSED` / `oneclick_source_active_owner_policy_required` | 1Click: no active policy, or its EVM account is not the payer. |
+| `APN_ALLOWLIST_REFUSED` / `oneclick_source_mechanism_not_admitted` | 1Click: the origin asset's single bridge pin is not this lane. |
+| `APN_ALLOWLIST_REFUSED` / `oneclick_source_policy_refused` | 1Click: asset, rail or lane not admitted, a cap, or the policy window (`cause` says which). |

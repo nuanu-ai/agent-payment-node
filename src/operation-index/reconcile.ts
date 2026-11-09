@@ -82,7 +82,7 @@ export class OperationIndexReconciler {
    * when nothing names a profile.
    */
   async quarantine(adapter: OperationFamilyAdapter, name: StoredRecordName, reason: UnreadableReason): Promise<OperationIndexEntry | null> {
-    const raw = await this.store.rawRecord(name.recordPath);
+    const raw = await this.store.rawRecord(name.recordPath, adapter.stores);
     if (raw === null) return null;
     const salvaged = "value" in raw ? adapter.salvage(raw.value) : null;
     const profiles = name.profileHash !== null ? [name.profileHash] : salvaged?.profileHashes ?? [];

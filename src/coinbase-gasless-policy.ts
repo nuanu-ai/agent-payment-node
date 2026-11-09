@@ -1,6 +1,7 @@
 import { canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
 import { activeAssetPolicyFromState, type ActiveAssetPolicy } from "./allowlist-active-policy.js";
 import { AllowlistPolicyStore } from "./allowlist-policy-store.js";
+import { assertRecipientAdmitted } from "./allowlist-recipient-pins.js";
 import { evaluateAssetPolicy } from "./asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity } from "./asset-usage-ledger.js";
 import { BASE_USDC } from "./constants.js";
@@ -67,7 +68,9 @@ export class CoinbaseGaslessPolicy {
     if (admitted.asset.decimals !== 6 || pinned === undefined || canonicalJson(pinned) !== canonicalJson(COINBASE_GASLESS_MECHANISM)) {
       deny("coinbase_allowlist_mechanism");
     }
-    if (admitted.asset.gaslessRecipient !== op.recipient) deny("coinbase_allowlist_recipient");
+    // Coinbase requires an owner pin (validation refuses a row without one): the single recipient, or a list (OD-1).
+    if (admitted.asset.recipients?.gasless === undefined && admitted.asset.gaslessRecipient !== op.recipient) deny("coinbase_allowlist_recipient");
+    assertRecipientAdmitted({ admission: admitted, recipient: op.recipient });
   }
 
   async prepare(op: Pick<OperationRecord, "profile" | "walletAddress" | "recipient" | "amountAtomic" | "operationId">): Promise<CoinbaseGaslessAllowlistBinding> {

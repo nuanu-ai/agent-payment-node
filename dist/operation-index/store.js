@@ -5,8 +5,8 @@ import { dirname, join } from "node:path";
 import { atomicTemporaryPrefix } from "../atomic-write-temporaries.js";
 import { canonicalJson, isPlainRecord } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { isCode, SecureStateStore, stateSecurity, validateDirectory } from "../secure-state-store.js";
-import { RECORD_NAME, STATE_HASH } from "./adapter.js";
+import { isCode, SecureStateStore, stateCorrupt, stateSecurity, validateDirectory } from "../secure-state-store.js";
+import { parseRecordPath, RECORD_NAME, STATE_HASH } from "./adapter.js";
 import { OPERATION_FAMILIES, OPERATION_INDEX_ENTRY_SCHEMA } from "./types.js";
 export const OPERATION_INDEX_DIRECTORY = "operation-index";
 /** The one leaf lock: held only around index file operations, always innermost, never around another acquisition. */
@@ -49,6 +49,16 @@ export function validateIndexEntry(value, operationId) {
         !ENTRY_KEYS.every(key => keys.includes(key)) || keys.some(key => !ENTRY_KEYS.includes(key) && key !== "unreadableReason"))
         damaged();
     return value;
+}
+/** A record file of a store whose family reader admits more than the state store's limit, read under that bound. */
+class RecordFileReader extends SecureStateStore {
+    byteLimit;
+    constructor(root, byteLimit) {
+        super(root);
+        this.byteLimit = byteLimit;
+    }
+    stateByteLimit() { return this.byteLimit; }
+    async read(recordPath) { return await this.readJson(recordPath); }
 }
 /** File I/O of `operation-index/` through the secure store (0600 files, atomic writes, strict reads). */
 export class OperationIndexStore extends SecureStateStore {
@@ -190,10 +200,17 @@ export class OperationIndexStore extends SecureStateStore {
         }
         return output;
     }
-    /** The record's bytes as JSON for salvage, or why they cannot be read as such. */
-    async rawRecord(recordPath) {
+    /**
+     * The record's bytes as JSON for salvage, read under the bound its family's store names (if any), or why they cannot be
+     * read as such. A path in no store of the family (a damaged index entry) is not that family's record bytes.
+     */
+    async rawRecord(recordPath, stores) {
         try {
-            const value = await this.readJson(recordPath);
+            const store = stores.find((candidate) => candidate.directory === parseRecordPath(recordPath)?.directory);
+            if (store === undefined)
+                stateCorrupt("Operation record path names no store of its family.");
+            const value = store.recordByteLimit === undefined ? await this.readJson(recordPath)
+                : await new RecordFileReader(this.root, store.recordByteLimit).read(recordPath);
             return value === null ? null : { value };
         }
         catch (error) {

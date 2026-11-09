@@ -148,9 +148,9 @@ export class X402SolanaService {
       });
     }
     if (record.state === "reserving") {
-      await this.assertOwnerUnchanged(record);
+      // The hold is reserved under the very policy load that matched the frozen admission, not a later reload.
+      const active = (await this.assertOwnerUnchanged(record)).active;
       await this.currentPolicy(record);
-      const active = (await x402SolanaOwnerRow(this.root, record.profile, record.terms.payer, record.terms.mint, this.now())).active;
       const lease = await new AssetUsageLedger(this.root).reserve({ ...x402SolanaUsageIdentity(record.terms), registry: active.registry, rail: "x402",
         mechanism: X402_SOLANA_MECHANISM, amountAtomic: record.terms.amountAtomic, idempotencyKey: x402SolanaUsageKey(operationId), now: this.now() })
         .catch(async (error: unknown) => {
@@ -168,6 +168,10 @@ export class X402SolanaService {
       });
     }
     if (record.state !== "signed") return record;
+    // A payment left signed (the process stopped after signing) meets the owner's allowlist and x402 policy again before
+    // its only exposure; refused, the bytes stay unexposed and observe ends the payment once its lifetime has passed.
+    await this.assertOwnerUnchanged(record);
+    await this.currentPolicy(record);
     // The lifetime must still be open at the confirmed height before the single exposure; past it the bytes can never land.
     const height = await readSolanaBlockHeight(this.rpc(), "confirmed");
     if (height >= BigInt(record.lifetime!.lastValidBlockHeight)) {
@@ -223,7 +227,7 @@ export class X402SolanaService {
       : { state: "failed_onchain", at, reason: "finalized_transaction_failed", settlement: observed.settlement };
   }
 
-  private async assertOwnerUnchanged(record: X402SolanaRecord): Promise<void> {
+  private async assertOwnerUnchanged(record: X402SolanaRecord): Promise<Awaited<ReturnType<typeof x402SolanaOwnerRow>>> {
     const owner = await x402SolanaOwnerRow(this.root, record.profile, record.terms.payer, record.terms.mint, this.now());
     const frozen = record.terms.admission;
     if (owner.active.digest !== frozen.policyDigest || owner.active.revision !== frozen.policyRevision || owner.active.activationDigest !== frozen.activationDigest) {
@@ -231,6 +235,7 @@ export class X402SolanaService {
         "Observe it once it expires (that releases the account), then prepare a new payment.",
         { reason: "allowlist_policy_changed", rail: "x402", nextActions: [`apn x402 solana observe --operation ${record.operationId}`] });
     }
+    return owner;
   }
 }
 

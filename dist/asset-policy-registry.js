@@ -161,9 +161,10 @@ function validateChain(value, schema) {
         if (asset.gaslessRecipient !== undefined && value.chain !== "eip155:1" && value.chain !== "eip155:8453") {
             invalid("A gasless recipient pin requires Ethereum or Base.");
         }
+        // Coinbase gasless needs an owner pin: the single recipient or a recipient list.
         if (asset.mechanismPins?.gasless?.provider === "coinbase-agentic-wallet" &&
-            (value.chain !== "eip155:8453" || asset.gaslessRecipient === undefined)) {
-            invalid("Coinbase gasless admission requires Base and one exact recipient.");
+            (value.chain !== "eip155:8453" || (asset.gaslessRecipient === undefined && asset.recipients?.gasless === undefined))) {
+            invalid("Coinbase gasless admission requires Base and an exact recipient pin.");
         }
         const identity = asset.kind === "native" ? "native" : `token:${asset.identifier}`;
         if (identities.has(identity))
@@ -232,8 +233,9 @@ function validateAsset(family, value, schema) {
             keys.add(key);
         }
     }
-    if (value.recipients !== undefined && !rowRecipientPinsValid(value.recipients, value.rails, family, isPlainRecord(value.mechanismOptions) && value.mechanismOptions.bridge !== undefined))
+    if (value.recipients !== undefined && !rowRecipientPinsValid(value.recipients, value.rails, family, isPlainRecord(value.mechanismOptions) && value.mechanismOptions.bridge !== undefined, value.gaslessRecipient !== undefined)) {
         invalid("Asset recipient pins are invalid.");
+    }
     const mechanismPins = value.mechanismPins;
     const swapPin = mechanismPins?.swap;
     if (value.rails.swap !== (swapPin !== undefined || swapOptions !== undefined))

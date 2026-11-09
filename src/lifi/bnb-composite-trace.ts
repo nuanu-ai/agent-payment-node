@@ -37,10 +37,11 @@ export interface BnbCompositeTraceProof {
 /** `to` is null only for a reverted CREATE or CREATE2, which callTracer reports without the address it never got. */
 type TraceNode = Readonly<{ type: string; from: Address; to: Address | null; value: bigint; input: Hex; output: Hex;
   error: string | null; calls: readonly TraceNode[] }>;
-/** The destination transaction (its sender, target and calldata bind the trace to it) and the fill amount its FilledRelay proved. */
+/** The destination transaction (its sender, target, value and calldata bind the trace to it) and the fill amount its FilledRelay proved. */
 export interface BnbDestinationFill {
   readonly sender: Address;
   readonly target: Address;
+  readonly valueAtomic: string;
   readonly calldata: Hex;
   readonly amountAtomic: string;
 }
@@ -58,13 +59,15 @@ export interface BnbDestinationFill {
  */
 export function verifyBnbCompositeTrace(raw: unknown, transactionHash: Hex, message: Hex,
   call: BnbCompositeCall, fill: BnbDestinationFill): BnbCompositeTraceProof {
-  const root = traceNode(raw, { count: 0 }, 0);
+  const root = traceNode(raw, { count: 0 }, 0), reported = raw as Record<string, unknown>;
   const traceHash = hashObject({ transactionHash, root: traceProjection(root) });
   const input = BigInt(call.inputAmountAtomic), filled = BigInt(fill.amountAtomic);
   // The root must be the verified transaction itself. A trace of anything else says nothing about this fill, so it is an
-  // RPC answer to read again (retryable), never a terminal outcome. Addresses are checksummed on both sides.
-  if (root.type !== "CALL" || root.error !== null || root.from !== getAddress(fill.sender) || root.to !== getAddress(fill.target) ||
-    root.input !== fill.calldata) bridgeFailure("APN_RPC_PROTOCOL", "native_trace_transaction");
+  // RPC answer to read again (retryable), never a terminal outcome. Addresses are checksummed on both sides. callTracer
+  // always reports the top call's value and input, so the root must carry both: inner frames may omit them, the root not.
+  if (root.type !== "CALL" || root.error !== null || reported.value === undefined || reported.input === undefined ||
+    root.from !== getAddress(fill.sender) || root.to !== getAddress(fill.target) ||
+    root.value !== BigInt(fill.valueAtomic) || root.input !== fill.calldata) bridgeFailure("APN_RPC_PROTOCOL", "native_trace_transaction");
   try {
     assertCallerTree(root);
     if (filled < input) mismatch();

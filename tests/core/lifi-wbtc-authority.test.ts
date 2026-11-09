@@ -296,6 +296,41 @@ test(`expired guarded WBTC ${phase} continuation uses only canonical terminal or
   }
 });
 
+for (const order of ["in time, then expired", "expired"] as const)
+test(`a guarded WBTC run stopped after custody sealed the bridge is recorded sealed without authority, then halts at expiry (${order})`, async t => {
+  const temp = await temporaryState(); t.after(temp.cleanup); const { op, f } = await preparedWbtc(temp.root, new Date());
+  // The authorized approval run dies after custody.seal, before the sealed save: signing_started, material, no SEND claim.
+  const persist = f.core.bridges.records.persist.bind(f.core.bridges.records);
+  f.core.bridges.records.persist = async current => {
+    if (current.effects[1]!.phase === "sealed") throw new Error("died before the sealed save");
+    await persist(current);
+  };
+  assert.equal((await f.core.execute({ command: "bridge.approve", operationId: op.operationId })).ok, false);
+  f.core.bridges.records.persist = persist;
+  const stopped = (await findStored(f.core.bridges.records, op.operationId))!, material = (await f.custody.load(stopped, "bridge"))!;
+  assert.equal(stopped.effects[1]!.phase, "signing_started"); assert.equal(f.source.submissions.length, 1);
+  const { approval: _approval, ...withoutApproval } = f.dependencies;
+  const core = new ApnCore({ state: f.state, clock: { now: () => new Date(f.now) }, bridge: withoutApproval });
+  const resume = async () => {
+    const result = await core.execute({ command: "operation.resume", operationId: op.operationId });
+    assert.equal(result.ok, true, JSON.stringify(result.error)); return (await findStored(core.bridges.records, op.operationId))!;
+  };
+  if (order === "in time, then expired") {
+    // Recording the seal signs nothing; sending it still needs a confirmed run, which a resume without one is refused.
+    const sealed = await resume();
+    assert.equal(sealed.effects[1]!.phase, "sealed"); assert.equal(sealed.effects[1]!.transactionHash, material.transactionHash);
+    assert.equal(sealed.terminal, false);
+    const unconfirmed = await core.execute({ command: "operation.resume", operationId: op.operationId });
+    assert.equal(unconfirmed.error?.code, "APN_FOREGROUND_APPROVAL_REQUIRED");
+    assert.equal((await findStored(core.bridges.records, op.operationId))!.integrityHash, sealed.integrityHash);
+  }
+  f.now.setTime(Date.parse(op.intent.expiresAt) + 1);
+  const ended = await resume();
+  assert.equal(ended.state, "failed_after_approval"); assert.equal(ended.effects[1]!.phase, "sealed");
+  assert.equal(ended.failure!.reason, "unsent_apn_reprepare_required"); assert.equal(f.source.submissions.length, 1);
+  assert.equal((await f.custody.load(ended, "bridge"))?.materialHash, material.materialHash);
+});
+
 import { AssetUsageLedger } from "../../src/asset-usage-ledger.js";
 
 import { privateKeyToAccount } from "viem/accounts";

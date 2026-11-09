@@ -143,7 +143,8 @@ export declare const BRIDGE_TELEMETRY_ROWS = 8;
 export declare const BRIDGE_HISTORY_LIMIT = 512;
 /**
  * Past that bound, at most this many more transitions, each a closing one (history-capacity.ts); the last of them is
- * kept for the terminal transition. A journal an earlier release filled to the bound can therefore still end.
+ * kept for the terminal transition. A journal an earlier release filled to the bound can therefore still end. The room
+ * a journal may take past 1 MiB is this many copies of the state and one more (history-capacity.ts).
  */
 export declare const BRIDGE_CLOSING_TRANSITIONS = 8;
 /**

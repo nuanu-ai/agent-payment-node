@@ -1,5 +1,6 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "../canonical.js";
 import { ApnError } from "../errors.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { evaluateAssetPolicy, validateAssetPolicyRegistry, type AssetPolicyRegistry } from "../asset-policy-registry.js";
 import { AssetUsageLedger, type AssetUsageReservation } from "../asset-usage-ledger.js";
 import { validateSwapProtocolRegistry } from "./protocol-registry.js";
@@ -33,6 +34,9 @@ export class GuardedSwapService {
       asset: quote.destinationAsset.kind === "native" ? { kind: "native", identifier: null } :
         { kind: "token", identifier: quote.destinationAsset.identifier! }, rail: "swap", amountAtomic: quote.minimumOutputAtomic,
       dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
+    // The recipient pin (OD-1) of each swap row binds the swap: the spent asset's and the received asset's.
+    assertRecipientAdmitted({ admission, recipient: quote.recipient });
+    assertRecipientAdmitted({ admission: destinationAdmission, recipient: quote.recipient });
     // Both assets must admit the installed lane's route (protocol, router, pools); its internal version is APN's own.
     const protocolRegistry = validateSwapProtocolRegistry(input.protocolRegistry);
     const mechanismDigest = admittedSwapProtocol(protocolRegistry, quote.sourceAsset.chain, admission.asset,
@@ -195,6 +199,7 @@ function assertPolicyBindings(operation: SwapOperationRecord, policy: AssetPolic
         swapAdmissionMechanisms(admission.asset).length === 0) {
       blocked("Swap policy or mechanism binding changed after preparation.");
     }
+    assertRecipientAdmitted({ admission, recipient: operation.quote.recipient });
   }
 }
 function invalid(message: string): never { throw new ApnError("APN_INVALID_INPUT", message); }

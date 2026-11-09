@@ -503,11 +503,39 @@ transitions in a file of at most 1 MiB. A poll that changes only timestamps or t
 `destination_pending` and `unknown_finality`, or new RPC failure details, does. Such an ordinary change is recorded only
 below 512 transitions with 128 KiB of the file free; otherwise resume refuses it (`APN_OPERATION_BLOCKED`,
 `bridge_history_capacity` or `bridge_record_capacity`) and changes nothing. Closing evidence (an effect's first safe
-proof, a provider observation naming a new or now settled destination transaction) is recorded while 32 KiB stay free,
-up to seven past the 512th transition; a provider hint with no room left still guides the read and is saved with the
-end. The destination proof is saved in the same transition as the end it decides, and that terminal transition always
-is: as the 520th at most, up to 1 MiB, without its read telemetry if only that does not fit, and up to 64 KiB past
-1 MiB in a journal an earlier release filled. A delivered bridge thus still ends `completed`.
+proof, its send steps after `signing_started`, a provider observation naming a new or now settled destination
+transaction) is recorded while 32 KiB stay free, up to seven past the 512th transition; a provider hint with no room
+left still guides the read and is saved with the next transition that may pass the bounds. The destination proof is
+saved in the same transition as the end it decides, and that terminal transition always is: as the 520th at most, up
+to 1 MiB, without its read telemetry if only that does not fit.
+
+An effect starts its send (its SIGN claim and `signing_started`) only when all four of its send transitions
+(`signing_started`, `sealed`, `submitting` and the save after the send) fit below 512 transitions with 128 KiB of the
+file free. The approval of a two-effect route also needs that room for the bridge's four, and for the two observations
+of the approval (included, then safe) before the bridge may sign, so on the ordinary path it does not go out when the
+bridge could not follow. RPC failures and recoveries between the two sends add ordinary transitions this reserve does
+not cover; on a journal already that close to full the bridge's own check may still refuse, and the route then ends
+`failed_after_approval` at expiry. Otherwise resume refuses it the same way before anything is claimed or signed, and once the operation's
+validity runs out it ends in its usual halt (`failed_before_effect`, or `failed_after_approval` once a sent approval is
+safe). Every step after `signing_started` is closing evidence, so an effect that has started signing always records
+its seal, its claimed send and the save after it.
+
+A journal that 0.5.96 or earlier filled kept no such room. There, the terminal transition and evidence a journal can
+record only a bounded number of times may pass 1 MiB, without their read telemetry. That evidence is an effect's first
+safe proof, the destination proof, an effect's send steps after `signing_started` (each happens once), and an effect
+losing an inclusion that was not yet safe (a reorg moved it, or it vanished): a full journal no longer records unsafe
+inclusions, so each effect can lose one only once there. After a file passes 1 MiB at most eight such transitions
+follow, the end included, as past 512. The room past 1 MiB is one copy of the state (at most 64 KiB) for each of them
+and one more for the state's own growth: an open journal may grow to 1.5 MiB, which keeps one copy free for its end,
+and a finished one to 1 MiB + 576 KiB. The reader refuses any file larger than that. Ordinary changes never use this
+room, and a provider hint never does on its own: one that found no room passes it only as part of the next such
+transition. A delivered bridge thus still ends `completed`, even when its journal was already full before the bridge
+transaction was safe or a reorg moved it.
+
+An effect left `signing_started` with nothing sealed (the process stopped before custody sealed it) normally returns to
+`unsealed` on the next resume. When a full journal has no room for that, resume is refused and changes nothing until
+the operation's validity runs out. Then the release is saved in the terminal halt the expiry decides:
+`failed_before_effect`, or `failed_after_approval` once a sent approval is safe.
 
 ### Signing and sending
 
@@ -521,6 +549,10 @@ is: as the 520th at most, up to 1 MiB, without its read telemetry if only that d
 - An effect left at `signing_started` with no sealed material and no SEND claim signed and sent nothing. Resume returns
   it to `unsealed`, runs the full guard again and re-signs the identical envelope (RFC 6979 gives the same bytes), or
   ends it on the expiry path.
+- A guarded WBTC effect that custody sealed before its run stopped (no SEND claim) is recorded `sealed` by the next
+  resume, which signs nothing and asks for no confirmation; a further confirmed resume sends the recorded bytes. Once the operation's validity
+  runs out, such a resume ends an unsent effect whose earlier effects are safe, as the expiry ends any other route:
+  `failed_after_approval` or `failed_before_effect`, with the seal kept in custody and never sent.
 - APN records the first submission attempt before calling the RPC. From then on, recovery observes the original hash
   without resending, even if the acknowledgment was lost, the RPC returned a different hash, the quote expired or no
   transaction is visible yet. A timeout or rate limit on the raw send itself is final for that attempt.
@@ -768,6 +800,34 @@ safe ASCII characters. For different assets the only in-band valuation is the qu
 the quote's slippage floor and `--min-output-atomic` is the owner's price floor. Recipients must be canonical: TRON
 base58check for TRX and USDT, a 32-byte Solana base58 key for SOL. `refundTo` is always the payer.
 
+**Owner policy.** Submit requires the profile's active owner allowlist policy, whose EVM account must be the payer.
+The payer's origin asset (Base USDC, or Ethereum ETH) must admit the `bridge` rail with this lane's mechanism,
+`{ "provider": "near-1click", "reference": "<lane>.v1" }`; the amount must fit that lane's per-operation cap and,
+together with the asset's usage for the UTC day, its daily limit; and a `recipients` pin on the lane must list the
+recipient. All of this is checked before any quote, so a refusal makes no network call and stages nothing. After the
+foreground consent the policy and pin are checked again and the principal is held in the usage ledger
+(`oneclick-source:<operation-id>`) before signing. A failure before the transaction is sealed releases the hold, and the
+journal refuses to seal after the effective deadline (`oneclick_source_quote_expired_before_seal`) or once the hold
+is no longer held (`oneclick_source_usage_hold_not_held`). An evaluation refusal (asset, rail or lane not admitted, a
+cap, the policy window) is `APN_ALLOWLIST_REFUSED` / `oneclick_source_policy_refused`, with the evaluator's words in
+`cause`. The hold changes only when submit or status runs; until then an open hold counts against the asset's daily
+limit on every day. Status brings the hold to what the journal proves:
+
+| Journal | Hold |
+| --- | --- |
+| `prepared`, `signing_started` | `reserved`; released (`failed_before_effect`) once the effective deadline has passed |
+| `sealed` | `reserved` |
+| `submitted_pending` | `submitted` |
+| `submitting`, `unknown_finality` | `unknown_finality` |
+| `source_observed`, safe success | `finalized` (counted on the day status records it) |
+| `source_observed`, safe revert | `failed_confirmed_revert` |
+| `failed_proven_superseded` | `released_unsubmitted` |
+
+Submit and status report the hold as `usageHold`: `null` when the operation holds nothing (records written before
+0.5.98, or a submit refused before the hold, such as a declined consent), and also from a submit whose deposit was
+sent but whose hold could not be settled right then; status settles and reports it. A
+late deposit that 1Click refunds still counts as spent: the refund is not an effect APN proves.
+
 **Submit** is keyless and fails closed. APN first requests a dry quote (no deposit address), then an actual exact-input
 quote whose echo must match the lane assets, payer, refund address, recipient, amount and a request deadline at most
 180 seconds ahead. The quoted minimum must meet `--min-output-atomic`, the loss must fit `--max-quoted-loss-atomic`,
@@ -958,9 +1018,11 @@ Stargate native pools (asset ID 13) are `0x77b2043768d28E9C9aB44E1aBfC95944bcE57
   outcome. A journal with a long telemetry history loads and is compacted on its next real change; a poll that changes
   only telemetry adds no transition, and a transition keeps at most the latest 8 telemetry rows.
 - **Journal bounds.** A journal an earlier release filled to 512 transitions or to 1 MiB loads unchanged and still takes
-  its terminal transition ([Journal bounds](#journal-bounds)); a destination proof such a release saved on its own
-  settles on the next resume. Releases up to 0.5.96 refuse a journal longer than 512 transitions or larger than 1 MiB,
-  so do not downgrade once one exists.
+  its first safe proofs and its terminal transition ([Journal bounds](#journal-bounds)); a destination proof such a
+  release saved on its own settles on the next resume. Releases up to 0.5.96 refuse a journal longer than 512
+  transitions or larger than 1 MiB; 0.5.97 refuses an open journal larger than 1 MiB, a finished one larger than
+  1 MiB + 64 KiB, and a lost inclusion or send step recorded past the 512th transition. Do not downgrade once one
+  exists.
 - **1Click records** of schema v1 and v2 are read as the `base-usdc-to-tron-usdt` lane with their original status output,
   operation IDs and nonce reservation path; v3 records carry the lane. Ethereum nonce reservations are scoped under
   `eip155-1`.

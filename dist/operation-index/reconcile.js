@@ -97,7 +97,7 @@ export class OperationIndexReconciler {
      * when nothing names a profile.
      */
     async quarantine(adapter, name, reason) {
-        const raw = await this.store.rawRecord(name.recordPath);
+        const raw = await this.store.rawRecord(name.recordPath, adapter.stores);
         if (raw === null)
             return null;
         const salvaged = "value" in raw ? adapter.salvage(raw.value) : null;

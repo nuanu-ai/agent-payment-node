@@ -58,7 +58,7 @@ export interface AssetPolicyRow {
     }>;
     /** Optional canonical recipient bound to Ethereum/Base local or Base Coinbase gasless admission. */
     readonly gaslessRecipient?: string;
-    /** Optional owner pins (OD-1) per direct, x402 or single-pin bridge rail; see `allowlist-recipient-pins.ts`. */
+    /** Optional owner pins (OD-1) per admitted rail (a gasless list never beside `gaslessRecipient`); see `allowlist-recipient-pins.ts`. */
     readonly recipients?: AssetRecipientPins;
 }
 export interface AssetPolicyChain {

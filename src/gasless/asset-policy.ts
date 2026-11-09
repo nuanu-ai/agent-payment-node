@@ -1,5 +1,6 @@
 import { canonicalJson } from "../canonical.js";
 import { activeAssetPolicyFromState, type ActiveAssetPolicy } from "../allowlist-active-policy.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { AllowlistPolicyStore } from "../allowlist-policy-store.js";
 import { evaluateAssetPolicy } from "../asset-policy-registry.js";
 import { AssetUsageLedger, assetUsageReservationId, type AssetUsageIdentity,
@@ -73,6 +74,8 @@ export class GaslessAssetPolicy {
     if (admission.asset.gaslessRecipient !== undefined && admission.asset.gaslessRecipient !== intent.request.recipient) {
       refused("gasless_allowlist_recipient");
     }
+    // The owner's recipient list (OD-1), on every chain; prepare, approval, reservation and first send all pass here.
+    assertRecipientAdmitted({ admission, recipient: intent.request.recipient });
   }
 
   async prepare(intent: Pick<GaslessIntent, "profile" | "owner" | "request" | "token">,

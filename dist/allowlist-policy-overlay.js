@@ -163,6 +163,9 @@ export function validateAllowlistAdmission(value) {
         (value.rail !== "direct" && value.rail !== "gasless" && value.rail !== "x402" && value.rail !== "bridge" && value.rail !== "swap")) {
         invalid("Allowlist admission row is invalid.", "invalid_admission");
     }
+    if (value.recipient !== undefined && value.recipients !== undefined) {
+        invalid("An admission pins recipients with either the single gasless `recipient` or a `recipients` list, not both.", "recipient_pin_conflict");
+    }
     const alternatives = value.mechanisms;
     if (alternatives !== undefined && value.rail === "swap")
         return swapAlternatives(value);
@@ -208,16 +211,16 @@ export function validateAllowlistAdmission(value) {
             invalid("Gasless recipient must be one canonical nonzero EVM address.", "invalid_recipient");
         }
     }
-    if (value.rail === "gasless" && mechanism !== undefined && "provider" in mechanism &&
-        mechanism.provider === "coinbase-agentic-wallet" && (value.chain !== "eip155:8453" || recipient === undefined)) {
-        invalid("Coinbase gasless admission requires Base and one exact recipient.", "recipient_required");
-    }
     // Bridge alternatives carry their own pins; a bridge recipient lives on the destination chain, so any family is accepted.
     if (value.recipients !== undefined && (!isRecipientPinRail(value.rail) || mechanisms !== undefined)) {
-        invalid("Recipient lists apply to direct, x402 and single-pin bridge admissions; put bridge alternative pins on each mechanism.", "recipients_not_applicable");
+        invalid("A bridge row with alternatives takes no recipient list; put the pin on each alternative mechanism.", "recipients_not_applicable");
     }
     const recipients = value.recipients === undefined ? undefined
         : recipientPins(value.recipients, value.rail === "bridge" ? null : policyChainFamily(value.chain));
+    if (value.rail === "gasless" && mechanism !== undefined && "provider" in mechanism && mechanism.provider === "coinbase-agentic-wallet" &&
+        (value.chain !== "eip155:8453" || (recipient === undefined && recipients === undefined))) {
+        invalid("Coinbase gasless admission requires Base and an exact recipient pin (`recipient` or `recipients`).", "recipient_required");
+    }
     return { chain: value.chain, kind: value.kind, ...(value.identifier === undefined ? {} : { identifier: value.identifier }),
         rail: value.rail, ...(mechanisms === undefined ? { maximumPerTransferAtomic: maximum } : {}), dailyLimitAtomic: daily,
         ...(mechanism === undefined ? {} : { mechanism }), ...(recipient === undefined ? {} : { recipient }),
@@ -242,10 +245,10 @@ function swapAlternatives(value) {
         invalid("Per-transfer cap cannot exceed daily cap.", "cap_order");
     if (value.recipient !== undefined)
         invalid("Recipient pins are available only for Ethereum/Base local or Base Coinbase gasless admissions.", "recipient_not_applicable");
-    if (value.recipients !== undefined)
-        invalid("Recipient lists apply to direct, x402 and bridge admissions.", "recipients_not_applicable");
+    // One pin for the row: every admitted route pays the same recipient on the row's own chain.
+    const recipients = value.recipients === undefined ? undefined : recipientPins(value.recipients, policyChainFamily(value.chain));
     return { chain: value.chain, kind: value.kind, ...(value.identifier === undefined ? {} : { identifier: value.identifier }),
-        rail: "swap", maximumPerTransferAtomic: maximum, dailyLimitAtomic: daily, mechanisms };
+        rail: "swap", maximumPerTransferAtomic: maximum, dailyLimitAtomic: daily, ...(recipients === undefined ? {} : { recipients }), mechanisms };
 }
 function maximumMechanismCap(value) {
     return value.reduce((max, item) => BigInt(item.maximumPerTransferAtomic) > BigInt(max) ? item.maximumPerTransferAtomic : max, "0");

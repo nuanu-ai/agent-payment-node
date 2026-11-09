@@ -9,8 +9,9 @@ import { TronRpc } from "../../src/tron/rpc.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
 import { OneClickSourceJournal } from "../../src/lifi/near-oneclick-source-journal.js";
 import { OneClickSourceService, TtyOneClickSourceApproval } from "../../src/lifi/near-oneclick-source-service.js";
+import { activateOneClickPolicy, type OneClickPolicyLane } from "./lifi-near-oneclick-policy-helpers.js";
 import { temporaryState } from "./helpers.js";
-import { SIGNATURE, SOL_RECIPIENT, solanaWorld, transfer, TRON_RECIPIENT, tronWorld } from "./lifi-near-oneclick-fixtures.js";
+import { SIGNATURE, SOL_RECIPIENT, SOLVER, solanaWorld, transfer, TRON_RECIPIENT, tronWorld } from "./lifi-near-oneclick-fixtures.js";
 
 const key = `0x${"1".repeat(64)}` as const, payer = privateKeyToAccount(key).address;
 const deposit = "0x76b4c56085ED136a8744D52bE956396624a730E8";
@@ -23,10 +24,12 @@ const solRequest = { ...trxRequest, lane: "ethereum-eth-to-solana-sol", recipien
   maxQuotedLossAtomic: "500000", idempotencyKey: "sol-fund-test-1" };
 interface World { code: string; estimate: bigint; balance: bigint; sendAmbiguous: boolean; destinationHashes: string[]; providerStatus: string }
 
-async function harness(t: import("node:test").TestContext, changes: Partial<World> = {}) {
+const ETH_LANES: readonly OneClickPolicyLane[] = [{ lane: "ethereum-eth-to-tron-trx" }, { lane: "ethereum-eth-to-solana-sol" }, { lane: "ethereum-eth-to-tron-usdt" }];
+async function harness(t: import("node:test").TestContext, changes: Partial<World> = {}, policy: readonly OneClickPolicyLane[] = ETH_LANES) {
   const tmp = await temporaryState(); t.after(tmp.cleanup);
   const state = new StateStore(tmp.root), wrapping = { async load() { return Buffer.alloc(32, 7); }, async create() { return Buffer.alloc(32, 7); } };
   await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("imported", key, payer);
+  await activateOneClickPolicy(tmp.root, payer, policy);
   const world: World = { code: "0x", estimate: 30_000n, balance: 21_200_000_000_000_000n, sendAmbiguous: false, destinationHashes: [],
     providerStatus: "SUCCESS", ...changes };
   const methods: string[] = [], sent: `0x${string}`[] = [];
@@ -160,4 +163,18 @@ test("SOL status proves the recipient's finalized balance delta from the provide
   const status = await h.service.status(submitted.operationId as string) as Record<string, any>;
   assert.equal(status.lane, "ethereum-eth-to-solana-sol"); assert.equal(status.destinationProof.proofClass, "solana_finalized_sol_balance_delta");
   assert.equal(status.destinationProof.creditedAtomic, "46400000"); assert.equal(status.destinationFinalized, true);
+});
+
+test("each Ethereum lane is its own owner mechanism: its pin governs its recipients and the ETH principal is held", async t => {
+  const lanes = [{ lane: "ethereum-eth-to-tron-trx" }, { lane: "ethereum-eth-to-solana-sol", recipients: [SOL_RECIPIENT] }];
+  const admitted = await harness(t, {}, lanes);
+  const result = await admitted.service.submit(solRequest) as any;
+  assert.equal(admitted.sent.length, 1);
+  assert.deepEqual(result.usageHold && { state: result.usageHold.state, amountAtomic: result.usageHold.amountAtomic },
+    { state: "submitted", amountAtomic: solRequest.amountAtomic });
+  const refused = await harness(t, {}, [{ lane: "ethereum-eth-to-solana-sol", recipients: [SOLVER] }]);
+  await assert.rejects(refused.service.submit(solRequest), (error: any) => error.code === "APN_ALLOWLIST_REFUSED" && error.details?.reason === "allowlist_recipient_not_admitted");
+  const other = await harness(t, {}, [{ lane: "ethereum-eth-to-solana-sol" }]);
+  await assert.rejects(other.service.submit(trxRequest), { code: "APN_ALLOWLIST_REFUSED", details: { reason: "oneclick_source_mechanism_not_admitted" } });
+  for (const h of [refused, other]) { assert.equal(h.sent.length, 0); assert.equal(h.approvals(), 0); }
 });

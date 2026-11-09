@@ -1,4 +1,5 @@
 import { canonicalJson, domainHash, exactKeys, isPlainRecord } from "../canonical.js";
+import { assertRecipientAdmitted } from "../allowlist-recipient-pins.js";
 import { evaluateAssetPolicy, validateAssetPolicyRegistry, type AssetPolicyRegistry } from "../asset-policy-registry.js";
 import { ApnError } from "../errors.js";
 import type { AssetUsageLedger } from "../asset-usage-ledger.js";
@@ -310,6 +311,8 @@ export class GuardedSwapRuntime<Request> {
         { kind: "native", identifier: null } : { kind: "token", identifier: asset.identifier! }, rail: "swap",
         amountAtomic: amount, dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
       if (!assetAdmitsSwapMechanism(admission.asset, lane)) blocked("Swap mechanism admission changed.", "swap_policy_drift");
+      // Before and after consent, and before the first send: each row's recipient pin (OD-1) still lists the recipient.
+      assertRecipientAdmitted({ admission, recipient: operation.quote.recipient });
     }
     return policy;
   }

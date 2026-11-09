@@ -36,7 +36,7 @@ export interface AllowlistAdmissionView {
     readonly swapMechanisms?: readonly SwapAdmissionMechanism[];
     /** Gasless: the single exact recipient pin. */
     readonly recipient?: string;
-    /** Direct, x402 and single-pin bridge: the owner's recipient pin (OD-1). Absent: this policy does not restrict recipients. */
+    /** Any rail but a bridge row with alternatives: the owner's recipient pin (OD-1). Absent: this policy does not restrict recipients. */
     readonly recipients?: readonly string[];
 }
 export declare function allowlistAdmissions(registry: AssetPolicyRegistry): readonly AllowlistAdmissionView[];

@@ -54,7 +54,7 @@ test("a delivery CALL that succeeded under a reverted parent frame does not prov
   }
 });
 
-test("the trace proves the fill only when its root is the verified transaction: a successful CALL with its sender, target and calldata", async () => {
+test("the trace proves the fill only when its root is the verified transaction: a successful CALL with its sender, target, value and calldata", async () => {
   const withRoot = (change: (root: any) => void) => observeCaptured((method, _params, result) => {
     if (method === "debug_traceTransaction") change(result);
     return result;
@@ -68,7 +68,31 @@ test("the trace proves the fill only when its root is the verified transaction: 
     ["sender", (root: any) => { root.from = other; }], ["target", (root: any) => { root.to = other; }],
     ["calldata", (root: any) => { root.input = `${root.input}00`; }], ["missing calldata", (root: any) => { delete root.input; }],
     ["type", (root: any) => { root.type = "DELEGATECALL"; }], ["error", (root: any) => { root.error = "execution reverted"; }],
-  ] as const) await assert.rejects(withRoot(change), /native_trace_transaction|bounded_hex/u, name);
+    // The captured fill sends no value (0x0 in the transaction and at the trace root).
+    ["value", (root: any) => { root.value = "0x1"; }], ["missing value", (root: any) => { delete root.value; }],
+  ] as const) await assert.rejects(withRoot(change), (error: any) => error.code === "APN_RPC_PROTOCOL" &&
+    /native_trace_transaction|bounded_hex|noncanonical quantity/u.test(error.message), name);
+});
+
+test("eth-linea: a trace root with another value is an RPC answer to read again, never an outcome; the true trace completes the fill", async (t) => {
+  const refusal = await observeCaptured((method, _params, result: any) => {
+    if (method === "debug_traceTransaction") result.value = "0x1";
+    return result;
+  }).then(() => assert.fail("a root with another value must be refused"), (error: Error) => error);
+  assert.match(refusal.message, /native_trace_transaction/u);
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const s = await lifiFixture(temporary.root, "eth-linea"); s.provider.statusValue = "completed_observed";
+  // The destination RPC first answers the delivery trace with that refusal, then with the true trace.
+  const original = s.destination.observe.bind(s.destination); let stale = true;
+  s.destination.observe = async (...args) => { if (stale && args[1] === undefined && args[2] !== undefined) throw refusal; return await original(...args); };
+  const { id } = await s.prepare("across", "eth-linea-revalued-trace-root");
+  await s.core.execute({ command: "bridge.approve", operationId: id });
+  let record = (await findStored(s.core.bridges.records, id))!;
+  assert.equal(record.state, "unknown_finality"); assert.equal(record.failure?.reason, "evidence_unavailable");
+  stale = false;
+  await s.core.execute({ command: "operation.resume", operationId: id });
+  record = (await findStored(s.core.bridges.records, id))!;
+  assert.equal(record.state, "completed", JSON.stringify(record.failure)); assert.equal(s.source.submissions.length, 1);
 });
 
 test("a reverted provider-named transaction is reported as reverted without reading a native proof it cannot carry", async () => {

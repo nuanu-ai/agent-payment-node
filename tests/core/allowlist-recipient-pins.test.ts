@@ -88,7 +88,7 @@ test("misplaced or malformed recipient pins are refused at staging and in a seal
     maximumPerTransferAtomic: "1", dailyLimitAtomic: "1", ...extra });
   const swapPin = { provider: "uniswap", reference: "pin" };
   for (const [value, expected] of [
-    [row("gasless", { mechanism: X402, recipients: [A] }), "recipients_not_applicable"],
+    [row("gasless", { mechanism: X402, recipient: A, recipients: [A] }), "recipient_pin_conflict"],
     [row("swap", { mechanisms: [swapPin, swapPin], recipients: [A] }), undefined],
     [{ chain: "eip155:1", kind: "token", identifier: USDC, rail: "bridge", dailyLimitAtomic: "2", recipients: [A], mechanisms: [
       { ...RELAY_BNB, maximumPerTransferAtomic: "1" }, { ...RELAY_BASE, maximumPerTransferAtomic: "1" }] }, "recipients_not_applicable"],

@@ -40,6 +40,9 @@ export class StargateNativeUsage {
         const identity = usageIdentity(op.owner), reservationId = assetUsageReservationId(identity, usageKey(op.operationId)), at = new Date(this.now());
         const existing = await this.ledger.load(identity, reservationId);
         if (existing !== null) {
+            // A hold released before any send (a refusal between the hold and the attempt marker) ended this operation.
+            if (existing.state === "failed_before_effect")
+                throw new ApnError("APN_REPREPARE_REQUIRED", "This Stargate native operation's usage hold was released before any send; prepare it again.", { reason: "usage_released_before_send" });
             // A retry after an interrupted pre-sign step keeps its own hold instead of counting it twice; the pin still applies.
             this.admit(active, op.amountAtomic, at, "0", op.recipient);
             if (existing.state !== "reserved" || existing.policyDigest !== binding.policyDigest || existing.amountAtomic !== op.amountAtomic)

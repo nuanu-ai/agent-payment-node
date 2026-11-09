@@ -12,6 +12,7 @@ import { BridgeHttps } from "./https.js";
 import { oneClickDestinationHashes, proveOneClickDestination } from "./near-oneclick-destination.js";
 import { assertOneClickNativePostApproval, assertOneClickPostApproval, OneClickEvmSource, planOneClickNative } from "./near-oneclick-evm-source.js";
 import { LEGACY_ONECLICK_LANE, oneClickLane, oneClickRecipient } from "./near-oneclick-lanes.js";
+import { OneClickSourceAdmission, releaseUnsignedOneClickUsage, settleOneClickUsage } from "./near-oneclick-admission.js";
 import { OneClickSourceJournal, oneClickRecordLane, oneClickSourceCall } from "./near-oneclick-source-journal.js";
 import { bridgeAddress, bridgeFailure, bridgeRecord, bridgeUint } from "./validation.js";
 import { admitOperation } from "../operation-index/admission.js";
@@ -160,6 +161,9 @@ export class OneClickSourceService {
                 if (loaded.identity.profile !== profile || loaded.identity.address !== payer ||
                     privateKeyToAccount(loaded.secret.privateKey).address !== payer)
                     fail("wallet_binding");
+                // The owner's policy admits this lane, amount and recipient before any quote; the hold is taken after consent.
+                const admission = new OneClickSourceAdmission(this.state, profile, lane, payer, amount.toString(), operationId, recipient, () => new Date(now()));
+                await admission.admit();
                 const quoteRequest = { dry: true, swapType: "EXACT_INPUT", slippageTolerance: 100, originAsset: lane.origin.oneClickAsset,
                     depositType: "ORIGIN_CHAIN", destinationAsset: lane.destination.oneClickAsset, amount: amount.toString(), refundTo: payer,
                     refundType: "ORIGIN_CHAIN", recipient, recipientType: "DESTINATION_CHAIN",
@@ -210,14 +214,25 @@ export class OneClickSourceService {
                     assertOneClickNativePostApproval(initial, await source.observeNative(payer, q.deposit, amount), amount, deadlineMs, now());
                 if (now() > deadlineMs - 15_000)
                     fail("quote_expired_before_sign");
-                record = await journal.advance(operationId, record.integrityHash, "signing_started");
-                const fees = { nonce: Number(initial.nonce), gas: initial.gas, maxFeePerGas: initial.fee, maxPriorityFeePerGas: initial.tip, accessList: [] };
-                const account = privateKeyToAccount(loaded.secret.privateKey);
-                const raw = lane.origin.kind === "erc20"
-                    ? await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, data: call.data, value: 0n, ...fees })
-                    : await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, value: amount, ...fees });
-                // Every pre-send check ran before signing; the sealed bytes go to the single send without a check that could strand them.
-                record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, releasedReservation);
+                await admission.reserve();
+                let raw;
+                try {
+                    record = await journal.advance(operationId, record.integrityHash, "signing_started");
+                    const fees = { nonce: Number(initial.nonce), gas: initial.gas, maxFeePerGas: initial.fee, maxPriorityFeePerGas: initial.tip, accessList: [] };
+                    const account = privateKeyToAccount(loaded.secret.privateKey);
+                    raw = lane.origin.kind === "erc20"
+                        ? await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, data: call.data, value: 0n, ...fees })
+                        : await account.signTransaction({ type: "eip1559", chainId: lane.origin.chainId, to: call.to, value: amount, ...fees });
+                    // Every pre-send check ran before signing; the sealed bytes go to the single send without a check that could strand them.
+                    record = await journal.advance(operationId, record.integrityHash, "sealed", { rawTransaction: raw, transactionHash: keccak256(raw) }, releasedReservation, async () => await admission.assertHeld());
+                }
+                catch (error) {
+                    // Not sealed: the signature never left this process. If this release fails, status releases the hold past the deadline.
+                    const current = await journal.load(operationId);
+                    if (current?.phase === "prepared" || current?.phase === "signing_started")
+                        await admission.releaseBeforeEffect().catch(() => undefined);
+                    throw error;
+                }
                 record = await journal.advance(operationId, record.integrityHash, "submitting", { submissionAttempts: 1 });
                 try {
                     const returned = await source.send(raw);
@@ -228,8 +243,10 @@ export class OneClickSourceService {
                 catch {
                     record = await journal.advance(operationId, record.integrityHash, "unknown_finality");
                 }
+                // The deposit may already be on its way: a settle failure must not hide that. Status settles the same hold again.
+                const usageHold = await settleOneClickUsage(this.state.root, record, new Date(now())).catch(() => null);
                 const common = { operationId, lane: lane.id, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
-                    submissionAttempts: 1, oneClickDepositAddress: record.depositAddress, sourceReceiptObserved: false };
+                    submissionAttempts: 1, oneClickDepositAddress: record.depositAddress, sourceReceiptObserved: false, usageHold };
                 return lane.id === LEGACY_ONECLICK_LANE ? { ...common, tronDestinationDelivered: false } : { ...common, destinationDelivered: false };
             }
             finally {
@@ -256,13 +273,15 @@ export class OneClickSourceService {
         if (record === null)
             fail("missing_operation");
         const lane = oneClickRecordLane(record);
+        await journal.whileUnsignedPastDeadline(operationId, async (unsigned) => await releaseUnsignedOneClickUsage(this.state.root, unsigned, new Date(Date.now())));
+        const usage = async (current) => await settleOneClickUsage(this.state.root, current, new Date(Date.now()));
         // A finished operation answers from its journal with no RPC: a source proven never to land, a reverted safe source, or a
         // stored finalized destination.
         if (record.phase === "failed_proven_superseded")
-            return statusView(record, lane, null, { status: null, provenance: "not_queried" }, null);
+            return statusView(record, lane, null, { status: null, provenance: "not_queried" }, null, await usage(record));
         if (record.phase === "source_observed" && (record.sourceReceiptStatus === "reverted" || record.destinationStatus !== null)) {
             return statusView(record, lane, { safe: true, transactionHash: record.transactionHash, status: record.sourceReceiptStatus,
-                receiptHash: record.sourceReceiptHash, provenance: "apn_journal" }, { status: null, provenance: "apn_journal" }, record.destinationStatus);
+                receiptHash: record.sourceReceiptHash, provenance: "apn_journal" }, { status: null, provenance: "apn_journal" }, record.destinationStatus, await usage(record));
         }
         const https = new BridgeHttps();
         const source = new OneClickEvmSource(lane, this.rpcUrl(lane.origin.rpcEnvironment, lane.origin.network), https);
@@ -281,11 +300,11 @@ export class OneClickSourceService {
             const finalizedNonceAtomic = await source.unlanded(record);
             if (finalizedNonceAtomic !== null) {
                 record = await journal.advance(operationId, record.integrityHash, "failed_proven_superseded", { finalizedNonceAtomic });
-                return statusView(record, lane, null, { status: null, provenance: "not_queried" }, null);
+                return statusView(record, lane, null, { status: null, provenance: "not_queried" }, null, await usage(record));
             }
         }
         if (record.sourceReceiptStatus === "reverted")
-            return statusView(record, lane, sourceReceipt, { status: null, provenance: "not_queried" }, null);
+            return statusView(record, lane, sourceReceipt, { status: null, provenance: "not_queried" }, null, await usage(record));
         // Destination status is obtained from a separate provider read and is never inferred from the source receipt.
         const endpoint = new URL(`${ORIGIN}/v0/status`);
         endpoint.searchParams.set("depositAddress", record.depositAddress);
@@ -311,17 +330,17 @@ export class OneClickSourceService {
         if (destinationProof.status === "finalized" && record.phase === "source_observed" && record.sourceReceiptStatus === "success") {
             record = await journal.recordDestination(operationId, record.integrityHash, destinationProof);
         }
-        return statusView(record, lane, sourceReceipt, { status: providerStatus, provenance: "oneclick_https_untrusted" }, destinationProof, hashes);
+        return statusView(record, lane, sourceReceipt, { status: providerStatus, provenance: "oneclick_https_untrusted" }, destinationProof, await usage(record), hashes);
     }
 }
 /** One status shape for live and journal answers. The legacy lane keeps its original TRON field names as aliases. */
-function statusView(record, lane, sourceReceipt, provider, destinationProof, hashes = destinationProof?.transactions.map((row) => row.id) ?? []) {
+function statusView(record, lane, sourceReceipt, provider, destinationProof, usageHold, hashes = destinationProof?.transactions.map((row) => row.id) ?? []) {
     const destinationClaimed = provider.status === "SUCCESS", destinationFinalized = destinationProof?.status === "finalized";
     return { operationId: record.operationId, lane: lane.id, sourceTransactionHash: record.transactionHash, sourceState: record.phase,
         sourceReceipt, sourceNeverLands: record.finalizedNonceAtomic === undefined ? null
             : { proof: "finalized_nonce_past_without_transaction_or_receipt", sourceNonce: record.sourceCall.nonce, finalizedNonceAtomic: record.finalizedNonceAtomic },
         oneClickProviderStatus: provider.status, providerStatusProvenance: provider.provenance,
-        destinationClaimed, providerDestinationTransactions: hashes, destinationProof, destinationFinalized,
+        destinationClaimed, providerDestinationTransactions: hashes, destinationProof, destinationFinalized, usageHold,
         ...(lane.id === LEGACY_ONECLICK_LANE ? { tronDestinationClaimed: destinationClaimed, tronDestinationFinalized: destinationFinalized } : {}) };
 }
 /** Foreground-only consent with a six-character code bound to the exact staged record. */

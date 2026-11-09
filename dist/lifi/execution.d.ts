@@ -26,6 +26,8 @@ export declare class BridgeExecution {
     resume(op: BridgeOperationRecord, approval?: BridgeApprovalPort): Promise<BridgeOperationRecord>;
     run(op: BridgeOperationRecord, authority?: BridgeEffectAuthority): Promise<BridgeOperationRecord>;
     private claims;
+    /** signing_started → sealed from the validated material custody holds; custody signs nothing here. */
+    private recordSeal;
     /**
      * signing_started with no sealed material and no SEND claim: the process stopped between the durable marker and custody,
      * so nothing was signed into custody and nothing could have been broadcast. The effect returns to unsealed; the normal
@@ -34,6 +36,13 @@ export declare class BridgeExecution {
      * observe-only path.
      */
     private releaseUnsignedSeal;
+    /**
+     * An expired operation whose unsigned seal a full journal could not release: nothing can be signed for it any more.
+     * Its sent effects are observed first, then it ends as the guard's expiry ends it, the release folded into that
+     * terminal transition, which the journal always admits. While a sent approval is not yet safe that halt is an ordinary
+     * transition, so the resume is refused unchanged until the approval's safe proof is recorded.
+     */
+    private haltHeldSeal;
     /** Catches the journal up with a SEND claim from the exact sealed material, without signing or sending, then observes. */
     private recordClaimedSend;
     private guard;
@@ -45,6 +54,7 @@ export declare class BridgeExecution {
      * operation on the normal expiry path once late. Deterministic refusals halt the unsent effect as before.
      */
     private deferOrHalt;
+    /** `carried`: effects not yet saved (an unsigned seal's release) that this halt records with the outcome they decide. */
     private haltUnsent;
     private terminalFailure;
 }

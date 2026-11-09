@@ -1,0 +1,80 @@
+import assert from "node:assert/strict";
+import { keccak256, pad } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+import { EncryptedWalletStore } from "../../src/encrypted-wallet-store.js";
+import { StateStore } from "../../src/state.js";
+import { BridgeHttps } from "../../src/lifi/https.js";
+import { OneClickSourceService, TtyOneClickSourceApproval } from "../../src/lifi/near-oneclick-source-service.js";
+import { temporaryState } from "./helpers.js";
+import { activateOneClickPolicy, type OneClickPolicyLane } from "./lifi-near-oneclick-policy-helpers.js";
+
+/** The Base USDC to TRON USDT lane against a synthetic Base RPC and 1Click API; the owner policy admits the lane unless told otherwise. */
+export const key = `0x${"1".repeat(64)}` as const;
+export const payer = privateKeyToAccount(key).address;
+export const usdc = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+export const deposit = "0x76b4c56085ED136a8744D52bE956396624a730E8";
+export const recipient = "TXHwnAuEUFnzk474xAKnY9DmemrZ8AsxpF";
+const blockHash = `0x${"a".repeat(64)}`;
+const word = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
+export const request = { lane: "base-usdc-to-tron-usdt", profile: "imported", expectedPayer: payer, recipient, amountAtomic: "3000000",
+  minOutputAtomic: "1000000", maxQuotedLossAtomic: "2000000", maxGasLimitAtomic: "130000",
+  maxFeePerGasWei: "3000000000", maxPriorityFeePerGasWei: "100000000", maxNativeDebitWei: "300000000000000",
+  idempotencyKey: "oneclick-once-test" };
+
+export async function harness(t: import("node:test").TestContext, sendAmbiguous = false, allowConsent = true,
+  onApprove?: () => void | Promise<void>, providerDeadlineMs = 86_400_000, consentAdvanceMs = 0,
+  policy: readonly OneClickPolicyLane[] | null = [{ lane: "base-usdc-to-tron-usdt" }]) {
+  const tmp = await temporaryState(); t.after(tmp.cleanup);
+  let clockNow = Date.now();
+  t.mock.method(Date, "now", () => clockNow);
+  const state = new StateStore(tmp.root), wrapping = { async load() { return Buffer.alloc(32, 7); }, async create() { return Buffer.alloc(32, 7); } };
+  await state.initialize(); await new EncryptedWalletStore(state, wrapping).importNew("imported", key, payer);
+  if (policy !== null) await activateOneClickPolicy(tmp.root, payer, policy);
+  let sends = 0, approvals = 0, nonce = 7n, actualQuote: unknown, transactionHash: string | null = null, badLog = false, badMembership = false;
+  let baseFee = 1_000_000_000n, rpcPosts = 0, receiptStatus = "0x1", quotes = 0;
+  if (allowConsent) t.mock.method(TtyOneClickSourceApproval.prototype, "approve", async () => {
+    approvals++; await onApprove?.(); clockNow += consentAdvanceMs;
+  });
+  t.mock.method(BridgeHttps.prototype, "request", async (endpoint: string, verb: string, body: string | null) => {
+    if (endpoint === "https://1click.chaindefuser.com/v0/quote") {
+      const quoteRequest = JSON.parse(body!); quotes++;
+      const quote = { amountIn: "3000000", minAmountIn: "2800000", amountOut: "1264167", minAmountOut: "1251525",
+        deadline: new Date(Date.now() + providerDeadlineMs).toISOString(), ...(quoteRequest.dry ? {} : { depositAddress: deposit, depositMemo: null }) };
+      // The provider signs every quote; its timestamp and signature participate in the saved quote digest.
+      const response = { timestamp: new Date(Date.now()).toISOString(), signature: `ed25519:${"a".repeat(80)}`, quoteRequest, quote };
+      if (!quoteRequest.dry) actualQuote = response;
+      return { status: 201, body: JSON.stringify(response) };
+    }
+    if (endpoint.startsWith("https://1click.chaindefuser.com/v0/status"))
+      return { status: 200, body: JSON.stringify({ quoteResponse: actualQuote, status: "SUCCESS" }) };
+    assert.equal(verb, "POST"); rpcPosts++;
+    const rpc = JSON.parse(body!), { method, params, id } = rpc;
+    if (method === "eth_sendRawTransaction") {
+      sends++; transactionHash = keccak256(params[0]);
+      if (sendAmbiguous) throw Error("ambiguous send");
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id, result: transactionHash }) };
+    }
+    if (method === "eth_getTransactionReceipt") {
+      const log = { address: usdc, topics: [keccak256(Buffer.from("Transfer(address,address,uint256)")),
+        pad(payer as `0x${string}`).toLowerCase(), pad(deposit as `0x${string}`).toLowerCase()], data: word(badLog ? 1n : 3_000_000n), transactionHash,
+        blockHash };
+      return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id, result: { transactionHash, to: usdc,
+        from: payer, blockNumber: "0x63", blockHash, transactionIndex: "0x0", status: receiptStatus, logs: [log] } }) };
+    }
+    const result = method === "eth_chainId" ? "0x2105" :
+      method === "eth_getBlockByNumber" ? { number: "0x63", hash: blockHash, baseFeePerGas: `0x${baseFee.toString(16)}`,
+        transactions: transactionHash === null ? [] : [badMembership ? `0x${"f".repeat(64)}` : transactionHash] } :
+      method === "eth_getBalance" ? "0xde0b6b3a7640000" :
+      method === "eth_getTransactionCount" ? `0x${nonce.toString(16)}` :
+      method === "eth_estimateGas" ? "0x186a0" :
+      method === "eth_maxPriorityFeePerGas" ? "0x5f5e100" :
+      method === "eth_call" ? params[0].data.startsWith("0x70a08231") ? word(3_200_000n) :
+        params[0].to.toLowerCase() === usdc.toLowerCase() ? word(1n) : word(0n) : null;
+    return { status: 200, body: JSON.stringify({ jsonrpc: "2.0", id, result }) };
+  });
+  return { root: tmp.root, state, quotes: () => quotes, service: new OneClickSourceService(state, wrapping, { APN_BASE_RPC_URL: "https://base.example.org" }),
+    sends: () => sends, approvals: () => approvals, changeNonce: () => { nonce = 8n; },
+    tickBaseFee: () => { baseFee += 1n; }, advance: (ms: number) => { clockNow += ms; }, rpcPosts: () => rpcPosts,
+    revert: () => { receiptStatus = "0x0"; },
+    badLog: () => { badLog = true; }, badMembership: () => { badMembership = true; } };
+}
