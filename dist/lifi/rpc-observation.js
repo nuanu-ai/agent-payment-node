@@ -107,10 +107,11 @@ export async function observeCanonical(c, hash, expected, nativeDelivery, includ
         nativeBalance = { recipient: nativeDelivery.recipient, beforeBlock: before, afterBlock: block,
             beforeBalanceAtomic: beforeBalance.toString(), afterBalanceAtomic: afterBalance.toString(), deltaAtomic: (afterBalance - beforeBalance).toString() };
         const calldata = bridgeHex(tx.input, 128 * 1024, undefined, "APN_RPC_PROTOCOL");
+        const transaction = { sender: identity.from, target: identity.to, valueAtomic: identity.valueAtomic, calldata };
         if (nativeDelivery.composite === undefined)
-            nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery, { sender: identity.from, target: identity.to, calldata });
+            nativeTransfer = exactNativeTransfer(trace, hash, nativeDelivery, transaction);
         else
-            compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call, { sender: identity.from, target: identity.to, calldata, amountAtomic: nativeDelivery.composite.fillAmountAtomic });
+            compositeTrace = verifyBnbCompositeTrace(trace, hash, nativeDelivery.composite.message, nativeDelivery.composite.call, { ...transaction, amountAtomic: nativeDelivery.composite.fillAmountAtomic });
     }
     return { transaction: { chainId: c.chainId, transactionHash: hash, block, safeBlock, rpcOrigin: c.origin, ...identity,
             ...(fees ?? {}), status: status === 1n ? "success" : "reverted", logsHash: hashObject(logs) },

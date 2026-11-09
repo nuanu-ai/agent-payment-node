@@ -13,10 +13,11 @@ export interface BnbCompositeTraceProof {
     readonly returnedWethAtomic: string;
     readonly traceHash: string;
 }
-/** The destination transaction (its sender, target and calldata bind the trace to it) and the fill amount its FilledRelay proved. */
+/** The destination transaction (its sender, target, value and calldata bind the trace to it) and the fill amount its FilledRelay proved. */
 export interface BnbDestinationFill {
     readonly sender: Address;
     readonly target: Address;
+    readonly valueAtomic: string;
     readonly calldata: Hex;
     readonly amountAtomic: string;
 }

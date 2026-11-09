@@ -36,7 +36,7 @@ export function verifyBnbCompositeTrace(raw, transactionHash, message, call, fil
     // The root must be the verified transaction itself. A trace of anything else says nothing about this fill, so it is an
     // RPC answer to read again (retryable), never a terminal outcome. Addresses are checksummed on both sides.
     if (root.type !== "CALL" || root.error !== null || root.from !== getAddress(fill.sender) || root.to !== getAddress(fill.target) ||
-        root.input !== fill.calldata)
+        root.value !== BigInt(fill.valueAtomic) || root.input !== fill.calldata)
         bridgeFailure("APN_RPC_PROTOCOL", "native_trace_transaction");
     try {
         assertCallerTree(root);
