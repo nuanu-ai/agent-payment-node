@@ -49,8 +49,8 @@ export const railAdapter: OperationFamilyAdapter<RailOperationRecord> = {
   salvage: raw => salvageRecord(raw, value => [salvageRail(field(value, "account", "rail"), field(value, "account", "address"))]),
   view: async record => publicRailOperation(record),
   // Approve revalidates before its prompt; from the frozen `expiresAt` on that refuses and closes the record before effect.
-  approvalExpiry: record => record.state !== "awaiting_approval" ? null
-    : { deadlineMs: Date.parse(record.prepared.expiresAt), approveCloses: true, note: EXPIRED_APPROVE_CLOSES },
+  approvalExpiry: async record => record.state !== "awaiting_approval" ? null
+    : { deadlineMs: Date.parse(record.prepared.expiresAt), approveCloses: true, sealedSlot: false, note: EXPIRED_APPROVE_CLOSES },
   async resume(context, record, options) {
     const rail = record.account.rail === "tron" ? "TRON" : "Solana";
     assertResumeOptions(options, {

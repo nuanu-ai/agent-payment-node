@@ -34,7 +34,7 @@ export class OperationCommands {
       : operationOutcome(await adapter.view(record, this.context.state.root));
     // Presentation only: an operation whose approval window passed unapproved reads as expired; its record is not changed.
     return adapter.approvalExpiry === undefined ? outcome
-      : presentExpiredApproval(outcome, adapter.approvalExpiry(record), this.context.clock.now());
+      : presentExpiredApproval(outcome, await adapter.approvalExpiry(record, this.context.state.root), this.context.clock.now());
   }
 
   async resume(request: ResumeRequest): Promise<CommandOutcome> {

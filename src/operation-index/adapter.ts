@@ -57,9 +57,10 @@ export interface OperationFamilyAdapter<R = unknown> {
   view(record: R, root: string): Promise<unknown>;
   /**
    * For a record still awaiting the owner's approval, the instant its family's approve refuses from and what then ends
-   * it; null in every other state. `apn operation status` presents such a record as expired (operation-approval-expiry.ts).
+   * it; null in every other state. It only reads. `apn operation status` presents such a record as expired
+   * (operation-approval-expiry.ts).
    */
-  approvalExpiry?(record: R): ApprovalExpiry | null;
+  approvalExpiry?(record: R, root: string): Promise<ApprovalExpiry | null>;
   // Generic `apn operation status|resume|abandon` and `apn receipt get` (phase 4b WP3 fills these in).
   status?(ctx: RuntimeContext, record: R, options?: { readonly refreshAllowance?: boolean }): Promise<CommandOutcome>;
   /** The family stores a residual token allowance its status shows; only it accepts `operation status --refresh-allowance`. */

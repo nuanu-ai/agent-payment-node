@@ -36,9 +36,10 @@ export const swapAdapter: OperationFamilyAdapter<SwapOperationRecord> = {
     ["ownerProfileHash"]),
   view: async record => record,
   // Every lane's consent refuses from the quote expiry on, before its prompt, and leaves the record as it is; the unmarked
-  // swap stops holding its account once the unstarted margin has passed (`terminal` above).
-  approvalExpiry: record => record.state !== "awaiting_approval" ? null
-    : { deadlineMs: Date.parse(record.quote.expiresAt), approveCloses: false, note: EXPIRED_RELEASED_AFTER_MARGIN },
+  // swap stops holding its account once the unstarted margin has passed (`terminal` above). Status returns the sealed
+  // record itself, so the presentation goes beside it.
+  approvalExpiry: async record => record.state !== "awaiting_approval" ? null
+    : { deadlineMs: Date.parse(record.quote.expiresAt), approveCloses: false, sealedSlot: true, note: EXPIRED_RELEASED_AFTER_MARGIN },
   // The lane's own status reads the swap and observes a marked one (inclusion, revert or expired_unlanded).
   status: async (context, record) => await laneStatus(context, record),
   // A marked swap whose outcome no chain proof can settle has the owner exit (R4); the family refuses every other case.

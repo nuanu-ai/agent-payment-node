@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { canonicalJson } from "../../src/canonical.js";
 import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { ApnCore } from "../../src/core.js";
-import { EXPIRED_APPROVE_CLOSES, EXPIRED_NEXT_TRANSFER_CLOSES, EXPIRED_RELEASED_AFTER_MARGIN } from "../../src/operation-approval-expiry.js";
+import { EXPIRED_APPROVE_CLOSES, EXPIRED_EVIDENCE_MISSING, EXPIRED_NEXT_TRANSFER_CLOSES, EXPIRED_RELEASED_AFTER_MARGIN }
+  from "../../src/operation-approval-expiry.js";
 import { OperationService } from "../../src/operation-service.js";
 import { StateStore } from "../../src/state.js";
+import { validateSwapOperation } from "../../src/swap/model.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
 import { ensureWallet, makeCore, prepareTransfer, temporaryState, TestClock, TestNative, TestRpc } from "./helpers.js";
@@ -20,8 +22,10 @@ import { X402_PAYMENT_REQUIRED, X402_URL, canonicalPaymentRequiredHeader } from 
  * QA on 0.5.101: a prepared operation whose approval window had passed still read `awaiting_approval` in `apn operation
  * status` and named its approve step as if it could still be approved. Status now presents it as expired and says what
  * ends it. Approve stays named only where running it now closes the record before any prompt. Status stays a pure read:
- * the stored record (and every receipt derived from it) is unchanged.
+ * the stored record (and every receipt derived from it) is unchanged, and a verifiable operation slot (a swap's sealed
+ * record, an x402 purchase's self-hashed view) reaches the caller untouched, with the presentation in the data slot.
  */
+const PRESENTED = (note: string) => ({ state: "expired", stored_state: "awaiting_approval", reason: "approval_window_expired", expiry_note: note });
 const APPROVE = /^apn (?:pay|gasless) transfer approve /u;
 
 function operationView(result: OutputEnvelope, label: string): Record<string, unknown> {
@@ -83,6 +87,24 @@ test("a Base USDC transfer past its approval deadline names approve, which now c
   assert.deepEqual([closed?.state, closed?.reason], ["failed_before_effect", "approval_window_expired"]);
 });
 
+test("a local transfer without its public effect evidence reads as expired and says approve cannot close it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const root = temporary.root, clock = new TestClock();
+  await ensureWallet(makeCore({ root, native: new TestNative(root), clock }));
+  const id = await prepareTransfer(makeCore({ root, rpc: new TestRpc(), clock }), "expired-status-no-evidence");
+  const stored = (await new StateStore(root).findOperation(id))!, core = makeCore({ root, clock });
+  // A record prepared before APN wrote its public prepared binding has none.
+  await unlink(join(root, "direct-public-effects", stored.profileHash, `${id}.prepared.json`));
+  clock.value = new Date(Date.parse(stored.expiresAt));
+  const expired = await core.execute({ command: "operation.status", operationId: id });
+  assertExpired(expired, "no evidence at the deadline", EXPIRED_EVIDENCE_MISSING, false);
+  assert.deepEqual(operationView(expired, "no evidence").next_actions, [`apn operation status --operation ${id}`]);
+  // What the note says: approve refuses without closing it.
+  const approved = await core.execute({ command: "transfer.approve", operationId: id });
+  assert.deepEqual([approved.error?.code, approved.error?.details?.reason], ["APN_OPERATION_BLOCKED", "direct_public_evidence_missing"]);
+  assert.deepEqual(await new StateStore(root).findOperation(id), stored);
+});
+
 interface Golden {
   readonly operation: { readonly profileHash: string; readonly operationId: string;
     readonly prepared?: { readonly expiresAt: string }; readonly intent?: { readonly expiresAt: string } };
@@ -135,11 +157,14 @@ test("a local x402 purchase past validBefore reads as expired and keeps its appr
   clock.value = new Date(deadline - 1);
   const open = await status.execute({ command: "operation.status", operationId: id });
   assert.equal(operationView(open, "x402 before validBefore").state, "awaiting_approval");
+  assert.equal(open.data, null);
   clock.value = new Date(deadline);
-  const expired = await status.execute({ command: "operation.status", operationId: id }), view = operationView(expired, "x402 at validBefore");
-  assert.deepEqual([view.state, view.stored_state, view.reason, view.expiry_note], ["expired", "awaiting_approval", "approval_window_expired",
-    EXPIRED_APPROVE_CLOSES]);
-  assert.deepEqual(view.nextActions, open.next_actions); assert.ok(expired.next_actions.includes("x402.fetch.approve"));
+  const expired = await status.execute({ command: "operation.status", operationId: id });
+  // The self-hashed public view is exactly the one status returned before the deadline; the presentation is beside it.
+  assert.deepEqual(operationView(expired, "x402 at validBefore"), open.operation);
+  assert.deepEqual(expired.data, PRESENTED(EXPIRED_APPROVE_CLOSES));
+  assert.equal(expired.proof_class, open.proof_class, "proof_class stays what the stored record proves");
+  assert.deepEqual(expired.next_actions, open.next_actions); assert.ok(expired.next_actions.includes("x402.fetch.approve"));
   assert.deepEqual((await new OperationService(new StateStore(root)).required(id)).record, found.record, "status never writes the record");
 });
 
@@ -149,10 +174,14 @@ test("a guarded swap past its quote expiry reads as expired and says it stops ho
   assert.equal(stored.state, "awaiting_approval");
   const status = async (at: number) => await runCli(["operation", "status", "--operation", fixture.id], {},
     { stateRoot: fixture.root, wrappingSecret: new NoSecret(), clock: { now: () => new Date(at) } });
-  assert.equal(operationView(await status(deadline - 1), "swap before the deadline").state, "awaiting_approval");
+  const open = await status(deadline - 1);
+  assert.equal(operationView(open, "swap before the deadline").state, "awaiting_approval");
+  assert.equal(open.data, null);
   const expired = await status(deadline), view = operationView(expired, "swap at the deadline");
-  assert.deepEqual([view.state, view.stored_state, view.reason, view.expiry_note], ["expired", "awaiting_approval", "approval_window_expired",
-    EXPIRED_RELEASED_AFTER_MARGIN]);
+  // The operation slot is the sealed record itself: same bytes, and its integrity hash still verifies.
+  assert.equal(JSON.stringify(view), JSON.stringify(stored)); assert.equal(validateSwapOperation(view).integrityHash, stored.integrityHash);
+  assert.deepEqual(expired.data, PRESENTED(EXPIRED_RELEASED_AFTER_MARGIN));
+  assert.equal(expired.proof_class, "awaiting_approval", "proof_class stays the stored state a swap lane reports");
   assert.deepEqual(expired.next_actions, []);
   assert.deepEqual(await records.loadAny(fixture.id), stored, "status never writes the record");
 });

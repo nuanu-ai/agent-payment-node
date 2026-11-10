@@ -83,8 +83,8 @@ function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, direct
     view: async record => view(record),
     // Each family's approve refuses from its intent's `expiresAt` on (some a margin before it); the unsent record then stops
     // holding its account once the unstarted margin has passed (`terminal` above).
-    approvalExpiry: record => record.state !== "awaiting_approval" ? null
-      : { deadlineMs: Date.parse(record.intent.expiresAt), approveCloses: false, note: EXPIRED_RELEASED_AFTER_MARGIN },
+    approvalExpiry: async record => record.state !== "awaiting_approval" ? null
+      : { deadlineMs: Date.parse(record.intent.expiresAt), approveCloses: false, sealedSlot: false, note: EXPIRED_RELEASED_AFTER_MARGIN },
     status: async (context, record) => operationOutcome(await commands.status(context, record.operationId)),
     async resume(context, record, options): Promise<CommandOutcome> {
       assertResumeOptions(options, commands.resumeOptions);

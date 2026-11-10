@@ -11,6 +11,11 @@ export interface ApprovalExpiry {
   readonly deadlineMs: number;
   /** True when that approve now closes the record as failed_before_effect without asking anything: it stays named. */
   readonly approveCloses: boolean;
+  /**
+   * True when the status's operation slot must reach the caller exactly as the family built it, because it can be verified:
+   * a swap's sealed record, or a local x402 purchase's self-hashed public view. The presentation then goes in the data slot.
+   */
+  readonly sealedSlot: boolean;
   /** What ends the record, in plain words. */
   readonly note: string;
 }
@@ -21,6 +26,14 @@ export const EXPIRED_APPROVE_CLOSES = "The approval window has passed, so approv
 /** Local EVM direct: the next transfer the profile prepares on the chain retires it (TransferService.retireExpiredDirectTransfers). */
 export const EXPIRED_NEXT_TRANSFER_CLOSES = "The approval window has passed and this transfer can no longer be approved; nothing was signed or " +
   "sent. The next transfer this profile prepares on this chain closes it as failed_before_effect.";
+/**
+ * A local direct transfer without its public effect evidence (prepared before APN recorded it, or its wallet file is gone):
+ * approve and the expiry retirement both stop at DirectPublicEffectJournal.assertUnstarted with direct_public_evidence_missing.
+ */
+export const EXPIRED_EVIDENCE_MISSING = "The approval window has passed, so this transfer can no longer be approved. APN holds no public " +
+  "effect evidence for it (it was prepared before APN recorded that evidence, or its wallet file is gone), so it cannot prove nothing was " +
+  "signed: approve refuses with direct_public_evidence_missing instead of closing it, and the transfer keeps holding its account until it " +
+  "is resolved manually.";
 /** Gasless and swap: the index stops counting an unstarted record once the unstarted margin has passed its deadline. */
 export const EXPIRED_RELEASED_AFTER_MARGIN = "The approval window has passed and this operation can no longer be approved; nothing was signed " +
   `or sent. It stops holding its account ${UNSTARTED_DEADLINE_MARGIN_MS / 60_000} minutes after the window closed, with nothing to run.`;
@@ -30,19 +43,25 @@ const APPROVE_COMMAND = /^apn (?:[a-z0-9-]+ )+approve(?: |$)/u;
 
 /**
  * `apn operation status` of a record still stored as `awaiting_approval` once its approval deadline has passed: it can
- * never be approved, so the status presents it as `expired` with the reason the direct approve records for it
- * (`approval_window_expired`) and `expiry_note` saying what ends it. Its approve step stays named only where running it
- * now closes the record without asking anything. Status stays a pure read: the stored record keeps `awaiting_approval`
- * (shown as `stored_state`) until its family ends it, and a receipt, derived from the stored record and hashed, never
- * carries this presentation. Any other outcome is returned as is.
+ * never be approved, so the status presents `state: expired`, `stored_state: awaiting_approval`, the reason the direct
+ * approve records (`approval_window_expired`) and `expiry_note` saying what ends it. These fields go on the operation view,
+ * or, for a sealed slot, in the data slot beside the untouched operation. Approve stays named only where running it now
+ * closes the record without asking anything. `proof_class` is left as the family set it: what the stored record proves
+ * (for a swap, its stored state). Status stays a pure read: the stored record keeps `awaiting_approval` until its family
+ * ends it, and a receipt, derived from the stored record and hashed, never carries this presentation. Any other outcome,
+ * and a sealed one whose data slot is neither empty nor a record, is returned as is.
  */
 export function presentExpiredApproval(outcome: CommandOutcome, expiry: ApprovalExpiry | null, now: Date): CommandOutcome {
-  const view = outcome.operation;
+  const view = outcome.operation, data = outcome.data;
   if (expiry === null || !(now.getTime() >= expiry.deadlineMs) || !isPlainRecord(view) || view.state !== "awaiting_approval") return outcome;
-  const expired = { ...view, state: "expired", stored_state: "awaiting_approval", reason: "approval_window_expired", expiry_note: expiry.note };
-  if (expiry.approveCloses) return { ...outcome, operation: expired };
-  const unapproved = (action: unknown) => typeof action !== "string" || !APPROVE_COMMAND.test(action);
+  const presented = { state: "expired", stored_state: "awaiting_approval", reason: "approval_window_expired", expiry_note: expiry.note };
+  const unapproved = (action: unknown) => expiry.approveCloses || typeof action !== "string" || !APPROVE_COMMAND.test(action);
+  const nextActions = outcome.nextActions.filter(unapproved);
+  if (expiry.sealedSlot) {
+    const beside = data === null ? {} : isPlainRecord(data) ? data : null;
+    return beside === null ? outcome : { ...outcome, data: { ...beside, ...presented }, nextActions };
+  }
   const actions = view.next_actions;
-  return { ...outcome, operation: Array.isArray(actions) ? { ...expired, next_actions: actions.filter(unapproved) } : expired,
-    nextActions: outcome.nextActions.filter(unapproved) };
+  return { ...outcome, operation: { ...view, ...presented, ...(Array.isArray(actions) ? { next_actions: actions.filter(unapproved) } : {}) },
+    nextActions };
 }

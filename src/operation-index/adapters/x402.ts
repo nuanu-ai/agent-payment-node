@@ -76,9 +76,10 @@ export const x402Adapter: OperationFamilyAdapter<X402StoredOperation> = {
   view: async operation => operation.strategy === "local"
     ? publicX402Operation(operation.record) : publicProviderX402Operation(operation.record),
   // A local purchase's approve closes it as failed_before_effect once `validBefore` (unix seconds) has passed, before its
-  // prompt. A provider purchase has no stored deadline: its approve re-reads the seller's offer instead.
-  approvalExpiry: operation => operation.strategy !== "local" || operation.record.state !== "awaiting_approval" ? null
-    : { deadlineMs: Number(operation.record.authorization.validBefore) * 1000, approveCloses: true, note: EXPIRED_APPROVE_CLOSES },
+  // prompt. Its public view carries its own integrity hash, so the presentation goes beside it. A provider purchase has no
+  // stored deadline: its approve re-reads the seller's offer instead.
+  approvalExpiry: async operation => operation.strategy !== "local" || operation.record.state !== "awaiting_approval" ? null
+    : { deadlineMs: Number(operation.record.authorization.validBefore) * 1000, approveCloses: true, sealedSlot: true, note: EXPIRED_APPROVE_CLOSES },
   // A provider purchase first recovers an interrupted read; the outcome is then built from the record saved after it.
   async status(context, { record }) {
     await new X402Service(context).recoverRead(record.operationId);
