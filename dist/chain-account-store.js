@@ -3,6 +3,7 @@ import { openEnvelope, sealCanonicalJson } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 const ENVELOPE = "apn.chain-wallet-envelope.v1";
 const SECRET = "apn.chain-wallet-secret.v1";
 const HASH = /^[a-f0-9]{64}$/u;
@@ -79,7 +80,7 @@ export class ChainAccountStore extends SecureStateStore {
         }
         if (existing !== null)
             corrupt();
-        const wrapping = await this.wrappingSecret.create();
+        const wrapping = await loadOrCreateWrappingSecret(this, this.wrappingSecret);
         let seed;
         try {
             const generated = await input.create();

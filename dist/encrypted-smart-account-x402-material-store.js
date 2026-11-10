@@ -3,6 +3,7 @@ import { decodeDelegations, encodeDelegations } from "./metamask-smart-account-v
 import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { decodePaymentSignatureHeader } from "./x402-codec.js";
 import { isStrictErc7710Payload } from "./x402-erc7710-codec.js";
@@ -68,7 +69,7 @@ export class EncryptedSmartAccountX402MaterialStore {
         return next;
     }
     async write(record) {
-        const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+        const wrapping = await loadOrCreateWrappingSecret(this.files, this.wrappingSecret);
         try {
             await this.files.write(record.operation_id, sealNested(wrapping, ENVELOPE, { schema_version: ENVELOPE_VERSION, operation_id: record.operation_id }, record));
         }

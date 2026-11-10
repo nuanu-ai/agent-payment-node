@@ -1,5 +1,4 @@
 import { CHAIN_ID } from "./constants.js";
-import { ApnError } from "./errors.js";
 import type { Address, Hex } from "./model.js";
 import type { StateStore } from "./state.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
@@ -52,15 +51,13 @@ export declare class EncryptedWalletStore {
     importNew(profileInput: string, privateKeyInput: string, expectedAddress: string): Promise<WalletIdentity>;
     save(identity: WalletIdentity, secret: WalletSecretState, wrappingInput?: Buffer, createOnly?: boolean): Promise<void>;
     clear(secret: WalletSecretState): void;
-    /** The wrapping secret is still in the Keychain: it is loaded only to be zeroed at once, and nothing is decrypted. */
+    /**
+     * The wrapping secret is still in the Keychain: read transiently (never kept in the command's cached copy), zeroed at
+     * once, and nothing is decrypted.
+     */
     assertWrappingSecretPresent(): Promise<void>;
     private requiredWrappingSecret;
 }
-/**
- * A local wallet whose login-Keychain wrapping secret is gone. Wallet status, ensure and doctor refuse it with this
- * reason instead of calling it ready; nothing replaces the secret, and only that Keychain item unwraps the wallet.
- */
-export declare function walletWrappingSecretMissing(): ApnError;
 /** Validate public envelope identity without loading or exposing the signing key. */
 export declare function walletEnvelopeIdentity(value: unknown, profile: string): WalletIdentity;
 export {};

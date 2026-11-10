@@ -3,6 +3,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 import { BASE_CHAIN_HEX, smartAccountEnvironment, validateSmartAccountObservation, } from "./metamask-smart-account-grant.js";
 import { isGrantedPermissionRecord, validateSmartAccountPermissionRecord, } from "./metamask-smart-account-record.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
@@ -64,7 +65,7 @@ export class EncryptedSmartAccountPermissionStore {
         await this.writeProtected(record);
     }
     async writeProtected(record) {
-        const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+        const wrapping = await loadOrCreateWrappingSecret(this.files, this.wrappingSecret);
         try {
             await this.files.write(record.profile_hash, sealNested(wrapping, ENVELOPE, { schema_version: ENVELOPE_VERSION, profile_hash: record.profile_hash }, record));
         }

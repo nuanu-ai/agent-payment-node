@@ -8,6 +8,7 @@ import { ApnError } from "./errors.js";
 import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import { listEncryptedWalletEnvelopes, listLocalProviderProfiles, listLocalWallets } from "./wallet-import-collision.js";
 import { releaseSettledWalletEffects } from "./wallet-effect-retention.js";
+import { loadOrCreateWrappingSecret, walletWrappingSecretMissing } from "./wrapping-secret-custody.js";
 const ENVELOPE_VERSION = "apn.wallet-envelope.v1";
 const SECRET_VERSION = "apn.wallet-secret.v1";
 const KDF_NAME = "HKDF-SHA-256";
@@ -70,7 +71,7 @@ export class EncryptedWalletStore {
         const current = await this.describe(profile);
         if (current !== null)
             return current;
-        const wrapping = await this.wrappingSecret.create();
+        const wrapping = await loadOrCreateWrappingSecret(this.state, this.wrappingSecret);
         let privateKey = randomPrivateKey();
         try {
             const account = privateKeyToAccount(privateKey);
@@ -129,7 +130,7 @@ export class EncryptedWalletStore {
                 throw new ApnError("APN_PROFILE_DRIFT", "Wallet address already belongs to a local profile.");
             }
         }
-        const wrapping = await this.wrappingSecret.create();
+        const wrapping = await loadOrCreateWrappingSecret(this.state, this.wrappingSecret);
         const createdAt = new Date().toISOString();
         const identity = { profile, address, chainId: CHAIN_ID, createdAt,
             bindingHash: hashObject({ profile, address, createdAt }) };
@@ -165,9 +166,12 @@ export class EncryptedWalletStore {
         secret.directEffects = {};
         secret.x402Effects = {};
     }
-    /** The wrapping secret is still in the Keychain: it is loaded only to be zeroed at once, and nothing is decrypted. */
+    /**
+     * The wrapping secret is still in the Keychain: read transiently (never kept in the command's cached copy), zeroed at
+     * once, and nothing is decrypted.
+     */
     async assertWrappingSecretPresent() {
-        const wrapping = await this.wrappingSecret.load();
+        const wrapping = await this.wrappingSecret.load("transient");
         if (wrapping === null)
             throw walletWrappingSecretMissing();
         wrapping.fill(0);
@@ -211,17 +215,6 @@ function parseEnvelope(value, profile) {
         if (typeof value.cipher[key] !== "string")
             corrupt("Wallet cipher encoding is invalid.");
     return value;
-}
-/**
- * A local wallet whose login-Keychain wrapping secret is gone. Wallet status, ensure and doctor refuse it with this
- * reason instead of calling it ready; nothing replaces the secret, and only that Keychain item unwraps the wallet.
- */
-export function walletWrappingSecretMissing() {
-    return new ApnError("APN_STATE_CORRUPT", "The encrypted wallet exists but its wrapping secret is missing.", {
-        reason: "wrapping_secret_missing",
-        nextActions: ["Restore the login Keychain item ai.nuanu.apn.wrapping-secret.v1 (account default) from a backup of " +
-                "the login Keychain; without it this wallet cannot be unwrapped."],
-    });
 }
 /** Validate public envelope identity without loading or exposing the signing key. */
 export function walletEnvelopeIdentity(value, profile) {

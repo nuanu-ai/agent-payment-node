@@ -1,6 +1,7 @@
 import { operationOutcome } from "./core-outcome.js";
 import { ApnError } from "./errors.js";
 import { gaslessObservationRpcEnv } from "./gasless/observation-source.js";
+import { presentExpiredApproval } from "./operation-approval-expiry.js";
 import { unexecutedUsdtPreparation } from "./operation-index/adapters/gasless-usdt.js";
 import { OperationIndex } from "./operation-index/index.js";
 import { StateStore } from "./state.js";
@@ -23,8 +24,11 @@ export class OperationCommands {
         if (refreshAllowance && adapter.refreshesAllowance !== true) {
             throw new ApnError("APN_INVALID_INPUT", `A ${entry.family} operation stores no residual allowance; --refresh-allowance does not apply.`, { family: entry.family, nextActions: [`apn operation status --operation ${entry.operationId}`] });
         }
-        return adapter.status !== undefined ? await adapter.status(this.context, record, { refreshAllowance })
+        const outcome = adapter.status !== undefined ? await adapter.status(this.context, record, { refreshAllowance })
             : operationOutcome(await adapter.view(record, this.context.state.root));
+        // Presentation only: an operation whose approval window passed unapproved reads as expired; its record is not changed.
+        return adapter.approvalExpiry === undefined ? outcome
+            : presentExpiredApproval(outcome, await adapter.approvalExpiry(record, this.context.state.root), this.context.clock.now());
     }
     async resume(request) {
         const { command: _command, operationId, ...options } = request;

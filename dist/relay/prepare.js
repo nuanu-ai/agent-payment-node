@@ -177,7 +177,12 @@ export class RelayUnsignedPrepareService {
                     const bytes = await file.readFile();
                     if (bytes.length > 65_536)
                         throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file is too large.");
-                    return JSON.parse(bytes.toString("utf8"));
+                    try {
+                        return JSON.parse(bytes.toString("utf8"));
+                    }
+                    catch {
+                        throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file is not JSON.", { reason: "relay_arbitrum_quote_invalid", check: "quote file json" });
+                    }
                 }
                 finally {
                     await file.close();

@@ -7,7 +7,7 @@ import { evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord } from "../evm-rpc-
 import { ApnError } from "../errors.js";
 import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC } from "./quote.js";
 import { getAddress } from "viem";
-import { RELAY_ARBITRUM_USDC, validateRelayArbitrumUsdcEthereumUsdcQuote } from "./arbitrum-usdc-ethereum-quote.js";
+import { RELAY_ARBITRUM_USDC, classifiedRelayArbitrumQuoteError, validateRelayArbitrumUsdcEthereumUsdcQuote } from "./arbitrum-usdc-ethereum-quote.js";
 export const RELAY_ARBITRUM_SOURCE_DRAFT_REFERENCE = "arbitrum-usdc-ethereum-usdc-source-draft-v1";
 const UINT = /^(0|[1-9][0-9]*)$/u;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u;
@@ -63,9 +63,10 @@ export async function createRelayArbitrumSourceDraft(input) {
         blocked("zero_amount");
     const owner = input.owner.toLowerCase();
     policy(activePolicy, input.profile, owner, recipient, input.amountAtomic, dailyUsageAtomic, now);
+    // The caller's quote file is read now, so a rejected check is classified here; saved drafts keep the plain rejection.
     const quote = await validateRelayArbitrumUsdcEthereumUsdcQuote(rawQuote, { payer: owner, recipient,
         amountAtomic: input.amountAtomic, minimumOutputAtomic: input.minimumOutputAtomic,
-        nowSeconds: Math.floor(now.getTime() / 1000) });
+        nowSeconds: Math.floor(now.getTime() / 1000) }).catch((error) => { throw classifiedRelayArbitrumQuoteError(error); });
     if (BigInt(quote.providerFeeAtomic) > BigInt(input.maxProviderFeeAtomic) ||
         BigInt(quote.approval.maximumNetworkFeeWei) > BigInt(input.maxApprovalNetworkFeeWei) ||
         BigInt(quote.deposit.maximumNetworkFeeWei) > BigInt(input.maxDepositNetworkFeeWei))

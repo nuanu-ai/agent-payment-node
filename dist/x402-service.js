@@ -18,7 +18,7 @@ import { isCode } from "./secure-state-store.js";
 import { resolveX402Payer } from "./x402-payer.js";
 import { reconcileX402Method } from "./x402-method-reconciliation.js";
 import { optionalX402HttpRequest } from "./x402-http-request.js";
-import { assertCurrentX402Payee } from "./x402-network-policy.js";
+import { assertCurrentNetworkPolicy, assertCurrentX402Payee } from "./x402-network-policy.js";
 export class X402Service extends X402PaidRequest {
     providerX402;
     constructor(context) {
@@ -346,6 +346,12 @@ export class X402Service extends X402PaidRequest {
                         return publicX402Operation(operation);
                 }
                 else {
+                    // The first-send policy checks run before the safe-head gate and the signer read: an unsent, unexpired authorization
+                    // the owner's current policy refuses is answered with that refusal, never returned unchanged to be resumed again.
+                    if (!this.authorizationExpired(operation) && !operation.attempts.some((attempt) => attempt.purpose === "payment")) {
+                        await assertCurrentNetworkPolicy(this.context, operation);
+                        await assertCurrentX402Payee(this.context, operation);
+                    }
                     // First send only after this resume read the nonce as unused at the safe head; the pending attempt marker keeps it at most once.
                     if (!unusedAtSafe)
                         return publicX402Operation(operation);

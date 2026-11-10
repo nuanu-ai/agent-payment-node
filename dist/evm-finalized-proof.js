@@ -14,7 +14,7 @@ export function publicFinalizedRead(url, label, https = new BridgeHttps()) {
     const post = async (body) => {
         const response = await https.request(endpoint, "POST", canonicalJson(body), 1024 * 1024, "APN_RPC_CONFIG");
         if (response.status !== 200)
-            throw new ApnError("APN_RPC_PROTOCOL", `${label} answered a non-200 status.`, { status: response.status });
+            throw new ApnError("APN_RPC_PROTOCOL", `${label} answered a non-200 status.`, { status: response.status, httpStatus: response.status });
         return response.body;
     };
     return {

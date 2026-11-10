@@ -47,5 +47,7 @@ export declare class DirectPublicEffectJournal extends SecureStateStore {
     publish(operation: OperationRecord, effect: DirectEffectMaterial, attestation: Hex): Promise<void>;
     effect(operation: OperationRecord): Promise<DirectPublicEffect>;
     hasSigned(operation: OperationRecord): Promise<boolean>;
+    /** Whether prepare recorded the public binding that approve and the expiry retirement require (else direct_public_evidence_missing). */
+    hasPrepared(operation: OperationRecord): Promise<boolean>;
 }
 export {};

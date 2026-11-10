@@ -3,6 +3,7 @@ import { canonicalJson, domainHash, exactKeys, isPlainRecord, sha256 } from "./c
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 const ENVELOPE_VERSION = "apn.provider-authorization-envelope.v1";
 const RECORD_VERSION = "apn.provider-authorization.v1";
 const KDF_NAME = "HKDF-SHA-256";
@@ -43,7 +44,7 @@ export class EncryptedProviderAuthorizationStore {
         const previous = await this.load(binding);
         if (previous !== null)
             validateAdvance(previous, record);
-        const wrapping = await this.loadOrCreateWrappingSecret();
+        const wrapping = await loadOrCreateWrappingSecret(this.envelopes, this.wrappingSecret);
         try {
             const envelope = sealNested(wrapping, ENVELOPE, { schemaVersion: ENVELOPE_VERSION, binding }, record);
             await this.envelopes.write(binding.profileHash, binding.operationId, envelope);
@@ -51,10 +52,6 @@ export class EncryptedProviderAuthorizationStore {
         finally {
             wrapping.fill(0);
         }
-    }
-    async loadOrCreateWrappingSecret() {
-        const existing = await this.wrappingSecret.load();
-        return existing ?? await this.wrappingSecret.create();
     }
 }
 class ProviderAuthorizationEnvelopeState extends SecureStateStore {

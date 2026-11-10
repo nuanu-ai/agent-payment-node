@@ -1,4 +1,5 @@
 import type { CommandOutcome, CommandRequest } from "../commands.js";
+import type { ApprovalExpiry } from "../operation-approval-expiry.js";
 import { type MoneyConflictDomain } from "../operation-conflict-domain.js";
 import type { RuntimeContext } from "../runtime.js";
 import type { OperationClaim, OperationFamily, WantedClaims } from "./types.js";
@@ -55,6 +56,12 @@ export interface OperationFamilyAdapter<R = unknown> {
     readonly unknownClaims?: readonly OperationClaim[];
     /** The public projection `OperationService.status` returns. */
     view(record: R, root: string): Promise<unknown>;
+    /**
+     * For a record still awaiting the owner's approval, the instant its family's approve refuses from and what then ends
+     * it; null in every other state. It only reads. `apn operation status` presents such a record as expired
+     * (operation-approval-expiry.ts).
+     */
+    approvalExpiry?(record: R, root: string): Promise<ApprovalExpiry | null>;
     status?(ctx: RuntimeContext, record: R, options?: {
         readonly refreshAllowance?: boolean;
     }): Promise<CommandOutcome>;

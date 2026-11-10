@@ -6,8 +6,9 @@ export declare class WalletService {
     constructor(context: RuntimeContext);
     /**
      * An unreadable Keychain fails from `load` (APN_NATIVE_REJECTED, nativeCode APN_KEYCHAIN_UNAVAILABLE). A readable one
-     * answers: without a wallet the answer is reported as `wrapping_secret`; with one a missing secret is refused with
-     * reason `wrapping_secret_missing`, and a present one must also decrypt the wallet.
+     * answers: without a wallet the answer is reported as `wrapping_secret`, and a missing one is followed by a first
+     * `wallet ensure` only while nothing sealed exists (else the restore step); with a wallet a missing secret is refused
+     * with reason `wrapping_secret_missing`, and a present one must also decrypt the wallet.
      */
     doctorKeychain(profileInput: string): Promise<unknown>;
     ensure(profileInput: string): Promise<unknown>;

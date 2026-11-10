@@ -180,6 +180,7 @@ export declare class CircleRpc {
     private requests;
     private posts;
     private readonly endpoint;
+    private readonly setting;
     private chainVerified;
     private queued;
     private readonly scopes;

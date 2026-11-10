@@ -1,4 +1,5 @@
-import { EncryptedWalletStore, walletWrappingSecretMissing } from "./encrypted-wallet-store.js";
+import { EncryptedWalletStore } from "./encrypted-wallet-store.js";
+import { missingSecretNextAction, walletWrappingSecretMissing } from "./wrapping-secret-custody.js";
 import { BASE_USDC, CHAIN_CAIP2, ETH_DECIMALS, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { formatAtomic } from "./money.js";
@@ -19,8 +20,9 @@ export class WalletService {
     }
     /**
      * An unreadable Keychain fails from `load` (APN_NATIVE_REJECTED, nativeCode APN_KEYCHAIN_UNAVAILABLE). A readable one
-     * answers: without a wallet the answer is reported as `wrapping_secret`; with one a missing secret is refused with
-     * reason `wrapping_secret_missing`, and a present one must also decrypt the wallet.
+     * answers: without a wallet the answer is reported as `wrapping_secret`, and a missing one is followed by a first
+     * `wallet ensure` only while nothing sealed exists (else the restore step); with a wallet a missing secret is refused
+     * with reason `wrapping_secret_missing`, and a present one must also decrypt the wallet.
      */
     async doctorKeychain(profileInput) {
         const profile = canonicalProfile(profileInput);
@@ -28,10 +30,11 @@ export class WalletService {
         const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
         const probe = this.context.requireKeychainProbe();
         if (artifacts.stored === null && artifacts.encrypted === null) {
-            const wrapping = await probe.load();
+            const wrapping = await probe.load("transient");
             wrapping?.fill(0);
+            const next = wrapping === null ? await missingSecretNextAction(this.context.state, profile) : `apn wallet ensure --profile ${profile}`;
             return { profile, status: "absent", wrapping_secret: wrapping === null ? "missing" : "present",
-                proof_class: "encrypted_apn_home_status", next_actions: [`apn wallet ensure --profile ${profile}`] };
+                proof_class: "encrypted_apn_home_status", next_actions: [next] };
         }
         // Explicit custody diagnostic: unlike wallet status, it decrypts the wallet.
         const wallets = new EncryptedWalletStore(this.context.state, {

@@ -4,7 +4,7 @@ import { canonicalJson, hashObject } from "../canonical.js";
 import { assertEvmNativeCustody } from "../evm-native-custody.js";
 import { evmAddressLock } from "../evm-address-ownership.js";
 import { listLocalWallets } from "../wallet-import-collision.js";
-import { CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_SOURCE_RPC, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, decodeCircleSource, verifyCircleApproval } from "./protocol.js";
 import { verifyCircleDeployments } from "./preflight.js";
 import { readCircleDeployment } from "./rpc.js";
@@ -94,7 +94,7 @@ export async function adoptCircleFundingExternalMint(state, repo, usage, env, no
                 circleBlocked("external_terminal_conflict");
             return op;
         }
-        const route = circleRoute(op.destinationChain), budget = new CircleExternalRpcBudget(now, now() + 120000, https), source = new CircleExternalRpc(env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", 42161, budget), destination = new CircleExternalRpc(env[route.rpcEnvironment] ?? route.rpcDefault, op.destinationChain, budget);
+        const route = circleRoute(op.destinationChain), budget = new CircleExternalRpcBudget(now, now() + 120000, https), source = new CircleExternalRpc(env[CIRCLE_SOURCE_RPC.rpcEnvironment] ?? CIRCLE_SOURCE_RPC.rpcDefault, CIRCLE_SOURCE_RPC.chainId, budget), destination = new CircleExternalRpc(env[route.rpcEnvironment] ?? route.rpcDefault, op.destinationChain, budget);
         const approval = op.effects[0], burn = op.effects[1];
         if (approval.phase !== "confirmed" || burn.phase !== "confirmed" || approval.transactionHash === null || burn.transactionHash === null)
             circleBlocked("external_source_not_confirmed");

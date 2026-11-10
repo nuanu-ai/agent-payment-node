@@ -1,6 +1,7 @@
 import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 import { canonicalPolicyInput, policyIncrease, sealProfilePolicy, validateProfilePolicy, } from "./profile-policy.js";
 import { policyStorageIdentity, solanaAccount, validPolicyNetwork, validSolanaPolicyNetwork } from "./x402-network.js";
 const ENVELOPE_VERSION = "apn.profile-policy-envelope.v1";
@@ -79,7 +80,7 @@ export class EncryptedProfilePolicy {
             approvedAt: increase ? now : current?.approvedAt ?? now,
             updatedAt: now,
         });
-        const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+        const wrapping = await loadOrCreateWrappingSecret(this.state, this.wrappingSecret);
         try {
             await this.save(binding, policy, wrapping);
             return policy;

@@ -23,6 +23,8 @@ export declare class SecureStateStore {
     }): Promise<T>;
     protected beforeLockAcquire(_key: string): Promise<void>;
     protected ensureDirectory(relativePath: string): Promise<void>;
+    /** The records of one state directory, empty when it is absent (see readDirectory). */
+    recordEntries(relativePath: string): Promise<readonly Dirent[]>;
     /** Records only: atomic-write stages are never records, and an abandoned stage cannot wedge a listing. */
     protected readDirectory(relativePath: string): Promise<readonly Dirent[]>;
     /** Raw listing that still shows atomic-write stages; only for code that inspects its own in-flight stage. */
