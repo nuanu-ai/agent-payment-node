@@ -83,6 +83,10 @@ test("a refused payment ends as never landed only once the lifetime passed at fi
   assert.equal(data(paid).seller_response?.status, 402);
   const open = await runCli(["x402", "solana", "observe", "--operation", id], {}, f.options);
   assert.equal(data(open).state, "exposed"); assert.equal(data(open).pending_reason, "lifetime_open");
+  // operation resume shows the same pending reason as observe (it answered null before).
+  const resumed = await runCli(["operation", "resume", "--operation", id], {}, f.options);
+  assert.equal((resumed.operation as SolanaStatus).state, "exposed", JSON.stringify(resumed));
+  assert.equal((resumed.operation as SolanaStatus).pending_reason, "lifetime_open");
   f.rpc.heights = { confirmed: 1_200n, finalized: 1_100n };
   const saved = f.rpc.index; f.rpc.index = [];
   assert.equal(data(await runCli(["x402", "solana", "observe", "--operation", id], {}, f.options)).pending_reason, "signature_index_not_covering");

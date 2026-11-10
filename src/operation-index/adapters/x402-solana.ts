@@ -35,8 +35,9 @@ export const x402SolanaAdapter: OperationFamilyAdapter<X402SolanaRecord> = {
     assertResumeOptions(options, { refuseWait: () => {
       throw new ApnError("APN_INVALID_INPUT", "Solana x402 resume performs one bounded observation; omit --wait-seconds.");
     } });
-    const { record: observed } = await (await service(context)).observe(record.operationId);
-    return operationOutcome((await import("../../x402-solana/view.js")).publicX402Solana(observed));
+    // The observation's pending reason is shown as `x402 solana observe` shows it; the record does not store it.
+    const { record: observed, pending } = await (await service(context)).observe(record.operationId);
+    return operationOutcome((await import("../../x402-solana/view.js")).publicX402Solana(observed, pending));
   },
   async abandon(context, record) {
     const [{ approveX402SolanaAbandon }, { abandonX402Solana }, { publicX402Solana }] = await Promise.all([

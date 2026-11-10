@@ -298,3 +298,41 @@ test("a limit below the frozen cap names the policy command of the operation's o
     } });
   }
 });
+
+test("Base USDC: a lowered limit blocks signing and the first send of a local authorization, never its expiry close", async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const fixture = networkFixture(temporary.root, 8453); await initializeNetworkFixture(fixture, 8453);
+  const prepared = await fixture.core.execute({ command: "x402.fetch.prepare", profile: "default", url: X402_URL, idempotencyKey: "base-x402-lowered-cap" });
+  assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  const operationId = (prepared.operation as { operationId: string }).operationId;
+  const lower = { command: "wallet.policy.set" as const, profile: "default", ...NETWORK_LIMITS, maxX402AmountAtomic: "1000" };
+  const nextActions = ["apn wallet policy set --profile default --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>"];
+  // Before the fix Base kept only its prepare-time admission: approve signed and resume sent under the lowered limit.
+  await fixture.core.wallet.policySet(lower);
+  const unsigned = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
+  assert.equal(unsigned.error?.details?.reason, "x402_profile_limit_below_frozen_cap", JSON.stringify(unsigned));
+  assert.deepEqual(unsigned.next_actions, nextActions);
+  assert.equal(fixture.nativeCalls.filter((call) => call.operation.includes("Authorize")).length, 0);
+  await fixture.core.wallet.policySet({ ...lower, ...NETWORK_LIMITS });
+  await fixture.core.execute({ command: "operation.resume", operationId });
+  await fixture.core.execute({ command: "operation.resume", operationId });
+  const authorized = (await fixture.state.findX402Operation(operationId))!;
+  assert.equal(authorized.state, "authorized_not_sent");
+  await fixture.core.wallet.policySet(lower);
+  const refused = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal(refused.ok, false, JSON.stringify(refused));
+  assert.equal(refused.error?.code, "APN_X402_PROFILE_LIMIT_EXCEEDED");
+  assert.equal(refused.error?.details?.reason, "x402_profile_limit_below_frozen_cap");
+  assert.equal(refused.error?.details?.cap_atomic, authorized.capAtomic);
+  assert.deepEqual(refused.next_actions, nextActions);
+  assert.equal(fixture.http.calls.length, 1, "only the unpaid challenge");
+  assert.deepEqual(await fixture.state.findX402Operation(operationId), authorized);
+  // Past validBefore, with the limit still lowered, resume closes the never-sent authorization without effect.
+  fixture.clock.advance(310000);
+  const observedAt = fixture.clock.now().toISOString(), timestamp = Math.floor(fixture.clock.now().getTime() / 1000).toString();
+  fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: "12347", hash: `0x${"e".repeat(64)}`, observedAt, timestamp };
+  fixture.rpc.finalizedHead = { ...fixture.rpc.finalizedHead, number: "12346", hash: `0x${"d".repeat(64)}`, observedAt, timestamp };
+  const expired = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((expired.operation as { state: string }).state, "failed_expired_unused", JSON.stringify(expired));
+  assert.equal(fixture.http.calls.length, 1); assert.equal((await fixture.state.findX402Operation(operationId))!.attempts.length, 0);
+});
