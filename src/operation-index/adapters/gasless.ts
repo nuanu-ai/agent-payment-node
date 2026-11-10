@@ -55,9 +55,9 @@ interface GaslessCommands {
 interface GaslessRules<R> {
   unsentUntil(record: R): string | number | null;
   /**
-   * How long before the intent's `expiresAt` the family's approve can no longer finish: the check it runs before signing or
-   * dispatch refuses once less than this is left, so from `expiresAt` minus this margin on, no approval completes. Zero where
-   * approve refuses only from `expiresAt` on.
+   * How much time the family's approve needs left before the intent's `expiresAt`: the check it runs before signing or
+   * dispatch refuses once less than this is left. With exactly this much left an approval still completes, so the first
+   * refused instant is `expiresAt` minus this margin plus 1 ms. 1 where approve refuses only from `expiresAt` on.
    */
   readonly approveMarginMs: number;
   readonly admits?: OperationFamilyAdapter<R>["admits"];
@@ -90,11 +90,11 @@ function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, direct
     ...(rules.admits === undefined ? {} : { admits: rules.admits }),
     salvage: raw => salvageRecord(raw, value => [salvageEvm(field(value, "intent", "request", "chainId"), field(value, "intent", ...ownerPath))]),
     view: async record => view(record),
-    // Each family's approve can no longer finish from its intent's `expiresAt` minus the family's approve margin on (status then
-    // presents it as expired and stops naming approve); the unsent record stops holding its account once the unstarted margin
-    // has passed `expiresAt` (`terminal` above).
+    // Each family's approve can no longer finish once less than its approve margin is left before the intent's `expiresAt`
+    // (status then presents it as expired and stops naming approve); the unsent record stops holding its account once the
+    // unstarted margin has passed `expiresAt` (`terminal` above).
     approvalExpiry: async record => record.state !== "awaiting_approval" ? null
-      : { deadlineMs: Date.parse(record.intent.expiresAt) - rules.approveMarginMs, approveCloses: false, sealedSlot: false,
+      : { deadlineMs: Date.parse(record.intent.expiresAt) - rules.approveMarginMs + 1, approveCloses: false, sealedSlot: false,
         note: EXPIRED_RELEASED_AFTER_MARGIN },
     status: async (context, record) => operationOutcome(await commands.status(context, record.operationId)),
     async resume(context, record, options): Promise<CommandOutcome> {
@@ -195,4 +195,4 @@ export const facilitatorGaslessAdapter = gaslessAdapter<FacilitatorOperationReco
     receipt: async (context, id) => await new FacilitatorGaslessService(context).receipt(id),
     abandon: async (context, id) => await abandonFacilitatorGasless({ context, operations: operations(context),
       facilitatorGasless: new FacilitatorGaslessService(context) }, id),
-  }, { unsentUntil: facilitatorUnsentUntil, approveMarginMs: 0 }); // approve refuses from `expiresAt` on
+  }, { unsentUntil: facilitatorUnsentUntil, approveMarginMs: 1 }); // approve refuses from `expiresAt` on (FacilitatorExecution.expired)

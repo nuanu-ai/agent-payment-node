@@ -51,6 +51,13 @@ export const EXPIRED_EVIDENCE_UNVERIFIED = "The approval window has passed, so t
   "effect evidence or wallet custody does not check out against the saved operation, so APN cannot prove nothing was signed: approve " +
   "refuses instead of closing it, and the transfer keeps holding its account until it is resolved manually.";
 /**
+ * A local direct transfer whose evidence check could not run to an answer (a file APN could not read just now, a lock it
+ * could not take): nothing is known yet about what approve would do, so approve is not named and status is the next step.
+ */
+export const EXPIRED_EVIDENCE_UNREADABLE = "The approval window has passed, so this transfer can no longer be approved. APN could " +
+  "not read its public effect evidence just now, so it cannot yet say whether approve would close it or refuse; nothing was signed " +
+  "or sent by this status. Run status again once the APN state is readable.";
+/**
  * Gasless and swap: the index stops counting an unstarted record once the unstarted margin has passed its recorded expiry
  * (a gasless approve stops being able to finish a little before that expiry, so the release is counted from the expiry).
  */
