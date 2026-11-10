@@ -1,5 +1,6 @@
 export interface WrappingSecretPort {
-    load(): Promise<Buffer | null>;
+    /** `transient` (a presence check) hands back a copy without keeping one cached for the rest of the command. */
+    load(use?: "transient"): Promise<Buffer | null>;
     create(): Promise<Buffer>;
 }
 interface LocalIdentity {
@@ -19,14 +20,14 @@ export interface MacOSLoginKeychainSecretOptions {
  * The login-Keychain wrapping secret. One instance belongs to one command invocation: the first successful `load` or
  * `create` keeps a private in-memory copy for that instance, so every later read in the same command spawns no
  * `security` process. It is never written anywhere, callers still receive (and zero) their own copy, and the cached
- * copy is zeroed when the instance is collected or the process exits.
+ * copy is zeroed when the instance is collected or the process exits. A `transient` load keeps no copy.
  */
 export declare class MacOSLoginKeychainSecret implements WrappingSecretPort {
     private readonly loginKeychain;
     private readonly security;
     private cached;
     constructor(options?: MacOSLoginKeychainSecretOptions);
-    load(): Promise<Buffer | null>;
+    load(use?: "transient"): Promise<Buffer | null>;
     private remember;
     create(): Promise<Buffer>;
     private findArgs;

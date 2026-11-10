@@ -27,6 +27,11 @@ brew install nuanu-ai/tap/apn
 The Formula installs `apn` and the Homebrew `node@24` dependency. The first wallet command creates `~/.apn` with mode
 `0700` and one encrypted wallet envelope per profile with mode `0600`.
 
+`apn` runs on the first `node` on `PATH`, and Homebrew keeps `node@24` off `PATH` (keg-only). On a Node.js outside
+`>=24 <27`, `apn` and `apn mcp serve` load nothing else: they print one `APN_NODE_UNSUPPORTED` line naming the required
+range and the running version on stderr, write nothing to stdout and exit 1. Put `/opt/homebrew/opt/node@24/bin` first
+on `PATH` then.
+
 ### Discover the installed contract
 
 ```sh
@@ -97,6 +102,11 @@ are projected from the same catalog and run the same code as the CLI. Commands t
 abandon, wallet connect, allowlist activate) are not separate tools: one `apn_foreground_handoff` tool validates the
 arguments exactly as the CLI does and returns the exact command for the human to run in a terminal. It reads and writes
 nothing. `wallet policy set` runs over MCP only for a pure decrease; a new policy or an increase returns the handoff.
+The handoff covers every foreground command of a family MCP exposes, `gasless usdt execute` and `x402 permit2 approve`
+included. Ten foreground commands have no handoff because MCP exposes no prepare, quote or status tool of their family,
+so an agent never holds their inputs or operations; these families are CLI only: `stargate native execute`,
+`stargate token execute`, `stargate token cleanup`, `relay execute`, `relay retire`, `wallet metamask native-transfer`,
+`circle approval execute`, `circle source submit`, `sei funding approve` and `mega funding approve`.
 
 ## First journey: a direct Base USDC transfer
 
@@ -149,7 +159,7 @@ work for native coins (`--asset native`) and every listed token on the eleven di
 Solana and TRON have their own `-solana`/`-tron` commands ([Solana](docs/solana.md), [TRON](docs/tron.md)).
 
 If a transfer stalls, `operation resume --operation <id> --rpc-url <url>` performs only the next legal transition
-(`--observe-only true` inspects an already submitted local transfer without custody access). `operation abandon` lets the
+(`--observe-only true` inspects an already submitted local EVM transfer without custody access; Solana and TRON refuse it: their plain resume never resends a possibly broadcast transfer, but sends an approved, never-sent one for the first time). `operation abandon` lets the
 owner close an eligible operation whose outcome cannot be proven, after accepting the unresolved risk in the terminal.
 A saved record APN can no longer read blocks only the accounts it names; `operation abandon` releases those claims after
 the same terminal consent and leaves the file and any usage-ledger reservation as they are, so the amount stays charged.
@@ -474,9 +484,37 @@ This is `local_software_disposable` custody, not savings custody. Encryption pro
 Keychain secret; it does not protect against compromise of the same unlocked login session, process, user or host.
 Transient key copies in JavaScript memory are not guaranteed to be zeroized. Missing Keychain material, failed
 authentication, unsafe permissions or identity mismatch fail closed and never rotate a wallet silently. On first creation
-APN passes the generated wrapping secret to `/usr/bin/security` as an argument, which another process of the same user
-could observe during that short window. The wallet envelope is bounded to 1 MiB; reaching the bound refuses persistence
-and submission rather than overwriting anything.
+APN writes the generated wrapping secret to `/usr/bin/security -i` on stdin, never in its arguments, so `ps` does not show
+it, and reads the item back in the same session to prove the add. The wallet envelope is bounded to 1 MiB; reaching the
+bound refuses persistence and submission rather than overwriting anything.
+
+`wallet connect --provider coinbase-agentic-wallet` reads the account email and the one-time verification code on the
+foreground terminal and passes each to the pinned `awal` as a command-line argument (`awal auth login <email>`, then
+`awal auth verify <code>`): `awal` 2.12.1 takes them nowhere else, neither on stdin nor from the environment. While that
+child runs (APN stops it at the 30-second provider timeout), another process of the same user can read the code with
+`ps`. It is a one-time code for that one pending sign-in; APN never prints, logs or stores it.
+
+`apn wallet status` and `apn wallet ensure` (CLI and MCP) prove that an existing local wallet's wrapping secret is still
+in the Keychain and decrypt nothing. They run `/usr/bin/security find-generic-password -w` once; the bytes it prints are
+zeroed when the check ends and are not kept in the per-command copy that signing commands cache. The base64 text also
+passes through JavaScript strings, which cannot be zeroed and stay in memory until garbage collection. When the item is
+gone they fail with `APN_STATE_CORRUPT` and `details.reason: "wrapping_secret_missing"` instead of answering `ready`.
+When the Keychain itself cannot be read (locked, refused, or `/usr/bin/security` failing) they fail with
+`APN_NATIVE_REJECTED` and `details.nativeCode: "APN_KEYCHAIN_UNAVAILABLE"`. With a locked login Keychain in a GUI session
+macOS may show its unlock prompt; the command then waits up to 15 seconds (the `security` timeout) while holding that
+profile's locks, so another command for the same profile waits its five seconds and fails with `APN_STATE_BUSY`.
+
+APN creates a wrapping secret only for a state root that holds nothing encrypted. While the secret is missing and any
+record sealed under it exists (a wallet envelope, a Solana or TRON key, a smart-account permission, a profile policy or
+saved signed material), a command that would create one (`wallet ensure` or `wallet import` for any profile,
+`wallet ensure-solana`, `wallet ensure-tron`, a first `wallet policy set`, or the first sealed record of a provider
+payment) fails with the same reason and restore step instead of minting a secret that would orphan those records and
+collide with the restored item.
+
+`apn doctor keychain` reports the same two failures and also decrypts the wallet, so a secret that exists but does not
+unwrap it fails with `APN_STATE_CORRUPT` without that reason. Its successful answers carry `wrapping_secret: "present"`;
+without a wallet it answers `status: "absent"` with `wrapping_secret: "present"` or `"missing"`, and for a missing secret
+it suggests `apn wallet ensure` only when nothing encrypted exists, otherwise the restore step.
 
 Foreground approval requires stdin and stderr attached to real TTYs and an exact operation-bound code within 60 seconds;
 a timeout or interruption writes nothing. It is a human-confirmation boundary, not protection against a compromised user

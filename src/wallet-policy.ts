@@ -54,7 +54,7 @@ export function assertWalletMatches(stored: WalletRecord, native: Extract<Native
   ) throw new ApnError("APN_WALLET_MISMATCH", "Native wallet identity does not match durable public metadata.");
 }
 
-export function publicWallet(wallet: WalletRecord, status: string): unknown {
+export function publicWallet(wallet: WalletRecord, status: string): Readonly<Record<string, unknown>> {
   return {
     profile: wallet.profile,
     status,

@@ -21,6 +21,13 @@ const BLOCK = { number: "0x3039", hash: EVM_BLOCK_HASH, baseFeePerGas: "0x1", pa
 const HASH = `0x${"d".repeat(64)}` as Hex;
 const ECONOMICS = { nonceAtomic: "7", gasLimitAtomic: "65000", maxFeePerGasAtomic: "3", maxPriorityFeePerGasAtomic: "1", maximumGasCostAtomic: "195000" };
 
+/** What the production envelope parser raises for the body publicnode returned for Multicall3 balanceOf on Ethereum. */
+function ethCallRevert(): ApnError {
+  try { parseRpcResultEnvelope('{"jsonrpc":"2.0","id":"1","error":{"code":3,"message":"execution reverted","data":"0x"}}', "1", "eth_call"); }
+  catch (error) { if (error instanceof ApnError) return error; throw error; }
+  throw new Error("an eth_call revert must not parse as a result");
+}
+
 test("production RPC envelope parser rejects duplicate, conflicting and extra JSON-RPC members", () => {
   assert.deepEqual(parseRpcResultEnvelope('{"jsonrpc":"2.0","id":"1","result":[]}', "1"), []);
   assert.deepEqual(parseRpcLogEnvelope('{"jsonrpc":"2.0","id":"1","result":[]}', "1"), { kind: "complete", value: [] });
@@ -52,6 +59,38 @@ test("malformed RPC envelope reports a bounded method and stage without response
   });
 });
 
+test("an eth_call revert is the endpoint's answer, marked for the caller; another error envelope is named by its code; a malformed one stays unmarked", () => {
+  const parse = (error: unknown, method: string, id: string) => () => parseRpcResultEnvelope(JSON.stringify({ jsonrpc: "2.0", id: "1", error }), id, method);
+  // publicnode, drpc and Arbitrum (code 3 with data), Base (no data), BSC (data in the message) and the older -32000 form.
+  for (const error of [{ code: 3, message: "execution reverted", data: "0x" }, { code: 3, message: "execution reverted" },
+    { code: 3, message: "execution reverted: 0x", data: "0x" }, { code: -32000, message: "execution reverted" }]) {
+    assert.throws(parse(error, "eth_call", "1"), { code: "APN_RPC_PROTOCOL", details: { rpcMethod: "eth_call", stage: "result_envelope", reason: "eth_call_reverted" } });
+  }
+  // Still APN_RPC_PROTOCOL for every caller, but no longer "violates the exact envelope": PublicNode's receipt refusal, an
+  // internal error, a rate limit and a revert of a method other than eth_call. The provider's text is never echoed.
+  for (const [error, method, rpcErrorCode] of [
+    [{ code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" }, "eth_getTransactionReceipt", -32602],
+    [{ code: -32603, message: "Internal error" }, "eth_call", -32603], [{ code: -32005, message: "rate limit exceeded" }, "eth_call", -32005],
+    [{ code: 3, message: "execution reverted", data: "0x" }, "eth_estimateGas", 3],
+  ] as const) assert.throws(parse(error, method, "1"), (thrown: unknown) => {
+    assert.ok(thrown instanceof ApnError);
+    assert.deepEqual([thrown.code, thrown.message, thrown.details], ["APN_RPC_PROTOCOL", `The RPC answered ${method} with JSON-RPC error ${rpcErrorCode}.`,
+      { rpcMethod: method, stage: "result_envelope", reason: "rpc_error", rpcErrorCode }]);
+    return true;
+  });
+  for (const [error, method, id] of [
+    [{ message: "execution reverted" }, "eth_call", "1"], ["execution reverted", "eth_call", "1"], [{ code: "3", message: "execution reverted" }, "eth_call", "1"],
+    [{ code: 3 }, "eth_estimateGas", "1"], [{ code: 3, message: "execution reverted" }, "eth_call", "2"],
+  ] as const) assert.throws(parse(error, method, id), (thrown: unknown) => {
+    assert.ok(thrown instanceof ApnError);
+    assert.deepEqual([thrown.code, thrown.message, thrown.details], ["APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.",
+      { rpcMethod: method, stage: "result_envelope" }]);
+    return true;
+  });
+  assert.throws(() => parseRpcResultEnvelope('{"jsonrpc":"2.0","id":"1","error":{"code":3,"message":"execution reverted"},"result":"0x"}', "1", "eth_call"),
+    { code: "APN_RPC_PROTOCOL", details: { rpcMethod: "eth_call", stage: "result_envelope" } });
+});
+
 test("null EVM block reports the fixed method and bounded tag category", async () => {
   await assert.rejects(evmRpcBlock(async () => null, "latest"), (error: unknown) => {
     assert.ok(error instanceof ApnError);
@@ -67,6 +106,7 @@ test("null EVM block reports the fixed method and bounded tag category", async (
 class Wire {
   chain = "0x2105";
   decimals: unknown = toHex(8n, { size: 32 });
+  tokenBalance: unknown = toHex(250000000n, { size: 32 });
   code: unknown = "0x6080";
   blockChanged = false;
   blocks = 0;
@@ -91,7 +131,10 @@ class Wire {
         if (this.decimals instanceof Error) throw this.decimals;
         return this.decimals;
       }
-      if (input.data.startsWith("0x70a08231")) return toHex(250000000n, { size: 32 });
+      if (input.data.startsWith("0x70a08231")) {
+        if (this.tokenBalance instanceof Error) throw this.tokenBalance;
+        return this.tokenBalance;
+      }
       const decoded = decodeFunctionData({ abi: [
         { type: "function", name: "getL1FeeUpperBound", inputs: [{ name: "size", type: "uint256" }], outputs: [{ type: "uint256" }] },
         { type: "function", name: "getOperatorFee", inputs: [{ name: "gas", type: "uint256" }], outputs: [{ type: "uint256" }] },
@@ -155,8 +198,10 @@ test("EVM RPC refuses wrong chain, absent contract, malformed decimals and reorg
   wire.chain = "0x2105"; wire.code = "0x";
   await assert.rejects(rpc.balance(WALLET, selection), { code: "APN_ASSET_MISMATCH" });
   wire.code = "0x6000"; wire.decimals = "0x08";
+  await assert.rejects(rpc.balance(WALLET, selection), { code: "APN_ASSET_MISMATCH" });
+  wire.decimals = "0x8";
   await assert.rejects(rpc.balance(WALLET, selection), { code: "APN_RPC_PROTOCOL" });
-  wire.decimals = new Error("optional method absent");
+  wire.decimals = ethCallRevert();
   await assert.rejects(rpc.balance(WALLET, selection), { code: "APN_ASSET_METADATA_REQUIRED" });
   assert.equal((await rpc.balance(WALLET, { ...selection, decimals: 8 })).asset.decimalsSource, "caller");
   wire.decimals = toHex(8, { size: 32 });
@@ -166,6 +211,28 @@ test("EVM RPC refuses wrong chain, absent contract, malformed decimals and reorg
   assert.deepEqual(wire.calls.map(({ method }) => method), ["eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_call", "eth_call"],
     "the endpoint's chain is proven once and no header is re-read around the pinned reads");
   await assert.rejects(rpc.balance(WALLET, { chainId: 1, token: EVM_TOKEN }), { code: "APN_CHAIN_MISMATCH" });
+});
+
+test("wallet balance reads a contract that is not an ERC-20 token as an asset mismatch, never as a broken RPC", async () => {
+  // Ethereum, as publicnode answered on 2026-11-10: Multicall3 reverts balanceOf and decimals; an EIP-7702 account delegated to
+  // a wallet with a payable fallback answers both with no data.
+  const selection = { chainId: 1 as const, token: EVM_TOKEN };
+  const wire = new Wire(); wire.chain = "0x1";
+  const rpc = new EvmRpc(wire.call, "https://rpc.example");
+  for (const answer of [ethCallRevert(), "0x", "0x08", `0x${"0".repeat(128)}`]) {
+    wire.tokenBalance = answer;
+    await assert.rejects(rpc.balance(WALLET, selection), { code: "APN_ASSET_MISMATCH" });
+  }
+  wire.tokenBalance = toHex(250000000n, { size: 32 }); wire.decimals = toHex(256n, { size: 32 });
+  await assert.rejects(rpc.balance(WALLET, selection), { code: "APN_ASSET_MISMATCH" });
+  // Not an answer of the contract: malformed bytes, a malformed envelope or a timeout stay the endpoint's, for either view.
+  const envelope = new ApnError("APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.", { rpcMethod: "eth_call", stage: "result_envelope" });
+  for (const [field, failure, code] of [["tokenBalance", "0x8", "APN_RPC_PROTOCOL"], ["tokenBalance", envelope, "APN_RPC_PROTOCOL"],
+    ["decimals", envelope, "APN_RPC_PROTOCOL"], ["decimals", new ApnError("APN_RPC_AMBIGUOUS", "RPC request timed out."), "APN_RPC_AMBIGUOUS"]] as const) {
+    wire.tokenBalance = toHex(250000000n, { size: 32 }); wire.decimals = toHex(8n, { size: 32 });
+    wire[field] = failure;
+    await assert.rejects(rpc.balance(WALLET, { ...selection, decimals: 8 }), { code });
+  }
 });
 
 test("receipt codec rejects log substitution, removed logs, malformed status and chain switches", async () => {

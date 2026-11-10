@@ -15,6 +15,7 @@ import { MM_TERMINAL } from "../../metamask-gasless/operation-model.js";
 import { MetaMaskGaslessService } from "../../metamask-gasless/service.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "../../operation-abandon-gasless.js";
 import { abandonSmartAccountGasless } from "../../operation-abandon-provider.js";
+import { EXPIRED_RELEASED_AFTER_MARGIN } from "../../operation-approval-expiry.js";
 import { assertResumeOptions, oneObservationOnly } from "../../operation-command-options.js";
 import { conflictDomainKey, evmConflictDomain } from "../../operation-conflict-domain.js";
 import { SA_TERMINAL } from "../../smart-account-gasless/operation-model.js";
@@ -50,6 +51,10 @@ function gaslessAdapter(family, directory, outcomes, load, domains, ownerPath, v
         ...(rules.admits === undefined ? {} : { admits: rules.admits }),
         salvage: raw => salvageRecord(raw, value => [salvageEvm(field(value, "intent", "request", "chainId"), field(value, "intent", ...ownerPath))]),
         view: async (record) => view(record),
+        // Each family's approve refuses from its intent's `expiresAt` on (some a margin before it); the unsent record then stops
+        // holding its account once the unstarted margin has passed (`terminal` above).
+        approvalExpiry: async (record) => record.state !== "awaiting_approval" ? null
+            : { deadlineMs: Date.parse(record.intent.expiresAt), approveCloses: false, sealedSlot: false, note: EXPIRED_RELEASED_AFTER_MARGIN },
         status: async (context, record) => operationOutcome(await commands.status(context, record.operationId)),
         async resume(context, record, options) {
             assertResumeOptions(options, commands.resumeOptions);

@@ -11,6 +11,7 @@ import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import { listEncryptedWalletEnvelopes, listLocalProviderProfiles, listLocalWallets } from "./wallet-import-collision.js";
 import { releaseSettledWalletEffects } from "./wallet-effect-retention.js";
+import { loadOrCreateWrappingSecret, walletWrappingSecretMissing } from "./wrapping-secret-custody.js";
 
 const ENVELOPE_VERSION = "apn.wallet-envelope.v1";
 const SECRET_VERSION = "apn.wallet-secret.v1";
@@ -120,7 +121,7 @@ export class EncryptedWalletStore {
     const current = await this.describe(profile);
     if (current !== null) return current;
 
-    const wrapping = await this.wrappingSecret.create();
+    const wrapping = await loadOrCreateWrappingSecret(this.state, this.wrappingSecret);
     let privateKey = randomPrivateKey();
     try {
       const account = privateKeyToAccount(privateKey);
@@ -174,7 +175,7 @@ export class EncryptedWalletStore {
         throw new ApnError("APN_PROFILE_DRIFT", "Wallet address already belongs to a local profile.");
       }
     }
-    const wrapping = await this.wrappingSecret.create();
+    const wrapping = await loadOrCreateWrappingSecret(this.state, this.wrappingSecret);
     const createdAt = new Date().toISOString();
     const identity: WalletIdentity = { profile, address, chainId: CHAIN_ID, createdAt,
       bindingHash: hashObject({ profile, address, createdAt }) };
@@ -206,6 +207,16 @@ export class EncryptedWalletStore {
     secret.privateKey = `0x${"0".repeat(64)}` as Hex;
     secret.directEffects = {};
     secret.x402Effects = {};
+  }
+
+  /**
+   * The wrapping secret is still in the Keychain: read transiently (never kept in the command's cached copy), zeroed at
+   * once, and nothing is decrypted.
+   */
+  async assertWrappingSecretPresent(): Promise<void> {
+    const wrapping = await this.wrappingSecret.load("transient");
+    if (wrapping === null) throw walletWrappingSecretMissing();
+    wrapping.fill(0);
   }
 
   private async requiredWrappingSecret(): Promise<Buffer> {

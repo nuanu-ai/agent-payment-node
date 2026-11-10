@@ -51,6 +51,11 @@ export declare class EncryptedWalletStore {
     importNew(profileInput: string, privateKeyInput: string, expectedAddress: string): Promise<WalletIdentity>;
     save(identity: WalletIdentity, secret: WalletSecretState, wrappingInput?: Buffer, createOnly?: boolean): Promise<void>;
     clear(secret: WalletSecretState): void;
+    /**
+     * The wrapping secret is still in the Keychain: read transiently (never kept in the command's cached copy), zeroed at
+     * once, and nothing is decrypted.
+     */
+    assertWrappingSecretPresent(): Promise<void>;
     private requiredWrappingSecret;
 }
 /** Validate public envelope identity without loading or exposing the signing key. */

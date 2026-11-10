@@ -159,8 +159,9 @@ test("a deposit-only Relay quote (the allowance already covers the amount) is a 
     error.code === "APN_OPERATION_BLOCKED" && JSON.stringify(error.details) === JSON.stringify({ reason: "relay_existing_allowance",
       chain: "eip155:1", asset: ETHEREUM_USDC, spender: ETHEREUM_DEPOSITORY }));
   const approvalOnly = await quoteFixture(); approvalOnly.steps = [approvalOnly.steps[0]];
-  await assert.rejects(validateRelayQuote(approvalOnly, relayIntent), (error: unknown) => !(error instanceof ApnError) &&
-    error instanceof Error && error.message === "Relay quote rejected: unsupported steps");
+  await assert.rejects(validateRelayQuote(approvalOnly, relayIntent), (error: unknown) => error instanceof ApnError &&
+    error.code === "APN_PROVIDER_PROTOCOL" && error.message === "Relay quote rejected: unsupported steps" &&
+    JSON.stringify(error.details) === JSON.stringify({ reason: "relay_quote_invalid", check: "unsupported steps" }));
 });
 
 test("Relay prepare names the allowance read and revoke for its own profile and writes nothing; the same command then prepares", async (t) => {

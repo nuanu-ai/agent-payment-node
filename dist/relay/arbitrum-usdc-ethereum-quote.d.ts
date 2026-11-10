@@ -1,3 +1,4 @@
+import { type RelayStatusLocator } from "./quote.js";
 export declare const RELAY_ARBITRUM_USDC: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831";
 export interface RelayArbitrumQuoteIntent {
     readonly payer: string;
@@ -13,7 +14,7 @@ export declare function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknow
     quoteDigest: string;
     schemaVersion: "apn.relay-arbitrum-usdc-ethereum-usdc-quote.v1";
     routeReference: "arbitrum-usdc-ethereum-usdc-observation-v1";
-    statusLocator: import("./quote.js").RelayStatusLocator;
+    statusLocator: RelayStatusLocator;
     orderId: string;
     orderSignature: string;
     solver: string;
@@ -89,3 +90,6 @@ export declare function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknow
         maximumNetworkFeeWei: string;
     };
 }>;
+/** `relay prepare` reads the quote the caller saved in --quote-file now: a rejected check is invalid input naming the
+ * check, and a proven quote below the caller's minimum output a refusal with both values. Other errors pass unchanged. */
+export declare function classifiedRelayArbitrumQuoteError(error: unknown): unknown;

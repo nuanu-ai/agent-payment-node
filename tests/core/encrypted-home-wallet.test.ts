@@ -107,12 +107,13 @@ test("CLI creates, reuses, and restarts one encrypted disposable wallet under th
   assert.equal((restarted.data as { readonly address: Address }).address, address);
   assert.equal((doctor.data as { readonly status: string }).status, "ready");
   assert.equal((doctor.data as { readonly address: Address }).address, address);
-  assert.equal(wrapping.loads, loadsBeforeDoctor + 1);
+  // One decrypt and one presence read by native describe; the production Keychain port caches, so `security` runs once.
+  assert.equal(wrapping.loads, loadsBeforeDoctor + 2);
   assert.equal(wrapping.creates, 1);
   assert.equal(JSON.stringify(created).includes("privateKey"), false);
 });
 
-test("public wallet status reads no keys; explicit doctor fails closed for missing/wrong wrapping secret, tag tamper, and unsafe mode", async (t) => {
+test("public wallet status decrypts nothing but refuses a missing wrapping secret; explicit doctor fails closed for missing/wrong wrapping secret, tag tamper, and unsafe mode", async (t) => {
   const temporary = await temporaryState();
   t.after(temporary.cleanup);
   const state = new StateStore(temporary.root);
@@ -122,16 +123,19 @@ test("public wallet status reads no keys; explicit doctor fails closed for missi
   const envelopePath = join(temporary.root, "wallets", "default.json");
   const original = await readFile(envelopePath, "utf8");
 
-  for (const wrapping of [new TestWrappingSecret(null), new TestWrappingSecret(WRONG_MASTER)]) {
+  // Status only proves the secret exists (one load, no decrypt): a missing one is refused, a wrong one is left to doctor.
+  for (const [wrapping, missing] of [[new TestWrappingSecret(null), true], [new TestWrappingSecret(WRONG_MASTER), false]] as const) {
     const result = await new ApnCore({
       state: new StateStore(temporary.root),
       native: new LocalWalletNative(new StateStore(temporary.root), wrapping), keychainProbe: wrapping,
     }).execute({ command: "wallet.status", profile: "default" });
-    assert.equal(result.ok, true); assert.equal(wrapping.loads, 0);
+    assert.equal(result.ok, !missing); assert.equal(wrapping.loads, 1);
+    assert.equal(result.error?.details?.reason, missing ? "wrapping_secret_missing" : undefined);
     const diagnostic = await new ApnCore({ state: new StateStore(temporary.root), keychainProbe: wrapping,
       native: new LocalWalletNative(new StateStore(temporary.root), wrapping) }).execute({ command: "doctor.keychain", profile: "default" });
     assert.equal(diagnostic.ok, false);
     assert.equal(diagnostic.error?.code, "APN_STATE_CORRUPT");
+    assert.equal(diagnostic.error?.details?.reason, missing ? "wrapping_secret_missing" : undefined);
   }
 
   const tampered = JSON.parse(original) as { cipher: { tag: string } };

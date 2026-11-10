@@ -8,6 +8,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalJson } from "../../src/canonical.js";
+import { ApnError } from "../../src/errors.js";
+import { SecureStateStore } from "../../src/secure-state-store.js";
+import { loadOrCreateWrappingSecret } from "../../src/wrapping-secret-custody.js";
 import { installCustodyEnvelopeMocks } from "./custody-envelope-mocks.js";
 import { FixedSecret, readGolden, referenceOpen, type Outcome, temporaryRoot } from "./custody-envelope-reference.js";
 import { caseOutcomes, readEnvelopeFiles } from "./custody-envelope-harness.js";
@@ -55,6 +58,9 @@ for (const [name, c] of Object.entries(CUSTODY_CASES)) {
       if (c.open !== undefined) assert.equal(canonicalJson(await c.open(temporary.root, spy, sealed.context)), sealed.plaintext);
       assert.ok(spy.handed.length > 0);
       for (const copy of spy.handed) assert.ok(copy.every(byte => byte === 0), `${name}: a wrapping-secret copy was left unzeroed`);
+      // Once the secret is gone, this one sealed record alone forbids minting a replacement that would orphan it.
+      await assert.rejects(loadOrCreateWrappingSecret(new SecureStateStore(temporary.root), new FixedSecret(null)), (error: unknown) =>
+        error instanceof ApnError && error.code === "APN_STATE_CORRUPT" && error.details?.reason === "wrapping_secret_missing", name);
     } finally { await temporary.cleanup(); }
   });
 }

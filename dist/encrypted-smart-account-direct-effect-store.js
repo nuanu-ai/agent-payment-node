@@ -3,6 +3,7 @@ import { keccak256 } from "viem";
 import { exactKeys, hashObject, isPlainRecord, sha256 } from "./canonical.js";
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 const RECORD_VERSION = "apn.metamask-smart-account-direct-effect.v1";
 const ENVELOPE_VERSION = "apn.metamask-smart-account-direct-effect-envelope.v1";
@@ -62,7 +63,7 @@ export class EncryptedSmartAccountDirectEffectStore {
         return next;
     }
     async write(record) {
-        const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+        const wrapping = await loadOrCreateWrappingSecret(this.files, this.wrappingSecret);
         try {
             await this.files.write(record.operation_id, sealNested(wrapping, ENVELOPE, { schema_version: ENVELOPE_VERSION, operation_id: record.operation_id }, record));
         }

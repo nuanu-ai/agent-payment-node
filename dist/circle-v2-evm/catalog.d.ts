@@ -25,6 +25,15 @@ export interface CircleRoute {
      * span of 100. An endpoint set through `rpcEnvironment` must accept the same window. */
     readonly logRange: number;
 }
+/** The Arbitrum source RPC: `APN_ARBITRUM_RPC_URL`, or arb1.arbitrum.io when unset. On 2026-11-10
+ * arbitrum-one-rpc.publicnode.com refused every eth_getTransactionReceipt, even for a transaction in the latest block
+ * (HTTP 403 alone, a -32602 row in a batch), so it could observe no approval or burn; arb1 answered receipts, the
+ * finalized and safe tags, EIP-1898 block-hash calls and 33-call batches. */
+export declare const CIRCLE_SOURCE_RPC: Readonly<{
+    readonly chainId: 42161;
+    readonly rpcEnvironment: "APN_ARBITRUM_RPC_URL";
+    readonly rpcDefault: "https://arb1.arbitrum.io/rpc";
+}>;
 /** Linea uses rpc.linea.build: linea-rpc.publicnode.com refuses transmitter logs older than about 128 blocks ("archive
  * requests require a personal token"), so an external mint could not be found there. */
 export declare const CIRCLE_ROUTES: Readonly<Record<CircleDestinationChain, CircleRoute>>;

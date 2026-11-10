@@ -21,8 +21,14 @@ const BYTES32 = /^0x[0-9a-fA-F]{64}$/;
 const RELAY_REQUEST_ID = /^0x[0-9a-fA-F]{64}$/;
 const RELAY_STATUS_ORIGIN = "https://api.relay.link";
 const RELAY_STATUS_PATH = "/intents/status/v3";
+const RELAY_QUOTE_URL = "https://api.relay.link/quote/v2";
+/** Relay's own machine code for a quote it declines (AMOUNT_TOO_LOW, NO_SWAP_ROUTES_FOUND, ...); its free text is never shown. */
+const PROVIDER_CODE = /^[A-Z][A-Z0-9_]{0,63}$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
-const fail = (reason) => { throw new Error(`Relay quote rejected: ${reason}`); };
+/** A live Ethereum USDC quote APN cannot decode or trust. Only `relay prepare` validates these quotes. */
+const fail = (reason) => {
+    throw new ApnError("APN_PROVIDER_PROTOCOL", `Relay quote rejected: ${reason}`, { reason: "relay_quote_invalid", check: reason });
+};
 const object = (value, reason) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : fail(reason);
 const array = (value, reason) => Array.isArray(value) ? value : fail(reason);
 const string = (value, reason) => typeof value === "string" ? value : fail(reason);
@@ -51,21 +57,25 @@ export function relayQuoteRequest(intent) {
         amount: intent.amountAtomic, tradeType: "EXACT_INPUT", recipient: intent.recipient,
         refundTo: intent.payer, includeProtocolData: true, usePermit: false, useDepositAddress: false };
 }
+/** A rejected status locator stays a plain Error: saved-state callers (the operation record, the deposit envelope) let it
+ * propagate exactly as before. Live quote validators turn it into their own invalid-quote error. */
+function locatorRejected(reason) { throw new Error(`Relay quote rejected: ${reason}`); }
 /** Only the Relay status/v3 endpoint can supply a status locator. Never follow a quote URL. */
 export function relayStatusLocator(requestId, endpoint) {
-    const id = string(requestId, "request id");
-    if (!RELAY_REQUEST_ID.test(id))
-        fail("request id");
-    const canonicalId = id.toLowerCase();
+    if (typeof requestId !== "string" || !RELAY_REQUEST_ID.test(requestId))
+        locatorRejected("request id");
+    const canonicalId = requestId.toLowerCase();
     const canonicalEndpoint = `${RELAY_STATUS_ORIGIN}${RELAY_STATUS_PATH}?requestId=${canonicalId}`;
     if (endpoint !== undefined) {
-        const source = string(endpoint, "status endpoint");
+        if (typeof endpoint !== "string")
+            locatorRejected("status endpoint");
+        const source = endpoint;
         let url;
         try {
             url = new URL(source, RELAY_STATUS_ORIGIN);
         }
         catch {
-            return fail("status endpoint");
+            return locatorRejected("status endpoint");
         }
         if (url.origin !== RELAY_STATUS_ORIGIN || url.pathname !== RELAY_STATUS_PATH ||
             url.username || url.password || url.hash || [...url.searchParams.keys()].length !== 1 ||
@@ -73,9 +83,49 @@ export function relayStatusLocator(requestId, endpoint) {
             !RELAY_REQUEST_ID.test(url.searchParams.get("requestId") ?? "") ||
             (source.startsWith("/") && source.startsWith("//")) ||
             (!source.startsWith("/") && !source.startsWith(`${RELAY_STATUS_ORIGIN}/`)))
-            fail("status endpoint");
+            locatorRejected("status endpoint");
     }
     return { requestId: canonicalId, endpoint: canonicalEndpoint };
+}
+/** The status locator check inside a live quote: its rejection is an invalid quote. */
+function liveLocator(requestId, endpoint) {
+    try {
+        return relayStatusLocator(requestId, endpoint);
+    }
+    catch {
+        return fail("status locator");
+    }
+}
+/** One keyless quote POST, no API key or retry, for the route's own reason prefix. Relay declines a route or amount it
+ * will not quote (AMOUNT_TOO_LOW, NO_SWAP_ROUTES_FOUND, AMOUNT_TOO_HIGH) with a 4xx and its own code: a refusal carrying
+ * both. No answer, HTTP 429 or 5xx is unavailable; a body that is not JSON is the route's invalid quote. */
+export async function postRelayQuote(request, fetcher, route, invalid) {
+    const unavailable = (httpStatus) => {
+        throw new ApnError("APN_PROVIDER_UNAVAILABLE", "The Relay quote service did not answer.", { reason: `${route}_unavailable`, ...(httpStatus === undefined ? {} : { http_status: httpStatus }) });
+    };
+    let response;
+    try {
+        response = await fetcher(RELAY_QUOTE_URL, { method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify(request), signal: AbortSignal.timeout(12_000) });
+    }
+    catch {
+        return unavailable();
+    }
+    if (!response.ok) {
+        if (response.status < 400 || response.status >= 500 || response.status === 429)
+            unavailable(response.status);
+        // The provider code is shown only when the error body carries one; the refusal is thrown either way.
+        const code = await response.json().then((value) => value !== null && typeof value === "object" ?
+            value.errorCode : undefined, () => undefined);
+        throw new ApnError("APN_OPERATION_BLOCKED", "Relay declined to quote this route, amount and recipient.", { reason: `${route}_refused`, http_status: response.status,
+            ...(typeof code === "string" && PROVIDER_CODE.test(code) ? { provider_error_code: code } : {}) });
+    }
+    try {
+        return await response.json();
+    }
+    catch (error) {
+        return error instanceof SyntaxError ? invalid("response body") : unavailable();
+    }
 }
 function quoteStatusLocator(quote, steps) {
     const ids = [];
@@ -106,12 +156,12 @@ function quoteStatusLocator(quote, steps) {
     }
     if (ids.length === 0)
         return undefined;
-    const locator = relayStatusLocator(ids[0]);
+    const locator = liveLocator(ids[0]);
     for (const value of ids.slice(1))
-        if (relayStatusLocator(value).requestId !== locator.requestId)
+        if (liveLocator(value).requestId !== locator.requestId)
             fail("conflicting request ids");
     for (const endpoint of endpoints)
-        relayStatusLocator(locator.requestId, endpoint);
+        liveLocator(locator.requestId, endpoint);
     return locator;
 }
 function onlyKeys(value, keys, reason) {
@@ -207,7 +257,7 @@ export async function validateRelayQuote(value, intent) {
         !same(address(payee.recipient, "recipient"), intent.recipient))
         fail("order identity");
     const minimum = amount(payee.minimumAmount, "minimum output");
-    if (minimum < amount(intent.minimumOutputWei, "required minimum") || amount(payee.expectedAmount, "expected output") < minimum)
+    if (amount(payee.expectedAmount, "expected output") < minimum)
         fail("output minimum");
     const deadline = output.deadline;
     if (typeof deadline !== "number" || !Number.isSafeInteger(deadline) || deadline <= intent.nowSeconds + 60 || deadline > intent.nowSeconds + RELAY_MAX_DEADLINE_SECONDS)
@@ -296,6 +346,13 @@ export async function validateRelayQuote(value, intent) {
     catch {
         return fail("call data");
     }
+    // The caller's minimum is compared last, on a quote already proven exact and solver-signed: the quoted output moves with
+    // the market, so this is a refusal with both values, not a provider fault.
+    const requiredMinimum = amount(intent.minimumOutputWei, "required minimum");
+    if (minimum < requiredMinimum) {
+        throw new ApnError("APN_OPERATION_BLOCKED", "The Relay quote's minimum output is below the requested minimum.", { reason: "relay_quote_output_below_minimum", quoted_minimum_output_wei: minimum.toString(),
+            requested_minimum_output_wei: requiredMinimum.toString() });
+    }
     const projection = { schemaVersion: "apn.relay-quote.v1",
         ...(destinationChain === "base" ? { routeReference: "ethereum-usdc-base-eth-v1" } : {}),
         ...(statusLocator === undefined ? {} : { statusLocator }), orderId: orderId.toLowerCase(),
@@ -319,13 +376,7 @@ export function withRelayAllowanceActions(error, profile) {
 }
 /** One POST, no API key, no retry. The caller receives a validated unsigned envelope only. */
 export async function requestRelayQuote(intent, fetcher = fetch, now = () => Math.floor(Date.now() / 1000)) {
-    const response = await fetcher("https://api.relay.link/quote/v2", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify(relayQuoteRequest(intent)), signal: AbortSignal.timeout(12_000),
-    });
-    if (!response.ok)
-        fail(`HTTP ${response.status}`);
-    const body = await response.json();
+    const body = await postRelayQuote(relayQuoteRequest(intent), fetcher, "relay_quote", fail);
     return validateRelayQuote(body, { ...intent, nowSeconds: now() });
 }
 //# sourceMappingURL=quote.js.map

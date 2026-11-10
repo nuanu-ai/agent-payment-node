@@ -16,7 +16,7 @@ export declare function parseWalletDescribe(value: unknown, profile: string): Na
 export declare function assertWalletMatches(stored: WalletRecord, native: Extract<NativeWallet, {
     found: true;
 }>): void;
-export declare function publicWallet(wallet: WalletRecord, status: string): unknown;
+export declare function publicWallet(wallet: WalletRecord, status: string): Readonly<Record<string, unknown>>;
 export declare function validateBalance(snapshot: BalanceSnapshot, address: Address): void;
 export declare function publicProvenance(snapshot: BalanceSnapshot): unknown;
 export {};

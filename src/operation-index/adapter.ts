@@ -1,5 +1,6 @@
 import { isAddress } from "viem";
 import type { CommandOutcome, CommandRequest } from "../commands.js";
+import type { ApprovalExpiry } from "../operation-approval-expiry.js";
 import { bridgeConflictDomain, conflictDomainKey, evmConflictDomain, railConflictDomain, SOLANA_BRIDGE_CHAIN_ID,
   type MoneyConflictDomain } from "../operation-conflict-domain.js";
 import type { RuntimeContext } from "../runtime.js";
@@ -54,6 +55,12 @@ export interface OperationFamilyAdapter<R = unknown> {
   readonly unknownClaims?: readonly OperationClaim[];
   /** The public projection `OperationService.status` returns. */
   view(record: R, root: string): Promise<unknown>;
+  /**
+   * For a record still awaiting the owner's approval, the instant its family's approve refuses from and what then ends
+   * it; null in every other state. It only reads. `apn operation status` presents such a record as expired
+   * (operation-approval-expiry.ts).
+   */
+  approvalExpiry?(record: R, root: string): Promise<ApprovalExpiry | null>;
   // Generic `apn operation status|resume|abandon` and `apn receipt get` (phase 4b WP3 fills these in).
   status?(ctx: RuntimeContext, record: R, options?: { readonly refreshAllowance?: boolean }): Promise<CommandOutcome>;
   /** The family stores a residual token allowance its status shows; only it accepts `operation status --refresh-allowance`. */

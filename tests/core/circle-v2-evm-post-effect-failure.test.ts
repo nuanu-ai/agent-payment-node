@@ -25,7 +25,7 @@ const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Bu
 type Effect = { role: string; phase: string; transaction_hash: string | null };
 type PublicOperation = { operation_id: string; state: string; terminal: boolean; effects: Effect[]; observation_failure?: Record<string, unknown> };
 
-async function setup(t: test.TestContext) {
+async function setup(t: test.TestContext, defaultSource = false) {
   const base = await mkdtemp(join(await realpath(tmpdir()), "circle-post-effect-")), root = join(base, "state"); t.after(() => rm(base, { recursive: true, force: true }));
   const net = new SyntheticCctp(CHAIN), mechanism = circleFundingMechanism(CHAIN);
   const ensure = async (profile: string) => { const r = await runCli(["wallet", "ensure", "--profile", profile], {}, { stateRoot: root, wrappingSecret: wrapping }); assert.equal(r.ok, true, JSON.stringify(r.error)); return getAddress((r.data as { address: string }).address); };
@@ -46,13 +46,19 @@ async function setup(t: test.TestContext) {
     { chain: "eip155:42161", kind: "native", rail: "bridge", maximumPerTransferAtomic: "30000000000000", dailyLimitAtomic: "1000000000000000", mechanism }]);
   await activate("cctp-gas", gas, [{ chain: `eip155:${CHAIN}`, kind: "native", rail: "bridge", maximumPerTransferAtomic: circleRoute(CHAIN).destinationNativeCap,
     dailyLimitAtomic: "1000000000000000000", mechanism }]);
-  const service = new CircleFundingEvmService(new StateStore(root), wrapping, net.env, Date.now, {}, net.https);
+  // `defaultSource`: APN_ARBITRUM_RPC_URL is unset, so the source reads go to the built-in default, served by the synthetic Arbitrum.
+  const sourceUrls: string[] = [], env: Readonly<Record<string, string | undefined>> = defaultSource ? { ...net.env, APN_ARBITRUM_RPC_URL: undefined } : net.env;
+  const https = defaultSource ? { request: async (url: string, method: string, body: string | null) => {
+    if (url.startsWith("https://iris-api.circle.com/") || url.startsWith("https://dest-")) return await net.https.request(url, method, body);
+    sourceUrls.push(url); return await net.https.request(url === "https://arb1.arbitrum.io/rpc" ? "https://arbitrum.example/" : url, method, body);
+  } } : net.https;
+  const service = new CircleFundingEvmService(new StateStore(root), wrapping, env, Date.now, {}, https);
   const cli = async (args: readonly string[]) => await runCli(["circle", "evm", ...args], {}, { stateRoot: root, wrappingSecret: wrapping, circleFundingEvm: service });
   const prepared = await cli(["prepare", "--profile", "cctp-src", "--destination-profile", "cctp-gas", "--destination-chain", String(CHAIN), "--idempotency-key", "post-effect-01",
     "--beneficiary", BENEFICIARY, "--gross-atomic", "1000000", "--max-issuer-fee-atomic", "1000", "--min-mint-atomic", "999000"]);
   assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
   const id = (prepared.operation as PublicOperation).operation_id, request = net.https.request;
-  return { net, cli, id, request };
+  return { net, cli, id, request, sourceUrls };
 }
 const phases = (op: PublicOperation) => Object.fromEntries(op.effects.map((e) => [e.role, [e.phase, e.transaction_hash !== null]]));
 
@@ -102,6 +108,40 @@ test("an approval sent before a failed read, and a mint sent before a failed rea
   let done = afterMint;
   for (let i = 0; i < 4 && !done.terminal; i++) done = (await f.cli(["observe", "--operation", f.id])).operation as PublicOperation;
   assert.deepEqual([done.state, f.net.arbitrum.sends, f.net.destination.sends], ["completed", 2, 1]);
+});
+
+test("an Arbitrum RPC that refuses receipts (PublicNode) is named with APN_ARBITRUM_RPC_URL; the sent approval is kept and never resent", async (t) => {
+  const f = await setup(t); let refusing = true;
+  // PublicNode's keyless Arbitrum root on 2026-11-10: HTTP 403 for a lone receipt read, HTTP 200 with this error row in a batch.
+  const refusal = { code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" };
+  f.net.https.request = async (url, method, body) => {
+    if (!refusing || body === null || !url.startsWith("https://arbitrum.example/") || !body.includes("eth_getTransactionReceipt")) return await f.request(url, method, body);
+    const sent = JSON.parse(body) as { id: number; method: string } | { id: number; method: string }[];
+    if (!Array.isArray(sent)) return { status: 403, body: JSON.stringify({ jsonrpc: "2.0", error: refusal, id: sent.id }) };
+    const rows = JSON.parse((await f.request(url, method, body)).body) as unknown[];
+    return { status: 200, body: JSON.stringify(rows.map((row, i) => sent[i]!.method === "eth_getTransactionReceipt" ? { jsonrpc: "2.0", error: refusal, id: sent[i]!.id } : row)) };
+  };
+  const approved = await f.cli(["approve-source", "--operation", f.id]); assert.equal(approved.ok, true, JSON.stringify(approved.error));
+  const afterApproval = approved.operation as PublicOperation;
+  assert.deepEqual(afterApproval.observation_failure, { stage: "after_effect_sent", code: "APN_RPC_CONFIG", reason: "rpc_error", http_status: null });
+  assert.deepEqual([phases(afterApproval).approval, phases(afterApproval).burn, f.net.arbitrum.sends], [["submitted", true], ["prepared", false], 1]);
+  // The refusal is a failed read only: the approval stays sent and held, and the answer names the setting to change.
+  const observed = await f.cli(["observe", "--operation", f.id]);
+  assert.deepEqual([observed.ok, observed.error?.code, observed.error?.details?.rpcErrorCode, observed.next_actions, f.net.arbitrum.sends],
+    [false, "APN_RPC_CONFIG", -32602, ["Set APN_ARBITRUM_RPC_URL to a public HTTPS RPC endpoint of that chain, then rerun the same command."], 1]);
+  refusing = false;
+  let current = afterApproval;
+  for (let i = 0; i < 3 && current.state !== "awaiting_mint"; i++) {
+    const next = await f.cli(["approve-source", "--operation", f.id]); assert.equal(next.ok, true, JSON.stringify(next.error)); current = next.operation as PublicOperation;
+  }
+  assert.deepEqual([current.state, f.net.arbitrum.sends], ["awaiting_mint", 2], "the approval is observed, never signed again; the burn is sent once");
+});
+
+test("without APN_ARBITRUM_RPC_URL every source read, receipts included, goes to arb1.arbitrum.io/rpc, not PublicNode", async (t) => {
+  const f = await setup(t, true);
+  const burned = await f.cli(["approve-source", "--operation", f.id]); assert.equal(burned.ok, true, JSON.stringify(burned.error));
+  assert.deepEqual([(burned.operation as PublicOperation).state, f.net.arbitrum.sends], ["awaiting_mint", 2]);
+  assert.deepEqual([...new Set(f.sourceUrls)], ["https://arb1.arbitrum.io/rpc"]);
 });
 
 test("a failure before anything is sent still answers as a refusal without an operation", async (t) => {

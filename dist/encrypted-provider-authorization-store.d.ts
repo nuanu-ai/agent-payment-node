@@ -42,6 +42,5 @@ export declare class EncryptedProviderAuthorizationStore implements ProviderAuth
     constructor(state: StateStore, wrappingSecret: WrappingSecretPort);
     load(binding: ProviderAuthorizationBinding): Promise<ProviderAuthorizationRecord | null>;
     save(binding: ProviderAuthorizationBinding, record: ProviderAuthorizationRecord): Promise<void>;
-    private loadOrCreateWrappingSecret;
 }
 export {};

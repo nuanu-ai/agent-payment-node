@@ -19,7 +19,7 @@ import { exactChainConsent } from "../tty-approval.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { ApnError } from "../errors.js";
 import { postEffectReadFailure } from "../post-effect-read-failure.js";
-import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, isCircleDestinationChain } from "./catalog.js";
+import { CIRCLE_SOURCE_RPC, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, isCircleDestinationChain } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, bindCircleAttestation, decodeCircleSource, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint, verifyCircleApproval, verifyCircleAttestationSigners, circleAttesterConfigurationHash } from "./protocol.js";
 import { verifyCircleDestinationAccount, verifyCircleGasEnvelope, verifyCircleMintPreflight, verifyCircleClosureFinality } from "./preflight.js";
 import { CircleRepository } from "./repository.js";
@@ -209,7 +209,7 @@ export class CircleFundingEvmService {
     preflightDeployments(source, destination, chain) { return currentCircleDeployments(source, destination, chain); }
     preflightAttesters(destination, digest) { return readCircleAttesters(destination, digest); }
     remotes(chain) {
-        const route = circleRoute(chain), sourceUrl = this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
+        const route = circleRoute(chain), sourceUrl = this.env[CIRCLE_SOURCE_RPC.rpcEnvironment] ?? CIRCLE_SOURCE_RPC.rpcDefault, destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
         return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET),
             // External-mint discovery runs on its own client under its derived budget (P4), apart from the command's read plan.
             discovery: () => new CircleRpc(destinationUrl, chain, this.https, CIRCLE_DISCOVERY_REQUEST_BUDGET) };

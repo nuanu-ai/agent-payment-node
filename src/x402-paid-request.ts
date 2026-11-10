@@ -1,4 +1,4 @@
-import { assertCurrentNetworkPolicy, assertCurrentX402Payee } from "./x402-network-policy.js";
+import { assertCurrentNetworkPolicy, assertCurrentX402Payee, assertX402LimitCoversCap } from "./x402-network-policy.js";
 import { ApnError } from "./errors.js";
 import {
   assertUnattendedX402Balance,
@@ -388,9 +388,7 @@ export class X402PaidRequest extends X402Lifecycle {
       profile.capability_snapshot.x402.retry_owner !== "apn_state_machine"
     ) throw new ApnError("APN_PROFILE_DRIFT", "The Smart Account profile no longer matches the frozen x402 authority.");
     const policy = requireProfilePolicy(await this.context.requirePolicy().load(policyBinding(profile)));
-    if (BigInt(operation.capAtomic) > BigInt(policy.maxX402AmountAtomic)) {
-      throw new ApnError("APN_X402_PROFILE_LIMIT_EXCEEDED", "The current profile maximum is below the frozen x402 cap.");
-    }
+    assertX402LimitCoversCap(operation, policy.maxX402AmountAtomic);
     const balance = await requireX402Rpc(this.context, x402AssetOf(operation)).getBalances(operation.wallet);
     if (balance.address.toLowerCase() !== operation.wallet) {
       throw new ApnError("APN_RPC_PROTOCOL", "RPC balance response does not match the frozen Smart Account owner.");

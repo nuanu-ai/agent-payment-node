@@ -16,6 +16,7 @@ import { MM_TERMINAL, type MetaMaskGaslessOperationRecord } from "../../metamask
 import { MetaMaskGaslessService } from "../../metamask-gasless/service.js";
 import { abandonFacilitatorGasless, abandonLocalGasless, abandonMetaMaskGasless } from "../../operation-abandon-gasless.js";
 import { abandonSmartAccountGasless } from "../../operation-abandon-provider.js";
+import { EXPIRED_RELEASED_AFTER_MARGIN } from "../../operation-approval-expiry.js";
 import { assertResumeOptions, oneObservationOnly, type ResumeOptionUse } from "../../operation-command-options.js";
 import { conflictDomainKey, evmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { SA_TERMINAL, type SmartAccountGaslessOperationRecord } from "../../smart-account-gasless/operation-model.js";
@@ -31,7 +32,7 @@ import type { OperationClaim, OperationFamily, WantedClaims } from "../types.js"
 import { pastUnstartedDeadline } from "./family-claims.js";
 
 interface GaslessRecord { readonly profileHash: string; readonly operationId: string; readonly idempotencyHash: string;
-  readonly requestHash: string; readonly state: string; readonly terminal: boolean }
+  readonly requestHash: string; readonly state: string; readonly terminal: boolean; readonly intent: { readonly expiresAt: string } }
 
 /** Each gasless family's own service: status, recovery, receipt and owner exit by operation ID (built per command). */
 interface GaslessCommands {
@@ -80,6 +81,10 @@ function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, direct
     ...(rules.admits === undefined ? {} : { admits: rules.admits }),
     salvage: raw => salvageRecord(raw, value => [salvageEvm(field(value, "intent", "request", "chainId"), field(value, "intent", ...ownerPath))]),
     view: async record => view(record),
+    // Each family's approve refuses from its intent's `expiresAt` on (some a margin before it); the unsent record then stops
+    // holding its account once the unstarted margin has passed (`terminal` above).
+    approvalExpiry: async record => record.state !== "awaiting_approval" ? null
+      : { deadlineMs: Date.parse(record.intent.expiresAt), approveCloses: false, sealedSlot: false, note: EXPIRED_RELEASED_AFTER_MARGIN },
     status: async (context, record) => operationOutcome(await commands.status(context, record.operationId)),
     async resume(context, record, options): Promise<CommandOutcome> {
       assertResumeOptions(options, commands.resumeOptions);

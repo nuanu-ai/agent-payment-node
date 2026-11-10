@@ -231,7 +231,12 @@ before the first submission may recover that same sealed effect; a crash after
 the submission boundary permits observation only.
 
 `operation resume` makes one bounded observation and does not accept
-`--wait-seconds` for this rail. Confirmed-only status, missing history,
+`--wait-seconds` for this rail. `--observe-only true` is for EVM direct
+transfers and is refused here with `rail_observe_only_unsupported`. Plain
+`operation resume` only observes a transaction that may have been broadcast,
+but sends an approved transaction that was never sent (`signing_started`,
+`signed_not_submitted`) for the first time; for those states the refusal
+points to `operation status`. Confirmed-only status, missing history,
 invalid evidence or an expired blockhash after a possible broadcast remain
 unresolved. Do not create a replacement payment for such an operation.
 Same-key replay returns the same intent; conflicting intents and other money
@@ -275,6 +280,11 @@ refuses abandonment while the window is open or the signature is visible.
 `wallet ensure-solana --profile <profile> --provider coinbase-awal` links an
 already authenticated pinned `awal` account. APN does not log in or enroll it.
 The existing profile owner must agree; no key is exported into APN custody.
+When `awal` is not signed in it answers `AUTH_REQUIRED`, and APN returns
+`APN_PROVIDER_SESSION_REQUIRED` with the next action
+`apn wallet connect --profile <profile> --provider coinbase-agentic-wallet`:
+that foreground handoff signs in the one `awal` session its EVM and Solana
+accounts share. Any other `awal` failure stays `APN_PROVIDER_PROTOCOL`.
 
 The adapter validates the pinned account, balance and send-result formats.
 Transfer preparation returns `APN_PROVIDER_CAPABILITY_UNAVAILABLE` before

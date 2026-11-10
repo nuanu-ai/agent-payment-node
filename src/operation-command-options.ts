@@ -12,18 +12,20 @@ export interface ResumeOptionUse {
   readonly observationRpc?: true;
   /** Absent when the family watches up to --wait-seconds; otherwise its own refusal. */
   readonly refuseWait?: () => never;
+  /** A family whose plain resume already observes names that command here; absent keeps the shared refusal. */
+  readonly refuseObserveOnly?: () => never;
 }
 
 export function assertResumeOptions(options: OperationResumeOptions, use: ResumeOptionUse): void {
   // Only a saved AWAL gasless direct transfer takes the Coinbase preset; every other record fails that check as before.
   if (options.coinbaseObservationRpc !== undefined) assertCoinbaseObservationRequest({} as never, options.coinbaseObservationRpc, true);
-  if (options.observeOnly) refuseObserveOnly();
+  if (options.observeOnly) (use.refuseObserveOnly ?? refuseObserveOnly)();
   if (options.observationRpcEnv !== undefined && use.observationRpc !== true) refuseObservationRpc();
   if (options.waitSeconds !== undefined) use.refuseWait?.();
 }
 
 export function refuseObserveOnly(): never {
-  throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local direct transfer.");
+  throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local EVM direct transfer.");
 }
 export function refuseObservationRpc(): never {
   throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery requires a saved Local, MetaMask or Smart Account gasless operation.",

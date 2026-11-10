@@ -7,6 +7,11 @@ export const CIRCLE_TRANSMITTER = getAddress("0x81D40F21F12A8F0E3252Bccb954D722d
 export const CIRCLE_MINTER = getAddress("0xfd78EE919681417d192449715b2594ab58f5D002");
 export const CIRCLE_IMPLEMENTATION_SLOT = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 export const CIRCLE_TOKEN_IMPLEMENTATION_SLOT = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
+/** The Arbitrum source RPC: `APN_ARBITRUM_RPC_URL`, or arb1.arbitrum.io when unset. On 2026-11-10
+ * arbitrum-one-rpc.publicnode.com refused every eth_getTransactionReceipt, even for a transaction in the latest block
+ * (HTTP 403 alone, a -32602 row in a batch), so it could observe no approval or burn; arb1 answered receipts, the
+ * finalized and safe tags, EIP-1898 block-hash calls and 33-call batches. */
+export const CIRCLE_SOURCE_RPC = Object.freeze({ chainId: 42161, rpcEnvironment: "APN_ARBITRUM_RPC_URL", rpcDefault: "https://arb1.arbitrum.io/rpc" });
 /** Linea uses rpc.linea.build: linea-rpc.publicnode.com refuses transmitter logs older than about 128 blocks ("archive
  * requests require a personal token"), so an external mint could not be found there. */
 export const CIRCLE_ROUTES = Object.freeze({

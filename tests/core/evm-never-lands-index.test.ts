@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkNeverLands, type SignedEffectFacts } from "../../src/evm-finalized-proof.js";
+import { checkNeverLands, publicFinalizedRead, type SignedEffectFacts } from "../../src/evm-finalized-proof.js";
+import { ApnError } from "../../src/errors.js";
+import { failureEnvelope } from "../../src/output.js";
 import { ERA, ERA_PROBE, finalizedNode } from "./finalized-node.js";
 
 /**
@@ -67,4 +69,20 @@ test("a nonce not past, a known transaction, a receipt or a pending effect end t
     assert.equal(node.batches.length, 1);
   }
   await assert.rejects(checkNeverLands(effect({ chainId: 10 }), finalizedNode(8453, () => 8n).batch), { code: "APN_CHAIN_MISMATCH" });
+});
+
+test("the public finalized reader names an HTTP refusal's status (429 reads as a rate limit) and a JSON-RPC error's code", async () => {
+  const answer = (status: number, body: string) => ({ request: async () => ({ status, body }) });
+  const refused = async (work: Promise<unknown>): Promise<ApnError> => {
+    const outcome = await work.then(() => null, (error: unknown) => error); assert.ok(outcome instanceof ApnError); return outcome;
+  };
+  const forbidden = await refused(publicFinalizedRead("https://arbitrum-one-rpc.publicnode.com", "Chain 42161 finalized-read RPC", answer(403, "")).call("eth_chainId", []));
+  assert.deepEqual([forbidden.code, forbidden.details?.status, forbidden.details?.httpStatus], ["APN_RPC_PROTOCOL", 403, 403]);
+  const limited = await refused(publicFinalizedRead("https://rpc.example", "Chain 8453 finalized-read RPC", answer(429, "")).call("eth_chainId", []));
+  assert.equal(failureEnvelope("operation.status", "request", limited).error?.code, "APN_RPC_RATE_LIMITED");
+  // PublicNode's keyless Arbitrum receipt refusal (2026-11-10), as a single call answered with HTTP 200.
+  const row = JSON.stringify({ jsonrpc: "2.0", id: "1", error: { code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" } });
+  const archive = await refused(publicFinalizedRead("https://rpc.example", "Chain 8453 finalized-read RPC", answer(200, row)).call("eth_getTransactionReceipt", [EFFECT]));
+  assert.deepEqual([archive.code, archive.message, archive.details?.reason, archive.details?.rpcErrorCode],
+    ["APN_RPC_PROTOCOL", "The RPC answered eth_getTransactionReceipt with JSON-RPC error -32602.", "rpc_error", -32602]);
 });

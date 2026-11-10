@@ -182,3 +182,37 @@ test("TRON expired unlanded transfer is owner-abandoned only after its solidifie
   await new OperationService(s.core.context.state).assertProfileAvailable(s.account.profileHash);
   assert.equal(((await s.core.execute({ command: "receipt.get", operationId: id })).receipt as { state: string }).state, "abandoned_unknown");
 });
+
+test("TRON observe-only resume names plain resume and touches nothing; plain resume then only observes the broadcast transfer", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare("usdt");
+  s.rpc.solidified = false; await s.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "submitted_pending");
+  const calls = s.rpc.calls.length, loads = s.wrapping.loads;
+  const refused = await s.core.execute({ command: "operation.resume", operationId: id, observeOnly: true });
+  assert.equal(refused.error?.code, "APN_INVALID_INPUT"); assert.equal(refused.error?.details?.reason, "rail_observe_only_unsupported");
+  assert.match(refused.error?.message ?? "", /^--observe-only is for local EVM direct transfers\. This TRON transfer may already be broadcast: /u);
+  assert.deepEqual(refused.next_actions, [`apn operation resume --operation ${id}`]);
+  assert.equal(s.rpc.calls.length, calls); assert.equal(s.wrapping.loads, loads); assert.equal(s.rpc.submissions.length, 1);
+  assert.match((await s.core.execute({ command: "operation.resume", operationId: id, waitSeconds: 5 })).error?.message ?? "", /^TRON resume /u);
+  s.rpc.solidified = true;
+  const observed = await s.core.execute({ command: "operation.resume", operationId: id });
+  assert.equal((observed.operation as { state: string }).state, "completed"); assert.equal(s.rpc.submissions.length, 1);
+});
+
+test("TRON observe-only on an approved, never-sent transfer points at status, because plain resume would send it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root); const id = await s.prepare("usdt");
+  const original = s.adapter.sign.bind(s.adapter);
+  s.adapter.sign = async (binding) => { await original(binding); throw new Error("synthetic interruption after sealed effect"); };
+  assert.equal((await s.core.execute({ command: "transfer.approve", operationId: id })).ok, false);
+  assert.equal((await findStored(s.core.rails.records, id))!.state, "signing_started"); assert.equal(s.rpc.submissions.length, 0);
+  const calls = s.rpc.calls.length, loads = s.wrapping.loads;
+  const refused = await s.core.execute({ command: "operation.resume", operationId: id, observeOnly: true });
+  assert.equal(refused.error?.details?.reason, "rail_observe_only_unsupported"); assert.equal(refused.error?.details?.state, "signing_started");
+  assert.match(refused.error?.message ?? "", /never sent: apn operation resume --operation \S+ would send it for the first time/u);
+  assert.deepEqual(refused.next_actions, [`apn operation status --operation ${id}`]);
+  assert.equal(s.rpc.calls.length, calls); assert.equal(s.wrapping.loads, loads); assert.equal(s.rpc.submissions.length, 0);
+  // The refusal is true: plain resume sends the sealed transfer for the first time.
+  const restart = await tronFixture(temporary.root, { rpc: s.rpc, wrapping: s.wrapping, admit: false });
+  assert.equal(((await restart.core.execute({ command: "operation.resume", operationId: id })).operation as { state: string }).state, "completed");
+  assert.equal(s.rpc.submissions.length, 1);
+});

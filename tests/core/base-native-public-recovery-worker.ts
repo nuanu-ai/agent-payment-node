@@ -120,11 +120,14 @@ else {
     await assert.rejects(native.request({ requestId: "no-private-repeat-sign", version: "apn.native.v1", operation: "directTransfer.approveAndSign", payload: directCustodyPayload(ended) }));
     await assert.rejects(native.request({ requestId: "no-private-effect-probe", version: "apn.native.v1", operation: "effectMaterial.get", payload: {
       profile: ended.profile, operationId: id, fingerprint: ended.fingerprint, expectedPayloadHash: hashObject(directCustodyPayload(ended)) } }));
+    const beforeDeclinedDescription = wrapping.loads;
     await native.request({ requestId: "public-description-test", version: "apn.native.v1", operation: "wallet.describe", payload: { profile: "default" } });
     assert.equal(await readFile(`${prefix}.prepared.json`, "utf8"), preparedBytes);
     assert.equal(await readFile(`${prefix}.signing.json`, "utf8"), signingBytes);
     assert.equal(await readFile(`${prefix}.no-private-entry.json`, "utf8"), proofBytes);
-    assert.equal(wrapping.loads, beforeKeys); assert.equal(wrapping.loads, beforeApprovalKeys);
+    assert.equal(beforeDeclinedDescription, beforeKeys); assert.equal(beforeDeclinedDescription, beforeApprovalKeys);
+    // The public description decrypts nothing: its one wrapping-secret read only proves the secret is still in the Keychain.
+    assert.equal(wrapping.loads, beforeDeclinedDescription + 1);
     assert.equal(physicalSends, 0); assert.equal(signCalls, beforeSigns);
     console.log("RESULT:"+JSON.stringify({ mode, recoveryKeyLoads: 0, recoverySends: 0, recoverySigns: 0,
       immutableOperationHash: immutableSnapshot?.operationHash ?? null, declinedOperationHash: declined.integrityHash,
@@ -232,6 +235,10 @@ if (!blocked) {
   assert.deepEqual(Object.keys(publicProof).sort(), ["rawTransactionHash", "transactionHash"]);
 }
 const describe = () => native.request({ requestId: "public-description-test", version: "apn.native.v1", operation: "wallet.describe", payload: { profile: "default" } });
-if (["custody-change", "dispatch-custody-change"].includes(mode)) await assert.rejects(describe()); else await describe();
-assert.equal(wrapping.loads, beforeKeys + sealedDispatch);
-console.log("RESULT:"+JSON.stringify({ mode, physicalSends, signCalls, recoveryKeyLoads: wrapping.loads-beforeKeys, recoverySends: physicalSends-beforeSends, recoverySigns: signCalls-beforeSigns, state: stored.state }));
+// The public description decrypts nothing: its one wrapping-secret read only proves the secret is still in the Keychain,
+// and a changed custody binding is refused before that read.
+const beforeDescription = wrapping.loads, custodyChanged = ["custody-change", "dispatch-custody-change"].includes(mode);
+if (custodyChanged) await assert.rejects(describe()); else await describe();
+assert.equal(beforeDescription, beforeKeys + sealedDispatch);
+assert.equal(wrapping.loads, beforeDescription + (custodyChanged ? 0 : 1));
+console.log("RESULT:"+JSON.stringify({ mode, physicalSends, signCalls, recoveryKeyLoads: beforeDescription-beforeKeys, recoverySends: physicalSends-beforeSends, recoverySigns: signCalls-beforeSigns, state: stored.state }));

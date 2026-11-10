@@ -5,6 +5,7 @@ import type { ChainAccount, ChainWalletStoragePort, DirectRailName, RailSignedEf
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 import { canonicalProfile } from "./wallet-policy.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 
 const ENVELOPE = "apn.chain-wallet-envelope.v1" as const;
 const SECRET = "apn.chain-wallet-secret.v1";
@@ -85,7 +86,7 @@ export class ChainAccountStore extends SecureStateStore implements ChainWalletSt
       return envelope.account;
     }
     if (existing !== null) corrupt();
-    const wrapping = await this.wrappingSecret.create();
+    const wrapping = await loadOrCreateWrappingSecret(this, this.wrappingSecret);
     let seed: Buffer | undefined;
     try {
       const generated = await input.create();

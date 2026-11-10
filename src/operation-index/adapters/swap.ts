@@ -1,5 +1,6 @@
 import type { CommandOutcome } from "../../commands.js";
 import type { RuntimeContext } from "../../runtime.js";
+import { EXPIRED_RELEASED_AFTER_MARGIN } from "../../operation-approval-expiry.js";
 import { SWAP_TERMINAL_STATES, type SwapOperationRecord } from "../../swap/model.js";
 import { SwapOperationRepository } from "../../swap/repository.js";
 import { field, readableClaims, requiredRecordPath, salvageRecord, type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
@@ -34,6 +35,11 @@ export const swapAdapter: OperationFamilyAdapter<SwapOperationRecord> = {
   salvage: raw => salvageRecord(raw, value => [salvageChain(field(value, "quote", "sourceAsset", "chain"), field(value, "quote", "account"))],
     ["ownerProfileHash"]),
   view: async record => record,
+  // Every lane's consent refuses from the quote expiry on, before its prompt, and leaves the record as it is; the unmarked
+  // swap stops holding its account once the unstarted margin has passed (`terminal` above). Status returns the sealed
+  // record itself, so the presentation goes beside it.
+  approvalExpiry: async record => record.state !== "awaiting_approval" ? null
+    : { deadlineMs: Date.parse(record.quote.expiresAt), approveCloses: false, sealedSlot: true, note: EXPIRED_RELEASED_AFTER_MARGIN },
   // The lane's own status reads the swap and observes a marked one (inclusion, revert or expired_unlanded).
   status: async (context, record) => await laneStatus(context, record),
   // A marked swap whose outcome no chain proof can settle has the owner exit (R4); the family refuses every other case.

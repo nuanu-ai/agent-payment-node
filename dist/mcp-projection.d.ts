@@ -1,5 +1,9 @@
 import { type CommandDefinition } from "./command-catalog.js";
 import { type ForegroundHandoffTool } from "./mcp-foreground-handoff.js";
+/** Foreground commands with no handoff, by design: MCP exposes no prepare, quote or status tool of their families, so an
+ * MCP agent never holds their inputs or operations, and each family starts and ends in the CLI. Every other foreground
+ * command of the catalog is selected above; a test keeps this partition exact. */
+export declare const CLI_ONLY_FOREGROUND: readonly ["stargate native execute", "stargate token execute", "stargate token cleanup", "relay execute", "relay retire", "wallet metamask native-transfer", "circle approval execute", "circle source submit", "sei funding approve", "mega funding approve"];
 export interface ProjectedMcpTool {
     readonly name: string;
     readonly description: string;

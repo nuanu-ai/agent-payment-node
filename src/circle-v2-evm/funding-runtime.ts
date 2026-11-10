@@ -21,7 +21,7 @@ import { exactChainConsent } from "../tty-approval.js";
 import { canonicalProfile } from "../wallet-policy.js";
 import { ApnError } from "../errors.js";
 import { postEffectReadFailure, type PostEffectReadFailure } from "../post-effect-read-failure.js";
-import { CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, isCircleDestinationChain, type CircleDestinationChain } from "./catalog.js";
+import { CIRCLE_SOURCE_RPC, CIRCLE_SOURCE_TOKEN, CIRCLE_MESSENGER, CIRCLE_TRANSMITTER, circleRoute, isCircleDestinationChain, type CircleDestinationChain } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, bindCircleAttestation, decodeCircleSource, decodeCircleDestination, encodeCircleApproval, encodeCircleBurn, encodeCircleMint,
   verifyCircleApproval, verifyCircleAttestationSigners, circleAttesterConfigurationHash, type CircleAttestation } from "./protocol.js";
 import { verifyCircleDestinationAccount, verifyCircleGasEnvelope, verifyCircleMintPreflight, verifyCircleClosureFinality } from "./preflight.js";
@@ -139,7 +139,7 @@ export class CircleFundingEvmService {
   private preflightDeployments(source: CircleRpc, destination: CircleRpc, chain: CircleDestinationChain) { return currentCircleDeployments(source, destination, chain); }
   private preflightAttesters(destination: CircleRpc, digest: string) { return readCircleAttesters(destination, digest); }
   private remotes(chain: CircleDestinationChain) {
-    const route = circleRoute(chain), sourceUrl = this.env.APN_ARBITRUM_RPC_URL ?? "https://arbitrum-one-rpc.publicnode.com", destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
+    const route = circleRoute(chain), sourceUrl = this.env[CIRCLE_SOURCE_RPC.rpcEnvironment] ?? CIRCLE_SOURCE_RPC.rpcDefault, destinationUrl = this.env[route.rpcEnvironment] ?? route.rpcDefault;
     return { source: new CircleRpc(sourceUrl, 42161, this.https, CIRCLE_COMMAND_REQUEST_BUDGET), destination: new CircleRpc(destinationUrl, chain, this.https, CIRCLE_COMMAND_REQUEST_BUDGET),
       // External-mint discovery runs on its own client under its derived budget (P4), apart from the command's read plan.
       discovery: () => new CircleRpc(destinationUrl, chain, this.https, CIRCLE_DISCOVERY_REQUEST_BUDGET) };

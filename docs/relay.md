@@ -77,6 +77,20 @@ is saved.
 Native BNB routes refuse a quote whose deposit fee exceeds `--max-deposit-network-fee-wei`. On Base that value is the full
 OP Stack fee budget: L2 gas, the GasPriceOracle L1 fee upper bound for at most 512 signed bytes and the operator fee.
 
+Native routes (BNB and Base sources) refuse with `APN_OPERATION_BLOCKED`, and save nothing, when the solver-signed
+minimum output is below `--min-output-atomic` (`relay_quote_output_below_minimum`), when a Base quote's L2 fee alone
+exceeds `--max-deposit-network-fee-wei` (`relay_deposit_fee_above_ceiling`), each with the compared values, and when
+Relay declines to quote the route and amount (`relay_native_quote_refused`, with the HTTP status and Relay's error code
+such as `AMOUNT_TOO_LOW` or `NO_SWAP_ROUTES_FOUND`). Output and gas price move with the market, so the same inputs can
+pass a minute later. A quote APN cannot decode or trust is `APN_PROVIDER_PROTOCOL` (`relay_native_quote_invalid`, naming
+the failed check); no answer, HTTP 429 or 5xx is `APN_PROVIDER_UNAVAILABLE` (`relay_native_quote_unavailable`).
+
+Ethereum USDC routes classify their live quote the same way, with the prefix `relay_quote_` (`relay_quote_refused`,
+`relay_quote_unavailable`, `relay_quote_invalid`). The Arbitrum USDC route reads no network at prepare: a `--quote-file`
+that is not JSON or fails a check is `APN_INVALID_INPUT` (`relay_arbitrum_quote_invalid`, naming the check), and a proven
+quote below `--min-output-atomic` is `relay_quote_output_below_minimum` with `quoted_minimum_output_atomic` and
+`requested_minimum_output_atomic`.
+
 ### Existing depository allowance
 
 An allowance left on the Relay depository changes the next Ethereum USDC quote: when it already covers the amount, Relay

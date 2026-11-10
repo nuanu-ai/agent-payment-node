@@ -2,7 +2,8 @@
 import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import { hashObject } from "../canonical.js";
-import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
+import { ApnError } from "../errors.js";
+import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, postRelayQuote, relayStatusLocator } from "./quote.js";
 import { relayNativeRouteByReference } from "./native-routes.js";
 export { POLYGON_USDC, RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BASE_MEGA_ROUTE_REFERENCE, RELAY_BASE_POLYGON_ROUTE_REFERENCE, RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE, RELAY_LEGACY_BASE_MEGA_REFERENCE, RELAY_LEGACY_BASE_POLYGON_REFERENCE, RELAY_MEGA_USDM } from "./native-routes.js";
 const DEPOSIT_NATIVE = parseAbi(["function depositNative(address depositor, bytes32 id) payable"]);
@@ -10,7 +11,23 @@ const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u, UINT = /^(0|[1-9][0-9]*)$/u;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/u, HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
 const same = (a, b) => a.toLowerCase() === b.toLowerCase();
-const fail = (reason) => { throw new Error(`Relay native quote rejected: ${reason}`); };
+/** A provider answer APN cannot decode or trust. Callers of a saved quote catch it and refuse with their own reason. */
+const fail = (reason) => {
+    throw new ApnError("APN_PROVIDER_PROTOCOL", `Relay native quote rejected: ${reason}`, { reason: "relay_native_quote_invalid", check: reason });
+};
+/** A solver-signed, exact quote outside a bound the caller set: a refusal with the compared values, not a provider fault. */
+function refused(reason, message, compared) {
+    throw new ApnError("APN_OPERATION_BLOCKED", message, { reason, ...compared });
+}
+/** The shared status locator check, held to this module's errors. */
+const locator = (requestId, endpoint) => {
+    try {
+        return relayStatusLocator(requestId, endpoint);
+    }
+    catch {
+        return fail("status locator");
+    }
+};
 const record = (value, reason) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : fail(reason);
 const list = (value, reason) => Array.isArray(value) ? value : fail(reason);
 const string = (value, reason) => typeof value === "string" ? value : fail(reason);
@@ -93,12 +110,12 @@ export async function validateRelayNativeQuote(value, intent) {
         ids.push(url.searchParams.get("requestId"));
         if (ids.length === 0)
             fail("request id");
-        statusLocator = relayStatusLocator(ids[0], endpoint);
+        statusLocator = locator(ids[0], endpoint);
     }
     else if (ids.length > 0)
-        statusLocator = relayStatusLocator(ids[0]);
+        statusLocator = locator(ids[0]);
     for (const id of ids)
-        if (relayStatusLocator(id).requestId !== statusLocator?.requestId)
+        if (locator(id).requestId !== statusLocator?.requestId)
             fail("conflicting request ids");
     const protocol = record(record(quote.protocol, "protocol").v2, "protocol v2");
     if (protocol.hubType !== "onchain")
@@ -122,7 +139,7 @@ export async function validateRelayNativeQuote(value, intent) {
         list(output.calls, "calls").length !== 0 || list(order.fees, "fees").length !== 0)
         fail("order identity");
     const minimum = amount(payee.minimumAmount, "minimum output");
-    if (minimum < amount(intent.minimumOutputWei, "required minimum") || amount(payee.expectedAmount, "expected output") < minimum)
+    if (amount(payee.expectedAmount, "expected output") < minimum)
         fail("output minimum");
     const deadline = output.deadline;
     if (typeof deadline !== "number" || !Number.isSafeInteger(deadline) || deadline <= intent.nowSeconds + 60 ||
@@ -189,10 +206,7 @@ export async function validateRelayNativeQuote(value, intent) {
         fail("transaction envelope");
     const gas = amount(tx.gas, "gas"), maxFeePerGas = amount(tx.maxFeePerGas, "max fee"), priority = amount(tx.maxPriorityFeePerGas, "priority fee");
     if (gas === 0n || gas > 500000n || maxFeePerGas === 0n || maxFeePerGas > 100000000000n ||
-        priority === 0n || priority > 10000000000n || priority > maxFeePerGas ||
-        // A Base quote persists the caller's full OP Stack budget as its ceiling, so its L2 part must already fit it;
-        // a BNB quote persists gas x max fee, which prepare compares with the caller's ceiling.
-        (route.sourceChainId === 8453 && gas * maxFeePerGas > ceiling))
+        priority === 0n || priority > 10000000000n || priority > maxFeePerGas)
         fail("gas limits");
     try {
         const decoded = decodeFunctionData({ abi: DEPOSIT_NATIVE, data: string(tx.data, "transaction data") });
@@ -203,6 +217,15 @@ export async function validateRelayNativeQuote(value, intent) {
     catch {
         return fail("deposit calldata");
     }
+    // The caller's own bounds are compared last, on a quote already proven exact and solver-signed. Its minimum output
+    // and Base gas price move with the market, so the same inputs can pass a minute later.
+    const requiredMinimum = amount(intent.minimumOutputWei, "required minimum");
+    if (minimum < requiredMinimum)
+        refused("relay_quote_output_below_minimum", "The Relay quote's minimum output is below the requested minimum.", { quoted_minimum_output_wei: minimum.toString(), requested_minimum_output_wei: requiredMinimum.toString() });
+    // A Base quote persists the caller's full OP Stack budget as its ceiling, so its L2 part must already fit it;
+    // a BNB quote persists gas x max fee, which prepare compares with the caller's ceiling.
+    if (route.sourceChainId === 8453 && gas * maxFeePerGas > ceiling)
+        refused("relay_deposit_fee_above_ceiling", "The Relay deposit network fee quote exceeds the caller's ceiling.", { quoted_fee_wei: (gas * maxFeePerGas).toString(), fee_ceiling_wei: ceiling.toString() });
     const projection = { schemaVersion: "apn.relay-native-quote.v1",
         routeReference: route.reference,
         ...(statusLocator === undefined ? {} : { statusLocator }), orderId: orderId.toLowerCase(),
@@ -269,13 +292,9 @@ export async function verifySavedRelayNativeQuote(quote) {
         fail("saved deposit");
     }
 }
-/** One public quote POST, no API key or retry. */
+/** One public quote POST, no API key or retry; a declined, unanswered or unreadable quote is classified by `postRelayQuote`. */
 export async function requestRelayNativeQuote(intent, fetcher = fetch, now = () => Math.floor(Date.now() / 1000)) {
-    const response = await fetcher("https://api.relay.link/quote/v2", { method: "POST",
-        headers: { "content-type": "application/json" }, body: JSON.stringify(relayNativeQuoteRequest(intent)),
-        signal: AbortSignal.timeout(12_000) });
-    if (!response.ok)
-        fail(`HTTP ${response.status}`);
-    return validateRelayNativeQuote(await response.json(), { ...intent, nowSeconds: now() });
+    const payload = await postRelayQuote(relayNativeQuoteRequest(intent), fetcher, "relay_native_quote", fail);
+    return validateRelayNativeQuote(payload, { ...intent, nowSeconds: now() });
 }
 //# sourceMappingURL=native-quote.js.map

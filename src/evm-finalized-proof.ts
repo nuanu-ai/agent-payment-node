@@ -30,7 +30,7 @@ export function publicFinalizedRead(url: string, label: string, https: Pick<Brid
   let sequence = 0;
   const post = async (body: unknown) => {
     const response = await https.request(endpoint, "POST", canonicalJson(body), 1024 * 1024, "APN_RPC_CONFIG");
-    if (response.status !== 200) throw new ApnError("APN_RPC_PROTOCOL", `${label} answered a non-200 status.`, { status: response.status });
+    if (response.status !== 200) throw new ApnError("APN_RPC_PROTOCOL", `${label} answered a non-200 status.`, { status: response.status, httpStatus: response.status });
     return response.body;
   };
   return {

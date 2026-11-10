@@ -192,6 +192,8 @@ export class DirectPublicEffectJournal extends SecureStateStore {
     return Object.freeze(effect);
   }
   async hasSigned(operation: OperationRecord): Promise<boolean> { return await this.readJson(this.path(operation, "signed")) !== null; }
+  /** Whether prepare recorded the public binding that approve and the expiry retirement require (else direct_public_evidence_missing). */
+  async hasPrepared(operation: OperationRecord): Promise<boolean> { return await this.readJson(this.path(operation, "prepared")) !== null; }
 }
 function attestationMessage(operation: OperationRecord, effect: DirectPublicEffect, binding: Binding): string {
   const body = { domain: "APN_DIRECT_PUBLIC_EFFECT_PROOF_V1", binding, chainId: operation.chainId,

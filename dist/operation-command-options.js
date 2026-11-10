@@ -5,14 +5,14 @@ export function assertResumeOptions(options, use) {
     if (options.coinbaseObservationRpc !== undefined)
         assertCoinbaseObservationRequest({}, options.coinbaseObservationRpc, true);
     if (options.observeOnly)
-        refuseObserveOnly();
+        (use.refuseObserveOnly ?? refuseObserveOnly)();
     if (options.observationRpcEnv !== undefined && use.observationRpc !== true)
         refuseObservationRpc();
     if (options.waitSeconds !== undefined)
         use.refuseWait?.();
 }
 export function refuseObserveOnly() {
-    throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local direct transfer.");
+    throw new ApnError("APN_INVALID_INPUT", "Observation-only recovery requires a saved local EVM direct transfer.");
 }
 export function refuseObservationRpc() {
     throw new ApnError("APN_INVALID_INPUT", "Observation RPC recovery requires a saved Local, MetaMask or Smart Account gasless operation.", { reason: "gasless_observation_operation_kind" });

@@ -9,6 +9,7 @@ import { circleHex, circleRecord, circleUint } from "./protocol.js";
 import { circleTokenPairKey, verifyCircleDeployments } from "./preflight.js";
 import { circleBlocked, circleEnvelope } from "./operation-model.js";
 import { circleEnvelopeEra } from "./funding-never-lands.js";
+import { circleHttpRefusal, circleJsonRpcRefusal, circleRpcSetting } from "./rpc-refusal.js";
 export const CIRCLE_RPC_ABI = parseAbi([
     "function localDomain() view returns(uint32)", "function version() view returns(uint32)", "function paused() view returns(bool)",
     "function remoteTokenMessengers(uint32) view returns(bytes32)", "function localMinter() view returns(address)",
@@ -34,7 +35,7 @@ export const CIRCLE_READ_PLAN = { identity: 1, configuration: 13, attesters: 23,
  * used nonce, cleanup nonce, mint head), each retried once. */
 export const CIRCLE_COMMAND_REQUEST_BUDGET = 2 * (CIRCLE_READ_PLAN.identity + CIRCLE_READ_PLAN.configuration + CIRCLE_READ_PLAN.attesters +
     2 * CIRCLE_READ_PLAN.account + 2 * CIRCLE_READ_PLAN.envelope + 3 * CIRCLE_READ_PLAN.preflight + 8 * CIRCLE_READ_PLAN.observation + CIRCLE_READ_PLAN.ambiguous + 4 * CIRCLE_READ_PLAN.single);
-const transient = (e) => e instanceof ApnError && typeof e.details?.status === "number" && [429, 500, 502, 503, 504].includes(e.details.status);
+const transient = (e) => e instanceof ApnError && typeof e.details?.httpStatus === "number" && [429, 500, 502, 503, 504].includes(e.details.httpStatus);
 /** Public HTTPS/DNS pinning and physical request accounting. Only transient read-only HTTP failures
  * retry once; an observation restarts wholly. Financial RPC is never retried. The chain id is checked once per client,
  * reads issued together leave as one JSON-RPC batch POST (every default Circle endpoint accepts batches), and an
@@ -47,6 +48,7 @@ export class CircleRpc {
     requests = 0;
     posts = 0;
     endpoint;
+    setting;
     chainVerified = false;
     queued = [];
     scopes = new AsyncLocalStorage();
@@ -58,6 +60,7 @@ export class CircleRpc {
         if (parsed.search !== "" || parsed.hash !== "")
             circleBlocked("rpc_url");
         this.endpoint = parsed.toString();
+        this.setting = circleRpcSetting(chainId);
     }
     /** Read calls counted against the budget, and physical POSTs sent (a batch is one POST). */
     get requestCount() { return this.requests; }
@@ -114,7 +117,7 @@ export class CircleRpc {
                 entry.resolve(this.result(this.envelopeRecord(await this.post(canonicalJson({ jsonrpc: "2.0", id: ids[0], method: entry.method, params: entry.params }), entry.method, gate), entry.method), ids[0], entry.method, gate));
                 return;
             }
-            const value = await this.post(canonicalJson(entries.map((entry, i) => ({ jsonrpc: "2.0", id: ids[i], method: entry.method, params: entry.params }))), "eth_call", gate);
+            const value = await this.post(canonicalJson(entries.map((entry, i) => ({ jsonrpc: "2.0", id: ids[i], method: entry.method, params: entry.params }))), "batch", gate);
             if (!Array.isArray(value) || value.length !== entries.length)
                 throw new ApnError("APN_RPC_PROTOCOL", "Circle RPC batch result is invalid.", { method: "batch", origin: new URL(this.endpoint).origin, stage: "protocol" });
             const rows = new Map();
@@ -150,7 +153,7 @@ export class CircleRpc {
         }
         gate();
         if (response.status !== 200)
-            throw new ApnError("APN_RPC_CONFIG", "Circle RPC returned an unsuccessful HTTP response.", { method, origin, status: response.status, stage: "response" });
+            throw circleHttpRefusal("Circle RPC", response.status, method, this.setting, { method, origin, stage: "response" });
         try {
             return JSON.parse(response.body);
         }
@@ -167,6 +170,10 @@ export class CircleRpc {
         }
     }
     result(value, id, method, gate) {
+        // The endpoint's own refusal (a status inside a batch, a rate limit) is not a broken envelope (rpc-refusal.ts).
+        const refused = circleJsonRpcRefusal("Circle RPC", value, id, method, this.setting, { method, origin: new URL(this.endpoint).origin, stage: "response" });
+        if (refused !== null)
+            throw refused;
         if (value.jsonrpc !== "2.0" || value.id !== id || !Object.hasOwn(value, "result") || Object.hasOwn(value, "error"))
             throw new ApnError("APN_RPC_PROTOCOL", "Circle RPC result envelope is invalid.", { method, origin: new URL(this.endpoint).origin, stage: "protocol" });
         gate();

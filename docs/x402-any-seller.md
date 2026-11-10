@@ -27,6 +27,11 @@ Caps are atomic units of that token.
   `x402_asset_required`.
 - Omitting `--chain` selects Base.
 - Base USDC keeps its original policy record without a network field; every other chain and token has its own record.
+- The per-payment cap is read again before signing and before the first paid request, on every chain, Base USDC included.
+  If the owner lowered `--max-x402-amount-atomic` below an operation's frozen cap, APN signs and sends nothing and
+  answers `APN_X402_PROFILE_LIMIT_EXCEEDED` with reason `x402_profile_limit_below_frozen_cap`. The next action is the
+  `wallet policy set` command for that chain and token. An authorization that was never sent lapses at its validBefore,
+  and `operation resume` then closes it without effect. A payment already sent is still reconciled.
 
 **Allowlist row for Permit2.** The row names the chain and token with the `x402` rail, its caps and exactly this
 mechanism pin:
@@ -104,8 +109,8 @@ The choice is deterministic, and an operation never changes method.
 
 ### `x402 permit2 approve` (foreground)
 
-The foreground TTY lane under allowlist admission. It pays the lowest-index admitted Permit2 offer. See
-[Permit2 requests](x402-non-usdc.md).
+The foreground TTY lane under allowlist admission. It pays the lowest-index admitted Permit2 offer; over MCP,
+`apn_foreground_handoff` returns the exact command. See [Permit2 requests](x402-non-usdc.md).
 
 ### `x402 permit2 allowance` (foreground)
 

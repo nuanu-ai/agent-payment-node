@@ -8,6 +8,7 @@ import { NodeAwalProcessRunner } from "../../src/awal-process-adapter.js";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
 import { chainAsset } from "../../src/chain-policy.js";
 import { renderHelp } from "../../src/command-help.js";
+import { failureEnvelope } from "../../src/output.js";
 import { SolanaAwalAdapter } from "../../src/solana/awal-adapter.js";
 import { SolanaTestRpc, SolanaWrapping, SOL_RECIPIENT } from "./solana-helpers.js";
 import { temporaryState } from "./helpers.js";
@@ -48,6 +49,40 @@ test("a provider answer for another chain or without the pinned fields is still 
   const adapter = new SolanaAwalAdapter(new ChainAccountStore(temporary.root, new SolanaWrapping()), new SolanaTestRpc(),
     new NodeAwalProcessRunner(async () => child.script));
   await assert.rejects(adapter.ensureAccount("awal-solana"), (error: { code?: string }) => error.code !== undefined && error.code !== "APN_INTERNAL");
+});
+
+/** awal 2.12.1 `cliError` under --json: formatJson (two-space indent) of the failure on stdout, then exit 1. */
+async function awalFailure(error: unknown, exitCode = 1): Promise<{ script: string; cleanup: () => Promise<void> }> {
+  const dir = await mkdtemp(join(tmpdir(), "apn-awal-solana-auth-")), script = join(dir, "awal.cjs");
+  const stdout = `${JSON.stringify({ success: false, error }, null, 2)}\n`;
+  await writeFile(script, `process.stdout.write(${JSON.stringify(stdout)});process.exitCode=${exitCode};`);
+  return { script, cleanup: async () => await rm(dir, { recursive: true, force: true }) };
+}
+// The display message of awal 2.12.1 AuthRequiredError, which `awal address --json` sends with code AUTH_REQUIRED.
+const AWAL_AUTH_MESSAGE = "Authentication required.\n\nSign in using one of:\n  1. Email OTP:\n     npx awal auth login <your-email>\n" +
+  "     npx awal auth verify <flow-id> <6-digit-code>\n\n  2. Wallet UI:\n     npx awal show";
+
+test("a signed-out awal's exact AUTH_REQUIRED answer is a session error naming the connect handoff; near misses stay protocol", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const ensure = (script: string): Promise<unknown> => new SolanaAwalAdapter(new ChainAccountStore(temporary.root, new SolanaWrapping()),
+    new SolanaTestRpc(), new NodeAwalProcessRunner(async () => script)).ensureAccount("awal-solana");
+  const signedOut = await awalFailure({ code: "AUTH_REQUIRED", message: AWAL_AUTH_MESSAGE }); t.after(signedOut.cleanup);
+  // Before the fix every non-zero awal exit here was APN_PROVIDER_PROTOCOL.
+  await assert.rejects(ensure(signedOut.script), (error: { code?: string }) => {
+    assert.equal(error.code, "APN_PROVIDER_SESSION_REQUIRED");
+    assert.deepEqual(failureEnvelope("wallet.ensure-solana", "request", error).next_actions,
+      ["apn wallet connect --profile awal-solana --provider coinbase-agentic-wallet"]);
+    return true;
+  });
+  for (const [error, exitCode] of [
+    [{ code: "ADDRESS_FETCH_FAILED", message: AWAL_AUTH_MESSAGE }, 1],
+    [{ code: "AUTH_REQUIRED", message: AWAL_AUTH_MESSAGE, detail: "extra" }, 1],
+    [{ code: "AUTH_REQUIRED", message: 7 }, 1],
+    [{ code: "AUTH_REQUIRED", message: AWAL_AUTH_MESSAGE }, 2],
+  ] as const) {
+    const child = await awalFailure(error, exitCode); t.after(child.cleanup);
+    await assert.rejects(ensure(child.script), { code: "APN_PROVIDER_PROTOCOL" }, JSON.stringify([error, exitCode]));
+  }
 });
 
 test("non-EVM amounts are labelled lamports, SUN or the asset's atomic unit in usage, options and the manifest type", () => {

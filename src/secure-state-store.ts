@@ -166,6 +166,9 @@ export class SecureStateStore {
     validateDirectory(await lstat(target), target === this.root);
   }
 
+  /** The records of one state directory, empty when it is absent (see readDirectory). */
+  async recordEntries(relativePath: string): Promise<readonly Dirent[]> { return await this.readDirectory(relativePath); }
+
   /** Records only: atomic-write stages are never records, and an abandoned stage cannot wedge a listing. */
   protected async readDirectory(relativePath: string): Promise<readonly Dirent[]> {
     const entries = await this.readDirectoryWithStagedWrites(relativePath);

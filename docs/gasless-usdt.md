@@ -53,7 +53,7 @@ apn gasless usdt execution-status --profile-hash <hash> --operation <operation-i
 | --- | --- | --- |
 | `prepare` | Reads the active owner policy, a safe Ethereum account snapshot and the sponsor; saves only unsigned material. | `apn_gasless_usdt_prepare` |
 | `status` | Reads the saved bound operation. No network access. | `apn_gasless_usdt_status` |
-| `execute` | Foreground approval, local signing and at most one send. | none (CLI only) |
+| `execute` | Foreground approval, local signing and at most one send. | none; `apn_foreground_handoff` returns the exact command |
 | `resume` | Observes a submitted hash (as `observe`), retires an interrupted unsent attempt, or returns the saved operation. Never signs or sends. | `apn_gasless_usdt_resume` |
 | `observe` | Observes the original submitted hash through finalized Ethereum evidence. Never signs or sends. | none |
 | `execution-status` | Reads the local bound and execution journals. No network access. | none |
@@ -130,7 +130,8 @@ authorization.
 ## Execute
 
 `apn gasless usdt execute --profile-hash <hash> --operation <operation-id>` loads only an existing prepared operation
-and needs a foreground terminal.
+and needs a foreground terminal. Over MCP, `apn_foreground_handoff` validates the same `profile_hash` and `operation`
+and returns this exact command for the owner to run; it reads, signs and sends nothing.
 
 **Consent screen.** It shows Ethereum, the owner, the recipient, the gross amount, the exact recipient amount, the
 requested maximum fee and the effective fee cap `F`, the quoted fee bound, the bound policy revision and digest, and the

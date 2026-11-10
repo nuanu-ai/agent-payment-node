@@ -4,6 +4,10 @@ export declare const MAX_RPC_BATCH_CALLS = 16;
 export declare const BATCH_READ_METHODS: Set<string>;
 /** Trace admission is a fixed exhaustive callTracer read, never a supplied JavaScript tracer. */
 export declare function readOnlyBatchMethod(method: string, params: readonly unknown[]): boolean;
+/** The detail reason of a well-formed JSON-RPC error by which the endpoint reports that the called code reverted. */
+export declare const ETH_CALL_REVERTED = "eth_call_reverted";
+/** The detail reason of any other well-formed JSON-RPC error: the endpoint answered with an error, not a broken envelope. */
+export declare const RPC_ERROR = "rpc_error";
 export declare function parseRpcResultEnvelope(raw: string, id: string, method?: string): unknown;
 export declare function parseRpcBatchResultEnvelope(raw: string, ids: readonly number[]): readonly unknown[];
 export declare function parseRpcLogEnvelope(raw: string, id: string): {

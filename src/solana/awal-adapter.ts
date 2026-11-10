@@ -1,4 +1,4 @@
-import { NodeAwalProcessRunner, type AwalProcessRunnerPort } from "../awal-process-adapter.js";
+import { NodeAwalProcessRunner, type AwalProcessResult, type AwalProcessRunnerPort } from "../awal-process-adapter.js";
 import { canonicalJson, exactKeys, isPlainRecord } from "../canonical.js";
 import { atomic, chainAsset, chainDisplay, SOLANA_GENESIS } from "../chain-policy.js";
 import type { ChainAccount, ChainAsset, ChainAssetAlias, ChainBalance, ChainWalletStoragePort, DirectRailPort, RailEffectBinding, RailInspection, RailPreparedTransfer, RailSignedEffect } from "../direct-rail-ports.js";
@@ -29,12 +29,12 @@ export class SolanaAwalAdapter implements DirectRailPort {
     return account;
   }
   async ensureAccount(profile: string): Promise<ChainAccount> {
-    const address = await this.providerAddress();
+    const address = await this.providerAddress(profile);
     return await this.storage.ensureProvider({ profile, rail: "solana", provider: this.provider, address });
   }
   async balance(account: ChainAccount, asset: ChainAsset): Promise<ChainBalance> {
     await this.currentAccount(account); await this.assertNetwork();
-    const result = await this.run(["balance", "--chain", "solana", "--asset", asset.alias, "--json"]);
+    const result = await this.run(["balance", "--chain", "solana", "--asset", asset.alias, "--json"], account.profile);
     // Preserve only the pinned fields. Provider display strings never become amounts.
     if (result.chain !== "solana" && result.chain !== "Solana") providerProtocol();
     if (!isPlainRecord(result.balances)) providerProtocol();
@@ -66,7 +66,7 @@ export class SolanaAwalAdapter implements DirectRailPort {
     await this.revalidate(binding.account, binding.prepared);
     const prepared = binding.prepared;
     const result = await this.run(["send", awalAmount(prepared.asset, prepared.amountAtomic), prepared.recipient,
-      "--chain", "solana", "--asset", prepared.asset.symbol, "--json"]);
+      "--chain", "solana", "--asset", prepared.asset.symbol, "--json"], binding.account.profile);
     if (result.chain !== "solana" && result.chain !== "Solana" || result.error !== undefined) providerProtocol();
     return { transactionId: solanaSignature(result.transactionHash) };
   }
@@ -79,24 +79,22 @@ export class SolanaAwalAdapter implements DirectRailPort {
   }
   private async currentAccount(account: ChainAccount): Promise<void> {
     const stored = await this.account(account.profile);
-    if (stored === null || canonicalJson(stored) !== canonicalJson(account) || await this.providerAddress() !== account.address) mismatch();
+    if (stored === null || canonicalJson(stored) !== canonicalJson(account) || await this.providerAddress(account.profile) !== account.address) mismatch();
   }
-  private async providerAddress(): Promise<string> {
-    const result = await this.run(["address", "--chain", "solana", "--json"]);
+  private async providerAddress(profile: string): Promise<string> {
+    const result = await this.run(["address", "--chain", "solana", "--json"], profile);
     if (!exactKeys(result, ["address", "chain"]) || result.chain !== "solana" || typeof result.address !== "string") providerProtocol();
     return solanaAddress(result.address);
   }
   /** Every awal Solana call here answers public JSON (address, balance, a transaction hash): the runner keeps its stdout.
-   * Authentication never runs through this adapter, so no secret output can reach it. */
-  private async run(argv: readonly string[]): Promise<Record<string, unknown>> {
+   * Authentication never runs through this adapter, so no secret output can reach it. Only awal's exact AUTH_REQUIRED
+   * failure answer means "not signed in"; any other failure or shape stays a protocol failure. */
+  private async run(argv: readonly string[], profile: string): Promise<Record<string, unknown>> {
     const result = await this.runner.run(argv, false);
-    try {
-      if (result.exitCode !== 0 || result.optionalFailure !== undefined || result.stdout.length > 65_536) providerProtocol();
-      const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(result.stdout)) as unknown;
-      if (!isPlainRecord(value)) providerProtocol();
-      return value;
-    } catch { return providerProtocol(); }
-    finally { result.stdout.fill(0); }
+    const value = providerJson(result);
+    if (result.exitCode === 0 && result.optionalFailure === undefined && isPlainRecord(value)) return value;
+    if (awalAuthRequired(result.exitCode, value)) signInRequired(profile);
+    return providerProtocol();
   }
   private feeContract(): AwalSolanaFeeContract { return this.fees ?? unavailable(); }
 }
@@ -114,3 +112,22 @@ export function awalAmount(asset: ChainAsset, amountAtomic: string): string {
 function unavailable(): never { throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "The pinned awal Solana contract does not guarantee the exact fee/rent payer and native debit cap; provider invocation is blocked."); }
 function mismatch(): never { throw new ApnError("APN_PROFILE_DRIFT", "The authenticated Solana provider account differs from this profile."); }
 function providerProtocol(): never { throw new ApnError("APN_PROVIDER_PROTOCOL", "The pinned awal Solana output does not attest the required public fields."); }
+/** The bounded UTF-8 JSON on the provider's stdout, which is zeroed once read; anything else is a protocol failure. */
+function providerJson(result: AwalProcessResult): unknown {
+  try {
+    if (result.stdout.length > 65_536) providerProtocol();
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(result.stdout)) as unknown;
+  } catch { return providerProtocol(); }
+  finally { result.stdout.fill(0); }
+}
+/** awal 2.12.1 `cliError` under --json: exit 1 and exactly {"success":false,"error":{"code":"AUTH_REQUIRED","message":…}}. */
+function awalAuthRequired(exitCode: number, value: unknown): boolean {
+  return exitCode === 1 && isPlainRecord(value) && exactKeys(value, ["success", "error"]) && value.success === false &&
+    isPlainRecord(value.error) && exactKeys(value.error, ["code", "message"]) && value.error.code === "AUTH_REQUIRED" &&
+    typeof value.error.message === "string";
+}
+/** awal keeps one session for its EVM and Solana accounts; the foreground `wallet connect` handoff signs it in. */
+function signInRequired(profile: string): never {
+  throw new ApnError("APN_PROVIDER_SESSION_REQUIRED", "The pinned awal wallet is not signed in.",
+    { retryable: true, nextActions: [`apn wallet connect --profile ${profile} --provider coinbase-agentic-wallet`] });
+}

@@ -300,6 +300,8 @@ function argv(command: AwalCommand): readonly string[] {
   switch (command.kind) {
     case "status": return ["status", "--json"];
     case "login": return ["auth", "login", command.identity, "--json"];
+    // awal 2.12.1 takes the one-time code only as this positional argument (neither stdin nor the environment), so a
+    // same-user `ps` can read it while this bounded call runs; README states the exposure.
     case "verify": return ["auth", "verify", command.challenge, "--json"];
     case "balance": return ["balance", "--chain", "base", "--asset", "usdc", "--json"];
     case "address": return ["address", "--chain", "base"];
