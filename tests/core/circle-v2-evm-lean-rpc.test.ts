@@ -108,7 +108,7 @@ test("an HTTP refusal names its status and the chain's RPC setting; HTTP 429 is 
   assert.deepEqual([e.code, e.details?.httpStatus, e.details?.reason, forbidden.posts.length], ["APN_RPC_CONFIG", 403, "rpc_status", 1]);
   assert.match(e.message, /HTTP 403 to eth_getTransactionReceipt; set APN_ARBITRUM_RPC_URL to another public HTTPS RPC endpoint/u);
   assert.deepEqual(envelope(e), SWITCH_ARBITRUM);
-  assert.match((await refused(lean(143, answering(() => ({ result: "0x8f" }), 502).https).call("eth_chainId", []))).message, /HTTP 502 to eth_chainId; set APN_MONAD_RPC_URL /u);
+  assert.match((await refused(lean(143, answering(() => ({ result: "0x8f" }), 404).https).call("eth_chainId", []))).message, /HTTP 404 to eth_chainId; set APN_MONAD_RPC_URL /u);
   const limited = answering(() => ({ result: "0x1" }), 429), l = await refused(lean(42161, limited.https).call("eth_getTransactionReceipt", [hash]));
   assert.deepEqual([l.code, l.details?.httpStatus, l.details?.retryable, limited.posts.length], ["APN_RPC_RATE_LIMITED", 429, true, 2]);
   assert.deepEqual(envelope(l), ["Wait for the RPC provider's rate-limit window, then rerun the same command; prepared operations are idempotent."]);
@@ -143,4 +143,26 @@ test("the external-mint proof reader names the same refusals and the chain's RPC
   const d = await refused(destination.call("eth_getTransactionReceipt", [hash]));
   assert.deepEqual([d.code, d.details?.reason, d.details?.rpcErrorCode], ["APN_RPC_CONFIG", "rpc_error", -32602]);
   assert.match(d.message, /set APN_MONAD_RPC_URL /u);
+});
+
+/** A brief outage is not a wrong setting: before 0.5.103 an HTTP 5xx named the RPC setting, sending an agent elsewhere. */
+const UNAVAILABLE = ["Wait for the RPC endpoint to recover, then rerun the same command; APN does not switch endpoints on its own."];
+test("HTTP 5xx and no answer are an unavailable endpoint: retryable, naming no setting", async () => {
+  const down = answering(() => ({ result: "0x8f" }), 502), e = await refused(lean(143, down.https).call("eth_chainId", []));
+  assert.deepEqual([e.code, e.details?.reason, e.details?.httpStatus, e.details?.retryable, down.posts.length], ["APN_RPC_AMBIGUOUS", "rpc_unavailable", 502, true, 2]);
+  assert.doesNotMatch(e.message, /APN_MONAD_RPC_URL/u); assert.deepEqual(envelope(e), UNAVAILABLE);
+  const silent = { request: async () => { throw new ApnError("APN_RPC_AMBIGUOUS", "Bridge transport failed: request_deadline.", { transportReason: "request_deadline" }); } };
+  const n = await refused(lean(42161, silent).call("eth_getTransactionReceipt", [hash]));
+  assert.deepEqual([n.code, n.details?.reason, n.details?.transportReason, n.details?.retryable], ["APN_RPC_AMBIGUOUS", "rpc_unavailable", "request_deadline", true]);
+  assert.deepEqual(envelope(n), UNAVAILABLE);
+  const external = new CircleExternalRpc("https://rpc.example", 143, new CircleExternalRpcBudget(() => 1, 100, answering(() => ({ result: "0x1" }), 503).https));
+  const x = await refused(external.call("eth_getTransactionReceipt", [hash]));
+  assert.deepEqual([x.code, x.details?.reason, x.details?.httpStatus, envelope(x)], ["APN_RPC_AMBIGUOUS", "rpc_unavailable", 503, UNAVAILABLE]);
+});
+
+test("a node's JSON-RPC error to a signed transaction rejects that transaction and names no RPC setting", async () => {
+  const t = answering(() => ({ error: { code: -32000, message: "nonce too low" } }));
+  const e = await refused(lean(42161, t.https).call("eth_sendRawTransaction", ["0x02"], () => undefined));
+  assert.deepEqual([e.code, e.details?.reason, e.details?.rpcErrorCode, t.posts.length], ["APN_RPC_PROTOCOL", "rpc_transaction_rejected", -32000, 1]);
+  assert.doesNotMatch(e.message, /APN_ARBITRUM_RPC_URL/u); assert.deepEqual(envelope(e), []);
 });
