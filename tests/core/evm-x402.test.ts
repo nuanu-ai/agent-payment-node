@@ -9,9 +9,11 @@ import test from "node:test";
 import { decodePaymentSignatureHeader, inspectCandidates } from "../../src/x402-codec.js";
 import { normalizeX402HttpRequest } from "../../src/x402-http-request.js";
 import { getAddress } from "viem";
+import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
 import { x402Network, x402Asset } from "../../src/x402-network.js";
 import { assertX402LimitCoversCap } from "../../src/x402-network-policy.js";
 import { validateX402Operation, type X402OperationRecord } from "../../src/x402-state-integrity.js";
+import { x402UsageKey } from "../../src/x402-usage.js";
 import { temporaryState } from "./helpers.js";
 import { FRESH_PROCESS_TEST_TIMEOUT_MS, freshProcess } from "./fresh-process.js";
 import { initializeNetworkFixture, networkChallenge, networkFixture, networkPaid, networkSettlement, NETWORK_LIMITS } from "./evm-x402-helpers.js";
@@ -19,6 +21,12 @@ import { X402_PAYMENT_REQUIRED, X402_REQUIREMENTS, X402_URL } from "./x402-vecto
 
 const { runCli } = await testRuntime(cliRuntime, "cli.js");
 const { createMcpServer } = await testRuntime(mcpRuntime, "mcp-server.js");
+
+/** The operation's hold in the shared daily usage (x402-usage.ts), or null when approve reserved nothing. */
+async function usageHold(root: string, operation: X402OperationRecord) {
+  const identity = { account: getAddress(operation.wallet), chain: operation.network, asset: { kind: "token" as const, identifier: getAddress(operation.token) } };
+  return await new AssetUsageLedger(root).load(identity, assetUsageReservationId(identity, x402UsageKey(operation.operationId)));
+}
 
 for (const chainId of [1, 42161] as const) {
 const network = x402Network(chainId).network;
@@ -69,11 +77,14 @@ test(`${networkName} never inherits Base policy; lowering current cap blocks new
   const operationId = (prepared.operation as { operationId: string }).operationId;
   const lower = { command: "wallet.policy.set" as const, profile: "default", chainId, ...NETWORK_LIMITS, maxX402AmountAtomic: "1" };
   await fixture.core.wallet.policySet(lower);
+  const unapproved = (await fixture.state.findX402Operation(operationId))!;
   assert.equal((await fixture.core.execute({ command: "x402.fetch.approve", operationId })).error?.code, "APN_X402_PROFILE_LIMIT_EXCEEDED");
   assert.equal(fixture.nativeCalls.filter((call) => call.operation.includes("Authorize")).length, 0);
+  // The cap is read before the daily-usage hold and the journal step, so the refused approve left neither.
+  assert.deepEqual(await fixture.state.findX402Operation(operationId), unapproved);
+  assert.equal(await usageHold(temporary.root, unapproved), null);
   await fixture.core.wallet.policySet({ ...lower, ...NETWORK_LIMITS });
-  await fixture.core.execute({ command: "operation.resume", operationId });
-  await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((await fixture.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
   const original = (await fixture.state.findX402Operation(operationId))!;
   assert.equal(original.state, "authorized_not_sent");
   await fixture.core.wallet.policySet(lower);
@@ -309,15 +320,20 @@ test("Base USDC: a lowered limit blocks signing and the first send of a local au
   const nextActions = ["apn wallet policy set --profile default --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>"];
   // Before the fix Base kept only its prepare-time admission: approve signed and resume sent under the lowered limit.
   await fixture.core.wallet.policySet(lower);
+  const unapproved = (await fixture.state.findX402Operation(operationId))!;
   const unsigned = await fixture.core.execute({ command: "x402.fetch.approve", operationId });
   assert.equal(unsigned.error?.details?.reason, "x402_profile_limit_below_frozen_cap", JSON.stringify(unsigned));
   assert.deepEqual(unsigned.next_actions, nextActions);
   assert.equal(fixture.nativeCalls.filter((call) => call.operation.includes("Authorize")).length, 0);
+  // Before 0.5.103 approve reserved the daily usage and moved the record to authorization_material_pending before this
+  // refusal, so the hold stayed until validBefore and a resume. The cap is now read first: no hold, no state change.
+  assert.deepEqual(await fixture.state.findX402Operation(operationId), unapproved);
+  assert.equal(await usageHold(temporary.root, unapproved), null);
   await fixture.core.wallet.policySet({ ...lower, ...NETWORK_LIMITS });
-  await fixture.core.execute({ command: "operation.resume", operationId });
-  await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal((await fixture.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
   const authorized = (await fixture.state.findX402Operation(operationId))!;
   assert.equal(authorized.state, "authorized_not_sent");
+  assert.equal((await usageHold(temporary.root, authorized))?.state, "reserved");
   await fixture.core.wallet.policySet(lower);
   const refused = await fixture.core.execute({ command: "operation.resume", operationId });
   assert.equal(refused.ok, false, JSON.stringify(refused));

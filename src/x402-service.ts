@@ -245,8 +245,11 @@ export class X402Service extends X402PaidRequest {
       }
       // Nothing was signed yet, so an approval after validBefore ends with no effect instead of a stranded signature.
       if (this.authorizationExpired(current)) return publicX402Operation(await this.commitTerminal(current, "failed_before_effect"));
-      // The owner's payee pin is re-read before any hold or signature (and again inside authorization and before the first send).
+      // The owner's payee pin and per-payment cap are re-read before any hold or journal step, so a refusal leaves neither a
+      // daily-usage hold nor a pending record. Both are read again inside authorization, which resume also enters for a
+      // pending record, and before the first send.
       await assertCurrentX402Payee(this.context, current);
+      await assertCurrentNetworkPolicy(this.context, current);
       // The shared daily usage sees this spend before anything is signed.
       await this.usage.reserve(current);
       const pending = await this.transition(current, "authorization_material_pending");
