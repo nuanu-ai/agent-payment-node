@@ -202,6 +202,8 @@ export class LocalWalletNative implements NativePort {
     const envelope = await this.state.loadEncryptedWalletEnvelope(profile);
     if (envelope === null) throw protocol("Public wallet has no custody envelope.");
     await assertEvmNativeCustody(this.state, profile, await evmNativeCustody(this.state, profile), walletEnvelopeIdentity(envelope, profile));
+    // A wallet whose wrapping secret left the Keychain is never described as usable; an unreadable Keychain throws here too.
+    await this.wallets.assertWrappingSecretPresent();
     return { found: true, profile: wallet.profile, address: wallet.address, createdAt: wallet.createdAt, bindingHash: wallet.bindingHash };
   }
   private async approveAndSign(payload: Readonly<Record<string, unknown>>): Promise<unknown> {

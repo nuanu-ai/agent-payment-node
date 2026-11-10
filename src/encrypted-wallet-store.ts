@@ -208,6 +208,13 @@ export class EncryptedWalletStore {
     secret.x402Effects = {};
   }
 
+  /** The wrapping secret is still in the Keychain: it is loaded only to be zeroed at once, and nothing is decrypted. */
+  async assertWrappingSecretPresent(): Promise<void> {
+    const wrapping = await this.wrappingSecret.load();
+    if (wrapping === null) throw walletWrappingSecretMissing();
+    wrapping.fill(0);
+  }
+
   private async requiredWrappingSecret(): Promise<Buffer> {
     const wrapping = await this.wrappingSecret.load();
     if (wrapping === null) throw new ApnError("APN_STATE_CORRUPT", "The wallet wrapping secret is missing.");
@@ -242,6 +249,18 @@ function parseEnvelope(value: unknown, profile: string): WalletEnvelope {
   if (!isPlainRecord(value.cipher) || !exactKeys(value.cipher, ["name", "nonce", "ciphertext", "tag"]) || value.cipher.name !== CIPHER_NAME) corrupt("Wallet cipher metadata is invalid.");
   for (const key of ["nonce", "ciphertext", "tag"] as const) if (typeof value.cipher[key] !== "string") corrupt("Wallet cipher encoding is invalid.");
   return value as unknown as WalletEnvelope;
+}
+
+/**
+ * A local wallet whose login-Keychain wrapping secret is gone. Wallet status, ensure and doctor refuse it with this
+ * reason instead of calling it ready; nothing replaces the secret, and only that Keychain item unwraps the wallet.
+ */
+export function walletWrappingSecretMissing(): ApnError {
+  return new ApnError("APN_STATE_CORRUPT", "The encrypted wallet exists but its wrapping secret is missing.", {
+    reason: "wrapping_secret_missing",
+    nextActions: ["Restore the login Keychain item ai.nuanu.apn.wrapping-secret.v1 (account default) from a backup of " +
+      "the login Keychain; without it this wallet cannot be unwrapped."],
+  });
 }
 
 /** Validate public envelope identity without loading or exposing the signing key. */

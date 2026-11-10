@@ -494,6 +494,15 @@ foreground terminal and passes each to the pinned `awal` as a command-line argum
 child runs (APN stops it at the 30-second provider timeout), another process of the same user can read the code with
 `ps`. It is a one-time code for that one pending sign-in; APN never prints, logs or stores it.
 
+`apn wallet status` and `apn wallet ensure` (CLI and MCP) read an existing local wallet's wrapping secret once and zero it
+at once; they decrypt nothing. When the Keychain item is gone they fail with `APN_STATE_CORRUPT` and
+`details.reason: "wrapping_secret_missing"` instead of answering `ready`, and `ensure` never creates a replacement for an
+existing wallet. When the Keychain itself cannot be read (locked, refused, or `/usr/bin/security` failing) they fail with
+`APN_NATIVE_REJECTED` and `details.nativeCode: "APN_KEYCHAIN_UNAVAILABLE"`. `apn doctor keychain` reports the same two
+failures and also decrypts the wallet, so a secret that exists but does not unwrap it fails with `APN_STATE_CORRUPT`
+without that reason. Its successful answers carry `wrapping_secret: "present"`; without a wallet it answers
+`status: "absent"` with `wrapping_secret: "present"` or `"missing"`.
+
 Foreground approval requires stdin and stderr attached to real TTYs and an exact operation-bound code within 60 seconds;
 a timeout or interruption writes nothing. It is a human-confirmation boundary, not protection against a compromised user
 session.

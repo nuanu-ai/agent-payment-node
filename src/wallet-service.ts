@@ -1,4 +1,4 @@
-import { EncryptedWalletStore } from "./encrypted-wallet-store.js";
+import { EncryptedWalletStore, walletWrappingSecretMissing } from "./encrypted-wallet-store.js";
 import { BASE_USDC, CHAIN_CAIP2, ETH_DECIMALS, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { formatAtomic } from "./money.js";
@@ -28,23 +28,36 @@ import { evmAddressLock } from "./evm-address-ownership.js";
 export class WalletService {
   constructor(private readonly context: RuntimeContext) {}
 
+  /**
+   * An unreadable Keychain fails from `load` (APN_NATIVE_REJECTED, nativeCode APN_KEYCHAIN_UNAVAILABLE). A readable one
+   * answers: without a wallet the answer is reported as `wrapping_secret`; with one a missing secret is refused with
+   * reason `wrapping_secret_missing`, and a present one must also decrypt the wallet.
+   */
   async doctorKeychain(profileInput: string): Promise<unknown> {
     const profile = canonicalProfile(profileInput);
     const profileHash = this.context.state.profileHash(profile);
     const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
-    if (artifacts.stored === null && artifacts.encrypted === null) {
-      const wrapping = await this.context.requireKeychainProbe().load();
-      wrapping?.fill(0);
-      return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: [`apn wallet ensure --profile ${profile}`] };
-    }
-    // Explicit custody diagnostic. Public wallet status does not load wrapping secrets.
     const probe = this.context.requireKeychainProbe();
-    const wallets = new EncryptedWalletStore(this.context.state, { load: () => probe.load(),
+    if (artifacts.stored === null && artifacts.encrypted === null) {
+      const wrapping = await probe.load();
+      wrapping?.fill(0);
+      return { profile, status: "absent", wrapping_secret: wrapping === null ? "missing" : "present",
+        proof_class: "encrypted_apn_home_status", next_actions: [`apn wallet ensure --profile ${profile}`] };
+    }
+    // Explicit custody diagnostic: unlike wallet status, it decrypts the wallet.
+    const wallets = new EncryptedWalletStore(this.context.state, {
+      load: async () => {
+        const wrapping = await probe.load();
+        if (wrapping === null) throw walletWrappingSecretMissing();
+        return wrapping;
+      },
       create: async () => { throw new ApnError("APN_INTERNAL", "Keychain diagnostics cannot create custody material."); } });
     const loaded = await wallets.describe(profile);
     if (loaded === null) throw new ApnError("APN_STATE_CORRUPT", "The public wallet has no encrypted custody material.");
-    try { return await this.initializedStatus(profile, profileHash); }
-    finally { wallets.clear(loaded.secret); }
+    try {
+      const status = await this.initializedStatus(profile, profileHash);
+      return { ...status, wrapping_secret: "present" };
+    } finally { wallets.clear(loaded.secret); }
   }
 
   async ensure(profileInput: string): Promise<unknown> {
@@ -138,7 +151,8 @@ export class WalletService {
     return await this.initializedStatus(profile, profileHash);
   }
 
-  private async initializedStatus(profile: string, profileHash: string): Promise<unknown> {
+  /** Public identity plus, through native describe, proof that the wrapping secret is still in the Keychain. */
+  private async initializedStatus(profile: string, profileHash: string): Promise<Readonly<Record<string, unknown>>> {
     await this.context.ready();
     return await this.context.state.withLocks([`profile:${profileHash}`], async () => {
       const stored = await this.context.state.loadWallet(profileHash);
