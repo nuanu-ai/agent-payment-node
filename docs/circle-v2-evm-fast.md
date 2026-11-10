@@ -30,6 +30,16 @@ TokenMessenger `0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d`, MessageTransmitter
 An endpoint you set must accept the same log window. Linea defaults to `rpc.linea.build` because
 `linea-rpc.publicnode.com` refuses transmitter logs older than about 128 blocks without a personal token.
 
+An endpoint's refusal names the variable to set; APN never switches endpoints on its own. An HTTP status other than 200
+is `APN_RPC_CONFIG` with `reason: rpc_status` and `details.httpStatus` (HTTP 429 is `APN_RPC_RATE_LIMITED` with
+`retryable: true`). A JSON-RPC error inside an HTTP 200 answer, alone or as a batch row, is `APN_RPC_CONFIG` with
+`reason: rpc_error` and `details.rpcErrorCode`; a rate-limit code is `APN_RPC_RATE_LIMITED`, and an execution revert stays
+`APN_RPC_PROTOCOL` with `reason: rpc_execution_reverted`. Only a body that breaks the JSON-RPC envelope reads "Circle RPC
+result envelope is invalid". A refusal is a failed read: the operation keeps its state, sent effects and holds. On
+2026-11-10 the keyless Arbitrum default refused every `eth_getTransactionReceipt` (HTTP 403 alone, an error row in a
+batch: "Archive requests require a personal token"), so observing a sent approval or burn needs `APN_ARBITRUM_RPC_URL`
+set to an endpoint that serves receipts.
+
 ## Requirements and owner policy
 
 Admission is each profile's own active policy.

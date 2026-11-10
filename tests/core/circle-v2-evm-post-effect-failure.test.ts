@@ -104,6 +104,33 @@ test("an approval sent before a failed read, and a mint sent before a failed rea
   assert.deepEqual([done.state, f.net.arbitrum.sends, f.net.destination.sends], ["completed", 2, 1]);
 });
 
+test("an Arbitrum RPC that refuses receipts (PublicNode) is named with APN_ARBITRUM_RPC_URL; the sent approval is kept and never resent", async (t) => {
+  const f = await setup(t); let refusing = true;
+  // PublicNode's keyless Arbitrum root on 2026-11-10: HTTP 403 for a lone receipt read, HTTP 200 with this error row in a batch.
+  const refusal = { code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" };
+  f.net.https.request = async (url, method, body) => {
+    if (!refusing || body === null || !url.startsWith("https://arbitrum.example/") || !body.includes("eth_getTransactionReceipt")) return await f.request(url, method, body);
+    const sent = JSON.parse(body) as { id: number; method: string } | { id: number; method: string }[];
+    if (!Array.isArray(sent)) return { status: 403, body: JSON.stringify({ jsonrpc: "2.0", error: refusal, id: sent.id }) };
+    const rows = JSON.parse((await f.request(url, method, body)).body) as unknown[];
+    return { status: 200, body: JSON.stringify(rows.map((row, i) => sent[i]!.method === "eth_getTransactionReceipt" ? { jsonrpc: "2.0", error: refusal, id: sent[i]!.id } : row)) };
+  };
+  const approved = await f.cli(["approve-source", "--operation", f.id]); assert.equal(approved.ok, true, JSON.stringify(approved.error));
+  const afterApproval = approved.operation as PublicOperation;
+  assert.deepEqual(afterApproval.observation_failure, { stage: "after_effect_sent", code: "APN_RPC_CONFIG", reason: "rpc_error", http_status: null });
+  assert.deepEqual([phases(afterApproval).approval, phases(afterApproval).burn, f.net.arbitrum.sends], [["submitted", true], ["prepared", false], 1]);
+  // The refusal is a failed read only: the approval stays sent and held, and the answer names the setting to change.
+  const observed = await f.cli(["observe", "--operation", f.id]);
+  assert.deepEqual([observed.ok, observed.error?.code, observed.error?.details?.rpcErrorCode, observed.next_actions, f.net.arbitrum.sends],
+    [false, "APN_RPC_CONFIG", -32602, ["Set APN_ARBITRUM_RPC_URL to a public HTTPS RPC endpoint of that chain, then rerun the same command."], 1]);
+  refusing = false;
+  let current = afterApproval;
+  for (let i = 0; i < 3 && current.state !== "awaiting_mint"; i++) {
+    const next = await f.cli(["approve-source", "--operation", f.id]); assert.equal(next.ok, true, JSON.stringify(next.error)); current = next.operation as PublicOperation;
+  }
+  assert.deepEqual([current.state, f.net.arbitrum.sends], ["awaiting_mint", 2], "the approval is observed, never signed again; the burn is sent once");
+});
+
 test("a failure before anything is sent still answers as a refusal without an operation", async (t) => {
   const f = await setup(t);
   f.net.https.request = async () => { throw new Error("synthetic outage"); };
