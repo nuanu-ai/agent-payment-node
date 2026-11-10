@@ -18,6 +18,11 @@ export interface CircleRoute { readonly chainId: CircleDestinationChain; readonl
    * default endpoint 2026-10-17: evm-rpc.sei-apis.com allows 2000 blocks, rpc.linea.build a span of 10000, rpc.monad.xyz a
    * span of 100. An endpoint set through `rpcEnvironment` must accept the same window. */
   readonly logRange: number; }
+/** The Arbitrum source RPC: `APN_ARBITRUM_RPC_URL`, or arb1.arbitrum.io when unset. On 2026-11-10
+ * arbitrum-one-rpc.publicnode.com refused every eth_getTransactionReceipt, even for a transaction in the latest block
+ * (HTTP 403 alone, a -32602 row in a batch), so it could observe no approval or burn; arb1 answered receipts, the
+ * finalized and safe tags, EIP-1898 block-hash calls and 33-call batches. */
+export const CIRCLE_SOURCE_RPC = Object.freeze({ chainId: 42161, rpcEnvironment: "APN_ARBITRUM_RPC_URL", rpcDefault: "https://arb1.arbitrum.io/rpc" } as const);
 /** Linea uses rpc.linea.build: linea-rpc.publicnode.com refuses transmitter logs older than about 128 blocks ("archive
  * requests require a personal token"), so an external mint could not be found there. */
 export const CIRCLE_ROUTES: Readonly<Record<CircleDestinationChain, CircleRoute>> = Object.freeze({

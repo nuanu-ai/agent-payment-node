@@ -22,7 +22,7 @@ TokenMessenger `0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d`, MessageTransmitter
 
 | Chain | Variable | Keyless default | Log window for external-mint scans |
 | --- | --- | --- | --- |
-| Arbitrum One (source) | `APN_ARBITRUM_RPC_URL` | `https://arbitrum-one-rpc.publicnode.com` | — |
+| Arbitrum One (source) | `APN_ARBITRUM_RPC_URL` | `https://arb1.arbitrum.io/rpc` | — |
 | Sei | `APN_SEI_RPC_URL` | `https://evm-rpc.sei-apis.com` | 2,000 blocks |
 | Linea | `APN_LINEA_RPC_URL` | `https://rpc.linea.build` | 10,000 blocks |
 | Monad | `APN_MONAD_RPC_URL` | `https://rpc.monad.xyz` | 100 blocks |
@@ -36,9 +36,9 @@ is `APN_RPC_CONFIG` with `reason: rpc_status` and `details.httpStatus` (HTTP 429
 `reason: rpc_error` and `details.rpcErrorCode`; a rate-limit code is `APN_RPC_RATE_LIMITED`, and an execution revert stays
 `APN_RPC_PROTOCOL` with `reason: rpc_execution_reverted`. Only a body that breaks the JSON-RPC envelope reads "Circle RPC
 result envelope is invalid". A refusal is a failed read: the operation keeps its state, sent effects and holds. On
-2026-11-10 the keyless Arbitrum default refused every `eth_getTransactionReceipt` (HTTP 403 alone, an error row in a
-batch: "Archive requests require a personal token"), so observing a sent approval or burn needs `APN_ARBITRUM_RPC_URL`
-set to an endpoint that serves receipts.
+2026-11-10 `arbitrum-one-rpc.publicnode.com`, the Arbitrum default through 0.5.101, refused every
+`eth_getTransactionReceipt` (HTTP 403 alone, an error row in a batch: "Archive requests require a personal token"), so it
+could not observe a sent approval or burn; the default is now `arb1.arbitrum.io/rpc`, which serves them.
 
 ## Requirements and owner policy
 

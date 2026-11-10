@@ -12,12 +12,12 @@
 import { isPlainRecord } from "../canonical.js";
 import { ApnError, type ErrorDetails } from "../errors.js";
 import { jsonRpcRateLimit } from "../lifi/rpc-session-helpers.js";
-import { circleRoute, isCircleDestinationChain } from "./catalog.js";
+import { CIRCLE_SOURCE_RPC, circleRoute, isCircleDestinationChain } from "./catalog.js";
 import { circleBlocked } from "./operation-model.js";
 
 /** The setting the Circle commands read for a chain's RPC (funding-runtime.ts and funding-external-adoption.ts). */
 export function circleRpcSetting(chainId: number): string {
-  if (chainId === 42161) return "APN_ARBITRUM_RPC_URL";
+  if (chainId === CIRCLE_SOURCE_RPC.chainId) return CIRCLE_SOURCE_RPC.rpcEnvironment;
   if (isCircleDestinationChain(chainId)) return circleRoute(chainId).rpcEnvironment;
   return circleBlocked("rpc_chain_setting");
 }

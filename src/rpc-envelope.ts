@@ -31,6 +31,8 @@ export function readOnlyBatchMethod(method: string, params: readonly unknown[]):
 
 /** The detail reason of a well-formed JSON-RPC error by which the endpoint reports that the called code reverted. */
 export const ETH_CALL_REVERTED = "eth_call_reverted";
+/** The detail reason of any other well-formed JSON-RPC error: the endpoint answered with an error, not a broken envelope. */
+export const RPC_ERROR = "rpc_error";
 
 export function parseRpcResultEnvelope(raw: string, id: string, method?: string): unknown {
   const message = strictRpcRecord(raw);
@@ -39,11 +41,16 @@ export function parseRpcResultEnvelope(raw: string, id: string, method?: string)
     throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered eth_call with an execution revert.",
       { rpcMethod: method, stage: "result_envelope", reason: ETH_CALL_REVERTED });
   }
+  const rpcMethod = method !== undefined && (BATCH_READ_METHODS.has(method) || method === "eth_sendRawTransaction") ? method : "unknown";
+  // Any other exact error envelope is named by its code (never its text, which may carry a URL or key); the code stays
+  // APN_RPC_PROTOCOL, so no caller decides anything new from it.
+  const rpcErrorCode = jsonRpcErrorCode(message, id);
+  if (rpcErrorCode !== null) {
+    throw new ApnError("APN_RPC_PROTOCOL", `The RPC answered ${rpcMethod} with JSON-RPC error ${rpcErrorCode}.`,
+      { rpcMethod, stage: "result_envelope", reason: RPC_ERROR, rpcErrorCode });
+  }
   if (!exactKeys(message, ["jsonrpc", "id", "result"]) || message.jsonrpc !== "2.0" || message.id !== id) {
-    throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.", {
-      rpcMethod: method !== undefined && (BATCH_READ_METHODS.has(method) || method === "eth_sendRawTransaction") ? method : "unknown",
-      stage: "result_envelope",
-    });
+    throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.", { rpcMethod, stage: "result_envelope" });
   }
   return message.result;
 }
@@ -114,6 +121,14 @@ function ethCallReverted(message: Record<string, unknown>, id: string): boolean 
   if (!exactKeys(message, ["jsonrpc", "id", "error"]) || message.jsonrpc !== "2.0" || message.id !== id || !isPlainRecord(error)) return false;
   const code: unknown = error.code, text: unknown = error.message;
   return Number.isSafeInteger(code) && typeof text === "string" && (code === 3 || /^execution reverted\b/iu.test(text));
+}
+
+/** The code of an exact error envelope for this id whose error has an integer code and a text message, or null. */
+function jsonRpcErrorCode(message: Record<string, unknown>, id: string): number | null {
+  const error = message.error;
+  if (!exactKeys(message, ["jsonrpc", "id", "error"]) || message.jsonrpc !== "2.0" || message.id !== id || !isPlainRecord(error)) return null;
+  const code: unknown = error.code, text: unknown = error.message;
+  return typeof code === "number" && Number.isSafeInteger(code) && typeof text === "string" ? code : null;
 }
 
 function strictRpcRecord(raw: string): Record<string, unknown> {

@@ -59,18 +59,34 @@ test("malformed RPC envelope reports a bounded method and stage without response
   });
 });
 
-test("an eth_call revert is the endpoint's answer, marked for the caller; every other error envelope stays an unmarked protocol fault", () => {
+test("an eth_call revert is the endpoint's answer, marked for the caller; another error envelope is named by its code; a malformed one stays unmarked", () => {
   const parse = (error: unknown, method: string, id: string) => () => parseRpcResultEnvelope(JSON.stringify({ jsonrpc: "2.0", id: "1", error }), id, method);
   // publicnode, drpc and Arbitrum (code 3 with data), Base (no data), BSC (data in the message) and the older -32000 form.
   for (const error of [{ code: 3, message: "execution reverted", data: "0x" }, { code: 3, message: "execution reverted" },
     { code: 3, message: "execution reverted: 0x", data: "0x" }, { code: -32000, message: "execution reverted" }]) {
     assert.throws(parse(error, "eth_call", "1"), { code: "APN_RPC_PROTOCOL", details: { rpcMethod: "eth_call", stage: "result_envelope", reason: "eth_call_reverted" } });
   }
+  // Still APN_RPC_PROTOCOL for every caller, but no longer "violates the exact envelope": PublicNode's receipt refusal, an
+  // internal error, a rate limit and a revert of a method other than eth_call. The provider's text is never echoed.
+  for (const [error, method, rpcErrorCode] of [
+    [{ code: -32602, message: "Archive requests require a personal token. Get one at: https://www.allnodes.com/publicnode" }, "eth_getTransactionReceipt", -32602],
+    [{ code: -32603, message: "Internal error" }, "eth_call", -32603], [{ code: -32005, message: "rate limit exceeded" }, "eth_call", -32005],
+    [{ code: 3, message: "execution reverted", data: "0x" }, "eth_estimateGas", 3],
+  ] as const) assert.throws(parse(error, method, "1"), (thrown: unknown) => {
+    assert.ok(thrown instanceof ApnError);
+    assert.deepEqual([thrown.code, thrown.message, thrown.details], ["APN_RPC_PROTOCOL", `The RPC answered ${method} with JSON-RPC error ${rpcErrorCode}.`,
+      { rpcMethod: method, stage: "result_envelope", reason: "rpc_error", rpcErrorCode }]);
+    return true;
+  });
   for (const [error, method, id] of [
-    [{ code: -32603, message: "Internal error" }, "eth_call", "1"], [{ code: -32005, message: "rate limit exceeded" }, "eth_call", "1"],
-    [{ message: "execution reverted" }, "eth_call", "1"], ["execution reverted", "eth_call", "1"],
-    [{ code: 3, message: "execution reverted" }, "eth_estimateGas", "1"], [{ code: 3, message: "execution reverted" }, "eth_call", "2"],
-  ] as const) assert.throws(parse(error, method, id), { code: "APN_RPC_PROTOCOL", details: { rpcMethod: method, stage: "result_envelope" } });
+    [{ message: "execution reverted" }, "eth_call", "1"], ["execution reverted", "eth_call", "1"], [{ code: "3", message: "execution reverted" }, "eth_call", "1"],
+    [{ code: 3 }, "eth_estimateGas", "1"], [{ code: 3, message: "execution reverted" }, "eth_call", "2"],
+  ] as const) assert.throws(parse(error, method, id), (thrown: unknown) => {
+    assert.ok(thrown instanceof ApnError);
+    assert.deepEqual([thrown.code, thrown.message, thrown.details], ["APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.",
+      { rpcMethod: method, stage: "result_envelope" }]);
+    return true;
+  });
   assert.throws(() => parseRpcResultEnvelope('{"jsonrpc":"2.0","id":"1","error":{"code":3,"message":"execution reverted"},"result":"0x"}', "1", "eth_call"),
     { code: "APN_RPC_PROTOCOL", details: { rpcMethod: "eth_call", stage: "result_envelope" } });
 });

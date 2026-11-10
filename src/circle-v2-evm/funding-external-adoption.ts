@@ -6,7 +6,7 @@ import { evmAddressLock } from "../evm-address-ownership.js";
 import { listLocalWallets } from "../wallet-import-collision.js";
 import type { StateStore } from "../state.js";
 import type { BridgeHttps } from "../lifi/https.js";
-import { CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
+import { CIRCLE_SOURCE_RPC, CIRCLE_TRANSMITTER, circleRoute } from "./catalog.js";
 import { circleHex, circleRecord, circleUint, decodeCircleSource, verifyCircleApproval, type CircleObservation } from "./protocol.js";
 import { verifyCircleDeployments } from "./preflight.js";
 import { readCircleDeployment } from "./rpc.js";
@@ -49,7 +49,7 @@ export async function adoptCircleFundingExternalMint(state:StateStore,repo:Circl
  const key=fundingExternalClaimKey(initial),sourceKey=hashObject({sourceTransactionHash:initial.source.transactionHash,sourceMessageHash:initial.source.sourceMessageHash});
  await state.initialize();return state.withLocks([`profile:${initial.profileHash}`,`profile:${initial.destinationProfileHash}`,`custody:${initial.profileHash}`,`custody:${initial.destinationProfileHash}`,`operation:${id}`,`operation:idempotency:${initial.idempotencyHash}`,evmAddressLock(initial.sourceCustody.walletAddress),evmAddressLock(initial.destinationCustody.walletAddress),`circle-external-nonce:${key}`,`circle-external-message:${sourceKey}`],async()=>{
   const savedOperation=await repo.loadAny(id);if(savedOperation===null||savedOperation.schemaVersion!=="apn.circle-v2-evm-operation.v2")circleBlocked("external_funding_operation_required");let op=savedOperation;await noPrivate(state,op);if(op.terminal){if(op.state!=="external_fulfilled"||op.externalFulfillment?.destinationReceipt.transactionHash!==txHash)circleBlocked("external_terminal_conflict");return op;}
-  const route=circleRoute(op.destinationChain),budget=new CircleExternalRpcBudget(now,now()+120000,https),source=new CircleExternalRpc(env.APN_ARBITRUM_RPC_URL??"https://arbitrum-one-rpc.publicnode.com",42161,budget),destination=new CircleExternalRpc(env[route.rpcEnvironment]??route.rpcDefault,op.destinationChain,budget);
+  const route=circleRoute(op.destinationChain),budget=new CircleExternalRpcBudget(now,now()+120000,https),source=new CircleExternalRpc(env[CIRCLE_SOURCE_RPC.rpcEnvironment]??CIRCLE_SOURCE_RPC.rpcDefault,CIRCLE_SOURCE_RPC.chainId,budget),destination=new CircleExternalRpc(env[route.rpcEnvironment]??route.rpcDefault,op.destinationChain,budget);
   const approval=op.effects[0]!,burn=op.effects[1]!;if(approval.phase!=="confirmed"||burn.phase!=="confirmed"||approval.transactionHash===null||burn.transactionHash===null)circleBlocked("external_source_not_confirmed");
   const [approvalObservation,burnObservation,destinationObservation]=await Promise.all([source.observation(approval.transactionHash,"finalized"),source.observation(burn.transactionHash,"finalized"),destination.observation(txHash,"safe")]);
   if(approvalObservation===null||burnObservation===null||destinationObservation===null)circleBlocked("external_finality_unresolved");

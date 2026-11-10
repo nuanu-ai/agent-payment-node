@@ -215,7 +215,7 @@ change, so treat this as a starting point, not a guarantee.
 | --- | --- | --- | --- |
 | Ethereum | `https://ethereum-rpc.publicnode.com` | `https://eth.drpc.org` | |
 | Base | `https://mainnet.base.org` | `https://base-rpc.publicnode.com`, `https://base.drpc.org` | |
-| Arbitrum One | `https://arb1.arbitrum.io/rpc` | `https://arbitrum-one-rpc.publicnode.com`, `https://arbitrum.drpc.org` | |
+| Arbitrum One | `https://arb1.arbitrum.io/rpc` | `https://arbitrum-one-rpc.publicnode.com`, `https://arbitrum.drpc.org` | `https://arbitrum-one-rpc.publicnode.com`: every `eth_getTransactionReceipt` refused (HTTP 403, 2026-11-10) |
 | OP Mainnet | `https://mainnet.optimism.io` | `https://optimism-rpc.publicnode.com`, `https://optimism.drpc.org` | |
 | Polygon PoS | `https://polygon-bor-rpc.publicnode.com` | `https://polygon.drpc.org` | `https://polygon-rpc.com`: HTTP 401, "API key disabled" |
 | BNB Smart Chain | `https://bsc-rpc.publicnode.com`, `https://bsc-dataseed.bnbchain.org` | `https://bsc-dataseed.binance.org` | `https://bsc.drpc.org`: HTTP 429, public rate limit |

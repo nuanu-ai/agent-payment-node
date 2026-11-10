@@ -25,7 +25,7 @@ const wrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Bu
 type Effect = { role: string; phase: string; transaction_hash: string | null };
 type PublicOperation = { operation_id: string; state: string; terminal: boolean; effects: Effect[]; observation_failure?: Record<string, unknown> };
 
-async function setup(t: test.TestContext) {
+async function setup(t: test.TestContext, defaultSource = false) {
   const base = await mkdtemp(join(await realpath(tmpdir()), "circle-post-effect-")), root = join(base, "state"); t.after(() => rm(base, { recursive: true, force: true }));
   const net = new SyntheticCctp(CHAIN), mechanism = circleFundingMechanism(CHAIN);
   const ensure = async (profile: string) => { const r = await runCli(["wallet", "ensure", "--profile", profile], {}, { stateRoot: root, wrappingSecret: wrapping }); assert.equal(r.ok, true, JSON.stringify(r.error)); return getAddress((r.data as { address: string }).address); };
@@ -46,13 +46,19 @@ async function setup(t: test.TestContext) {
     { chain: "eip155:42161", kind: "native", rail: "bridge", maximumPerTransferAtomic: "30000000000000", dailyLimitAtomic: "1000000000000000", mechanism }]);
   await activate("cctp-gas", gas, [{ chain: `eip155:${CHAIN}`, kind: "native", rail: "bridge", maximumPerTransferAtomic: circleRoute(CHAIN).destinationNativeCap,
     dailyLimitAtomic: "1000000000000000000", mechanism }]);
-  const service = new CircleFundingEvmService(new StateStore(root), wrapping, net.env, Date.now, {}, net.https);
+  // `defaultSource`: APN_ARBITRUM_RPC_URL is unset, so the source reads go to the built-in default, served by the synthetic Arbitrum.
+  const sourceUrls: string[] = [], env: Readonly<Record<string, string | undefined>> = defaultSource ? { ...net.env, APN_ARBITRUM_RPC_URL: undefined } : net.env;
+  const https = defaultSource ? { request: async (url: string, method: string, body: string | null) => {
+    if (url.startsWith("https://iris-api.circle.com/") || url.startsWith("https://dest-")) return await net.https.request(url, method, body);
+    sourceUrls.push(url); return await net.https.request(url === "https://arb1.arbitrum.io/rpc" ? "https://arbitrum.example/" : url, method, body);
+  } } : net.https;
+  const service = new CircleFundingEvmService(new StateStore(root), wrapping, env, Date.now, {}, https);
   const cli = async (args: readonly string[]) => await runCli(["circle", "evm", ...args], {}, { stateRoot: root, wrappingSecret: wrapping, circleFundingEvm: service });
   const prepared = await cli(["prepare", "--profile", "cctp-src", "--destination-profile", "cctp-gas", "--destination-chain", String(CHAIN), "--idempotency-key", "post-effect-01",
     "--beneficiary", BENEFICIARY, "--gross-atomic", "1000000", "--max-issuer-fee-atomic", "1000", "--min-mint-atomic", "999000"]);
   assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
   const id = (prepared.operation as PublicOperation).operation_id, request = net.https.request;
-  return { net, cli, id, request };
+  return { net, cli, id, request, sourceUrls };
 }
 const phases = (op: PublicOperation) => Object.fromEntries(op.effects.map((e) => [e.role, [e.phase, e.transaction_hash !== null]]));
 
@@ -129,6 +135,13 @@ test("an Arbitrum RPC that refuses receipts (PublicNode) is named with APN_ARBIT
     const next = await f.cli(["approve-source", "--operation", f.id]); assert.equal(next.ok, true, JSON.stringify(next.error)); current = next.operation as PublicOperation;
   }
   assert.deepEqual([current.state, f.net.arbitrum.sends], ["awaiting_mint", 2], "the approval is observed, never signed again; the burn is sent once");
+});
+
+test("without APN_ARBITRUM_RPC_URL every source read, receipts included, goes to arb1.arbitrum.io/rpc, not PublicNode", async (t) => {
+  const f = await setup(t, true);
+  const burned = await f.cli(["approve-source", "--operation", f.id]); assert.equal(burned.ok, true, JSON.stringify(burned.error));
+  assert.deepEqual([(burned.operation as PublicOperation).state, f.net.arbitrum.sends], ["awaiting_mint", 2]);
+  assert.deepEqual([...new Set(f.sourceUrls)], ["https://arb1.arbitrum.io/rpc"]);
 });
 
 test("a failure before anything is sent still answers as a refusal without an operation", async (t) => {
