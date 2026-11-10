@@ -27,6 +27,11 @@ brew install nuanu-ai/tap/apn
 The Formula installs `apn` and the Homebrew `node@24` dependency. The first wallet command creates `~/.apn` with mode
 `0700` and one encrypted wallet envelope per profile with mode `0600`.
 
+`apn` runs on the first `node` on `PATH`, and Homebrew keeps `node@24` off `PATH` (keg-only). On a Node.js outside
+`>=24 <27`, `apn` and `apn mcp serve` load nothing else: they print one `APN_NODE_UNSUPPORTED` line naming the required
+range and the running version on stderr, write nothing to stdout and exit 1. Put `/opt/homebrew/opt/node@24/bin` first
+on `PATH` then.
+
 ### Discover the installed contract
 
 ```sh

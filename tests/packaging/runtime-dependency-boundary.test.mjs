@@ -15,6 +15,17 @@ test("shipped executable installs the guard before its runtime graph", () => {
   assert.ok(bootstrap.indexOf("installRuntimeDependencyBoundary();") < bootstrap.indexOf('await import("../dist/bin.js")'));
 });
 
+// A static import links (and an older Node fails to link) before any statement runs: only the Node.js guard is static.
+test("shipped executable checks the Node.js version before it links the boundary or the runtime", () => {
+  const bootstrap = readFileSync(resolve(root, "bin/apn.js"), "utf8");
+  const staticImports = [...bootstrap.matchAll(/^import\s[^;]*?["']([^"']+)["']/gmu)].map((match) => match[1]);
+  assert.deepEqual(staticImports, ["../dist/node-version-guard.js"]);
+  const check = bootstrap.indexOf("unsupportedNodeMessage(process.versions.node)");
+  assert.ok(check > 0 && check < bootstrap.indexOf('await import("../dist/runtime-dependency-boundary.js")'));
+  const guard = readFileSync(resolve(root, "dist/node-version-guard.js"), "utf8");
+  assert.doesNotMatch(guard, /^\s*(?:import\b|export\b[^;]*\bfrom\b)/mu, "the guard module links nothing else");
+});
+
 for (const argv of [["--help"], ["mcp", "config"]]) {
   test(`shipped APN ${argv.join(" ")} bootstrap guards ESM and CommonJS loads`, () => {
     const script = `
