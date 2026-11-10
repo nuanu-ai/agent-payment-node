@@ -8,8 +8,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodePaymentSignatureHeader, inspectCandidates } from "../../src/x402-codec.js";
 import { normalizeX402HttpRequest } from "../../src/x402-http-request.js";
+import { getAddress } from "viem";
 import { x402Network, x402Asset } from "../../src/x402-network.js";
-import { validateX402Operation } from "../../src/x402-state-integrity.js";
+import { assertX402LimitCoversCap } from "../../src/x402-network-policy.js";
+import { validateX402Operation, type X402OperationRecord } from "../../src/x402-state-integrity.js";
 import { temporaryState } from "./helpers.js";
 import { FRESH_PROCESS_TEST_TIMEOUT_MS, freshProcess } from "./fresh-process.js";
 import { initializeNetworkFixture, networkChallenge, networkFixture, networkPaid, networkSettlement, NETWORK_LIMITS } from "./evm-x402-helpers.js";
@@ -244,4 +246,55 @@ test(`${networkName} first-exposure policy re-check reads local state only, no R
   assert.equal(fixture.rpc.x402Calls.length, x402Calls, "no chain or head re-read");
 });
 
+test(`${networkName} resume refuses an unsent authorization above a lowered limit at once, even while the safe head trails`, async (context) => {
+  const temporary = await temporaryState(); context.after(temporary.cleanup);
+  const fixture = networkFixture(temporary.root, chainId); await initializeNetworkFixture(fixture, chainId);
+  const prepared = await fixture.core.execute(REQUEST); assert.equal(prepared.ok, true, JSON.stringify(prepared));
+  const operationId = (prepared.operation as { operationId: string }).operationId;
+  assert.equal((await fixture.core.execute({ command: "x402.fetch.approve", operationId })).ok, true);
+  const authorized = (await fixture.state.findX402Operation(operationId))!;
+  assert.equal(authorized.state, "authorized_not_sent");
+  // The safe head still trails the prepared block, so the chain proves nothing yet. Before the fix resume answered ok with
+  // the unchanged state and resume as its next action, without the refusal, for as long as the head trailed.
+  fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: (BigInt(authorized.preparedBlock.number) - 1n).toString() };
+  await fixture.core.wallet.policySet({ command: "wallet.policy.set", profile: "default", chainId, ...NETWORK_LIMITS, maxX402AmountAtomic: "1000" });
+  const refused = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal(refused.ok, false, JSON.stringify(refused));
+  assert.equal(refused.error?.code, "APN_X402_PROFILE_LIMIT_EXCEEDED");
+  assert.equal(refused.error?.details?.reason, "x402_profile_limit_below_frozen_cap", JSON.stringify(refused.error));
+  assert.equal(refused.error?.details?.cap_atomic, authorized.capAtomic);
+  assert.equal(refused.error?.details?.max_x402_amount_atomic, "1000");
+  assert.equal(refused.error?.details?.valid_before, authorized.authorization.validBefore);
+  assert.deepEqual(refused.next_actions,
+    [`apn wallet policy set --profile default --chain eip155:${chainId} --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>`]);
+  // Nothing was read from the signer, sent, released or rewritten.
+  assert.equal(fixture.http.calls.length, 1);
+  assert.equal(fixture.nativeCalls.filter((call) => call.operation === "x402Exact.authorizationMaterial.get").length, 0);
+  assert.deepEqual(await fixture.state.findX402Operation(operationId), authorized);
+  // The owner restoring the limit lets the same authorization go out once the safe head reaches the prepared block.
+  await fixture.core.wallet.policySet({ command: "wallet.policy.set", profile: "default", chainId, ...NETWORK_LIMITS });
+  fixture.rpc.safeHead = { ...fixture.rpc.safeHead, number: authorized.preparedBlock.number };
+  fixture.http.outcomes.push(networkPaid(authorized));
+  const sent = await fixture.core.execute({ command: "operation.resume", operationId });
+  assert.equal(sent.ok, true, JSON.stringify(sent)); assert.equal(fixture.http.calls.length, 2);
+});
+
 }
+
+test("a limit below the frozen cap names the policy command of the operation's own network and token", () => {
+  const polygonToken = "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359";
+  for (const [network, token, flags] of [
+    ["eip155:8453", x402Network(8453).token, ""],
+    ["eip155:1", x402Network(1).token, " --chain eip155:1"],
+    ["eip155:137", polygonToken, ` --chain eip155:137 --asset ${getAddress(polygonToken)}`],
+  ] as const) {
+    const operation = { operationId: "a".repeat(64), profile: "default", network, token: token.toLowerCase(), capAtomic: "5000", amountAtomic: "5000",
+      authorization: { validBefore: "1790000000" } } as unknown as X402OperationRecord;
+    assertX402LimitCoversCap(operation, "5000");
+    assert.throws(() => assertX402LimitCoversCap(operation, "1000"), { code: "APN_X402_PROFILE_LIMIT_EXCEEDED", details: {
+      reason: "x402_profile_limit_below_frozen_cap", operationId: "a".repeat(64), chain: network, asset: getAddress(token),
+      cap_atomic: "5000", amount_atomic: "5000", max_x402_amount_atomic: "1000", valid_before: "1790000000",
+      nextActions: [`apn wallet policy set --profile default${flags} --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>`],
+    } });
+  }
+});
