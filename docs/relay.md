@@ -77,6 +77,14 @@ is saved.
 Native BNB routes refuse a quote whose deposit fee exceeds `--max-deposit-network-fee-wei`. On Base that value is the full
 OP Stack fee budget: L2 gas, the GasPriceOracle L1 fee upper bound for at most 512 signed bytes and the operator fee.
 
+Native routes (BNB and Base sources) refuse with `APN_OPERATION_BLOCKED`, and save nothing, when the solver-signed
+minimum output is below `--min-output-atomic` (`relay_quote_output_below_minimum`), when a Base quote's L2 fee alone
+exceeds `--max-deposit-network-fee-wei` (`relay_deposit_fee_above_ceiling`), each with the compared values, and when
+Relay declines to quote the route and amount (`relay_native_quote_refused`, with the HTTP status and Relay's error code
+such as `AMOUNT_TOO_LOW` or `NO_SWAP_ROUTES_FOUND`). Output and gas price move with the market, so the same inputs can
+pass a minute later. A quote APN cannot decode or trust is `APN_PROVIDER_PROTOCOL` (`relay_native_quote_invalid`, naming
+the failed check); no answer, HTTP 429 or 5xx is `APN_PROVIDER_UNAVAILABLE` (`relay_native_quote_unavailable`).
+
 ### Existing depository allowance
 
 An allowance left on the Relay depository changes the next Ethereum USDC quote: when it already covers the amount, Relay

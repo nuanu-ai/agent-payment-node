@@ -75,7 +75,8 @@ test("CLI native prepare of any profile names chains, picks the owner-free Base 
     // The captured order is the provider's signed data; the route is protocol data the caller's chains selected.
     nativeQuote: async i => { calls++; references.push(i.routeReference); return validateRelayNativeQuote(await raw(), i); } });
   // A fee ceiling below the signed envelope is refused by the quote validator before anything is saved.
-  await assert.rejects(service.prepareNative({ ...input, idempotencyKey: "relay-base-mega-0003", maxDepositNetworkFeeWei: "1" }), /gas limits/u);
+  await assert.rejects(service.prepareNative({ ...input, idempotencyKey: "relay-base-mega-0003", maxDepositNetworkFeeWei: "1" }),
+    { code: "APN_OPERATION_BLOCKED", details: { reason: "relay_deposit_fee_above_ceiling", quoted_fee_wei: "212928917000", fee_ceiling_wei: "1" } });
   assert.equal(calls, 1);
   const first = await service.prepareNative(input); assert.equal(first.sourceChainId, 8453); assert.equal(first.destinationChainId, 4326);
   assert.equal(first.nativeQuote?.routeReference, RELAY_BASE_MEGA_ROUTE_REFERENCE);
