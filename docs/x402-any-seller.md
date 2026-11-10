@@ -30,7 +30,10 @@ Caps are atomic units of that token.
 - The per-payment cap is read again before signing and before the first paid request, on every chain, Base USDC included.
   If the owner lowered `--max-x402-amount-atomic` below an operation's frozen cap, APN signs and sends nothing and
   answers `APN_X402_PROFILE_LIMIT_EXCEEDED` with reason `x402_profile_limit_below_frozen_cap`. The next action is the
-  `wallet policy set` command for that chain and token. An authorization that was never sent lapses at its validBefore,
+  `wallet policy set` command for that chain and token. Approve reads the cap before it reserves the payment in the
+  shared daily usage, so a refused approve leaves no hold and the operation still awaiting approval; once the owner
+  raises the limit, the same approve proceeds. (A Smart Account ERC-7710 payment checks its cap against its frozen
+  authority at authorization, after the hold, as before.) An authorization that was never sent lapses at its validBefore,
   and `operation resume` then closes it without effect. A payment already sent is still reconciled.
 
 **Allowlist row for Permit2.** The row names the chain and token with the `x402` rail, its caps and exactly this

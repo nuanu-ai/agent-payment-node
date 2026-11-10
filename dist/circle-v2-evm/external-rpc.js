@@ -5,9 +5,10 @@ import { parsePublicHttpsUrl } from "../network-policy.js";
 import { circleBlocked } from "./operation-model.js";
 import { circleRecord } from "./protocol.js";
 import { CircleRpc } from "./rpc.js";
-import { circleHttpRefusal, circleJsonRpcRefusal, circleRpcSetting } from "./rpc-refusal.js";
+import { circleHttpRefusal, circleJsonRpcRefusal, circleNoAnswer, circleRpcSetting } from "./rpc-refusal.js";
 const METHODS = new Set(["eth_chainId", "eth_getBlockByNumber", "eth_getBalance", "eth_getCode", "eth_getStorageAt", "eth_call", "eth_getTransactionReceipt", "eth_getTransactionByHash", "eth_getTransactionCount", "eth_getLogs"]);
-/** One shared physical POST/deadline/concurrency budget for both public chains. No signing methods or retries. */
+/** One shared physical POST/deadline/concurrency budget for both public chains. No signing methods, and no read is retried
+ * here; an observation (CircleRpc.observation) restarts once on HTTP 429, 500, 502, 503 or 504, so it may spend its POSTs twice. */
 export class CircleExternalRpcBudget {
     now;
     endsAt;
@@ -33,10 +34,12 @@ export class CircleExternalRpcBudget {
             this.inFlight++;
         try {
             this.assert();
-            const response = await this.transport.request(endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", () => this.assert());
-            this.assert();
-            // A refusal names its HTTP status or JSON-RPC error and the chain's RPC setting; only a broken envelope is a protocol fault.
             const label = "External Circle proof RPC", setting = circleRpcSetting(chain), details = { method, origin: new URL(endpoint).origin, stage: "response" };
+            const response = await this.transport.request(endpoint, "POST", canonicalJson({ jsonrpc: "2.0", id, method, params }), 1024 * 1024, "APN_RPC_CONFIG", () => this.assert())
+                .catch((error) => { throw circleNoAnswer(label, error, method, { ...details, stage: "transport" }) ?? error; });
+            this.assert();
+            // A refusal names its HTTP status or JSON-RPC error (and the chain's RPC setting only where another endpoint is the remedy);
+            // no answer or HTTP 5xx is an unavailable endpoint; only a broken envelope is a protocol fault.
             if (response.status !== 200)
                 throw circleHttpRefusal(label, response.status, method, setting, details);
             const value = circleRecord(JSON.parse(response.body));

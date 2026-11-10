@@ -1,6 +1,7 @@
 import { BridgeHttps } from "../lifi/https.js";
 import { CircleRpc } from "./rpc.js";
-/** One shared physical POST/deadline/concurrency budget for both public chains. No signing methods or retries. */
+/** One shared physical POST/deadline/concurrency budget for both public chains. No signing methods, and no read is retried
+ * here; an observation (CircleRpc.observation) restarts once on HTTP 429, 500, 502, 503 or 504, so it may spend its POSTs twice. */
 export declare class CircleExternalRpcBudget {
     private readonly now;
     private readonly endsAt;

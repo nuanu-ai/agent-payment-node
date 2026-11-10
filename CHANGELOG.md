@@ -2,6 +2,16 @@
 
 Release artifacts, their SHA-256 digests and provenance for every version are on https://github.com/nuanu-ai/agent-payment-node/releases.
 
+## 0.5.103 — 2026-11-10
+
+Five LOW findings from the release review of 0.5.102. No money was at risk; a refused x402 approve now holds less.
+
+- **Circle RPC outages are not configuration problems.** An HTTP 5xx or no answer from a Circle RPC (after one retry for 500, 502, 503 and 504) is `APN_RPC_AMBIGUOUS` with `reason: rpc_unavailable`, retryable, with a wait-and-rerun step. It used to be `APN_RPC_CONFIG` with advice to switch endpoints. A 4xx stays `APN_RPC_CONFIG` and a 429 stays rate-limited. A JSON-RPC error to `eth_sendRawTransaction`, such as "nonce too low", is `APN_RPC_PROTOCOL` with `reason: rpc_transaction_rejected` and no endpoint advice. The fenced send handling is unchanged. External Circle proof reads are not retried call by call; a failed observation is restarted as a whole, and the code comment now says so.
+- **The wrapping-secret guard counts only sealed records.** Only regular, non-dot `*.json` files in the sealed stores (one profile or chain level deep) count. An empty per-profile directory or a `.DS_Store` no longer blocks a first secret forever. A link, any other entry type, a deeper directory or a listing error still counts as sealed, so the check fails closed.
+- **Expired direct transfers name what really closes them.** `operation status` runs approve's own read-only evidence check. A local EVM direct transfer names approve, which closes it, and notes that the next transfer also does. A record whose prepared evidence is missing or corrupt says approve will refuse, and does not name it.
+- **Gasless expiry uses approve's own deadline.** For local, MetaMask and Smart Account gasless, status shows expired from `expiresAt` minus the margin approve requires (15, 15 and 30 seconds), not from `expiresAt`.
+- **A refused x402 approve leaves no hold.** Approve checks the profile's current per-payment cap before it reserves daily usage or changes the record. A cap below the payment now refuses with no reservation and no state change. The check inside authorization completion stays for resume. Smart Account (ERC-7710) still checks its cap inside its delegated policy, after the hold.
+
 ## 0.5.102 — 2026-11-10
 
 QA's review of 0.5.101 in two reports: one MEDIUM, nine LOW and three INFO, none with money at risk, plus one older MEDIUM found by the release review.

@@ -6,8 +6,8 @@ import { canonicalJson } from "../../src/canonical.js";
 import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { ApnCore } from "../../src/core.js";
-import { EXPIRED_APPROVE_CLOSES, EXPIRED_EVIDENCE_MISSING, EXPIRED_NEXT_TRANSFER_CLOSES, EXPIRED_RELEASED_AFTER_MARGIN }
-  from "../../src/operation-approval-expiry.js";
+import { EXPIRED_APPROVE_CLOSES, EXPIRED_APPROVE_OR_NEXT_TRANSFER_CLOSES, EXPIRED_EVIDENCE_MISSING, EXPIRED_EVIDENCE_UNVERIFIED,
+  EXPIRED_RELEASED_AFTER_MARGIN } from "../../src/operation-approval-expiry.js";
 import { OperationService } from "../../src/operation-service.js";
 import { StateStore } from "../../src/state.js";
 import { validateSwapOperation } from "../../src/swap/model.js";
@@ -46,24 +46,34 @@ function assertExpired(result: OutputEnvelope, label: string, note: string, appr
   }
 }
 
-test("a local EVM transfer past its approval deadline reads as expired and is closed by the profile's next transfer", async (t) => {
+test("a local EVM transfer past its approval deadline names approve, which closes it, as the profile's next transfer does", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const setup = evmCore(temporary.root);
   await ensureDirectWallet(setup);
-  const prepared = await setup.core.transfer.prepare({ ...EVM_REQUEST, idempotencyKey: "expired-status-0001" }) as
+  const prepare = async (key: string) => await setup.core.transfer.prepare({ ...EVM_REQUEST, idempotencyKey: key }) as
     { readonly operation_id: string; readonly expires_at: string };
+  const prepared = await prepare("expired-status-0001");
   const id = prepared.operation_id, deadline = Date.parse(prepared.expires_at), stored = await setup.state.findOperation(id);
   assert.equal(stored?.state, "awaiting_approval");
   setup.clock.value = new Date(deadline - 1);
-  assertOpen(await setup.core.execute({ command: "operation.status", operationId: id }), "local EVM before the deadline");
+  const before = await setup.core.execute({ command: "operation.status", operationId: id });
+  assertOpen(before, "local EVM before the deadline");
   setup.clock.value = new Date(deadline);
   const expired = await setup.core.execute({ command: "operation.status", operationId: id });
-  assertExpired(expired, "local EVM at the deadline", EXPIRED_NEXT_TRANSFER_CLOSES, false);
-  assert.deepEqual(operationView(expired, "local EVM").next_actions, [`apn operation status --operation ${id}`]);
+  // Before 0.5.103 status dropped approve here, though approve closes a local EVM transfer just as it closes Base USDC.
+  assertExpired(expired, "local EVM at the deadline", EXPIRED_APPROVE_OR_NEXT_TRANSFER_CLOSES, true);
+  assert.deepEqual(operationView(expired, "local EVM").next_actions, operationView(before, "local EVM open").next_actions);
   assert.deepEqual(await setup.state.findOperation(id), stored, "status never writes the record");
-  // What the note says: the profile's next transfer on this chain closes it.
-  await setup.core.transfer.prepare({ ...EVM_REQUEST, idempotencyKey: "expired-status-0002" });
-  const closed = await setup.state.findOperation(id);
+  // What the note says: approve closes it with no prompt and nothing signed...
+  const approved = await setup.core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal(approved.error?.code, "APN_REPREPARE_REQUIRED", JSON.stringify(approved.error));
+  const closedByApprove = await setup.state.findOperation(id);
+  assert.deepEqual([closedByApprove?.state, closedByApprove?.reason, setup.approval.intents.length], ["failed_before_effect", "approval_window_expired", 0]);
+  // ...and so does the profile's next transfer on this chain.
+  const next = await prepare("expired-status-0002");
+  setup.clock.value = new Date(Date.parse(next.expires_at));
+  await prepare("expired-status-0003");
+  const closed = await setup.state.findOperation(next.operation_id);
   assert.deepEqual([closed?.state, closed?.reason], ["failed_before_effect", "approval_window_expired"]);
 });
 
@@ -106,29 +116,53 @@ test("a local transfer without its public effect evidence reads as expired and s
   assert.deepEqual(await new StateStore(root).findOperation(id), stored);
 });
 
+test("a local transfer whose public evidence does not verify reads as expired and does not name approve, which refuses", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const root = temporary.root, clock = new TestClock();
+  await ensureWallet(makeCore({ root, native: new CanonicalDirectTestNative(root), clock }));
+  const id = await prepareTransfer(makeCore({ root, rpc: new TestRpc(), clock }), "expired-status-bad-evidence");
+  const stored = (await new StateStore(root).findOperation(id))!, core = makeCore({ root, clock });
+  // Before 0.5.103 the file's presence alone made status say approve closes it, while approve failed APN_STATE_CORRUPT.
+  const path = join(root, "direct-public-effects", stored.profileHash, `${id}.prepared.json`);
+  const prepared = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+  await writeFile(path, `${canonicalJson({ ...prepared, integrityHash: "0".repeat(64) })}\n`);
+  clock.value = new Date(Date.parse(stored.expiresAt));
+  const expired = await core.execute({ command: "operation.status", operationId: id });
+  assertExpired(expired, "unverified evidence at the deadline", EXPIRED_EVIDENCE_UNVERIFIED, false);
+  assert.deepEqual(operationView(expired, "unverified evidence").next_actions, [`apn operation status --operation ${id}`]);
+  const approved = await core.execute({ command: "transfer.approve", operationId: id });
+  assert.equal(approved.error?.code, "APN_STATE_CORRUPT", JSON.stringify(approved.error));
+  assert.deepEqual(await new StateStore(root).findOperation(id), stored);
+});
+
 interface Golden {
   readonly operation: { readonly profileHash: string; readonly operationId: string;
     readonly prepared?: { readonly expiresAt: string }; readonly intent?: { readonly expiresAt: string } };
   readonly receipt: { readonly state: string };
 }
-/** The awaiting-approval record a released version wrote, as the derived-receipt goldens pin it, and where its deadline is. */
+/**
+ * The awaiting-approval record a released version wrote, as the derived-receipt goldens pin it, where its expiry is, and how
+ * long before that expiry its approve can no longer finish: local gasless refuses at the guard before the prompt with under
+ * 15 s left, MetaMask at dispatch with under 15 s, Smart Account at signing with under 30 s. Before 0.5.103 status still
+ * named approve through that margin.
+ */
 const GOLDEN = [
-  ["rail", "rail-operations", "prepared", EXPIRED_APPROVE_CLOSES, true],
-  ["gasless", "gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false],
-  ["metamask-gasless", "metamask-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false],
-  ["smart-account-gasless", "smart-account-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false],
-  ["facilitator-gasless", "facilitator-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false],
+  ["rail", "rail-operations", "prepared", EXPIRED_APPROVE_CLOSES, true, 0],
+  ["gasless", "gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false, 15_000],
+  ["metamask-gasless", "metamask-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false, 15_000],
+  ["smart-account-gasless", "smart-account-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false, 30_000],
+  ["facilitator-gasless", "facilitator-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false, 0],
 ] as const;
 
 test("a Solana or gasless transfer past its approval deadline reads as expired and says what ends it", async (t) => {
-  for (const [file, directory, holder, note, approveNamed] of GOLDEN) {
+  for (const [file, directory, holder, note, approveNamed, approveMarginMs] of GOLDEN) {
     await t.test(file, async (sub) => {
       const temporary = await temporaryState(); sub.after(temporary.cleanup); await new StateStore(temporary.root).initialize();
       const cases = JSON.parse(await readFile(join("tests", "fixtures", "derived-receipts", `${file}.json`), "utf8")) as readonly Golden[];
       const { operation } = cases.find(entry => entry.receipt.state === "awaiting_approval")!;
       const path = join(temporary.root, directory, operation.profileHash, `${operation.operationId}.json`);
       await mkdir(dirname(path), { recursive: true, mode: 0o700 }); await writeFile(path, `${canonicalJson(operation)}\n`, { mode: 0o600 });
-      const deadline = Date.parse(operation[holder]!.expiresAt), clock = new TestClock();
+      const deadline = Date.parse(operation[holder]!.expiresAt) - approveMarginMs, clock = new TestClock();
       const core = new ApnCore({ state: new StateStore(temporary.root, { lockWaitMs: 1_000 }), clock });
       clock.value = new Date(deadline - 1);
       assertOpen(await core.execute({ command: "operation.status", operationId: operation.operationId }), `${file} before the deadline`);

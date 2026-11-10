@@ -10,7 +10,7 @@ import { circleHex, circleRecord, circleUint, type CircleAttesterSnapshot, type 
 import { circleTokenPairKey, verifyCircleDeployments, type CircleDeploymentSnapshot, type CircleAccountPreflight } from "./preflight.js";
 import { circleBlocked, circleEnvelope, type CircleEnvelope } from "./operation-model.js";
 import { circleEnvelopeEra } from "./funding-never-lands.js";
-import { circleHttpRefusal, circleJsonRpcRefusal, circleRpcSetting } from "./rpc-refusal.js";
+import { circleHttpRefusal, circleJsonRpcRefusal, circleNoAnswer, circleRpcSetting } from "./rpc-refusal.js";
 export const CIRCLE_RPC_ABI = parseAbi([
   "function localDomain() view returns(uint32)", "function version() view returns(uint32)", "function paused() view returns(bool)",
   "function remoteTokenMessengers(uint32) view returns(bytes32)", "function localMinter() view returns(address)",
@@ -89,7 +89,10 @@ export class CircleRpc {
     let response: Awaited<ReturnType<BridgeHttps["request"]>>;
     this.posts++;
     try { response = await this.https.request(this.endpoint, "POST", body, 1024 * 1024, "APN_RPC_CONFIG", gate); }
-    catch (error) { if (error instanceof ApnError) throw new ApnError(error.code, "Circle RPC transport failed.", { method, origin, stage: "transport" }); throw error; }
+    catch (error) {
+      const unanswered = circleNoAnswer("Circle RPC", error, method, { method, origin, stage: "transport" }); if (unanswered !== null) throw unanswered;
+      if (error instanceof ApnError) throw new ApnError(error.code, "Circle RPC transport failed.", { method, origin, stage: "transport" }); throw error;
+    }
     gate();
     if (response.status !== 200) throw circleHttpRefusal("Circle RPC", response.status, method, this.setting, { method, origin, stage: "response" });
     try { return JSON.parse(response.body) as unknown; } catch { throw new ApnError("APN_RPC_PROTOCOL", "Circle RPC result cannot be decoded.", { method, origin, stage: "protocol" }); }
