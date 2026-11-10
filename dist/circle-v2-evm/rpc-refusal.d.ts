@@ -4,6 +4,11 @@ export declare function circleRpcSetting(chainId: number): string;
 /** An HTTP status other than 200, named in `httpStatus` as in the other RPC families. */
 export declare function circleHttpRefusal(label: string, status: number, method: string, setting: string, details: ErrorDetails): ApnError;
 /**
+ * A transport failure that got no complete answer (a deadline or an interruption, lifi/rpc-session-helpers.ts) as the same
+ * unavailable refusal, keeping its transport reason. Null for any other failure, which the caller reports as before.
+ */
+export declare function circleNoAnswer(label: string, error: unknown, method: string, details: ErrorDetails): ApnError | null;
+/**
  * The JSON-RPC error an HTTP 200 body carries for this id, alone or as a batch row: the exact error member with an integer
  * code and a message, and no result. Null when the value is not one; the caller then checks the result envelope.
  */

@@ -8,7 +8,12 @@ import type { SecureStateStore } from "./secure-state-store.js";
 export declare function walletWrappingSecretMissing(): ApnError;
 /** What doctor suggests for a missing secret: a first wallet only when nothing was ever sealed under a secret. */
 export declare function missingSecretNextAction(state: SecureStateStore, profile: string): Promise<string>;
-/** Whether anything under the state root was sealed under a wrapping secret; any entry counts, so this fails closed. */
+/**
+ * Whether anything under the state root was sealed under a wrapping secret. Only a record counts: an empty directory
+ * (left after effect retention, or by a first seal that failed before writing), a dotfile such as Finder's .DS_Store and
+ * any other regular file do not. It fails closed: a link or any other entry type, a directory nested deeper than the
+ * stores lay them out, or a listing that fails counts as sealed. In `wallets/` the subdirectories are public records.
+ */
 export declare function holdsSealedCustody(state: SecureStateStore): Promise<boolean>;
 /**
  * The wrapping secret for sealing: the existing one, or a first one minted for a state root that holds nothing sealed.

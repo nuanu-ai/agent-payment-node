@@ -2,9 +2,10 @@ import { assertCoinbaseObservationRequest } from "../../coinbase-gasless-observa
 import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
 import { DirectPublicEffectJournal } from "../../direct-public-effect.js";
 import { SETTLED_DIRECT_STATES } from "../../direct-transfer-settle.js";
+import { ApnError } from "../../errors.js";
 import { LOCAL_DIRECT_TERMINAL_STATES, PROVIDER_DIRECT_TERMINAL_STATES } from "../../model.js";
 import { abandonDirectTransfer } from "../../operation-abandon-service.js";
-import { EXPIRED_APPROVE_CLOSES, EXPIRED_EVIDENCE_MISSING, EXPIRED_NEXT_TRANSFER_CLOSES } from "../../operation-approval-expiry.js";
+import { EXPIRED_APPROVE_CLOSES, EXPIRED_APPROVE_OR_NEXT_TRANSFER_CLOSES, EXPIRED_EVIDENCE_MISSING, EXPIRED_EVIDENCE_UNVERIFIED, EXPIRED_NEXT_TRANSFER_CLOSES } from "../../operation-approval-expiry.js";
 import { refuseObservationRpc, refuseObserveOnly } from "../../operation-command-options.js";
 import { evmConflictDomain } from "../../operation-conflict-domain.js";
 import { StateStore } from "../../state.js";
@@ -35,6 +36,22 @@ export function salvageProvider(providerId, accountBindingHash, payer) {
         return [UNREADABLE_PROVIDER_CLAIM];
     }
 }
+/**
+ * Null when local approve reaches its deadline check and closes the record; otherwise the note for its refusal. Approve's own
+ * order (TransferService.approveOperation): a generic EVM record without its frozen native custody refuses first, then
+ * DirectPublicEffectJournal.assertUnstarted checks the prepared binding, custody and wallet file. Reads only.
+ */
+async function localApproveRefusal(record, root) {
+    if (record.evm !== undefined && record.evm.nativeCustody === undefined)
+        return EXPIRED_EVIDENCE_UNVERIFIED;
+    try {
+        await new DirectPublicEffectJournal(new StateStore(root)).assertUnstarted(record);
+        return null;
+    }
+    catch (error) {
+        return error instanceof ApnError && error.details?.reason === "direct_public_evidence_missing" ? EXPIRED_EVIDENCE_MISSING : EXPIRED_EVIDENCE_UNVERIFIED;
+    }
+}
 export const directAdapter = {
     family: "direct_transfer",
     stores: [STORE],
@@ -56,20 +73,23 @@ export const directAdapter = {
     unknownClaims: [UNREADABLE_PROVIDER_CLAIM],
     view: async (record) => publicOperation(record),
     // Provider and local approve both close the record from `expiresAt` on (approval_window_expired) before any prompt; a local
-    // EVM transfer is also closed by the profile's next transfer on its chain, which status names instead. A local transfer
-    // is closed only through its public effect evidence (DirectPublicEffectJournal.assertUnstarted): without its prepared
-    // binding or its wallet file, approve and that retirement refuse with direct_public_evidence_missing instead.
+    // EVM transfer is also closed by the profile's next transfer on its chain. A local transfer is closed only once
+    // DirectPublicEffectJournal.assertUnstarted accepts its evidence, so status runs that same read-only check: where it
+    // refuses, approve and that retirement refuse too, and approve is not named.
     async approvalExpiry(record, root) {
         if (record.state !== "awaiting_approval")
             return null;
         const expiry = (approveCloses, note) => ({ deadlineMs: Date.parse(record.expiresAt), approveCloses, sealedSlot: false, note });
         if (record.providerDirect !== undefined)
             return expiry(true, EXPIRED_APPROVE_CLOSES);
-        const state = new StateStore(root);
-        if (!await new DirectPublicEffectJournal(state).hasPrepared(record) || await state.loadEncryptedWalletEnvelope(record.profile) === null) {
-            return expiry(false, EXPIRED_EVIDENCE_MISSING);
-        }
-        return record.evm !== undefined ? expiry(false, EXPIRED_NEXT_TRANSFER_CLOSES) : expiry(true, EXPIRED_APPROVE_CLOSES);
+        const refusal = await localApproveRefusal(record, root);
+        if (refusal !== null)
+            return expiry(false, refusal);
+        if (record.evm === undefined)
+            return expiry(true, EXPIRED_APPROVE_CLOSES);
+        // The retired cleanup85 cancellation is read-only to approve; the profile's next transfer on its chain still retires it.
+        return record.evm.cleanup85Cancellation === undefined ? expiry(true, EXPIRED_APPROVE_OR_NEXT_TRANSFER_CLOSES)
+            : expiry(false, EXPIRED_NEXT_TRANSFER_CLOSES);
     },
     status: async (context, record) => operationOutcome(await new TransferService(context).status(record.operationId)),
     // The terminal receipt's authority over its operation is checked here, by the one command that returns it.

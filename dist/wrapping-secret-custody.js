@@ -25,13 +25,42 @@ export function walletWrappingSecretMissing() {
 export async function missingSecretNextAction(state, profile) {
     return await holdsSealedCustody(state) ? RESTORE_WRAPPING_SECRET : `apn wallet ensure --profile ${profile}`;
 }
-/** Whether anything under the state root was sealed under a wrapping secret; any entry counts, so this fails closed. */
+/**
+ * A sealed record: every store writes `<name>.json`, its name a profile (which starts with [a-z0-9]) or a hex hash, flat
+ * or in one per-profile or per-chain subdirectory. Atomic-write stages never reach a listing (recordEntries).
+ */
+const SEALED_RECORD = /^[^.].*\.json$/u;
+/**
+ * Whether anything under the state root was sealed under a wrapping secret. Only a record counts: an empty directory
+ * (left after effect retention, or by a first seal that failed before writing), a dotfile such as Finder's .DS_Store and
+ * any other regular file do not. It fails closed: a link or any other entry type, a directory nested deeper than the
+ * stores lay them out, or a listing that fails counts as sealed. In `wallets/` the subdirectories are public records.
+ */
 export async function holdsSealedCustody(state) {
-    if ((await state.recordEntries("wallets")).some((entry) => !entry.isDirectory()))
-        return true;
-    for (const directory of SEALED_DIRECTORIES)
-        if ((await state.recordEntries(directory)).length > 0)
+    try {
+        if (await holdsSealedRecord(state, "wallets", "public"))
             return true;
+        for (const directory of SEALED_DIRECTORIES)
+            if (await holdsSealedRecord(state, directory, "descend"))
+                return true;
+        return false;
+    }
+    catch {
+        return true;
+    }
+}
+async function holdsSealedRecord(state, directory, subdirectories) {
+    for (const entry of await state.recordEntries(directory)) {
+        if (entry.isFile()) {
+            if (SEALED_RECORD.test(entry.name))
+                return true;
+            continue;
+        }
+        if (!entry.isDirectory() || subdirectories === "unexpected")
+            return true;
+        if (subdirectories === "descend" && await holdsSealedRecord(state, `${directory}/${entry.name}`, "unexpected"))
+            return true;
+    }
     return false;
 }
 /**
