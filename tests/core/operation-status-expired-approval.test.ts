@@ -140,24 +140,29 @@ interface Golden {
     readonly prepared?: { readonly expiresAt: string }; readonly intent?: { readonly expiresAt: string } };
   readonly receipt: { readonly state: string };
 }
-/** The awaiting-approval record a released version wrote, as the derived-receipt goldens pin it, and where its deadline is. */
+/**
+ * The awaiting-approval record a released version wrote, as the derived-receipt goldens pin it, where its expiry is, and how
+ * long before that expiry its approve can no longer finish: local gasless refuses at the guard before the prompt with under
+ * 15 s left, MetaMask at dispatch with under 15 s, Smart Account at signing with under 30 s. Before 0.5.103 status still
+ * named approve through that margin.
+ */
 const GOLDEN = [
-  ["rail", "rail-operations", "prepared", EXPIRED_APPROVE_CLOSES, true],
-  ["gasless", "gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false],
-  ["metamask-gasless", "metamask-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false],
-  ["smart-account-gasless", "smart-account-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false],
-  ["facilitator-gasless", "facilitator-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false],
+  ["rail", "rail-operations", "prepared", EXPIRED_APPROVE_CLOSES, true, 0],
+  ["gasless", "gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false, 15_000],
+  ["metamask-gasless", "metamask-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false, 15_000],
+  ["smart-account-gasless", "smart-account-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false, 30_000],
+  ["facilitator-gasless", "facilitator-gasless-operations", "intent", EXPIRED_RELEASED_AFTER_MARGIN, false, 0],
 ] as const;
 
 test("a Solana or gasless transfer past its approval deadline reads as expired and says what ends it", async (t) => {
-  for (const [file, directory, holder, note, approveNamed] of GOLDEN) {
+  for (const [file, directory, holder, note, approveNamed, approveMarginMs] of GOLDEN) {
     await t.test(file, async (sub) => {
       const temporary = await temporaryState(); sub.after(temporary.cleanup); await new StateStore(temporary.root).initialize();
       const cases = JSON.parse(await readFile(join("tests", "fixtures", "derived-receipts", `${file}.json`), "utf8")) as readonly Golden[];
       const { operation } = cases.find(entry => entry.receipt.state === "awaiting_approval")!;
       const path = join(temporary.root, directory, operation.profileHash, `${operation.operationId}.json`);
       await mkdir(dirname(path), { recursive: true, mode: 0o700 }); await writeFile(path, `${canonicalJson(operation)}\n`, { mode: 0o600 });
-      const deadline = Date.parse(operation[holder]!.expiresAt), clock = new TestClock();
+      const deadline = Date.parse(operation[holder]!.expiresAt) - approveMarginMs, clock = new TestClock();
       const core = new ApnCore({ state: new StateStore(temporary.root, { lockWaitMs: 1_000 }), clock });
       clock.value = new Date(deadline - 1);
       assertOpen(await core.execute({ command: "operation.status", operationId: operation.operationId }), `${file} before the deadline`);

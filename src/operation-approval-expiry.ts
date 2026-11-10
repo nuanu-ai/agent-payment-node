@@ -50,9 +50,12 @@ export const EXPIRED_EVIDENCE_MISSING = "The approval window has passed, so this
 export const EXPIRED_EVIDENCE_UNVERIFIED = "The approval window has passed, so this transfer can no longer be approved. Its public " +
   "effect evidence or wallet custody does not check out against the saved operation, so APN cannot prove nothing was signed: approve " +
   "refuses instead of closing it, and the transfer keeps holding its account until it is resolved manually.";
-/** Gasless and swap: the index stops counting an unstarted record once the unstarted margin has passed its deadline. */
+/**
+ * Gasless and swap: the index stops counting an unstarted record once the unstarted margin has passed its recorded expiry
+ * (a gasless approve stops being able to finish a little before that expiry, so the release is counted from the expiry).
+ */
 export const EXPIRED_RELEASED_AFTER_MARGIN = "The approval window has passed and this operation can no longer be approved; nothing was signed " +
-  `or sent. It stops holding its account ${UNSTARTED_DEADLINE_MARGIN_MS / 60_000} minutes after the window closed, with nothing to run.`;
+  `or sent. It stops holding its account ${UNSTARTED_DEADLINE_MARGIN_MS / 60_000} minutes after its recorded expiry time, with nothing to run.`;
 
 /** A family's approve step, such as `apn pay transfer approve --operation <id>` or `apn gasless transfer approve --operation <id>`. */
 const APPROVE_COMMAND = /^apn (?:[a-z0-9-]+ )+approve(?: |$)/u;
