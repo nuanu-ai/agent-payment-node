@@ -2,7 +2,7 @@ import type { RpcObservationCounters } from "./rpc-observation-metrics.js";
 import { request as httpsRequest } from "node:https";
 import { isDeepStrictEqual } from "node:util";
 import { record } from "./base-rpc-codec.js";
-import { exactKeys } from "./canonical.js";
+import { exactKeys, isPlainRecord } from "./canonical.js";
 import { MAX_RPC_RESPONSE_BYTES } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { jsonRpcRequestHeaders } from "./rpc-request-headers.js";
@@ -29,8 +29,16 @@ export function readOnlyBatchMethod(method: string, params: readonly unknown[]):
     (config as Record<string, unknown>).timeout === "10s";
 }
 
+/** The detail reason of a well-formed JSON-RPC error by which the endpoint reports that the called code reverted. */
+export const ETH_CALL_REVERTED = "eth_call_reverted";
+
 export function parseRpcResultEnvelope(raw: string, id: string, method?: string): unknown {
   const message = strictRpcRecord(raw);
+  // The endpoint answered and the called code reverted; the caller decides what that means for its contract.
+  if (method === "eth_call" && ethCallReverted(message, id)) {
+    throw new ApnError("APN_RPC_PROTOCOL", "The RPC answered eth_call with an execution revert.",
+      { rpcMethod: method, stage: "result_envelope", reason: ETH_CALL_REVERTED });
+  }
   if (!exactKeys(message, ["jsonrpc", "id", "result"]) || message.jsonrpc !== "2.0" || message.id !== id) {
     throw new ApnError("APN_RPC_PROTOCOL", "RPC response violates the exact JSON-RPC result envelope.", {
       rpcMethod: method !== undefined && (BATCH_READ_METHODS.has(method) || method === "eth_sendRawTransaction") ? method : "unknown",
@@ -98,6 +106,14 @@ export function parseRpcLogEnvelope(raw: string, id: string):
   const availability = classifyX402LogAvailabilityMessage(typeof error.message === "string" ? error.message : "");
   if (availability !== null) return { kind: availability };
   throw new ApnError("APN_RPC_PROTOCOL", "RPC log query failed without a recognized availability class.");
+}
+
+/** An exact error envelope whose error is an EVM revert: code 3 (geth, reth, Arbitrum, BSC) or a message that says so (-32000). */
+function ethCallReverted(message: Record<string, unknown>, id: string): boolean {
+  const error = message.error;
+  if (!exactKeys(message, ["jsonrpc", "id", "error"]) || message.jsonrpc !== "2.0" || message.id !== id || !isPlainRecord(error)) return false;
+  const code: unknown = error.code, text: unknown = error.message;
+  return Number.isSafeInteger(code) && typeof text === "string" && (code === 3 || /^execution reverted\b/iu.test(text));
 }
 
 function strictRpcRecord(raw: string): Record<string, unknown> {

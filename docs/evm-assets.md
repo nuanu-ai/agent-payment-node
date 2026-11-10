@@ -435,7 +435,7 @@ fingerprint. The Circle journal and its usage holds are not changed.
 | `APN_FEE_BUDGET_EXCEEDED` | The current total fee quote is above `--max-fee-wei`. | Prepare again later, or with a higher budget under a new idempotency key. |
 | `APN_INSUFFICIENT_ASSET` | Asset balance below the amount. | Fund the wallet. |
 | `APN_INSUFFICIENT_GAS` | Native balance cannot cover the fee quote (plus value for a native transfer). | Fund native gas. |
-| `APN_ASSET_MISMATCH` | No contract at the address, or the contract reports other decimals. | Check the selected network and contract. |
+| `APN_ASSET_MISMATCH` | No contract at the address; a contract that is not an ERC-20 token (`balanceOf` reverts or returns no data, as Multicall3 or an EIP-7702 delegated account do, or an ERC-20 view returns data that is not one ABI word); or the contract reports other decimals. | Check the selected network and contract. |
 | `APN_RPC_PROTOCOL` / `rpc_batch_unsupported` | The endpoint does not accept JSON-RPC batches. | Choose another endpoint ([RPC endpoints](#rpc-endpoints)). |
 | `APN_RPC_BUDGET_EXCEEDED` | The step used its POST cap. | Check the endpoint, then rerun; an approved transfer continues with `operation resume`. |
 | `APN_CHAIN_MISMATCH` | The RPC serves another chain. | Use an endpoint of the selected chain. |
