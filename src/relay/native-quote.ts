@@ -4,7 +4,8 @@ import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress
 import type { Hex } from "viem";
 import { hashObject } from "../canonical.js";
 import { ApnError } from "../errors.js";
-import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, relayStatusLocator, type RelayStatusLocator } from "./quote.js";
+import { BNB_NATIVE, ETHEREUM_DEPOSITORY, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, postRelayQuote, relayStatusLocator,
+  type RelayStatusLocator } from "./quote.js";
 import { relayNativeRouteByReference } from "./native-routes.js";
 export { POLYGON_USDC, RELAY_BNB_POLYGON_ROUTE_REFERENCE, RELAY_BNB_MONAD_ROUTE_REFERENCE, RELAY_BASE_MEGA_ROUTE_REFERENCE,
   RELAY_BASE_POLYGON_ROUTE_REFERENCE, RELAY_LEGACY_BNB_MONAD_DEFAULT_REFERENCE, RELAY_LEGACY_BASE_MEGA_REFERENCE,
@@ -14,8 +15,6 @@ const DEPOSIT_NATIVE = parseAbi(["function depositNative(address depositor, byte
 const CHAINS = { ethereum: "ethereum-vm", bnb: "ethereum-vm", base: "ethereum-vm", polygon: "ethereum-vm", megaeth: "ethereum-vm", monad: "ethereum-vm" } as const;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/u, UINT = /^(0|[1-9][0-9]*)$/u;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/u, HEX = /^0x(?:[0-9a-fA-F]{2})+$/u;
-/** Relay's own machine code for a quote it declines (AMOUNT_TOO_LOW, NO_SWAP_ROUTES_FOUND, ...); its free text is never shown. */
-const PROVIDER_CODE = /^[A-Z][A-Z0-9_]{0,63}$/u;
 const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 /** A provider answer APN cannot decode or trust. Callers of a saved quote catch it and refuse with their own reason. */
 const fail = (reason: string): never => {
@@ -24,10 +23,6 @@ const fail = (reason: string): never => {
 /** A solver-signed, exact quote outside a bound the caller set: a refusal with the compared values, not a provider fault. */
 function refused(reason: string, message: string, compared: Readonly<Record<string, string>>): never {
   throw new ApnError("APN_OPERATION_BLOCKED", message, { reason, ...compared });
-}
-function unavailable(httpStatus?: number): never {
-  throw new ApnError("APN_PROVIDER_UNAVAILABLE", "The Relay quote service did not answer.",
-    { reason: "relay_native_quote_unavailable", ...(httpStatus === undefined ? {} : { http_status: httpStatus }) });
 }
 /** The shared status locator check, held to this module's errors. */
 const locator = (requestId: unknown, endpoint?: unknown): RelayStatusLocator => {
@@ -261,26 +256,9 @@ export async function verifySavedRelayNativeQuote(quote: ValidatedRelayNativeQuo
   } catch { fail("saved deposit"); }
 }
 
-/** One public quote POST, no API key or retry. Relay answers a quote it declines for this route and amount
- * (AMOUNT_TOO_LOW, NO_SWAP_ROUTES_FOUND, AMOUNT_TOO_HIGH) with a 4xx and its own code, which the refusal carries. */
+/** One public quote POST, no API key or retry; a declined, unanswered or unreadable quote is classified by `postRelayQuote`. */
 export async function requestRelayNativeQuote(intent: RelayNativeQuoteIntent, fetcher: typeof fetch = fetch,
   now: () => number = () => Math.floor(Date.now() / 1000)): Promise<ValidatedRelayNativeQuote> {
-  const body = JSON.stringify(relayNativeQuoteRequest(intent));
-  let response: Response;
-  try {
-    response = await fetcher("https://api.relay.link/quote/v2", { method: "POST",
-      headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(12_000) });
-  } catch { return unavailable(); }
-  if (!response.ok) {
-    if (response.status < 400 || response.status >= 500 || response.status === 429) unavailable(response.status);
-    // The provider code is shown only when the error body carries one; a refusal is thrown either way.
-    const code = await response.json().then((value: unknown) => value !== null && typeof value === "object" ?
-      (value as { readonly errorCode?: unknown }).errorCode : undefined, () => undefined);
-    throw new ApnError("APN_OPERATION_BLOCKED", "Relay declined to quote this route, amount and recipient.",
-      { reason: "relay_native_quote_refused", http_status: response.status,
-        ...(typeof code === "string" && PROVIDER_CODE.test(code) ? { provider_error_code: code } : {}) });
-  }
-  let payload: unknown;
-  try { payload = await response.json(); } catch (error) { return error instanceof SyntaxError ? fail("response body") : unavailable(); }
+  const payload = await postRelayQuote(relayNativeQuoteRequest(intent), fetcher, "relay_native_quote", fail);
   return validateRelayNativeQuote(payload, { ...intent, nowSeconds: now() });
 }

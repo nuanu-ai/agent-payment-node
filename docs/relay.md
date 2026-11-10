@@ -85,6 +85,12 @@ such as `AMOUNT_TOO_LOW` or `NO_SWAP_ROUTES_FOUND`). Output and gas price move w
 pass a minute later. A quote APN cannot decode or trust is `APN_PROVIDER_PROTOCOL` (`relay_native_quote_invalid`, naming
 the failed check); no answer, HTTP 429 or 5xx is `APN_PROVIDER_UNAVAILABLE` (`relay_native_quote_unavailable`).
 
+Ethereum USDC routes classify their live quote the same way, with the prefix `relay_quote_` (`relay_quote_refused`,
+`relay_quote_unavailable`, `relay_quote_invalid`). The Arbitrum USDC route reads no network at prepare: a `--quote-file`
+that is not JSON or fails a check is `APN_INVALID_INPUT` (`relay_arbitrum_quote_invalid`, naming the check), and a proven
+quote below `--min-output-atomic` is `relay_quote_output_below_minimum` with `quoted_minimum_output_atomic` and
+`requested_minimum_output_atomic`.
+
 ### Existing depository allowance
 
 An allowance left on the Relay depository changes the next Ethereum USDC quote: when it already covers the amount, Relay

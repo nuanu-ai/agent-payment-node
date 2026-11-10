@@ -3,7 +3,9 @@ import { getOrderId } from "./order-id.js";
 import { decodeFunctionData, encodeFunctionData, parseAbi, recoverMessageAddress } from "viem";
 import type { Hex } from "viem";
 import { hashObject } from "../canonical.js";
-import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, relayStatusLocator } from "./quote.js";
+import { ApnError } from "../errors.js";
+import { ETHEREUM_DEPOSITORY, ETHEREUM_USDC, RELAY_MAX_DEADLINE_SECONDS, RELAY_SOLVER, relayStatusLocator,
+  type RelayStatusLocator } from "./quote.js";
 
 export const RELAY_ARBITRUM_USDC = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831" as const;
 // The captured signed order has no calls and names this exact router in all extraData fields.
@@ -16,7 +18,26 @@ const UINT = /^(0|[1-9][0-9]*)$/u;
 const BYTES32 = /^0x[0-9a-fA-F]{64}$/u;
 const SIGNATURE = /^0x[0-9a-fA-F]{130}$/u;
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-const fail = (reason: string): never => { throw new Error(`Relay Arbitrum quote rejected: ${reason}`); };
+/**
+ * A rejected check. It stays an `Error` named "Error" with the same message, so every saved-state caller sees what it
+ * always saw: the operation record catches it, while the approval and deposit preflights, the source-draft preflight
+ * and the destination proof let it propagate. Only `relay prepare` classifies it, through `classifiedRelayArbitrumQuoteError`.
+ */
+class RelayArbitrumQuoteRejection extends Error {
+  readonly check: string;
+  /** Set only when a proven quote is below the caller's minimum output. */
+  readonly compared: Readonly<Record<string, string>> | undefined;
+  constructor(check: string, compared?: Readonly<Record<string, string>>) {
+    super(`Relay Arbitrum quote rejected: ${check}`);
+    this.check = check;
+    this.compared = compared;
+  }
+}
+const fail = (reason: string): never => { throw new RelayArbitrumQuoteRejection(reason); };
+/** The shared status locator check, rejected as this module's own check. */
+function statusLocator(requestId: unknown, endpoint?: unknown): RelayStatusLocator {
+  try { return relayStatusLocator(requestId, endpoint); } catch { return fail("status locator"); }
+}
 function object(value: unknown, reason: string): Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : fail(reason);
 }
@@ -91,7 +112,7 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknown,
   keys(quote, ["steps", "details", "protocol", "fees", "requestId"], "quote extension");
   const steps = array(quote.steps, "steps"); if (steps.length !== 2) fail("steps");
   const requestId = string(quote.requestId, "request id");
-  const locator = relayStatusLocator(requestId);
+  const locator = statusLocator(requestId);
   for (const stepValue of steps) {
     const step = object(stepValue, "step");
     if (step.requestId !== requestId) fail("step request id");
@@ -100,7 +121,7 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknown,
   if (one(approvalStep.items, "approval items").check !== undefined) fail("approval check");
   const check = object(one(depositStep.items, "deposit items").check, "deposit check");
   keys(check, ["endpoint", "method"], "check extension");
-  if (check.method !== "GET" || relayStatusLocator(requestId, check.endpoint).endpoint !== locator.endpoint) fail("deposit check");
+  if (check.method !== "GET" || statusLocator(requestId, check.endpoint).endpoint !== locator.endpoint) fail("deposit check");
   const protocolContainer = object(quote.protocol, "protocol");
   keys(protocolContainer, ["v2"], "protocol version extension");
   const protocol = object(protocolContainer.v2, "protocol v2");
@@ -128,7 +149,7 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknown,
     deadline <= intent.nowSeconds + 60 || deadline > intent.nowSeconds + RELAY_MAX_DEADLINE_SECONDS) fail("order identity");
   const minimum = atomic(payee.minimumAmount, "output minimum");
   const expected = atomic(payee.expectedAmount, "expected output");
-  if (minimum < atomic(intent.minimumOutputAtomic, "required minimum") || expected < minimum) fail("output bound");
+  if (expected < minimum) fail("output bound");
   const normalizedRefunds = refunds.map((value, index) => {
     const refund = object(value, "refund");
     keys(refund, ["chainId", "recipient", "currency", "minimumAmount", "deadline", "extraData"], "refund extension");
@@ -197,6 +218,10 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknown,
       !same(decodedDeposit.args[3], orderId) ||
       !same(encodeFunctionData({ abi: DEPOSIT, functionName: "depositErc20", args: [...decodedDeposit.args] }), deposit.data)) fail("deposit calldata");
   } catch { return fail("call data"); }
+  // The caller's minimum is compared last, on a quote already proven exact and solver-signed.
+  const requiredMinimum = atomic(intent.minimumOutputAtomic, "required minimum");
+  if (minimum < requiredMinimum) throw new RelayArbitrumQuoteRejection("output bound",
+    { quoted_minimum_output_atomic: minimum.toString(), requested_minimum_output_atomic: requiredMinimum.toString() });
   const projection = { schemaVersion: "apn.relay-arbitrum-usdc-ethereum-usdc-quote.v1" as const,
     routeReference: "arbitrum-usdc-ethereum-usdc-observation-v1" as const,
     statusLocator: locator, orderId: orderId.toLowerCase(), orderSignature: signature.toLowerCase(),
@@ -206,4 +231,14 @@ export async function validateRelayArbitrumUsdcEthereumUsdcQuote(value: unknown,
     orderData, paymentDetails: { chainId: "arbitrum" as const, depository: ETHEREUM_DEPOSITORY,
       currency: RELAY_ARBITRUM_USDC.toLowerCase(), amount: intent.amountAtomic }, approval, deposit };
   return frozen({ ...projection, quoteDigest: hashObject(projection) });
+}
+
+/** `relay prepare` reads the quote the caller saved in --quote-file now: a rejected check is invalid input naming the
+ * check, and a proven quote below the caller's minimum output a refusal with both values. Other errors pass unchanged. */
+export function classifiedRelayArbitrumQuoteError(error: unknown): unknown {
+  if (!(error instanceof RelayArbitrumQuoteRejection)) return error;
+  return error.compared === undefined
+    ? new ApnError("APN_INVALID_INPUT", error.message, { reason: "relay_arbitrum_quote_invalid", check: error.check })
+    : new ApnError("APN_OPERATION_BLOCKED", "The Relay quote's minimum output is below the requested minimum.",
+      { reason: "relay_quote_output_below_minimum", ...error.compared });
 }
