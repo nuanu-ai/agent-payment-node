@@ -258,7 +258,10 @@ replay, status and resume never send it again.
 initialize state directories or repair local records after an interrupted
 write. `operation resume` uses `APN_TRON_RPC_URL` for one bounded
 solidified-history observation of the same transaction ID; omit
-`--wait-seconds` for this rail.
+`--wait-seconds` for this rail. `--observe-only true` is for EVM direct
+transfers and is refused here with `rail_observe_only_unsupported`: plain
+`operation resume` already only observes a transaction that may have been
+broadcast.
 
 If the submission acknowledgment is missing, mismatched or interrupted, the
 operation remains `unknown_finality`. Missing solidified history or invalid or
