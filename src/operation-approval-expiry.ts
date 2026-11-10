@@ -23,7 +23,14 @@ export interface ApprovalExpiry {
 /** Direct (Base USDC, provider), Solana, TRON and local x402: approve checks the deadline before any prompt and closes. */
 export const EXPIRED_APPROVE_CLOSES = "The approval window has passed, so approve no longer approves anything: running it now closes this " +
   "operation as failed_before_effect, with no prompt, and nothing is signed or sent. Until then the operation stays open.";
-/** Local EVM direct: the next transfer the profile prepares on the chain retires it (TransferService.retireExpiredDirectTransfers). */
+/**
+ * Local EVM direct: approve closes it as it closes Base USDC, and so does the next transfer the profile prepares on the
+ * chain (TransferService.retireExpiredDirectTransfers); both first pass DirectPublicEffectJournal.assertUnstarted.
+ */
+export const EXPIRED_APPROVE_OR_NEXT_TRANSFER_CLOSES = "The approval window has passed, so approve no longer approves anything: " +
+  "running it now closes this operation as failed_before_effect, with no prompt, and nothing is signed or sent. The next transfer " +
+  "this profile prepares on this chain closes it the same way.";
+/** The retired cleanup85 cancellation, read-only to approve: only the next transfer the profile prepares on the chain retires it. */
 export const EXPIRED_NEXT_TRANSFER_CLOSES = "The approval window has passed and this transfer can no longer be approved; nothing was signed or " +
   "sent. The next transfer this profile prepares on this chain closes it as failed_before_effect.";
 /**
@@ -34,6 +41,15 @@ export const EXPIRED_EVIDENCE_MISSING = "The approval window has passed, so this
   "effect evidence for it (it was prepared before APN recorded that evidence, or its wallet file is gone), so it cannot prove nothing was " +
   "signed: approve refuses with direct_public_evidence_missing instead of closing it, and the transfer keeps holding its account until it " +
   "is resolved manually.";
+/**
+ * A local direct transfer whose evidence approve refuses for any other reason (DirectPublicEffectJournal.assertUnstarted: a
+ * prepared binding, frozen custody or wallet that no longer matches the saved operation, signing evidence already present),
+ * or a generic EVM record without its frozen native custody: approve refuses before its deadline check, and so does the
+ * expiry retirement.
+ */
+export const EXPIRED_EVIDENCE_UNVERIFIED = "The approval window has passed, so this transfer can no longer be approved. Its public " +
+  "effect evidence or wallet custody does not check out against the saved operation, so APN cannot prove nothing was signed: approve " +
+  "refuses instead of closing it, and the transfer keeps holding its account until it is resolved manually.";
 /** Gasless and swap: the index stops counting an unstarted record once the unstarted margin has passed its deadline. */
 export const EXPIRED_RELEASED_AFTER_MARGIN = "The approval window has passed and this operation can no longer be approved; nothing was signed " +
   `or sent. It stops holding its account ${UNSTARTED_DEADLINE_MARGIN_MS / 60_000} minutes after the window closed, with nothing to run.`;
