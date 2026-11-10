@@ -479,9 +479,15 @@ This is `local_software_disposable` custody, not savings custody. Encryption pro
 Keychain secret; it does not protect against compromise of the same unlocked login session, process, user or host.
 Transient key copies in JavaScript memory are not guaranteed to be zeroized. Missing Keychain material, failed
 authentication, unsafe permissions or identity mismatch fail closed and never rotate a wallet silently. On first creation
-APN passes the generated wrapping secret to `/usr/bin/security` as an argument, which another process of the same user
-could observe during that short window. The wallet envelope is bounded to 1 MiB; reaching the bound refuses persistence
-and submission rather than overwriting anything.
+APN writes the generated wrapping secret to `/usr/bin/security -i` on stdin, never in its arguments, so `ps` does not show
+it, and reads the item back in the same session to prove the add. The wallet envelope is bounded to 1 MiB; reaching the
+bound refuses persistence and submission rather than overwriting anything.
+
+`wallet connect --provider coinbase-agentic-wallet` reads the account email and the one-time verification code on the
+foreground terminal and passes each to the pinned `awal` as a command-line argument (`awal auth login <email>`, then
+`awal auth verify <code>`): `awal` 2.12.1 takes them nowhere else, neither on stdin nor from the environment. While that
+child runs (APN stops it at the 30-second provider timeout), another process of the same user can read the code with
+`ps`. It is a one-time code for that one pending sign-in; APN never prints, logs or stores it.
 
 Foreground approval requires stdin and stderr attached to real TTYs and an exact operation-bound code within 60 seconds;
 a timeout or interruption writes nothing. It is a human-confirmation boundary, not protection against a compromised user
