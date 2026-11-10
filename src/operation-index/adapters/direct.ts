@@ -56,6 +56,8 @@ export const directAdapter: OperationFamilyAdapter<OperationRecord> = {
   ]),
   unknownClaims: [UNREADABLE_PROVIDER_CLAIM],
   view: async record => publicOperation(record),
+  // Local and provider approve both refuse from `expiresAt` on (approval_window_expired).
+  approvalDeadline: record => record.state === "awaiting_approval" ? record.expiresAt : null,
   status: async (context, record) => operationOutcome(await new TransferService(context).status(record.operationId)),
   // The terminal receipt's authority over its operation is checked here, by the one command that returns it.
   receipt: async (context, record) => receiptOutcome(await new TransferService(context).receipt(record.operationId)),

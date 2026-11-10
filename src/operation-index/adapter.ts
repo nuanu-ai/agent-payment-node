@@ -54,6 +54,11 @@ export interface OperationFamilyAdapter<R = unknown> {
   readonly unknownClaims?: readonly OperationClaim[];
   /** The public projection `OperationService.status` returns. */
   view(record: R, root: string): Promise<unknown>;
+  /**
+   * The approval deadline of a record still awaiting the owner's approval, null in every other state. The family's approve
+   * refuses from that instant on, so `apn operation status` presents such a record as expired (operation-approval-expiry.ts).
+   */
+  approvalDeadline?(record: R): string | null;
   // Generic `apn operation status|resume|abandon` and `apn receipt get` (phase 4b WP3 fills these in).
   status?(ctx: RuntimeContext, record: R, options?: { readonly refreshAllowance?: boolean }): Promise<CommandOutcome>;
   /** The family stores a residual token allowance its status shows; only it accepts `operation status --refresh-allowance`. */

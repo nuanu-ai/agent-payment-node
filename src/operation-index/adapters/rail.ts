@@ -47,6 +47,8 @@ export const railAdapter: OperationFamilyAdapter<RailOperationRecord> = {
   state: record => record.state,
   salvage: raw => salvageRecord(raw, value => [salvageRail(field(value, "account", "rail"), field(value, "account", "address"))]),
   view: async record => publicRailOperation(record),
+  // Approve revalidates first, and that refuses from the frozen `expiresAt` on.
+  approvalDeadline: record => record.state === "awaiting_approval" ? record.prepared.expiresAt : null,
   async resume(context, record, options) {
     const rail = record.account.rail === "tron" ? "TRON" : "Solana";
     assertResumeOptions(options, {

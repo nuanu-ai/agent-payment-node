@@ -31,7 +31,7 @@ import type { OperationClaim, OperationFamily, WantedClaims } from "../types.js"
 import { pastUnstartedDeadline } from "./family-claims.js";
 
 interface GaslessRecord { readonly profileHash: string; readonly operationId: string; readonly idempotencyHash: string;
-  readonly requestHash: string; readonly state: string; readonly terminal: boolean }
+  readonly requestHash: string; readonly state: string; readonly terminal: boolean; readonly intent: { readonly expiresAt: string } }
 
 /** Each gasless family's own service: status, recovery, receipt and owner exit by operation ID (built per command). */
 interface GaslessCommands {
@@ -80,6 +80,8 @@ function gaslessAdapter<R extends GaslessRecord>(family: OperationFamily, direct
     ...(rules.admits === undefined ? {} : { admits: rules.admits }),
     salvage: raw => salvageRecord(raw, value => [salvageEvm(field(value, "intent", "request", "chainId"), field(value, "intent", ...ownerPath))]),
     view: async record => view(record),
+    // Each family's approve refuses from its intent's `expiresAt` on (some already a margin before it).
+    approvalDeadline: record => record.state === "awaiting_approval" ? record.intent.expiresAt : null,
     status: async (context, record) => operationOutcome(await commands.status(context, record.operationId)),
     async resume(context, record, options): Promise<CommandOutcome> {
       assertResumeOptions(options, commands.resumeOptions);
