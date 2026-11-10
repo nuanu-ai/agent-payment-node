@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { chmod, link, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { privateKeyToAccount } from "viem/accounts";
 import { runCli } from "../../src/cli.js";
@@ -103,6 +103,19 @@ test("wallet import rejects unsafe file, bad key, mismatched address, and occupi
   assert.equal((await f.run()).ok, true);
   assert.equal((await f.run(f.args("second"))).ok, false, "address collision must fail");
   assert.equal((await f.run()).ok, false, "profile collision must fail");
+});
+
+test("wallet import refuses a missing key file as invalid input without echoing its path", async (t) => {
+  const f = await fixture(t);
+  // A file that does not exist, and a path that runs through a regular file (ENOTDIR).
+  for (const path of [join(dirname(f.keyFile), "missing-key.env"), join(f.keyFile, "child.env")]) {
+    const result = await f.run(f.args("imported", ADDRESS, path));
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.code, "APN_INVALID_INPUT", JSON.stringify(result.error));
+    assert.equal(JSON.stringify(result).includes(path), false);
+  }
+  const imported = await f.run();
+  assert.equal(imported.ok, true, `a refused path leaves the profile free: ${JSON.stringify(imported.error)}`);
 });
 
 test("wallet import rejects oversized, linked, duplicated, and non-checksummed input without exposing key", async (t) => {
