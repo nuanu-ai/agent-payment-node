@@ -4,6 +4,7 @@ import { canonicalJson, exactKeys, isPlainRecord } from "./canonical.js";
 import { openNested, sealNested, type EnvelopeSpec, type NestedHeader } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 import {
   BASE_CHAIN_HEX,
   smartAccountEnvironment,
@@ -94,7 +95,7 @@ export class EncryptedSmartAccountPermissionStore implements SmartAccountPermiss
   }
 
   private async writeProtected(record: SmartAccountPermissionRecord): Promise<void> {
-    const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+    const wrapping = await loadOrCreateWrappingSecret(this.files, this.wrappingSecret);
     try {
       await this.files.write(record.profile_hash,
         sealNested(wrapping, ENVELOPE, { schema_version: ENVELOPE_VERSION, profile_hash: record.profile_hash }, record));

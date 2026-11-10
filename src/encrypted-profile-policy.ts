@@ -2,6 +2,7 @@ import { canonicalJson, exactKeys, hashObject, isPlainRecord } from "./canonical
 import { openNested, sealNested, type EnvelopeSpec, type NestedHeader } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 import type { ClockPort } from "./ports.js";
 import type { Address } from "./model.js";
 import {
@@ -104,7 +105,7 @@ export class EncryptedProfilePolicy implements ProfilePolicyPort {
       approvedAt: increase ? now : current?.approvedAt ?? now,
       updatedAt: now,
     });
-    const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+    const wrapping = await loadOrCreateWrappingSecret(this.state, this.wrappingSecret);
     try {
       await this.save(binding, policy, wrapping);
       return policy;

@@ -4,6 +4,7 @@ import { canonicalJson, domainHash, exactKeys, hashObject, isPlainRecord } from 
 import { openNested, sealNested, type EnvelopeSpec, type NestedHeader } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 import type { Address, Hex } from "./model.js";
 import type { StateStore } from "./state.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
@@ -105,7 +106,7 @@ export class EncryptedSmartAccountX402MaterialStore implements SmartAccountX402M
   }
 
   private async write(record: SmartAccountX402MaterialRecord): Promise<void> {
-    const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+    const wrapping = await loadOrCreateWrappingSecret(this.files, this.wrappingSecret);
     try {
       await this.files.write(record.operation_id,
         sealNested(wrapping, ENVELOPE, { schema_version: ENVELOPE_VERSION, operation_id: record.operation_id }, record));

@@ -2,6 +2,7 @@ import { exactKeys, hashObject, isPlainRecord } from "../../../canonical.js";
 import { openNested, sealNested, type EnvelopeSpec } from "../../../custody-envelope.js";
 import { ApnError } from "../../../errors.js";
 import type { WrappingSecretPort } from "../../../macos-keychain.js";
+import { loadOrCreateWrappingSecret } from "../../../wrapping-secret-custody.js";
 import type { StateStore } from "../../../state.js";
 import { SecureStateStore, stateIdentifier } from "../../../secure-state-store.js";
 import { validateSwapOperation, type SwapOperationRecord } from "../../model.js";
@@ -86,7 +87,7 @@ export class EncryptedUniswapExecutionEffectStore extends SecureStateStore imple
 
   private async writeUnlocked(operation: SwapOperationRecord, binding: UniswapExecutionBinding,
     effect: UniswapExecutionEffect, createOnly: boolean): Promise<void> {
-    const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+    const wrapping = await loadOrCreateWrappingSecret(this, this.wrappingSecret);
     try {
       const envelope = sealNested(wrapping, ENVELOPE, { schemaVersion: ENVELOPE_VERSION, operationId: operation.operationId,
         profileHash: operation.ownerProfileHash, bindingHash: binding.bindingHash, envelopeHash: binding.envelopeHash,

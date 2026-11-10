@@ -5,6 +5,7 @@ import { openNested, sealNested, type EnvelopeSpec, type NestedHeader } from "./
 import { ApnError } from "./errors.js";
 import type { Economics, Address, Hex } from "./model.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 import type { StateStore } from "./state.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
 
@@ -125,7 +126,7 @@ export class EncryptedSmartAccountDirectEffectStore implements SmartAccountDirec
   }
 
   private async write(record: SmartAccountDirectEffectRecord): Promise<void> {
-    const wrapping = await this.wrappingSecret.load() ?? await this.wrappingSecret.create();
+    const wrapping = await loadOrCreateWrappingSecret(this.files, this.wrappingSecret);
     try {
       await this.files.write(record.operation_id,
         sealNested(wrapping, ENVELOPE, { schema_version: ENVELOPE_VERSION, operation_id: record.operation_id }, record));

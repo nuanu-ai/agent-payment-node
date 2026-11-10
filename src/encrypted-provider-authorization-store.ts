@@ -6,6 +6,7 @@ import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { Address, Hex } from "./model.js";
 import type { StateStore } from "./state.js";
 import { SecureStateStore, stateIdentifier } from "./secure-state-store.js";
+import { loadOrCreateWrappingSecret } from "./wrapping-secret-custody.js";
 
 const ENVELOPE_VERSION = "apn.provider-authorization-envelope.v1" as const;
 const RECORD_VERSION = "apn.provider-authorization.v1" as const;
@@ -98,18 +99,13 @@ export class EncryptedProviderAuthorizationStore implements ProviderAuthorizatio
     validateRecord(record);
     const previous = await this.load(binding);
     if (previous !== null) validateAdvance(previous, record);
-    const wrapping = await this.loadOrCreateWrappingSecret();
+    const wrapping = await loadOrCreateWrappingSecret(this.envelopes, this.wrappingSecret);
     try {
       const envelope: ProviderAuthorizationEnvelope = sealNested(wrapping, ENVELOPE, { schemaVersion: ENVELOPE_VERSION, binding }, record);
       await this.envelopes.write(binding.profileHash, binding.operationId, envelope);
     } finally {
       wrapping.fill(0);
     }
-  }
-
-  private async loadOrCreateWrappingSecret(): Promise<Buffer> {
-    const existing = await this.wrappingSecret.load();
-    return existing ?? await this.wrappingSecret.create();
   }
 }
 

@@ -12,7 +12,8 @@ const MAX_OUTPUT_BYTES = 4 * 1024;
 const SECURITY_TIMEOUT_MS = 15_000;
 
 export interface WrappingSecretPort {
-  load(): Promise<Buffer | null>;
+  /** `transient` (a presence check) hands back a copy without keeping one cached for the rest of the command. */
+  load(use?: "transient"): Promise<Buffer | null>;
   create(): Promise<Buffer>;
 }
 
@@ -44,7 +45,7 @@ function privateCopy(secret: Buffer): Buffer {
  * The login-Keychain wrapping secret. One instance belongs to one command invocation: the first successful `load` or
  * `create` keeps a private in-memory copy for that instance, so every later read in the same command spawns no
  * `security` process. It is never written anywhere, callers still receive (and zero) their own copy, and the cached
- * copy is zeroed when the instance is collected or the process exits.
+ * copy is zeroed when the instance is collected or the process exits. A `transient` load keeps no copy.
  */
 export class MacOSLoginKeychainSecret implements WrappingSecretPort {
   private readonly loginKeychain: string;
@@ -57,7 +58,7 @@ export class MacOSLoginKeychainSecret implements WrappingSecretPort {
     this.security = options.runSecurity ?? (async (args, input) => await runSecurity(args, identity, input));
   }
 
-  async load(): Promise<Buffer | null> {
+  async load(use?: "transient"): Promise<Buffer | null> {
     if (this.cached !== undefined) return privateCopy(this.cached);
     const result = await this.security(this.findArgs());
     try {
@@ -69,7 +70,7 @@ export class MacOSLoginKeychainSecret implements WrappingSecretPort {
         secret.fill(0);
         throw keychainUnavailable();
       }
-      this.remember(secret);
+      if (use !== "transient") this.remember(secret);
       return secret;
     } finally {
       result.stdout.fill(0);
@@ -151,19 +152,19 @@ async function runSecurity(args: readonly string[], identity: LocalIdentity, inp
         LANG: "C",
       },
     });
+    // What `security` prints (the secret, for a find with -w): each chunk is zeroed once copied, every copy once settled.
     const stdout: Buffer[] = [];
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let oversized = false;
     let settled = false;
-    const finish = (result?: SecurityResult): void => {
+    const finish = (code?: number): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      if (result === undefined) {
-        for (const chunk of stdout) chunk.fill(0);
-        reject(keychainUnavailable());
-      } else resolve(result);
+      if (code === undefined) reject(keychainUnavailable());
+      else resolve({ code, stdout: Buffer.concat(stdout) });
+      for (const chunk of stdout) chunk.fill(0);
     };
     const timeout = setTimeout(() => {
       child.kill("SIGKILL");
@@ -172,13 +173,15 @@ async function runSecurity(args: readonly string[], identity: LocalIdentity, inp
     timeout.unref();
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutBytes += chunk.length;
-      if (stdoutBytes > MAX_OUTPUT_BYTES) {
+      if (!settled && stdoutBytes > MAX_OUTPUT_BYTES) {
         oversized = true;
         child.kill("SIGKILL");
-      } else stdout.push(Buffer.from(chunk));
+      } else if (!settled) stdout.push(Buffer.from(chunk)); // A chunk arriving after a timeout is only zeroed.
+      chunk.fill(0);
     });
     child.stderr.on("data", (chunk: Buffer) => {
       stderrBytes += chunk.length;
+      chunk.fill(0);
       if (stderrBytes > MAX_OUTPUT_BYTES) {
         oversized = true;
         child.kill("SIGKILL");
@@ -187,7 +190,7 @@ async function runSecurity(args: readonly string[], identity: LocalIdentity, inp
     child.once("error", () => finish());
     child.once("close", (code) => {
       if (oversized || code === null) finish();
-      else finish({ code, stdout: Buffer.concat(stdout) });
+      else finish(code);
     });
     child.stdin.once("error", () => undefined);
     child.stdin.end(input);
