@@ -3,6 +3,7 @@ import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
 import { SETTLED_DIRECT_STATES } from "../../direct-transfer-settle.js";
 import { LOCAL_DIRECT_TERMINAL_STATES, PROVIDER_DIRECT_TERMINAL_STATES, type OperationRecord } from "../../model.js";
 import { abandonDirectTransfer } from "../../operation-abandon-service.js";
+import { EXPIRED_APPROVE_CLOSES, EXPIRED_NEXT_TRANSFER_CLOSES } from "../../operation-approval-expiry.js";
 import { refuseObservationRpc, refuseObserveOnly } from "../../operation-command-options.js";
 import { evmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { StateStore } from "../../state.js";
@@ -56,8 +57,11 @@ export const directAdapter: OperationFamilyAdapter<OperationRecord> = {
   ]),
   unknownClaims: [UNREADABLE_PROVIDER_CLAIM],
   view: async record => publicOperation(record),
-  // Local and provider approve both refuse from `expiresAt` on (approval_window_expired).
-  approvalDeadline: record => record.state === "awaiting_approval" ? record.expiresAt : null,
+  // Local and provider approve both close the record from `expiresAt` on (approval_window_expired) before any prompt; a
+  // local EVM transfer is also closed by the profile's next transfer on its chain, which status names instead.
+  approvalExpiry: record => record.state !== "awaiting_approval" ? null : { deadlineMs: Date.parse(record.expiresAt),
+    ...record.evm !== undefined && record.providerDirect === undefined ? { approveCloses: false, note: EXPIRED_NEXT_TRANSFER_CLOSES }
+      : { approveCloses: true, note: EXPIRED_APPROVE_CLOSES } },
   status: async (context, record) => operationOutcome(await new TransferService(context).status(record.operationId)),
   // The terminal receipt's authority over its operation is checked here, by the one command that returns it.
   receipt: async (context, record) => receiptOutcome(await new TransferService(context).receipt(record.operationId)),

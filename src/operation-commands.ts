@@ -32,9 +32,9 @@ export class OperationCommands {
     }
     const outcome = adapter.status !== undefined ? await adapter.status(this.context, record, { refreshAllowance })
       : operationOutcome(await adapter.view(record, this.context.state.root));
-    // Presentation only: a transfer whose approval window passed unapproved reads as expired; its record is not changed.
-    return adapter.approvalDeadline === undefined ? outcome
-      : presentExpiredApproval(outcome, adapter.approvalDeadline(record), this.context.clock.now());
+    // Presentation only: an operation whose approval window passed unapproved reads as expired; its record is not changed.
+    return adapter.approvalExpiry === undefined ? outcome
+      : presentExpiredApproval(outcome, adapter.approvalExpiry(record), this.context.clock.now());
   }
 
   async resume(request: ResumeRequest): Promise<CommandOutcome> {

@@ -1,6 +1,7 @@
 import { operationOutcome, receiptOutcome } from "../../core-outcome.js";
 import { ApnError } from "../../errors.js";
 import { abandonRailTransfer } from "../../operation-abandon-service.js";
+import { EXPIRED_APPROVE_CLOSES } from "../../operation-approval-expiry.js";
 import { assertResumeOptions } from "../../operation-command-options.js";
 import { railConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { publicRailOperation, RAIL_TERMINAL_STATES, railNextActions, type RailOperationRecord, type RailState } from "../../rail-operation-model.js";
@@ -47,8 +48,9 @@ export const railAdapter: OperationFamilyAdapter<RailOperationRecord> = {
   state: record => record.state,
   salvage: raw => salvageRecord(raw, value => [salvageRail(field(value, "account", "rail"), field(value, "account", "address"))]),
   view: async record => publicRailOperation(record),
-  // Approve revalidates first, and that refuses from the frozen `expiresAt` on.
-  approvalDeadline: record => record.state === "awaiting_approval" ? record.prepared.expiresAt : null,
+  // Approve revalidates before its prompt; from the frozen `expiresAt` on that refuses and closes the record before effect.
+  approvalExpiry: record => record.state !== "awaiting_approval" ? null
+    : { deadlineMs: Date.parse(record.prepared.expiresAt), approveCloses: true, note: EXPIRED_APPROVE_CLOSES },
   async resume(context, record, options) {
     const rail = record.account.rail === "tron" ? "TRON" : "Solana";
     assertResumeOptions(options, {

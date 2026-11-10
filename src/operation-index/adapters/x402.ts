@@ -1,6 +1,7 @@
 import type { CommandOutcome } from "../../commands.js";
 import { ApnError } from "../../errors.js";
 import { abandonProviderX402 } from "../../operation-abandon-provider.js";
+import { EXPIRED_APPROVE_CLOSES } from "../../operation-approval-expiry.js";
 import { assertResumeOptions } from "../../operation-command-options.js";
 import { evmConflictDomain, sharedEvmConflictDomain, type MoneyConflictDomain } from "../../operation-conflict-domain.js";
 import { localX402Outcome, providerX402Outcome, x402ReceiptOutcome } from "../../operation-x402-outcome.js";
@@ -74,6 +75,10 @@ export const x402Adapter: OperationFamilyAdapter<X402StoredOperation> = {
   unknownClaims: [UNREADABLE_PROVIDER_CLAIM],
   view: async operation => operation.strategy === "local"
     ? publicX402Operation(operation.record) : publicProviderX402Operation(operation.record),
+  // A local purchase's approve closes it as failed_before_effect once `validBefore` (unix seconds) has passed, before its
+  // prompt. A provider purchase has no stored deadline: its approve re-reads the seller's offer instead.
+  approvalExpiry: operation => operation.strategy !== "local" || operation.record.state !== "awaiting_approval" ? null
+    : { deadlineMs: Number(operation.record.authorization.validBefore) * 1000, approveCloses: true, note: EXPIRED_APPROVE_CLOSES },
   // A provider purchase first recovers an interrupted read; the outcome is then built from the record saved after it.
   async status(context, { record }) {
     await new X402Service(context).recoverRead(record.operationId);
