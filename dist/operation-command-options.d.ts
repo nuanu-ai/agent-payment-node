@@ -9,6 +9,8 @@ export interface ResumeOptionUse {
     readonly observationRpc?: true;
     /** Absent when the family watches up to --wait-seconds; otherwise its own refusal. */
     readonly refuseWait?: () => never;
+    /** A family whose plain resume already observes names that command here; absent keeps the shared refusal. */
+    readonly refuseObserveOnly?: () => never;
 }
 export declare function assertResumeOptions(options: OperationResumeOptions, use: ResumeOptionUse): void;
 export declare function refuseObserveOnly(): never;

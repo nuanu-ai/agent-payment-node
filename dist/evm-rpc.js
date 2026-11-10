@@ -3,7 +3,8 @@ import { ApnError } from "./errors.js";
 import { evmDecimals, evmToken, evmUint, MAX_DIRECT_TRANSACTION_BYTES, resolveEvmAsset } from "./evm-asset.js";
 import { directEvmChain, directEvmNetwork, directEvmQuoteFeeModel, directEvmRequiresSafeHead } from "./evm-direct-networks.js";
 import { evmDirectReads, OP_STACK_GAS_ORACLE, OP_STACK_GAS_ORACLE_ABI } from "./evm-direct-reads.js";
-import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, evmTokenBalance, recheckEvmBlock } from "./evm-rpc-codec.js";
+import { evmRpcAddress, evmRpcBlock, evmRpcHex, evmRpcQuantity, evmRpcRecord, evmRpcWord, recheckEvmBlock } from "./evm-rpc-codec.js";
+import { ETH_CALL_REVERTED } from "./rpc-envelope.js";
 import { observeEvmTransfer } from "./evm-transfer-evidence.js";
 import { readEvmReceiptFeeFields } from "./evm-direct-actual-fee.js";
 export class EvmRpc {
@@ -73,16 +74,17 @@ export class EvmRpc {
             if (evmRpcHex(await this.call("eth_getCode", [token, block.tag])) === "0x") {
                 throw new ApnError("APN_ASSET_MISMATCH", "The selected token address has no contract on this chain.");
             }
-            assetAtomic = (await evmTokenBalance(this.call, token, address, block.tag)).toString();
-            let encodedDecimals;
-            try {
-                encodedDecimals = await this.call("eth_call", [{ to: token, data: "0x313ce567" }, block.tag]);
+            const balance = await tokenWord(this.call, token, `0x70a08231${address.slice(2).toLowerCase().padStart(64, "0")}`, block.tag);
+            if (balance === null) {
+                throw new ApnError("APN_ASSET_MISMATCH", "The selected address is not an ERC-20 token on this chain: balanceOf(address) reverted or returned no data.");
             }
-            catch {
-                encodedDecimals = undefined;
-            }
-            if (encodedDecimals !== undefined && encodedDecimals !== "0x")
-                observedDecimals = evmDecimals(Number(evmRpcWord(encodedDecimals)));
+            assetAtomic = balance.toString();
+            // decimals() is optional in ERC-20: without it the caller supplies them; a fault of the endpoint is never read as absence.
+            const decimals = await tokenWord(this.call, token, "0x313ce567", block.tag);
+            if (decimals !== null && decimals > 255n)
+                throw new ApnError("APN_ASSET_MISMATCH", "The selected contract answered decimals() with a value that is not a uint8.");
+            if (decimals !== null)
+                observedDecimals = evmDecimals(Number(decimals));
         }
         const asset = resolveEvmAsset(selection, observedDecimals);
         return { address, asset, assetAtomic, nativeAtomic, blockNumberAtomic: block.number, blockHash: block.hash, rpcOrigin: this.rpcOrigin, observedAt: new Date().toISOString() };
@@ -178,6 +180,28 @@ export class EvmRpc {
             return calls.map(call => call.method === "eth_chainId" ? `0x${chain.toString(16)}` : values[next++]);
         };
     }
+}
+/**
+ * One ERC-20 view of the selected contract. The endpoint answered, so a revert or no data is the contract's answer (null): an
+ * address that is not an ERC-20 token, such as Multicall3 or an EIP-7702 delegated account. Hex that is not one ABI word is the
+ * contract's too; anything that is not an answer (a malformed envelope or bytes, a transport fault) stays the endpoint's.
+ */
+async function tokenWord(call, token, data, tag) {
+    let answer;
+    try {
+        answer = await call("eth_call", [{ to: token, data }, tag]);
+    }
+    catch (error) {
+        if (error instanceof ApnError && error.details?.reason === ETH_CALL_REVERTED)
+            return null;
+        throw error;
+    }
+    const bytes = evmRpcHex(answer);
+    if (bytes === "0x")
+        return null;
+    if (bytes.length !== 66)
+        throw new ApnError("APN_ASSET_MISMATCH", "The selected contract answered an ERC-20 view with data that is not one ABI word.");
+    return BigInt(bytes);
 }
 function chainMismatch() {
     throw new ApnError("APN_CHAIN_MISMATCH", "RPC chain does not match the explicitly selected EVM network.");

@@ -3,7 +3,7 @@ import { ApnError } from "../../errors.js";
 import { abandonRailTransfer } from "../../operation-abandon-service.js";
 import { assertResumeOptions } from "../../operation-command-options.js";
 import { railConflictDomain } from "../../operation-conflict-domain.js";
-import { publicRailOperation, RAIL_TERMINAL_STATES } from "../../rail-operation-model.js";
+import { publicRailOperation, RAIL_TERMINAL_STATES, railNextActions } from "../../rail-operation-model.js";
 import { RailOperationRepository } from "../../rail-operation-repository.js";
 import { RailOperationService } from "../../rail-operation-service.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageRail, salvageRecord, standardIdentity } from "../adapter.js";
@@ -25,9 +25,15 @@ export const railAdapter = {
     salvage: raw => salvageRecord(raw, value => [salvageRail(field(value, "account", "rail"), field(value, "account", "address"))]),
     view: async (record) => publicRailOperation(record),
     async resume(context, record, options) {
-        assertResumeOptions(options, { refuseWait: () => {
-                throw new ApnError("APN_INVALID_INPUT", "Solana resume performs one bounded observation; omit --wait-seconds.");
-            } });
+        const rail = record.account.rail === "tron" ? "TRON" : "Solana";
+        assertResumeOptions(options, {
+            refuseWait: () => { throw new ApnError("APN_INVALID_INPUT", `${rail} resume performs one bounded observation; omit --wait-seconds.`); },
+            // Plain resume of a direct rail transfer is already observation-only once it may have been broadcast: it never sends again.
+            refuseObserveOnly: () => {
+                throw new ApnError("APN_INVALID_INPUT", `--observe-only is for local EVM direct transfers. Resume this ${rail} transfer without it: ` +
+                    `apn operation resume --operation ${record.operationId} only observes a transaction that may have been broadcast and never sends it again.`, { reason: "rail_observe_only_unsupported", nextActions: railNextActions(record) });
+            },
+        });
         return operationOutcome(await new RailOperationService(context).resume(record.operationId));
     },
     receipt: async (context, record) => receiptOutcome(await new RailOperationService(context).receipt(record.operationId)),

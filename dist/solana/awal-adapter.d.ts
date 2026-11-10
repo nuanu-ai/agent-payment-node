@@ -33,7 +33,8 @@ export declare class SolanaAwalAdapter implements DirectRailPort {
     private currentAccount;
     private providerAddress;
     /** Every awal Solana call here answers public JSON (address, balance, a transaction hash): the runner keeps its stdout.
-     * Authentication never runs through this adapter, so no secret output can reach it. */
+     * Authentication never runs through this adapter, so no secret output can reach it. Only awal's exact AUTH_REQUIRED
+     * failure answer means "not signed in"; any other failure or shape stays a protocol failure. */
     private run;
     private feeContract;
 }

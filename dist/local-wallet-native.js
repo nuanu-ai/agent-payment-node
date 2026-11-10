@@ -165,11 +165,11 @@ export class LocalWalletNative {
         let component = parse(keyFile).root;
         for (const part of keyFile.slice(component.length).split(sep).filter(Boolean)) {
             component = join(component, part);
-            if ((await lstat(component)).isSymbolicLink()) {
+            if ((await lstat(component).catch(keyFileAccessFailure)).isSymbolicLink()) {
                 throw new ApnError("APN_STATE_SECURITY", "Wallet key file path traverses a symbolic link.");
             }
         }
-        const handle = await open(keyFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const handle = await open(keyFile, constants.O_RDONLY | constants.O_NOFOLLOW).catch(keyFileAccessFailure);
         let bytes = Buffer.alloc(0);
         try {
             const before = await handle.stat();
@@ -213,6 +213,8 @@ export class LocalWalletNative {
         if (envelope === null)
             throw protocol("Public wallet has no custody envelope.");
         await assertEvmNativeCustody(this.state, profile, await evmNativeCustody(this.state, profile), walletEnvelopeIdentity(envelope, profile));
+        // A wallet whose wrapping secret left the Keychain is never described as usable; an unreadable Keychain throws here too.
+        await this.wallets.assertWrappingSecretPresent();
         return { found: true, profile: wallet.profile, address: wallet.address, createdAt: wallet.createdAt, bindingHash: wallet.bindingHash };
     }
     async approveAndSign(payload) {
@@ -395,4 +397,18 @@ export class LocalWalletNative {
 }
 /** Separate custody slots: an EIP-3009 authorization and a Permit2 witness transfer of one operation never share one. */
 function x402EffectDomain(method) { return method === "eip3009" ? "apn-x402-effect-v1" : "apn-x402-permit2-effect-v1"; }
+/**
+ * A key file the operator named that is missing or unreadable is bad input, not an internal fault. The message names
+ * neither the path nor anything read from it; any other failure is rethrown unchanged.
+ */
+function keyFileAccessFailure(error) {
+    const code = typeof error === "object" && error !== null ? error.code : undefined;
+    if (code === "ENOENT" || code === "ENOTDIR")
+        throw new ApnError("APN_INVALID_INPUT", "Wallet key file does not exist.");
+    if (code === "EACCES" || code === "EPERM")
+        throw new ApnError("APN_INVALID_INPUT", "Wallet key file cannot be read by this user.");
+    if (code === "ELOOP")
+        throw new ApnError("APN_STATE_SECURITY", "Wallet key file path traverses a symbolic link.");
+    throw error;
+}
 //# sourceMappingURL=local-wallet-native.js.map
