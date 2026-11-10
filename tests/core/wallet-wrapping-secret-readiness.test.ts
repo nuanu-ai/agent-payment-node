@@ -6,7 +6,7 @@
  * (exit 0 with the secret, 44 for no item, 36 for a locked or refused Keychain); the real Keychain is never touched.
  */
 import assert from "node:assert/strict";
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -16,7 +16,7 @@ import type { OutputEnvelope } from "../../src/commands.js";
 import { MacOSLoginKeychainSecret, type SecurityRunner, type WrappingSecretPort } from "../../src/macos-keychain.js";
 import { createMcpServer, type McpRuntimeOptions } from "../../src/mcp-server.js";
 import { StateStore } from "../../src/state.js";
-import { loadOrCreateWrappingSecret } from "../../src/wrapping-secret-custody.js";
+import { holdsSealedCustody, loadOrCreateWrappingSecret } from "../../src/wrapping-secret-custody.js";
 import { temporaryState } from "./helpers.js";
 
 const MASTER = Buffer.from("11".repeat(32), "hex");
@@ -187,6 +187,36 @@ test("only a state root that holds nothing sealed mints a first wrapping secret"
   assert.equal(first.toString("base64"), login.item);
   first.fill(0);
   assert.equal(login.calls.filter((args) => args[0] === "-i").length, 1);
+});
+
+test("empty store directories and dotfiles are not sealed state; a record, a link or an unlistable store is", async (t) => {
+  const temporary = await temporaryState();
+  t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root);
+  await state.initialize();
+  const at = (...parts: string[]) => join(temporary.root, ...parts), hash = "a".repeat(64);
+  // Left by effect retention or by a first seal that failed before writing, and by Finder: nothing here was sealed.
+  // Before 0.5.103 any entry counted, so this root refused a first secret for good, naming a Keychain item that never existed.
+  for (const directory of [at("gasless-effects", hash), at("bridge-effects", hash), at("smart-account-effects"), at("wallets", hash)]) {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+  }
+  for (const file of [at("policies", ".DS_Store"), at("gasless-effects", hash, ".DS_Store")]) await writeFile(file, "", { mode: 0o600 });
+  assert.equal(await holdsSealedCustody(state), false);
+  const login = new FakeKeychain(null);
+  (await loadOrCreateWrappingSecret(state, login.port())).fill(0);
+  assert.notEqual(login.item, null, "a first secret is minted over leftovers that hold nothing sealed");
+  // Fail closed: one record in a per-profile directory, a link in a store, or a store directory that cannot be listed.
+  const record = at("gasless-effects", hash, `${"1".repeat(64)}-bootstrap.json`);
+  await writeFile(record, "{}", { mode: 0o600 });
+  assert.equal(await holdsSealedCustody(state), true, "a record in a per-profile directory");
+  await unlink(record);
+  await mkdir(at("merchant-material"), { mode: 0o700 });
+  await symlink(at("nowhere"), at("merchant-material", "entry"));
+  assert.equal(await holdsSealedCustody(state), true, "a link");
+  await unlink(at("merchant-material", "entry"));
+  assert.equal(await holdsSealedCustody(state), false);
+  await chmod(at("bridge-effects", hash), 0o750);
+  assert.equal(await holdsSealedCustody(state), true, "a store directory the state reader refuses to list");
 });
 
 test("wallet status keeps no cached copy of the wrapping secret it checked", async (t) => {
