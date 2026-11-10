@@ -60,8 +60,9 @@ test("wallet import holds the shared owner lock before a concurrent provider pro
   const gate = new Promise<void>(resolve => { release = resolve; });
   const importing = new Promise<void>(resolve => { entered = resolve; });
   const saving = new Promise<void>(resolve => { attempted = resolve; });
+  // No secret yet: the first import mints it, and create() is where this import pauses.
   const pausedWrapping: WrappingSecretPort = {
-    load: wrapping.load,
+    load: async () => null,
     create: async () => { entered(); await gate; return Buffer.alloc(32, 7); },
   };
   const pendingImport = f.run(undefined, pausedWrapping); await importing;
