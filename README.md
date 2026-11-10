@@ -97,6 +97,11 @@ are projected from the same catalog and run the same code as the CLI. Commands t
 abandon, wallet connect, allowlist activate) are not separate tools: one `apn_foreground_handoff` tool validates the
 arguments exactly as the CLI does and returns the exact command for the human to run in a terminal. It reads and writes
 nothing. `wallet policy set` runs over MCP only for a pure decrease; a new policy or an increase returns the handoff.
+The handoff covers every foreground command of a family MCP exposes, `gasless usdt execute` and `x402 permit2 approve`
+included. Ten foreground commands have no handoff because MCP exposes no prepare, quote or status tool of their family,
+so an agent never holds their inputs or operations; these families are CLI only: `stargate native execute`,
+`stargate token execute`, `stargate token cleanup`, `relay execute`, `relay retire`, `wallet metamask native-transfer`,
+`circle approval execute`, `circle source submit`, `sei funding approve` and `mega funding approve`.
 
 ## First journey: a direct Base USDC transfer
 

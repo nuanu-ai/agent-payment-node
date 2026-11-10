@@ -52,7 +52,7 @@ const SELECTED_PATHS = [
   "wallet policy show",
   "wallet policy set",
   "wallet allowance status", "wallet allowance revoke",
-  "x402 permit2 status",
+  "x402 permit2 approve", "x402 permit2 status",
   "x402 solana pay", "x402 solana observe", "x402 solana status",
   "x402 permit2 allowance set", "x402 permit2 allowance revoke", "x402 permit2 allowance observe", "x402 permit2 allowance status",
   "x402 merchant prepare", "x402 merchant approve", "x402 merchant observe", "x402 merchant status", "x402 merchant retire-unsent",
@@ -69,7 +69,7 @@ const SELECTED_PATHS = [
   "operation recover-transaction-settlement",
   "receipt get",
   "bridge capabilities", "bridge inventory", "bridge routes", "bridge prepare", "bridge approve",
-  "gasless usdt prepare", "gasless usdt status", "gasless usdt resume",
+  "gasless usdt prepare", "gasless usdt execute", "gasless usdt status", "gasless usdt resume",
   "gasless capabilities", "gasless balance", "gasless transfer quote", "gasless transfer prepare", "gasless transfer approve", "gasless transfer approve-sealed", "gasless transfer revoke",
   "oneclick source submit", "oneclick source status",
 ] as const;
@@ -78,6 +78,17 @@ const SELECTED_PATHS = [
  * consent part is refused by RejectingMcpPolicyApproval with a CLI handoff. Every other selected foreground command is
  * reachable only through the single foreground handoff tool, which never executes anything. */
 const MCP_RUNS_FOREGROUND = new Set(["wallet policy set"]);
+
+/** Foreground commands with no handoff, by design: MCP exposes no prepare, quote or status tool of their families, so an
+ * MCP agent never holds their inputs or operations, and each family starts and ends in the CLI. Every other foreground
+ * command of the catalog is selected above; a test keeps this partition exact. */
+export const CLI_ONLY_FOREGROUND = [
+  "stargate native execute", "stargate token execute", "stargate token cleanup",
+  "relay execute", "relay retire",
+  "wallet metamask native-transfer",
+  "circle approval execute", "circle source submit",
+  "sei funding approve", "mega funding approve",
+] as const;
 
 export interface ProjectedMcpTool {
   readonly name: string;

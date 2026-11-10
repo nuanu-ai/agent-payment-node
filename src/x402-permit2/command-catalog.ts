@@ -12,7 +12,7 @@ export const PERMIT2_COMMANDS: readonly CommandDefinition[] = [
       option("--rpc-url", "https_url", true, noDefault, ["credential_free_https_without_fragment", "public_target_required_at_runtime", "serves_the_selected_offer_chain"], "operator_input"),
       option("--idempotency-key", "idempotency_key", true, noDefault, ["8_to_200_safe_ascii_characters"], "operator_input")],
     "payment_submit", "New operations select the lowest-index Permit2 offer on an owner-admitted chain and token, verify canonical Permit2 and the x402 exact proxy on that chain, reserve frozen material, require foreground approval, sign and send at most one paid GET. Held or terminal replays read status only; HTTP alone never proves settlement.",
-    "foreground_tty", "The owner must approve the exact frozen request, maximum debit and payee in the foreground TTY.",
+    "foreground_tty", "The owner must approve the exact frozen request, maximum debit and payee in the foreground TTY; MCP returns the exact CLI handoff only.",
     { terminal: ["settled", "expired_no_effect", "released_unsubmitted"], non_terminal: ["prepared", "reserving", "reserved", "exposure_unknown", "request_pending", "terminal_pending"] },
     [{ command_path: ["x402", "permit2", "observe"], when: "Read canonical chain evidence for the held operation without sending again." }], ["apn x402 permit2 approve --help"]),
   command(["x402", "permit2", "observe"], "apn x402 permit2 observe --operation <operation-id> --rpc-url <https-rpc> [--profile <profile>] [--transaction <hash> | --expired-unused]",

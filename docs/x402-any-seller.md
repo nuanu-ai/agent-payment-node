@@ -104,8 +104,8 @@ The choice is deterministic, and an operation never changes method.
 
 ### `x402 permit2 approve` (foreground)
 
-The foreground TTY lane under allowlist admission. It pays the lowest-index admitted Permit2 offer. See
-[Permit2 requests](x402-non-usdc.md).
+The foreground TTY lane under allowlist admission. It pays the lowest-index admitted Permit2 offer; over MCP,
+`apn_foreground_handoff` returns the exact command. See [Permit2 requests](x402-non-usdc.md).
 
 ### `x402 permit2 allowance` (foreground)
 
