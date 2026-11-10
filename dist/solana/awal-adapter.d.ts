@@ -32,10 +32,17 @@ export declare class SolanaAwalAdapter implements DirectRailPort {
     inspect(account: ChainAccount, prepared: RailPreparedTransfer, transactionId: string): Promise<RailInspection>;
     private currentAccount;
     private providerAddress;
-    /** Every awal Solana call here answers public JSON (address, balance, a transaction hash): the runner keeps its stdout.
-     * Authentication never runs through this adapter, so no secret output can reach it. Only awal's exact AUTH_REQUIRED
-     * failure answer means "not signed in"; any other failure or shape stays a protocol failure. */
+    /** Every awal Solana call here answers JSON without secrets (address, balance, a transaction hash, and status, which also
+     * names the signed-in email): the runner keeps its stdout, which is parsed once and zeroed, never logged. Authentication
+     * never runs through this adapter, so no secret output can reach it. A failure is "not signed in" only on
+     * awal's own word: its exact AUTH_REQUIRED answer (`address`), or, for any other exact awal failure answer (`balance`
+     * answers BALANCE_FETCH_FAILED when signed out), `awal status --json` reporting `auth.authenticated: false`. The failure's
+     * message text, served by awal's remote wallet window, decides nothing. Any other failure or shape stays a protocol failure.
+     * `send` never asks status: a failed send keeps its own answer, since being signed out afterwards proves nothing about it. */
     private run;
+    /** True only when awal 2.12.1 `status --json` answers exit 0 with `auth.authenticated` exactly false; a status that cannot
+     * run or answers anything else leaves the original failure a protocol failure. */
+    private signedOut;
     private feeContract;
 }
 export declare function awalAmount(asset: ChainAsset, amountAtomic: string): string;

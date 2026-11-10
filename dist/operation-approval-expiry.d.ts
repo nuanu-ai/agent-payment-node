@@ -38,6 +38,11 @@ export declare const EXPIRED_EVIDENCE_MISSING: string;
  */
 export declare const EXPIRED_EVIDENCE_UNVERIFIED: string;
 /**
+ * A local direct transfer whose evidence check could not run to an answer (the file system refused or failed a read, such
+ * as EACCES or EIO): nothing is known yet about what approve would do, so approve is not named and status is the next step.
+ */
+export declare const EXPIRED_EVIDENCE_UNREADABLE: string;
+/**
  * Gasless and swap: the index stops counting an unstarted record once the unstarted margin has passed its recorded expiry
  * (a gasless approve stops being able to finish a little before that expiry, so the release is counted from the expiry).
  */
