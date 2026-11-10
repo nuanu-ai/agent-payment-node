@@ -34,8 +34,10 @@ export async function missingSecretNextAction(state: SecureStateStore, profile: 
 }
 
 /**
- * A sealed record: every store writes `<name>.json`, its name a profile (which starts with [a-z0-9]) or a hex hash, flat
- * or in one per-profile or per-chain subdirectory. Atomic-write stages never reach a listing (recordEntries).
+ * A sealed record: every store writes `<name>.json`, flat or in one per-profile or per-chain subdirectory. The name never
+ * starts with a dot: a profile (which starts with [a-z0-9]), a hex hash, a network-scoped key such as `~network~…` or
+ * `~solana~…`, or an operation-scoped one such as `<operation>-<role>…`. Any such name counts, so the test is the dot and
+ * the `.json` suffix alone. Atomic-write stages never reach a listing (recordEntries).
  */
 const SEALED_RECORD = /^[^.].*\.json$/u;
 

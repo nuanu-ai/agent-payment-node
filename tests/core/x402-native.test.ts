@@ -314,6 +314,31 @@ test("lost create response remains durable pending and resume recovers the same 
   assert.equal(fixture.http.calls.length, 1);
 });
 
+test("resume of pending authorization material under a lowered limit refuses before any recovery read, then recovers once restored", async (t) => {
+  const fixture = await preparedFixture(t);
+  fixture.native.loseCreateResponse = true;
+  const first = await fixture.core.execute({ command: "x402.fetch.approve", operationId: fixture.operationId });
+  assert.equal((first.operation as { readonly state?: unknown } | null)?.state, "authorization_material_pending", JSON.stringify(first));
+  const pending = await fixture.core.context.state.findX402Operation(fixture.operationId);
+  // Review of 0.5.103: the cap check resume runs before recovering pending material (completeAuthorization) had no test.
+  const limits = { command: "wallet.policy.set" as const, profile: "default", maxBalanceUsdcAtomic: "100000000" };
+  await fixture.core.wallet.policySet({ ...limits, maxX402AmountAtomic: "1000" });
+  const refused = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal(refused.ok, false, JSON.stringify(refused));
+  assert.deepEqual([refused.error?.code, refused.error?.details?.reason, refused.error?.details?.max_x402_amount_atomic],
+    ["APN_X402_PROFILE_LIMIT_EXCEEDED", "x402_profile_limit_below_frozen_cap", "1000"]);
+  assert.deepEqual(refused.next_actions,
+    ["apn wallet policy set --profile default --max-balance-usdc-atomic <atomic> --max-x402-amount-atomic <atomic>"]);
+  assert.deepEqual(fixture.native.calls.map((call) => call.operation), ["x402Exact.approveAndAuthorize"], "no recovery read");
+  assert.deepEqual(await fixture.core.context.state.findX402Operation(fixture.operationId), pending, "the record is unchanged");
+  await fixture.core.wallet.policySet({ ...limits, maxX402AmountAtomic: "10000000" });
+  const resumed = await fixture.core.execute({ command: "operation.resume", operationId: fixture.operationId });
+  assert.equal((resumed.operation as { readonly state?: unknown } | null)?.state, "authorized_not_sent", JSON.stringify(resumed));
+  assert.deepEqual(fixture.native.calls.map((call) => call.operation),
+    ["x402Exact.approveAndAuthorize", "x402Exact.authorizationMaterial.get"]);
+  assert.equal(fixture.http.calls.length, 1);
+});
+
 test("native material mismatch fails closed without a paid marker or signature bytes in state", async (t) => {
   const fixture = await preparedFixture(t);
   fixture.native.corruptNextMaterial = true;
