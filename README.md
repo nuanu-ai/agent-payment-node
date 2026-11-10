@@ -494,6 +494,16 @@ foreground terminal and passes each to the pinned `awal` as a command-line argum
 child runs (APN stops it at the 30-second provider timeout), another process of the same user can read the code with
 `ps`. It is a one-time code for that one pending sign-in; APN never prints, logs or stores it.
 
+Every `awal` command except `quit`, including the public reads APN runs (`address`, `balance`, `status`), starts awal's
+own wallet server (a detached Electron process shown as `bundle-electron.js`, the `payments-mcp-server`) when it is not already
+running. That server holds the awal session and keeps running after APN exits, as it does after any `npx awal` command.
+APN does not stop it, because the same server answers every awal client of this user. `npx awal@2.12.1 quit`, or
+`node "$(brew --prefix apn)/libexec/node_modules/awal/dist/index.js" quit` for the copy APN pins, stops it; the next awal
+command starts it again. When an AWAL Solana read (`wallet ensure-solana`, `wallet balance-solana`) fails with an exact
+awal failure answer other than `AUTH_REQUIRED`, APN asks `awal status --json`, and only `auth.authenticated: false` there
+turns the failure into `APN_PROVIDER_SESSION_REQUIRED` with the `apn wallet connect` step; awal's error text, which its
+remote wallet window supplies, decides nothing. `AUTH_REQUIRED` gives that answer directly.
+
 `apn wallet status` and `apn wallet ensure` (CLI and MCP) prove that an existing local wallet's wrapping secret is still
 in the Keychain and decrypt nothing. They run `/usr/bin/security find-generic-password -w` once; the bytes it prints are
 zeroed when the check ends and are not kept in the per-command copy that signing commands cache. The base64 text also

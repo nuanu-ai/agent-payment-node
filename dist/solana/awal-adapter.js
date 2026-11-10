@@ -38,7 +38,7 @@ export class SolanaAwalAdapter {
     async balance(account, asset) {
         await this.currentAccount(account);
         await this.assertNetwork();
-        const result = await this.run(["balance", "--chain", "solana", "--asset", asset.alias, "--json"], account.profile);
+        const result = await this.run(["balance", "--chain", "solana", "--asset", asset.alias, "--json"], account.profile, "read");
         // Preserve only the pinned fields. Provider display strings never become amounts.
         if (result.chain !== "solana" && result.chain !== "Solana")
             providerProtocol();
@@ -80,7 +80,7 @@ export class SolanaAwalAdapter {
         await this.revalidate(binding.account, binding.prepared);
         const prepared = binding.prepared;
         const result = await this.run(["send", awalAmount(prepared.asset, prepared.amountAtomic), prepared.recipient,
-            "--chain", "solana", "--asset", prepared.asset.symbol, "--json"], binding.account.profile);
+            "--chain", "solana", "--asset", prepared.asset.symbol, "--json"], binding.account.profile, "send");
         if (result.chain !== "solana" && result.chain !== "Solana" || result.error !== undefined)
             providerProtocol();
         return { transactionId: solanaSignature(result.transactionHash) };
@@ -99,22 +99,39 @@ export class SolanaAwalAdapter {
             mismatch();
     }
     async providerAddress(profile) {
-        const result = await this.run(["address", "--chain", "solana", "--json"], profile);
+        const result = await this.run(["address", "--chain", "solana", "--json"], profile, "read");
         if (!exactKeys(result, ["address", "chain"]) || result.chain !== "solana" || typeof result.address !== "string")
             providerProtocol();
         return solanaAddress(result.address);
     }
-    /** Every awal Solana call here answers public JSON (address, balance, a transaction hash): the runner keeps its stdout.
-     * Authentication never runs through this adapter, so no secret output can reach it. Only awal's exact AUTH_REQUIRED
-     * failure answer means "not signed in"; any other failure or shape stays a protocol failure. */
-    async run(argv, profile) {
+    /** Every awal Solana call here answers JSON without secrets (address, balance, a transaction hash, and status, which also
+     * names the signed-in email): the runner keeps its stdout, which is parsed once and zeroed, never logged. Authentication
+     * never runs through this adapter, so no secret output can reach it. A failure is "not signed in" only on
+     * awal's own word: its exact AUTH_REQUIRED answer (`address`), or, for any other exact awal failure answer (`balance`
+     * answers BALANCE_FETCH_FAILED when signed out), `awal status --json` reporting `auth.authenticated: false`. The failure's
+     * message text, served by awal's remote wallet window, decides nothing. Any other failure or shape stays a protocol failure.
+     * `send` never asks status: a failed send keeps its own answer, since being signed out afterwards proves nothing about it. */
+    async run(argv, profile, call) {
         const result = await this.runner.run(argv, false);
         const value = providerJson(result);
         if (result.exitCode === 0 && result.optionalFailure === undefined && isPlainRecord(value))
             return value;
-        if (awalAuthRequired(result.exitCode, value))
+        const failure = awalFailureCode(result.exitCode, value);
+        if (failure === "AUTH_REQUIRED" || failure !== null && call === "read" && await this.signedOut())
             signInRequired(profile);
         return providerProtocol();
+    }
+    /** True only when awal 2.12.1 `status --json` answers exit 0 with `auth.authenticated` exactly false; a status that cannot
+     * run or answers anything else leaves the original failure a protocol failure. */
+    async signedOut() {
+        try {
+            const result = await this.runner.run(["status", "--json"], false), value = providerJson(result);
+            return result.exitCode === 0 && result.optionalFailure === undefined && isPlainRecord(value) && isPlainRecord(value.auth) &&
+                value.auth.authenticated === false;
+        }
+        catch {
+            return false;
+        }
     }
     feeContract() { return this.fees ?? unavailable(); }
 }
@@ -149,11 +166,11 @@ function providerJson(result) {
         result.stdout.fill(0);
     }
 }
-/** awal 2.12.1 `cliError` under --json: exit 1 and exactly {"success":false,"error":{"code":"AUTH_REQUIRED","message":…}}. */
-function awalAuthRequired(exitCode, value) {
+/** The code of an awal 2.12.1 `cliError` answer under --json (exit 1 and exactly {"success":false,"error":{"code","message"}}). */
+function awalFailureCode(exitCode, value) {
     return exitCode === 1 && isPlainRecord(value) && exactKeys(value, ["success", "error"]) && value.success === false &&
-        isPlainRecord(value.error) && exactKeys(value.error, ["code", "message"]) && value.error.code === "AUTH_REQUIRED" &&
-        typeof value.error.message === "string";
+        isPlainRecord(value.error) && exactKeys(value.error, ["code", "message"]) && typeof value.error.code === "string" &&
+        /^[A-Z][A-Z0-9_]{0,63}$/u.test(value.error.code) && typeof value.error.message === "string" ? value.error.code : null;
 }
 /** awal keeps one session for its EVM and Solana accounts; the foreground `wallet connect` handoff signs it in. */
 function signInRequired(profile) {

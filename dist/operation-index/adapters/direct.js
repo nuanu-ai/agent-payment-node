@@ -5,7 +5,7 @@ import { SETTLED_DIRECT_STATES } from "../../direct-transfer-settle.js";
 import { ApnError } from "../../errors.js";
 import { LOCAL_DIRECT_TERMINAL_STATES, PROVIDER_DIRECT_TERMINAL_STATES } from "../../model.js";
 import { abandonDirectTransfer } from "../../operation-abandon-service.js";
-import { EXPIRED_APPROVE_CLOSES, EXPIRED_APPROVE_OR_NEXT_TRANSFER_CLOSES, EXPIRED_EVIDENCE_MISSING, EXPIRED_EVIDENCE_UNVERIFIED, EXPIRED_NEXT_TRANSFER_CLOSES } from "../../operation-approval-expiry.js";
+import { EXPIRED_APPROVE_CLOSES, EXPIRED_APPROVE_OR_NEXT_TRANSFER_CLOSES, EXPIRED_EVIDENCE_MISSING, EXPIRED_EVIDENCE_UNREADABLE, EXPIRED_EVIDENCE_UNVERIFIED, EXPIRED_NEXT_TRANSFER_CLOSES } from "../../operation-approval-expiry.js";
 import { refuseObservationRpc, refuseObserveOnly } from "../../operation-command-options.js";
 import { evmConflictDomain } from "../../operation-conflict-domain.js";
 import { StateStore } from "../../state.js";
@@ -39,7 +39,10 @@ export function salvageProvider(providerId, accountBindingHash, payer) {
 /**
  * Null when local approve reaches its deadline check and closes the record; otherwise the note for its refusal. Approve's own
  * order (TransferService.approveOperation): a generic EVM record without its frozen native custody refuses first, then
- * DirectPublicEffectJournal.assertUnstarted checks the prepared binding, custody and wallet file. Reads only.
+ * DirectPublicEffectJournal.assertUnstarted checks the prepared binding, custody and wallet file. Reads only. Every refusal it
+ * makes on what the state holds is an ApnError (blocked, corrupt, drift, an unsafe file, an out-of-range number), and approve
+ * stops at the same one. A failure that is not an ApnError (the file system's own, such as EACCES or EIO) proves nothing
+ * either way, so it gets its own note.
  */
 async function localApproveRefusal(record, root) {
     if (record.evm !== undefined && record.evm.nativeCustody === undefined)
@@ -49,7 +52,9 @@ async function localApproveRefusal(record, root) {
         return null;
     }
     catch (error) {
-        return error instanceof ApnError && error.details?.reason === "direct_public_evidence_missing" ? EXPIRED_EVIDENCE_MISSING : EXPIRED_EVIDENCE_UNVERIFIED;
+        if (!(error instanceof ApnError))
+            return EXPIRED_EVIDENCE_UNREADABLE;
+        return error.details?.reason === "direct_public_evidence_missing" ? EXPIRED_EVIDENCE_MISSING : EXPIRED_EVIDENCE_UNVERIFIED;
     }
 }
 export const directAdapter = {
