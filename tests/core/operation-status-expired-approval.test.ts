@@ -143,7 +143,8 @@ test("a local transfer whose evidence cannot be read just now reads as expired w
   const stored = (await new StateStore(root).findOperation(id))!, core = makeCore({ root, clock });
   // Review of 0.5.103: any failure of the evidence check, an I/O error too, read as "resolve manually".
   const path = join(root, "direct-public-effects", stored.profileHash, `${id}.prepared.json`);
-  await chmod(path, 0o000); t.after(async () => await chmod(path, 0o600));
+  // Run as a non-root user (the CI runner): open() then fails EACCES before any mode check. The body restores 0600 below.
+  await chmod(path, 0o000);
   clock.value = new Date(Date.parse(stored.expiresAt));
   const unreadable = await core.execute({ command: "operation.status", operationId: id });
   assertExpired(unreadable, "unreadable evidence at the deadline", EXPIRED_EVIDENCE_UNREADABLE, false);

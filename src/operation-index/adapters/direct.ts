@@ -40,23 +40,18 @@ export function salvageProvider(providerId: unknown, accountBindingHash: unknown
 }
 
 /**
- * The answers by which DirectPublicEffectJournal.assertUnstarted refuses on what the state holds: evidence missing or signing
- * evidence retained (APN_OPERATION_BLOCKED), evidence or binding that does not match (APN_STATE_CORRUPT), changed custody
- * (APN_PROFILE_DRIFT), an unsafe state file (APN_STATE_SECURITY). Approve stops at the same answer.
- */
-const EVIDENCE_REFUSALS: ReadonlySet<string> = new Set(["APN_OPERATION_BLOCKED", "APN_STATE_CORRUPT", "APN_PROFILE_DRIFT", "APN_STATE_SECURITY"]);
-
-/**
  * Null when local approve reaches its deadline check and closes the record; otherwise the note for its refusal. Approve's own
  * order (TransferService.approveOperation): a generic EVM record without its frozen native custody refuses first, then
- * DirectPublicEffectJournal.assertUnstarted checks the prepared binding, custody and wallet file. Reads only. A check that
- * failed without one of its refusals (an I/O error, a lock) proves nothing either way, so it gets its own note.
+ * DirectPublicEffectJournal.assertUnstarted checks the prepared binding, custody and wallet file. Reads only. Every refusal it
+ * makes on what the state holds is an ApnError (blocked, corrupt, drift, an unsafe file, an out-of-range number), and approve
+ * stops at the same one. A failure that is not an ApnError (the file system's own, such as EACCES or EIO) proves nothing
+ * either way, so it gets its own note.
  */
 async function localApproveRefusal(record: OperationRecord, root: string): Promise<string | null> {
   if (record.evm !== undefined && record.evm.nativeCustody === undefined) return EXPIRED_EVIDENCE_UNVERIFIED;
   try { await new DirectPublicEffectJournal(new StateStore(root)).assertUnstarted(record); return null; }
   catch (error) {
-    if (!(error instanceof ApnError) || !EVIDENCE_REFUSALS.has(error.code)) return EXPIRED_EVIDENCE_UNREADABLE;
+    if (!(error instanceof ApnError)) return EXPIRED_EVIDENCE_UNREADABLE;
     return error.details?.reason === "direct_public_evidence_missing" ? EXPIRED_EVIDENCE_MISSING : EXPIRED_EVIDENCE_UNVERIFIED;
   }
 }

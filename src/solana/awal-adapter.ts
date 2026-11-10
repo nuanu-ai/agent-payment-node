@@ -86,8 +86,9 @@ export class SolanaAwalAdapter implements DirectRailPort {
     if (!exactKeys(result, ["address", "chain"]) || result.chain !== "solana" || typeof result.address !== "string") providerProtocol();
     return solanaAddress(result.address);
   }
-  /** Every awal Solana call here answers public JSON (address, balance, a transaction hash): the runner keeps its stdout.
-   * Authentication never runs through this adapter, so no secret output can reach it. A failure is "not signed in" only on
+  /** Every awal Solana call here answers JSON without secrets (address, balance, a transaction hash, and status, which also
+   * names the signed-in email): the runner keeps its stdout, which is parsed once and zeroed, never logged. Authentication
+   * never runs through this adapter, so no secret output can reach it. A failure is "not signed in" only on
    * awal's own word: its exact AUTH_REQUIRED answer (`address`), or, for any other exact awal failure answer (`balance`
    * answers BALANCE_FETCH_FAILED when signed out), `awal status --json` reporting `auth.authenticated: false`. The failure's
    * message text, served by awal's remote wallet window, decides nothing. Any other failure or shape stays a protocol failure.
