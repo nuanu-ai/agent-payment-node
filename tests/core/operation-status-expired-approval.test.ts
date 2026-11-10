@@ -12,8 +12,9 @@ import { OperationService } from "../../src/operation-service.js";
 import { StateStore } from "../../src/state.js";
 import { validateSwapOperation } from "../../src/swap/model.js";
 import { SwapOperationRepository } from "../../src/swap/repository.js";
+import { CanonicalDirectTestNative } from "./canonical-direct-native-fixture.js";
 import { EVM_REQUEST, ensureDirectWallet, evmCore } from "./evm-helpers.js";
-import { ensureWallet, makeCore, prepareTransfer, temporaryState, TestClock, TestNative, TestRpc } from "./helpers.js";
+import { ensureWallet, makeCore, prepareTransfer, temporaryState, TestClock, TestRpc } from "./helpers.js";
 import { NoSecret, WP2_FAMILY_RECORDS } from "./operation-commands-families.js";
 import { ExactX402Native, QueuedHttp, RecoveryRpc, X402_TEST_ACCOUNT, challengeObservation } from "./x402-helpers.js";
 import { X402_PAYMENT_REQUIRED, X402_URL, canonicalPaymentRequiredHeader } from "./x402-vectors.js";
@@ -69,7 +70,7 @@ test("a local EVM transfer past its approval deadline reads as expired and is cl
 test("a Base USDC transfer past its approval deadline names approve, which now closes it without asking", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const root = temporary.root, clock = new TestClock();
-  await ensureWallet(makeCore({ root, native: new TestNative(root), clock }));
+  await ensureWallet(makeCore({ root, native: new CanonicalDirectTestNative(root), clock }));
   const id = await prepareTransfer(makeCore({ root, rpc: new TestRpc(), clock }), "expired-status-base-usdc");
   const stored = (await new StateStore(root).findOperation(id))!, deadline = Date.parse(stored.expiresAt), core = makeCore({ root, clock });
   clock.value = new Date(deadline - 1);
@@ -90,7 +91,7 @@ test("a Base USDC transfer past its approval deadline names approve, which now c
 test("a local transfer without its public effect evidence reads as expired and says approve cannot close it", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const root = temporary.root, clock = new TestClock();
-  await ensureWallet(makeCore({ root, native: new TestNative(root), clock }));
+  await ensureWallet(makeCore({ root, native: new CanonicalDirectTestNative(root), clock }));
   const id = await prepareTransfer(makeCore({ root, rpc: new TestRpc(), clock }), "expired-status-no-evidence");
   const stored = (await new StateStore(root).findOperation(id))!, core = makeCore({ root, clock });
   // A record prepared before APN wrote its public prepared binding has none.
