@@ -159,7 +159,7 @@ work for native coins (`--asset native`) and every listed token on the eleven di
 Solana and TRON have their own `-solana`/`-tron` commands ([Solana](docs/solana.md), [TRON](docs/tron.md)).
 
 If a transfer stalls, `operation resume --operation <id> --rpc-url <url>` performs only the next legal transition
-(`--observe-only true` inspects an already submitted local EVM transfer without custody access; Solana and TRON resume never resends a possibly broadcast transfer). `operation abandon` lets the
+(`--observe-only true` inspects an already submitted local EVM transfer without custody access; Solana and TRON refuse it: their plain resume never resends a possibly broadcast transfer, but sends an approved, never-sent one for the first time). `operation abandon` lets the
 owner close an eligible operation whose outcome cannot be proven, after accepting the unresolved risk in the terminal.
 A saved record APN can no longer read blocks only the accounts it names; `operation abandon` releases those claims after
 the same terminal consent and leaves the file and any usage-ledger reservation as they are, so the amount stays charged.

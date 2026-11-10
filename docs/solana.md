@@ -232,7 +232,11 @@ the submission boundary permits observation only.
 
 `operation resume` makes one bounded observation and does not accept
 `--wait-seconds` for this rail. `--observe-only true` is for EVM direct
-transfers and is refused here with `rail_observe_only_unsupported`. Confirmed-only status, missing history,
+transfers and is refused here with `rail_observe_only_unsupported`. Plain
+`operation resume` only observes a transaction that may have been broadcast,
+but sends an approved transaction that was never sent (`signing_started`,
+`signed_not_submitted`) for the first time; for those states the refusal
+points to `operation status`. Confirmed-only status, missing history,
 invalid evidence or an expired blockhash after a possible broadcast remain
 unresolved. Do not create a replacement payment for such an operation.
 Same-key replay returns the same intent; conflicting intents and other money
