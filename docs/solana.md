@@ -276,6 +276,11 @@ refuses abandonment while the window is open or the signature is visible.
 `wallet ensure-solana --profile <profile> --provider coinbase-awal` links an
 already authenticated pinned `awal` account. APN does not log in or enroll it.
 The existing profile owner must agree; no key is exported into APN custody.
+When `awal` is not signed in it answers `AUTH_REQUIRED`, and APN returns
+`APN_PROVIDER_SESSION_REQUIRED` with the next action
+`apn wallet connect --profile <profile> --provider coinbase-agentic-wallet`:
+that foreground handoff signs in the one `awal` session its EVM and Solana
+accounts share. Any other `awal` failure stays `APN_PROVIDER_PROTOCOL`.
 
 The adapter validates the pinned account, balance and send-result formats.
 Transfer preparation returns `APN_PROVIDER_CAPABILITY_UNAVAILABLE` before
