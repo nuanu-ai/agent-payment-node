@@ -44,7 +44,30 @@ export class MetaMaskCliRevocationWallet {
     }
 }
 function withProvider(answer, provider) {
-    return answer.disposition === "unknown" && provider !== undefined ? { ...answer, provider } : answer;
+    if (answer.disposition !== "unknown" || provider === undefined)
+        return answer;
+    const code = stderrErrorCode(provider);
+    return code === undefined ? { ...answer, provider } : { ...answer, providerErrorCode: code, provider };
+}
+/**
+ * The error code of `mm`'s JSON failure answer, which it writes to stderr after any progress lines
+ * (`{"ok":false,"error":{"code":…}}`, indented, or `{"_error":{…}}` after a notice), read from the stream shape: only
+ * when the process exited, stdout is empty, stderr is complete and its last frame is that answer. The shape keeps `code`
+ * only when it looks like an enum value, so no message, id or address can surface here.
+ */
+function stderrErrorCode(provider) {
+    const { stdout, stderr } = provider;
+    if (provider.outcome !== "exit" || stdout.captured !== "empty" || stderr.captured !== "complete" || stderr.frames.length === 0)
+        return undefined;
+    const frame = stderr.frames.at(-1);
+    if (!frame.json || frame.object === undefined)
+        return undefined;
+    const ok = frame.object.keys.find((key) => key.key === "ok");
+    if (ok !== undefined && ok.value !== false)
+        return undefined;
+    const error = frame.object.keys.find((key) => (key.key === "error" || key.key === "_error") && key.object !== undefined);
+    const code = error?.object?.keys.find((key) => key.key === "code")?.value;
+    return typeof code === "string" ? code : undefined;
 }
 function submission(exitCode, stdout, from) {
     const parsed = parseMetaMaskProcessOutput(stdout);

@@ -90,6 +90,7 @@ export class MetaMaskSmartAccountAdapter {
         const idempotencyHash = sha256(`idempotency\0${intent.idempotencyKey}`);
         const fingerprint = connectionFingerprint(intent, idempotencyHash);
         let record = await this.store.load(intent.profileHash);
+        const retry = record !== null;
         if (record === null) {
             if (instant.unix >= intent.expiresAtUnix)
                 invalidInput("Permission expiry must be in the future.");
@@ -147,6 +148,7 @@ export class MetaMaskSmartAccountAdapter {
             capAtomic: pending.requested_cap_atomic,
             startsAtUnix: pending.starts_at_unix,
             expiresAtUnix: pending.requested_expires_at_unix,
+            retry,
         });
         const commitInstant = this.instant();
         const grant = validateSmartAccountObservation(observation, requestShape(pending, commitInstant.unix));

@@ -27,7 +27,9 @@ const CONNECT = ["wallet", "connect", "--profile", PROFILE, "--provider", METAMA
   "--permission-cap-usdc-atomic", "2000000", "--permission-expires-at", String(EXPIRY), "--idempotency-key", KEY];
 const EXPIRED = [
   `The intent expired at ${new Date(EXPIRY * 1000).toISOString()} and its exact connect is refused. In MetaMask, check whether a permission for session ${SESSION} was granted, and revoke it there if it is not wanted.`,
-  `Then cancel only the local expired intent with apn wallet permission forget --profile ${PROFILE} --expected-revision 1, and start a new wallet connect with a new expiry and idempotency key.`,
+  `Then cancel only the local expired intent with apn wallet permission forget --profile ${PROFILE} --expected-revision 1. It deletes the key APN generated for session ${SESSION}, ` +
+    "and only that key can use a permission granted to it, so such a permission can then move nothing, also where MetaMask cannot list it. " +
+    "Start a new wallet connect with a new expiry and idempotency key.",
 ];
 
 class Wrapping implements WrappingSecretPort {

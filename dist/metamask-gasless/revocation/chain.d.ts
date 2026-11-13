@@ -18,7 +18,9 @@ export interface MetaMaskRevocationChain {
 }
 /**
  * Reads, in order: at the finality block (pinned by hash) the redemption count, the manager's disabled flag and the
- * manager's own hash of the tuple the call carries; then at the latest block the delegator's pending nonce, the gas
+ * manager's own hash of the tuple the call carries; then the delegator's pending and latest nonces, which must agree
+ * (a transaction the RPC holds as pending, an earlier disable included, would make this one land after it and revert at a
+ * cost in gas); then at the latest block the gas
  * of exactly this call from the delegator (`eth_estimateGas` executes it, so a call the manager would refuse fails
  * here), the fee rule `EvmRpc.estimate` uses (2 x base fee + priority) and the delegator's native balance.
  */

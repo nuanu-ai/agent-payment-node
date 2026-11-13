@@ -7,13 +7,15 @@ import type { MetaMaskProcessObservation } from "../../metamask-process-observat
 import { NodeMetaMaskProcessRunner, takeMetaMaskProcessFailureObservation, type MetaMaskProcessRunnerPort } from "../../metamask-process-runner.js";
 
 /**
- * What the wallet answered; an unknown answer is never a reason to send again (the pinned nonce allows one landing).
- * An unknown answer carries the child process's exit and stream shape (`provider`), so its cause can be read later.
+ * What the wallet answered. An unknown answer is not proof that nothing was sent; the revoke's next actions say which
+ * chain reads must hold before another disable. It carries the child process's exit and stream shape (`provider`), and
+ * the code of `mm`'s JSON error when there is one (`providerErrorCode`), so its cause can be read later.
  */
 export type MetaMaskRevocationSubmission =
   | { readonly disposition: "acknowledged"; readonly transactionHash: Hex; readonly requestIdHash: string | null }
   | { readonly disposition: "pending"; readonly requestIdHash: string }
-  | { readonly disposition: "unknown"; readonly reason: string; readonly provider?: MetaMaskProcessObservation };
+  | { readonly disposition: "unknown"; readonly reason: string; readonly providerErrorCode?: string;
+      readonly provider?: MetaMaskProcessObservation };
 export interface MetaMaskRevocationWalletPort {
   send(input: { readonly chainId: number; readonly from: Address; readonly payload: Readonly<Record<string, Hex>>;
     readonly intent: string }): Promise<MetaMaskRevocationSubmission>;
@@ -50,7 +52,27 @@ export class MetaMaskCliRevocationWallet implements MetaMaskRevocationWalletPort
 }
 
 function withProvider(answer: MetaMaskRevocationSubmission, provider: MetaMaskProcessObservation | undefined): MetaMaskRevocationSubmission {
-  return answer.disposition === "unknown" && provider !== undefined ? { ...answer, provider } : answer;
+  if (answer.disposition !== "unknown" || provider === undefined) return answer;
+  const code = stderrErrorCode(provider);
+  return code === undefined ? { ...answer, provider } : { ...answer, providerErrorCode: code, provider };
+}
+
+/**
+ * The error code of `mm`'s JSON failure answer, which it writes to stderr after any progress lines
+ * (`{"ok":false,"error":{"code":…}}`, indented, or `{"_error":{…}}` after a notice), read from the stream shape: only
+ * when the process exited, stdout is empty, stderr is complete and its last frame is that answer. The shape keeps `code`
+ * only when it looks like an enum value, so no message, id or address can surface here.
+ */
+function stderrErrorCode(provider: MetaMaskProcessObservation): string | undefined {
+  const { stdout, stderr } = provider;
+  if (provider.outcome !== "exit" || stdout.captured !== "empty" || stderr.captured !== "complete" || stderr.frames.length === 0) return undefined;
+  const frame = stderr.frames.at(-1)!;
+  if (!frame.json || frame.object === undefined) return undefined;
+  const ok = frame.object.keys.find((key) => key.key === "ok");
+  if (ok !== undefined && ok.value !== false) return undefined;
+  const error = frame.object.keys.find((key) => (key.key === "error" || key.key === "_error") && key.object !== undefined);
+  const code = error?.object?.keys.find((key) => key.key === "code")?.value;
+  return typeof code === "string" ? code : undefined;
 }
 
 function submission(exitCode: number, stdout: Buffer, from: Address): MetaMaskRevocationSubmission {

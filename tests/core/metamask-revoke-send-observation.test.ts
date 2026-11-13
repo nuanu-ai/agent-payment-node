@@ -46,9 +46,42 @@ const send = async (answer: Answer) => {
 test("an empty stdout with a stderr refusal is named empty and keeps exit, sizes, hashes and key shapes without values", async () => {
   const submitted = await send({ stderr: STDERR_ERROR, code: 1 });
   assert.equal(submitted.disposition, "unknown"); assert.equal(submitted.reason, "provider_response_empty");
+  assert.equal(submitted.providerErrorCode, "POLICY_VIOLATION");
   const { durationMs, ...provider } = submitted.provider; assert.ok(Number.isSafeInteger(durationMs));
   assert.deepEqual(provider, { provider: PROVIDER, outcome: "exit", exitCode: 1, signal: null, stdout: EMPTY,
     stderr: { bytes: Buffer.byteLength(STDERR_ERROR), captured: "complete", sha256: sha256(STDERR_ERROR), frames: [ERROR_FRAME], framesOmitted: 0 } });
+});
+
+test("mm's own error envelope on stderr names its code; free text last, ok:true or a stdout answer name none", async () => {
+  const envelope = await send({ stderr: JSON.stringify({ ok: false, error: { code: "MFA_REQUIRED", message: SECRET, hint: SECRET } }), code: 1 });
+  assert.deepEqual([envelope.reason, envelope.providerErrorCode], ["provider_response_empty", "MFA_REQUIRED"]);
+  for (const answer of [{ stderr: JSON.stringify({ ok: false, error: { code: "not an enum", message: SECRET } }), code: 1 },
+    { stderr: `${STDERR_ERROR}\n${SECRET}`, code: 1 }, { stderr: SECRET, code: 1 },
+    { stderr: JSON.stringify({ ok: true, error: { code: "POLICY_VIOLATION" } }), code: 1 },
+    { stdout: SECRET, stderr: STDERR_ERROR, code: 1 }]) {
+    const submitted = await send(answer);
+    assert.equal(submitted.disposition, "unknown"); assert.equal("providerErrorCode" in submitted, false, JSON.stringify(answer));
+  }
+});
+
+test("QA 0.5.104 shape: progress lines, then mm's indented JSON error, name TX_FAILED and keep the block as one frame", async () => {
+  // As QA's saved revoke showed it: 514 bytes in 11 lines, the last 8 of them `mm --json`'s indented error answer.
+  const progress = ["Submitting transaction request to the MetaMask server wallet for chain 8453 ...", "x".repeat(55), "y".repeat(163)];
+  const answer = JSON.stringify({ ok: false, error: { code: "TX_FAILED", message: `${SECRET} (requestId: ${RID})`,
+    hint: "The signing job failed. Retry; run with --verbose for detail." } }, null, 2);
+  const submitted = await send({ stderr: `${progress.join("\n")}\n${answer}\n`, code: 1 });
+  assert.deepEqual([submitted.reason, submitted.providerErrorCode], ["provider_response_empty", "TX_FAILED"]);
+  const { frames, framesOmitted } = submitted.provider.stderr;
+  assert.deepEqual(frames.slice(0, 3), progress.map((line) => ({ json: false, bytes: line.length })));
+  assert.deepEqual(frames[3], { json: true, type: "object", object: { otherKeys: 0, keys: [{ key: "ok", type: "boolean", value: false },
+    { key: "error", type: "object", object: { otherKeys: 0, keys: [{ key: "code", type: "string", value: "TX_FAILED" },
+      { key: "message", type: "string" }, { key: "hint", type: "string" }] } }] } });
+  assert.equal(frames.length, 4); assert.equal(framesOmitted, 0);
+  // Many progress lines: the first seven stay, the rest are counted, and the answer is still the last frame.
+  const long = await send({ stderr: `${Array.from({ length: 10 }, (_, i) => `progress ${i}`).join("\n")}\n${answer}`, code: 1 });
+  assert.equal(long.providerErrorCode, "TX_FAILED");
+  assert.equal(long.provider.stderr.frames.length, 8); assert.equal(long.provider.stderr.framesOmitted, 3);
+  assert.equal(long.provider.stderr.frames.at(-1).json, true);
 });
 
 test("a non-JSON stdout stays malformed and shows only its line sizes", async () => {

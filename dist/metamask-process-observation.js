@@ -14,10 +14,44 @@ function streamShape({ bytes, total }) {
     if (total === 0)
         return { bytes: 0, captured: "empty", sha256: null, frames: [], framesOmitted: 0 };
     const complete = bytes.length === total, text = bytes.toString("utf8").trim(), whole = parse(text);
-    const lines = whole === undefined ? text.split(/\r?\n/u).filter((line) => line.trim().length > 0) : [];
-    const frames = whole === undefined ? lines.slice(0, MAX_FRAMES).map((line) => frame(line)) : [frameOf(whole)];
-    return { bytes: total, captured: complete ? "complete" : "truncated", sha256: complete ? sha256(bytes) : null,
-        frames, framesOmitted: Math.max(0, lines.length - MAX_FRAMES) };
+    const shape = { bytes: total, captured: complete ? "complete" : "truncated", sha256: complete ? sha256(bytes) : null };
+    if (whole !== undefined)
+        return { ...shape, frames: [frameOf(whole)], framesOmitted: 0 };
+    const lines = text.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+    // `mm --json` prints its answer indented over many lines, after any progress lines: that block is one frame, kept last.
+    // The last frame is always the stream's end; past eight lines the ones before it are counted, not shown.
+    const tail = trailingBlock(lines);
+    if (tail === undefined) {
+        const kept = lines.length <= MAX_FRAMES ? lines : [...lines.slice(0, MAX_FRAMES - 1), lines.at(-1)];
+        return { ...shape, frames: kept.map((line) => frame(line)), framesOmitted: lines.length - kept.length };
+    }
+    const before = lines.slice(0, tail.start);
+    return { ...shape, frames: [...before.slice(0, MAX_FRAMES - 1).map((line) => frame(line)), frameOf(tail.value)],
+        framesOmitted: Math.max(0, before.length - (MAX_FRAMES - 1)) };
+}
+/** `mm`'s JSON answer in a stream: the whole text, else the object it prints last, indented or on one line, after progress lines. */
+export function metaMaskJsonAnswer(text) {
+    const trimmed = text.trim(), whole = parse(trimmed);
+    if (whole !== undefined)
+        return whole;
+    const lines = trimmed.split(/\r?\n/u).filter((line) => line.trim().length > 0), block = trailingBlock(lines)?.value;
+    if (block !== undefined)
+        return block;
+    const last = parse(lines.at(-1)?.trim() ?? "");
+    return isPlainRecord(last) ? last : undefined;
+}
+/**
+ * The last line that opens a top-level `{` at column 0 and, with every line after it, parses as one JSON object. `mm`
+ * indents nested objects, so a column-0 `{` starts a top-level answer; scanning from the end parses well-formed output once.
+ */
+function trailingBlock(lines) {
+    for (let start = lines.length - 1; start >= 0; start -= 1) {
+        if (lines[start] !== "{")
+            continue;
+        const value = parse(lines.slice(start).join("\n"));
+        return isPlainRecord(value) ? { start, value } : undefined;
+    }
+    return undefined;
 }
 function frame(line) {
     const value = parse(line.trim());

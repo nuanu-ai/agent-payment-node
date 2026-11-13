@@ -869,10 +869,20 @@ its exact delivery and fee) or the delegation disabled before any redemption (`r
 as `transient_observation` and is not saved over the acknowledgement. When an observation went through
 `--observation-rpc-env`, the next action of the still unresolved operation repeats that option.
 
+### A transfer sent from another login project
+
+MetaMask keeps a transfer's request in the project of the `mm` login that sent it (`…/v1/projects/{projectId}/transaction-requests/{requestId}`).
+After a login into another project, even one that holds the same server wallet, APN does not read that request with the
+new session: the operation keeps `mm_gasless_binding_changed` as its reason and resume reads only the chain. To read the
+request again, sign in to MetaMask the way you did when it was sent, so that the session's project is that one again. To
+close the operation without it, disable its delegation (below): when the selected server wallet and the profile are
+unchanged, the server wallet's address signs the disable whatever project the current login is in, and resume then
+proves `revoked_unused` or `completed` from the chain.
+
 ### Disabling a disclosed delegation
 
-When MetaMask closed the request (`FAILED`, `DENIED`, `EXPIRED`), the relay reverted, or you abandoned the operation, the
-delegation may still be redeemed and only a proof ends that. Your exit is to disable it from the server wallet itself:
+When MetaMask closed the request (`FAILED`, `DENIED`, `EXPIRED`), the relay reverted, the request belongs to another
+login project, or you abandoned the operation, the delegation may still be redeemed and only a proof ends that. Your exit is to disable it from the server wallet itself:
 
 ```sh
 apn gasless transfer revoke --operation <operation-id>
@@ -888,13 +898,18 @@ state, because they send nothing from that wallet themselves.
 pinned DelegationManager hashes the call's delegation tuple (`getDelegationHash`) to the operation's delegation hash.
 It then prices exactly `DelegationManager.disableDelegation(<that delegation>)` from the server wallet at the latest
 block (`eth_estimateGas`, pending nonce, 2 x base fee + priority fee, and on OP-stack chains the L1 data and operator
-fee upper bounds). It refuses with `APN_INSUFFICIENT_GAS` and the exact amount to send when the wallet's native balance
-is below that maximum.
+fee upper bounds). It refuses with `APN_OPERATION_BLOCKED / mm_revoke_transaction_pending` while the RPC's pending nonce
+of the wallet is past its latest one: a transaction this RPC holds as pending still waits, an earlier disable included,
+and a disable sent now would take the next nonce and could revert after it at a cost in gas. The check reads the RPC's
+pool once, at pricing; a transaction the RPC does not show (many public OP-stack RPCs show none) is not seen. It refuses with `APN_INSUFFICIENT_GAS` and the
+exact amount to send when the wallet's native balance is below that maximum.
 
 The foreground screen shows the call, the nonce, the gas fields and the maximum native cost. After the six-character
 code, APN checks that the wallet's selected server wallet is the delegator, and the MetaMask Agent Wallet
 (`mm wallet send-transaction`) signs and broadcasts the call after its own Guard policy and MFA. The call moves no USDC.
-The pinned nonce lets one such call land; a second disable reverts (`AlreadyDisabled`). Nothing is written to the
+Each disable pins the pending nonce it was priced at, so two disables at one nonce land at most once. A disable priced
+after another one landed fails its gas estimate and is not sent; gas is lost only when a disable is priced before
+another one lands and is sent after it (it reverts `AlreadyDisabled`). Nothing is written to the
 operation: the chain is the record. `operation resume` then proves the outcome: `revoked_unused` when the delegation is
 disabled with no redemption, or `completed` when the redemption landed first. MCP returns the CLI handoff.
 
@@ -902,14 +917,21 @@ The `revoke` output reports `submission`:
 
 - `acknowledged`: with the transaction hash.
 - `pending`: MetaMask waits on your MFA.
-- `unknown`: never a reason to disable again; `operation resume` reads the chain. Its `reason` says what APN saw
+- `unknown`: not a proof that nothing was sent; `operation resume` reads the chain. Its `reason` says what APN saw
   (`provider_response_empty` when `mm` wrote nothing to stdout, `provider_response_malformed`,
-  `provider_handoff_outcome_unknown`).
+  `provider_handoff_outcome_unknown`). When `mm` answered with its JSON error on stderr and nothing on stdout,
+  `providerErrorCode` is that error's code (for example `POLICY_VIOLATION`), taken from the stderr shape below.
+  The next actions say when another disable is safe: the resume still finds the delegation not disabled, and
+  `eth_getTransactionCount(<server wallet>, …)` at both `latest` and `pending` still answers the disable's
+  `nonce_atomic`, so no transaction of the wallet used that nonce or waits for it in the RPC's pool. Remove the cause
+  the code names, then run `revoke` again: it takes the same nonce, so only one of the two disables can land, and it
+  moves no USDC. A request MetaMask still holds for your MFA is the only one no RPC shows; it carries the same nonce.
 
 `provider` records the `mm` child process as APN received it, before its bytes are zeroed: the admitted package version
 and shasum, outcome, exit code or signal, duration, and for stdout and stderr the byte count, the SHA-256 of a complete
-capture and each JSON frame's keys and value types. Values are shown only for `ok`, `code`, `kind`, `status`, `mode` and
-`chainNamespace`; ids, addresses, hashes and messages never appear. Eligible operations list
+capture and each JSON frame's keys and value types. `mm --json` prints its answer indented over many lines after any
+progress lines; that block is one frame, always the last, after at most seven line frames. Values are shown only for
+`ok`, `code`, `kind`, `status`, `mode` and `chainNamespace`; ids, addresses, hashes and messages never appear. Eligible operations list
 `apn gasless transfer revoke` among their next actions.
 
 ## MetaMask Smart Account

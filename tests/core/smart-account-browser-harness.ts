@@ -86,7 +86,8 @@ export class FakeDocument {
   }
 }
 
-type ServedMode = "request" | "sync";
+/** "request" is a first consent; "request-retry" is a retry of the same intent, which first reads held grants. */
+type ServedMode = "request" | "request-retry" | "sync";
 const browserAssets = new Map<ServedMode, Promise<{ readonly html: string; readonly script: string }>>();
 
 /** The page and script the CLI serves for one consent mode, captured once per mode through a real loopback consent. */
@@ -113,8 +114,8 @@ async function captureServedBrowserAssets(mode: ServedMode): Promise<{ readonly 
     });
     assert.equal(callback.status, 204);
   }, 1_000);
-  assert.deepEqual(mode === "request" ? await consent.request({ ...REQUEST, port: await allocateConsentPort() })
-    : await consent.sync({ port: await allocateConsentPort(), ownerAddress: OWNER }), expected);
+  assert.deepEqual(mode === "sync" ? await consent.sync({ port: await allocateConsentPort(), ownerAddress: OWNER })
+    : await consent.request({ ...REQUEST, port: await allocateConsentPort(), retry: mode === "request-retry" }), expected);
   if (assets === undefined) throw new Error("served browser assets were not captured");
   return assets;
 }
@@ -131,6 +132,8 @@ export async function runServedBrowser(options: {
   readonly announcements?: readonly ProviderAnnouncement[];
   readonly ethereum?: BrowserProvider | { readonly providers: readonly BrowserProvider[] };
   readonly mode?: ServedMode;
+  /** The address fragment the page starts with; a reloaded page has lost its one-use token. */
+  readonly hash?: string;
 }) {
   const { script } = await servedBrowserAssets(options.mode);
   const document = new FakeDocument();
@@ -139,7 +142,7 @@ export async function runServedBrowser(options: {
   class FakeEvent { public constructor(public readonly type: string) {} }
   const sandbox: Record<string, unknown> = {
     document,
-    location: { hash: `#${"a".repeat(64)}` },
+    location: { hash: options.hash ?? `#${"a".repeat(64)}` },
     history: { replaceState: () => undefined },
     Event: FakeEvent,
     addEventListener: (type: string, listener: (event: unknown) => void) => {

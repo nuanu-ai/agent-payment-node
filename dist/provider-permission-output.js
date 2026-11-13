@@ -14,7 +14,9 @@ export function pendingPermissionNextActions(profile, permission, nowUnix) {
     return [
         `The intent expired at ${new Date(permission.expires_at_unix * 1000).toISOString()} and its exact connect is refused. In MetaMask, check whether ` +
             `a permission for session ${permission.session_address} was granted, and revoke it there if it is not wanted.`,
-        `Then cancel only the local expired intent with ${forget}, and start a new wallet connect with a new expiry and idempotency key.`,
+        `Then cancel only the local expired intent with ${forget}. It deletes the key APN generated for session ${permission.session_address}, ` +
+            "and only that key can use a permission granted to it, so such a permission can then move nothing, also where MetaMask cannot list it. " +
+            "Start a new wallet connect with a new expiry and idempotency key.",
     ];
 }
 export function publicPendingPermissionProfile(profile, adapter, permission, nowUnix) {

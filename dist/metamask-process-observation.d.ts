@@ -53,4 +53,6 @@ export declare function observeMetaMaskProcess(input: Omit<MetaMaskProcessObserv
     readonly stdout: MetaMaskCapturedStream;
     readonly stderr: MetaMaskCapturedStream;
 }): MetaMaskProcessObservation;
+/** `mm`'s JSON answer in a stream: the whole text, else the object it prints last, indented or on one line, after progress lines. */
+export declare function metaMaskJsonAnswer(text: string): unknown;
 export {};

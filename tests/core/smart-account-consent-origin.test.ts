@@ -78,8 +78,10 @@ test("a permission keeps the consent port it saved before its first consent, thr
   const port = store.record?.consent_port;
   assert.equal(typeof port, "number");
   assert.equal(consent.requests[0]?.port, port);
+  assert.equal(consent.requests[0]?.retry, false, "a first consent reads no held grants");
   await assert.rejects(adapter.connect(intent), { code: "APN_PROVIDER_UNAVAILABLE" });
   assert.deepEqual([consent.requests[1]?.port, store.record?.consent_port], [port, port]);
+  assert.equal(consent.requests[1]?.retry, true, "a retry of the same intent reads held grants first");
   store.record = granted(store.record!);
   await assert.rejects(adapter.sync(PROFILE_HASH, 1), { code: "APN_PROVIDER_UNAVAILABLE" });
   assert.deepEqual(consent.syncs, [{ port, ownerAddress: OWNER }]);

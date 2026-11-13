@@ -53,7 +53,7 @@ async function pageOutcome(answer: (method: string, call: number) => unknown, mo
 }
 
 const healthy = (method: string): unknown => ({ eth_requestAccounts: [OWNER], eth_accounts: [OWNER], wallet_switchEthereumChain: null,
-  eth_chainId: "0x2105", wallet_getSupportedExecutionPermissions: SUPPORTED, eth_getCode: ACTIVE, wallet_requestExecutionPermissions: [] } as Record<string, unknown>)[method];
+  eth_chainId: "0x2105", wallet_getSupportedExecutionPermissions: SUPPORTED, eth_getCode: ACTIVE, wallet_getGrantedExecutionPermissions: [], wallet_requestExecutionPermissions: [] } as Record<string, unknown>)[method];
 
 test("the page names the wallet call that threw, with the wallet's code and printable message", async () => {
   const thrown = `The method "wallet_getSupportedExecutionPermissions" does not exist.\u0007‮\u{1F600}${"x".repeat(200)}`;

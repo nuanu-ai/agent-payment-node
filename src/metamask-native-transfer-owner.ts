@@ -29,7 +29,7 @@ import { MetaMaskNativeHandoffNotStarted, readMetaMaskNativeVendorPolicy, readMe
   type MetaMaskNativeReadObservation } from "./metamask-native-transfer-adapter.js";
 import { prepareMetaMaskNativeQuote, readMetaMaskNativeFunding, observeMetaMaskNativeTransfer } from "./metamask-native-transfer-rpc.js";
 import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeExpiredBeforeEffect, metaMaskNativeMfaTask, metaMaskNativeRequestHash,
-  metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation,
+  metaMaskNativeObserveCommand, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation,
   type MetaMaskNativeOperation as NativeOperation, type MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
 import { assetUsageReservationId } from "./asset-usage-ledger.js";
 import { refreshOperationIndex } from "./operation-index/refresh.js";
@@ -273,6 +273,20 @@ async function closeExpiredBeforeEffect(stateRoot:string,journal:MetaMaskNativeJ
   return closed;
 }
 /**
+ * This read verified that MetaMask closed the very request at its approval step (`EXPIRED` or `DENIED`, which `mm`
+ * itself reads as an MFA rejection before signing) and no transaction is known: the provider's word, not chain evidence.
+ * The transfer stays UNKNOWN with its reserves charged; the next actions name the owner's only exit, abandonment after
+ * the quote expired, which frees the account and keeps the reserves until the chain proves an outcome.
+ */
+export function metaMaskNativeClosedRequestNextActions(op:Pick<NativeOperation,"operationId"|"state"|"transactionHash"|"providerRequestId"|"context">,
+  read:MetaMaskNativeReadObservation|undefined):string[]|undefined {
+  if(read===undefined||read.request_identity_verified!==true||(read.provider_status!=="EXPIRED"&&read.provider_status!=="DENIED")||
+    op.state!=="unknown"||op.transactionHash!==null)return undefined;
+  return [`MetaMask closed request ${op.providerRequestId} as ${read.provider_status} at its approval step, before signing. That is the provider's word, not chain evidence: do not confirm the old request; APN keeps this transfer UNKNOWN, keeps its reserves charged and never sends it again.`,
+    metaMaskNativeObserveCommand(op.operationId),
+    `To free the account for a new transfer, from ${op.context.quote.expiresAt} on: apn operation abandon --operation ${op.operationId} (the reserves stay charged until the chain proves an outcome).`];
+}
+/**
  * Before a new transfer is admitted, every transfer of this account and chain that can never start is closed under its
  * own operation lock. Best effort: one that cannot be closed now no longer blocks (the family's own rule reads it as
  * resolved), and its next status closes it.
@@ -324,7 +338,8 @@ export async function readMetaMaskNativeTransfer(stateRoot:string,idInput:string
       }
     }
     if(op.state==="confirmed") await new AssetUsageLedger(stateRoot).settleMetaMaskNativeActual(op.operationId,new Date());
-    return {...publicOperation(op),...(readObservation===undefined?{}:{read_observation:readObservation})};
+    const view=publicOperation(op), closed=metaMaskNativeClosedRequestNextActions(op,readObservation);
+    return {...view,...(closed===undefined?{}:{next_actions:closed}),...(readObservation===undefined?{}:{read_observation:readObservation})};
   });
 }
 /**

@@ -25,7 +25,8 @@ function corrupt(): never { return mmFail("mm_gasless_state_corrupt"); }
  */
 export function metaMaskGaslessDisableExit(op: MetaMaskGaslessOperationRecord): boolean {
   return op.submissionAttempts === 1 && op.settlement === null && (op.state === "failed_effects_pending" ||
-    op.state === "abandoned_unknown" || (!op.terminal && (MM_CLOSED_PROVIDER_STATUSES as readonly string[]).includes(op.providerObservation?.status ?? "")));
+    op.state === "abandoned_unknown" || (!op.terminal && ((MM_CLOSED_PROVIDER_STATUSES as readonly string[]).includes(op.providerObservation?.status ?? "") ||
+      op.failure?.reason === "mm_gasless_binding_changed")));
 }
 
 /**
@@ -114,9 +115,16 @@ export function publicMetaMaskGaslessOperation(operation: MetaMaskGaslessOperati
 /** The public operation of status and resume output: the receipt projection plus the delegation-disable exit. */
 export function liveMetaMaskGaslessOperation(operation: MetaMaskGaslessOperationRecord): MetaMaskGaslessPublicOperation {
   const op = validateMetaMaskGaslessOperation(operation), view = publicMetaMaskGaslessOperation(op);
-  return metaMaskGaslessDisableExit(op)
-    ? { ...view, next_actions: [...view.next_actions, `apn gasless transfer revoke --operation ${op.operationId}`] } : view;
+  if (!metaMaskGaslessDisableExit(op)) return view;
+  // Live output only: receipts saved by earlier releases rebuild their projection exactly, so it never gains this text.
+  const moved = op.failure?.reason === "mm_gasless_binding_changed" ? [PROJECT_MOVED] : [];
+  return { ...view, next_actions: [...moved, ...view.next_actions, `apn gasless transfer revoke --operation ${op.operationId}`] };
 }
+
+const PROJECT_MOVED = "MetaMask keeps this transfer's request in the mm login project it was sent from, and the current mm " +
+  "login or this profile's binding differs from the one it was sent with, so APN reads only the chain. To read the request " +
+  "again, sign in to MetaMask the way you did when it was sent. When the server wallet and the profile are unchanged and " +
+  "only the login project differs, the revoke below disables its delegation, and resume then closes the operation from the chain.";
 
 export function metaMaskGaslessReceipt(operation: MetaMaskGaslessOperationRecord, legacyNextActions = false): MetaMaskGaslessReceipt {
   const op = validateMetaMaskGaslessOperation(operation), body = {
