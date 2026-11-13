@@ -171,7 +171,11 @@ async function mfaScenario() {
   const denied = await observeCli(second.data.operation_id);
   assert.equal(denied.ok, true, JSON.stringify(denied.error)); assert.equal(denied.data.state, "unknown"); assert.equal(denied.data.mfa_task, undefined);
   assert.equal(denied.data.read_observation.provider_status, "DENIED");
-  assert.deepEqual(denied.next_actions, [`apn wallet metamask native-transfer-observe --operation ${second.data.operation_id}`]);
+  // The verified DENIED names the owner's exit: the transfer stays UNKNOWN with its hold, and abandon frees the account.
+  assert.equal(denied.next_actions.length, 3);
+  assert.match(denied.next_actions[0], new RegExp(`^MetaMask closed request ${RID2} as DENIED at its approval step, before signing\\.`, "u"));
+  assert.equal(denied.next_actions[1], `apn wallet metamask native-transfer-observe --operation ${second.data.operation_id}`);
+  assert.match(denied.next_actions[2], new RegExp(`: apn operation abandon --operation ${second.data.operation_id} \\(the reserves stay charged`, "u"));
   assert.equal((await sends()).length, 2); assert.equal(await usage(TOKEN), "3500");
 }
 
