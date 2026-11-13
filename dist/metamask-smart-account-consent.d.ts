@@ -9,6 +9,11 @@ export interface SmartAccountConsentRequest {
     readonly capAtomic: string;
     readonly startsAtUnix: number;
     readonly expiresAtUnix: number;
+    /**
+     * The intent's consent ran before: the page then first reads the grants its origin holds, since an earlier answer may
+     * never have reached APN. A first consent skips the read, because a session account made for it holds no grant.
+     */
+    readonly retry?: boolean;
 }
 export interface SmartAccountConsentSync {
     readonly port: number;

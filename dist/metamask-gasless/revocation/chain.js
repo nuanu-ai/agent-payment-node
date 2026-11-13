@@ -7,7 +7,9 @@ import { mmDelegationDisabled, mmRedemptionCount } from "../chain/scan.js";
 const blocked = (message, reason, operationId) => new ApnError("APN_OPERATION_BLOCKED", message, { reason, nextActions: [`apn operation resume --operation ${operationId}`] });
 /**
  * Reads, in order: at the finality block (pinned by hash) the redemption count, the manager's disabled flag and the
- * manager's own hash of the tuple the call carries; then at the latest block the delegator's pending nonce, the gas
+ * manager's own hash of the tuple the call carries; then the delegator's pending and latest nonces, which must agree
+ * (a transaction the RPC holds as pending, an earlier disable included, would make this one land after it and revert at a
+ * cost in gas); then at the latest block the gas
  * of exactly this call from the delegator (`eth_estimateGas` executes it, so a call the manager would refuse fails
  * here), the fee rule `EvmRpc.estimate` uses (2 x base fee + priority) and the delegator's native balance.
  */
@@ -27,8 +29,16 @@ export async function readMetaMaskRevocationChain(call, deployment, dispatched, 
     const head = await rpcBlock(call, "latest"), at = { blockHash: head.block.hash, requireCanonical: true };
     const transaction = { from: disable.from, to: disable.to, data: disable.data, value: "0x0" };
     const model = directEvmNetwork(chainId).feeModel;
-    const [nonce, gas, priority, balance] = await Promise.all([
+    const [nonce, mined] = await Promise.all([
         call("eth_getTransactionCount", [disable.from, "pending"]).then(value => rpcQuantity(value)),
+        call("eth_getTransactionCount", [disable.from, at]).then(value => rpcQuantity(value)),
+    ]);
+    if (nonce !== mined) {
+        throw blocked(`The server wallet ${disable.from} has a transaction this RPC holds as pending (pending nonce ${nonce}, ` +
+            `latest ${mined}). A disable sent now would take the next nonce and could revert after it at a cost in gas, so nothing ` +
+            "was sent. Wait until that transaction is mined, then resume; if the delegation is still not disabled, revoke again.", "mm_revoke_transaction_pending", operationId);
+    }
+    const [gas, priority, balance] = await Promise.all([
         call("eth_estimateGas", [transaction]).then(value => rpcQuantity(value)),
         model === "arbitrum-inclusive" ? Promise.resolve(0n) : call("eth_maxPriorityFeePerGas", []).then(value => rpcQuantity(value)),
         call("eth_getBalance", [disable.from, at]).then(value => rpcQuantity(value)),

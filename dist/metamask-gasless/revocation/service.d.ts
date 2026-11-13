@@ -11,7 +11,9 @@ export interface MetaMaskRevocationDependencies {
  * The owner's exit for a disclosed delegation whose outcome no proof decides: one `disableDelegation` of exactly that
  * delegation, signed and paid by its own server wallet after foreground consent. It records nothing in the operation:
  * the chain is the record, and `operation resume` closes the operation only from the manager's disabled flag with the
- * redemption count 0 at one finality block. Repeating it can never move USDC; the pinned nonce lets one call land.
+ * redemption count 0 at one finality block. Repeating it can never move USDC. Each call pins the pending nonce it was
+ * priced at, so two calls at one nonce land at most once; a call priced after another landed fails its gas estimate and
+ * is not sent. Gas is lost only when a call is priced before another lands and is sent after it (`AlreadyDisabled`).
  * `assertAvailable` refuses while an operation that may use the server wallet's own account is unresolved; it runs under
  * the account's evm-owner lock, before pricing and again with the send.
  */

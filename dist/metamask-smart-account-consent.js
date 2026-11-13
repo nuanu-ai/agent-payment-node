@@ -243,6 +243,8 @@ const sameAccount = async (provider, owner) => {
   return Array.isArray(accounts) && accounts.length > 0 && String(accounts[0]).toLowerCase() === owner.toLowerCase();
 };
 (async () => {
+  // A reload has lost the one-use token (removed from the address above): such a page never asks the wallet anything.
+  if (!/^[a-f0-9]{64}$/u.test(token)) return setStatus("This consent page was already used. Return to the terminal and rerun the same wallet connect.");
   try {
     const provider = await chooseProvider(await discoverProviders());
     if (!provider) return await post(failure("missing_provider"));
@@ -268,6 +270,14 @@ const sameAccount = async (provider, owner) => {
       if (owner.toLowerCase() !== config.ownerAddress.toLowerCase()) { step = "owner_match"; return await post(failure("changed_account")); }
       const permission_responses = await call(provider, "wallet_getGrantedExecutionPermissions", []);
       return await post({ ok: true, value: { owner_address: owner, chain_id: chainId, account_code: code, supported_permissions: supported, permission_responses } });
+    }
+    // On a retry, a grant this intent's session key already holds (an earlier consent whose answer never reached APN) is
+    // taken as the answer, never asked for again; APN validates it as a fresh one. A failed read stops before any request.
+    if (config.retry === true) {
+      const held = await call(provider, "wallet_getGrantedExecutionPermissions", []);
+      if (!Array.isArray(held)) return await post(failure("provider_protocol"));
+      const mine = held.filter((item) => item !== null && typeof item === "object" && typeof item.to === "string" && item.to.toLowerCase() === config.sessionAddress.toLowerCase());
+      if (mine.length > 0) return await post({ ok: true, value: { owner_address: owner, chain_id: chainId, account_code: code, supported_permissions: supported, permission_responses: mine } });
     }
     const request = { chainId: config.chainId, from: owner, to: config.sessionAddress, permission: { type: "erc20-token-allowance", isAdjustmentAllowed: true, data: { tokenAddress: config.tokenAddress, allowanceAmount: "0x" + BigInt(config.capAtomic).toString(16), startTime: config.startsAtUnix, justification: "Allow this APN session to spend up to the selected Base USDC cap." } }, rules: [{ type: "expiry", data: { timestamp: config.expiresAtUnix } }] };
     if (!(await sameAccount(provider, owner)) || !active(await accountCode(provider, owner))) return await post(failure("changed_account"));

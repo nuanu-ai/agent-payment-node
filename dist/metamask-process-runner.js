@@ -5,7 +5,7 @@ import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
-import { observeMetaMaskProcess } from "./metamask-process-observation.js";
+import { metaMaskJsonAnswer, observeMetaMaskProcess } from "./metamask-process-observation.js";
 import { METAMASK_FOREGROUND_TIMEOUT_MS, METAMASK_PROCESS_TIMEOUT_MS, resolveMetaMaskBin, } from "./metamask-package.js";
 const MAX_JSON_BYTES = 1024 * 1024;
 const nativeFailureDiagnostics = new WeakMap();
@@ -203,7 +203,7 @@ export class NodeMetaMaskProcessRunner {
                     return { stderrClass: "unclassified", providerCode: "other" };
                 const bytes = Buffer.concat(stderrChunks);
                 try {
-                    const parsed = JSON.parse(bytes.toString("utf8"));
+                    const parsed = metaMaskJsonAnswer(bytes.toString("utf8"));
                     const error = isPlainRecord(parsed) ? (isPlainRecord(parsed.error) ? parsed.error : isPlainRecord(parsed._error) ? parsed._error : null) : null;
                     if (error === null)
                         return { stderrClass: "unclassified", providerCode: "other" };

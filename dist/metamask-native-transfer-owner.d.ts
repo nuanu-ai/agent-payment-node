@@ -1,7 +1,7 @@
 import { type MetaMaskNativeDeadline, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import type { OperationAbandonIntent } from "./operation-abandon-approval.js";
 import { type MetaMaskNativeReadObservation } from "./metamask-native-transfer-adapter.js";
-import { type MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
+import { type MetaMaskNativeOperation as NativeOperation, type MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
 export type { MetaMaskNativeOwnedContext } from "./metamask-native-journal.js";
 /** Journal readers, also reachable here for callers that name the command module. */
 export { readMetaMaskNativeSettlement, readMetaMaskNativeReservation, assertMetaMaskNativeFailedBeforeEffect, assertMetaMaskNativeGenericCapacityRelease, metaMaskNativeOperationExists } from "./metamask-native-journal.js";
@@ -77,6 +77,13 @@ export declare function runMetaMaskNativeTransfer(stateRoot: string, input: Meta
     effect_attempts: 0 | 1;
     proof_class: string;
 }>;
+/**
+ * This read verified that MetaMask closed the very request at its approval step (`EXPIRED` or `DENIED`, which `mm`
+ * itself reads as an MFA rejection before signing) and no transaction is known: the provider's word, not chain evidence.
+ * The transfer stays UNKNOWN with its reserves charged; the next actions name the owner's only exit, abandonment after
+ * the quote expired, which frees the account and keeps the reserves until the chain proves an outcome.
+ */
+export declare function metaMaskNativeClosedRequestNextActions(op: Pick<NativeOperation, "operationId" | "state" | "transactionHash" | "providerRequestId" | "context">, read: MetaMaskNativeReadObservation | undefined): string[] | undefined;
 /**
  * Before a new transfer is admitted, every transfer of this account and chain that can never start is closed under its
  * own operation lock. Best effort: one that cannot be closed now no longer blocks (the family's own rule reads it as

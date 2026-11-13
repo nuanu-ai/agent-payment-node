@@ -2,8 +2,9 @@ import type { Address, Hex } from "../../model.js";
 import type { MetaMaskProcessObservation } from "../../metamask-process-observation.js";
 import { type MetaMaskProcessRunnerPort } from "../../metamask-process-runner.js";
 /**
- * What the wallet answered; an unknown answer is never a reason to send again (the pinned nonce allows one landing).
- * An unknown answer carries the child process's exit and stream shape (`provider`), so its cause can be read later.
+ * What the wallet answered. An unknown answer is not proof that nothing was sent; the revoke's next actions say which
+ * chain reads must hold before another disable. It carries the child process's exit and stream shape (`provider`), and
+ * the code of `mm`'s JSON error when there is one (`providerErrorCode`), so its cause can be read later.
  */
 export type MetaMaskRevocationSubmission = {
     readonly disposition: "acknowledged";
@@ -15,6 +16,7 @@ export type MetaMaskRevocationSubmission = {
 } | {
     readonly disposition: "unknown";
     readonly reason: string;
+    readonly providerErrorCode?: string;
     readonly provider?: MetaMaskProcessObservation;
 };
 export interface MetaMaskRevocationWalletPort {
