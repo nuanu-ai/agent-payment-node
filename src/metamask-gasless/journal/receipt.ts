@@ -25,7 +25,8 @@ function corrupt(): never { return mmFail("mm_gasless_state_corrupt"); }
  */
 export function metaMaskGaslessDisableExit(op: MetaMaskGaslessOperationRecord): boolean {
   return op.submissionAttempts === 1 && op.settlement === null && (op.state === "failed_effects_pending" ||
-    op.state === "abandoned_unknown" || (!op.terminal && (MM_CLOSED_PROVIDER_STATUSES as readonly string[]).includes(op.providerObservation?.status ?? "")));
+    op.state === "abandoned_unknown" || (!op.terminal && ((MM_CLOSED_PROVIDER_STATUSES as readonly string[]).includes(op.providerObservation?.status ?? "") ||
+      op.failure?.reason === "mm_gasless_binding_changed")));
 }
 
 /**
@@ -49,6 +50,13 @@ export function metaMaskGaslessNextActions(operation: MetaMaskGaslessOperationRe
     "MetaMask closed this request as denied or expired at the MFA step, before signing. Do not confirm the old request. APN cannot prove that no signature exists, so the operation stays guarded.",
     resume,
     `After its approval window, accept the unknown outcome with apn operation abandon --operation ${op.operationId}`,
+  ];
+  if (op.submissionAttempts === 1 && op.failure?.reason === "mm_gasless_binding_changed") return [
+    "MetaMask keeps this transfer's request in the mm login project it was sent from. The current mm login (its project, " +
+    "wallet or the profile's binding) differs from that one, so APN reads only the chain and the request stays unread. " +
+    "To read it again, sign in to MetaMask the way you did when it was sent. To close the operation without it, disable " +
+    "its delegation from the server wallet with the revoke below, then resume.",
+    resume,
   ];
   if (op.failure?.reason === "mm_gasless_rpc_log_range") return [
     "The RPC refused even narrow eth_getLogs ranges. Put a public HTTPS RPC that serves bounded log queries in an APN_<NAME>_RPC_URL variable and add --observation-rpc-env APN_<NAME>_RPC_URL to the resume.",

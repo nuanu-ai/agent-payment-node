@@ -46,9 +46,21 @@ const send = async (answer: Answer) => {
 test("an empty stdout with a stderr refusal is named empty and keeps exit, sizes, hashes and key shapes without values", async () => {
   const submitted = await send({ stderr: STDERR_ERROR, code: 1 });
   assert.equal(submitted.disposition, "unknown"); assert.equal(submitted.reason, "provider_response_empty");
+  assert.equal(submitted.providerErrorCode, "POLICY_VIOLATION");
   const { durationMs, ...provider } = submitted.provider; assert.ok(Number.isSafeInteger(durationMs));
   assert.deepEqual(provider, { provider: PROVIDER, outcome: "exit", exitCode: 1, signal: null, stdout: EMPTY,
     stderr: { bytes: Buffer.byteLength(STDERR_ERROR), captured: "complete", sha256: sha256(STDERR_ERROR), frames: [ERROR_FRAME], framesOmitted: 0 } });
+});
+
+test("mm's own error envelope on stderr names its code; free text, two frames or a stdout answer name none", async () => {
+  const envelope = await send({ stderr: JSON.stringify({ ok: false, error: { code: "MFA_REQUIRED", message: SECRET, hint: SECRET } }), code: 1 });
+  assert.deepEqual([envelope.reason, envelope.providerErrorCode], ["provider_response_empty", "MFA_REQUIRED"]);
+  for (const answer of [{ stderr: JSON.stringify({ ok: false, error: { code: "not an enum", message: SECRET } }), code: 1 },
+    { stderr: `${STDERR_ERROR}\n${STDERR_ERROR}`, code: 1 }, { stderr: SECRET, code: 1 },
+    { stdout: SECRET, stderr: STDERR_ERROR, code: 1 }]) {
+    const submitted = await send(answer);
+    assert.equal(submitted.disposition, "unknown"); assert.equal("providerErrorCode" in submitted, false, JSON.stringify(answer));
+  }
 });
 
 test("a non-JSON stdout stays malformed and shows only its line sizes", async () => {

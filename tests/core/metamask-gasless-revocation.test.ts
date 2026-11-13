@@ -135,3 +135,21 @@ test("CLI binds the disable from argv and MCP answers it only with the same fore
   assert.deepEqual(envelope.error?.details?.cli_handoff_argv, ["apn", "gasless", "transfer", "revoke", "--operation", id]);
   assert.deepEqual(envelope.next_actions, [`apn gasless transfer revoke --operation ${id}`]);
 });
+
+test("an unknown disable answer names mm's error code and when another disable is safe", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const { f, id, core } = await seiProviderFailed(temporary.root), before = await f.record(id);
+  const wallet = new Wallet({ disposition: "unknown", reason: "provider_response_empty", providerErrorCode: "POLICY_VIOLATION" });
+  const result = await core(new Approval(), wallet).execute({ command: "gasless.transfer.revoke", operationId: id });
+  assert.equal(result.ok, true, JSON.stringify(result.error));
+  assert.equal((result.data as Json).submission.providerErrorCode, "POLICY_VIOLATION");
+  assert.deepEqual(result.next_actions, [`MetaMask did not confirm this disable (mm error code POLICY_VIOLATION). Run the resume below: ` +
+    `it reads whether the delegation is disabled. If it is not, and eth_getTransactionCount(${f.binding.address}, "latest") on this chain ` +
+    `still answers 0x0 (0), no transaction used this disable's nonce: remove the cause, then run ` +
+    `apn gasless transfer revoke --operation ${id} again. It moves no USDC, and only one disable of the delegation can land.`,
+  `apn operation resume --operation ${id}`]);
+  assert.deepEqual(await f.record(id), before);
+  const plain = await core(new Approval(), new Wallet({ disposition: "unknown", reason: "provider_handoff_outcome_unknown" }))
+    .execute({ command: "gasless.transfer.revoke", operationId: id });
+  assert.match(plain.next_actions![0]!, /^MetaMask did not confirm this disable\. Run the resume below/u);
+});

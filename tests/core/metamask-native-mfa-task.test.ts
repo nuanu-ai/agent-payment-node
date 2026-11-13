@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { MetaMaskNativeJournal, metaMaskNativeMfaTask, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicView,
   type MetaMaskNativeOperation } from "../../src/metamask-native-journal.js";
+import { metaMaskNativeClosedRequestNextActions as closed } from "../../src/metamask-native-transfer-owner.js";
 import { temporaryState } from "./helpers.js";
 
 const RID = "8cc50f3c-ca4e-41d1-98bb-b30f7bcaa3aa", EXPIRES = "2026-10-20T09:51:13.922Z";
@@ -65,4 +66,24 @@ test("a task that is not this record's own pending approval never loads", async 
   ];
   for (const fields of bad) await assert.rejects(journal.persist(patch(live, fields)), { code: "APN_STATE_CORRUPT" }, JSON.stringify(fields));
   assert.deepEqual(await journal.read(live.operationId), live, "nothing was written");
+});
+
+test("a verified EXPIRED or DENIED request with no transaction names the abandon exit and keeps the transfer UNKNOWN", () => {
+  const op = patch(legacy, { providerRequestId: RID, diagnostic: DIAGNOSTIC as NonNullable<MetaMaskNativeOperation["diagnostic"]> });
+  const id = op.operationId, read = { stage: "complete", guard_step: null, request_id: RID, watch_returned: true, before_guard_verified: true,
+    after_guard_verified: true, request_identity_verified: true, provider_status: "EXPIRED", transaction_hash: null, chain_id: null,
+    response_hash: null, reason: "provider_request_outcome_unknown", error_code: null, diagnostic: null } as const;
+  assert.equal(op.state, "unknown");
+  const actions = closed(op, read)!;
+  assert.equal(actions.length, 3);
+  assert.match(actions[0]!, new RegExp(`closed request ${RID} as EXPIRED at its approval step, before signing`, "u"));
+  assert.match(actions[0]!, /keeps this transfer UNKNOWN, keeps its reserves charged and never sends it again/u);
+  assert.equal(actions[1], `apn wallet metamask native-transfer-observe --operation ${id}`);
+  assert.equal(actions[2], `To free the account for a new transfer, from ${op.context.quote.expiresAt} on: apn operation abandon --operation ${id} (the reserves stay charged until the chain proves an outcome).`);
+  assert.match(closed(op, { ...read, provider_status: "DENIED" })![0]!, /as DENIED at its approval step/u);
+  for (const other of [{ ...read, provider_status: "SIGNING" as const }, { ...read, request_identity_verified: false }, undefined]) {
+    assert.equal(closed(op, other), undefined);
+  }
+  assert.equal(closed(patch(op, { transactionHash: `0x${"a".repeat(64)}` as MetaMaskNativeOperation["transactionHash"] }), read), undefined);
+  assert.equal(closed(patch(op, { state: "abandoned_unknown" }), read), undefined);
 });

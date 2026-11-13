@@ -13,7 +13,8 @@ import { NodeMetaMaskProcessRunner, takeMetaMaskProcessFailureObservation, type 
 export type MetaMaskRevocationSubmission =
   | { readonly disposition: "acknowledged"; readonly transactionHash: Hex; readonly requestIdHash: string | null }
   | { readonly disposition: "pending"; readonly requestIdHash: string }
-  | { readonly disposition: "unknown"; readonly reason: string; readonly provider?: MetaMaskProcessObservation };
+  | { readonly disposition: "unknown"; readonly reason: string; readonly providerErrorCode?: string;
+      readonly provider?: MetaMaskProcessObservation };
 export interface MetaMaskRevocationWalletPort {
   send(input: { readonly chainId: number; readonly from: Address; readonly payload: Readonly<Record<string, Hex>>;
     readonly intent: string }): Promise<MetaMaskRevocationSubmission>;
@@ -50,7 +51,24 @@ export class MetaMaskCliRevocationWallet implements MetaMaskRevocationWalletPort
 }
 
 function withProvider(answer: MetaMaskRevocationSubmission, provider: MetaMaskProcessObservation | undefined): MetaMaskRevocationSubmission {
-  return answer.disposition === "unknown" && provider !== undefined ? { ...answer, provider } : answer;
+  if (answer.disposition !== "unknown" || provider === undefined) return answer;
+  const code = stderrErrorCode(provider);
+  return code === undefined ? { ...answer, provider } : { ...answer, providerErrorCode: code, provider };
+}
+
+/**
+ * The error code of `mm`'s JSON failure answer, which it writes to stderr (`{"ok":false,"error":{"code":…}}`, or
+ * `{"_error":{…}}` after a notice), read from the stream shape: only when stdout is empty and stderr is that one complete
+ * frame. The shape keeps `code` only when it looks like an enum value, so no message, id or address can surface here.
+ */
+function stderrErrorCode(provider: MetaMaskProcessObservation): string | undefined {
+  const { stdout, stderr } = provider;
+  if (stdout.captured !== "empty" || stderr.captured !== "complete" || stderr.frames.length !== 1 || stderr.framesOmitted !== 0) return undefined;
+  const frame = stderr.frames[0]!;
+  if (!frame.json || frame.object === undefined) return undefined;
+  const error = frame.object.keys.find((key) => (key.key === "error" || key.key === "_error") && key.object !== undefined);
+  const code = error?.object?.keys.find((key) => key.key === "code")?.value;
+  return typeof code === "string" ? code : undefined;
 }
 
 function submission(exitCode: number, stdout: Buffer, from: Address): MetaMaskRevocationSubmission {

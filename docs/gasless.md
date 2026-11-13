@@ -869,10 +869,19 @@ its exact delivery and fee) or the delegation disabled before any redemption (`r
 as `transient_observation` and is not saved over the acknowledgement. When an observation went through
 `--observation-rpc-env`, the next action of the still unresolved operation repeats that option.
 
+### A transfer sent from another login project
+
+MetaMask keeps a transfer's request in the project of the `mm` login that sent it (`…/v1/projects/{projectId}/transaction-requests/{requestId}`).
+After a login into another project, even one that holds the same server wallet, APN does not read that request with the
+new session: the operation keeps `mm_gasless_binding_changed` as its reason and resume reads only the chain. To read the
+request again, sign in to MetaMask the way you did when it was sent, so that the session's project is that one again. To
+close the operation without it, disable its delegation (below): the server wallet's address signs the disable, whatever
+project the current login is in, and resume then proves `revoked_unused` or `completed` from the chain.
+
 ### Disabling a disclosed delegation
 
-When MetaMask closed the request (`FAILED`, `DENIED`, `EXPIRED`), the relay reverted, or you abandoned the operation, the
-delegation may still be redeemed and only a proof ends that. Your exit is to disable it from the server wallet itself:
+When MetaMask closed the request (`FAILED`, `DENIED`, `EXPIRED`), the relay reverted, the request belongs to another
+login project, or you abandoned the operation, the delegation may still be redeemed and only a proof ends that. Your exit is to disable it from the server wallet itself:
 
 ```sh
 apn gasless transfer revoke --operation <operation-id>
@@ -902,9 +911,14 @@ The `revoke` output reports `submission`:
 
 - `acknowledged`: with the transaction hash.
 - `pending`: MetaMask waits on your MFA.
-- `unknown`: never a reason to disable again; `operation resume` reads the chain. Its `reason` says what APN saw
+- `unknown`: not a proof that nothing was sent; `operation resume` reads the chain. Its `reason` says what APN saw
   (`provider_response_empty` when `mm` wrote nothing to stdout, `provider_response_malformed`,
-  `provider_handoff_outcome_unknown`).
+  `provider_handoff_outcome_unknown`). When `mm` answered with its JSON error on stderr and nothing on stdout,
+  `providerErrorCode` is that error's code (for example `POLICY_VIOLATION`), taken from the stderr shape below.
+  The next actions say when another disable is safe: the resume still finds the delegation not disabled, and
+  `eth_getTransactionCount(<server wallet>, "latest")` still answers the disable's `nonce_atomic`, so no transaction of
+  the wallet used that nonce. Remove the cause the code names, then run `revoke` again. It moves no USDC, and of two
+  disables of one delegation at most one lands; the other reverts (`AlreadyDisabled`).
 
 `provider` records the `mm` child process as APN received it, before its bytes are zeroed: the admitted package version
 and shasum, outcome, exit code or signal, duration, and for stdout and stderr the byte count, the SHA-256 of a complete

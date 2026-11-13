@@ -72,5 +72,18 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
     nonce_atomic: chain.nonceAtomic, gas_limit_atomic: chain.gasLimitAtomic, max_fee_per_gas_atomic: chain.maxFeePerGasAtomic,
     maximum_native_cost_wei: chain.maximumNativeCostWei, submission: submitted, proof_class: "owner_wallet_handoff_unproven",
     next_actions: [...submitted.disposition === "pending" ? ["Confirm this disable request in MetaMask Mobile or the email registered to your MetaMask dashboard."] : [],
+      ...submitted.disposition === "unknown" ? [unconfirmedDisable(submitted.providerErrorCode, call.from, chain.nonceAtomic, id)] : [],
       resume] };
+}
+
+/**
+ * After an unknown answer: the resume reads the chain, and two public reads tell whether this disable can still land.
+ * A transaction count still at the pinned nonce means no transaction of the wallet used it, so another disable is safe:
+ * it moves no USDC, and of two disables of one delegation at most one lands (the other reverts `AlreadyDisabled`).
+ */
+function unconfirmedDisable(code: string | undefined, from: string, nonce: string, id: string): string {
+  return `MetaMask did not confirm this disable${code === undefined ? "" : ` (mm error code ${code})`}. Run the resume below: ` +
+    `it reads whether the delegation is disabled. If it is not, and eth_getTransactionCount(${from}, "latest") on this chain ` +
+    `still answers 0x${BigInt(nonce).toString(16)} (${nonce}), no transaction used this disable's nonce: remove the cause, then run ` +
+    `apn gasless transfer revoke --operation ${id} again. It moves no USDC, and only one disable of the delegation can land.`;
 }
