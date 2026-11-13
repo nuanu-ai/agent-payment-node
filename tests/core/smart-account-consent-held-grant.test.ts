@@ -1,9 +1,9 @@
 /**
  * Regression (QA 2026-11-13, 0.5.104): a pending Smart Account connect that MetaMask refused (4100) could only be
  * retried, and each retry asked MetaMask for a new permission without looking at the ones the intent's session key
- * already held, so a consent whose answer never reached APN would be granted twice. The request page now reads
- * `wallet_getGrantedExecutionPermissions` first: a permission to this intent's session key is posted as the answer and
- * no new one is requested; a failed or malformed read stops before any request.
+ * already held, so a consent whose answer never reached APN would be granted twice. On a retry the request page now
+ * reads `wallet_getGrantedExecutionPermissions` first: a permission to this intent's session key is posted as the answer
+ * and no new one is requested; a failed or malformed read stops before any request. A first consent skips the read.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -18,14 +18,14 @@ const OTHER = "0x3333333333333333333333333333333333333333";
 const healthy: Record<string, unknown> = { eth_requestAccounts: [OWNER], eth_accounts: [OWNER], wallet_switchEthereumChain: null,
   eth_chainId: "0x2105", wallet_getSupportedExecutionPermissions: SUPPORTED, eth_getCode: ACTIVE, wallet_requestExecutionPermissions: [{ to: SESSION, fresh: true }] };
 
-async function page(granted: () => unknown) {
+async function page(granted: () => unknown, mode: "request" | "request-retry" = "request-retry") {
   const methods: string[] = [];
   const provider: BrowserProvider = { request: async (request) => {
     const method = (request as { method: string }).method;
     methods.push(method);
     return method === "wallet_getGrantedExecutionPermissions" ? granted() : healthy[method];
   } };
-  const browser = await runServedBrowser({ ethereum: provider });
+  const browser = await runServedBrowser({ ethereum: provider, mode });
   await waitFor(() => browser.document.buttons().length > 0, "provider choice");
   browser.document.buttons()[0]?.click();
   await waitFor(() => browser.posts.length > 0, "consent result");
@@ -39,6 +39,13 @@ test("a permission the session key already holds is the answer, and no new permi
   assert.deepEqual(outcome.value.permission_responses, [held]);
   assert.equal(outcome.value.owner_address, OWNER);
   assert.ok(!methods.includes("wallet_requestExecutionPermissions"), methods.join(","));
+});
+
+test("a first consent asks for the permission without reading held grants", async () => {
+  const { methods, outcome } = await page(() => assert.fail("a first consent read held grants"), "request");
+  assert.equal(outcome.ok, true);
+  assert.deepEqual(outcome.value.permission_responses, [{ to: SESSION, fresh: true }]);
+  assert.ok(!methods.includes("wallet_getGrantedExecutionPermissions"), methods.join(","));
 });
 
 test("with no permission to this session key the page requests one", async () => {

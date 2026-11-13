@@ -228,8 +228,10 @@ tokens, seed phrases or private keys.
   (4001), it may then hold a grant for this session. A retry of the same `wallet connect` first reads the permissions
   this origin holds (`wallet_getGrantedExecutionPermissions`): one granted to the intent's session account is taken as
   the answer and checked like a new one, with no new request; only when none is held does MetaMask show a new request,
-  which you can reject (4001) to leave nothing granted. A failed read stops before any request. The page shows the same
-  step.
+  which you can reject (4001) to leave nothing granted. A failed read stops before any request; `wallet permission
+  forget` then deletes the pending intent with its session key, so a grant MetaMask may still hold for that key can no
+  longer be used, and the next connect starts a new intent. A first consent skips the read: its new session account
+  holds no grant. The page shows the same step.
   MetaMask lists a permission only to the page origin that requested it, so each permission keeps one consent origin,
   `http://127.0.0.1:<port>`: the port is saved before its first consent and reused by every retry of the same
   `wallet connect` (which also reuses the pending intent and its session) and by `wallet permission sync`. A busy port

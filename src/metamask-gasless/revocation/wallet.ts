@@ -7,8 +7,9 @@ import type { MetaMaskProcessObservation } from "../../metamask-process-observat
 import { NodeMetaMaskProcessRunner, takeMetaMaskProcessFailureObservation, type MetaMaskProcessRunnerPort } from "../../metamask-process-runner.js";
 
 /**
- * What the wallet answered; an unknown answer is never a reason to send again (the pinned nonce allows one landing).
- * An unknown answer carries the child process's exit and stream shape (`provider`), so its cause can be read later.
+ * What the wallet answered. An unknown answer is not proof that nothing was sent; the revoke's next actions say which
+ * chain reads must hold before another disable. It carries the child process's exit and stream shape (`provider`), and
+ * the code of `mm`'s JSON error when there is one (`providerErrorCode`), so its cause can be read later.
  */
 export type MetaMaskRevocationSubmission =
   | { readonly disposition: "acknowledged"; readonly transactionHash: Hex; readonly requestIdHash: string | null }
@@ -63,9 +64,12 @@ function withProvider(answer: MetaMaskRevocationSubmission, provider: MetaMaskPr
  */
 function stderrErrorCode(provider: MetaMaskProcessObservation): string | undefined {
   const { stdout, stderr } = provider;
-  if (stdout.captured !== "empty" || stderr.captured !== "complete" || stderr.frames.length !== 1 || stderr.framesOmitted !== 0) return undefined;
+  if (provider.outcome !== "exit" || stdout.captured !== "empty" || stderr.captured !== "complete" || stderr.frames.length !== 1 ||
+    stderr.framesOmitted !== 0) return undefined;
   const frame = stderr.frames[0]!;
   if (!frame.json || frame.object === undefined) return undefined;
+  const ok = frame.object.keys.find((key) => key.key === "ok");
+  if (ok !== undefined && ok.value !== false) return undefined;
   const error = frame.object.keys.find((key) => (key.key === "error" || key.key === "_error") && key.object !== undefined);
   const code = error?.object?.keys.find((key) => key.key === "code")?.value;
   return typeof code === "string" ? code : undefined;

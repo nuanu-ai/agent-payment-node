@@ -51,13 +51,6 @@ export function metaMaskGaslessNextActions(operation: MetaMaskGaslessOperationRe
     resume,
     `After its approval window, accept the unknown outcome with apn operation abandon --operation ${op.operationId}`,
   ];
-  if (op.submissionAttempts === 1 && op.failure?.reason === "mm_gasless_binding_changed") return [
-    "MetaMask keeps this transfer's request in the mm login project it was sent from. The current mm login (its project, " +
-    "wallet or the profile's binding) differs from that one, so APN reads only the chain and the request stays unread. " +
-    "To read it again, sign in to MetaMask the way you did when it was sent. To close the operation without it, disable " +
-    "its delegation from the server wallet with the revoke below, then resume.",
-    resume,
-  ];
   if (op.failure?.reason === "mm_gasless_rpc_log_range") return [
     "The RPC refused even narrow eth_getLogs ranges. Put a public HTTPS RPC that serves bounded log queries in an APN_<NAME>_RPC_URL variable and add --observation-rpc-env APN_<NAME>_RPC_URL to the resume.",
     resume,
@@ -122,9 +115,16 @@ export function publicMetaMaskGaslessOperation(operation: MetaMaskGaslessOperati
 /** The public operation of status and resume output: the receipt projection plus the delegation-disable exit. */
 export function liveMetaMaskGaslessOperation(operation: MetaMaskGaslessOperationRecord): MetaMaskGaslessPublicOperation {
   const op = validateMetaMaskGaslessOperation(operation), view = publicMetaMaskGaslessOperation(op);
-  return metaMaskGaslessDisableExit(op)
-    ? { ...view, next_actions: [...view.next_actions, `apn gasless transfer revoke --operation ${op.operationId}`] } : view;
+  if (!metaMaskGaslessDisableExit(op)) return view;
+  // Live output only: receipts saved by earlier releases rebuild their projection exactly, so it never gains this text.
+  const moved = op.failure?.reason === "mm_gasless_binding_changed" ? [PROJECT_MOVED] : [];
+  return { ...view, next_actions: [...moved, ...view.next_actions, `apn gasless transfer revoke --operation ${op.operationId}`] };
 }
+
+const PROJECT_MOVED = "MetaMask keeps this transfer's request in the mm login project it was sent from, and the current mm " +
+  "login or this profile's binding differs from the one it was sent with, so APN reads only the chain. To read the request " +
+  "again, sign in to MetaMask the way you did when it was sent. When the server wallet and the profile are unchanged and " +
+  "only the login project differs, the revoke below disables its delegation, and resume then closes the operation from the chain.";
 
 export function metaMaskGaslessReceipt(operation: MetaMaskGaslessOperationRecord, legacyNextActions = false): MetaMaskGaslessReceipt {
   const op = validateMetaMaskGaslessOperation(operation), body = {

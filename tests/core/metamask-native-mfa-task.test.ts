@@ -69,7 +69,7 @@ test("a task that is not this record's own pending approval never loads", async 
 });
 
 test("a verified EXPIRED or DENIED request with no transaction names the abandon exit and keeps the transfer UNKNOWN", () => {
-  const op = patch(legacy, { providerRequestId: RID, diagnostic: DIAGNOSTIC as NonNullable<MetaMaskNativeOperation["diagnostic"]> });
+  const op = { ...legacy, providerRequestId: RID };
   const id = op.operationId, read = { stage: "complete", guard_step: null, request_id: RID, watch_returned: true, before_guard_verified: true,
     after_guard_verified: true, request_identity_verified: true, provider_status: "EXPIRED", transaction_hash: null, chain_id: null,
     response_hash: null, reason: "provider_request_outcome_unknown", error_code: null, diagnostic: null } as const;
@@ -84,6 +84,6 @@ test("a verified EXPIRED or DENIED request with no transaction names the abandon
   for (const other of [{ ...read, provider_status: "SIGNING" as const }, { ...read, request_identity_verified: false }, undefined]) {
     assert.equal(closed(op, other), undefined);
   }
-  assert.equal(closed(patch(op, { transactionHash: `0x${"a".repeat(64)}` as MetaMaskNativeOperation["transactionHash"] }), read), undefined);
-  assert.equal(closed(patch(op, { state: "abandoned_unknown" }), read), undefined);
+  assert.equal(closed({ ...op, transactionHash: `0x${"a".repeat(64)}` as MetaMaskNativeOperation["transactionHash"] }, read), undefined);
+  assert.equal(closed({ ...op, state: "abandoned_unknown" as const }, read), undefined);
 });

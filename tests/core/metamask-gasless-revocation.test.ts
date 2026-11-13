@@ -143,10 +143,12 @@ test("an unknown disable answer names mm's error code and when another disable i
   const result = await core(new Approval(), wallet).execute({ command: "gasless.transfer.revoke", operationId: id });
   assert.equal(result.ok, true, JSON.stringify(result.error));
   assert.equal((result.data as Json).submission.providerErrorCode, "POLICY_VIOLATION");
+  const from = f.binding.address;
   assert.deepEqual(result.next_actions, [`MetaMask did not confirm this disable (mm error code POLICY_VIOLATION). Run the resume below: ` +
-    `it reads whether the delegation is disabled. If it is not, and eth_getTransactionCount(${f.binding.address}, "latest") on this chain ` +
-    `still answers 0x0 (0), no transaction used this disable's nonce: remove the cause, then run ` +
-    `apn gasless transfer revoke --operation ${id} again. It moves no USDC, and only one disable of the delegation can land.`,
+    `it reads whether the delegation is disabled. If it is not, and eth_getTransactionCount(${from}, "latest") and ` +
+    `eth_getTransactionCount(${from}, "pending") on this chain both still answer 0x0 (0), no transaction used ` +
+    `this disable's nonce or waits for it: remove the cause, then run apn gasless transfer revoke --operation ${id} again. ` +
+    `It moves no USDC, and with the same nonce only one of the two disables can land.`,
   `apn operation resume --operation ${id}`]);
   assert.deepEqual(await f.record(id), before);
   const plain = await core(new Approval(), new Wallet({ disposition: "unknown", reason: "provider_handoff_outcome_unknown" }))

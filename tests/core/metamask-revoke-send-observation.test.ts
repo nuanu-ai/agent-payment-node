@@ -57,6 +57,7 @@ test("mm's own error envelope on stderr names its code; free text, two frames or
   assert.deepEqual([envelope.reason, envelope.providerErrorCode], ["provider_response_empty", "MFA_REQUIRED"]);
   for (const answer of [{ stderr: JSON.stringify({ ok: false, error: { code: "not an enum", message: SECRET } }), code: 1 },
     { stderr: `${STDERR_ERROR}\n${STDERR_ERROR}`, code: 1 }, { stderr: SECRET, code: 1 },
+    { stderr: JSON.stringify({ ok: true, error: { code: "POLICY_VIOLATION" } }), code: 1 },
     { stdout: SECRET, stderr: STDERR_ERROR, code: 1 }]) {
     const submitted = await send(answer);
     assert.equal(submitted.disposition, "unknown"); assert.equal("providerErrorCode" in submitted, false, JSON.stringify(answer));

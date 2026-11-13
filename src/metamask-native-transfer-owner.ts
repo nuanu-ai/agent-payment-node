@@ -278,7 +278,8 @@ async function closeExpiredBeforeEffect(stateRoot:string,journal:MetaMaskNativeJ
  * The transfer stays UNKNOWN with its reserves charged; the next actions name the owner's only exit, abandonment after
  * the quote expired, which frees the account and keeps the reserves until the chain proves an outcome.
  */
-export function metaMaskNativeClosedRequestNextActions(op:NativeOperation,read:MetaMaskNativeReadObservation|undefined):string[]|undefined {
+export function metaMaskNativeClosedRequestNextActions(op:Pick<NativeOperation,"operationId"|"state"|"transactionHash"|"providerRequestId"|"context">,
+  read:MetaMaskNativeReadObservation|undefined):string[]|undefined {
   if(read===undefined||read.request_identity_verified!==true||(read.provider_status!=="EXPIRED"&&read.provider_status!=="DENIED")||
     op.state!=="unknown"||op.transactionHash!==null)return undefined;
   return [`MetaMask closed request ${op.providerRequestId} as ${read.provider_status} at its approval step, before signing. That is the provider's word, not chain evidence: do not confirm the old request; APN keeps this transfer UNKNOWN, keeps its reserves charged and never sends it again.`,

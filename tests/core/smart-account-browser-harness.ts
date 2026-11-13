@@ -86,7 +86,8 @@ export class FakeDocument {
   }
 }
 
-type ServedMode = "request" | "sync";
+/** "request" is a first consent; "request-retry" is a retry of the same intent, which first reads held grants. */
+type ServedMode = "request" | "request-retry" | "sync";
 const browserAssets = new Map<ServedMode, Promise<{ readonly html: string; readonly script: string }>>();
 
 /** The page and script the CLI serves for one consent mode, captured once per mode through a real loopback consent. */
@@ -113,8 +114,8 @@ async function captureServedBrowserAssets(mode: ServedMode): Promise<{ readonly 
     });
     assert.equal(callback.status, 204);
   }, 1_000);
-  assert.deepEqual(mode === "request" ? await consent.request({ ...REQUEST, port: await allocateConsentPort() })
-    : await consent.sync({ port: await allocateConsentPort(), ownerAddress: OWNER }), expected);
+  assert.deepEqual(mode === "sync" ? await consent.sync({ port: await allocateConsentPort(), ownerAddress: OWNER })
+    : await consent.request({ ...REQUEST, port: await allocateConsentPort(), retry: mode === "request-retry" }), expected);
   if (assets === undefined) throw new Error("served browser assets were not captured");
   return assets;
 }

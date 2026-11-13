@@ -22,7 +22,8 @@ export interface MetaMaskRevocationDependencies {
  * The owner's exit for a disclosed delegation whose outcome no proof decides: one `disableDelegation` of exactly that
  * delegation, signed and paid by its own server wallet after foreground consent. It records nothing in the operation:
  * the chain is the record, and `operation resume` closes the operation only from the manager's disabled flag with the
- * redemption count 0 at one finality block. Repeating it can never move USDC; the pinned nonce lets one call land.
+ * redemption count 0 at one finality block. Repeating it can never move USDC. Each call pins the pending nonce it was
+ * priced at, so two calls at one nonce land at most once; a call priced after another landed reverts `AlreadyDisabled`.
  * `assertAvailable` refuses while an operation that may use the server wallet's own account is unresolved; it runs under
  * the account's evm-owner lock, before pricing and again with the send.
  */
@@ -77,13 +78,16 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
 }
 
 /**
- * After an unknown answer: the resume reads the chain, and two public reads tell whether this disable can still land.
- * A transaction count still at the pinned nonce means no transaction of the wallet used it, so another disable is safe:
- * it moves no USDC, and of two disables of one delegation at most one lands (the other reverts `AlreadyDisabled`).
+ * After an unknown answer: the resume reads the chain, and two public reads tell whether another disable is safe. Each
+ * disable is priced at the wallet's pending nonce; with both the latest and the pending count still at this one's nonce,
+ * no transaction of the wallet used it or waits in the RPC's pool, so the next disable takes the same nonce and at most
+ * one of the two can land. A request MetaMask still holds for MFA is the only one no RPC shows; it carries the same nonce.
  */
 function unconfirmedDisable(code: string | undefined, from: string, nonce: string, id: string): string {
+  const hex = `0x${BigInt(nonce).toString(16)}`;
   return `MetaMask did not confirm this disable${code === undefined ? "" : ` (mm error code ${code})`}. Run the resume below: ` +
-    `it reads whether the delegation is disabled. If it is not, and eth_getTransactionCount(${from}, "latest") on this chain ` +
-    `still answers 0x${BigInt(nonce).toString(16)} (${nonce}), no transaction used this disable's nonce: remove the cause, then run ` +
-    `apn gasless transfer revoke --operation ${id} again. It moves no USDC, and only one disable of the delegation can land.`;
+    `it reads whether the delegation is disabled. If it is not, and eth_getTransactionCount(${from}, "latest") and ` +
+    `eth_getTransactionCount(${from}, "pending") on this chain both still answer ${hex} (${nonce}), no transaction used ` +
+    `this disable's nonce or waits for it: remove the cause, then run apn gasless transfer revoke --operation ${id} again. ` +
+    `It moves no USDC, and with the same nonce only one of the two disables can land.`;
 }

@@ -875,8 +875,9 @@ MetaMask keeps a transfer's request in the project of the `mm` login that sent i
 After a login into another project, even one that holds the same server wallet, APN does not read that request with the
 new session: the operation keeps `mm_gasless_binding_changed` as its reason and resume reads only the chain. To read the
 request again, sign in to MetaMask the way you did when it was sent, so that the session's project is that one again. To
-close the operation without it, disable its delegation (below): the server wallet's address signs the disable, whatever
-project the current login is in, and resume then proves `revoked_unused` or `completed` from the chain.
+close the operation without it, disable its delegation (below): when the selected server wallet and the profile are
+unchanged, the server wallet's address signs the disable whatever project the current login is in, and resume then
+proves `revoked_unused` or `completed` from the chain.
 
 ### Disabling a disclosed delegation
 
@@ -903,7 +904,8 @@ is below that maximum.
 The foreground screen shows the call, the nonce, the gas fields and the maximum native cost. After the six-character
 code, APN checks that the wallet's selected server wallet is the delegator, and the MetaMask Agent Wallet
 (`mm wallet send-transaction`) signs and broadcasts the call after its own Guard policy and MFA. The call moves no USDC.
-The pinned nonce lets one such call land; a second disable reverts (`AlreadyDisabled`). Nothing is written to the
+Each disable pins the pending nonce it was priced at, so two disables at one nonce land at most once; a disable priced
+after another one landed reverts (`AlreadyDisabled`) and costs its gas. Nothing is written to the
 operation: the chain is the record. `operation resume` then proves the outcome: `revoked_unused` when the delegation is
 disabled with no redemption, or `completed` when the redemption landed first. MCP returns the CLI handoff.
 
@@ -916,9 +918,10 @@ The `revoke` output reports `submission`:
   `provider_handoff_outcome_unknown`). When `mm` answered with its JSON error on stderr and nothing on stdout,
   `providerErrorCode` is that error's code (for example `POLICY_VIOLATION`), taken from the stderr shape below.
   The next actions say when another disable is safe: the resume still finds the delegation not disabled, and
-  `eth_getTransactionCount(<server wallet>, "latest")` still answers the disable's `nonce_atomic`, so no transaction of
-  the wallet used that nonce. Remove the cause the code names, then run `revoke` again. It moves no USDC, and of two
-  disables of one delegation at most one lands; the other reverts (`AlreadyDisabled`).
+  `eth_getTransactionCount(<server wallet>, …)` at both `latest` and `pending` still answers the disable's
+  `nonce_atomic`, so no transaction of the wallet used that nonce or waits for it in the RPC's pool. Remove the cause
+  the code names, then run `revoke` again: it takes the same nonce, so only one of the two disables can land, and it
+  moves no USDC. A request MetaMask still holds for your MFA is the only one no RPC shows; it carries the same nonce.
 
 `provider` records the `mm` child process as APN received it, before its bytes are zeroed: the admitted package version
 and shasum, outcome, exit code or signal, duration, and for stdout and stderr the byte count, the SHA-256 of a complete
