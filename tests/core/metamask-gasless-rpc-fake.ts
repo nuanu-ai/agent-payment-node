@@ -34,7 +34,8 @@ export interface FakeOptions {
   /** The manager's `disabledDelegations` flag for the asked delegation at a block (default: never disabled). */
   readonly disabled?: (blockNumber: bigint, delegationHash: Hex) => boolean;
   /** Disable pricing reads: the manager's `getDelegationHash` answer, nonce, gas, priority fee, balance, OP-stack fees. */
-  readonly pricing?: { readonly managerHash: Hex; readonly nonce?: bigint; readonly gas?: bigint; readonly priority?: bigint;
+  /** `pendingNonce` answers `eth_getTransactionCount(…, "pending")` when set; every other nonce read answers `nonce`. */
+  readonly pricing?: { readonly managerHash: Hex; readonly nonce?: bigint; readonly pendingNonce?: bigint; readonly gas?: bigint; readonly priority?: bigint;
     readonly balance?: bigint; readonly l1?: bigint; readonly operator?: bigint; readonly estimateRevert?: boolean };
   readonly corruptProtocol?: boolean;
   readonly transaction?: Json;
@@ -102,7 +103,9 @@ export class FakeRpcTransport implements GaslessTransport {
       throw new Error(`unexpected eth_call ${selector}`);
     }
     if (method === "eth_getTransactionByHash") return this.options.transaction ?? null;
-    if (this.options.pricing && method === "eth_getTransactionCount") return quantity(this.options.pricing.nonce ?? 7n);
+    if (this.options.pricing && method === "eth_getTransactionCount") {
+      return quantity(params[1] === "pending" ? this.options.pricing.pendingNonce ?? this.options.pricing.nonce ?? 7n : this.options.pricing.nonce ?? 7n);
+    }
     if (this.options.pricing && method === "eth_estimateGas") return quantity(this.options.pricing.gas ?? 60_000n);
     if (this.options.pricing && method === "eth_maxPriorityFeePerGas") return quantity(this.options.pricing.priority ?? 1_000_000n);
     if (this.options.pricing && method === "eth_getBalance") return quantity(this.options.pricing.balance ?? 10n ** 16n);

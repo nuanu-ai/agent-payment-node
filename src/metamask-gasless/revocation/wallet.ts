@@ -58,15 +58,15 @@ function withProvider(answer: MetaMaskRevocationSubmission, provider: MetaMaskPr
 }
 
 /**
- * The error code of `mm`'s JSON failure answer, which it writes to stderr (`{"ok":false,"error":{"code":…}}`, or
- * `{"_error":{…}}` after a notice), read from the stream shape: only when stdout is empty and stderr is that one complete
- * frame. The shape keeps `code` only when it looks like an enum value, so no message, id or address can surface here.
+ * The error code of `mm`'s JSON failure answer, which it writes to stderr after any progress lines
+ * (`{"ok":false,"error":{"code":…}}`, indented, or `{"_error":{…}}` after a notice), read from the stream shape: only
+ * when the process exited, stdout is empty, stderr is complete and its last frame is that answer. The shape keeps `code`
+ * only when it looks like an enum value, so no message, id or address can surface here.
  */
 function stderrErrorCode(provider: MetaMaskProcessObservation): string | undefined {
   const { stdout, stderr } = provider;
-  if (provider.outcome !== "exit" || stdout.captured !== "empty" || stderr.captured !== "complete" || stderr.frames.length !== 1 ||
-    stderr.framesOmitted !== 0) return undefined;
-  const frame = stderr.frames[0]!;
+  if (provider.outcome !== "exit" || stdout.captured !== "empty" || stderr.captured !== "complete" || stderr.frames.length === 0) return undefined;
+  const frame = stderr.frames.at(-1)!;
   if (!frame.json || frame.object === undefined) return undefined;
   const ok = frame.object.keys.find((key) => key.key === "ok");
   if (ok !== undefined && ok.value !== false) return undefined;

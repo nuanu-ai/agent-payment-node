@@ -5,7 +5,7 @@ import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
 import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, parseMetaMaskProcessOutput, type MetaMaskMfaNotice } from "./metamask-process-output.js";
-import { observeMetaMaskProcess, type MetaMaskProcessObservation } from "./metamask-process-observation.js";
+import { metaMaskJsonAnswer, observeMetaMaskProcess, type MetaMaskProcessObservation } from "./metamask-process-observation.js";
 import type { Hex } from "./model.js";
 import {
   METAMASK_FOREGROUND_TIMEOUT_MS,
@@ -198,7 +198,7 @@ export class NodeMetaMaskProcessRunner implements MetaMaskProcessRunnerPort {
       const stage=argv[0]==="wallet"&&argv[1]==="send-transaction"?"sdk_send":"sdk_read";
       const stderrObservation=():{stderrClass:MetaMaskNativeDiagnostic["stderrClass"];providerCode:MetaMaskNativeDiagnostic["providerCode"]}=>{
         if(stderrSize===0)return {stderrClass:"none",providerCode:"none"};if(stderrOverflow)return {stderrClass:"unclassified",providerCode:"other"};
-        const bytes=Buffer.concat(stderrChunks);try {const parsed=JSON.parse(bytes.toString("utf8"));const error=isPlainRecord(parsed)?(isPlainRecord(parsed.error)?parsed.error:isPlainRecord(parsed._error)?parsed._error:null):null;
+        const bytes=Buffer.concat(stderrChunks);try {const parsed=metaMaskJsonAnswer(bytes.toString("utf8"));const error=isPlainRecord(parsed)?(isPlainRecord(parsed.error)?parsed.error:isPlainRecord(parsed._error)?parsed._error:null):null;
           if(error===null)return {stderrClass:"unclassified",providerCode:"other"};const code=typeof error.code==="string"?error.code:"";
           const providerCode=code==="POLICY_VIOLATION"||code==="POLICY_REJECTED"?"policy":code==="MFA_REQUIRED"?"mfa":code==="UNAUTHORIZED"||code==="AUTH_REQUIRED"?"auth":code==="INSUFFICIENT_FUNDS"?"funds":code==="RATE_LIMITED"?"rate_limit":"other";return {stderrClass:"json_error",providerCode};
         }catch{return {stderrClass:"unclassified",providerCode:"other"};}finally{bytes.fill(0);}

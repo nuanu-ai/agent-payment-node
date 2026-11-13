@@ -898,8 +898,10 @@ state, because they send nothing from that wallet themselves.
 pinned DelegationManager hashes the call's delegation tuple (`getDelegationHash`) to the operation's delegation hash.
 It then prices exactly `DelegationManager.disableDelegation(<that delegation>)` from the server wallet at the latest
 block (`eth_estimateGas`, pending nonce, 2 x base fee + priority fee, and on OP-stack chains the L1 data and operator
-fee upper bounds). It refuses with `APN_INSUFFICIENT_GAS` and the exact amount to send when the wallet's native balance
-is below that maximum.
+fee upper bounds). It refuses with `APN_OPERATION_BLOCKED / mm_revoke_transaction_pending` while the RPC's pending nonce
+of the wallet is past its latest one: a transaction still waits, an earlier disable included, and a disable sent now
+would take the next nonce and could revert after it at a cost in gas. It refuses with `APN_INSUFFICIENT_GAS` and the
+exact amount to send when the wallet's native balance is below that maximum.
 
 The foreground screen shows the call, the nonce, the gas fields and the maximum native cost. After the six-character
 code, APN checks that the wallet's selected server wallet is the delegator, and the MetaMask Agent Wallet
@@ -925,8 +927,9 @@ The `revoke` output reports `submission`:
 
 `provider` records the `mm` child process as APN received it, before its bytes are zeroed: the admitted package version
 and shasum, outcome, exit code or signal, duration, and for stdout and stderr the byte count, the SHA-256 of a complete
-capture and each JSON frame's keys and value types. Values are shown only for `ok`, `code`, `kind`, `status`, `mode` and
-`chainNamespace`; ids, addresses, hashes and messages never appear. Eligible operations list
+capture and each JSON frame's keys and value types. `mm --json` prints its answer indented over many lines after any
+progress lines; that block is one frame, always the last, after at most seven line frames. Values are shown only for
+`ok`, `code`, `kind`, `status`, `mode` and `chainNamespace`; ids, addresses, hashes and messages never appear. Eligible operations list
 `apn gasless transfer revoke` among their next actions.
 
 ## MetaMask Smart Account

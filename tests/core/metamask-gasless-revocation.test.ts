@@ -60,6 +60,7 @@ test("disable pricing reads the finality proofs, the manager's own hash and the 
     ["redeemed", { counter: () => 1n }, "mm_revoke_redeemed"],
     ["disabled", { disabled: () => true }, "mm_revoke_already_disabled"],
     ["other hash", { pricing: { ...pricing, managerHash: `0x${"ab".repeat(32)}` as Hex } }, "mm_revoke_hash_mismatch"],
+    ["a transaction in flight", { pricing: { ...pricing, pendingNonce: 4n } }, "mm_revoke_transaction_pending"],
   ] as const) await t.test(name, async () => {
     const refused = new FakeRpcTransport(8453, { finality: 2500n, head: 2501n, pricing, ...options });
     await assert.rejects(new MetaMaskGaslessRpc({ chainId: 8453, rpcUrl: RPC_URL, clock: now, transport: refused }).revocation(value, call, "a".repeat(64)),

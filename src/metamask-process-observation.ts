@@ -51,10 +51,31 @@ export function observeMetaMaskProcess(input: Omit<MetaMaskProcessObservation, "
 function streamShape({ bytes, total }: MetaMaskCapturedStream): MetaMaskStreamShape {
   if (total === 0) return { bytes: 0, captured: "empty", sha256: null, frames: [], framesOmitted: 0 };
   const complete = bytes.length === total, text = bytes.toString("utf8").trim(), whole = parse(text);
-  const lines = whole === undefined ? text.split(/\r?\n/u).filter((line) => line.trim().length > 0) : [];
-  const frames = whole === undefined ? lines.slice(0, MAX_FRAMES).map((line) => frame(line)) : [frameOf(whole)];
-  return { bytes: total, captured: complete ? "complete" : "truncated", sha256: complete ? sha256(bytes) : null,
-    frames, framesOmitted: Math.max(0, lines.length - MAX_FRAMES) };
+  const shape = { bytes: total, captured: complete ? "complete" as const : "truncated" as const, sha256: complete ? sha256(bytes) : null };
+  if (whole !== undefined) return { ...shape, frames: [frameOf(whole)], framesOmitted: 0 };
+  const lines = text.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+  // `mm --json` prints its answer indented over many lines, after any progress lines: that block is one frame, kept last.
+  const tail = trailingBlock(lines);
+  if (tail === undefined) return { ...shape, frames: lines.slice(0, MAX_FRAMES).map((line) => frame(line)), framesOmitted: Math.max(0, lines.length - MAX_FRAMES) };
+  const before = lines.slice(0, tail.start);
+  return { ...shape, frames: [...before.slice(0, MAX_FRAMES - 1).map((line) => frame(line)), frameOf(tail.value)],
+    framesOmitted: Math.max(0, before.length - (MAX_FRAMES - 1)) };
+}
+
+/** `mm`'s JSON answer in a stream: the whole text, or the indented object it prints after progress lines. */
+export function metaMaskJsonAnswer(text: string): unknown {
+  const trimmed = text.trim(), whole = parse(trimmed);
+  return whole !== undefined ? whole : trailingBlock(trimmed.split(/\r?\n/u).filter((line) => line.trim().length > 0))?.value;
+}
+
+/** The first line that opens a top-level `{` at column 0 and, with every line after it, parses as one JSON object. */
+function trailingBlock(lines: readonly string[]): { readonly start: number; readonly value: unknown } | undefined {
+  for (let start = 0; start < lines.length; start += 1) {
+    if (lines[start] !== "{") continue;
+    const value = parse(lines.slice(start).join("\n"));
+    if (isPlainRecord(value)) return { start, value };
+  }
+  return undefined;
 }
 
 function frame(line: string): MetaMaskFrameShape {

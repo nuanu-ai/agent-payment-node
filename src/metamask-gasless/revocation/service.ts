@@ -79,9 +79,10 @@ export async function revokeMetaMaskGasless(state: StateStore, op: MetaMaskGasle
 
 /**
  * After an unknown answer: the resume reads the chain, and two public reads tell whether another disable is safe. Each
- * disable is priced at the wallet's pending nonce; with both the latest and the pending count still at this one's nonce,
- * no transaction of the wallet used it or waits in the RPC's pool, so the next disable takes the same nonce and at most
- * one of the two can land. A request MetaMask still holds for MFA is the only one no RPC shows; it carries the same nonce.
+ * disable is priced at the wallet's pending nonce, and revoke refuses while the pending nonce is past the latest one;
+ * with both still at this one's nonce, no transaction of the wallet used it or waits in the RPC's pool, so the next
+ * disable takes the same nonce and at most one of the two can land. A request MetaMask still holds for MFA is the only
+ * one no RPC shows; it carries the same nonce.
  */
 function unconfirmedDisable(code: string | undefined, from: string, nonce: string, id: string): string {
   const hex = `0x${BigInt(nonce).toString(16)}`;
