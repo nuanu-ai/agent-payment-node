@@ -55,6 +55,15 @@ test("with no permission to this session key the page requests one", async () =>
   assert.ok(methods.indexOf("wallet_getGrantedExecutionPermissions") < methods.indexOf("wallet_requestExecutionPermissions"));
 });
 
+test("a reloaded consent page, its one-use token gone, never asks the wallet anything", async () => {
+  const methods: string[] = [];
+  const provider: BrowserProvider = { request: async (request) => { methods.push((request as { method: string }).method); return null; } };
+  const browser = await runServedBrowser({ ethereum: provider, hash: "" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual([methods, browser.posts, browser.document.buttons().length], [[], [], 0]);
+  assert.match(browser.document.status.textContent, /already used/u);
+});
+
 test("a refused or malformed read of held permissions stops before any request", async () => {
   const refused = await page(() => { throw Object.assign(new Error("Unauthorized"), { code: 4100 }); });
   assert.deepEqual(refused.outcome, { ok: false, code: "provider_protocol", diagnostic: { step: "wallet_getGrantedExecutionPermissions",

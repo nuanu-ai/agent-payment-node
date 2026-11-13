@@ -132,6 +132,8 @@ export async function runServedBrowser(options: {
   readonly announcements?: readonly ProviderAnnouncement[];
   readonly ethereum?: BrowserProvider | { readonly providers: readonly BrowserProvider[] };
   readonly mode?: ServedMode;
+  /** The address fragment the page starts with; a reloaded page has lost its one-use token. */
+  readonly hash?: string;
 }) {
   const { script } = await servedBrowserAssets(options.mode);
   const document = new FakeDocument();
@@ -140,7 +142,7 @@ export async function runServedBrowser(options: {
   class FakeEvent { public constructor(public readonly type: string) {} }
   const sandbox: Record<string, unknown> = {
     document,
-    location: { hash: `#${"a".repeat(64)}` },
+    location: { hash: options.hash ?? `#${"a".repeat(64)}` },
     history: { replaceState: () => undefined },
     Event: FakeEvent,
     addEventListener: (type: string, listener: (event: unknown) => void) => {

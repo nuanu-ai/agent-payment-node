@@ -899,15 +899,17 @@ pinned DelegationManager hashes the call's delegation tuple (`getDelegationHash`
 It then prices exactly `DelegationManager.disableDelegation(<that delegation>)` from the server wallet at the latest
 block (`eth_estimateGas`, pending nonce, 2 x base fee + priority fee, and on OP-stack chains the L1 data and operator
 fee upper bounds). It refuses with `APN_OPERATION_BLOCKED / mm_revoke_transaction_pending` while the RPC's pending nonce
-of the wallet is past its latest one: a transaction still waits, an earlier disable included, and a disable sent now
-would take the next nonce and could revert after it at a cost in gas. It refuses with `APN_INSUFFICIENT_GAS` and the
+of the wallet is past its latest one: a transaction this RPC holds as pending still waits, an earlier disable included,
+and a disable sent now would take the next nonce and could revert after it at a cost in gas. The check reads the RPC's
+pool once, at pricing; a transaction the RPC does not show (many public OP-stack RPCs show none) is not seen. It refuses with `APN_INSUFFICIENT_GAS` and the
 exact amount to send when the wallet's native balance is below that maximum.
 
 The foreground screen shows the call, the nonce, the gas fields and the maximum native cost. After the six-character
 code, APN checks that the wallet's selected server wallet is the delegator, and the MetaMask Agent Wallet
 (`mm wallet send-transaction`) signs and broadcasts the call after its own Guard policy and MFA. The call moves no USDC.
-Each disable pins the pending nonce it was priced at, so two disables at one nonce land at most once; a disable priced
-after another one landed reverts (`AlreadyDisabled`) and costs its gas. Nothing is written to the
+Each disable pins the pending nonce it was priced at, so two disables at one nonce land at most once. A disable priced
+after another one landed fails its gas estimate and is not sent; gas is lost only when a disable is priced before
+another one lands and is sent after it (it reverts `AlreadyDisabled`). Nothing is written to the
 operation: the chain is the record. `operation resume` then proves the outcome: `revoked_unused` when the delegation is
 disabled with no redemption, or `completed` when the redemption landed first. MCP returns the CLI handoff.
 

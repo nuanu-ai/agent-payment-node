@@ -309,6 +309,8 @@ const sameAccount = async (provider, owner) => {
   return Array.isArray(accounts) && accounts.length > 0 && String(accounts[0]).toLowerCase() === owner.toLowerCase();
 };
 (async () => {
+  // A reload has lost the one-use token (removed from the address above): such a page never asks the wallet anything.
+  if (!/^[a-f0-9]{64}$/u.test(token)) return setStatus("This consent page was already used. Return to the terminal and rerun the same wallet connect.");
   try {
     const provider = await chooseProvider(await discoverProviders());
     if (!provider) return await post(failure("missing_provider"));

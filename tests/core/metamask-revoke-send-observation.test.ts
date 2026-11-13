@@ -52,7 +52,7 @@ test("an empty stdout with a stderr refusal is named empty and keeps exit, sizes
     stderr: { bytes: Buffer.byteLength(STDERR_ERROR), captured: "complete", sha256: sha256(STDERR_ERROR), frames: [ERROR_FRAME], framesOmitted: 0 } });
 });
 
-test("mm's own error envelope on stderr names its code; free text, two frames or a stdout answer name none", async () => {
+test("mm's own error envelope on stderr names its code; free text last, ok:true or a stdout answer name none", async () => {
   const envelope = await send({ stderr: JSON.stringify({ ok: false, error: { code: "MFA_REQUIRED", message: SECRET, hint: SECRET } }), code: 1 });
   assert.deepEqual([envelope.reason, envelope.providerErrorCode], ["provider_response_empty", "MFA_REQUIRED"]);
   for (const answer of [{ stderr: JSON.stringify({ ok: false, error: { code: "not an enum", message: SECRET } }), code: 1 },

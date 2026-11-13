@@ -55,25 +55,36 @@ function streamShape({ bytes, total }: MetaMaskCapturedStream): MetaMaskStreamSh
   if (whole !== undefined) return { ...shape, frames: [frameOf(whole)], framesOmitted: 0 };
   const lines = text.split(/\r?\n/u).filter((line) => line.trim().length > 0);
   // `mm --json` prints its answer indented over many lines, after any progress lines: that block is one frame, kept last.
+  // The last frame is always the stream's end; past eight lines the ones before it are counted, not shown.
   const tail = trailingBlock(lines);
-  if (tail === undefined) return { ...shape, frames: lines.slice(0, MAX_FRAMES).map((line) => frame(line)), framesOmitted: Math.max(0, lines.length - MAX_FRAMES) };
+  if (tail === undefined) {
+    const kept = lines.length <= MAX_FRAMES ? lines : [...lines.slice(0, MAX_FRAMES - 1), lines.at(-1)!];
+    return { ...shape, frames: kept.map((line) => frame(line)), framesOmitted: lines.length - kept.length };
+  }
   const before = lines.slice(0, tail.start);
   return { ...shape, frames: [...before.slice(0, MAX_FRAMES - 1).map((line) => frame(line)), frameOf(tail.value)],
     framesOmitted: Math.max(0, before.length - (MAX_FRAMES - 1)) };
 }
 
-/** `mm`'s JSON answer in a stream: the whole text, or the indented object it prints after progress lines. */
+/** `mm`'s JSON answer in a stream: the whole text, else the object it prints last, indented or on one line, after progress lines. */
 export function metaMaskJsonAnswer(text: string): unknown {
   const trimmed = text.trim(), whole = parse(trimmed);
-  return whole !== undefined ? whole : trailingBlock(trimmed.split(/\r?\n/u).filter((line) => line.trim().length > 0))?.value;
+  if (whole !== undefined) return whole;
+  const lines = trimmed.split(/\r?\n/u).filter((line) => line.trim().length > 0), block = trailingBlock(lines)?.value;
+  if (block !== undefined) return block;
+  const last = parse(lines.at(-1)?.trim() ?? "");
+  return isPlainRecord(last) ? last : undefined;
 }
 
-/** The first line that opens a top-level `{` at column 0 and, with every line after it, parses as one JSON object. */
+/**
+ * The last line that opens a top-level `{` at column 0 and, with every line after it, parses as one JSON object. `mm`
+ * indents nested objects, so a column-0 `{` starts a top-level answer; scanning from the end parses well-formed output once.
+ */
 function trailingBlock(lines: readonly string[]): { readonly start: number; readonly value: unknown } | undefined {
-  for (let start = 0; start < lines.length; start += 1) {
+  for (let start = lines.length - 1; start >= 0; start -= 1) {
     if (lines[start] !== "{") continue;
     const value = parse(lines.slice(start).join("\n"));
-    if (isPlainRecord(value)) return { start, value };
+    return isPlainRecord(value) ? { start, value } : undefined;
   }
   return undefined;
 }
