@@ -94,7 +94,7 @@
     "@types/node": "24.5.2",
     "typescript": "5.9.2",
     "@metamask/agent-sdk": "6.1.4",
-    "@metamask/fox-sdk": "2.7.0",
+    "@metamask/fox-sdk": "2.10.0",
     "esbuild": "0.28.2",
     "tronweb": "6.5.0",
     "@relay-protocol/settlement-sdk": "0.0.143",
