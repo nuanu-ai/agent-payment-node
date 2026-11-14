@@ -137,6 +137,14 @@ export async function verifySignedJupiterV1Transaction(effect:RailSignedEffect,b
  }catch{corrupt();}
 }
 function corrupt():never{throw new ApnError("APN_STATE_CORRUPT","Jupiter V1 durable execution binding or signed message changed.");}
+/**
+ * The profile's local Solana wallet was left half-created: its encrypted envelope exists without the public account record.
+ * `wallet ensure-solana` with the local provider restores that record from the envelope's own key; it creates no new key.
+ */
+function jupiterV1LocalWalletIncomplete(profile:string, address:string):ApnError{
+ return new ApnError("APN_WALLET_POLICY_REQUIRED","The profile's local Solana wallet is incomplete: its encrypted key exists without its public account record.",
+  {reason:"jupiter_v1_local_wallet_incomplete",address,nextActions:[`apn wallet ensure-solana --profile ${profile} --provider local --accept-risk true`]});
+}
 /** Jupiter signs only with the profile's local Solana key: none exists yet, or the profile's Solana account is provider-linked. */
 function jupiterV1LocalWalletRequired(profile:string, provider:string|null):ApnError{
  return provider===null
@@ -162,13 +170,16 @@ export class JupiterV1LocalSigner {
  }
  readonly #bindings:JupiterV1ExecutionBindingStore;readonly #operations:SwapOperationRepository;
  /**
-  * The owner as admission sees it (quote, prepare and the checks before any marker). A profile with no Solana wallet, or
-  * with a provider-linked one, is refused with that cause; every other disagreement stays corrupt, as in publicOwner.
+  * The owner as admission sees it (quote, prepare and the checks before any marker). A profile with no Solana wallet, a
+  * provider-linked one, or a local one left half-created (envelope without its public record) is refused with that cause;
+  * every other disagreement stays corrupt, as in publicOwner.
   */
  async admissionOwner(profile:string, expected?:string){
   if(Object.getPrototypeOf(this.#custody)!==ChainAccountStore.prototype)corrupt();
   const account=await this.#custody.account(profile,"solana"),envelope=await this.#custody.ownerBinding(profile,"solana");
   if(account===null&&envelope===null)throw jupiterV1LocalWalletRequired(profile,null);
+  // An interrupted first creation: the encrypted seed exists, its public account record does not. Jupiter completes nothing.
+  if(account===null&&envelope!==null&&envelope.profile===profile&&envelope.rail==="solana"&&envelope.provider==="local")throw jupiterV1LocalWalletIncomplete(profile,envelope.address);
   if(account!==null&&envelope!==null&&canonicalJson(account)===canonicalJson(envelope)&&account.provider!=="local")throw jupiterV1LocalWalletRequired(profile,account.provider);
   return await this.publicOwner(profile,expected);
  }

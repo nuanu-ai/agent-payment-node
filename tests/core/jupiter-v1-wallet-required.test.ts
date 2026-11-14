@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { access, unlink } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { ChainAccountStore } from "../../src/chain-account-store.js";
@@ -74,5 +76,31 @@ test("a provider-linked Solana account is refused with its provider, and a local
   await accounts.ensureLocal({ profile: local, rail: "solana", create: async () => ({ address: payer, seed: Buffer.alloc(32, 9) }) });
   await assert.rejects(runtime().quote({ ...quoteRequest, profile: local }, new Date()), { code: "APN_OPERATION_BLOCKED",
     details: { reason: "jupiter_v1_owner_admission", nextActions: [`apn allowlist policy status --profile ${local}`] } });
+  assert.deepEqual(c.count, { reads: 0, secrets: 0 });
+});
+
+test("a half-created local Solana wallet (envelope without its public record) is named, left as it is, and the next action restores it", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const c = counters();
+  const storeWrapping = { async load() { return Buffer.alloc(32, 77); }, async create() { return Buffer.alloc(32, 77); } };
+  const created = await new ChainAccountStore(temporary.root, storeWrapping).ensureLocal({ profile: PROFILE, rail: "solana",
+    create: async () => ({ address: payer, seed: Buffer.alloc(32, 9) }) });
+  // An interrupted first creation: the encrypted envelope was written, the public account record was not.
+  const publicRecord = join(temporary.root, "chain-accounts", "solana", `${created.profileHash}.json`);
+  await unlink(publicRecord);
+  const runtime = () => createJupiterV1Runtime({ state: new StateStore(temporary.root), clock: { now: () => new Date() },
+    rpc: new SolanaRpc("https://example.com", c.fetch, new SolanaRpcBudget({ maxPhysicalRequests: 64 })), wrappingSecret: c.wrapping,
+    foreground: false, providerFetch: c.fetch });
+  await assert.rejects(runtime().quote(quoteRequest, new Date()), { code: "APN_WALLET_POLICY_REQUIRED",
+    message: "The profile's local Solana wallet is incomplete: its encrypted key exists without its public account record.",
+    details: { reason: "jupiter_v1_local_wallet_incomplete", address: payer, nextActions: [ENSURE] } });
+  assert.deepEqual(c.count, { reads: 0, secrets: 0 });
+  await assert.rejects(access(publicRecord), { code: "ENOENT" }, "Jupiter completes nothing");
+  // The owner's manual next action restores the public record from the envelope's own key, at the same address.
+  const bound = bindArgv(ENSURE.split(" ").slice(1));
+  const ensured = await createApnCore(bound, { stateRoot: temporary.root, wrappingSecret: storeWrapping, solanaRpcFetch: c.fetch }).execute(bound.request);
+  assert.equal(ensured.ok, true, JSON.stringify(ensured.error)); assert.equal((ensured.data as { address: string }).address, payer);
+  await access(publicRecord);
+  await assert.rejects(runtime().quote(quoteRequest, new Date()), { code: "APN_OPERATION_BLOCKED",
+    details: { reason: "jupiter_v1_owner_admission", nextActions: [`apn allowlist policy status --profile ${PROFILE}`] } });
   assert.deepEqual(c.count, { reads: 0, secrets: 0 });
 });
