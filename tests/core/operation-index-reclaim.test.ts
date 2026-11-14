@@ -109,7 +109,7 @@ test("reclaim leaves alone a record its family reads as terminal now, and an ent
   await assert.rejects(s.approveCheck(first.operationId), blockedBy(open.operationId));
 });
 
-test("assertOwnClaimsAvailable, the families' shared approve-time guard: it re-takes the released claim, wants the record's accounts only", async t => {
+test("assertOwnClaimsAvailable, the families' shared approve-time guard: a released record is admitted again, an admitted one passes", async t => {
   const s = await setup(t), first = await s.save(1);
   await s.index.reconcile();
   s.clock.now = T0 + SKEW; await s.index.refresh(first.operationId);
@@ -118,9 +118,18 @@ test("assertOwnClaimsAvailable, the families' shared approve-time guard: it re-t
   const elsewhere = await s.save(3, { account: "0x1a642f0e3c3af545e7acbd38b07251b3990914f1", deadline: T0 + SKEW + 300_000 });
   await s.index.reconcile();
   s.clock.now = T0;
+  // The released record is refused while the second holds the account, and stays released: every later attempt is checked.
   await assert.rejects(s.index.assertOwnClaimsAvailable(first.operationId), blockedBy(second.operationId));
-  assert.equal(await s.entry(first.operationId), "active");
-  await assert.rejects(s.index.assertOwnClaimsAvailable(second.operationId), blockedBy(first.operationId));
+  assert.equal(await s.entry(first.operationId), "terminal");
+  await assert.rejects(s.index.assertOwnClaimsAvailable(first.operationId), blockedBy(second.operationId));
+  // The second has held its claims since its admission: it is the operation the account was admitted for.
+  await s.index.assertOwnClaimsAvailable(second.operationId);
   await s.index.assertOwnClaimsAvailable(elsewhere.operationId);
   await assert.rejects(s.index.assertOwnClaimsAvailable(id(99)), (error: unknown) => (error as { code?: string }).code === "APN_OPERATION_NOT_FOUND");
+  // Once the account is free, the released record is admitted again and holds it: another admission now meets it.
+  await s.save(2, { state: "finalized", deadline: T0 + SKEW + 300_000 });
+  await s.index.refresh(second.operationId);
+  await s.index.assertOwnClaimsAvailable(first.operationId);
+  assert.equal(await s.entry(first.operationId), "active");
+  await assert.rejects(s.index.assertAvailable({ family: null, profileHash: P1, claims: ACCOUNT }), blockedBy(first.operationId));
 });

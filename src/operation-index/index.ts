@@ -208,21 +208,33 @@ export class OperationIndex {
 
   /**
    * The approve-time account guard of one saved operation, right before its own approve or execute starts the effect
-   * (its start marker or first signature): its entry holds its claims again if the clock released it (`reclaim`), then
-   * any other unresolved operation holding one of the accounts its record names refuses it, as an admission would.
-   * Its profile claim is held, never wanted, as at admission; `tag` is the family's own coexistence rule.
+   * (its start marker or first signature). An entry that has held its claims since its admission is the operation the
+   * account was admitted for: nothing more is proven, as before this guard (two journals an older release wrote without
+   * admission keep their family's own owner lock and nonce check). An entry the index wrote terminal while its record is
+   * open by its family's rule now (a never-started record let go by the wall clock, read again after the clock went
+   * back) is admitted again as a new operation is: refused while another unresolved operation holds one of the accounts
+   * its record names, else its claims are written under the index lock. A refused one stays released, so every later
+   * attempt is checked again; its profile claim is held, never wanted, and `tag` is the family's own coexistence rule.
    */
   async assertOwnClaimsAvailable(operationId: string, tag?: WantedTag): Promise<void> {
-    await this.reclaim(operationId);
     await this.repairing(async () => {
       await this.reconciler.reconcile();
       const entry = await this.store.entry(operationId), adapter = entry === null ? undefined : this.adapter(entry);
       const record = entry === null || adapter === undefined ? null : await adapter.load(this.root, entry.recordPath);
       if (entry === null || adapter === undefined || record === null) throw new ApnError("APN_OPERATION_NOT_FOUND", "Operation was not found.");
+      if (entry.state !== "terminal") return;
+      const name = nameOf(entry), derived = name === null ? null : await this.reconciler.fromRecord(adapter, name, record);
+      // Terminal by its family's rule now as well: its own approve refuses by that rule, and nothing is claimed.
+      if (derived?.state !== "active") return;
       const held = adapter.claims(record);
       if (held === null) throw new ApnError("APN_STATE_CORRUPT", "The operation's accounts cannot be read.", { operationId });
-      await this.check({ family: null, profileHash: entry.profileHash, claims: held.filter(claim => !claim.key.startsWith("profile:")),
-        except: operationId, ...(tag === undefined ? {} : { tag }) });
+      await this.claimUnderLock({ family: null, profileHash: entry.profileHash, claims: held.filter(claim => !claim.key.startsWith("profile:")),
+        except: operationId, ...(tag === undefined ? {} : { tag }) }, async () => {
+        if (canonicalJson(await this.store.entry(operationId)) !== canonicalJson(entry)) {
+          throw new ApnError("APN_STATE_BUSY", "The operation index changed concurrently; retry the operation.");
+        }
+        await this.reconciler.write(derived, true);
+      });
     });
   }
 

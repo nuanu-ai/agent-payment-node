@@ -223,20 +223,22 @@ test("owner abandon refuses a sent payment whose transaction has a receipt: obse
  * same account. Then the clock goes back inside the first payment's deadline. Approve is the hard guard: it re-takes
  * the payment's own claim before signing, so at most one of the two can sign, whichever is approved first.
  */
-async function clockRollbackPair(t: test.TestContext) {
+async function clockRollbackPair(t: test.TestContext, secondPrepared: "ahead" | "after_rollback") {
   const { f } = await setup(t);
   t.mock.method(Date, "now", () => f.now().getTime());
   // A daily cap for both payments: only the account guard decides here.
   await f.activate({ tokenDailyCap: (2n * BigInt(MERCHANT_AMOUNT)).toString() });
   const first = await prepare(f), index = new OperationIndex(f.state), entry = async (id: string) => (await index.find(id))?.state;
-  const SKEW = 16 * 60_000;
+  const SKEW = 16 * 60_000, prepareSecond = async () => await f.service.prepare({ profile: PROFILE, url: MERCHANT_URL,
+    maximumNativeFee: "100000000000000", nativeFeeReserveWei: HELD[1]!, idempotencyKey: "merchant-exits-0002" });
   f.advance(SKEW);
   assert.equal(data(await merchant(f, "status", "--operation", first.operationId)).state, "prepared");
   assert.equal(await entry(first.operationId), "terminal", "an expired never-started payment frees its account without observe or abandon");
-  const second = await f.service.prepare({ profile: PROFILE, url: MERCHANT_URL, maximumNativeFee: "100000000000000",
-    nativeFeeReserveWei: HELD[1]!, idempotencyKey: "merchant-exits-0002" });
-  assert.equal(second.state, "prepared");
+  const ahead = secondPrepared === "ahead" ? await prepareSecond() : undefined;
   f.advance(-SKEW);
+  // The index never revisits the released entry: once the clock is back the second payment is still admitted beside it.
+  const second = ahead ?? await prepareSecond();
+  assert.equal(second.state, "prepared");
   return { f, first, second, entry };
 }
 const blockedBy = (operationId: string) => (error: unknown) => {
@@ -245,7 +247,7 @@ const blockedBy = (operationId: string) => (error: unknown) => {
 };
 
 test("clock rollback, the released payment approved first: it re-takes its account and is refused, and then refuses the other; none signs", async t => {
-  const { f, first, second, entry } = await clockRollbackPair(t);
+  const { f, first, second, entry } = await clockRollbackPair(t, "ahead");
   await assert.rejects(f.service.approve(first.operationId), blockedBy(second.operationId));
   assert.equal(await entry(first.operationId), "active", "approve re-took the payment's own claim");
   await assert.rejects(f.service.approve(second.operationId), blockedBy(first.operationId));
@@ -253,7 +255,9 @@ test("clock rollback, the released payment approved first: it re-takes its accou
 });
 
 test("clock rollback, the other payment approved first: it signs once, and the released payment is then refused by it", async t => {
-  const { f, first, second, entry } = await clockRollbackPair(t);
+  // Prepared once the clock is back: a payment prepared while it ran ahead can never be approved after it went back (its
+  // approval event would predate its own creation, which the journal refuses as merchant_event_chain).
+  const { f, first, second, entry } = await clockRollbackPair(t, "after_rollback");
   f.rpc.lost = true;
   const sent = await f.service.approve(second.operationId);
   assert.deepEqual([sent.state, sent.submissionAttempts, f.signs(), f.rpc.sends], ["unknown_finality", 1, 1, 1]);

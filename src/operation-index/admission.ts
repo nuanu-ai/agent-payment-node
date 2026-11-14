@@ -21,8 +21,9 @@ export async function assertClaimsAvailable(state: SecureStateStore, profileHash
 /**
  * The approve-time account guard of a saved operation outside the OperationService facade, called right before its own
  * approve or execute starts the effect (QA F03): an entry the index let go by the wall clock (a never-started record
- * past its deadline plus the unstarted margin) holds its claims again if the clock went back, and any other unresolved
- * operation on its accounts refuses it with APN_OPERATION_BLOCKED. Nothing is written to the family's record.
+ * past its deadline plus the unstarted margin) while its record is open again by its family's rule (the clock went back)
+ * is admitted again, refused with APN_OPERATION_BLOCKED while another unresolved operation holds one of its accounts.
+ * An entry that held its claims since its admission passes. Nothing is written to the family's record.
  */
 export async function assertOwnClaimsAvailable(state: SecureStateStore, operationId: string, tag?: WantedTag): Promise<void> {
   await new OperationIndex(state).assertOwnClaimsAvailable(operationId, tag);
