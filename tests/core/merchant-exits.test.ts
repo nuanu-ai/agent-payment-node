@@ -12,6 +12,7 @@ import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
+import { merchantAdapter } from "../../src/operation-index/adapters/merchant.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
 import { MerchantClaims } from "../../src/x402-merchant/claims.js";
 import { merchantMove, type MerchantOperation } from "../../src/x402-merchant/model.js";
@@ -213,4 +214,57 @@ test("owner abandon refuses a sent payment whose transaction has a receipt: obse
   assert.equal(refused.error?.details?.reason, "merchant_abandon_receipt_exists");
   assert.equal(approval.calls.length, 0);
   assert.notEqual(data(await merchant(f, "observe", "--operation", o.operationId)).receipt, null);
+});
+
+/**
+ * QA F03: the machine clock (the operation index reads `Date.now`, the merchant lane its clock port; both follow the
+ * fixture clock here) runs 16 minutes ahead, the payment is read, and the clock goes back. The payment approve could
+ * still sign (prepared, holds reserved by an approval that crashed before signing) keeps its account guard throughout;
+ * only observe's durable `failed_before_effect` releases it, and a clock going back after that changes nothing.
+ */
+test("a clock that runs past a prepared payment's deadline and back never releases its account guard; observe's recorded exit does", async t => {
+  const { f } = await setup(t), persist = MerchantRepository.prototype.persist;
+  t.mock.method(Date, "now", () => f.now().getTime());
+  const o = await prepare(f), index = new OperationIndex(f.state), entryState = async () => (await index.find(o.operationId))?.state;
+  const crash = t.mock.method(MerchantRepository.prototype, "persist", async function (this: MerchantRepository, op: MerchantOperation) {
+    if (op.state === "signing_started") throw new Error("synthetic crash"); return await persist.call(this, op);
+  });
+  await assert.rejects(f.service.approve(o.operationId)); crash.mock.restore();
+  assert.deepEqual(await usage(f, o), HELD);
+  const second = () => f.service.prepare({ profile: PROFILE, url: MERCHANT_URL, maximumNativeFee: "100000000000000", nativeFeeReserveWei: HELD[1]!,
+    idempotencyKey: "merchant-exits-0002" });
+  const SKEW = 16 * 60_000;
+  f.advance(SKEW);
+  assert.deepEqual([data(await merchant(f, "status", "--operation", o.operationId)).state, (await entryState())], ["prepared", "active"]);
+  const generic = await runCli(["operation", "status", "--operation", o.operationId], {}, options(f) as never);
+  assert.equal(generic.ok, true, JSON.stringify(generic.error));
+  assert.equal(await entryState(), "active", "no read lets the guard go by the clock");
+  f.advance(-SKEW);
+  await assert.rejects(second(), (error: unknown) => (error as { code?: string; details?: Record<string, unknown> }).code === "APN_OPERATION_BLOCKED" &&
+    (error as { details: Record<string, unknown> }).details.blockingOperationId === o.operationId &&
+    (error as { details: Record<string, unknown> }).details.blockingState === "prepared");
+  // Past the deadline, observe records the exit; a clock going back afterwards cannot reopen approve.
+  f.advance(300_001);
+  assert.deepEqual(data(await merchant(f, "observe", "--operation", o.operationId)).exit, { reason: "never_signed" });
+  assert.deepEqual([await usage(f, o), await entryState()], [FREE, "terminal"]);
+  f.advance(-300_001);
+  await assert.rejects(f.service.approve(o.operationId), (error: unknown) =>
+    (error as { details?: Record<string, unknown> }).details?.reason === "merchant_once_only_approval");
+  assert.equal((await second()).state, "prepared");
+  assert.deepEqual([f.signs(), f.rpc.sends], [0, 0]);
+});
+
+test("approve first re-derives an index entry an earlier release let go by the clock: the payment holds its account before anything is signed", async t => {
+  const { f } = await setup(t), o = await prepare(f), index = new OperationIndex(f.state);
+  // What 0.5.106 wrote once its clock ran 10 minutes past the deadline: a terminal entry for a payment still prepared.
+  const released = t.mock.method(merchantAdapter, "terminal", () => true);
+  await index.refresh(o.operationId); released.mock.restore();
+  assert.equal((await index.find(o.operationId))?.state, "terminal");
+  const other = await f.service.prepare({ profile: PROFILE, url: MERCHANT_URL, maximumNativeFee: "100000000000000", nativeFeeReserveWei: HELD[1]!,
+    idempotencyKey: "merchant-exits-0003" });
+  await assert.rejects(f.service.approve(o.operationId), (error: unknown) =>
+    (error as { code?: string; details?: Record<string, unknown> }).code === "APN_OPERATION_BLOCKED" &&
+    (error as { details: Record<string, unknown> }).details.blockingOperationId === other.operationId);
+  assert.equal((await index.find(o.operationId))?.state, "active");
+  assert.deepEqual([f.signs(), f.rpc.sends, await usage(f, o)], [0, 0, FREE]);
 });

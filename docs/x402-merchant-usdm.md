@@ -196,6 +196,15 @@ Every attempt without a receipt has an exit that never signs, sends or delivers.
 - **`abandoned_unknown`**: when no proof decides, `apn operation abandon --operation <id>` after the deadline asks for
   TTY consent and ends the attempt, with both holds still charged.
 
+**Account guard.** Every non-terminal payment, `prepared` included, holds the payer's MegaETH account until one of these
+exits (or an outcome) is recorded in its operation. The clock alone never releases it: no status, observe or other read
+lets the guard go because the deadline has passed, and a clock that runs ahead and then goes back cannot leave a
+payment that approve can still sign without its guard. A `prepared` payment past its deadline is closed by
+`apn x402 merchant observe --operation <id>` (or `apn operation abandon --operation <id>`), which records
+`failed_before_effect`; approve never leaves that state. Through 0.5.106 the operation index let a `prepared` payment go
+by the clock alone, 10 minutes after its deadline. Approve now first re-derives its own index entry from the operation,
+so a payment such an entry let go holds its account again before anything is signed.
+
 ### `retire-unsent`
 
 An expired attempt that kept its independent signing claim but has no send claim, sealed material or transaction hash

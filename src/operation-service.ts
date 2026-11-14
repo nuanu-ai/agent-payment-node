@@ -257,6 +257,9 @@ export class OperationService {
     validateMerchant(record);
     const saved = await new MerchantRepository(this.state.root).findOperation(record.operationId);
     if (saved === null || saved.integrityHash !== record.integrityHash) throw new ApnError("APN_OPERATION_BLOCKED", "Merchant conflict exclusion requires the exact saved operation.");
+    // The payment being approved holds its own account claim first. Through 0.5.106 the index let a `prepared` payment
+    // go by the wall clock alone; such an entry is re-derived from this unresolved record and holds the account again.
+    await this.index.settle(record.operationId);
     await this.assertConflictDomainsAvailable(record.profileHash, () => [evmConflictDomain(4326, record.custody.walletAddress)], record.operationId);
   }
 

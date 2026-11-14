@@ -187,10 +187,12 @@ test("a family holds its account while it can still sign or land, and lets go on
   assert.equal(terminal(metaMaskNativeAdapter, { state: "prepared", effectAttempts: 0, context: context(PAST) }), true);
   assert.equal(terminal(metaMaskNativeAdapter, { state: "effect_started", effectAttempts: 1, context: context(PAST) }), false);
   assert.equal(terminal(metaMaskNativeAdapter, { state: "abandoned_unknown", effectAttempts: 1, context: context(RECENT) }), true);
-  // A merchant payment approve never signed (prepared, never approved) cannot sign past its local deadline.
-  assert.equal(terminal(merchantAdapter, { state: "prepared", expiresAt: PAST }), true);
-  assert.equal(terminal(merchantAdapter, { state: "prepared", expiresAt: RECENT }), false, "inside the margin");
+  // A merchant payment lets go only by a recorded outcome: approve signs a prepared payment while the machine's clock reads
+  // inside its deadline, so a deadline passed by the clock alone never ends it (observe records failed_before_effect).
+  assert.equal(terminal(merchantAdapter, { state: "prepared", expiresAt: PAST }), false, "the clock may go back");
+  assert.equal(terminal(merchantAdapter, { state: "prepared", expiresAt: RECENT }), false);
   assert.equal(terminal(merchantAdapter, { state: "signing_started", expiresAt: PAST }), false, "signed bytes may exist");
+  assert.equal(terminal(merchantAdapter, { state: "failed_before_effect", expiresAt: PAST }), true);
 });
 
 test("observe ends a Permit2 authorization never exposed once its deadline passed, frees its hold and its claims", async (t) => {
