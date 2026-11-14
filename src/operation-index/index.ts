@@ -225,9 +225,12 @@ export class OperationIndex {
     if (record === null) return;
     const derived = await this.reconciler.fromRecord(adapter, name, record);
     if (derived?.state !== "active") return;
-    await this.claimUnderLock({ ...wanted, except: operationId }, async () => {
+    // Everything the entry will hold is checked, not only what the caller names (a provider operation's wallet, a Circle
+    // route's other account): a refusal then writes nothing, and nothing it would hold collides once it is written.
+    const claims = normalizeClaims([...wanted.claims, ...derived.claims.filter(claim => !claim.key.startsWith("profile:"))]);
+    await this.claimUnderLock({ ...wanted, claims, except: operationId }, async () => {
       const current = await this.store.entry(operationId);
-      // The check's own collection may have re-derived a released quarantine meanwhile: it already holds its claims.
+      // A collection may have reopened it meanwhile, under the same collision check (reopenIfFree): it holds its claims.
       if (current?.state === "active") return;
       if (canonicalJson(current) !== canonicalJson(entry)) {
         throw new ApnError("APN_STATE_BUSY", "The operation index changed concurrently; retry the operation.");
@@ -376,6 +379,12 @@ export class OperationIndex {
     }
     const derived = await this.reconciler.fromRecord(adapter!, name!, record);
     if (derived === null) return null;
+    // A released entry (owner-released quarantine, or a clock-released one met through settle) whose record is open again
+    // holds nothing until it is admitted again: never by a read, a refresh or another admission's collection alone.
+    if ((entry.state === "released" || entry.state === "terminal") && derived.state === "active") {
+      await this.reopenIfFree(entry, derived);
+      return null;
+    }
     const next = entry.state === "admitted" && derived.state === "active" ? entryOf({ ...derived, claims: [...derived.claims, ...entry.claims] }) : derived;
     if (entry.state !== "active" || derived.state !== "active") await this.reconciler.write(next, true);
     if (wanted === null || derived.state === "terminal") return null;
@@ -384,6 +393,23 @@ export class OperationIndex {
     const blocking = colliding.filter(claim => adapter!.admits?.(record, wanted, claim) !== true);
     if (blocking.length > 0) return blockedBy(entry, adapter!.state(record), blocking);
     return colliding.length === 0 ? null : { operationId: entry.operationId, family: entry.family, state: adapter!.state(record), record };
+  }
+
+  /**
+   * A read, a refresh or another admission's collection that finds a released entry whose record is open again reopens it
+   * only as an admission would: under the index lock, when no other open entry holds a claim colliding with what it
+   * would hold (its own quarantines and every family's included). Otherwise it stays released and holds nothing, until
+   * its own guard admits it again (readmitReleased) or a later collection finds the account free.
+   */
+  private async reopenIfFree(entry: OperationIndexEntry, derived: OperationIndexEntry): Promise<void> {
+    const wanted = this.wantedClaims({ family: null, profileHash: derived.profileHash,
+      claims: derived.claims.filter(claim => !claim.key.startsWith("profile:")) });
+    await this.store.ensureLockDirectory();
+    await this.state.withLocks([OPERATION_INDEX_LOCK], async () => {
+      if (canonicalJson(await this.store.entry(entry.operationId)) !== canonicalJson(entry)) return;
+      const held = (await this.openEntries()).some(other => other.operationId !== entry.operationId && collidingClaims(other.claims, wanted).length > 0);
+      if (!held) await this.reconciler.write(derived, true);
+    });
   }
 
   /** After `work`: the admitted entry becomes the entry its record yields, keeping the admitted claims while unresolved. */

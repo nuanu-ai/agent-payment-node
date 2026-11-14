@@ -21,7 +21,9 @@ import { temporaryState } from "./helpers.js";
  * deadline plus the unstarted margin.
  */
 interface TestRecord { readonly schemaVersion: "test.v1"; readonly operationId: string; readonly profileHash: string; readonly idempotencyHash: string;
-  readonly requestHash: string; readonly state: "prepared" | "finalized"; readonly deadline: number; readonly account: string }
+  readonly requestHash: string; readonly state: "prepared" | "finalized"; readonly deadline: number; readonly account: string;
+  /** A second account the record also holds (as a provider operation's wallet or a Circle route's destination). */
+  readonly second?: string }
 class Reader extends SecureStateStore { async read(path: string) { return await this.readJson(path); } }
 const P1 = "1".repeat(64), A = "0x0b4dd0c3da001fa146eed3f80b01860bef6b8a14", T0 = Date.parse("2026-11-15T10:00:00.000Z");
 const id = (n: number) => n.toString(16).padStart(64, "0");
@@ -35,7 +37,8 @@ async function setup(t: test.TestContext) {
     family: "swap", stores: [{ directory: "test-reclaim", perProfile: true }],
     load: async (root, recordPath) => await new Reader(root).read(recordPath) as TestRecord | null,
     identity: standardIdentity,
-    claims: record => readableClaims(() => domainClaims([evmConflictDomain(8453, record.account)])),
+    claims: record => readableClaims(() => domainClaims([evmConflictDomain(8453, record.account),
+      ...(record.second === undefined ? [] : [evmConflictDomain(8453, record.second)])])),
     // The families' own rule: an unstarted record stops holding its account once its deadline plus the margin has passed.
     terminal: record => record.state === "finalized" || record.state === "prepared" && pastUnstartedDeadline(record.deadline, clock.now),
     state: record => record.state,
@@ -156,4 +159,46 @@ test("an owner-released quarantine whose record reads again is admitted again by
   await s.index.assertOwnClaimsAvailable(first.operationId);
   assert.equal(await s.entry(first.operationId), "active");
   await assert.rejects(s.index.assertAvailable({ family: null, profileHash: P1, claims: ACCOUNT }), blockedBy(first.operationId));
+});
+
+const B2 = "0x1a642f0e3c3af545e7acbd38b07251b3990914f1";
+
+test("a released quarantine refused by its guard stays released through the command's refresh and another admission's collection", async t => {
+  const s = await setup(t), first = await s.save(1), path = join(s.root, "test-reclaim", P1, `${first.operationId}.json`);
+  await writeFile(path, "not json\n", { mode: 0o600 });
+  await s.index.reconcile();
+  await s.index.releaseByOwner(first.operationId, { approve: async () => undefined });
+  const other = await s.save(2);
+  await s.index.reconcile();
+  // A widened reader reads it again; its own guard refuses while the other holds the account.
+  await s.save(1);
+  await assert.rejects(s.index.assertOwnClaimsAvailable(first.operationId), blockedBy(other.operationId));
+  // The same command's `finally` refresh never reopens it beside the holder.
+  await s.index.refresh(first.operationId);
+  assert.equal(await s.entry(first.operationId), "released");
+  // Nor does the collection inside another admission's check (it inspects both open entries here).
+  await s.index.assertAvailable({ family: null, profileHash: P1, claims: [{ key: conflictDomainKey(evmConflictDomain(1, B2)) }] });
+  assert.equal(await s.entry(first.operationId), "released");
+  // So a second attempt is checked again and refused.
+  await assert.rejects(s.index.assertOwnClaimsAvailable(first.operationId), blockedBy(other.operationId));
+  // Once the holder ends, a refresh finds the account free and reopens it with its claims.
+  await s.save(2, { state: "finalized" }); await s.index.refresh(other.operationId);
+  await s.index.refresh(first.operationId);
+  assert.equal(await s.entry(first.operationId), "active");
+  await assert.rejects(s.index.assertAvailable({ family: null, profileHash: P1, claims: ACCOUNT }), blockedBy(first.operationId));
+});
+
+test("the except path checks everything the re-admitted entry would hold, not only the accounts its caller names", async t => {
+  const s = await setup(t), first = await s.save(1, { second: B2 });
+  await s.index.reconcile();
+  s.clock.now = T0 + SKEW; await s.index.refresh(first.operationId);
+  const holder = await s.save(2, { account: B2, deadline: T0 + SKEW + 300_000 });
+  await s.index.reconcile();
+  s.clock.now = T0;
+  // The caller names only the first account (as a provider check names only its provider claims); the record also holds
+  // B2, which the other operation holds: refused, writing nothing.
+  await assert.rejects(s.approveCheck(first.operationId), blockedBy(holder.operationId));
+  assert.equal(await s.entry(first.operationId), "terminal");
+  // The holder is never blocked by it.
+  await s.index.assertAvailable({ family: null, profileHash: P1, claims: [{ key: conflictDomainKey(evmConflictDomain(8453, B2)) }], except: holder.operationId });
 });

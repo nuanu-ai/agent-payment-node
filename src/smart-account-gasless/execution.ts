@@ -85,6 +85,9 @@ export class SmartAccountGaslessExecution {
       } else {
         await this.guard(op, true);
         assertSmartAccountGaslessCapacity(op);
+        // Before custody signs the child delegation (its durable 0 -> 1 marker), after the first guard's reads: admitted
+        // again as before exposure below, so a refusal leaves nothing signed (QA F03).
+        try { await assertOwnClaimsAvailable(this.state, op.operationId); } catch (error) { accountRefusal = error; throw error; }
         await persist({ state: "material_pending", signingAttempts: 1 }, new Date(this.clock.signing(op)).toISOString());
         this.clock.signing(op);
         // Only this invocation made the durable 0 -> 1 marker. No restart enters this branch.
