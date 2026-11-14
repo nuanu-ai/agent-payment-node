@@ -224,6 +224,9 @@ tokens, seed phrases or private keys.
 - **MetaMask Agent Wallet** (`@metamask/agent-wallet@6.1.5`, Guard server wallet): direct transfers and x402 use the same
   operation contract; Guard MFA returns `provider_pending` and `operation resume --wait-seconds` watches only that request.
   `operation recover-provider-request` binds an independently known request to an ambiguous transfer without replaying it.
+  A watch that `mm` answers with `REQUEST_NOT_FOUND` records where it missed the request, never an outcome:
+  `metamask_request_not_in_local_state` (its local request list, emptied by a new `mm login`),
+  `metamask_request_not_found_on_server`, or `provider_request_not_found`.
 - **MetaMask Smart Account**: APN keeps one encrypted session account and the ERC-7715 grant; each transfer derives one
   exact child delegation after foreground approval. `wallet permission list|sync|disable|forget` manage the binding.
   `sync`, `disable` and `forget` take `--expected-revision`, the `revision` that `wallet permission list` shows; a stale

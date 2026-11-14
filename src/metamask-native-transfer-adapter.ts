@@ -7,7 +7,7 @@ import type { Hex } from "./model.js";
 import { NodeMetaMaskProcessRunner, takeMetaMaskNativeProcessFailureIdentifiers, takeMetaMaskNativeProcessFailureDiagnostic, type MetaMaskProcessResult } from "./metamask-process-runner.js";
 import { metaMaskCommand } from "./metamask-command.js";
 import { resolveMetaMaskBin } from "./metamask-package.js";
-import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice, type MetaMaskMfaNotice } from "./metamask-process-output.js";
+import { parseMetaMaskProcessOutput, classifyMetaMaskPendingNotices, metaMaskMfaNotice, metaMaskWatchMissReason, type MetaMaskMfaNotice } from "./metamask-process-output.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
 import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote, type MetaMaskNativeFeeChainId } from "./metamask-native-fee-evidence.js";
 import { claimMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedScope, assertMetaMaskNativeOwnedContextCurrent,
@@ -309,7 +309,8 @@ export async function readMetaMaskNativeRequest(requestId: string, vendorProject
 function requestHint(result: MetaMaskProcessResult, requestId: string, observation: MutableReadObservation): RequestHint {
   const parsed = parseMetaMaskProcessOutput(result.stdout);
   const unknown = (reason: string): MetaMaskNativeRequestObservation => ({disposition: "unknown", reason, requestId});
-  if (parsed === null) return unknown("provider_response_malformed");
+  // Nothing on stdout because the watch answered REQUEST_NOT_FOUND on stderr: where mm missed it, never what it did.
+  if (parsed === null) return unknown(metaMaskWatchMissReason(result) ?? "provider_response_malformed");
   const notice = classifyMetaMaskPendingNotices(parsed.notices, requestId);
   if (notice.disposition === "invalid") return unknown("provider_request_identity_conflict");
   const data = parsed.envelope?.data, mfa = (): MetaMaskNativeMfaEvidence => ({...(notice.disposition === "pending" ? metaMaskMfaNotice(parsed.notices)
