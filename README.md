@@ -224,6 +224,17 @@ tokens, seed phrases or private keys.
 - **MetaMask Agent Wallet** (`@metamask/agent-wallet@6.1.5`, Guard server wallet): direct transfers and x402 use the same
   operation contract; Guard MFA returns `provider_pending` and `operation resume --wait-seconds` watches only that request.
   `operation recover-provider-request` binds an independently known request to an ambiguous transfer without replaying it.
+  The request ID of a direct transfer is sealed under the login-Keychain wrapping secret in
+  `provider-direct-request-references/<profile-hash>/<operation-id>.json`, and the operation record keeps only its hash
+  (provider effect reference `apn.provider-effect-reference.v2`, `recoveryTokenHash`); output shows that hash as
+  `provider_request_reference_hash`, as before. Approve reads the wrapping secret before the hand-off, so a secret
+  missing over sealed state or a refusing Keychain leaves the transfer `awaiting_approval` with nothing sent. Resume
+  opens the sealed ID before it watches the request; an ID that cannot be opened refuses that resume precisely
+  (`APN_STATE_CORRUPT` with `provider_request_reference_unmatched` or `wrapping_secret_missing`, or
+  `APN_NATIVE_REJECTED`) and changes nothing.
+  Records written by 0.5.106 and earlier keep their plaintext reference (`v1`) and are never migrated; 0.5.106 and
+  earlier cannot read a `v2` reference, so do not downgrade once one exists. A delegated Smart Account send keeps its
+  `v1` reference: its ID is the APN operation ID.
   A watch that `mm` answers with `REQUEST_NOT_FOUND` records where it missed the request, never an outcome:
   `metamask_request_not_in_local_state` (its local request list, emptied by a new `mm login`),
   `metamask_request_not_found_on_server`, or `provider_request_not_found`.
@@ -534,10 +545,11 @@ profile's locks, so another command for the same profile waits its five seconds 
 
 APN creates a wrapping secret only for a state root that holds nothing encrypted. While the secret is missing and any
 record sealed under it exists (a wallet envelope, a Solana or TRON key, a smart-account permission, a profile policy,
-saved signed material or a MetaMask gasless request reference), a command that would create one (`wallet ensure` or
-`wallet import` for any profile, `wallet ensure-solana`, `wallet ensure-tron`, a first `wallet policy set`, or the first
-sealed record of a provider payment, such as a MetaMask gasless prepare) fails with the same reason and restore step
-instead of minting a secret that would orphan those records and collide with the restored item.
+saved signed material or a MetaMask gasless, native or direct request reference), a command that would create one
+(`wallet ensure` or `wallet import` for any profile, `wallet ensure-solana`, `wallet ensure-tron`, a first
+`wallet policy set`, or the first sealed record of a provider payment, such as a MetaMask gasless prepare, a MetaMask
+native transfer or a MetaMask direct transfer approve) fails with the same reason and restore step instead of minting a
+secret that would orphan those records and collide with the restored item.
 
 `apn doctor keychain` reports the same two failures and also decrypts the wallet, so a secret that exists but does not
 unwrap it fails with `APN_STATE_CORRUPT` without that reason. Its successful answers carry `wrapping_secret: "present"`;

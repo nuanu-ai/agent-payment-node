@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import test from "node:test";
 import { ApnCore } from "../../src/core.js";
 import { BASE_USDC, TRANSFER_TOPIC } from "../../src/constants.js";
+import { ApnError } from "../../src/errors.js";
 import { MetaMaskDirectAdapter } from "../../src/metamask-direct-adapter.js";
 import {
   METAMASK_AGENT_WALLET_PROVIDER_ID,
@@ -11,10 +14,13 @@ import type { MetaMaskProcessResult, MetaMaskProcessRunnerPort } from "../../src
 import type { Address, Hex } from "../../src/model.js";
 import type { ForegroundAuthenticationPort } from "../../src/provider-ports.js";
 import { ProviderRegistry } from "../../src/provider-registry.js";
+import { providerDirectReceipt } from "../../src/provider-direct-receipt.js";
+import { EncryptedProviderRequestReferenceStore, providerRequestReferenceHash } from "../../src/provider-request-reference-store.js";
 import { StateProfileRepository } from "../../src/profile-repository.js";
-import { StateStore } from "../../src/state.js";
+import { appendTransition, sealOperation, StateStore } from "../../src/state.js";
 import type { TransferApprovalIntent, TransferApprovalPort } from "../../src/tty-approval.js";
 import { TestClock, TestRpc, temporaryState } from "./helpers.js";
+import { ReferenceTestSecret, flipped, rewrite, stateFiles } from "./provider-request-reference-helpers.js";
 
 const SENDER = "0x1111111111111111111111111111111111111111" as Address;
 const RECIPIENT = "0x2222222222222222222222222222222222222222" as Address;
@@ -22,6 +28,8 @@ const TX_HASH = `0x${"e".repeat(64)}` as Hex;
 const TOKEN = "request-01234567";
 const PROFILE = "metamask-direct";
 const IDEMPOTENCY = "metamask-direct-001";
+/** What output and a sealing record show in place of the MetaMask request id (QA F26). */
+const TOKEN_HASH = providerRequestReferenceHash(METAMASK_AGENT_WALLET_PROVIDER_ID, TOKEN);
 
 class FixtureRunner implements MetaMaskProcessRunnerPort {
   readonly calls: Array<{ readonly argv: readonly string[]; readonly timeoutMs?: number }> = [];
@@ -207,11 +215,15 @@ test("provider direct operation survives restart, watches one request and comple
   assert.equal(approved.ok, true, JSON.stringify(approved));
   assert.equal((approved.operation as { state?: unknown }).state, "provider_pending");
   assert.equal(JSON.stringify(approved).includes(TOKEN), false, "public output must not expose provider recovery token");
+  assert.equal((approved.operation as { provider_request_reference_hash?: unknown }).provider_request_reference_hash, TOKEN_HASH);
   assert.equal(initialRunner.calls.filter((call) => call.argv[0] === "transfer").length, 1);
   assert.equal(approval.calls.length, 1);
 
+  // QA F26: the record keeps only the request id's hash; the id itself is sealed apart, and no state file names it.
   const durable = await new StateStore(temporary.root).findOperation(operationId);
-  assert.equal(durable?.providerEffect?.recoveryToken, TOKEN);
+  assert.deepEqual(durable?.providerEffect, { schemaVersion: "apn.provider-effect-reference.v2", kind: "transaction",
+    recoveryTokenHash: TOKEN_HASH, providerState: "AWAITING_MFA" });
+  for (const [path, text] of await stateFiles(temporary.root)) assert.equal(text.includes(TOKEN), false, `${path} keeps the request id in plaintext`);
   const restartedRunner = new FixtureRunner();
   const restartedRpc = new TestRpc();
   restartedRpc.receipt = exactReceipt();
@@ -222,6 +234,7 @@ test("provider direct operation survives restart, watches one request and comple
   assert.equal((resumed.operation as { transaction_hash?: unknown }).transaction_hash, TX_HASH);
   assert.equal(restartedRunner.calls.filter((call) => call.argv[0] === "transfer").length, 0);
   assert.equal(restartedRunner.calls.filter((call) => call.argv[2] === "watch").length, 1);
+  assert.equal(restartedRunner.calls.find((call) => call.argv[2] === "watch")?.argv[3], TOKEN, "resume watches the sealed id itself");
 
   const receipt = await restarted.execute({ command: "receipt.get", operationId });
   assert.equal((receipt.receipt as { exact_transfer_log?: unknown }).exact_transfer_log, true);
@@ -270,6 +283,9 @@ test("provider denial is terminal with a durable receipt; lost initial outcome s
   assert.equal(reference.ok, true, JSON.stringify(reference));
   assert.equal((reference.operation as { state?: unknown }).state, "provider_pending");
   assert.equal(JSON.stringify(reference).includes(TOKEN), false);
+  // The owner's recovered request id is sealed too: the record keeps its hash only.
+  assert.equal((await new StateStore(lostState.root).findOperation(lostId))?.providerEffect?.schemaVersion, "apn.provider-effect-reference.v2");
+  for (const [path, text] of await stateFiles(lostState.root)) assert.equal(text.includes(TOKEN), false, `${path} keeps the request id in plaintext`);
   const duplicate = await restartedCore.execute({
     command: "operation.recover-provider-request", operationId: lostId, providerRequestId: TOKEN,
   });
@@ -285,10 +301,116 @@ test("provider denial is terminal with a durable receipt; lost initial outcome s
   assert.equal(restartedRunner.calls.filter((call) => call.argv[0] === "transfer").length, 0);
 });
 
-function core(root: string, runner: FixtureRunner, rpc: TestRpc, approval: Approval): ApnCore {
+/** The pending MetaMask request of a direct transfer, approved once; the record keeps only its request id's hash. */
+async function pendingTransfer(root: string, wrapping: ReferenceTestSecret): Promise<string> {
+  const initial = core(root, new FixtureRunner(), new TestRpc(), new Approval(), wrapping);
+  await connect(initial);
+  const operationId = await prepare(initial, IDEMPOTENCY);
+  const approved = await initial.execute({ command: "transfer.approve", operationId });
+  assert.equal((approved.operation as { state?: unknown }).state, "provider_pending", JSON.stringify(approved));
+  return operationId;
+}
+const operationPath = (root: string, operationId: string) =>
+  join(root, "operations", new StateStore(root).profileHash(PROFILE), `${operationId}.json`);
+const sealedPath = (root: string, operationId: string) =>
+  join(root, "provider-direct-request-references", new StateStore(root).profileHash(PROFILE), `${operationId}.json`);
+
+test("a sealed request id that cannot be opened refuses resume precisely: nothing is watched and the record is unchanged", async (t) => {
+  const refused = (code: string, reason?: string) => (error: unknown) =>
+    (error as { code?: unknown } | undefined)?.code === code &&
+    (reason === undefined || (error as { details?: { reason?: unknown } } | undefined)?.details?.reason === reason);
+  const cases: ReadonlyArray<readonly [string, (root: string, operationId: string, wrapping: ReferenceTestSecret) => Promise<void>,
+    (error: unknown) => boolean]> = [
+    ["ciphertext changed", async (root, id) => { await rewrite(sealedPath(root, id), v => ({ ...v, cipher: { ...v.cipher, ciphertext: flipped(v.cipher.ciphertext) } })); },
+      refused("APN_STATE_CORRUPT", "provider_request_reference_unmatched")],
+    ["binding changed", async (root, id) => { await rewrite(sealedPath(root, id), v => ({ ...v, binding: { ...v.binding, operationId: "e".repeat(64) } })); },
+      refused("APN_STATE_CORRUPT", "provider_request_reference_unmatched")],
+    ["another wrapping secret", async (_root, _id, wrapping) => { wrapping.secret = Buffer.alloc(32, 9); },
+      refused("APN_STATE_CORRUPT", "provider_request_reference_unmatched")],
+    ["wrapping secret gone", async (_root, _id, wrapping) => { wrapping.secret = null; }, refused("APN_STATE_CORRUPT", "wrapping_secret_missing")],
+    ["Keychain refused", async (_root, _id, wrapping) => { wrapping.failure = new ApnError("APN_NATIVE_REJECTED", "The APN login-Keychain wrapping secret is unavailable."); },
+      refused("APN_NATIVE_REJECTED")],
+  ];
+  for (const [name, damage, expected] of cases) await t.test(name, async (sub) => {
+    const temporary = await temporaryState(); sub.after(temporary.cleanup);
+    const wrapping = new ReferenceTestSecret(), operationId = await pendingTransfer(temporary.root, wrapping);
+    const sealed = await readFile(sealedPath(temporary.root, operationId));
+    await damage(temporary.root, operationId, wrapping);
+    const before = await readFile(operationPath(temporary.root, operationId));
+    const runner = new FixtureRunner(), rpc = new TestRpc(); rpc.receipt = exactReceipt();
+    const resumed = await core(temporary.root, runner, rpc, new Approval(), wrapping).execute({ command: "operation.resume", operationId, waitSeconds: 1 });
+    assert.equal(resumed.ok, false, JSON.stringify(resumed));
+    assert.ok(expected(resumed.error), JSON.stringify(resumed.error));
+    assert.equal(runner.calls.filter((call) => call.argv[2] === "watch").length, 0, "no request is read without its own id");
+    assert.deepEqual(await readFile(operationPath(temporary.root, operationId)), before, "the operation never advances");
+    const status = await core(temporary.root, new FixtureRunner(), new TestRpc(), new Approval(), wrapping).execute({ command: "operation.status", operationId });
+    assert.equal((status.operation as { state?: unknown }).state, "provider_pending", "status never opens the seal");
+    // Once the seal and its secret are back, the same request is read and the transfer completes, never sent again.
+    await writeFile(sealedPath(temporary.root, operationId), sealed, { mode: 0o600 });
+    wrapping.secret = Buffer.alloc(32, 7); wrapping.failure = undefined;
+    const healed = await core(temporary.root, runner, rpc, new Approval(), wrapping).execute({ command: "operation.resume", operationId, waitSeconds: 1 });
+    assert.equal((healed.operation as { state?: unknown }).state, "completed", JSON.stringify(healed));
+    assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 0);
+  });
+});
+
+test("a Keychain that refuses before the hand-off leaves the transfer awaiting approval; nothing is sent", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const wrapping = new ReferenceTestSecret(), runner = new FixtureRunner(), approval = new Approval();
+  const first = core(temporary.root, runner, new TestRpc(), approval, wrapping);
+  await connect(first);
+  const operationId = await prepare(first, IDEMPOTENCY);
+  wrapping.failure = new ApnError("APN_NATIVE_REJECTED", "The APN login-Keychain wrapping secret is unavailable.");
+  const refusedApprove = await first.execute({ command: "transfer.approve", operationId });
+  assert.equal(refusedApprove.error?.code, "APN_NATIVE_REJECTED", JSON.stringify(refusedApprove));
+  assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 0, "nothing is handed to MetaMask");
+  assert.equal((await new StateStore(temporary.root).findOperation(operationId))?.state, "awaiting_approval");
+  wrapping.failure = undefined;
+  const approved = await core(temporary.root, runner, new TestRpc(), approval, wrapping).execute({ command: "transfer.approve", operationId });
+  assert.equal((approved.operation as { state?: unknown }).state, "provider_pending", JSON.stringify(approved));
+  assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 1, "one hand-off in all");
+  const again = await core(temporary.root, runner, new TestRpc(), approval, wrapping).execute({ command: "transfer.approve", operationId });
+  assert.equal((again.operation as { state?: unknown }).state, "provider_pending");
+  assert.equal(runner.calls.filter((call) => call.argv[0] === "transfer").length, 1, "restart once-only: an approved transfer is never sent again");
+});
+
+test("a reference 0.5.106 wrote keeps its plaintext id: it projects the same hash, resumes with that id and needs no wrapping secret", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const lostRunner = new FixtureRunner(); lostRunner.throwTransfer = true;
+  const lostCore = core(temporary.root, lostRunner, new TestRpc(), new Approval());
+  await connect(lostCore);
+  const operationId = await prepare(lostCore, "metamask-legacy-reference-001");
+  assert.equal(((await lostCore.execute({ command: "transfer.approve", operationId })).operation as { state?: unknown }).state, "ambiguous_effect");
+  // As `operation recover-provider-request` of 0.5.106 wrote it: the request id itself in the record.
+  const state = new StateStore(temporary.root), lost = (await state.findOperation(operationId))!;
+  const transition = { at: lost.transitions.at(-1)!.at, state: "provider_pending" as const, terminal: false,
+    reason: "provider_request_reference_recovered", proofClass: "provider_request_reference" };
+  const { integrityHash: _lost, ...base } = lost;
+  const legacy = sealOperation({ ...base, providerEffect: { schemaVersion: "apn.provider-effect-reference.v1", kind: "transaction",
+    recoveryToken: TOKEN, providerState: "RECOVERED" }, state: transition.state, terminal: transition.terminal, reason: transition.reason,
+    proofClass: transition.proofClass, transitions: appendTransition(lost.transitions, transition) });
+  await state.writeOperation(legacy);
+  await state.writeReceipt(legacy.profileHash, providerDirectReceipt(legacy));
+  const bytes = await readFile(operationPath(temporary.root, operationId));
+  const untouched = new ReferenceTestSecret(); untouched.failure = new Error("TEST the Keychain must not be read");
+  const status = await core(temporary.root, new FixtureRunner(), new TestRpc(), new Approval(), untouched).execute({ command: "operation.status", operationId });
+  assert.equal((status.operation as { provider_request_reference_hash?: unknown }).provider_request_reference_hash, TOKEN_HASH,
+    "an earlier release's reference projects the same hash a sealed one keeps");
+  assert.deepEqual(await readFile(operationPath(temporary.root, operationId)), bytes, "a read never rewrites an earlier release's record");
+  const runner = new FixtureRunner(), rpc = new TestRpc(); rpc.receipt = exactReceipt();
+  const resumed = await core(temporary.root, runner, rpc, new Approval(), untouched).execute({ command: "operation.resume", operationId, waitSeconds: 1 });
+  assert.equal((resumed.operation as { state?: unknown }).state, "completed", JSON.stringify(resumed));
+  assert.equal(runner.calls.find((call) => call.argv[2] === "watch")?.argv[3], TOKEN);
+  assert.equal(untouched.loads, 0, "an earlier release's reference needs no wrapping secret");
+  assert.deepEqual((await state.findOperation(operationId))?.providerEffect, legacy.providerEffect, "it is never migrated");
+});
+
+function core(root: string, runner: FixtureRunner, rpc: TestRpc, approval: Approval,
+  wrapping: ReferenceTestSecret = new ReferenceTestSecret()): ApnCore {
   const state = new StateStore(root, { lockWaitMs: 1_000 });
   return new ApnCore({
     state,
+    providerRequestReferences: new EncryptedProviderRequestReferenceStore(state, wrapping),
     profileRepository: new StateProfileRepository(state),
     providerRegistry: new ProviderRegistry([{
       provider_id: METAMASK_AGENT_WALLET_PROVIDER_ID,
