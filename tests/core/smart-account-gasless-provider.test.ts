@@ -73,7 +73,7 @@ test("verify sends the exact sealed request once and accepts only valid exact pa
     paymentRequirements: op.intent.requirements }));
   assert.equal(Object.hasOwn(verified, "invalidReason"), false);
   for (const response of [{ isValid: true }, { isValid: true, payer: op.intent.binding.ownerAddress, surprise: "secret-canary" },
-    { isValid: false, invalidReason: null }, { isValid: "false" }]) {
+    { isValid: false, invalidReason: 7 }, { isValid: "false" }]) {
     const rejected = new Transport({ status: 200, body: JSON.stringify(response) });
     await assert.rejects(new MetaMaskSmartAccountGaslessProvider(rejected).verify(op, sealed));
     assert.equal(rejected.calls.length, 1);
@@ -90,6 +90,12 @@ test("a refused verify answer is returned with only its closed reason token and 
     [{ isValid: false, payer: "", invalidReason: "free text with secret-canary" }, { isValid: false, payer: null, invalidReason: null }],
     [{ isValid: false, invalidReason: `redeemer_${"ab".repeat(20)}` }, { isValid: false, payer: null, invalidReason: null }],
     [{ isValid: false, invalidReason: "request_1234567890" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "f47ac10b-58cc-4372-a567-0e02b2c3d479" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "Req_AbC123xyz" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "tx-sentinel-base-mainnet.dev-api.cx.metamask.io" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "redeemer_deadbeefcafe" }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: null, invalidMessage: null }, { isValid: false, payer: null, invalidReason: null }],
+    [{ isValid: false, invalidReason: "INVALID_ERC7710_DELEGATION" }, { isValid: false, payer: null, invalidReason: "INVALID_ERC7710_DELEGATION" }],
     [{ isValid: true, payer: session.toUpperCase().replace("0X", "0x") }, { isValid: true, payer: session, invalidReason: null }],
   ];
   for (const [response, expected] of cases) {
@@ -118,6 +124,11 @@ test("supported stops before signing when the published facilitator set is not e
       (error: any) => error.code === "APN_PROVIDER_CAPABILITY_UNAVAILABLE" && error.details?.reason === "sa_gasless_facilitator_set");
     assert.equal(transport.calls.length, 1);
   }
+  const chainSigner = JSON.parse(body([...pinned], [...pinned]));
+  chainSigner.signers["eip155:8453"] = [extra];
+  const transport = new Transport({ status: 200, body: JSON.stringify(chainSigner) });
+  await assert.rejects(new MetaMaskSmartAccountGaslessProvider(transport).supported(),
+    (error: any) => error.details?.reason === "sa_gasless_facilitator_set");
 });
 
 test("settle sends the identical frozen request once and returns only a valid untrusted hint", async () => {

@@ -264,7 +264,8 @@ test("a refused verify answer is journaled with its closed reason, never settles
       : { is_valid: true, payer: f.binding.sessionAddress, invalid_reason: null,
         observed_at: unknown.provider_verify?.observed_at, response_hash: "5".repeat(64) });
     assert.equal(typeof unknown.provider_verify?.observed_at, "string");
-    assert.match(unknown.next_actions[0]!, /refused this transfer at verify/u);
+    assert.match(unknown.next_actions[0]!, kind === "invalid" ? /refused this transfer at verify \(invalidReason invalid_exact_evm_payload_redeemer\)/u
+      : /accepted this transfer at verify for another payer, so APN refused it/u);
     assert.equal(unknown.next_actions.at(-1), `apn operation resume --operation ${f.id}`);
     const saved = await f.records.findOperation(f.id);
     assert.equal(saved?.state, "unknown_finality"); assert.equal(saved?.observation?.phase, "pending");

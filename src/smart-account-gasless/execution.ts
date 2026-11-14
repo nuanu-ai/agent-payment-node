@@ -10,6 +10,7 @@ import { SmartAccountGaslessClock, smartAccountGaslessApprovalPhrase, smartAccou
 import type { SmartAccountGaslessApprovalPort, SmartAccountGaslessMaterialPort,
   SmartAccountGaslessProviderPort, SmartAccountGaslessRpcFactory, SmartAccountGaslessRpcPort } from "./ports.js";
 import { saClassify, saError, saFail, saFailure, type SmartAccountGaslessFailure, type SmartAccountGaslessReason } from "./reasons.js";
+import { saRegistry } from "./registry.js";
 import { saExact } from "./schema.js";
 import { advanceSmartAccountGaslessOperation, assertSmartAccountGaslessCapacity } from "./transitions.js";
 
@@ -68,6 +69,10 @@ export class SmartAccountGaslessExecution {
     };
     try {
       this.clock.check(op);
+      // A transfer prepared under another facilitator pin (0.5.105 and earlier) ends before its child is signed or disclosed.
+      if (!saSame(op.intent.requirements.extra.facilitatorAddresses, saRegistry(op.intent.request.chainId).facilitatorAddresses)) {
+        saFail("sa_gasless_facilitator_set");
+      }
       let sealed: SmartAccountGaslessSealedMaterial;
       if (op.signingAttempts === 1) {
         const recovered = await this.material.load(op); this.clock.check(op);

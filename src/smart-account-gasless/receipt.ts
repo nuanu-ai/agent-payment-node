@@ -44,14 +44,15 @@ export function publicSmartAccountGaslessOperation(operation: SmartAccountGasles
     // Only a record written after a refused verify carries these, so older records project exactly as before.
     ...(refused === null ? {} : { provider_verify: { is_valid: refused.isValid, payer: refused.payer,
       invalid_reason: refused.invalidReason, observed_at: refused.observedAt, response_hash: refused.responseHash } }),
-    next_actions: [...(refused === null || op.terminal ? [] : [refusedVerifyAction(op, refused.invalidReason)]),
+    next_actions: [...(refused === null || op.terminal ? [] : [refusedVerifyAction(op, refused.isValid, refused.invalidReason)]),
       op.state === "awaiting_approval" ? `apn gasless transfer approve --operation ${op.operationId}` :
       op.terminal ? `apn receipt get --operation ${op.operationId}` : `apn operation resume --operation ${op.operationId}`],
   };
 }
-function refusedVerifyAction(op: SmartAccountGaslessOperationRecord, reason: string | null): string {
-  return `The facilitator refused this transfer at verify (${reason === null ? "no closed invalidReason" : `invalidReason ${reason}`}); ` +
-    "APN did not ask it to settle. It still holds the signed delegation, which only its own addresses can redeem, " +
+function refusedVerifyAction(op: SmartAccountGaslessOperationRecord, isValid: boolean, reason: string | null): string {
+  const answer = isValid ? "The facilitator accepted this transfer at verify for another payer, so APN refused it" :
+    `The facilitator refused this transfer at verify (${reason === null ? "no closed invalidReason" : `invalidReason ${reason}`})`;
+  return `${answer}; APN did not ask it to settle. It still holds the signed delegation, which only its own addresses can redeem, ` +
     `until ${op.intent.expiresAt}. Once a finalized Base block is past that time, the resume below proves the outcome ` +
     "from the chain and frees the reserve.";
 }

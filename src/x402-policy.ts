@@ -88,6 +88,7 @@ export function selectPrepareOffer(
   let hasMatchingMethod = false;
   let hasSufficientBalance = false;
   let decimalsMismatch = false;
+  let facilitatorsUndeclared = false;
   for (const candidate of underCap) {
     if (candidate.assetTransferMethod === "permit2" || candidate.assetTransferMethod !== transferMethod) continue;
     hasMatchingMethod = true;
@@ -105,6 +106,12 @@ export function selectPrepareOffer(
     const declaredDecimals = (requirements.extra as Record<string, unknown> | undefined)?.decimals;
     if (evidence.tokenFacts !== undefined && declaredDecimals !== undefined && declaredDecimals !== evidence.tokenFacts.decimals) {
       decimalsMismatch = true;
+      continue;
+    }
+    // A delegated offer that names no facilitator cannot say who may redeem it; the next offer is tried instead.
+    if (candidate.assetTransferMethod === "erc7710" &&
+      (requirements.extra as Record<string, unknown> | undefined)?.facilitatorAddresses === undefined) {
+      facilitatorsUndeclared = true;
       continue;
     }
     const declaredCanonicalJson = canonicalJson(requirements);
@@ -143,6 +150,11 @@ export function selectPrepareOffer(
   if (decimalsMismatch) {
     throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's declared decimals differ from the token's on-chain decimals().",
       { reason: "x402_token_decimals_mismatch", chain: context.asset.network, asset: context.asset.token });
+  }
+  if (facilitatorsUndeclared) {
+    throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's ERC-7710 offer names no extra.facilitatorAddresses, so APN cannot name " +
+      "who may redeem the delegation; nothing was signed.",
+    { reason: "x402_erc7710_facilitators_undeclared", chain: context.asset.network, asset: context.asset.token });
   }
   throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer's token name and version recompute the token's on-chain DOMAIN_SEPARATOR.",
     { reason: "x402_token_domain_mismatch", chain: context.asset.network, asset: context.asset.token });

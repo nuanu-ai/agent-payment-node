@@ -92,7 +92,7 @@ test("ERC-7710 deterministic salt comparison accepts equivalent uint256 encoding
   assert.equal(sameDelegationSalt("0x01", "0x02"), false);
 });
 
-test("current official seller shape uses the pinned MetaMask facilitator set when none is published", () => {
+test("an erc7710 offer without facilitatorAddresses still inspects to the SDK list for saved records; prepare refuses it", () => {
   const decoded = decodePaymentRequiredHeader(canonicalPaymentRequiredHeader({
     x402Version: 2,
     error: "Payment Required",

@@ -6,7 +6,7 @@ import { SA_FILE_LIMIT, SA_HISTORY_LIMIT, SA_MUTABLE_KEYS, SA_OPERATION_KIND, SA
   type SmartAccountGaslessOperationIdentity, type SmartAccountGaslessOperationRecord,
   type SmartAccountGaslessTransition } from "./operation-model.js";
 import { saMaterialHash, saRequirementsHash, saSame } from "./integrity.js";
-import { saProviderReasonToken, saVerifyAccepted } from "./model.js";
+import { saStoredReasonToken, saVerifyAccepted } from "./model.js";
 import { SA_REASON_CODES, saFail } from "./reasons.js";
 import { saBlock, saBlockOrder, saCanonicalAddress, saExact, saHash, saHex, saIso, saStateCounters, saUint,
   validateSmartAccountGaslessIntent } from "./schema.js";
@@ -158,7 +158,7 @@ function journalMutable(value: unknown, intent: SmartAccountGaslessIntent, opera
       // A refused answer: invalid, or valid for another payer. Its reason is a closed token or none.
       const payer = v.payer === null ? null : saCanonicalAddress(v.payer);
       if (typeof v.isValid !== "boolean" || (v.isValid && (payer === null || payer === intent.binding.ownerAddress)) ||
-        (v.invalidReason !== null && saProviderReasonToken(v.invalidReason) !== v.invalidReason)) corrupt();
+        (v.invalidReason !== null && !saStoredReasonToken(v.invalidReason))) corrupt();
     }
     within(v.observedAt, exposedAt, at); saHash(v.responseHash);
   }
