@@ -3,6 +3,7 @@ import { MERCHANT_TERMINAL_PHASES, publicMerchant, type MerchantOperation } from
 import { MerchantRepository } from "../../x402-merchant/repository.js";
 import { domainClaims, field, readableClaims, requiredRecordPath, salvageEvm, salvageRecord, standardIdentity,
   type OperationFamilyAdapter, type OperationStore } from "../adapter.js";
+import { pastUnstartedDeadline } from "./family-claims.js";
 
 const STORE: OperationStore = { directory: "merchant-x402", perProfile: false };
 
@@ -11,15 +12,16 @@ export function merchantDomains(record: MerchantOperation): readonly MoneyConfli
 }
 
 /**
- * Merchant x402 payments on MegaETH. Only the family's own recorded outcomes end the claim, the phase 4c exits included
- * (never sent, superseded at the finalized nonce, owner abandon, delivery attempts exhausted). The wall clock never
- * does: approve signs a `prepared` payment while the machine's clock reads inside its 300 s deadline, so a clock that
- * once ran past the deadline and then went back would leave a payment approve can still sign without its account
- * guard. A payment past its deadline lets go when `x402 merchant observe` (or `operation abandon`) records it
- * `failed_before_effect`, a durable state approve never leaves, releasing any hold a crashed approval reserved.
- * Through 0.5.106 a `prepared` payment let go by the clock alone, 10 minutes after its deadline.
+ * Merchant x402 payments on MegaETH. The family's own outcomes end the claim, the phase 4c exits included (never sent,
+ * superseded at the finalized nonce, owner abandon, delivery attempts exhausted); besides them, a `prepared` payment
+ * (never signed: approve moves it to signing_started only while its 300 s local deadline holds) can never sign once that
+ * deadline plus the unstarted margin has passed, so it stops holding its account without any command. Observe then
+ * records it `failed_before_effect` and releases any hold a crashed approval reserved. That release reads the machine
+ * clock: should the clock go back inside the deadline, approve's own account check first re-takes this payment's claim
+ * (`OperationIndex.reclaim`) and refuses while another unresolved operation holds the account.
  */
-export const merchantTerminal = (record: Pick<MerchantOperation, "state">): boolean => MERCHANT_TERMINAL_PHASES.includes(record.state);
+export const merchantTerminal = (record: Pick<MerchantOperation, "state" | "expiresAt">): boolean =>
+  MERCHANT_TERMINAL_PHASES.includes(record.state) || record.state === "prepared" && pastUnstartedDeadline(record.expiresAt);
 
 export const merchantAdapter: OperationFamilyAdapter<MerchantOperation> = {
   family: "merchant_x402",

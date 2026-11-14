@@ -3,7 +3,7 @@
  * service, ledger, operation index). The merchant and MegaETH are the fixture's in-process fakes; nothing leaves the machine.
  */
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { AssetUsageLedger, assetUsageReservationId } from "../../src/asset-usage-ledger.js";
@@ -12,8 +12,8 @@ import { runCli } from "../../src/cli.js";
 import type { OutputEnvelope } from "../../src/commands.js";
 import { BridgeHttps } from "../../src/lifi/https.js";
 import type { OperationAbandonApprovalPort, OperationAbandonIntent } from "../../src/operation-abandon-approval.js";
-import { merchantAdapter } from "../../src/operation-index/adapters/merchant.js";
 import { OperationIndex } from "../../src/operation-index/index.js";
+import { OperationService } from "../../src/operation-service.js";
 import { MerchantClaims } from "../../src/x402-merchant/claims.js";
 import { merchantMove, type MerchantOperation } from "../../src/x402-merchant/model.js";
 import { merchantNativeUsageIdentity, merchantNativeUsageKey, merchantUsageIdentity } from "../../src/x402-merchant/owner.js";
@@ -21,7 +21,7 @@ import { MerchantRepository } from "../../src/x402-merchant/repository.js";
 import { MerchantService } from "../../src/x402-merchant/service.js";
 import { merchantTerms } from "../../src/x402-merchant/terms.js";
 import { temporaryState } from "./helpers.js";
-import { BLOCK_HASH, MERCHANT_URL, merchantFixture, PROFILE, TX_HASH } from "./merchant-x402-fixtures.js";
+import { BLOCK_HASH, MERCHANT_AMOUNT, MERCHANT_URL, merchantFixture, PROFILE, TX_HASH } from "./merchant-x402-fixtures.js";
 
 type Fixture = Awaited<ReturnType<typeof merchantFixture>>;
 class Approval implements OperationAbandonApprovalPort {
@@ -217,54 +217,66 @@ test("owner abandon refuses a sent payment whose transaction has a receipt: obse
 });
 
 /**
- * QA F03: the machine clock (the operation index reads `Date.now`, the merchant lane its clock port; both follow the
- * fixture clock here) runs 16 minutes ahead, the payment is read, and the clock goes back. The payment approve could
- * still sign (prepared, holds reserved by an approval that crashed before signing) keeps its account guard throughout;
- * only observe's durable `failed_before_effect` releases it, and a clock going back after that changes nothing.
+ * QA F03. The machine clock (the operation index reads `Date.now`, the merchant lane its clock port; both follow the
+ * fixture clock here) runs 16 minutes ahead and the first payment, prepared and never approved, is read: past its
+ * deadline plus the unstarted margin it frees its account with no command, and a second payment is prepared on the
+ * same account. Then the clock goes back inside the first payment's deadline. Approve is the hard guard: it re-takes
+ * the payment's own claim before signing, so at most one of the two can sign, whichever is approved first.
  */
-test("a clock that runs past a prepared payment's deadline and back never releases its account guard; observe's recorded exit does", async t => {
-  const { f } = await setup(t), persist = MerchantRepository.prototype.persist;
+async function clockRollbackPair(t: test.TestContext) {
+  const { f } = await setup(t);
   t.mock.method(Date, "now", () => f.now().getTime());
-  const o = await prepare(f), index = new OperationIndex(f.state), entryState = async () => (await index.find(o.operationId))?.state;
-  const crash = t.mock.method(MerchantRepository.prototype, "persist", async function (this: MerchantRepository, op: MerchantOperation) {
-    if (op.state === "signing_started") throw new Error("synthetic crash"); return await persist.call(this, op);
-  });
-  await assert.rejects(f.service.approve(o.operationId)); crash.mock.restore();
-  assert.deepEqual(await usage(f, o), HELD);
-  const second = () => f.service.prepare({ profile: PROFILE, url: MERCHANT_URL, maximumNativeFee: "100000000000000", nativeFeeReserveWei: HELD[1]!,
-    idempotencyKey: "merchant-exits-0002" });
+  // A daily cap for both payments: only the account guard decides here.
+  await f.activate({ tokenDailyCap: (2n * BigInt(MERCHANT_AMOUNT)).toString() });
+  const first = await prepare(f), index = new OperationIndex(f.state), entry = async (id: string) => (await index.find(id))?.state;
   const SKEW = 16 * 60_000;
   f.advance(SKEW);
-  assert.deepEqual([data(await merchant(f, "status", "--operation", o.operationId)).state, (await entryState())], ["prepared", "active"]);
-  const generic = await runCli(["operation", "status", "--operation", o.operationId], {}, options(f) as never);
-  assert.equal(generic.ok, true, JSON.stringify(generic.error));
-  assert.equal(await entryState(), "active", "no read lets the guard go by the clock");
+  assert.equal(data(await merchant(f, "status", "--operation", first.operationId)).state, "prepared");
+  assert.equal(await entry(first.operationId), "terminal", "an expired never-started payment frees its account without observe or abandon");
+  const second = await f.service.prepare({ profile: PROFILE, url: MERCHANT_URL, maximumNativeFee: "100000000000000",
+    nativeFeeReserveWei: HELD[1]!, idempotencyKey: "merchant-exits-0002" });
+  assert.equal(second.state, "prepared");
   f.advance(-SKEW);
-  await assert.rejects(second(), (error: unknown) => (error as { code?: string; details?: Record<string, unknown> }).code === "APN_OPERATION_BLOCKED" &&
-    (error as { details: Record<string, unknown> }).details.blockingOperationId === o.operationId &&
-    (error as { details: Record<string, unknown> }).details.blockingState === "prepared");
-  // Past the deadline, observe records the exit; a clock going back afterwards cannot reopen approve.
-  f.advance(300_001);
-  assert.deepEqual(data(await merchant(f, "observe", "--operation", o.operationId)).exit, { reason: "never_signed" });
-  assert.deepEqual([await usage(f, o), await entryState()], [FREE, "terminal"]);
-  f.advance(-300_001);
-  await assert.rejects(f.service.approve(o.operationId), (error: unknown) =>
-    (error as { details?: Record<string, unknown> }).details?.reason === "merchant_once_only_approval");
-  assert.equal((await second()).state, "prepared");
+  return { f, first, second, entry };
+}
+const blockedBy = (operationId: string) => (error: unknown) => {
+  const refused = error as { code?: string; details?: Record<string, unknown> };
+  return refused.code === "APN_OPERATION_BLOCKED" && refused.details?.blockingOperationId === operationId;
+};
+
+test("clock rollback, the released payment approved first: it re-takes its account and is refused, and then refuses the other; none signs", async t => {
+  const { f, first, second, entry } = await clockRollbackPair(t);
+  await assert.rejects(f.service.approve(first.operationId), blockedBy(second.operationId));
+  assert.equal(await entry(first.operationId), "active", "approve re-took the payment's own claim");
+  await assert.rejects(f.service.approve(second.operationId), blockedBy(first.operationId));
   assert.deepEqual([f.signs(), f.rpc.sends], [0, 0]);
 });
 
-test("approve first re-derives an index entry an earlier release let go by the clock: the payment holds its account before anything is signed", async t => {
-  const { f } = await setup(t), o = await prepare(f), index = new OperationIndex(f.state);
-  // What 0.5.106 wrote once its clock ran 10 minutes past the deadline: a terminal entry for a payment still prepared.
-  const released = t.mock.method(merchantAdapter, "terminal", () => true);
-  await index.refresh(o.operationId); released.mock.restore();
-  assert.equal((await index.find(o.operationId))?.state, "terminal");
-  const other = await f.service.prepare({ profile: PROFILE, url: MERCHANT_URL, maximumNativeFee: "100000000000000", nativeFeeReserveWei: HELD[1]!,
-    idempotencyKey: "merchant-exits-0003" });
-  await assert.rejects(f.service.approve(o.operationId), (error: unknown) =>
-    (error as { code?: string; details?: Record<string, unknown> }).code === "APN_OPERATION_BLOCKED" &&
-    (error as { details: Record<string, unknown> }).details.blockingOperationId === other.operationId);
-  assert.equal((await index.find(o.operationId))?.state, "active");
-  assert.deepEqual([f.signs(), f.rpc.sends, await usage(f, o)], [0, 0, FREE]);
+test("clock rollback, the other payment approved first: it signs once, and the released payment is then refused by it", async t => {
+  const { f, first, second, entry } = await clockRollbackPair(t);
+  f.rpc.lost = true;
+  const sent = await f.service.approve(second.operationId);
+  assert.deepEqual([sent.state, sent.submissionAttempts, f.signs(), f.rpc.sends], ["unknown_finality", 1, 1, 1]);
+  f.rpc.lost = false;
+  await assert.rejects(f.service.approve(first.operationId), blockedBy(second.operationId));
+  assert.equal(await entry(first.operationId), "active");
+  assert.deepEqual([f.signs(), f.rpc.sends], [1, 1]);
+});
+
+test("a clock that releases the payment after approve's last check but before signing: the check after signing_started refuses", async t => {
+  const { f } = await setup(t), o = await prepare(f);
+  // Another operation took the account between approve's second check and its signing_started write.
+  const blocker = new Error("blocked after signing_started");
+  let checks = 0;
+  const original = OperationService.prototype.assertMerchantAccountAvailable;
+  t.mock.method(OperationService.prototype, "assertMerchantAccountAvailable", async function (this: OperationService, record: MerchantOperation) {
+    checks += 1;
+    if (record.state === "signing_started") throw blocker;
+    return await original.call(this, record);
+  });
+  await assert.rejects(f.service.approve(o.operationId), error => error === blocker);
+  assert.equal(checks, 3, "before consent, after consent, and after signing_started");
+  assert.equal((await f.service.status(o.operationId)).state, "signing_started");
+  assert.deepEqual([f.signs(), f.rpc.sends], [0, 0]);
+  await assert.rejects(access(join(f.state.root, "merchant-effect-claims", `${o.operationId}.sign.json`)), "no SIGN claim was written");
 });

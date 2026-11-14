@@ -196,14 +196,15 @@ Every attempt without a receipt has an exit that never signs, sends or delivers.
 - **`abandoned_unknown`**: when no proof decides, `apn operation abandon --operation <id>` after the deadline asks for
   TTY consent and ends the attempt, with both holds still charged.
 
-**Account guard.** Every non-terminal payment, `prepared` included, holds the payer's MegaETH account until one of these
-exits (or an outcome) is recorded in its operation. The clock alone never releases it: no status, observe or other read
-lets the guard go because the deadline has passed, and a clock that runs ahead and then goes back cannot leave a
-payment that approve can still sign without its guard. A `prepared` payment past its deadline is closed by
-`apn x402 merchant observe --operation <id>` (or `apn operation abandon --operation <id>`), which records
-`failed_before_effect`; approve never leaves that state. Through 0.5.106 the operation index let a `prepared` payment go
-by the clock alone, 10 minutes after its deadline. Approve now first re-derives its own index entry from the operation,
-so a payment such an entry let go holds its account again before anything is signed.
+**Account guard.** Every non-terminal payment holds the payer's MegaETH account. A `prepared` payment that was never
+approved also lets go of it by itself once its 300-second deadline plus a 10-minute margin has passed by the machine
+clock: no command is needed, and `observe` later records it `failed_before_effect`. Approve is the hard guard. Before
+consent, again after it, and once more after it records `signing_started`, approve re-takes the payment's own account
+claim and refuses with `APN_OPERATION_BLOCKED` while another unresolved operation holds the account. A clock that ran
+ahead, released a payment and then went back inside its deadline therefore cannot let two payments on one account
+sign. Once one of them is approved, the other's approve is refused while the first is unresolved. A released payment
+whose approve re-took its claim and was refused also blocks the other payment's approve, until one of them ends (a
+never-approved one lets go again when its deadline passes).
 
 ### `retire-unsent`
 

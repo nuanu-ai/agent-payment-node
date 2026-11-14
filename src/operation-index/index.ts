@@ -75,8 +75,14 @@ export class OperationIndex {
     });
   }
 
-  /** APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. */
+  /**
+   * APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. With
+   * `except` (the caller's own saved operation, checked before its approve or execute starts its effect) that
+   * operation's entry first holds its claims again when the index had let it go while its record is still open
+   * (`reclaim`): the guard of an operation about to sign never rests on a wall-clock release.
+   */
   async assertAvailable(wanted: WantedClaims): Promise<void> {
+    if (wanted.except !== undefined) await this.reclaim(wanted.except);
     await this.repairing(async () => { await this.reconciler.reconcile(); await this.check(wanted); });
   }
 
@@ -170,6 +176,34 @@ export class OperationIndex {
       const entry = await this.store.entry(operationId);
       if (entry !== null && entry.state !== "terminal") await this.inspect(entry, null);
     } catch { /* Best effort by contract. */ }
+  }
+
+  /**
+   * Before an operation's own approve or execute starts its effect: an entry the index wrote terminal while its record
+   * is still open by its family's rule now (a never-started record let go by the wall clock past its deadline plus the
+   * unstarted margin, read again after the clock went back) holds its record's claims again. The write happens under
+   * the index lock, so an admission either sees it or is seen by the caller's availability check that follows; that
+   * check then refuses while another unresolved operation holds a colliding claim. Any other entry is left as it is:
+   * an open one already holds its claims, and a record its family reads as terminal now is refused by its own approve.
+   */
+  async reclaim(operationId: string): Promise<void> {
+    await this.repairing(async () => {
+      const entry = await this.store.entry(operationId);
+      if (entry?.state !== "terminal") return;
+      const adapter = this.adapter(entry), name = nameOf(entry);
+      if (adapter === undefined || name === null) return;
+      const record = await adapter.load(this.root, entry.recordPath);
+      if (record === null) return;
+      const derived = await this.reconciler.fromRecord(adapter, name, record);
+      if (derived?.state !== "active") return;
+      await this.store.ensureLockDirectory();
+      await this.state.withLocks([OPERATION_INDEX_LOCK], async () => {
+        if (canonicalJson(await this.store.entry(operationId)) !== canonicalJson(entry)) {
+          throw new ApnError("APN_STATE_BUSY", "The operation index changed concurrently; retry the operation.");
+        }
+        await this.reconciler.write(derived, true);
+      });
+    });
   }
 
   /** Optional fast path after a terminal write: the claims go now instead of at the next check that meets them. */
