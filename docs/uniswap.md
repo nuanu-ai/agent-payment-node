@@ -251,9 +251,15 @@ block; for the swap it also reads both token balances at that block and the
 block before it. Without `APN_ETHEREUM_ARCHIVE_RPC_URL` the primary serves
 these reads. A pruning public primary keeps that state for only about 128
 blocks (about 25 minutes), so run `status` soon after the send, or set an
-archive endpoint before a later first `status`. Quote, prepare and the signing
-guard read only at a block they have just read from the primary, so they never
-need an archive.
+archive endpoint before a later first `status`. When the primary answers one
+of these reads with a JSON-RPC error, `status` refuses with
+`APN_PROVIDER_CAPABILITY_UNAVAILABLE` / `uniswap_token_status_archive_required`
+(`details.blockNumber` is the effect's block). Nothing is recorded, and
+`next_actions` say to set `APN_ETHEREUM_ARCHIVE_RPC_URL` and run
+`apn swap ethereum uniswap-token status --operation <id>` again. With an
+archive configured, its failures are reported as they are. Quote, prepare and
+the signing guard read only at a block they have just read from the primary,
+so they never need an archive.
 
 ### Recovery and cleanup
 

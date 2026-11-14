@@ -23,6 +23,8 @@ export type TokenRpcCall = EvmRpcCall & {
   readonly primaryPoolSize?: () => number;
   readonly selectedPrimaryProviderId?: () => string | null;
   readonly bindPrimaryProvider?: (providerId: string | null) => Promise<void>;
+  /** Whether APN_ETHEREUM_ARCHIVE_RPC_URL names an archive; without one the primary serves the block-pinned reads. */
+  readonly archiveConfigured?: () => boolean;
 };
 
 export async function tokenBatch(call: TokenRpcCall, route: TokenRpcRoute, items: readonly TokenRpcItem[]): Promise<readonly unknown[]> {
@@ -95,6 +97,7 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
     primaryPoolSize: { value: () => candidates().length },
     selectedPrimaryProviderId: { value: () => selected === null ? null : candidates()[selected]!.id },
     bindPrimaryProvider: { value: async (providerId: string | null) => { await bindProvider(providerId); } },
+    archiveConfigured: { value: () => resolve().archive },
   });
   return call;
 
@@ -206,7 +209,7 @@ function createLegacyTokenRpc(input: { readonly environment: Readonly<Record<str
     selectedPrimaryProviderId: { value: () => null }, bindPrimaryProvider: { value: async (providerId: string | null) => {
       if (providerId !== null) throw new ApnError("APN_OPERATION_BLOCKED", "Scalar Uniswap token RPC cannot restore a pooled provider binding.",
         { reason: "uniswap_token_provider_binding_changed" });
-    } } });
+    } }, archiveConfigured: { value: () => resolve().archive } });
   return call;
 }
 
