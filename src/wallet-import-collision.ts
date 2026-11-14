@@ -30,9 +30,21 @@ async function recordlessWallet(state: StateStore, profileHash: string): Promise
   for (const envelope of await listEncryptedWalletEnvelopes(state)) {
     if (state.profileHash(envelope.profile) !== profileHash) continue;
     throw new ApnError("APN_STATE_CORRUPT", `The local wallet of profile ${envelope.profile} is incomplete: its key is sealed but its ` +
-      "public record was never written.", { reason: "incomplete_wallet", nextActions: [completeWalletCommand(envelope.profile)] });
+      "public record was never written.", { reason: "sealed_key_without_public_record", nextActions: [completeWalletCommand(envelope.profile)] });
   }
   return stateCorrupt("Wallet metadata disappeared during identity validation.");
+}
+
+/**
+ * A first provider binding of a profile whose local key is sealed without its public record (an incomplete wallet, see
+ * incompleteWallet) would strand that key behind another owner. Callers refuse it under the profile lock, before any
+ * provider contact, consent or write, naming the command that completes the local wallet.
+ */
+export async function assertNoIncompleteLocalWallet(state: StateStore, profile: string): Promise<void> {
+  if (await state.loadWallet(state.profileHash(profile)) !== null || await state.loadEncryptedWalletEnvelope(profile) === null) return;
+  throw new ApnError("APN_PROFILE_DRIFT", "This profile holds an incomplete local wallet: its key is sealed but its public record " +
+    "was never written. Complete that wallet; a provider cannot be bound over it.",
+  { reason: "sealed_key_without_public_record", nextActions: [completeWalletCommand(profile)] });
 }
 
 export async function listEncryptedWalletEnvelopes(state: StateStore): Promise<readonly { profile: string; value: unknown }[]> {

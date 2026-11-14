@@ -2,8 +2,9 @@
  * QA on 0.5.106 (F22): a `wallet ensure` or `wallet import` interrupted after the encrypted key was sealed and before
  * `wallet.json` left `wallet status` answering `absent` with `apn wallet ensure`, while ensure and import refused the
  * profile with APN_PROFILE_DRIFT. The key is kept; status now names the incomplete state and the one command that
- * completes it from that sealed key alone. QA on 0.5.104 (F02): `wallet status --profile s1` advised
- * `apn wallet ensure` without the profile, which created `default` and left `s1` absent.
+ * completes it from that sealed key alone, and no provider can be bound over that key. QA on 0.5.104 (F02):
+ * `wallet status --profile s1` advised `apn wallet ensure` without the profile, which created `default` and left `s1`
+ * absent.
  */
 import assert from "node:assert/strict";
 import { readdir, readFile, writeFile } from "node:fs/promises";
@@ -19,6 +20,7 @@ import { LocalWalletNative } from "../../src/local-wallet-native.js";
 import type { WrappingSecretPort } from "../../src/macos-keychain.js";
 import type { WalletRecord } from "../../src/model.js";
 import { StateProfileRepository } from "../../src/profile-repository.js";
+import type { ForegroundAuthenticationPort, ProviderRegistryPort } from "../../src/provider-ports.js";
 import { StateStore } from "../../src/state.js";
 import { TestNative, TestProfilePolicy, TestRpc, WALLET, makeCore, temporaryState } from "./helpers.js";
 
@@ -116,7 +118,7 @@ test("an ensure stopped after sealing its key: status says incomplete for that p
   const elsewhere = ["wallet", "import", "--profile", "other", "--key-file", f.keyFile, "--key-name", "TEST_EVM_KEY", "--expected-address", ADDRESS];
   const blocked = await f.cli(elsewhere);
   assert.equal(blocked.error?.code, "APN_STATE_CORRUPT");
-  assert.equal(blocked.error?.details?.reason, "incomplete_wallet");
+  assert.equal(blocked.error?.details?.reason, "sealed_key_without_public_record");
   assert.deepEqual(blocked.next_actions, [COMPLETE]);
   const completed = await f.cli(argv(status.next_actions[0]));
   assert.equal(completed.ok, true, JSON.stringify(completed.error));
@@ -140,6 +142,50 @@ test("an ensure stopped after sealing its key: status says incomplete for that p
   assert.deepEqual(await readFile(f.envelopePath), sealed.bytes);
   const imported = await f.cli(elsewhere);
   assert.equal(imported.ok, true, `the completed wallet no longer blocks other profiles: ${JSON.stringify(imported.error)}`);
+});
+
+test("no provider is bound over an incomplete local wallet: connect and a Coinbase Solana account refuse before any contact or write", async (t) => {
+  const wrapping = new TestWrappingSecret();
+  const f = await fixture(t, wrapping);
+  await interrupted(f.root, wrapping, { command: "wallet.ensure", profile: PROFILE });
+  const sealed = await f.sealed();
+  const contacted: string[] = [];
+  const registry: ProviderRegistryPort = { resolve: (providerId) => { contacted.push(providerId); throw new Error("no provider may be reached"); } };
+  const foreground: ForegroundAuthenticationPort = {
+    readIdentity: async () => { contacted.push("identity"); throw new Error("no consent may start"); },
+    readChallengeResponse: async () => { contacted.push("challenge"); throw new Error("no consent may start"); },
+    confirmRebind: async () => { contacted.push("rebind"); return false; },
+  };
+  const core = (root: string) => {
+    const state = new StateStore(root);
+    return new ApnCore({ state, native: new LocalWalletNative(state, wrapping), profileRepository: new StateProfileRepository(state),
+      providerRegistry: registry, foregroundAuthentication: foreground });
+  };
+  const requests: readonly CommandRequest[] = [
+    { command: "wallet.connect", profile: PROFILE, providerId: "coinbase-agentic-wallet" },
+    { command: "wallet.connect", profile: PROFILE, providerId: "metamask-agent-wallet", authenticationMethod: "browser" },
+    { command: "wallet.connect", profile: PROFILE, providerId: "metamask-smart-account", authenticationMethod: "browser",
+      permissionCapUsdcAtomic: "2000000", permissionExpiresAt: 2_000_000_000, idempotencyKey: "incomplete-connect-0001" },
+    { command: "wallet.ensure-solana", profile: PROFILE, provider: "coinbase-awal", acceptRisk: false },
+  ];
+  for (const request of requests) {
+    const refused = await core(f.root).execute(request);
+    const label = JSON.stringify(request);
+    assert.equal(refused.error?.code, "APN_PROFILE_DRIFT", label);
+    assert.equal(refused.error?.details?.reason, "sealed_key_without_public_record", label);
+    assert.deepEqual(refused.next_actions, [COMPLETE], label);
+  }
+  assert.deepEqual(contacted, [], "no provider was resolved and no consent started");
+  assert.equal(await f.state.loadProviderProfile(f.profileHash), null, "no provider profile was written");
+  assert.deepEqual((await readdir(f.root)).filter((name) => ["chain-accounts", "chain-wallets", "smart-account-permissions"].includes(name)), []);
+  assert.deepEqual(await readFile(f.envelopePath), sealed.bytes);
+
+  // The one next action completes the local wallet; a profile without an incomplete key still reaches its provider.
+  const completed = await f.cli(argv(COMPLETE));
+  assert.equal((completed.data as Record<string, unknown>).address, sealed.identity.address);
+  const other = await core(f.root).execute({ command: "wallet.connect", profile: "fresh", providerId: "coinbase-agentic-wallet" });
+  assert.notEqual(other.error?.details?.reason, "sealed_key_without_public_record");
+  assert.deepEqual(contacted, ["coinbase-agentic-wallet"]);
 });
 
 test("an import stopped after sealing its key completes only with that very key; another key is refused and changes nothing", async (t) => {

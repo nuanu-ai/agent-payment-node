@@ -23,6 +23,7 @@ import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { canonicalIdempotencyKey } from "./transfer-policy.js";
 import { canonicalProfile, publicProvenance, validateBalance } from "./wallet-policy.js";
 import { assertWalletLifecycleAvailable, walletLifecycleMutable } from "./wallet-lifecycle-guard.js";
+import { assertNoIncompleteLocalWallet } from "./wallet-import-collision.js";
 import { OperationService } from "./operation-service.js";
 
 export class ProviderWalletService {
@@ -36,6 +37,7 @@ export class ProviderWalletService {
       await assertWalletLifecycleAvailable(this.context, profileHash);
       const repository = this.context.requireProfileRepository();
       let existing = await repository.load(profileHash);
+      if (existing === null) await assertNoIncompleteLocalWallet(this.context.state, profile);
       if (existing !== null) {
         if (existing.provider_id !== request.providerId) {
           throw new ApnError("APN_PROFILE_DRIFT", "The APN profile is already bound to a different provider.");

@@ -551,7 +551,10 @@ profile a first run would have written. It creates no key and mints no wrapping 
 `wrapping_secret_missing` and the restore step, which `wallet status` also reports for such a wallet. A retried
 `wallet import` into that profile completes it the same way only when the key file holds that very key; any other key
 is refused with `APN_PROFILE_DRIFT` and `details.reason: "incomplete_wallet_key_differs"`, since an import never replaces
-a sealed key.
+a sealed key. Until it is completed, a first provider binding of that profile (`wallet connect` with any provider, or
+`wallet ensure-solana --provider coinbase-awal`) is refused before any provider contact, consent or write, with
+`APN_PROFILE_DRIFT`, the same reason and the same one next action; another profile's scan of local wallets that meets
+its empty record directory fails with `APN_STATE_CORRUPT` and that reason too.
 
 `wallet import --key-file` reads only an owner-only (mode 0600), single-link regular file of at most 64 KiB, reached
 without symbolic links. A FIFO, device, socket or directory is refused at once from its `lstat`, before any open, with
