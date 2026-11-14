@@ -4,6 +4,7 @@ import { type ActiveAssetPolicy } from "./allowlist-active-policy.js";
 import { type AssetUsageReservation } from "./asset-usage-ledger.js";
 import { validateProviderProfile } from "./provider-profile.js";
 import { type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { type ProviderRequestReferenceBinding } from "./provider-request-reference-store.js";
 import type { MetaMaskMfaNotice } from "./metamask-process-output.js";
 import { type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeReceiptEvidence } from "./metamask-native-fee-evidence.js";
 declare const V1 = "apn.metamask-native-operation.v1", V2 = "apn.metamask-native-operation.v2";
@@ -46,7 +47,19 @@ export interface MetaMaskNativeOperation {
     readonly state: MetaMaskNativeState;
     readonly effectAttempts: 0 | 1;
     readonly transactionHash: `0x${string}` | null;
+    /** The MetaMask request id itself, as every release up to 0.5.106 kept it; null in a record that seals it. */
     readonly providerRequestId: string | null;
+    /**
+     * In a record a later release wrote, the hash of the MetaMask request id (metaMaskNativeRequestIdHash), whose id is
+     * sealed apart under the Keychain wrapping secret (provider-request-reference-store.ts); providerRequestId is then
+     * null. Absent from a record that holds no request and from every record 0.5.106 or earlier wrote.
+     */
+    readonly providerRequestIdHash?: string;
+    /**
+     * Why a record a later release wrote keeps no request although the hand-off returned one: the id could not be sealed
+     * after the hand-off, so it was dropped, never kept in plaintext. Everything else the hand-off returned is kept.
+     */
+    readonly providerRequestReason?: typeof METAMASK_NATIVE_REQUEST_UNSEALED;
     readonly receiptEvidence: MetaMaskNativeFeeReceiptEvidence | null;
     readonly createdAt: string;
     readonly updatedAt: string;
@@ -55,23 +68,37 @@ export interface MetaMaskNativeOperation {
     readonly recordHash: string;
 }
 export declare const METAMASK_NATIVE_OPERATION_SCHEMA = "apn.metamask-native-operation.v2";
+/** The only `providerRequestReason`: the hand-off returned a request id that could not be sealed. */
+export declare const METAMASK_NATIVE_REQUEST_UNSEALED = "provider_request_reference_unsealed";
 /**
  * The owner's MetaMask approval this transfer waits on: a verified AWAITING_MFA notice (or request status) for its own
- * stored request, from the hand-off (`send`) or a no-send watch (`watch`); `evidenceHash` is the SHA-256 of that vendor
- * output. Metadata only, kept apart from the financial state: it is never a payment, an outcome or a reason to release a
- * hold, and it goes when a transaction hash or the provider's own record shows the request past the approval.
+ * stored request, from the hand-off (`send`) or a no-send read (`watch`: `mm wallet requests watch`, or MetaMask's server
+ * answer when mm's local request list no longer held the request); `evidenceHash` is the SHA-256 of that vendor output.
+ * Metadata only, kept apart from the financial state: it is never a payment, an outcome or a reason to release a hold,
+ * and it goes when a transaction hash or the provider's own record shows the request past the approval. It names the
+ * request as its record does: by the id itself in a record 0.5.106 or earlier wrote, by the id's hash in one that seals it.
  */
-export interface MetaMaskNativeMfaTask {
-    readonly requestId: string;
+interface MfaTaskFields {
     readonly expiresAt: string | null;
     readonly authMethod: string | null;
     readonly observedAt: string;
     readonly source: "send" | "watch";
     readonly evidenceHash: string;
 }
-export declare function metaMaskNativeMfaTask(requestId: string, evidence: MetaMaskMfaNotice & {
+export interface MetaMaskNativeMfaTaskWithId extends MfaTaskFields {
+    readonly requestId: string;
+}
+export interface MetaMaskNativeMfaTaskWithHash extends MfaTaskFields {
+    readonly requestIdHash: string;
+}
+export type MetaMaskNativeMfaTask = MetaMaskNativeMfaTaskWithId | MetaMaskNativeMfaTaskWithHash;
+type MfaEvidence = MetaMaskMfaNotice & {
     readonly evidenceHash: string;
-}, source: MetaMaskNativeMfaTask["source"], now?: Date): MetaMaskNativeMfaTask;
+};
+/** The task of a record that keeps the request id itself (one 0.5.106 or earlier wrote). */
+export declare function metaMaskNativeMfaTask(requestId: string, evidence: MfaEvidence, source: MfaTaskFields["source"], now?: Date): MetaMaskNativeMfaTaskWithId;
+/** The task of a record that seals its request id: it names only the id's hash, as the record does. */
+export declare function metaMaskNativeSealedMfaTask(requestIdHash: string, evidence: MfaEvidence, source: MfaTaskFields["source"], now?: Date): MetaMaskNativeMfaTaskWithHash;
 /**
  * A transfer whose foreground command ended before its effect marker (still `prepared`: nothing was handed off or signed)
  * and whose consent deadline has passed (plus the unstarted margin) can never start: the hand-off needs that consent.
@@ -104,10 +131,22 @@ export declare function patchMetaMaskNativeOperation(op: MetaMaskNativeOperation
 }): Omit<MetaMaskNativeOperation, "recordHash">;
 /** The family's own no-send observer: it reads the stored request or transaction and never signs or sends again. */
 export declare const metaMaskNativeObserveCommand: (id: string) => string;
+/** The hash a record that seals its MetaMask request id keeps in its place (the same hash a direct transfer shows). */
+export declare const metaMaskNativeRequestIdHash: (requestId: string) => string;
+/** The sealed request id of `op` lives under this binding (provider-request-reference-store.ts). */
+export declare function metaMaskNativeRequestReference(op: Pick<MetaMaskNativeOperation, "operationId" | "context">, requestIdHash: string): ProviderRequestReferenceBinding;
+/** Whether the record stores a MetaMask request to observe: the id itself (0.5.106 and earlier) or the hash of a sealed one. */
+export declare function metaMaskNativeHasRequest(o: Pick<MetaMaskNativeOperation, "providerRequestId" | "providerRequestIdHash">): boolean;
+/**
+ * How output names the request: `request MetaMask-id` for a record that keeps the id, the APN operation (which the
+ * MetaMask request's intent names) for one that seals it.
+ */
+export declare function metaMaskNativeRequestLabel(o: Pick<MetaMaskNativeOperation, "operationId" | "providerRequestId">): string;
 export declare function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation, now?: Date): {
     next_actions: string[];
     mfa_task?: never;
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    provider_request_reason?: "provider_request_reference_unsealed";
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;
@@ -125,10 +164,6 @@ export declare function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation
 } | {
     next_actions: string[];
     mfa_task: {
-        status: string;
-        provider: string;
-        provider_state: string;
-        request_id: string;
         auth_method: string | null;
         expires_at: string | null;
         observed_at: string;
@@ -136,8 +171,27 @@ export declare function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation
         evidence_hash: string;
         owner_action: string;
         observe_command: string;
+        request_id: string;
+        request_id_hash?: never;
+        status: string;
+        provider: string;
+        provider_state: string;
+    } | {
+        auth_method: string | null;
+        expires_at: string | null;
+        observed_at: string;
+        source: "send" | "watch";
+        evidence_hash: string;
+        owner_action: string;
+        observe_command: string;
+        request_id_hash: string;
+        request_id?: never;
+        status: string;
+        provider: string;
+        provider_state: string;
     };
     receipt?: import("./metamask-native-fee-evidence.js").MetaMaskNativeFeeReceiptVerdict;
+    provider_request_reason?: "provider_request_reference_unsealed";
     diagnostic?: MetaMaskNativeDiagnostic;
     operation_id: string;
     state: string;

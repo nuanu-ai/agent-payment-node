@@ -6,7 +6,7 @@ import { canonicalProfile } from "../wallet-policy.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
 import { MetaMaskGaslessClock } from "./clock.js";
 import { mmActualGross, mmPolicyHash } from "./economics.js";
-import { mmAssertProfileBinding } from "./identity.js";
+import { mmAssertProfileBinding, mmPrivateHash } from "./identity.js";
 import { newMetaMaskGaslessOperation } from "./journal/transitions.js";
 import { MM_TTL_MS, MM_ZERO_ADDRESS } from "./model.js";
 import { mmRequestHash } from "./operation-model.js";
@@ -55,6 +55,10 @@ export class MetaMaskGaslessPreparation {
                     const rpc = this.o.rpcFor(request.chainId);
                     if (rpc.chainId !== request.chainId)
                         mmFail("mm_gasless_rpc_binding");
+                    // The wrapping secret that seals the request id is read before any provider or chain read: a missing secret over
+                    // sealed state or a refusing Keychain refuses here, at no provider cost. The seal below reads the command's copy.
+                    await this.o.references.ready();
+                    clock.check();
                     return await state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
                         clock.check();
                         const binding = await this.o.provider.inspect(owner);
@@ -74,10 +78,14 @@ export class MetaMaskGaslessPreparation {
                         const initialSnapshot = validateMetaMaskGaslessSnapshot(snapshot, { chainId: request.chainId,
                             endpointHash: rpc.endpointHash, endpointOrigin: rpc.endpointOrigin, grossAtomic: mmActualGross(quote), ...(quote.feeMode === "sponsored" ? { feeMode: quote.feeMode } : {}) });
                         const prepared = clock.fresh(initialSnapshot.observedAt), preparedAt = new Date(prepared).toISOString();
+                        // The journal keeps only the request id's hash; the id itself is sealed apart before the journal exists.
+                        const requestId = mmUuid(this.o.ids.next()), requestIdHash = mmPrivateHash("request-id", requestId);
                         const intent = { profile, request, binding, ...checkedUnsigned, token: row.token, decimals: 6,
-                            deploymentEvidenceHash, initialSnapshot, ...(request.fixedNet ? { preparedGrossAtomic: mmActualGross(quote) } : {}), quote, requestId: mmUuid(this.o.ids.next()), preparedAt,
+                            deploymentEvidenceHash, initialSnapshot, ...(request.fixedNet ? { preparedGrossAtomic: mmActualGross(quote) } : {}), quote, requestIdHash, preparedAt,
                             expiresAt: new Date(prepared + MM_TTL_MS).toISOString(), policyHash: mmPolicyHash(profileHash, binding, request) };
                         const operation = newMetaMaskGaslessOperation({ profileHash, operationId, idempotencyHash, requestHash }, intent);
+                        clock.check(operation);
+                        await this.o.references.seal({ profileHash, operationId, requestIdHash }, requestId);
                         clock.check(operation);
                         await this.o.records.persist(operation);
                         return operation;

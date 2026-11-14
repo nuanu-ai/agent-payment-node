@@ -4,7 +4,7 @@ import { type MetaMaskObserveDiagnostic } from "./client/observe-diagnostic.js";
 import type { MetaMaskGaslessClock } from "./clock.js";
 import type { MetaMaskGaslessCursor, MetaMaskGaslessMutable, MetaMaskGaslessObservation, MetaMaskGaslessProviderObservation } from "./model.js";
 import { type MetaMaskGaslessOperationRecord } from "./operation-model.js";
-import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "./ports.js";
+import type { MetaMaskGaslessProviderPort, MetaMaskGaslessRequestReferencePort, MetaMaskGaslessRpcFactory, MetaMaskGaslessRpcPort } from "./ports.js";
 import { type MetaMaskGaslessFailure, type MetaMaskGaslessFailureReason } from "./reasons.js";
 export type MetaMaskGaslessSave = (op: MetaMaskGaslessOperationRecord, patch: Partial<MetaMaskGaslessMutable>, at: string) => Promise<MetaMaskGaslessOperationRecord>;
 export interface MetaMaskGaslessStep {
@@ -52,10 +52,11 @@ export declare class MetaMaskGaslessObservationService {
     private readonly state;
     private readonly rpcFor;
     private readonly provider;
+    private readonly references;
     private readonly clock;
     private readonly save;
     private readonly observer?;
-    constructor(state: StateStore, rpcFor: MetaMaskGaslessRpcFactory, provider: MetaMaskGaslessProviderPort, clock: MetaMaskGaslessClock, save: MetaMaskGaslessSave, observer?: MetaMaskGaslessObserver | undefined);
+    constructor(state: StateStore, rpcFor: MetaMaskGaslessRpcFactory, provider: MetaMaskGaslessProviderPort, references: MetaMaskGaslessRequestReferencePort, clock: MetaMaskGaslessClock, save: MetaMaskGaslessSave, observer?: MetaMaskGaslessObserver | undefined);
     /**
      * One bounded observation. An operation the owner abandoned is observed the same way (provider status bound to the
      * original request, then the chain), but only a proof replaces the abandonment: the redemption, or its delegation
@@ -64,6 +65,11 @@ export declare class MetaMaskGaslessObservationService {
     run(op: MetaMaskGaslessOperationRecord, submitted?: MetaMaskGaslessProviderRead): Promise<MetaMaskGaslessStep>;
     private once;
     private source;
+    /**
+     * The provider's job for this request, read by its id. A sealed request id that cannot be opened (absent, damaged,
+     * another operation's, or its wrapping secret unavailable) is a failed read like any other: the chain is still observed,
+     * and nothing is sent.
+     */
     private readProvider;
     private retainProvider;
     private decide;

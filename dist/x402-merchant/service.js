@@ -105,6 +105,19 @@ export class MerchantService {
             this.consentFresh(o, approvalEndsAt);
             o = merchantMove(o, "signing_started", this.at(), { signingAttempts: 1 });
             await this.records.persist(o);
+            // No longer `prepared`, the payment can never be let go by the clock: its claim is checked once more here, in
+            // case a clock that ran past the deadline released it after the last check, before anything is signed. A
+            // refusal (or a busy index) ends the attempt at once: no SIGN claim exists yet, so its holds are released now.
+            try {
+                await this.operations.assertMerchantAccountAvailable(o);
+            }
+            catch (error) {
+                try {
+                    await this.exits.closeBeforeSigning(o);
+                }
+                catch { /* Left signing_started with its holds: observe ends it never_signed once its deadline passed. */ }
+                throw error;
+            }
             await owner.follow(o, "unknown_finality");
             await claims.claim(o, "sign");
             const holds = await owner.held(o), grant = issueMerchantAuthority(this, o, holds.token, holds.native, approvalEndsAt);

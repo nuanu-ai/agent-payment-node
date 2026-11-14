@@ -197,6 +197,11 @@ async function executeLocked(operationId, ports, journal) {
     if (!evmFrozenFeeAdmitted(rpcQuantity(head.baseFeePerGas), { maxFeePerGasWei: BigInt(operation.envelope.maxFeePerGasAtomic),
         maxPriorityFeePerGasWei: BigInt(operation.envelope.maxPriorityFeePerGasAtomic) }))
         fail("APN_REPREPARE_REQUIRED", "fee_spike");
+    // Nothing was marked yet, so the index may have let this operation go by the clock: after every network read it is
+    // admitted again, refused while another unresolved operation holds the account (QA F03). Only local steps follow (the
+    // hold, the custody signature, the marker); later, inside the signing step, a refusal would release the hold and the
+    // operation would have to be prepared again, so this is the last point a refusal leaves it as it was.
+    await journal.assertOwnClaims(operation.operationId);
     await ports.reserveUsage(operation);
     let raw;
     try {

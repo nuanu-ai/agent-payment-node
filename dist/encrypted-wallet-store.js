@@ -1,11 +1,11 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { domainHash, exactKeys, hashObject, isPlainRecord } from "./canonical.js";
 import { CHAIN_ID } from "./constants.js";
 import { openNested, sealNested } from "./custody-envelope.js";
 import { ApnError } from "./errors.js";
-import { canonicalAddress, canonicalProfile } from "./wallet-policy.js";
+import { canonicalAddress, canonicalProfile, completeWalletCommand } from "./wallet-policy.js";
 import { listEncryptedWalletEnvelopes, listLocalProviderProfiles, listLocalWallets } from "./wallet-import-collision.js";
 import { releaseSettledWalletEffects } from "./wallet-effect-retention.js";
 import { loadOrCreateWrappingSecret, walletWrappingSecretMissing } from "./wrapping-secret-custody.js";
@@ -112,9 +112,8 @@ export class EncryptedWalletStore {
         if (address !== canonicalAddress(expectedAddress) || expectedAddress !== address) {
             throw new ApnError("APN_WALLET_MISMATCH", "Imported wallet address does not match the expected checksum address.");
         }
-        if (await this.state.loadEncryptedWalletEnvelope(profile) !== null) {
-            throw new ApnError("APN_PROFILE_DRIFT", "Wallet profile is already occupied.");
-        }
+        if (await this.state.loadEncryptedWalletEnvelope(profile) !== null)
+            return await this.completeImport(profile, privateKeyInput);
         for (const wallet of await listLocalWallets(this.state)) {
             if (wallet.address.toLowerCase() === address.toLowerCase()) {
                 throw new ApnError("APN_PROFILE_DRIFT", "Wallet address already belongs to a local profile.");
@@ -144,6 +143,43 @@ export class EncryptedWalletStore {
             this.clear(secret);
             wrapping.fill(0);
         }
+    }
+    /**
+     * The identity of a key that was sealed while its public record (`wallet.json`) never got written: a `wallet ensure`
+     * or `wallet import` stopped between the two writes. Proven only by decrypting the envelope: it must authenticate
+     * under the existing wrapping secret, and its key must derive the identity's address (decryptEnvelope). Nothing is
+     * created or written, and a missing wrapping secret is refused with the restore step, never replaced.
+     */
+    async sealedIdentity(profileInput) {
+        const loaded = await this.loadIncomplete(canonicalProfile(profileInput));
+        this.clear(loaded.secret);
+        return loaded.identity;
+    }
+    /**
+     * A retried import into a profile whose earlier create or import sealed a key and stopped before its public record.
+     * It completes only when the key file holds that very key (compared in constant time) and writes nothing here; the
+     * caller then writes the public record. Any other key is refused: an import never replaces a sealed key.
+     */
+    async completeImport(profile, privateKey) {
+        const loaded = await this.loadIncomplete(profile);
+        try {
+            if (!sameKey(loaded.secret.privateKey, privateKey))
+                throw incompleteWalletKeyDiffers(profile);
+            return loaded.identity;
+        }
+        finally {
+            this.clear(loaded.secret);
+        }
+    }
+    async loadIncomplete(profile) {
+        if (await this.state.loadWallet(this.state.profileHash(profile)) !== null) {
+            throw new ApnError("APN_PROFILE_DRIFT", "Wallet profile is already occupied.");
+        }
+        await this.assertWrappingSecretPresent();
+        const loaded = await this.describe(profile);
+        if (loaded === null)
+            throw new ApnError("APN_STATE_CORRUPT", "The sealed wallet key disappeared while it was read.");
+        return loaded;
     }
     async save(identity, secret, wrappingInput, createOnly = false) {
         // Signed material is kept only while it can still be used, so the envelope stays bounded under the state-file cap.
@@ -288,6 +324,24 @@ function validStoredAuthorization(value) {
     catch {
         return false;
     }
+}
+/** Constant-time equality of two canonical private keys; both byte copies are zeroed. */
+function sameKey(left, right) {
+    const a = Buffer.from(left.slice(2), "hex"), b = Buffer.from(right.slice(2), "hex");
+    try {
+        return a.length === 32 && b.length === 32 && timingSafeEqual(a, b);
+    }
+    finally {
+        a.fill(0);
+        b.fill(0);
+    }
+}
+function incompleteWalletKeyDiffers(profile) {
+    return new ApnError("APN_PROFILE_DRIFT", "This profile already holds a different sealed wallet key: an earlier wallet ensure or " +
+        "wallet import sealed it and stopped before writing its public record. An import never replaces a sealed key.", {
+        reason: "incomplete_wallet_key_differs",
+        nextActions: [completeWalletCommand(profile), "To import this key instead, run wallet import with a profile that holds no wallet."],
+    });
 }
 function randomPrivateKey() {
     for (let attempt = 0; attempt < 32; attempt += 1) {

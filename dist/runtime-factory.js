@@ -29,6 +29,7 @@ import { ProviderRegistry } from "./provider-registry.js";
 import { METAMASK_AGENT_WALLET_PROVIDER_ID, MetaMaskProcessAdapter } from "./metamask-process-adapter.js";
 import { StateProfileRepository } from "./profile-repository.js";
 import { EncryptedProviderAuthorizationStore } from "./encrypted-provider-authorization-store.js";
+import { EncryptedProviderRequestReferenceStore } from "./provider-request-reference-store.js";
 import { EncryptedSmartAccountPermissionStore } from "./encrypted-smart-account-permission-store.js";
 import { METAMASK_SMART_ACCOUNT_PROVIDER_ID, LocalSessionKeyFactory, MetaMaskSmartAccountAdapter } from "./metamask-smart-account-adapter.js";
 import { LoopbackMetaMaskConsent } from "./metamask-smart-account-consent.js";
@@ -62,6 +63,7 @@ import { gaslessRpcFactory } from "./gasless/rpc.js";
 import { gaslessObservationRpcFactory } from "./gasless/observation-rpc.js";
 import { TtyGaslessApproval } from "./gasless/tty.js";
 import { MetaMaskGaslessProviderClient } from "./metamask-gasless/client/index.js";
+import { EncryptedMetaMaskGaslessRequestReferenceStore } from "./metamask-gasless/journal/request-reference.js";
 import { TtyMetaMaskRevocationApproval } from "./metamask-gasless/revocation/consent.js";
 import { MetaMaskCliRevocationWallet } from "./metamask-gasless/revocation/wallet.js";
 import { metaMaskGaslessObservationRpcFactory, metaMaskGaslessRpcFactory } from "./metamask-gasless/chain/rpc.js";
@@ -263,6 +265,7 @@ export function createApnCore(bound, options = {}, runtimeCommand = bound.reques
             rpcFor: metaMaskGaslessRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
             observationRpcFor: metaMaskGaslessObservationRpcFactory(process.env, options.clock ?? { now: () => new Date() }),
             provider: new MetaMaskGaslessProviderClient({ environment: process.env, clock: options.clock ?? { now: () => new Date() } }),
+            references: new EncryptedMetaMaskGaslessRequestReferenceStore(state, wrappingSecret),
             ...(bound.request.command === "gasless.transfer.approve" ? { approval: new TtyMetaMaskGaslessApproval() } : {}),
             ...(bound.request.command === "gasless.transfer.revoke" ? { revocation: { approval: new TtyMetaMaskRevocationApproval(),
                     wallet: new MetaMaskCliRevocationWallet() } } : {}),
@@ -308,6 +311,8 @@ export function createApnCore(bound, options = {}, runtimeCommand = bound.reques
         ...(options.wait === undefined ? {} : { wait: options.wait }),
         ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
         ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
+        // Constructing it reads nothing; only a sealed MetaMask request reference reaches the Keychain through it.
+        providerRequestReferences: new EncryptedProviderRequestReferenceStore(state, wrappingSecret),
         ...(bound.request.command === "operation.abandon" || options.operationAbandonApproval !== undefined
             ? { operationAbandonApproval: options.operationAbandonApproval ?? new TtyOperationAbandonApproval() }
             : {}),

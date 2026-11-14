@@ -24,6 +24,12 @@ export declare class CoinbaseGaslessPolicy {
     prepare(op: Pick<OperationRecord, "profile" | "walletAddress" | "recipient" | "amountAtomic" | "operationId">): Promise<CoinbaseGaslessAllowlistBinding>;
     assert(op: OperationRecord): Promise<ActiveAssetPolicy>;
     reserve(op: OperationRecord): Promise<void>;
+    /**
+     * The ledger refuses a new hold with its policy evaluation's own denial (`APN_OPERATION_BLOCKED`, no details) when
+     * another hold took the cap after this policy's check. When the ledger holds no hold of this operation, the policy is
+     * checked again with today's usage and its refusal is returned; anything else, a replay included, is unchanged.
+     */
+    private reservationRefusal;
     /** Journal state wins after a crash. Uncertain provider effects retain the full reservation. */
     reconcile(op: OperationRecord, recoveringStarted?: boolean): Promise<void>;
 }

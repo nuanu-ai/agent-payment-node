@@ -1,5 +1,4 @@
 import type { ErrorDetail } from "../../errors.js";
-import type { MetaMaskGaslessIntent } from "../model.js";
 import { type MetaMaskGaslessFailureReason } from "../reasons.js";
 /**
  * How the `tx` of a MetaMask job answer compares with the bound request, as closed facts only: no address, number or
@@ -18,7 +17,16 @@ export interface MetaMaskJobTx {
     /** Whether a readable chain id names the request's chain; null when there is none. */
     readonly chainIdMatches: boolean | null;
 }
-export declare function jobTx(value: unknown, intent: Pick<MetaMaskGaslessIntent, "binding" | "request">): MetaMaskJobTx;
+/** The bound sender and chain a job answer is compared with: a gasless intent, or a native transfer's server request read. */
+export interface MetaMaskJobBinding {
+    readonly binding: {
+        readonly address: string;
+    };
+    readonly request: {
+        readonly chainId: number;
+    };
+}
+export declare function jobTx(value: unknown, intent: MetaMaskJobBinding): MetaMaskJobTx;
 export declare function validateJobTx(value: unknown, reason: MetaMaskGaslessFailureReason): MetaMaskJobTx;
 /** The facts as flat error details under `prefix` (ErrorDetail values only; a null fact is left out). */
 export declare function jobTxDetails(prefix: string, t: MetaMaskJobTx | null): Record<string, ErrorDetail>;

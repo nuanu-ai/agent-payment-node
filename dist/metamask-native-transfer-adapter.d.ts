@@ -2,6 +2,7 @@ import { type Address } from "viem";
 import { type MetaMaskNativeDeadlineInput, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
 import type { Hex } from "./model.js";
 import { type MetaMaskMfaNotice } from "./metamask-process-output.js";
+import { type MetaMaskNativeRequestBinding } from "./metamask-native-request-server-read.js";
 import { type MetaMaskNativeFeeChainId } from "./metamask-native-fee-evidence.js";
 import { type MetaMaskNativeOwnedScope, type MetaMaskNativeOwnedContext } from "./metamask-native-transfer-owner.js";
 /** What the vendor CLI reported for the selected wallet; `vendorPolicyHash` pins the policy bytes between prepare and send. */
@@ -52,7 +53,7 @@ export declare class MetaMaskNativeHandoffNotStarted extends Error {
 export declare function submitOwnedMetaMaskNative(scope: MetaMaskNativeOwnedScope, context: MetaMaskNativeOwnedContext): Promise<MetaMaskNativeSubmission>;
 /** Transient read evidence only. No field grants financial authority or changes a held journal. */
 export interface MetaMaskNativeReadObservation {
-    readonly stage: "not_requested" | "input" | "before_guard" | "watch" | "after_guard" | "complete";
+    readonly stage: "not_requested" | "input" | "before_guard" | "watch" | "server_read" | "after_guard" | "complete";
     /** Request reads bracket the watch with the session project only (`project_before`, `project_after`); other steps are kept for old outputs. */
     readonly guard_step: "project_before" | "address_before" | "trading_mode" | "vendor_policy" | "address_after" | "project_after" | null;
     readonly request_id: string | null;
@@ -67,6 +68,22 @@ export interface MetaMaskNativeReadObservation {
     readonly reason: string | null;
     readonly error_code: "APN_OPERATION_BLOCKED" | "APN_PROVIDER_PROTOCOL" | "APN_PROVIDER_UNAVAILABLE" | "APN_STATE_CORRUPT" | "unavailable" | null;
     readonly diagnostic: MetaMaskNativeDiagnostic | null;
+    /** Present only when the watch answered `metamask_request_not_in_local_state` and APN read the request from MetaMask's server. */
+    readonly server_read?: MetaMaskNativeServerReadObservation;
+}
+/**
+ * APN's own read of the request from MetaMask's server by its stored id (metamask-native-request-server-read.ts).
+ * `verified`: the answer named this request, kind transaction, the transfer's sender and chain; its status and hash are
+ * recorded above exactly as a watch's would be. `not_found`: the server answered 404, which proves nothing. `refused`:
+ * nothing usable was read; `reason` is a closed reason (`metamask_session_project_changed` for another signed-in
+ * project, an `mm_gasless_*` reason of the helper otherwise) and `check` the answer check that refused, when one did.
+ */
+export interface MetaMaskNativeServerReadObservation {
+    readonly outcome: "verified" | "not_found" | "refused";
+    /** The SHA-256 of the server's answer bytes, for a verified answer only. */
+    readonly response_hash: string | null;
+    readonly reason: string | null;
+    readonly check: string | null;
 }
 type RequestHint = {
     readonly disposition: "acknowledged";
@@ -92,7 +109,9 @@ export type MetaMaskNativeRequestObservation = RequestHint & {
 /**
  * Normal status READ only (three vendor processes): the session project before, the watch, the project after. The owner
  * supplies the request id and project hash from its authentic journal; a service hint is never chain evidence, so no
- * policy is read around it.
+ * policy is read around it. When the watch answers that mm's own local request list no longer holds the request (a
+ * new `mm login` starts that list empty) and the owner supplies the transfer's sender and chain, the request is read
+ * once from MetaMask's server instead, inside the same project bracket; that read never sends, signs or approves.
  */
-export declare function readMetaMaskNativeRequest(requestId: string, vendorProjectHash: string): Promise<MetaMaskNativeRequestObservation>;
+export declare function readMetaMaskNativeRequest(requestId: string, vendorProjectHash: string, binding?: MetaMaskNativeRequestBinding): Promise<MetaMaskNativeRequestObservation>;
 export {};

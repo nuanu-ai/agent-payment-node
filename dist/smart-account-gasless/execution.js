@@ -1,3 +1,4 @@
+import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { saPolicyHash, saSame } from "./integrity.js";
 import { saVerifyAccepted } from "./model.js";
 import { assertSmartAccountGaslessBinding, smartAccountGaslessOwner } from "./owner.js";
@@ -77,7 +78,7 @@ export class SmartAccountGaslessExecution {
             return await this.observe(op);
         if (!["execution_pending", "material_pending", "material_sealed"].includes(op.state) || op.approval === null)
             saFail("sa_gasless_state_corrupt");
-        let writing = false;
+        let writing = false, accountRefusal = undefined;
         const persist = async (patch, at = new Date(this.clock.check(op)).toISOString()) => {
             writing = true;
             op = await this.save(op, patch, at);
@@ -114,6 +115,16 @@ export class SmartAccountGaslessExecution {
             this.clock.live(op);
             await this.guard(op, false, sealed);
             assertSmartAccountGaslessCapacity(op);
+            // Exposure is the first step that leaves APN, and the index may have let an unexposed transfer go by the clock: after
+            // every read it is admitted again, refused while another unresolved operation holds the account. A refusal leaves
+            // the sealed, unexposed material for a later run (QA F03).
+            try {
+                await assertOwnClaimsAvailable(this.state, op.operationId);
+            }
+            catch (error) {
+                accountRefusal = error;
+                throw error;
+            }
             const exposureAt = new Date(this.clock.live(op)).toISOString();
             await persist({ state: "exposure_pending", exposureAttempts: 1, exposureStartedAt: exposureAt }, exposureAt);
             const exposed = await this.material.markExposed(op, sealed);
@@ -141,6 +152,8 @@ export class SmartAccountGaslessExecution {
             }
         }
         catch (error) {
+            if (accountRefusal !== undefined && error === accountRefusal)
+                throw error;
             const failure = saClassify(error, "sa_gasless_internal");
             // An operation-first write may already be durable. A rejected write never authorizes another write or effect here.
             if (writing || failure.reason === "sa_gasless_state_corrupt")

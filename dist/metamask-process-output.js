@@ -81,6 +81,34 @@ export function metaMaskMfaNotice(notices) {
         authMethod: typeof authMethod === "string" && /^[a-z][a-z0-9_-]{0,31}$/u.test(authMethod) ? authMethod : null,
     };
 }
+const LOCAL_STATE_HINT = "Run `mm wallet requests list` to see open requests, then copy a polling ID.";
+const SERVER_HINT = "The request was not found on the server — it may have expired or already completed. Run `mm wallet requests list`, or re-run the command.";
+/**
+ * The miss in mm's parsed stderr answer (`{"ok":false,"error":{…}}`, or `{"_error":{…}}` after a notice) for the watched
+ * id, by 6.1.5's exact wording: the local miss names the id itself ("No pending wallet request found for polling id
+ * <id>.") beside its fixed hint; a server miss carries its own fixed hint. Undefined for any other answer.
+ */
+export function metaMaskRequestNotFound(answer, requestId) {
+    if (!isPlainRecord(answer))
+        return undefined;
+    const error = exactKeys(answer, ["ok", "error"]) && answer.ok === false ? answer.error
+        : exactKeys(answer, ["_error"]) ? answer._error : undefined;
+    if (!isPlainRecord(error) || error.code !== "REQUEST_NOT_FOUND")
+        return undefined;
+    if (error.message === `No pending wallet request found for polling id ${requestId}.` && error.hint === LOCAL_STATE_HINT)
+        return "local_state";
+    return error.hint === SERVER_HINT ? "server" : "unattributed";
+}
+/**
+ * The reason for a watch that wrote nothing to stdout because it answered REQUEST_NOT_FOUND on stderr (the runner's
+ * `requestNotFound`); undefined for every other watch, which keeps its own classification.
+ */
+export function metaMaskWatchMissReason(result) {
+    if (result.requestNotFound === undefined || result.stdout.toString("utf8").trim().length !== 0)
+        return undefined;
+    return result.requestNotFound === "local_state" ? "metamask_request_not_in_local_state"
+        : result.requestNotFound === "server" ? "metamask_request_not_found_on_server" : "provider_request_not_found";
+}
 function parseRecord(text) {
     try {
         const value = JSON.parse(text);

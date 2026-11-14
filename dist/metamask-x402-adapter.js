@@ -1,6 +1,6 @@
 import { canonicalJson, isPlainRecord } from "./canonical.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
-import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import { classifyMetaMaskPendingNotices, metaMaskWatchMissReason, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 const PENDING_STATES = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING"]);
 const SUCCESS_STATES = new Set(["SIGNED", "APPROVED"]);
 const FAILURE_STATES = new Set(["FAILED"]);
@@ -134,8 +134,9 @@ function parseSigningResult(result, expected) {
 }
 function parseWatchResult(result, recoveryToken) {
     const parsed = parseMetaMaskProcessOutput(result.stdout);
+    // A REQUEST_NOT_FOUND on stderr names where mm missed the request (its local list, or MetaMask's server): never proof.
     if (parsed === null)
-        return ambiguous("provider_response_malformed");
+        return ambiguous(metaMaskWatchMissReason(result) ?? "provider_response_malformed");
     const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices, recoveryToken);
     if (pendingNotice.disposition === "invalid")
         return ambiguous(pendingNotice.reason);

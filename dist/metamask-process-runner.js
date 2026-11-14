@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { ApnError } from "./errors.js";
 import { isPlainRecord, sha256 } from "./canonical.js";
-import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import { classifyMetaMaskPendingNotices, metaMaskMfaNotice, metaMaskRequestNotFound, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 import { metaMaskJsonAnswer, observeMetaMaskProcess } from "./metamask-process-observation.js";
 import { METAMASK_FOREGROUND_TIMEOUT_MS, METAMASK_PROCESS_TIMEOUT_MS, resolveMetaMaskBin, } from "./metamask-package.js";
 const MAX_JSON_BYTES = 1024 * 1024;
@@ -218,6 +218,22 @@ export class NodeMetaMaskProcessRunner {
                     bytes.fill(0);
                 }
             };
+            // The watched id, for a `wallet requests watch <id>` child only: its stderr answer may say where mm missed the request.
+            const watchedId = argv[3], watched = argv[0] === "wallet" && argv[1] === "requests" && argv[2] === "watch" ? watchedId : undefined;
+            const requestNotFound = () => {
+                if (watched === undefined || stderrSize === 0 || stderrOverflow)
+                    return undefined;
+                const bytes = Buffer.concat(stderrChunks);
+                try {
+                    return metaMaskRequestNotFound(metaMaskJsonAnswer(bytes.toString("utf8")), watched);
+                }
+                catch {
+                    return undefined;
+                }
+                finally {
+                    bytes.fill(0);
+                }
+            };
             const observe = (outcome, exitCode, signal) => {
                 const out = Buffer.concat(chunks), err = Buffer.concat(stderrChunks);
                 try {
@@ -294,9 +310,10 @@ export class NodeMetaMaskProcessRunner {
                 const stdout = Buffer.concat(chunks);
                 const signal = ["SIGTERM", "SIGKILL", "SIGINT", "SIGHUP", "SIGABRT", "SIGSEGV", "SIGPIPE"].includes(rawSignal ?? "") ? rawSignal : null;
                 const stderr = stderrObservation(), nativeDiagnostic = diagnostic(stage, signal !== null ? "signal" : code === 0 ? "ok" : "exit", code, signal, stderr.stderrClass, stderr.providerCode);
-                const observation = observe(signal !== null ? "signal" : "exit", code, signal);
+                const observation = observe(signal !== null ? "signal" : "exit", code, signal), miss = requestNotFound();
                 zero();
-                resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }), observation });
+                resolveResult({ exitCode: code ?? 1, stdout, ...(absoluteDeadline === undefined ? {} : { nativeDiagnostic }), observation,
+                    ...(miss === undefined ? {} : { requestNotFound: miss }) });
             };
             const timeout = setTimeout(() => {
                 fail(providerUnavailable("The MetaMask Agent Wallet process timed out safely."), true);

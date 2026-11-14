@@ -1,5 +1,6 @@
 import { ChainPolicyService } from "./chain-policy-service.js";
 import type { DirectRailPort, RailEffectBinding, RailInspection, RailSendBinding, RailSignedEffect } from "./direct-rail-ports.js";
+import { ApnError } from "./errors.js";
 import type { OperationService } from "./operation-service.js";
 import { type RailOperationRecord, type RailState } from "./rail-operation-model.js";
 import type { RailOperationRepository } from "./rail-operation-repository.js";
@@ -53,5 +54,45 @@ export declare class RailOperationLifecycle {
     /** The journal owns the effect state; the shared usage ledger follows it forward, idempotently. */
     followUsage(operation: RailOperationRecord): Promise<RailOperationRecord>;
 }
+/** Owner, chain-policy and allowlist refusals of the frozen transfer, in the codes those services refuse with. */
+declare function ownerPolicyRefusal(error: ApnError): boolean;
+/** The owner's answer on the approval screen, or a refusal of the frozen transfer by its policies or by the chain. */
+declare function approvalRefusal(error: ApnError): boolean;
+/** Each pre-effect stop that catches every error: the refusal that keeps the step's reason, and the prefix for the rest. */
+declare const RAIL_STOPS: {
+    readonly approval: {
+        readonly refused: typeof approvalRefusal;
+        readonly refusal: "approval_or_pre_effect_validation_refused";
+        readonly prefix: "approval_or_pre_effect_validation";
+    };
+    readonly chain_policy: {
+        readonly refused: typeof ownerPolicyRefusal;
+        readonly refusal: "chain_policy_refused_at_approval";
+        readonly prefix: "chain_policy_check";
+    };
+    readonly usage_reservation: {
+        readonly refused: (error: ApnError) => boolean;
+        readonly refusal: "allowlist_refused_at_approval";
+        readonly prefix: "usage_reservation";
+    };
+    readonly pre_sign: {
+        readonly refused: (error: ApnError) => boolean;
+        readonly refusal: "pre_sign_owner_or_policy_changed";
+        readonly prefix: "pre_sign_policy_check";
+    };
+    readonly pre_send: {
+        readonly refused: typeof railEffectProvenUnsendable;
+        readonly refusal: "never_submitted_frozen_effect_no_longer_valid";
+        readonly prefix: "pre_send_policy_check";
+    };
+};
+/**
+ * The saved cause of a stop before any effect. The step's own refusal keeps its reason; any other APN error, such as a
+ * state or ledger failure (`APN_STATE_SECURITY`), is `<prefix>_<code in lower case>`, as the Stargate token rail names
+ * it, and a non-APN error is `<prefix>_failed`. The stop itself is the same. Records written before keep their reason.
+ */
+export declare function railStopReason(step: keyof typeof RAIL_STOPS, error: unknown): string;
+/** Expiry, funding, fee, owner-policy or custody refusals prove the frozen effect must not be sent; RPC failures prove nothing. */
+declare function railEffectProvenUnsendable(error: unknown): boolean;
 export declare function binding(operation: RailOperationRecord): RailEffectBinding;
 export {};

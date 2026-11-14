@@ -12,7 +12,7 @@ import { canonicalProfile } from "./wallet-policy.js";
 import { DirectAllowlistGate, refuse } from "./direct-allowlist-gate.js";
 import { railAllowlistSubject, requireListedRailAsset } from "./rail-direct-allowlist.js";
 import { RailPrepareClaimStore, RailApprovalClaimStore, sealPrepareClaim, sealApprovalClaim } from "./rail-operation-claims.js";
-import { RailOperationLifecycle, binding } from "./rail-operation-lifecycle.js";
+import { RailOperationLifecycle, binding, railStopReason } from "./rail-operation-lifecycle.js";
 import { reportingRateLimits } from "./rpc-rate-limit.js";
 export class RailOperationService {
     context;
@@ -221,7 +221,7 @@ export class RailOperationService {
                 await this.lifecycle.revalidate(operation, adapter);
             }
             catch (error) {
-                await this.lifecycle.move(operation, "failed_before_effect", "approval_or_pre_effect_validation_refused", "durable_pre_effect");
+                await this.lifecycle.move(operation, "failed_before_effect", railStopReason("approval", error), "durable_pre_effect");
                 throw error;
             }
             if (adapter.execution === "provider_atomic")
@@ -292,7 +292,7 @@ export class RailOperationService {
                 await this.lifecycle.assertCurrentRailPolicy(operation);
             }
             catch (error) {
-                await this.failApprovalClaim(operation, claim, claims, "approval_or_pre_effect_validation_refused");
+                await this.failApprovalClaim(operation, claim, claims, railStopReason("approval", error));
                 throw error;
             }
             let send;

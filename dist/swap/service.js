@@ -8,9 +8,11 @@ import { admittedSwapProtocol, swapAdmissionMechanisms } from "./route-admission
 import { createSwapQuote } from "./quote.js";
 import { newSwapOperation, SWAP_TERMINAL_STATES, validateSwapOperation, validateSwapReceiptProof } from "./model.js";
 import { SwapOperationRepository } from "./repository.js";
+import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 import { swapUnlandedProofHash, validateSwapUnlandedProof } from "./unlanded.js";
 import { isIdempotencyKey } from "../idempotency-key-contract.js";
+import { evaluateSwapAssetAdmission, GUARDED_SWAP_INVENTORY, swapOwnerAdmissionRequired, swapReservationRefusal, swapRouteGapSide } from "./owner-admission.js";
 export class GuardedSwapService {
     operations;
     usage;
@@ -26,20 +28,29 @@ export class GuardedSwapService {
         const quote = createSwapQuote(input.quote), at = instant(input.now), policy = validateAssetPolicyRegistry(input.assetPolicy);
         if (at < quote.effectiveAt || at >= quote.expiresAt)
             invalid("Swap quote is expired or not yet effective.");
-        const admission = evaluateAssetPolicy(policy, { chain: quote.sourceAsset.chain,
-            asset: quote.sourceAsset.kind === "native" ? { kind: "native", identifier: null } :
-                { kind: "token", identifier: quote.sourceAsset.identifier }, rail: "swap", amountAtomic: quote.inputAmountAtomic,
-            dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
-        const destinationAdmission = evaluateAssetPolicy(policy, { chain: quote.destinationAsset.chain,
-            asset: quote.destinationAsset.kind === "native" ? { kind: "native", identifier: null } :
-                { kind: "token", identifier: quote.destinationAsset.identifier }, rail: "swap", amountAtomic: quote.minimumOutputAtomic,
-            dailyUsageAtomic: "0", asOfDate: at.slice(0, 10), asOf: at });
+        const protocolRegistry = validateSwapProtocolRegistry(input.protocolRegistry);
+        // An asset the active policy does not list, admit for the swap rail or admit with this lane's route refuses as
+        // swap_owner_admission_required and names the asset; the lane's inventory prints the route to admit.
+        const families = new Set(protocolRegistry.records.filter(({ pin }) => pin.chain === quote.sourceAsset.chain).map(({ pin }) => pin.protocolFamily));
+        const inventory = families.size === 1 ? GUARDED_SWAP_INVENTORY[[...families][0]] : null;
+        const subject = (side) => ({ profile: quote.profile, side, inventory,
+            asset: side === "source" ? quote.sourceAsset : quote.destinationAsset });
+        const admission = evaluateSwapAssetAdmission(policy, subject("source"), { amountAtomic: quote.inputAmountAtomic, dailyUsageAtomic: "0" }, at);
+        const destinationAdmission = evaluateSwapAssetAdmission(policy, subject("destination"), { amountAtomic: quote.minimumOutputAtomic, dailyUsageAtomic: "0" }, at);
         // The recipient pin (OD-1) of each swap row binds the swap: the spent asset's and the received asset's.
         assertRecipientAdmitted({ admission, recipient: quote.recipient });
         assertRecipientAdmitted({ admission: destinationAdmission, recipient: quote.recipient });
         // Both assets must admit the installed lane's route (protocol, router, pools); its internal version is APN's own.
-        const protocolRegistry = validateSwapProtocolRegistry(input.protocolRegistry);
-        const mechanismDigest = admittedSwapProtocol(protocolRegistry, quote.sourceAsset.chain, admission.asset, destinationAdmission.asset, input.laneMechanismDigest).mechanismDigest;
+        let mechanismDigest;
+        try {
+            mechanismDigest = admittedSwapProtocol(protocolRegistry, quote.sourceAsset.chain, admission.asset, destinationAdmission.asset, input.laneMechanismDigest).mechanismDigest;
+        }
+        catch (error) {
+            const side = swapRouteGapSide(error);
+            if (side === null)
+                throw error;
+            throw swapOwnerAdmissionRequired(subject(side), "swap_route_not_admitted", error.message);
+        }
         const idempotencyHash = swapIdempotencyHash(input.idempotencyKey);
         const operationId = preparedSwapOperationId(quote.profile, input.idempotencyKey);
         let operation = await this.operations.create(newSwapOperation({ operationId, idempotencyHash, quote,
@@ -61,10 +72,20 @@ export class GuardedSwapService {
             blocked("Swap asset policy does not match the prepared operation.");
         }
         assertPolicyBindings(operation, registry, at);
-        const lease = await this.usage.reserve({ account: operation.quote.account, chain: operation.quote.sourceAsset.chain,
-            asset: operation.quote.sourceAsset.kind === "native" ? { kind: "native", identifier: null } :
-                { kind: "token", identifier: operation.quote.sourceAsset.identifier }, registry: policy, rail: "swap",
-            amountAtomic: operation.quote.inputAmountAtomic, idempotencyKey: `swap-${operation.idempotencyHash}`, now });
+        const idempotencyKey = `swap-${operation.idempotencyHash}`;
+        let lease;
+        try {
+            lease = await this.usage.reserve({ account: operation.quote.account, chain: operation.quote.sourceAsset.chain,
+                asset: operation.quote.sourceAsset.kind === "native" ? { kind: "native", identifier: null } :
+                    { kind: "token", identifier: operation.quote.sourceAsset.identifier }, registry: policy, rail: "swap",
+                amountAtomic: operation.quote.inputAmountAtomic, idempotencyKey, now });
+        }
+        catch (error) {
+            // At approval the shared daily usage decides: a cap the reservation exceeds is named, nothing else changes.
+            throw await swapReservationRefusal(error, this.usage, { policy: registry, account: operation.quote.account, idempotencyKey, now,
+                amountAtomic: operation.quote.inputAmountAtomic,
+                subject: { profile: operation.quote.profile, side: "source", asset: operation.quote.sourceAsset, inventory: null } });
+        }
         return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "reserved", { usageLease: lease }, now);
     }
     async markSubmitting(operation, now) {
@@ -75,6 +96,9 @@ export class GuardedSwapService {
             blocked("The guarded stable Orca route has no submission capability.");
         const markedAt = assertLiveQuote(operation, now), markerBody = { operationId: operation.operationId, operationIntegrityHash: operation.integrityHash,
             unsignedTransactionPayloadHash: operation.quote.unsignedTransactionPayloadHash, markedAt };
+        // Every lane signs only after this marker. An unmarked swap the index let go by the clock re-takes its account here,
+        // and another unresolved operation on the account refuses it (QA F03: a clock that ran ahead and went back).
+        await assertOwnClaimsAvailable(this.operations, operation.operationId);
         return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "submitting", {
             submissionMarker: { markerHash: domainHash("apn.swap-submission-marker.v1", canonicalJson(markerBody)), markedAt,
                 operationIntegrityHash: operation.integrityHash,

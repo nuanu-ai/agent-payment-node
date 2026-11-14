@@ -10,6 +10,15 @@ export function mmPrivateHash(kind, value, referenceKind) {
     const purpose = `apn.metamask-gasless.${kind}.v1`;
     return referenceKind === undefined ? hashObject({ purpose, value }) : hashObject({ purpose, kind: referenceKind, value });
 }
+/**
+ * The hash that names the provider request in journals, receipts and output: kept as such by a record that seals the
+ * request id, derived from the id itself in a record an earlier release wrote. The two give the same value.
+ */
+export function mmRequestIdHash(intent) {
+    if (intent.requestIdHash !== undefined)
+        return intent.requestIdHash;
+    return intent.requestId === undefined ? mmFail("mm_gasless_state_corrupt") : mmPrivateHash("request-id", intent.requestId);
+}
 export function mmProfileIdentity(value) {
     const p = validateProviderProfile(value);
     if (p.provider_id !== "metamask-agent-wallet")

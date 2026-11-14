@@ -11,6 +11,7 @@ export declare class FileStargateNativeJournal implements StargateNativeJournal 
     /** The same per-account lock every other EVM writer holds, so no other family can race this nonce. */
     withOwnerLock<T>(owner: Address, work: () => Promise<T>): Promise<T>;
     admit<T>(operation: StargateAdmission, work: () => Promise<T>): Promise<T>;
+    assertOwnClaims(operationId: string): Promise<void>;
     load(id: string): Promise<StargateNativeOperation | null>;
     save(nextInput: StargateNativeOperation): Promise<void>;
 }

@@ -1,6 +1,8 @@
 import { ApnError } from "./errors.js";
 import type { WrappingSecretPort } from "./macos-keychain.js";
 import type { SecureStateStore } from "./secure-state-store.js";
+/** A sealed record whose login-Keychain wrapping secret is gone: only restoring the item can open it again. */
+export declare function sealedRecordWrappingSecretMissing(message: string): ApnError;
 /**
  * A local wallet whose login-Keychain wrapping secret is gone. Wallet status, ensure and doctor refuse it with this
  * reason instead of calling it ready.

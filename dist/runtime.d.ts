@@ -22,6 +22,7 @@ import type { TransferApprovalPort } from "./tty-approval.js";
 import type { ProviderX402Repository } from "./provider-x402-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
+import type { ProviderRequestReferencePort } from "./provider-request-reference-store.js";
 import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
@@ -136,6 +137,8 @@ export interface CoreDependencies {
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+    /** The sealed provider request ids of MetaMask native and provider direct transfers (provider-request-reference-store.ts). */
+    readonly providerRequestReferences?: ProviderRequestReferencePort;
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
     /** Keyless public reads at a chain's finalized tag, for the R4 proofs of operations no family runtime observes. */
     readonly finalizedRead?: FinalizedReader;
@@ -211,6 +214,8 @@ export declare class RuntimeContext {
     readonly providerX402Repository?: ProviderX402Repository;
     readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
     readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+    /** The sealed provider request ids of MetaMask native and provider direct transfers (provider-request-reference-store.ts). */
+    readonly providerRequestReferences?: ProviderRequestReferencePort;
     readonly operationAbandonApproval?: OperationAbandonApprovalPort;
     readonly finalizedRead?: FinalizedReader;
     readonly circleSourceDelivery?: CircleSolanaDeliveryReader;
@@ -234,5 +239,6 @@ export declare class RuntimeContext {
     requireRpcUrl(chain: RpcChain): string;
     requireCoinbaseRpcUrl(): string;
     requireProviderAuthorizationStore(): ProviderAuthorizationStorePort;
+    requireProviderRequestReferences(): ProviderRequestReferencePort;
     nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest;
 }

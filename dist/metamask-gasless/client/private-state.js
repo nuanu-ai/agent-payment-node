@@ -11,7 +11,7 @@ const SESSION_MAX = 256 * 1024;
 const WALLETS_MAX = 1024 * 1024;
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const CLOSE_ON_EXEC = constants.O_CLOEXEC ?? 0;
-export async function readPrivateState(homeDirectory, expected, now) {
+export async function readPrivateSession(homeDirectory, now) {
     if (typeof homeDirectory !== "string" || homeDirectory.length < 1 || homeDirectory.length > 4096 ||
         !isAbsolute(homeDirectory) || resolve(homeDirectory) !== homeDirectory || !(now instanceof Date) ||
         !Number.isSafeInteger(now.getTime()))
@@ -28,7 +28,11 @@ export async function readPrivateState(homeDirectory, expected, now) {
         mmFail("mm_gasless_state_busy");
     const sessionEnvelope = parseObject(secondSession.bytes), walletEnvelope = parseObject(secondWallet.bytes);
     const session = validateSession(sessionEnvelope, now), walletState = validateWallet(walletEnvelope);
-    const projectId = session.projectId, token = session.cliToken;
+    return { sessionEnvelope, walletEnvelope, session, walletState, token: session.cliToken, projectId: session.projectId,
+        generationHash: sha(`${secondSession.hash}\0${secondWallet.hash}`) };
+}
+export async function readPrivateState(homeDirectory, expected, now) {
+    const { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, generationHash } = await readPrivateSession(homeDirectory, now);
     const selected = walletState.selectedWallet;
     const ref = selected.ref;
     const referenceKind = Object.keys(ref)[0];
@@ -49,8 +53,7 @@ export async function readPrivateState(homeDirectory, expected, now) {
         walletIdHash: mmWalletIdentityHash(address), namespace: "eip155", mode: "server", environment: "prod" });
     if ("providerId" in expected)
         mmAssertSameBinding(binding, expected);
-    return { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, address,
-        binding, generationHash: sha(`${secondSession.hash}\0${secondWallet.hash}`) };
+    return { sessionEnvelope, walletEnvelope, session, walletState, token, projectId, address, binding, generationHash };
 }
 function validateSession(envelope, now) {
     const root = mmExact(envelope, ["schemaVersion", "data"], "mm_gasless_state_corrupt");

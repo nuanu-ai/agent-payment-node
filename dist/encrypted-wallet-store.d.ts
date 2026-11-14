@@ -49,6 +49,20 @@ export declare class EncryptedWalletStore {
         readonly secret: WalletSecretState;
     }>;
     importNew(profileInput: string, privateKeyInput: string, expectedAddress: string): Promise<WalletIdentity>;
+    /**
+     * The identity of a key that was sealed while its public record (`wallet.json`) never got written: a `wallet ensure`
+     * or `wallet import` stopped between the two writes. Proven only by decrypting the envelope: it must authenticate
+     * under the existing wrapping secret, and its key must derive the identity's address (decryptEnvelope). Nothing is
+     * created or written, and a missing wrapping secret is refused with the restore step, never replaced.
+     */
+    sealedIdentity(profileInput: string): Promise<WalletIdentity>;
+    /**
+     * A retried import into a profile whose earlier create or import sealed a key and stopped before its public record.
+     * It completes only when the key file holds that very key (compared in constant time) and writes nothing here; the
+     * caller then writes the public record. Any other key is refused: an import never replaces a sealed key.
+     */
+    private completeImport;
+    private loadIncomplete;
     save(identity: WalletIdentity, secret: WalletSecretState, wrappingInput?: Buffer, createOnly?: boolean): Promise<void>;
     clear(secret: WalletSecretState): void;
     /**

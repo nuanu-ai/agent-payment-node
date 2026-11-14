@@ -53,8 +53,17 @@ export class UniswapTokenObserver {
         if (gasUsed > BigInt(cap.gasLimit) || effectivePrice > BigInt(cap.maxFeePerGas))
             blocked("Actual network fee exceeds its effect cap.", "uniswap_token_gas_cap");
         const tag = block.tag, gasDebitWei = (gasUsed * effectivePrice).toString();
+        // The effect's own block state; a primary without an archive serves it only while it keeps that block's state.
+        const atEffect = async (items) => {
+            try {
+                return await tokenBatch(rpc, "archive", items);
+            }
+            catch (error) {
+                throw statusStateRefused(error, rpc, op, blockNumber, BigInt(safe.number));
+            }
+        };
         if (status === 0n || kind !== "swap") {
-            const [rawAllowance] = await tokenBatch(rpc, "archive", [allowanceRequest(op, tag)]), allowance = BigInt(evmRpcHex(rawAllowance, 32));
+            const [rawAllowance] = await atEffect([allowanceRequest(op, tag)]), allowance = BigInt(evmRpcHex(rawAllowance, 32));
             await recheck(rpc, block, safe);
             if (status === 0n)
                 return { status: "reverted", transactionHash: hash, gasDebitWei, allowanceAtomic: allowance.toString() };
@@ -66,8 +75,8 @@ export class UniswapTokenObserver {
             blocked("Receipt status is invalid.", "uniswap_token_receipt_conflict");
         const before = `0x${(blockNumber - 1n).toString(16)}`;
         const [first, second] = await Promise.all([
-            tokenBatch(rpc, "archive", [allowanceRequest(op, tag), balanceRequest(op.route.inputToken, op.account, before), balanceRequest(op.route.inputToken, op.account, tag)]),
-            tokenBatch(rpc, "archive", [balanceRequest(op.route.outputToken, op.route.recipient, before), balanceRequest(op.route.outputToken, op.route.recipient, tag)]),
+            atEffect([allowanceRequest(op, tag), balanceRequest(op.route.inputToken, op.account, before), balanceRequest(op.route.inputToken, op.account, tag)]),
+            atEffect([balanceRequest(op.route.outputToken, op.route.recipient, before), balanceRequest(op.route.outputToken, op.route.recipient, tag)]),
         ]), allowance = BigInt(evmRpcHex(first[0], 32)), inputBefore = BigInt(evmRpcHex(first[1], 32)), inputAfter = BigInt(evmRpcHex(first[2], 32)), outputBefore = BigInt(evmRpcHex(second[0], 32)), outputAfter = BigInt(evmRpcHex(second[1], 32));
         await recheck(rpc, block, safe);
         if (inputAfter > inputBefore || outputAfter < outputBefore)
@@ -75,6 +84,29 @@ export class UniswapTokenObserver {
         return { status: "success", transactionHash: hash, gasDebitWei, allowanceAtomic: allowance.toString(),
             inputDebitAtomic: (inputBefore - inputAfter).toString(), outputCreditAtomic: (outputAfter - outputBefore).toString() };
     }
+}
+/** How many recent blocks of state a pruning full node keeps (geth's default; public endpoints serve about as many). */
+const PRUNED_STATE_DEPTH = 128n;
+/**
+ * Without APN_ETHEREUM_ARCHIVE_RPC_URL the primary serves the reads pinned to the effect's block. When it answers one of
+ * them with a JSON-RPC error (not a rate limit, a revert or a transport failure) and the block is provably older than a
+ * pruning node keeps (the safe head, at or below the latest head, is more than 128 blocks past it), status names the
+ * archive setting and the command to run again. A nearer block's refusal (a load-balanced backend behind, a provider
+ * reporting a revert as -32000) and any failure of a configured archive are returned unchanged.
+ */
+function statusStateRefused(error, rpc, op, block, safeHead) {
+    const details = error instanceof ApnError && error.code === "APN_RPC_PROTOCOL" ? error.details : undefined;
+    if (rpc.archiveConfigured?.() !== false || details === undefined || details.rpcSubcallId === undefined || details.providerCode === 3 ||
+        safeHead - block <= PRUNED_STATE_DEPTH)
+        return error;
+    return new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", `Uniswap token status needs the token state at the effect's block ${block}, ` +
+        "and the primary RPC refused that read. Without APN_ETHEREUM_ARCHIVE_RPC_URL the primary serves it, and a pruning node keeps a block's " +
+        "state for about 128 blocks.", { reason: "uniswap_token_status_archive_required", endpointRole: "primary", blockNumber: block.toString(),
+        safeBlockNumber: safeHead.toString(),
+        ...(typeof details.rpcMethod === "string" ? { rpcMethod: details.rpcMethod } : {}),
+        ...(typeof details.providerCode === "number" ? { providerCode: details.providerCode } : {}),
+        nextActions: ["Set APN_ETHEREUM_ARCHIVE_RPC_URL to a public HTTPS Ethereum archive endpoint, then run status again.",
+            `apn swap ethereum uniswap-token status --operation ${op.operationId}`] });
 }
 function pending(transactionHash) {
     return { status: "pending", transactionHash: evmRpcHex(transactionHash, 32), gasDebitWei: "0", allowanceAtomic: "0" };

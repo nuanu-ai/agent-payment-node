@@ -17,6 +17,10 @@ type Call = (method: string, params: readonly unknown[]) => Promise<unknown>;
 export declare class StargateDestinationScanStore extends SecureStateStore {
     cursor(operationId: string, scope: "token-oft" | "native-oft"): StargateScanCursor;
 }
+/** A provider may ignore the requested `fromBlock`/`toBlock` and answer a log outside the scan. A log above the
+ * finality head is not final yet, and a log below the frozen baseline predates the operation, so neither is a delivery
+ * candidate. Both destination paths skip such a log the same way they skip a row from another emitter. */
+export declare function stargateLogInScan(blockNumber: bigint, baseline: bigint, head: bigint): boolean;
 /**
  * Filtered `eth_getLogs` in bounded windows from `max(from, cursor)` up to the finality head `to` (BRDG-30). Returns the
  * first window's logs that match the indexed filter (the caller validates them), or none after at most `maxWindows`

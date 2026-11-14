@@ -50,6 +50,12 @@ export class StargateDestinationScanStore extends SecureStateStore {
         };
     }
 }
+/** A provider may ignore the requested `fromBlock`/`toBlock` and answer a log outside the scan. A log above the
+ * finality head is not final yet, and a log below the frozen baseline predates the operation, so neither is a delivery
+ * candidate. Both destination paths skip such a log the same way they skip a row from another emitter. */
+export function stargateLogInScan(blockNumber, baseline, head) {
+    return blockNumber >= baseline && blockNumber <= head;
+}
 /**
  * Filtered `eth_getLogs` in bounded windows from `max(from, cursor)` up to the finality head `to` (BRDG-30). Returns the
  * first window's logs that match the indexed filter (the caller validates them), or none after at most `maxWindows`

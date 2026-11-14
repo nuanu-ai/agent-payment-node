@@ -2,13 +2,15 @@ import type { MetaMaskGaslessObservationRpcFactory } from "./ports.js";
 import { OperationService } from "../operation-service.js";
 import type { RuntimeContext } from "../runtime.js";
 import type { MetaMaskGaslessChainId } from "./model.js";
-import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRepositoryPort, MetaMaskGaslessRpcFactory } from "./ports.js";
+import type { MetaMaskGaslessApprovalPort, MetaMaskGaslessProviderPort, MetaMaskGaslessRepositoryPort, MetaMaskGaslessRequestReferencePort, MetaMaskGaslessRpcFactory } from "./ports.js";
 import { MetaMaskGaslessPreparation } from "./prepare.js";
 import { type MetaMaskRevocationDependencies } from "./revocation/service.js";
 export interface MetaMaskGaslessDependencies {
     readonly rpcFor: MetaMaskGaslessRpcFactory;
     readonly observationRpcFor?: MetaMaskGaslessObservationRpcFactory;
     readonly provider: MetaMaskGaslessProviderPort;
+    /** The sealed provider request ids of operations whose journal keeps only the id's hash (journal/request-reference.ts). */
+    readonly references: MetaMaskGaslessRequestReferencePort;
     readonly approval?: MetaMaskGaslessApprovalPort;
     readonly records?: MetaMaskGaslessRepositoryPort;
     /** Foreground consent and the owner's wallet CLI, present only for `gasless transfer revoke`. */

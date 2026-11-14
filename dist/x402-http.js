@@ -45,13 +45,18 @@ export async function inspectX402(http, value, request,
 /** The network and token whose EIP-3009/Permit2 offers become candidates; null inspects only the Permit2 offer for `payer`. */
 asset, payer) {
     const { endpoint, canonicalUrl, paymentRequired } = await readX402Challenge(http, value, request);
-    const permit2 = payer === undefined ? undefined : inspectPermit2Offer({ accepts: paymentRequired.accepts, payer });
+    const payerOffer = payer === undefined ? null : payerPermit2Offer(paymentRequired.accepts, payer, asset !== null);
+    const permit2 = payerOffer !== null && "offer" in payerOffer ? payerOffer.offer : undefined;
+    const refusal = payerOffer !== null && "refusal" in payerOffer ? payerOffer : undefined;
     const inspected = asset === null ? undefined : inspectOffers(paymentRequired, canonicalUrl, asset);
     if (asset === null && permit2 === undefined) {
         throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "Seller challenge has no Permit2 offer this payer can inspect.", { reason: "x402_offer_asset_not_offered" });
     }
-    // Each offer of this network and token that APN cannot sign is named with the field that decided it.
     if (asset !== null && inspected !== undefined && inspected.candidates.length === 0 && permit2 === undefined) {
+        // Nothing is payable: the refused Permit2 offer the payer asked about is the answer, as it was through 0.5.106.
+        if (refusal !== undefined)
+            throw refusal.error;
+        // Each offer of this network and token that APN cannot sign is named with the field that decided it.
         throw unsupportedOfferError(asset, paymentRequired, inspected);
     }
     const candidates = inspected?.candidates ?? [];
@@ -65,7 +70,33 @@ asset, payer) {
         },
         candidates,
         ...(permit2 === undefined ? {} : { permit2 }),
+        ...(refusal === undefined ? {} : { permit2Refusal: refusal.refusal }),
     };
+}
+/**
+ * The lowest-index Permit2 offer `payer` can sign. Beside a selected network and token, `--payer` only adds Permit2
+ * facts and never removes a candidate: a challenge that lists no Permit2 offer at all inspects exactly as without the
+ * flag (null), and a listed Permit2 offer APN refuses comes back as that refusal, by its deciding field, for
+ * `permit2Refusal`. An invalid payer is refused whole. With no selected network and token the Permit2 offer is the only
+ * answer, so its absence or refusal is refused.
+ */
+function payerPermit2Offer(accepts, payer, besideSelectedAsset) {
+    try {
+        return { offer: inspectPermit2Offer({ accepts, payer }) };
+    }
+    catch (error) {
+        if (!besideSelectedAsset || !(error instanceof ApnError) || error.code !== "APN_X402_UNSUPPORTED_OFFER")
+            throw error;
+        const details = error.details ?? {}, { reason, field, sellerValue, accepted, refused } = details;
+        if (reason === "x402_permit2_no_listed_offer")
+            return null;
+        if (typeof reason !== "string")
+            throw error;
+        return { error, refusal: { reason, ...(typeof field === "string" ? { field } : {}),
+                ...(typeof sellerValue === "string" ? { sellerValue } : {}), ...(typeof accepted === "string" ? { accepted } : {}),
+                // ErrorDetail's only list is readonly string[].
+                ...(Array.isArray(refused) ? { refused: refused } : {}) } };
+    }
 }
 /** One unpaid request to a canonical public HTTPS URL that must answer 402 with exactly one strict PAYMENT-REQUIRED header. */
 export async function readX402Challenge(http, value, request) {

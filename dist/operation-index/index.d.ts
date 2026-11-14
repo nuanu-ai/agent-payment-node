@@ -2,7 +2,7 @@ import type { OperationAbandonApprovalPort } from "../operation-abandon-approval
 import type { SecureStateStore } from "../secure-state-store.js";
 import { type OperationFamilyAdapter } from "./adapter.js";
 import { type OperationRegistry } from "./registry.js";
-import { type OperationBeside, type OperationIndexEntry, type PrepareIdentity, type WantedClaims } from "./types.js";
+import { type OperationBeside, type OperationClaim, type OperationIndexEntry, type PrepareIdentity, type WantedClaims, type WantedTag } from "./types.js";
 /** Same bound as ORPHAN_TEMPORARY_AGE_MS: an admission without a record older than this belongs to a crashed prepare. */
 export declare const ADMISSION_LEASE_MS: number;
 export { OPERATION_INDEX_LOCK } from "./store.js";
@@ -29,7 +29,12 @@ export declare class OperationIndex {
      * identity without an idempotency hash (its operation ID is derived from profile and key) is resolved by its ID.
      */
     resolvePrepare(identity: PrepareIdentity): Promise<OperationIndexEntry | null>;
-    /** APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. */
+    /**
+     * APN_OPERATION_BLOCKED when an unresolved operation holds a colliding claim; the details name the blocker. With
+     * `except` (the caller's own saved operation, checked before its approve or execute starts its effect) an entry the
+     * index let go while its record is still open is first admitted again (`readmitReleased`): the guard of an operation
+     * about to sign never rests on a wall-clock release, and a refused one writes nothing.
+     */
     assertAvailable(wanted: WantedClaims): Promise<void>;
     /** The unresolved operations holding one of `wanted.claims` that their family admits beside it; a blocker is skipped, not thrown. */
     admittedBeside(wanted: WantedClaims): Promise<readonly OperationBeside[]>;
@@ -50,6 +55,30 @@ export declare class OperationIndex {
      * is left as it is. Never throws: a refresh that fails changes nothing, and the next admission still re-verifies.
      */
     refresh(operationId: string): Promise<void>;
+    /**
+     * The approve-time account guard of one saved operation, right before its own approve or execute starts the effect
+     * (its start marker or first signature). An entry that has held its claims since its admission is the operation the
+     * account was admitted for: nothing more is proven, as before this guard (two journals an older release wrote without
+     * admission keep their family's own owner lock and nonce check). An entry the index let go while its record is open
+     * is admitted again (`readmitReleased`) with the accounts its record names; its profile claim is held, never wanted.
+     * `tag` is the family's own coexistence rule and `waits` the quarantines its admission also waited for (the account's
+     * other profiles), as at admission.
+     */
+    assertOwnClaimsAvailable(operationId: string, options?: {
+        readonly tag?: WantedTag;
+        readonly waits?: readonly OperationClaim[];
+    }): Promise<void>;
+    /**
+     * The caller's own entry is admitted again, before its approve or execute starts the effect, when the index let it go
+     * while its record is open by its family's rule now: `terminal` (a never-started record let go by the wall clock past
+     * its deadline plus the unstarted margin, read again after the clock went back) or `released` (an owner-released
+     * quarantine whose record a widened reader reads again). As an admission is: refused without any write while another
+     * unresolved operation holds a colliding claim, so a refused entry stays released and every later attempt is checked
+     * again; otherwise its record's claims are written under the index lock. Any other entry already holds its claims, a
+     * record its family reads as terminal now is refused by its own approve, and a released record still unreadable stays
+     * released.
+     */
+    private readmitReleased;
     /** Optional fast path after a terminal write: the claims go now instead of at the next check that meets them. */
     settle(operationId: string): Promise<void>;
     /**

@@ -1,11 +1,12 @@
 import { type MetaMaskReadDiagnostic } from "./read-diagnostic.js";
 import { type MetaMaskSubmitDiagnostic } from "./submit-diagnostic.js";
 import { type MetaMaskObserveDiagnostic } from "./observe-diagnostic.js";
-import type { MetaMaskGaslessBinding, MetaMaskGaslessIntent, MetaMaskGaslessProfileIdentity, MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
+import { type MetaMaskServerRequestQuery, type MetaMaskServerRequestRead } from "./server-request.js";
+import type { MetaMaskGaslessBinding, MetaMaskGaslessProviderIntent, MetaMaskGaslessProfileIdentity, MetaMaskGaslessProviderObservation, MetaMaskGaslessQuote, MetaMaskGaslessUnsignedResult } from "../model.js";
 import type { MetaMaskGaslessQuoteInput, MetaMaskGaslessUnsignedInput } from "../ports.js";
 import { type MetaMaskGaslessFailure } from "../reasons.js";
 export declare const MM_HELPER_VERSION: "apn.metamask-gasless-helper.v1";
-export type HelperMode = "inspect" | "quote" | "buildUnsigned" | "submit" | "observe";
+export type HelperMode = "inspect" | "quote" | "buildUnsigned" | "submit" | "observe" | "readRequest";
 export type HelperRequest = {
     readonly version: typeof MM_HELPER_VERSION;
     readonly mode: "inspect";
@@ -21,9 +22,15 @@ export type HelperRequest = {
 } | {
     readonly version: typeof MM_HELPER_VERSION;
     readonly mode: "submit" | "observe";
-    readonly intent: MetaMaskGaslessIntent;
+    readonly intent: MetaMaskGaslessProviderIntent;
+}
+/** A native transfer's server-wallet request, read by its exact id (client/server-request.ts). */
+ | {
+    readonly version: typeof MM_HELPER_VERSION;
+    readonly mode: "readRequest";
+    readonly query: MetaMaskServerRequestQuery;
 };
-export type HelperResult = MetaMaskGaslessBinding | MetaMaskGaslessQuote | MetaMaskGaslessUnsignedResult | MetaMaskGaslessProviderObservation;
+export type HelperResult = MetaMaskGaslessBinding | MetaMaskGaslessQuote | MetaMaskGaslessUnsignedResult | MetaMaskGaslessProviderObservation | MetaMaskServerRequestRead;
 export type HelperResponse = {
     readonly version: typeof MM_HELPER_VERSION;
     readonly ok: true;

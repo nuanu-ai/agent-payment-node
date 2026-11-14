@@ -1,11 +1,11 @@
-import { EncryptedWalletStore } from "./encrypted-wallet-store.js";
+import { EncryptedWalletStore, walletEnvelopeIdentity } from "./encrypted-wallet-store.js";
 import { missingSecretNextAction, walletWrappingSecretMissing } from "./wrapping-secret-custody.js";
 import { BASE_USDC, CHAIN_CAIP2, ETH_DECIMALS, STATE_VERSION, USDC_DECIMALS } from "./constants.js";
 import { ApnError } from "./errors.js";
 import { formatAtomic } from "./money.js";
 import { BASE_RPC_CHAIN } from "./rpc-requirement.js";
 import { sealWallet } from "./state.js";
-import { assertWalletMatches, canonicalProfile, parseWalletDescribe, parseWalletEnsure, publicProvenance, publicWallet, validateBalance, } from "./wallet-policy.js";
+import { absentWallet, assertWalletMatches, canonicalProfile, incompleteWallet, parseWalletDescribe, parseWalletEnsure, publicProvenance, publicWallet, validateBalance, } from "./wallet-policy.js";
 import { fundingPosture, policyBinding, publicProfilePolicy } from "./profile-policy.js";
 import { walletFundingGuidance } from "./funding-guidance.js";
 import { projectLegacyLocalProfile } from "./provider-profile.js";
@@ -68,9 +68,9 @@ export class WalletService {
                 throw new ApnError("APN_PROFILE_DRIFT", "The APN profile is already bound to a different wallet provider.");
             }
             const stored = await this.context.state.loadWallet(profileHash);
-            if (stored === null && await this.context.state.loadEncryptedWalletEnvelope(profile) !== null) {
-                throw new ApnError("APN_PROFILE_DRIFT", "Encrypted wallet profile has incomplete public metadata; automatic repair is disabled.");
-            }
+            const sealed = stored === null ? await this.context.state.loadEncryptedWalletEnvelope(profile) : null;
+            if (sealed !== null)
+                return await this.complete(profile, profileHash, walletEnvelopeIdentity(sealed, profile), providerProfile);
             const native = this.context.requireNative();
             const result = stored === null
                 ? parseWalletEnsure(await native.request(this.context.nativeRequest("wallet.ensure", { profile })), profile)
@@ -106,12 +106,17 @@ export class WalletService {
             await assertWalletLifecycleAvailable(this.context, profileHash);
             const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
             const provider = await this.context.state.loadProviderProfile(profileHash);
-            if (artifacts.stored !== null || artifacts.encrypted !== null || provider !== null) {
+            if (artifacts.stored !== null || provider !== null) {
                 throw new ApnError("APN_PROFILE_DRIFT", "Wallet profile is already occupied; import cannot overwrite it.");
             }
+            // A sealed key without a public record is an incomplete wallet (incompleteWallet): native custody completes it only
+            // when the key file holds that very key, proven by decrypting it, and refuses any other key.
+            const sealed = artifacts.encrypted === null ? null : walletEnvelopeIdentity(artifacts.encrypted, profile);
             const result = parseWalletEnsure(await this.context.requireNative().request(this.context.nativeRequest("wallet.import", { profile, keyFile, keyName, expectedAddress })), profile);
             if (!result.found)
                 throw new ApnError("APN_NATIVE_PROTOCOL", "Native wallet import returned no identity.");
+            if (sealed !== null)
+                assertSealedIdentity(sealed, result);
             const wallet = sealWallet({ schemaVersion: STATE_VERSION, profile, profileHash,
                 address: result.address, createdAt: result.createdAt, bindingHash: result.bindingHash });
             await this.context.state.writeNewWallet(wallet);
@@ -119,24 +124,41 @@ export class WalletService {
             return publicWallet(wallet, "ready");
         });
     }
+    /**
+     * `wallet ensure` of an incomplete wallet (incompleteWallet): an earlier ensure or import sealed its key and stopped
+     * before the public record. Native custody decrypts that envelope and derives its address from the sealed key; the
+     * public record and the local profile are then written exactly as a first ensure writes them, under its locks (this
+     * profile's, the custody lock inside native, the address lock for the record). No key is created. A different
+     * provider profile was refused by the caller, and a local one must already equal this wallet's projection.
+     */
+    async complete(profile, profileHash, sealed, providerProfile) {
+        const result = parseWalletEnsure(await this.context.requireNative().request(this.context.nativeRequest("wallet.complete", { profile, address: sealed.address })), profile);
+        if (!result.found)
+            throw new ApnError("APN_NATIVE_PROTOCOL", "Native wallet completion returned no identity.");
+        assertSealedIdentity(sealed, result);
+        const wallet = sealWallet({ schemaVersion: STATE_VERSION, profile, profileHash,
+            address: result.address, createdAt: result.createdAt, bindingHash: result.bindingHash });
+        if (providerProfile !== null)
+            assertLocalProjection(wallet, providerProfile);
+        await this.context.state.withLocks([evmAddressLock(wallet.address)], async () => {
+            await this.context.state.writeNewWallet(wallet);
+        });
+        await this.materializeLocalProfile(wallet, providerProfile);
+        return publicWallet(wallet, "ready");
+    }
     async materializeLocalProfile(wallet, existing) {
-        const projected = projectLegacyLocalProfile(wallet);
         if (existing === null) {
-            await this.context.profileRepository?.save(projected);
+            await this.context.profileRepository?.save(projectLegacyLocalProfile(wallet));
             return;
         }
-        if (existing.provider_id !== "local" || existing.public_address.toLowerCase() !== wallet.address.toLowerCase() ||
-            existing.account_binding_hash !== wallet.bindingHash || existing.capability_hash !== projected.capability_hash) {
-            throw new ApnError("APN_STATE_CORRUPT", "Local provider profile projection does not match legacy wallet state.");
-        }
+        assertLocalProjection(wallet, existing);
     }
     async status(profileInput) {
         const profile = canonicalProfile(profileInput);
         const profileHash = this.context.state.profileHash(profile);
         const artifacts = await this.context.state.loadWalletArtifacts(profile, profileHash);
-        if (artifacts.stored === null && artifacts.encrypted === null) {
-            return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
-        }
+        if (artifacts.stored === null && artifacts.encrypted === null)
+            return absentWallet(profile);
         return await this.initializedStatus(profile, profileHash);
     }
     /** Public identity plus, through native describe, proof that the wrapping secret is still in the Keychain. */
@@ -147,7 +169,7 @@ export class WalletService {
             const result = parseWalletDescribe(await this.context.requireNative().request(this.context.nativeRequest("wallet.describe", { profile })), profile);
             if (stored === null) {
                 if (!result.found) {
-                    return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: ["apn wallet ensure"] };
+                    return await this.context.state.loadEncryptedWalletEnvelope(profile) === null ? absentWallet(profile) : incompleteWallet(profile);
                 }
                 return {
                     profile,
@@ -176,7 +198,7 @@ export class WalletService {
             const snapshot = await this.context.requireRpc(BASE_RPC_CHAIN).getBalances(wallet.address);
             validateBalance(snapshot, wallet.address);
             const posture = fundingPosture(snapshot.usdcAtomic, snapshot.ethAtomic, policy);
-            const guidance = walletFundingGuidance(snapshot.usdcAtomic, snapshot.ethAtomic, policy, posture.next_actions);
+            const guidance = walletFundingGuidance(profile, snapshot.usdcAtomic, snapshot.ethAtomic, policy, posture.next_actions);
             return {
                 profile,
                 funding_address: wallet.address,
@@ -241,6 +263,20 @@ export class WalletService {
         if (wallet === null)
             throw new ApnError("APN_OPERATION_BLOCKED", "Wallet is not initialized.");
         return policyBinding(wallet);
+    }
+}
+/** The public record a first ensure or import would have written must equal the local profile already saved. */
+function assertLocalProjection(wallet, existing) {
+    const projected = projectLegacyLocalProfile(wallet);
+    if (existing.provider_id !== "local" || existing.public_address.toLowerCase() !== wallet.address.toLowerCase() ||
+        existing.account_binding_hash !== wallet.bindingHash || existing.capability_hash !== projected.capability_hash) {
+        throw new ApnError("APN_STATE_CORRUPT", "Local provider profile projection does not match legacy wallet state.");
+    }
+}
+/** Native custody answered for the very key sealed in the envelope this command read under its profile lock. */
+function assertSealedIdentity(sealed, result) {
+    if (result.address !== sealed.address || result.createdAt !== sealed.createdAt || result.bindingHash !== sealed.bindingHash) {
+        throw new ApnError("APN_WALLET_MISMATCH", "Native wallet identity does not match the sealed wallet envelope.");
     }
 }
 /** The network and token a policy command named; undefined keeps the original Base USDC spelling. */

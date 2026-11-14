@@ -62,14 +62,18 @@ export function admittedSwapProtocol(registryValue, chain, source, destination, 
         (laneMechanismDigest === undefined || mechanismDigest === laneMechanismDigest));
     const bySource = lanes.filter(({ pin }) => assetAdmitsSwapMechanism(source, pin));
     if (bySource.length === 0)
-        blocked("Source asset lacks the exact swap mechanism admission.");
+        routeNotAdmitted("Source asset lacks the exact swap mechanism admission.", "source");
     const both = bySource.filter(({ pin }) => assetAdmitsSwapMechanism(destination, pin));
     if (both.length === 0)
-        blocked("Destination asset lacks the same exact swap mechanism admission.");
+        routeNotAdmitted("Destination asset lacks the same exact swap mechanism admission.", "destination");
     if (both.length !== 1)
         blocked("More than one installed swap mechanism matches the owner admission; select one exact mechanism.");
     return both[0];
 }
 function invalid(message) { throw new ApnError("APN_INVALID_INPUT", message); }
 function blocked(message) { throw new ApnError("APN_OPERATION_BLOCKED", message); }
+/** A missing owner admission of the lane's route for one asset (owner-admission.ts names the asset and the next actions). */
+function routeNotAdmitted(message, side) {
+    throw new ApnError("APN_OPERATION_BLOCKED", message, { reason: "swap_owner_admission_required", side, admissionGap: "swap_route_not_admitted" });
+}
 //# sourceMappingURL=route-admission.js.map

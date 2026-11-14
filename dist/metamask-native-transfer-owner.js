@@ -25,7 +25,8 @@ import { formatAtomic } from "./money.js";
 import { METAMASK_NATIVE_CHAINS, metaMaskNativeQuoteTransfer, metaMaskNativeUsdc, validateMetaMaskNativeFeeQuote, validateMetaMaskNativeFeeReceipt } from "./metamask-native-fee-evidence.js";
 import { MetaMaskNativeHandoffNotStarted, readMetaMaskNativeVendorPolicy, readMetaMaskNativeRequest, submitOwnedMetaMaskNative } from "./metamask-native-transfer-adapter.js";
 import { prepareMetaMaskNativeQuote, readMetaMaskNativeFunding, observeMetaMaskNativeTransfer } from "./metamask-native-transfer-rpc.js";
-import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeExpiredBeforeEffect, metaMaskNativeMfaTask, metaMaskNativeRequestHash, metaMaskNativeObserveCommand, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation } from "./metamask-native-journal.js";
+import { MetaMaskNativeJournal, METAMASK_NATIVE_OPERATION_SCHEMA, loadMetaMaskNativeOwner, metaMaskNativeExpiredBeforeEffect, metaMaskNativeRequestHash, metaMaskNativeHasRequest, metaMaskNativeObserveCommand, metaMaskNativeRequestLabel, metaMaskNativeRequestMatches, patchMetaMaskNativeOperation as patch, publicMetaMaskNativeOperation as publicOperation } from "./metamask-native-journal.js";
+import { keepMetaMaskNativeRequest, metaMaskNativeHandoffFields, metaMaskNativeRequestTask, openMetaMaskNativeRequest, publicMetaMaskNativeReadObservation } from "./metamask-native-request-reference.js";
 import { assetUsageReservationId } from "./asset-usage-ledger.js";
 import { refreshOperationIndex } from "./operation-index/refresh.js";
 /** Journal readers, also reachable here for callers that name the command module. */
@@ -170,7 +171,8 @@ export function withNativeFeeCeiling(error, caps, profile) {
     return new ApnError(error.code, error.message, { ...error.details, per_transfer_cap_wei: caps.perTransferWei,
         daily_remaining_wei: caps.dailyRemainingWei, nextActions: [`apn allowlist policy status --profile ${profile}`] });
 }
-export async function runMetaMaskNativeTransfer(stateRoot, input) {
+/** `references` seals the MetaMask request id the hand-off may return; its wrapping secret is read before consent. */
+export async function runMetaMaskNativeTransfer(stateRoot, input, references) {
     const profileName = canonicalProfile(input.profile), chainId = chain(input.chainId), key = canonicalIdempotencyKey(input.idempotencyKey);
     const recipient = recipientInput(input.recipient), amountAtomic = amountInput(input.amountAtomic), state = new StateStore(stateRoot), journal = new MetaMaskNativeJournal(stateRoot);
     const id = state.operationId(profileName, `metamask-native:${chainId}:${key}`), request = { chainId, key, profile: profileName, recipient, amountAtomic }, requestHash = metaMaskNativeRequestHash(request);
@@ -231,6 +233,9 @@ export async function runMetaMaskNativeTransfer(stateRoot, input) {
                 op = await journal.persist(patch(op, { reservations }));
                 if (process.stdin.isTTY !== true || process.stderr.isTTY !== true || !isatty(0) || !isatty(2))
                     blocked("A genuine foreground stdin/stderr terminal is required.");
+                // The request id the hand-off may return is sealed after it: a wrapping secret that cannot be read refuses here,
+                // before consent and before any effect, never after the hand-off.
+                await references.ready();
                 const limits = Object.entries(vendor.outflowLimitsUsd).map(([name, value]) => `${name} ${value} USD`).join(", ");
                 await exactChainConsent(["Agent Payment Node — MetaMask Agent Wallet USDC transfer, network fee paid in the native coin", `Profile: ${context.profile}; sender: ${quote.sender}`,
                     `Chain: eip155:${chainId}; token: ${quote.token}`, `Recipient: ${recipient}`, `Amount: ${amountAtomic} atomic USDC (${formatAtomic(amountAtomic, 6)} USDC)`,
@@ -248,10 +253,12 @@ export async function runMetaMaskNativeTransfer(stateRoot, input) {
                 scope = Object.freeze({});
                 scopes.set(scope, { root: stateRoot, context, journal, reservations, state: "issued", lockActive: true, monotonicDeadline: performance.now() + Math.min(60000, Date.parse(expires) - Date.now()), lastNow: Date.now(), guardStage: "sdk_resolver", startedAt: performance.now() });
                 const result = await submitOwnedMetaMaskNative(scope, context);
-                // A pending or unknown hand-off stays financially UNKNOWN; an owner approval the provider waits on is kept beside it.
-                const mfa = result.disposition !== "acknowledged" && result.mfa !== undefined && result.requestId !== undefined && result.transactionHash === undefined
-                    ? { mfaTask: metaMaskNativeMfaTask(result.requestId, result.mfa, "send") } : {};
-                op = await journal.persist(patch(op, { ...(result.diagnostic === undefined ? {} : { diagnostic: result.diagnostic }), ...(result.disposition === "acknowledged" ? { state: "acknowledged", transactionHash: result.transactionHash } : { state: "unknown", transactionHash: "transactionHash" in result ? result.transactionHash ?? null : null, providerRequestId: result.requestId ?? null, ...mfa }) }));
+                // The request id is sealed before the journal names its hash; the journal never keeps the id itself. A seal that
+                // fails here keeps every other field the hand-off returned (its transaction hash above all) and says why no
+                // request is stored.
+                const kept = result.disposition !== "acknowledged" && result.requestId !== undefined
+                    ? await keepMetaMaskNativeRequest(references, op, result.requestId) : undefined;
+                op = await journal.persist(patch(op, metaMaskNativeHandoffFields(result, kept)));
                 for (const r of reservations)
                     await ledger.transition({ ...transitionIdentity(r), state: result.disposition === "acknowledged" ? "submitted" : "unknown_finality", now: new Date() });
                 return publicOperation(op);
@@ -320,7 +327,7 @@ export function metaMaskNativeClosedRequestNextActions(op, read) {
     if (read === undefined || read.request_identity_verified !== true || (read.provider_status !== "EXPIRED" && read.provider_status !== "DENIED") ||
         op.state !== "unknown" || op.transactionHash !== null)
         return undefined;
-    return [`MetaMask closed request ${op.providerRequestId} as ${read.provider_status} at its approval step, before signing. That is the provider's word, not chain evidence: do not confirm the old request; APN keeps this transfer UNKNOWN, keeps its reserves charged and never sends it again.`,
+    return [`MetaMask closed ${metaMaskNativeRequestLabel(op)} as ${read.provider_status} at its approval step, before signing. That is the provider's word, not chain evidence: do not confirm the old request; APN keeps this transfer UNKNOWN, keeps its reserves charged and never sends it again.`,
         metaMaskNativeObserveCommand(op.operationId),
         `To free the account for a new transfer, from ${op.context.quote.expiresAt} on: apn operation abandon --operation ${op.operationId} (the reserves stay charged until the chain proves an outcome).`];
 }
@@ -348,7 +355,11 @@ function failureDiagnostic(error, context, scope) {
         stderrClass: "none", providerCode: "none"
     });
 }
-export async function readMetaMaskNativeTransfer(stateRoot, idInput, observe = false) {
+/**
+ * Status, and with `observe` one no-send read of the stored request or transaction. A record that seals its request id
+ * opens it from `references` first; one that cannot be opened refuses the read precisely, and nothing is read or written.
+ */
+export async function readMetaMaskNativeTransfer(stateRoot, idInput, observe = false, references) {
     const id = canonicalOperationId(idInput), journal = new MetaMaskNativeJournal(stateRoot);
     if (await journal.read(id) === null)
         throw new ApnError("APN_OPERATION_NOT_FOUND", "Native transfer operation does not exist.");
@@ -357,21 +368,23 @@ export async function readMetaMaskNativeTransfer(stateRoot, idInput, observe = f
         if (op === null)
             throw new ApnError("APN_OPERATION_NOT_FOUND", "Native transfer operation does not exist.");
         op = await closeExpiredBeforeEffect(stateRoot, journal, op, new Date());
-        let readObservation = observe ? Object.freeze({ stage: "not_requested", guard_step: null,
+        let readObservation = observe ? publicMetaMaskNativeReadObservation(Object.freeze({ stage: "not_requested", guard_step: null,
             request_id: op.providerRequestId, watch_returned: false, before_guard_verified: false, after_guard_verified: false,
             request_identity_verified: false, provider_status: null, transaction_hash: op.transactionHash, chain_id: op.context.quote.chainId,
-            response_hash: null, reason: op.providerRequestId === null ? "no_stored_request_id" : "stored_transaction_or_confirmed", error_code: null, diagnostic: null }) : undefined;
-        if (observe && op.transactionHash === null && op.providerRequestId !== null && op.effectAttempts === 1) {
-            const hint = await readMetaMaskNativeRequest(op.providerRequestId, op.context.vendorProjectHash);
-            readObservation = hint.readObservation;
-            if (hint.requestId !== undefined && hint.requestId !== op.providerRequestId || hint.chainId !== undefined && hint.chainId !== op.context.quote.chainId)
+            response_hash: null, reason: metaMaskNativeHasRequest(op) ? "stored_transaction_or_confirmed" : op.providerRequestReason ?? "no_stored_request_id", error_code: null, diagnostic: null }), op) : undefined;
+        if (observe && op.transactionHash === null && metaMaskNativeHasRequest(op) && op.effectAttempts === 1) {
+            const requestId = await openMetaMaskNativeRequest(references, op);
+            // The transfer's own sender and chain bind a server read, should mm's local request list no longer hold the request.
+            const hint = await readMetaMaskNativeRequest(requestId, op.context.vendorProjectHash, { sender: op.context.quote.sender, chainId: op.context.quote.chainId });
+            readObservation = hint.readObservation === undefined ? undefined : publicMetaMaskNativeReadObservation(hint.readObservation, op);
+            if (hint.requestId !== undefined && hint.requestId !== requestId || hint.chainId !== undefined && hint.chainId !== op.context.quote.chainId)
                 blocked("Native transfer stored provider request identity or chain changed.");
             const hash = "transactionHash" in hint ? hint.transactionHash : undefined, mfa = hint.disposition === "pending" ? hint.mfa : undefined;
             if (hash !== undefined)
                 op = await journal.persist(patch(op, { state: "unknown", transactionHash: hash, mfaTask: undefined }));
             // A verified notice or AWAITING_MFA status for this very request: the owner's task, kept beside the UNKNOWN outcome.
             else if (mfa !== undefined && op.state === "unknown")
-                op = await journal.persist(patch(op, { mfaTask: metaMaskNativeMfaTask(op.providerRequestId, mfa, "watch") }));
+                op = await journal.persist(patch(op, { mfaTask: metaMaskNativeRequestTask(op, mfa, "watch") }));
             // The provider's own record of this request shows it past the approval (signing, denied, expired...): no task is left.
             else if (op.mfaTask !== undefined && op.state === "unknown" && hint.readObservation?.request_identity_verified === true)
                 op = await journal.persist(patch(op, { mfaTask: undefined }));
@@ -396,7 +409,7 @@ export async function readMetaMaskNativeTransfer(stateRoot, idInput, observe = f
  * never sends, keeps the stored transaction hash or request id, and leaves the held usage consumed. A transfer that
  * never reached its effect marker and whose consent has passed is closed as failed before effect instead (no consent).
  */
-export async function abandonMetaMaskNativeTransfer(stateRoot, idInput, approve, now) {
+export async function abandonMetaMaskNativeTransfer(stateRoot, idInput, approve, now, references) {
     const id = canonicalOperationId(idInput), journal = new MetaMaskNativeJournal(stateRoot);
     const initial = await journal.read(id);
     if (initial === null)
@@ -415,7 +428,7 @@ export async function abandonMetaMaskNativeTransfer(stateRoot, idInput, approve,
     if (!eligible(initial))
         blocked("Only a native transfer with an unknown outcome can be abandoned, and only after its quote expired.");
     try {
-        await readMetaMaskNativeTransfer(stateRoot, id, true);
+        await readMetaMaskNativeTransfer(stateRoot, id, true, references);
     }
     catch { /* Observation is best effort; consent decides. */ }
     return journal.withLocks([`operation:${id}`], async () => {

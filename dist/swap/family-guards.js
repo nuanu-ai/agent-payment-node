@@ -1,6 +1,7 @@
 import { validateAssetPolicyRegistry } from "../asset-policy-registry.js";
 import { ApnError } from "../errors.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry } from "./protocol-registry.js";
+import { swapPolicyStatusCommand } from "./owner-admission.js";
 const LABEL = { uniswap: "Uniswap", sunswap: "SunSwap", orca: "Orca" };
 /** The protocol registry the driver runs with must be the one the operation was prepared under and admit its mechanism. */
 export function assertOperationProtocolRegistry(operation, registryValue, family) {
@@ -15,7 +16,7 @@ export function assertOperationProtocolRegistry(operation, registryValue, family
 export async function assertActiveSwapPolicyUnchanged(policy, operation) {
     const active = await policy(operation.quote.profile);
     if (active === null)
-        blocked("No active owner swap admission is installed for this profile.", "swap_owner_admission_required");
+        throw new ApnError("APN_OPERATION_BLOCKED", "No active owner swap admission is installed for this profile.", { reason: "swap_owner_admission_required", nextActions: [swapPolicyStatusCommand(operation.quote.profile)] });
     const registry = validateAssetPolicyRegistry(active);
     if (registry.policyDigest !== operation.policyDigest || registry.registryVersion !== operation.policyVersion) {
         blocked("The active owner policy changed after preparation.", "swap_policy_drift");

@@ -34,6 +34,10 @@ export class MetaMaskGaslessProviderClient {
     observe(intent) {
         return this.invoke({ version: MM_HELPER_VERSION, mode: "observe", intent });
     }
+    /** A native transfer's server-wallet request by its exact id, in the same sandboxed helper (client/server-request.ts). */
+    readServerRequest(query) {
+        return this.invoke({ version: MM_HELPER_VERSION, mode: "readRequest", query });
+    }
     async invoke(request) {
         const timeoutMs = request.mode === "submit" ? 120_000 : 60_000;
         let raw;

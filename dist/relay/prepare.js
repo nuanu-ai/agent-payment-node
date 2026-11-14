@@ -168,7 +168,8 @@ export class RelayUnsignedPrepareService {
         // The profile and the source account are claimed before the quote, and dropped if no operation is written.
         return await this.operations.admit({ kind: "relay_unsigned", profileHash, operationId, idempotencyHash, requestHash }, { profileWide: true, domains: () => [evmConflictDomain(42161, owner)] }, async () => {
             const rawQuote = await (this.ports.arbitrumQuoteFile?.(input.quoteFile) ?? (async () => {
-                const file = await open(input.quoteFile, constants.O_RDONLY | constants.O_NOFOLLOW)
+                // Non-blocking: a FIFO named here is opened at once and refused below as not a regular file.
+                const file = await open(input.quoteFile, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
                     .catch(() => { throw new ApnError("APN_INVALID_INPUT", "Relay Arbitrum quote file cannot be opened."); });
                 try {
                     const stat = await file.stat();

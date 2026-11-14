@@ -6,15 +6,16 @@ import { observeDiagnostic } from "./observe-diagnostic.js";
 import { agentSdk, agentEvm, foxEvm, foxKeyring, ethereumControllers } from "./sdk-vendor.js";
 import { homedir } from "node:os";
 import { encodeFunctionData, hashTypedData, parseAbi } from "viem";
-import { isPlainRecord } from "../../canonical.js";
+import { isPlainRecord, sha256 } from "../../canonical.js";
 import { mmQuoteHash } from "../economics.js";
 import { mmPrivateHash } from "../identity.js";
 import { mmRegistry } from "../registry.js";
 import { mmClassify, mmFail, mmFailure } from "../reasons.js";
 import { mmValidateUnsigned } from "../unsigned.js";
 import { mmAddress, mmHex, mmUint } from "../validation.js";
-import { HelperNetworkPolicy, networkContextEmpty, networkContextQuote, networkContextRequest } from "./network.js";
-import { readPrivateState } from "./private-state.js";
+import { HelperNetworkPolicy, networkContextEmpty, networkContextQuote, networkContextRequest, networkContextServerRequest } from "./network.js";
+import { readPrivateSession, readPrivateState } from "./private-state.js";
+import { serverRequestAnswer, serverRequestNotFound } from "./server-request.js";
 import { assertProjectWallet } from "./project-wallets.js";
 import { helperRequest, MM_HELPER_VERSION } from "./protocol.js";
 import { hydrateSdkState } from "./session.js";
@@ -49,6 +50,17 @@ export async function executeHelperRequest(input, options = {}) {
             policy = new HelperNetworkPolicy(networkContextEmpty("buildUnsigned"), options.exchange);
         else if (request.mode === "inspect")
             policy = new HelperNetworkPolicy(networkContextEmpty("inspect"), options.exchange);
+        else if (request.mode === "readRequest") {
+            const session = await readPrivateSession(home, now());
+            // Only the operation's own MetaMask project is read: a session signed in to another one refuses before any read.
+            if (sha256(session.projectId) !== request.query.projectHash)
+                mmFail("mm_gasless_binding_changed");
+            policy = new HelperNetworkPolicy(networkContextServerRequest(request.query, session.projectId, session.token), options.exchange);
+            globalThis.fetch = policy.fetch;
+            const result = await readServerRequest(request.query, session, policy, seen);
+            policy.assertComplete();
+            return { version: MM_HELPER_VERSION, ok: true, result };
+        }
         else {
             const expected = request.mode === "quote" ? request.input.binding : request.intent.binding;
             const firstObservedAt = now();
@@ -105,7 +117,7 @@ export async function executeHelperRequest(input, options = {}) {
             }
             return { version: MM_HELPER_VERSION, ok: false, failure, ...(diagnostic === undefined ? {} : { submitDiagnostic: diagnostic }) };
         }
-        if (request.mode === "observe" && seen.check !== undefined) {
+        if ((request.mode === "observe" || request.mode === "readRequest") && seen.check !== undefined) {
             let diagnostic;
             try {
                 diagnostic = observeDiagnostic(seen.check, seen.providerStatus, seen.check === "response_tx" ? seen.tx ?? null : null);
@@ -272,6 +284,32 @@ async function observe(intent, state, policy, now, seen) {
             return unavailable(intent, now());
         throw error;
     }
+}
+/**
+ * A native transfer's server-wallet request, read as `observe` reads a gasless one: one `getJobStatus` GET by its exact
+ * id, checked field by field (client/server-request.ts). A 404 is "not found", never an outcome.
+ */
+async function readServerRequest(query, session, policy, seen) {
+    const evm = await foxEvm();
+    const keyrings = await foxKeyring();
+    const hydrated = await hydrateSdkState(session);
+    if (hydrated.writes() !== 0)
+        mmFail("mm_gasless_state_security");
+    const { keyring } = await keyrings.createKeyringController({ mode: keyrings.KEYRING_KIND.SERVER,
+        input: { baseUrl: SERVER_URL, authToken: session.token, projectId: session.projectId,
+            wallets: hydrated.walletState.remoteWallets }, adapters: [(deps) => new evm.EvmServerAdapter(deps)], logLevel: "silent" });
+    let status;
+    try {
+        status = await evm.evmServerAdapter(keyring).getJobStatus({ pollingId: query.requestId, kind: evm.SIGN_REQUEST_KIND.TRANSACTION });
+    }
+    catch (error) {
+        if (policy.didObserveNotFound())
+            return serverRequestNotFound(query);
+        throw error;
+    }
+    if (hydrated.writes() !== 0)
+        mmFail("mm_gasless_state_security");
+    return serverRequestAnswer(status, query, policy.requestBodyHash(), seen);
 }
 function validateSdkQuote(value, input, owner) {
     if (!isPlainRecord(value) || typeof value.amount !== "bigint" || value.amount !== mmUint(input.netAtomic, true) ||

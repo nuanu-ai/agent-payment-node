@@ -67,6 +67,8 @@ export class RuntimeContext {
     providerX402Repository;
     providerTransactionEvidence;
     providerAuthorizationStore;
+    /** The sealed provider request ids of MetaMask native and provider direct transfers (provider-request-reference-store.ts). */
+    providerRequestReferences;
     operationAbandonApproval;
     finalizedRead;
     circleSourceDelivery;
@@ -191,6 +193,8 @@ export class RuntimeContext {
             this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
         if (dependencies.providerAuthorizationStore !== undefined)
             this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
+        if (dependencies.providerRequestReferences !== undefined)
+            this.providerRequestReferences = dependencies.providerRequestReferences;
         if (dependencies.operationAbandonApproval !== undefined)
             this.operationAbandonApproval = dependencies.operationAbandonApproval;
         if (dependencies.finalizedRead !== undefined)
@@ -282,6 +286,12 @@ export class RuntimeContext {
             throw new ApnError("APN_INTERNAL", "The encrypted provider authorization store is unavailable.");
         }
         return this.providerAuthorizationStore;
+    }
+    requireProviderRequestReferences() {
+        if (this.providerRequestReferences === undefined) {
+            throw new ApnError("APN_INTERNAL", "The sealed provider request reference store is unavailable.");
+        }
+        return this.providerRequestReferences;
     }
     nativeRequest(operation, payload) {
         return { version: NATIVE_IPC_VERSION, requestId: this.ids.next(), operation, payload };

@@ -1,7 +1,7 @@
 import { isPlainRecord } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import { isMetaMaskEvmNamespace } from "./metamask-namespace.js";
-import { classifyMetaMaskPendingNotices, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
+import { classifyMetaMaskPendingNotices, metaMaskWatchMissReason, parseMetaMaskProcessOutput } from "./metamask-process-output.js";
 const PENDING_STATES = new Set(["EVALUATING", "AWAITING_MFA", "SIGNING", "BROADCASTING"]);
 const UNSAFE_FAILURE_STATES = new Set([
     "FAILED", "BROADCAST_FAILED", "BROADCAST_TRACKING_EXPIRED", "CONFIRMATION_TRACKING_EXPIRED",
@@ -124,8 +124,9 @@ function parseTransferResult(result, expected) {
 }
 function parseWatchResult(result, recoveryToken) {
     const parsed = parseMetaMaskProcessOutput(result.stdout);
+    // A REQUEST_NOT_FOUND on stderr names where mm missed the request (its local list, or MetaMask's server): never proof.
     if (parsed === null)
-        return { disposition: "ambiguous", reason: "provider_response_malformed" };
+        return { disposition: "ambiguous", reason: metaMaskWatchMissReason(result) ?? "provider_response_malformed" };
     const pendingNotice = classifyMetaMaskPendingNotices(parsed.notices, recoveryToken);
     if (pendingNotice.disposition === "invalid")
         return { disposition: "ambiguous", reason: pendingNotice.reason };

@@ -1,6 +1,7 @@
 import { approvalCode } from "../approval-code.js";
 import { domainHash } from "../canonical.js";
 import { assertGaslessOwner } from "../gasless/owner.js";
+import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
 import { facilitatorFail, facilitatorReason } from "./failure.js";
 import { FACILITATOR_EXPOSED, FACILITATOR_POLICY } from "./operation-model.js";
 import { publicFacilitatorOperation } from "./receipt.js";
@@ -40,8 +41,17 @@ export class FacilitatorExecution {
         let startBlock;
         try {
             startBlock = await this.guard(op);
-            await this.policy.reserve(op); // charged before the owner signs
         }
+        catch (error) {
+            return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_guard") });
+        }
+        // Nothing is reserved or signed yet, and the index may have let this unapproved transfer go by the clock: after the
+        // chain guard's reads it is admitted again, refused while another unresolved operation holds the account, leaving it
+        // awaiting approval (QA F03). Only local steps follow: the hold, the signature and the exposure marker.
+        await assertOwnClaimsAvailable(this.state, op.operationId);
+        try {
+            await this.policy.reserve(op);
+        } // charged before the owner signs
         catch (error) {
             return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_guard") });
         }

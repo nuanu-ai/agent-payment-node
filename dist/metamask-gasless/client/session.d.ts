@@ -4,4 +4,4 @@ export interface HydratedSdkState {
     readonly walletState: Record<string, unknown>;
     readonly writes: () => number;
 }
-export declare function hydrateSdkState(state: PrivateState): Promise<HydratedSdkState>;
+export declare function hydrateSdkState(state: Pick<PrivateState, "sessionEnvelope" | "walletEnvelope">): Promise<HydratedSdkState>;

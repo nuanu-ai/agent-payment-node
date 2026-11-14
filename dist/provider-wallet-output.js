@@ -45,7 +45,7 @@ export function permissionBalance(profile, bound, permission, owner, session) {
             warning: "This read performs no funding action and does not prove future effect availability or gas sufficiency.",
         },
         next_actions: permission.state === "active"
-            ? ["Fund manually only if intended", "Re-run apn wallet balance"]
+            ? ["Fund manually only if intended", `Re-run apn wallet balance --profile ${profile}`]
             : ["Review the permission lifecycle state before any future effect."],
     };
 }
@@ -70,7 +70,7 @@ export function publicProfile(profile, reused) {
                 address: profile.public_address,
                 action: "Fund manually only; APN performs no funding action.",
             },
-            next_actions: ["Use apn wallet balance with an explicit Base RPC URL"],
+            next_actions: [`Use apn wallet balance --profile ${profile.profile} with an explicit Base RPC URL`],
         } : {
             next_actions: [rebindCommand],
         }),

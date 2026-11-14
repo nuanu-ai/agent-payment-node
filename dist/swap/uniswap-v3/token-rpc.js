@@ -4,6 +4,7 @@ import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js"
 import { BridgeHttps } from "../../lifi/https.js";
 import { bridgeRpcCall, RpcProviderScheduler, RpcReadSession } from "../../lifi/rpc.js";
 import { submitDirect } from "../../lifi/rpc-support.js";
+import { bridgeArchiveEndpoint } from "../../lifi/rpc-archive.js";
 import { tokenPrimaryCandidates } from "./token-rpc-pool.js";
 export async function tokenBatch(call, route, items) {
     if (items.length < 1 || items.length > 3)
@@ -44,7 +45,7 @@ export function createTokenRpc(input) {
                     throw new ApnError("APN_PROVIDER_CAPABILITY_UNAVAILABLE", "Uniswap token primary does not support bounded JSON-RPC batches.", { reason: "token_primary_batch_unsupported" });
                 return response.status === 200 && credentialResponse(response.body) ? { ...response, status: 403, body: "" } : response;
             } }, descriptors = candidates().map((candidate) => bridgeRpcCall(1, { ...input.environment, APN_ETHEREUM_RPC_URL: candidate.url.toString() }, { transport }));
-        return { session, descriptors };
+        return { session, descriptors, archive: bridgeArchiveEndpoint(1, input.environment) !== null };
     })();
     let effects = 0, selected = null;
     const attempts = [], tried = new Set();
@@ -55,15 +56,19 @@ export function createTokenRpc(input) {
         const descriptor = resolve().descriptors[selected];
         if (method === "eth_sendRawTransaction")
             return await submitDirect(method, params, async () => await resolve().session.externalAttempt(descriptor.origin, async () => { effects += 1; return await descriptor.attempt(method, params); }));
-        return await descriptor.sessionCall(resolve().session)(method, params);
+        return await descriptor.sessionCall(resolve().session)(method, resolve().archive ? params : pinnedToHash(method, params, primaryBlocks));
     });
     Object.defineProperties(call, {
-        batch: { value: async (route, items) => {
+        batch: { value: async (requested, items) => {
+                const index = selected ?? 0, descriptor = resolve().descriptors[index], route = servedTokenRoute(requested, descriptor, resolve().archive);
+                // The primary stands in for an unconfigured archive or receipt reader only once the pool has selected it: such a batch
+                // never runs the selection, which could quarantine a candidate on a sub-error and send the batch to the next one.
+                if (route === "primary" && requested !== "primary" && selected === null)
+                    throw new ApnError("APN_RPC_CONFIG", "Uniswap token primary provider is not semantically selected.", { reason: "token_primary_not_selected", rpcRoute: requested });
                 if (route === "primary")
                     return await primary(items);
                 if (route === "archive")
                     await verifyArchive(items);
-                const index = selected ?? 0, descriptor = resolve().descriptors[index];
                 return await descriptor.sessionBatchCall(resolve().session)(items, route);
             } },
         telemetry: { value: () => initialized?.session.telemetry() ?? null },
@@ -75,6 +80,7 @@ export function createTokenRpc(input) {
         primaryPoolSize: { value: () => candidates().length },
         selectedPrimaryProviderId: { value: () => selected === null ? null : candidates()[selected].id },
         bindPrimaryProvider: { value: async (providerId) => { await bindProvider(providerId); } },
+        archiveConfigured: { value: () => resolve().archive },
     });
     return call;
     async function primary(items) {
@@ -88,7 +94,7 @@ export function createTokenRpc(input) {
             // Pool code always acquires probe before the scheduler's provider-family lock. No path acquires them in reverse.
             const result = await input.state.withLocks([probeLock(index)], async () => {
                 try {
-                    const values = await resolve().descriptors[index].sessionBatchCall(resolve().session)(items, "primary");
+                    const values = await resolve().descriptors[index].sessionBatchCall(resolve().session)(pinnedItems(items, primaryBlocks), "primary");
                     rememberBlocks(items, values);
                     selected = index;
                     attempts.push({ providerId: candidates()[index].id, outcome: "selected", reason: null });
@@ -113,22 +119,11 @@ export function createTokenRpc(input) {
         throw new ApnError("APN_PROVIDER_UNAVAILABLE", "No configured Uniswap token primary provider passed semantic validation.", { reason: "token_primary_pool_exhausted", attemptedProviders: attempts.length.toString() });
     }
     async function selectedBatch(items) {
-        const values = await resolve().descriptors[selected].sessionBatchCall(resolve().session)(items, "primary");
+        const values = await resolve().descriptors[selected].sessionBatchCall(resolve().session)(pinnedItems(items, primaryBlocks), "primary");
         rememberBlocks(items, values);
         return values;
     }
-    function rememberBlocks(items, values) {
-        for (let index = 0; index < items.length; index += 1)
-            if (items[index].method === "eth_getBlockByNumber") {
-                try {
-                    const block = evmRpcRecord(values[index]), number = evmRpcQuantity(block.number), hash = evmRpcHex(block.hash, 32);
-                    primaryBlocks.set(`0x${number.toString(16)}`, hash);
-                    if (number > 0n && typeof block.parentHash === "string")
-                        primaryBlocks.set(`0x${(number - 1n).toString(16)}`, evmRpcHex(block.parentHash, 32));
-                }
-                catch { /* The caller decoder owns the required block shape. */ }
-            }
-    }
+    function rememberBlocks(items, values) { rememberPrimaryBlocks(primaryBlocks, items, values); }
     async function verifyArchive(items) {
         const tags = [...new Set(items.map(archiveTag).filter((tag) => tag !== null && !archiveVerified.has(tag)))];
         if (tags.length === 0)
@@ -190,15 +185,24 @@ function createLegacyTokenRpc(input) {
             maxHttpRequests: input.maxHttpRequests, maxHttpAttempts: input.maxHttpRequests, maxReadAttempts: 1, deadlineMs: input.deadlineMs,
             now: input.now, ...(input.wait === undefined ? {} : { wait: input.wait }), providerScheduler: scheduler });
         const descriptor = bridgeRpcCall(1, input.environment, { transport: input.transport ?? new BridgeHttps(undefined, undefined, 2_500) });
-        return { session, descriptor, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session) };
+        return { session, descriptor, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session),
+            archive: bridgeArchiveEndpoint(1, input.environment) !== null };
     })();
     let effects = 0, archiveVerified = false;
+    const primaryBlocks = new Map();
     const call = (async (method, params) => {
         if (method === "eth_sendRawTransaction")
             return await submitDirect(method, params, async () => await resolve().session.externalAttempt(resolve().descriptor.origin, async () => { effects += 1; return await resolve().descriptor.attempt(method, params); }));
-        return await resolve().read(method, params);
+        // Without an archive the primary serves every pinned scalar read; with one, a pinned read is the archive's.
+        return await resolve().read(method, resolve().archive ? params : pinnedToHash(method, params, primaryBlocks));
     });
-    Object.defineProperties(call, { batch: { value: async (route, items) => {
+    Object.defineProperties(call, { batch: { value: async (requested, items) => {
+                const route = servedTokenRoute(requested, resolve().descriptor, resolve().archive);
+                if (route === "primary") {
+                    const values = await resolve().batch(pinnedItems(items, primaryBlocks), route);
+                    rememberPrimaryBlocks(primaryBlocks, items, values);
+                    return values;
+                }
                 if (route === "archive" && !archiveVerified) {
                     const identity = items.findIndex((item) => item.method === "eth_chainId");
                     if (identity >= 0) {
@@ -217,8 +221,49 @@ function createLegacyTokenRpc(input) {
         selectedPrimaryProviderId: { value: () => null }, bindPrimaryProvider: { value: async (providerId) => {
                 if (providerId !== null)
                     throw new ApnError("APN_OPERATION_BLOCKED", "Scalar Uniswap token RPC cannot restore a pooled provider binding.", { reason: "uniswap_token_provider_binding_changed" });
-            } } });
+            } }, archiveConfigured: { value: () => resolve().archive } });
     return call;
+}
+/**
+ * The endpoint that serves one lane batch. The archive and the receipt reader are optional (docs/uniswap.md, Setup): a
+ * configured archive serves the state pinned to an exact block, and a configured receipt reader (else that archive) serves
+ * receipts. Without one the primary serves them, as it serves the lane's scalar reads; that works for recent blocks on
+ * any full node. The route follows the configuration only: a batch is never sent to a second endpoint after a failure.
+ */
+function servedTokenRoute(route, descriptor, archive) {
+    if (route === "archive")
+        return archive ? "archive" : "primary";
+    if (route === "receipt")
+        return descriptor.receipts.reader || descriptor.receipts.fallback ? "receipt" : "primary";
+    return route;
+}
+/** The EIP-1898 block parameter of each state read that takes one. EIP-1898 defines none for eth_estimateGas. */
+const PINNABLE_STATE_READS = { eth_call: 1, eth_getCode: 1, eth_getStorageAt: 2, eth_getBalance: 1, eth_getTransactionCount: 1 };
+/** The blocks this command read from the primary by number: each block's hash, and its parent hash for the block before it. */
+function rememberPrimaryBlocks(blocks, items, values) {
+    for (let index = 0; index < items.length; index += 1)
+        if (items[index].method === "eth_getBlockByNumber") {
+            try {
+                const block = evmRpcRecord(values[index]), number = evmRpcQuantity(block.number), hash = evmRpcHex(block.hash, 32);
+                blocks.set(`0x${number.toString(16)}`, hash);
+                if (number > 0n && typeof block.parentHash === "string")
+                    blocks.set(`0x${(number - 1n).toString(16)}`, evmRpcHex(block.parentHash, 32));
+            }
+            catch { /* The caller decoder owns the required block shape. */ }
+        }
+}
+/**
+ * A state read the primary serves at a block number this command read from it goes out pinned to that block's hash
+ * (EIP-1898, requireCanonical), as the custody's allowance read already is: a backend on another branch refuses it
+ * instead of answering that branch's state. The request count is unchanged; a number the command never read stays as it is.
+ */
+function pinnedToHash(method, params, blocks) {
+    const index = PINNABLE_STATE_READS[method], tag = index === undefined || params.length !== index + 1 ? undefined : params[index];
+    const hash = typeof tag === "string" && /^0x(?:0|[1-9a-f][0-9a-f]*)$/u.test(tag) ? blocks.get(tag) : undefined;
+    return hash === undefined ? params : [...params.slice(0, index), { blockHash: hash, requireCanonical: true }];
+}
+function pinnedItems(items, blocks) {
+    return items.map((item) => { const params = pinnedToHash(item.method, item.params, blocks); return params === item.params ? item : { ...item, params }; });
 }
 function archiveTag(item) {
     const index = item.method === "eth_getStorageAt" ? 2 : ["eth_call", "eth_getCode"].includes(item.method) ? 1 : null;
