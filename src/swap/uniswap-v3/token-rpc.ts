@@ -5,6 +5,7 @@ import { evmRpcHex, evmRpcQuantity, evmRpcRecord } from "../../evm-rpc-codec.js"
 import { BridgeHttps } from "../../lifi/https.js";
 import { bridgeRpcCall, RpcProviderScheduler, RpcReadSession, type RpcReadTelemetry } from "../../lifi/rpc.js";
 import { submitDirect } from "../../lifi/rpc-support.js";
+import { bridgeArchiveEndpoint } from "../../lifi/rpc-archive.js";
 import type { StateStore } from "../../state.js";
 import { tokenPrimaryCandidates, type TokenPrimaryFailureReason, type TokenPrimaryPoolTelemetry } from "./token-rpc-pool.js";
 import type { FinalizedBatchRead, FinalizedReadCall } from "../../evm-finalized-proof.js";
@@ -56,7 +57,7 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
     },
   }, input.pacingNow, "reject", "transient");
   type Descriptor = ReturnType<typeof bridgeRpcCall>;
-  let initialized: { readonly session: RpcReadSession; readonly descriptors: readonly Descriptor[] } | undefined;
+  let initialized: { readonly session: RpcReadSession; readonly descriptors: readonly Descriptor[]; readonly archive: boolean } | undefined;
   const resolve = () => initialized ??= (() => { const session = new RpcReadSession({ maxLogicalItems: input.maxLogicalItems ?? input.maxHttpRequests * 3,
     maxHttpRequests: input.maxHttpRequests, maxHttpAttempts: input.maxHttpRequests, maxReadAttempts: 1,
     deadlineMs: input.deadlineMs, now: input.now, ...(input.wait === undefined ? {} : { wait: input.wait }), providerScheduler: scheduler });
@@ -66,7 +67,7 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
           { reason: "token_primary_batch_unsupported" });
       return response.status === 200 && credentialResponse(response.body) ? { ...response, status: 403, body: "" } : response; } }, descriptors = candidates().map((candidate) => bridgeRpcCall(1,
       { ...input.environment, APN_ETHEREUM_RPC_URL: candidate.url.toString() }, { transport }));
-    return { session, descriptors }; })();
+    return { session, descriptors, archive: bridgeArchiveEndpoint(1, input.environment) !== null }; })();
   let effects = 0, selected: number | null = null;
   const attempts: Array<TokenPrimaryPoolTelemetry["attempts"][number]> = [], tried = new Set<number>();
   const primaryBlocks = new Map<string, string>(), archiveVerified = new Set<string>();
@@ -79,10 +80,10 @@ export function createTokenRpc(input: { readonly environment: Readonly<Record<st
     return await descriptor.sessionCall(resolve().session)(method, params);
   }) as TokenRpcCall;
   Object.defineProperties(call, {
-    batch: { value: async (route: TokenRpcRoute, items: readonly TokenRpcItem[]) => {
+    batch: { value: async (requested: TokenRpcRoute, items: readonly TokenRpcItem[]) => {
+      const index = selected ?? 0, descriptor = resolve().descriptors[index]!, route = servedTokenRoute(requested, descriptor, resolve().archive);
       if (route === "primary") return await primary(items);
       if (route === "archive") await verifyArchive(items);
-      const index = selected ?? 0, descriptor = resolve().descriptors[index]!;
       return await descriptor.sessionBatchCall(resolve().session)(items, route);
     } },
     telemetry: { value: () => initialized?.session.telemetry() ?? null },
@@ -183,17 +184,19 @@ function createLegacyTokenRpc(input: { readonly environment: Readonly<Record<str
       await input.state.loadRpcProviderCooldown(familyHash), async (value) => await input.state.writeRpcProviderCooldown(familyHash, value)));
   } }, input.pacingNow);
   let initialized: { readonly session: RpcReadSession; readonly descriptor: ReturnType<typeof bridgeRpcCall>; readonly read: EvmRpcCall;
-    readonly batch: ReturnType<ReturnType<typeof bridgeRpcCall>["sessionBatchCall"]> } | undefined;
+    readonly batch: ReturnType<ReturnType<typeof bridgeRpcCall>["sessionBatchCall"]>; readonly archive: boolean } | undefined;
   const resolve = () => initialized ??= (() => { const session = new RpcReadSession({ maxLogicalItems: input.maxLogicalItems ?? 96,
     maxHttpRequests: input.maxHttpRequests, maxHttpAttempts: input.maxHttpRequests, maxReadAttempts: 1, deadlineMs: input.deadlineMs,
     now: input.now, ...(input.wait === undefined ? {} : { wait: input.wait }), providerScheduler: scheduler });
     const descriptor = bridgeRpcCall(1, input.environment, { transport: input.transport ?? new BridgeHttps(undefined, undefined, 2_500) });
-    return { session, descriptor, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session) }; })();
+    return { session, descriptor, read: descriptor.sessionCall(session), batch: descriptor.sessionBatchCall(session),
+      archive: bridgeArchiveEndpoint(1, input.environment) !== null }; })();
   let effects = 0, archiveVerified = false;
   const call = (async (method, params) => { if (method === "eth_sendRawTransaction") return await submitDirect(method, params, async () => await resolve().session.externalAttempt(
     resolve().descriptor.origin, async () => { effects += 1; return await resolve().descriptor.attempt(method, params); }));
     return await resolve().read(method, params); }) as TokenRpcCall;
-  Object.defineProperties(call, { batch: { value: async (route: TokenRpcRoute, items: readonly TokenRpcItem[]) => {
+  Object.defineProperties(call, { batch: { value: async (requested: TokenRpcRoute, items: readonly TokenRpcItem[]) => {
+    const route = servedTokenRoute(requested, resolve().descriptor, resolve().archive);
     if (route === "archive" && !archiveVerified) { const identity = items.findIndex((item) => item.method === "eth_chainId");
       if (identity >= 0) { const values = await resolve().batch(items, route); tokenChain(values[identity]); archiveVerified = true; return values; }
       await resolve().batch([{ method: "eth_chainId", params: [], cachePolicy: "none", decoder: tokenChain }], route); archiveVerified = true; }
@@ -205,6 +208,18 @@ function createLegacyTokenRpc(input: { readonly environment: Readonly<Record<str
         { reason: "uniswap_token_provider_binding_changed" });
     } } });
   return call;
+}
+
+/**
+ * The endpoint that serves one lane batch. The archive and the receipt reader are optional (docs/uniswap.md, Setup): a
+ * configured archive serves the state pinned to an exact block, and a configured receipt reader (else that archive) serves
+ * receipts. Without one the primary serves them, as it serves the lane's scalar reads; that works for recent blocks on
+ * any full node. The route follows the configuration only: a batch is never sent to a second endpoint after a failure.
+ */
+function servedTokenRoute(route: TokenRpcRoute, descriptor: ReturnType<typeof bridgeRpcCall>, archive: boolean): TokenRpcRoute {
+  if (route === "archive") return archive ? "archive" : "primary";
+  if (route === "receipt") return descriptor.receipts.reader || descriptor.receipts.fallback ? "receipt" : "primary";
+  return route;
 }
 
 function archiveTag(item: TokenRpcItem): string | null {

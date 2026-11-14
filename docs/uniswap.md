@@ -19,7 +19,12 @@ commands such as `inventory` do not need it.
 `APN_ETHEREUM_ARCHIVE_RPC_URL` is optional. When it is set, state reads pinned
 to one exact block (`eth_getCode`, `eth_getStorageAt` and `eth_call` at a
 numeric tag or block hash) go to it after its chain id is checked; otherwise
-the primary serves them, which works for recent blocks on any full node.
+the primary serves them, which works for recent blocks on any full node. This
+holds for both families, including the token lane's batched reads. The token
+lane reads receipts from `APN_ETHEREUM_RECEIPT_RPC_URL` when it is set to
+another origin than the primary, else from the archive when that is set, else
+from the primary. A batch goes to one endpoint only; it is never sent to
+another one after a failure.
 Public endpoints that need no account or API key:
 
 ```sh
@@ -222,6 +227,17 @@ it checks the chain, the code pins, the exact allowance, the source balance,
 the fresh quote floor, the exact simulation, the gas cap, the native balance
 and the fee caps, and reads none of them twice. `execute` holds its one send
 slot before it writes an attempt marker, so no read can take it.
+
+### Status reads
+
+Once an effect's receipt block is safe, `status` reads the allowance at that
+block; for the swap it also reads both token balances at that block and the
+block before it. Without `APN_ETHEREUM_ARCHIVE_RPC_URL` the primary serves
+these reads. A pruning public primary keeps that state for only about 128
+blocks (about 25 minutes), so run `status` soon after the send, or set an
+archive endpoint before a later first `status`. Quote, prepare and the signing
+guard read only at a block they have just read from the primary, so they never
+need an archive.
 
 ### Recovery and cleanup
 
