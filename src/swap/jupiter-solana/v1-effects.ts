@@ -137,6 +137,14 @@ export async function verifySignedJupiterV1Transaction(effect:RailSignedEffect,b
  }catch{corrupt();}
 }
 function corrupt():never{throw new ApnError("APN_STATE_CORRUPT","Jupiter V1 durable execution binding or signed message changed.");}
+/** Jupiter signs only with the profile's local Solana key: none exists yet, or the profile's Solana account is provider-linked. */
+function jupiterV1LocalWalletRequired(profile:string, provider:string|null):ApnError{
+ return provider===null
+  ?new ApnError("APN_WALLET_POLICY_REQUIRED","Jupiter swaps from the profile's local Solana wallet, and this profile has no Solana wallet.",
+   {reason:"jupiter_v1_local_wallet_required",nextActions:[`apn wallet ensure-solana --profile ${profile} --provider local --accept-risk true`]})
+  :new ApnError("APN_WALLET_POLICY_REQUIRED","Jupiter swaps from the profile's local Solana wallet, and this profile's Solana account is linked to a provider.",
+   {reason:"jupiter_v1_local_wallet_required",provider,nextActions:[`apn wallet capabilities-solana --profile ${profile}`]});
+}
 
 /** The finite local Jupiter signer owns the canonical software custody instance and its one-shot TTY grants. */
 export class JupiterV1LocalSigner {
@@ -153,6 +161,17 @@ export class JupiterV1LocalSigner {
   this.#bindings=new JupiterV1ExecutionBindingStore(root);this.#operations=new SwapOperationRepository(root);
  }
  readonly #bindings:JupiterV1ExecutionBindingStore;readonly #operations:SwapOperationRepository;
+ /**
+  * The owner as admission sees it (quote, prepare and the checks before any marker). A profile with no Solana wallet, or
+  * with a provider-linked one, is refused with that cause; every other disagreement stays corrupt, as in publicOwner.
+  */
+ async admissionOwner(profile:string, expected?:string){
+  if(Object.getPrototypeOf(this.#custody)!==ChainAccountStore.prototype)corrupt();
+  const account=await this.#custody.account(profile,"solana"),envelope=await this.#custody.ownerBinding(profile,"solana");
+  if(account===null&&envelope===null)throw jupiterV1LocalWalletRequired(profile,null);
+  if(account!==null&&envelope!==null&&canonicalJson(account)===canonicalJson(envelope)&&account.provider!=="local")throw jupiterV1LocalWalletRequired(profile,account.provider);
+  return await this.publicOwner(profile,expected);
+ }
  async publicOwner(profile:string, expected?:string){
   if(Object.getPrototypeOf(this.#custody)!==ChainAccountStore.prototype)corrupt();
   const account=await this.#custody.account(profile,"solana"),envelope=await this.#custody.ownerBinding(profile,"solana");
