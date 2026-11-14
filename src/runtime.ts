@@ -31,6 +31,7 @@ import type { TransferApprovalPort } from "./tty-approval.js";
 import type { ProviderX402Repository } from "./provider-x402-repository.js";
 import type { ProviderX402TransactionEvidencePort } from "./provider-x402-transaction-port.js";
 import type { ProviderAuthorizationStorePort } from "./encrypted-provider-authorization-store.js";
+import type { ProviderRequestReferencePort } from "./provider-request-reference-store.js";
 import type { ChainWalletStoragePort, DirectRailPort, RailApprovalPort } from "./direct-rail-ports.js";
 import type { ChainPolicyApprovalPort } from "./chain-policy.js";
 import type { BridgeDependencies } from "./lifi/service.js";
@@ -139,6 +140,8 @@ export interface CoreDependencies {
   readonly providerX402Repository?: ProviderX402Repository;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+  /** The sealed provider request ids of MetaMask native and provider direct transfers (provider-request-reference-store.ts). */
+  readonly providerRequestReferences?: ProviderRequestReferencePort;
   readonly operationAbandonApproval?: OperationAbandonApprovalPort;
   /** Keyless public reads at a chain's finalized tag, for the R4 proofs of operations no family runtime observes. */
   readonly finalizedRead?: FinalizedReader;
@@ -209,6 +212,8 @@ export class RuntimeContext {
   readonly providerX402Repository?: ProviderX402Repository;
   readonly providerTransactionEvidence?: ProviderX402TransactionEvidencePort;
   readonly providerAuthorizationStore?: ProviderAuthorizationStorePort;
+  /** The sealed provider request ids of MetaMask native and provider direct transfers (provider-request-reference-store.ts). */
+  readonly providerRequestReferences?: ProviderRequestReferencePort;
   readonly operationAbandonApproval?: OperationAbandonApprovalPort;
   readonly finalizedRead?: FinalizedReader;
   readonly circleSourceDelivery?: CircleSolanaDeliveryReader;
@@ -278,6 +283,7 @@ export class RuntimeContext {
     if (dependencies.providerX402Repository !== undefined) this.providerX402Repository = dependencies.providerX402Repository;
     if (dependencies.providerTransactionEvidence !== undefined) this.providerTransactionEvidence = dependencies.providerTransactionEvidence;
     if (dependencies.providerAuthorizationStore !== undefined) this.providerAuthorizationStore = dependencies.providerAuthorizationStore;
+    if (dependencies.providerRequestReferences !== undefined) this.providerRequestReferences = dependencies.providerRequestReferences;
     if (dependencies.operationAbandonApproval !== undefined) this.operationAbandonApproval = dependencies.operationAbandonApproval;
     if (dependencies.finalizedRead !== undefined) this.finalizedRead = dependencies.finalizedRead;
     if (dependencies.circleSourceDelivery !== undefined) this.circleSourceDelivery = dependencies.circleSourceDelivery;
@@ -374,6 +380,13 @@ export class RuntimeContext {
       throw new ApnError("APN_INTERNAL", "The encrypted provider authorization store is unavailable.");
     }
     return this.providerAuthorizationStore;
+  }
+
+  requireProviderRequestReferences(): ProviderRequestReferencePort {
+    if (this.providerRequestReferences === undefined) {
+      throw new ApnError("APN_INTERNAL", "The sealed provider request reference store is unavailable.");
+    }
+    return this.providerRequestReferences;
   }
 
   nativeRequest(operation: NativeRequest["operation"], payload: Readonly<Record<string, unknown>>): NativeRequest {

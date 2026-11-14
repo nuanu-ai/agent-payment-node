@@ -31,6 +31,7 @@ import { ProviderRegistry } from "./provider-registry.js";
 import { METAMASK_AGENT_WALLET_PROVIDER_ID, MetaMaskProcessAdapter } from "./metamask-process-adapter.js";
 import { StateProfileRepository } from "./profile-repository.js";
 import { EncryptedProviderAuthorizationStore } from "./encrypted-provider-authorization-store.js";
+import { EncryptedProviderRequestReferenceStore } from "./provider-request-reference-store.js";
 import { EncryptedSmartAccountPermissionStore } from "./encrypted-smart-account-permission-store.js";
 import { METAMASK_SMART_ACCOUNT_PROVIDER_ID, LocalSessionKeyFactory, MetaMaskSmartAccountAdapter } from "./metamask-smart-account-adapter.js";
 import { LoopbackMetaMaskConsent } from "./metamask-smart-account-consent.js";
@@ -363,6 +364,8 @@ export function createApnCore(bound: BoundCommand, options: RuntimeFactoryOption
     ...(options.wait === undefined ? {} : { wait: options.wait }),
     ...(options.providerTransactionEvidence === undefined ? {} : { providerTransactionEvidence: options.providerTransactionEvidence }),
     ...(providerAuthorizationStore === undefined ? {} : { providerAuthorizationStore }),
+    // Constructing it reads nothing; only a sealed MetaMask request reference reaches the Keychain through it.
+    providerRequestReferences: new EncryptedProviderRequestReferenceStore(state, wrappingSecret),
     ...(bound.request.command === "operation.abandon" || options.operationAbandonApproval !== undefined
       ? { operationAbandonApproval: options.operationAbandonApproval ?? new TtyOperationAbandonApproval() }
       : {}),

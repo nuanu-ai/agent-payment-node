@@ -8,14 +8,15 @@ const RESTORE_WRAPPING_SECRET = "Restore the login Keychain item ai.nuanu.apn.wr
 
 /**
  * Every directory whose entries a custody store sealed under the wrapping secret: the 13 stores of
- * tests/core/custody-envelope-cases.ts (the 0.5.45 formats), and the MetaMask gasless request references that releases
- * after 0.5.106 seal (metamask-gasless/journal/request-reference.ts). `wallets/` is checked apart: its subdirectories are
- * public records.
+ * tests/core/custody-envelope-cases.ts (the 0.5.45 formats), and the MetaMask gasless, MetaMask native and provider
+ * direct request references that releases after 0.5.106 seal (metamask-gasless/journal/request-reference.ts and
+ * provider-request-reference-store.ts). `wallets/` is checked apart: its subdirectories are public records.
  */
 const SEALED_DIRECTORIES = [
   "policies", "provider-authorizations", "smart-account-effects", "smart-account-x402-materials",
   "smart-account-gasless-materials", "smart-account-permissions", "chain-wallets", "circle-v2-evm-funding-effects",
   "bridge-effects", "uniswap-execution-effects", "merchant-material", "gasless-effects", "metamask-gasless-request-references",
+  "metamask-native-request-references", "provider-direct-request-references",
 ] as const;
 
 function wrappingSecretMissing(message: string): ApnError {

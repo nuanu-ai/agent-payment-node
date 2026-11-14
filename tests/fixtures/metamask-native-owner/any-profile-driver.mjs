@@ -1,7 +1,8 @@
 // TEST ONLY. The real CLI path (`runCli`: argv binding, core dispatch, owner, the real vendor adapter and process runner,
 // the real RPC module and EvmRpc, journal and usage ledger) for a profile that is not the owner's, with its own recipient
-// and amount. Only the edges are synthetic: a fake `mm` child script and an in-memory JSON-RPC chain. No HOME, Keychain,
-// network or money. Runs in a pseudo-terminal so the real foreground consent prompt is answered.
+// and amount. Only the edges are synthetic: a fake `mm` child script, an in-memory JSON-RPC chain and a synthetic wrapping
+// secret that seals the MetaMask request id (QA F26). No HOME, Keychain, network or money. Runs in a pseudo-terminal so the
+// real foreground consent prompt is answered.
 import { mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
@@ -96,8 +97,8 @@ const { AllowlistPolicyStore } = await import(moduleUrl("allowlist-policy-store.
 const { metamaskDirectCapabilitySnapshot, capabilityHash, accountBindingHash } = await import(moduleUrl("provider-profile.js"));
 const { AssetUsageLedger } = await import(moduleUrl("asset-usage-ledger.js"));
 const { OperationService } = await import(moduleUrl("operation-service.js"));
-const noKeychain = { load: async () => { throw new Error("TEST no Keychain"); }, create: async () => { throw new Error("TEST no Keychain"); } };
-const cli = (argv) => runCli(argv, process.env, { stateRoot: root, wrappingSecret: noKeychain });
+const testWrapping = { load: async () => Buffer.alloc(32, 7), create: async () => Buffer.alloc(32, 7) };
+const cli = (argv) => runCli(argv, process.env, { stateRoot: root, wrappingSecret: testWrapping });
 const transfer = (recipient, amount, key) => cli(["wallet", "metamask", "native-transfer", "--profile", PROFILE, "--chain", "ethereum",
   "--recipient", recipient, "--amount-atomic", amount, "--idempotency-key", key]);
 const usage = async (asset) => (await new AssetUsageLedger(root).usage({ account: PAYER, chain: "eip155:1", asset }, new Date())).amountAtomic;
@@ -125,11 +126,19 @@ async function mfaScenario() {
   assert.equal(first.ok, true, JSON.stringify(first.error));
   const id = first.data.operation_id, observe = `apn wallet metamask native-transfer-observe --operation ${id}`, task = first.data.mfa_task;
   assert.equal(first.data.state, "unknown"); assert.equal(first.data.transaction_hash, null); assert.equal(first.data.effect_attempts, 1);
-  assert.deepEqual([task.status, task.request_id, task.auth_method, task.expires_at, task.source, task.observe_command], ["awaiting_owner", RID, "social", later, "send", observe]);
-  assert.match(task.owner_action, /email registered to your MetaMask dashboard/u); assert.deepEqual(first.next_actions, [observe]);
-  // The record 0.5.52 wrote for the captured transfer: UNKNOWN with its request id and no task. It recovers through the normal observer.
-  const journalPath = join(root, "metamask-native-operations", `${id}.json`);
-  const { recordHash: _hash, mfaTask: _task, ...body } = JSON.parse(await readFile(journalPath, "utf8"));
+  // QA F26: the journal and every output keep only the request id's hash; the id itself is sealed apart.
+  const { metaMaskNativeRequestIdHash } = await import(moduleUrl("metamask-native-journal.js"));
+  assert.deepEqual([task.status, task.request_id_hash, task.auth_method, task.expires_at, task.source, task.observe_command],
+    ["awaiting_owner", metaMaskNativeRequestIdHash(RID), "social", later, "send", observe]);
+  assert.equal("request_id" in task, false); assert.equal(JSON.stringify(first).includes(RID), false);
+  assert.match(task.owner_action, new RegExp(`^Approve the MetaMask request of APN ${id} from the email registered to your MetaMask dashboard`, "u"));
+  assert.deepEqual(first.next_actions, [observe]);
+  const journalPath = join(root, "metamask-native-operations", `${id}.json`), sealedText = await readFile(journalPath, "utf8");
+  assert.equal(sealedText.includes(RID), false); assert.equal(JSON.parse(sealedText).providerRequestIdHash, metaMaskNativeRequestIdHash(RID));
+  // The record 0.5.52 wrote for the captured transfer: UNKNOWN with its request id in plaintext and no task. It recovers
+  // through the normal observer, unchanged.
+  const { recordHash: _hash, mfaTask: _task, providerRequestIdHash: _sealed, ...sealedBody } = JSON.parse(sealedText);
+  const body = { ...sealedBody, providerRequestId: RID };
   await writeFile(journalPath, `${canonicalJson({ ...body, recordHash: hashObject(body) })}\n`);
   const old = await cli(["wallet", "metamask", "native-transfer-status", "--operation", id]);
   assert.equal(old.ok, true, JSON.stringify(old.error)); assert.equal(old.data.mfa_task, undefined); assert.deepEqual(old.next_actions, [observe]);
@@ -142,7 +151,7 @@ async function mfaScenario() {
   assert.deepEqual([pending.data.mfa_task.source, pending.data.mfa_task.evidence_hash, pending.data.mfa_task.status], ["watch", sha(watched), "awaiting_owner"]);
   assert.deepEqual(pending.next_actions, [observe]);
   // CLI and MCP name the same task and the same no-send observer.
-  const server = createMcpServer({ stateRoot: root, wrappingSecret: noKeychain }), [x, y] = InMemoryTransport.createLinkedPair();
+  const server = createMcpServer({ stateRoot: root, wrappingSecret: testWrapping }), [x, y] = InMemoryTransport.createLinkedPair();
   await server.connect(y); const client = new Client({ name: "qa0552-mm-mfa", version: "1" }); await client.connect(x);
   try {
     const viaMcp = (await client.callTool({ name: "apn_operation_status", arguments: { operation: id } })).structuredContent, viaCli = await cli(["operation", "status", "--operation", id]);
@@ -173,7 +182,8 @@ async function mfaScenario() {
   assert.equal(denied.data.read_observation.provider_status, "DENIED");
   // The verified DENIED names the owner's exit: the transfer stays UNKNOWN with its hold, and abandon frees the account.
   assert.equal(denied.next_actions.length, 3);
-  assert.match(denied.next_actions[0], new RegExp(`^MetaMask closed request ${RID2} as DENIED at its approval step, before signing\\.`, "u"));
+  assert.match(denied.next_actions[0], new RegExp(`^MetaMask closed the request of APN ${second.data.operation_id} as DENIED at its approval step, before signing\\.`, "u"));
+  assert.equal(JSON.stringify([second, denied]).includes(RID2), false, "a sealed request id is never shown");
   assert.equal(denied.next_actions[1], `apn wallet metamask native-transfer-observe --operation ${second.data.operation_id}`);
   assert.match(denied.next_actions[2], new RegExp(`: apn operation abandon --operation ${second.data.operation_id} \\(the reserves stay charged`, "u"));
   assert.equal((await sends()).length, 2); assert.equal(await usage(TOKEN), "3500");

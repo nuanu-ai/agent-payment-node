@@ -60,7 +60,12 @@ try {
    await state.writeOperation(sealOperation({...body,state:started.state,reason:started.reason,proofClass:started.proofClass,transitions:appendTransition(saved.transitions,started)}));
  }
  const owner=await import(moduleUrl('metamask-native-transfer-owner.js'));
- const run=(chainId,key,p=profile)=>owner.runMetaMaskNativeTransfer(root,{profile:p,chainId,recipient:recipientInput,amountAtomic:amount,idempotencyKey:key});
+ // QA F26: a synthetic wrapping secret seals the MetaMask request id the hand-off returns; the Keychain is never touched.
+ const {EncryptedProviderRequestReferenceStore}=await import(moduleUrl('provider-request-reference-store.js'));
+ const {metaMaskNativeRequestIdHash,metaMaskNativeRequestReference}=await import(moduleUrl('metamask-native-journal.js'));
+ const wrapping={loads:0,async load(){this.loads++;return Buffer.alloc(32,7);},async create(){return Buffer.alloc(32,7);}};
+ const references=new EncryptedProviderRequestReferenceStore({root},wrapping);
+ const run=(chainId,key,p=profile)=>owner.runMetaMaskNativeTransfer(root,{profile:p,chainId,recipient:recipientInput,amountAtomic:amount,idempotencyKey:key},references);
  if(scenario==='vendor-drift-before-send'){
    const result=await run(1,'native-test-refused-0001');assert.equal(result.state,'unknown');assert.equal(result.effect_attempts,1);assert.equal(effects,0);
    const saved=JSON.parse(await readFile(join(root,'metamask-native-operations',result.operation_id+'.json'),'utf8'));assert.equal(saved.reservations.length,2);assert.notEqual(saved.context.vendorPolicyHash,otherVendor);assert.equal(saved.diagnostic.stage,'sdk_read');
@@ -70,7 +75,13 @@ try {
    if(scenario==='guard-refused')assert.deepEqual(await readdir(join(root,'metamask-native-operations')).catch(()=>[]),[]);
    process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
  } else {
- const result=await run(primaryChain,'native-test-positive-0001');assert.equal(result.recipient.toLowerCase(),recipientInput);assert.equal(result.usdc_atomic,amount);assert.equal(result.operation_id,state.operationId(profile,`metamask-native:${primaryChain}:native-test-positive-0001`));assert.equal(lastContext.profile,profile);assert.equal(lastContext.quote.sender.toLowerCase(),payer);assert.equal(result.state,acknowledgedScenarios.includes(scenario)?'acknowledged':'unknown');assert.equal(result.transaction_hash,['pending','no-rid'].includes(scenario)?null:'0x'+'e'.repeat(64));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(lastScope,lastContext));
+ const result=await run(primaryChain,'native-test-positive-0001');assert.ok(wrapping.loads>0,'the wrapping secret is read before consent');
+ {const text=await readFile(join(root,'metamask-native-operations',result.operation_id+'.json'),'utf8'),saved=JSON.parse(text);
+  assert.ok(!text.includes('TEST-pending-request')&&!JSON.stringify(result).includes('TEST-pending-request'),'no journal or output names the request id');
+  if(acknowledgedScenarios.includes(scenario)||scenario==='no-rid')assert.equal('providerRequestIdHash' in saved,false);
+  else{assert.equal(saved.providerRequestId,null);assert.equal(saved.providerRequestIdHash,metaMaskNativeRequestIdHash('TEST-pending-request'));
+   assert.equal(await references.open(metaMaskNativeRequestReference(saved,saved.providerRequestIdHash)),'TEST-pending-request');}}
+ assert.equal(result.recipient.toLowerCase(),recipientInput);assert.equal(result.usdc_atomic,amount);assert.equal(result.operation_id,state.operationId(profile,`metamask-native:${primaryChain}:native-test-positive-0001`));assert.equal(lastContext.profile,profile);assert.equal(lastContext.quote.sender.toLowerCase(),payer);assert.equal(result.state,acknowledgedScenarios.includes(scenario)?'acknowledged':'unknown');assert.equal(result.transaction_hash,['pending','no-rid'].includes(scenario)?null:'0x'+'e'.repeat(64));assert.throws(()=>owner.assertMetaMaskNativeOwnedScope(lastScope,lastContext));
  const replay=await run(primaryChain,'native-test-positive-0001');assert.equal(replay.operation_id,result.operation_id);assert.equal(effects,1);
  await assert.rejects(()=>run(primaryChain,'native-test-second-key-0002'));assert.equal(effects,1);
  if(scenario==='native-crosschain'){const other=await run(1329,'native-test-other-chain-0002');assert.equal(other.state,'acknowledged');assert.equal(effects,2);}
@@ -104,17 +115,17 @@ try {
  await assert.rejects(()=>ledger.transition({...identity,reservationId,policyDigest:held.policyDigest,state:'released_unsubmitted',now:new Date(),outcomeDigest:'2'.repeat(64)}));
  await writeFile(holdPath,original);
  const statusOnly=await owner.readMetaMaskNativeTransfer(root,result.operation_id,false);assert.ok(!("read_observation" in statusOnly));
- if(scenario==='no-rid'){const before=await ledger.usageWithReservation(identity,reservationId,new Date());const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true);assert.equal(observed.state,"unknown");assert.equal(observed.read_observation.stage,"not_requested");assert.equal(observed.read_observation.reason,"no_stored_request_id");assert.equal(requestReads,0);assert.deepEqual(await ledger.usageWithReservation(identity,reservationId,new Date()),before);assert.equal(effects,1);
+ if(scenario==='no-rid'){const before=await ledger.usageWithReservation(identity,reservationId,new Date());const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true,references);assert.equal(observed.state,"unknown");assert.equal(observed.read_observation.stage,"not_requested");assert.equal(observed.read_observation.reason,"no_stored_request_id");assert.equal(requestReads,0);assert.deepEqual(await ledger.usageWithReservation(identity,reservationId,new Date()),before);assert.equal(effects,1);
    // R4 exit: an unknown outcome with no identifier is released by the owner, only after its quote expired, with consent.
    const approvals=[];
-   await assert.rejects(()=>owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date()),{code:'APN_OPERATION_BLOCKED'});
-   const abandoned=await owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(Date.now()+120000));
+   await assert.rejects(()=>owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(),references),{code:'APN_OPERATION_BLOCKED'});
+   const abandoned=await owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(Date.now()+120000),references);
    assert.equal(abandoned.state,'abandoned_unknown');assert.equal(approvals.length,1);assert.equal(approvals[0].amountAtomic,amount);assert.equal(approvals[0].recipient.toLowerCase(),recipientInput);assert.equal(effects,1);
-   const again=await owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(Date.now()+120000));
+   const again=await owner.abandonMetaMaskNativeTransfer(root,result.operation_id,async i=>{approvals.push(i);},()=>new Date(Date.now()+120000),references);
    assert.equal(again.state,'abandoned_unknown');assert.equal(approvals.length,1);
    const freed=await run(primaryChain,'native-test-after-abandon-0003');assert.equal(effects,2,'the account is no longer held after abandonment');assert.equal(freed.effect_attempts,1);
    process.stdout.write("TEST_OWNER_NO-RID_OK\n");} else {
- const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true);assert.equal(observed.state,scenario==='reverted'?'confirmed_reverted':'confirmed');assert.equal(observed.receipt.transferAccepted,scenario!=='reverted');if(scenario!=="pending")assert.equal(observed.read_observation.stage,"not_requested");else {assert.equal(requestReads,1);assert.equal(observed.read_observation.stage,"complete");assert.equal(observed.read_observation.provider_status,"CONFIRMED");}assert.ok(!JSON.stringify(await owner.readMetaMaskNativeTransfer(root,result.operation_id,false)).includes("read_observation"));assert.equal(observed.receipt.nativeFeeAtomic,primaryChain===10?'7500550':'7500000');
+ const observed=await owner.readMetaMaskNativeTransfer(root,result.operation_id,true,references);assert.equal(observed.state,scenario==='reverted'?'confirmed_reverted':'confirmed');assert.equal(observed.receipt.transferAccepted,scenario!=='reverted');if(scenario!=="pending")assert.equal(observed.read_observation.stage,"not_requested");else {assert.equal(requestReads,1);assert.equal(observed.read_observation.stage,"complete");assert.equal(observed.read_observation.provider_status,"CONFIRMED");}assert.ok(!JSON.stringify(await owner.readMetaMaskNativeTransfer(root,result.operation_id,false)).includes("read_observation"));assert.equal(observed.receipt.nativeFeeAtomic,primaryChain===10?'7500550':'7500000');
  assert.equal((await ledger.usage({account:address,chain:`eip155:${primaryChain}`,asset:{kind:'native',identifier:null}},new Date())).amountAtomic,primaryChain===10?'7500550':'7500000');
  assert.equal((await ledger.usage({account:address,chain:`eip155:${primaryChain}`,asset:{kind:'token',identifier:token}},new Date())).amountAtomic,scenario==='reverted'?'0':amount);
  if(scenario==='profile-tamper'){
@@ -127,7 +138,7 @@ try {
    const body={...journal,reservations:[forged,journal.reservations[1]]};delete body.recordHash;await writeFile(path,JSON.stringify({...body,recordHash:hashObject(body)})+'\n');
    await assert.rejects(()=>owner.readMetaMaskNativeSettlement(root,result.operation_id));await writeFile(path,journalBytes);
  }
- await owner.readMetaMaskNativeTransfer(root,result.operation_id,true);assert.equal(effects,scenario==='native-crosschain'?2:1);
+ await owner.readMetaMaskNativeTransfer(root,result.operation_id,true,references);assert.equal(effects,scenario==='native-crosschain'?2:1);
  await normalOperations.assertEvmAccountAvailable(state.profileHash('native-test-unbound-alias'),primaryChain,address);
  process.stdout.write('TEST_OWNER_'+scenario.toUpperCase()+'_OK\n');
  }

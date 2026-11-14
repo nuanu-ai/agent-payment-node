@@ -14,6 +14,7 @@ import { canonicalOperationId } from "./transfer-policy.js";
 import { formatAtomic } from "./money.js";
 import { pastUnstartedDeadline } from "./unstarted-deadline.js";
 import { validateMetaMaskNativeDiagnostic, type MetaMaskNativeDiagnostic } from "./metamask-native-diagnostic.js";
+import { providerRequestReferenceHash, type ProviderRequestReferenceBinding } from "./provider-request-reference-store.js";
 import type { MetaMaskMfaNotice } from "./metamask-process-output.js";
 import { METAMASK_NATIVE_FEE_QUOTE_SCHEMA, METAMASK_NATIVE_FEE_QUOTE_SCHEMA_V2, metaMaskNativeQuoteTransfer, validateMetaMaskNativeFeeQuote,
   validateMetaMaskNativeFeeReceipt, type MetaMaskNativeFeeQuote, type MetaMaskNativeFeeReceiptEvidence } from "./metamask-native-fee-evidence.js";
@@ -61,7 +62,14 @@ export interface MetaMaskNativeOperation {
   readonly state: MetaMaskNativeState;
   readonly effectAttempts: 0 | 1;
   readonly transactionHash: `0x${string}` | null;
+  /** The MetaMask request id itself, as every release up to 0.5.106 kept it; null in a record that seals it. */
   readonly providerRequestId: string | null;
+  /**
+   * In a record a later release wrote, the hash of the MetaMask request id (metaMaskNativeRequestIdHash), whose id is
+   * sealed apart under the Keychain wrapping secret (provider-request-reference-store.ts); providerRequestId is then
+   * null. Absent from a record that holds no request and from every record 0.5.106 or earlier wrote.
+   */
+  readonly providerRequestIdHash?: string;
   readonly receiptEvidence: MetaMaskNativeFeeReceiptEvidence | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -76,24 +84,37 @@ export const METAMASK_NATIVE_OPERATION_SCHEMA = V2;
  * stored request, from the hand-off (`send`) or a no-send read (`watch`: `mm wallet requests watch`, or MetaMask's server
  * answer when mm's local request list no longer held the request); `evidenceHash` is the SHA-256 of that vendor output.
  * Metadata only, kept apart from the financial state: it is never a payment, an outcome or a reason to release a hold,
- * and it goes when a transaction hash or the provider's own record shows the request past the approval.
+ * and it goes when a transaction hash or the provider's own record shows the request past the approval. It names the
+ * request as its record does: by the id itself in a record 0.5.106 or earlier wrote, by the id's hash in one that seals it.
  */
-export interface MetaMaskNativeMfaTask {
-  readonly requestId: string;
+interface MfaTaskFields {
   readonly expiresAt: string | null;
   readonly authMethod: string | null;
   readonly observedAt: string;
   readonly source: "send" | "watch";
   readonly evidenceHash: string;
 }
-export function metaMaskNativeMfaTask(requestId: string, evidence: MetaMaskMfaNotice & { readonly evidenceHash: string }, source: MetaMaskNativeMfaTask["source"],
-  now = new Date()): MetaMaskNativeMfaTask {
-  return { requestId, expiresAt: evidence.expiresAt, authMethod: evidence.authMethod, observedAt: now.toISOString(), source, evidenceHash: evidence.evidenceHash };
+export interface MetaMaskNativeMfaTaskWithId extends MfaTaskFields { readonly requestId: string }
+export interface MetaMaskNativeMfaTaskWithHash extends MfaTaskFields { readonly requestIdHash: string }
+export type MetaMaskNativeMfaTask = MetaMaskNativeMfaTaskWithId | MetaMaskNativeMfaTaskWithHash;
+type MfaEvidence = MetaMaskMfaNotice & { readonly evidenceHash: string };
+const mfaFields = (evidence: MfaEvidence, source: MfaTaskFields["source"], now: Date): MfaTaskFields =>
+  ({ expiresAt: evidence.expiresAt, authMethod: evidence.authMethod, observedAt: now.toISOString(), source, evidenceHash: evidence.evidenceHash });
+/** The task of a record that keeps the request id itself (one 0.5.106 or earlier wrote). */
+export function metaMaskNativeMfaTask(requestId: string, evidence: MfaEvidence, source: MfaTaskFields["source"],
+  now = new Date()): MetaMaskNativeMfaTaskWithId {
+  return { requestId, ...mfaFields(evidence, source, now) };
+}
+/** The task of a record that seals its request id: it names only the id's hash, as the record does. */
+export function metaMaskNativeSealedMfaTask(requestIdHash: string, evidence: MfaEvidence, source: MfaTaskFields["source"],
+  now = new Date()): MetaMaskNativeMfaTaskWithHash {
+  return { requestIdHash, ...mfaFields(evidence, source, now) };
 }
 function validateMfaTask(o: MetaMaskNativeOperation): void {
-  const t = o.mfaTask as unknown;
+  const t = o.mfaTask as unknown, sealed = o.providerRequestIdHash !== undefined;
   if (t === undefined) return;
-  if (!isPlainRecord(t) || !exactKeys(t, ["requestId", "expiresAt", "authMethod", "observedAt", "source", "evidenceHash"]) || t.requestId !== o.providerRequestId ||
+  if (!isPlainRecord(t) || !exactKeys(t, [sealed ? "requestIdHash" : "requestId", "expiresAt", "authMethod", "observedAt", "source", "evidenceHash"]) ||
+    (sealed ? t.requestIdHash !== o.providerRequestIdHash : t.requestId !== o.providerRequestId) ||
     o.transactionHash !== null || o.effectAttempts !== 1 || !["unknown", "abandoned_unknown"].includes(o.state) || !(t.expiresAt === null || instant(t.expiresAt)) ||
     !(t.authMethod === null || typeof t.authMethod === "string" && /^[a-z][a-z0-9_-]{0,31}$/u.test(t.authMethod)) || !instant(t.observedAt) ||
     (t.observedAt as string) < o.createdAt || !["send", "watch"].includes(t.source as string) || !digest(t.evidenceHash)) corrupt("Native transfer MFA task is invalid.");
@@ -106,7 +127,7 @@ const instant = (value: unknown): boolean => typeof value === "string" && Number
 
 /** Checked against the record's own seal and fields only (R2): a changed constant or a moved APN home never voids it. */
 function validateOperation(value: unknown): MetaMaskNativeOperation {
-  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion","operationId","requestHash","context","reservations","state","effectAttempts","transactionHash","providerRequestId","receiptEvidence","createdAt","updatedAt","recordHash",...(value.diagnostic===undefined?[]:["diagnostic"]),...(value.mfaTask===undefined?[]:["mfaTask"])])) corrupt("Native transfer journal schema is invalid.");
+  if (!isPlainRecord(value) || !exactKeys(value, ["schemaVersion","operationId","requestHash","context","reservations","state","effectAttempts","transactionHash","providerRequestId","receiptEvidence","createdAt","updatedAt","recordHash",...(value.diagnostic===undefined?[]:["diagnostic"]),...(value.mfaTask===undefined?[]:["mfaTask"]),...(value.providerRequestIdHash===undefined?[]:["providerRequestIdHash"])])) corrupt("Native transfer journal schema is invalid.");
   const o = value as unknown as MetaMaskNativeOperation, { recordHash, ...body } = o, v2 = o.schemaVersion === V2, c = o.context;
   if ((o.schemaVersion !== V1 && !v2) || recordHash !== hashObject(body)) corrupt("Native transfer journal schema is invalid.");
   if (o.diagnostic !== undefined) validateMetaMaskNativeDiagnostic(o.diagnostic);
@@ -137,6 +158,9 @@ function validateOperation(value: unknown): MetaMaskNativeOperation {
     if (o.state !== "confirmed" || r.transactionHash !== o.transactionHash) corrupt("Native transfer journal receipt changed.");
   } else if (o.state === "confirmed") corrupt("Native transfer confirmed journal has no receipt.");
   if (o.transactionHash !== null && !/^0x[0-9a-f]{64}$/u.test(o.transactionHash)) corrupt("Native transfer transaction hash is invalid.");
+  // A sealed request exists only after the hand-off, and the record then never keeps the id itself.
+  if (o.providerRequestIdHash !== undefined && (!digest(o.providerRequestIdHash) || o.providerRequestId !== null || o.effectAttempts !== 1))
+    corrupt("Native transfer sealed provider request reference is invalid.");
   validateMfaTask(o);
   return o;
 }
@@ -195,6 +219,7 @@ export class MetaMaskNativeJournal extends SecureStateStore {
     const next = validateOperation({ ...body, recordHash: hashObject(body) }), old = await this.read(next.operationId);
     if (old !== null && (old.schemaVersion !== next.schemaVersion || old.requestHash !== next.requestHash || canonicalJson(old.context) !== canonicalJson(next.context) ||
       old.diagnostic !== undefined && canonicalJson(old.diagnostic) !== canonicalJson(next.diagnostic) || old.createdAt !== next.createdAt || old.effectAttempts > next.effectAttempts || old.transactionHash !== null && old.transactionHash !== next.transactionHash ||
+      old.providerRequestIdHash !== undefined && old.providerRequestIdHash !== next.providerRequestIdHash ||
       RESOLVED.includes(old.state))) blocked("Native transfer journal cannot replace an existing outcome.");
     await this.ensureDirectory(DIRECTORY);
     await this.writeJson(`${DIRECTORY}/${next.operationId}.json`, next, old === null);
@@ -223,6 +248,24 @@ export function patchMetaMaskNativeOperation(op: MetaMaskNativeOperation, fields
 
 /** The family's own no-send observer: it reads the stored request or transaction and never signs or sends again. */
 export const metaMaskNativeObserveCommand = (id: string): string => `apn wallet metamask native-transfer-observe --operation ${id}`;
+const METAMASK_PROVIDER = "metamask-agent-wallet";
+/** The hash a record that seals its MetaMask request id keeps in its place (the same hash a direct transfer shows). */
+export const metaMaskNativeRequestIdHash = (requestId: string): string => providerRequestReferenceHash(METAMASK_PROVIDER, requestId);
+/** The sealed request id of `op` lives under this binding (provider-request-reference-store.ts). */
+export function metaMaskNativeRequestReference(op: Pick<MetaMaskNativeOperation, "operationId" | "context">, requestIdHash: string): ProviderRequestReferenceBinding {
+  return { lane: "metamask-native", providerId: METAMASK_PROVIDER, profileHash: op.context.profileHash, operationId: op.operationId, referenceHash: requestIdHash };
+}
+/** Whether the record stores a MetaMask request to observe: the id itself (0.5.106 and earlier) or the hash of a sealed one. */
+export function metaMaskNativeHasRequest(o: Pick<MetaMaskNativeOperation, "providerRequestId" | "providerRequestIdHash">): boolean {
+  return o.providerRequestId !== null || o.providerRequestIdHash !== undefined;
+}
+/**
+ * How output names the request: `request MetaMask-id` for a record that keeps the id, the APN operation (which the
+ * MetaMask request's intent names) for one that seals it.
+ */
+export function metaMaskNativeRequestLabel(o: Pick<MetaMaskNativeOperation, "operationId" | "providerRequestId">): string {
+  return o.providerRequestId !== null ? `request ${o.providerRequestId}` : `the request of APN ${o.operationId}`;
+}
 const OWNER_CONFIRMS: Readonly<Record<string, string>> = { social: "from the email registered to your MetaMask dashboard",
   qr: "in MetaMask Mobile" };
 
@@ -235,18 +278,23 @@ function publicMfaTask(o: MetaMaskNativeOperation, now: Date) {
   if (t === undefined || RESOLVED.includes(o.state) || o.transactionHash !== null) return {};
   const expired = t.expiresAt !== null && now.getTime() >= Date.parse(t.expiresAt), observe = metaMaskNativeObserveCommand(o.operationId);
   const how = OWNER_CONFIRMS[t.authMethod ?? ""] ?? "from your paired device or the email registered to your MetaMask dashboard";
+  // A record that seals its request id shows only the id's hash, and names the request by its APN operation, which the
+  // MetaMask request's own intent names.
+  const named = "requestId" in t
+    ? { field: { request_id: t.requestId }, closed: `request ${t.requestId}`, approve: `MetaMask request ${t.requestId}` }
+    : { field: { request_id_hash: t.requestIdHash }, closed: `the request of APN ${o.operationId}`, approve: `the MetaMask request of APN ${o.operationId}` };
   return { mfa_task: { status: expired ? "expired" : "awaiting_owner", provider: "metamask-agent-wallet", provider_state: "AWAITING_MFA",
-    request_id: t.requestId, auth_method: t.authMethod, expires_at: t.expiresAt, observed_at: t.observedAt, source: t.source, evidence_hash: t.evidenceHash,
+    ...named.field, auth_method: t.authMethod, expires_at: t.expiresAt, observed_at: t.observedAt, source: t.source, evidence_hash: t.evidenceHash,
     owner_action: expired
-      ? `The MetaMask approval window for request ${t.requestId} closed at ${t.expiresAt}. Observe to read what the provider did; the transfer stays UNKNOWN until the chain proves it, and APN never sends it again.`
-      : `Approve MetaMask request ${t.requestId} ${how}${t.expiresAt === null ? "" : ` before ${t.expiresAt}`}. APN never approves it for you and never sends again; then observe.`,
+      ? `The MetaMask approval window for ${named.closed} closed at ${t.expiresAt}. Observe to read what the provider did; the transfer stays UNKNOWN until the chain proves it, and APN never sends it again.`
+      : `Approve ${named.approve} ${how}${t.expiresAt === null ? "" : ` before ${t.expiresAt}`}. APN never approves it for you and never sends again; then observe.`,
     observe_command: observe } };
 }
 
 export function publicMetaMaskNativeOperation(o: MetaMaskNativeOperation, now = new Date()) {
   const receipt = o.receiptEvidence === null ? null : validateMetaMaskNativeFeeReceipt(o.receiptEvidence, o.context.quote), transfer = metaMaskNativeQuoteTransfer(o.context.quote);
   // Only an outcome that a no-send observation can still move (a stored request or transaction) names the observer.
-  const observable = ["acknowledged", "unknown"].includes(o.state) && (o.transactionHash !== null || o.providerRequestId !== null);
+  const observable = ["acknowledged", "unknown"].includes(o.state) && (o.transactionHash !== null || metaMaskNativeHasRequest(o));
   return { operation_id: o.operationId, state: o.state === "confirmed" && receipt?.transferAccepted === false ? "confirmed_reverted" : o.state, chain_id: o.context.quote.chainId, profile: o.context.profile,
     sender: o.context.quote.sender, recipient: transfer.recipient, token: o.context.quote.token, usdc_atomic: transfer.amountAtomic, usdc: formatAtomic(transfer.amountAtomic, 6),
     maximum_native_fee_atomic: o.context.quote.feeQuote.totalQuoteWei, transaction_hash: o.transactionHash,
