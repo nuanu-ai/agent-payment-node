@@ -284,3 +284,17 @@ test("without a source packet nonce, a drop before the frozen baseline from a pr
   assert.equal(await observeStargateTokenDestination(stale as any, unbound), null);
   assert.ok(stale.ranges.some(row => row.from === 205n && row.to === 304n));
 });
+
+test("the baseline block is the balance read before the send, so a delivery or drop in that block is no proof", async () => {
+  const { sourcePacket: _packet, ...unbound } = destinationInput;
+  // A same-recipient, same-amount drop in baseline block 209, with no packet nonce to bind it: no proof.
+  assert.equal(await observeStargateTokenDestination(destinationRpc("split") as any, { ...unbound, fromBlockNumberAtomic: "209", fromBlockHash: SAFE }), null);
+  // With the baseline one block earlier, the same drop binds the delivery.
+  assert.equal((await observeStargateTokenDestination(destinationRpc("split") as any,
+    { ...unbound, fromBlockNumberAtomic: "208", fromBlockHash: SAFE }))?.nativeDrop?.blockNumberAtomic, "209");
+  // OFTReceived, PacketDelivered and the drop all in baseline block 304: no proof; with baseline 303 they bind.
+  assert.equal(await observeStargateTokenDestination(destinationRpc("combined") as any,
+    { ...destinationInput, fromBlockNumberAtomic: "304", fromBlockHash: EVENT_BLOCK }), null);
+  assert.equal((await observeStargateTokenDestination(destinationRpc("combined") as any,
+    { ...destinationInput, fromBlockNumberAtomic: "303", fromBlockHash: SAFE }))?.blockNumberAtomic, "304");
+});

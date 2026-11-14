@@ -105,6 +105,13 @@ test("destination observer skips an OFTReceived outside baseline..safe head from
   // Block 8 below the frozen baseline 16 predates the operation.
   logBlock = 0x8n;
   assert.equal((await observeStargateDestination(rpc as any, input))?.mode, "balance_delta");
+  // Block 16 is the baseline itself: its balance was read before the send was signed, so a log there predates it too.
+  logBlock = 0x10n;
+  assert.equal((await observeStargateDestination(rpc as any, input))?.mode, "balance_delta");
+  // Block 17, the first block after the baseline, can hold the delivery.
+  logBlock = 0x11n;
+  const first = await observeStargateDestination(rpc as any, input);
+  assert.equal(first?.mode, "oft_received"); assert.equal(first?.blockNumberAtomic, "17");
   // Once the safe head passes block 40, the same log is the proof.
   logBlock = 0x28n; head = 0x30n;
   const late = await observeStargateDestination(rpc as any, input);

@@ -252,9 +252,11 @@ evidence block hash. If Polygon `finalized` is unavailable, the operation fails 
 - It scans the exact inclusive baseline-to-horizon range in contiguous chunks of at most 100 blocks, deduplicates
   identical provider rows and rejects conflicting duplicates. One observe scans at most 32 chunks; the next observe
   resumes from a saved cursor, so a late horizon never dead-ends.
-- An `OFTReceived` log outside the baseline-to-horizon range is skipped, also when the provider ignores the requested
-  `fromBlock` or `toBlock`. A log above the finalized head proves delivery only on a later observe, after the head
-  reaches its block.
+- An `OFTReceived` log must be after the baseline block and at or below the finalized head. A `NativeDropApplied` log
+  must be after the baseline block and at or before the delivery block. The baseline is the block whose balances APN
+  read before the send was signed, so a log in that block or earlier predates the operation, also when no source packet
+  nonce binds the drop. Other logs are skipped, also when the provider ignores the requested `fromBlock` or `toBlock`.
+  A log above the finalized head proves delivery only on a later observe, after the head reaches its block.
 - Exactly one successful native drop and exactly one delivery are required.
 - The drop may finalize in an earlier transaction or in the delivery transaction; its packet origin, nonce,
   TokenMessaging OApp, owner, amount, and success must match.

@@ -56,10 +56,12 @@ export class StargateDestinationScanStore extends SecureStateStore {
 }
 
 /** A provider may ignore the requested `fromBlock`/`toBlock` and answer a log outside the scan. A log above the
- * finality head is not final yet, and a log below the frozen baseline predates the operation, so neither is a delivery
- * candidate. Both destination paths skip such a log the same way they skip a row from another emitter. */
+ * finality head is not final yet. The frozen baseline is the block whose balance APN read before the send was signed,
+ * so a log in that block or earlier predates the operation: a real delivery or native drop is always after it. None of
+ * these is a delivery candidate; both destination paths skip such a log the same way they skip a row from another
+ * emitter. The scan itself still starts at the baseline, so this skips no block a delivery can be in. */
 export function stargateLogInScan(blockNumber: bigint, baseline: bigint, head: bigint): boolean {
-  return blockNumber >= baseline && blockNumber <= head;
+  return blockNumber > baseline && blockNumber <= head;
 }
 
 /**
