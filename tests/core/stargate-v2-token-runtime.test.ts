@@ -141,7 +141,8 @@ test("service status and receipt reconcile legal terminal targets and reject ill
 });
 
 type DestinationMutation = "nonce" | "sender" | "oapp" | "guid" | "duplicate-drop" | "duplicate-delivery" | "failed-drop" |
-  "noncanonical" | "bad-order" | "baseline" | "provider-error" | "dedup" | "low-balances" | "receipt-hash" | "receipt-block" | "receipt-status";
+  "noncanonical" | "bad-order" | "baseline" | "provider-error" | "dedup" | "low-balances" | "receipt-hash" | "receipt-block" | "receipt-status" |
+  "unbounded-logs" | "unbounded-early-head";
 const TEST_CODE = "0x6001" as Hex, TEST_CODE_HASH = keccak256(TEST_CODE), PACKET_NONCE = 27308n;
 const sourcePacket = { srcEid: 30111 as const, sender: pad(STARGATE_TOKEN_SOURCE_MESSAGING, { size: 32 }), nonceAtomic: PACKET_NONCE.toString(),
   dstEid: 30109 as const, receiver: pad(STARGATE_TOKEN_DESTINATION_MESSAGING, { size: 32 }) };
@@ -174,7 +175,7 @@ function destinationRpc(mode: "split" | "combined" = "split", mutation?: Destina
   return { ranges, codeReads, transactionReads, call: async (method: string, params: readonly any[]) => {
     if (method === "eth_getBlockByNumber") {
       const tag = String(params[0]); if (tag === "safe" || tag === "latest") throw new Error(`weaker finality tag ${tag} forbidden`);
-      if (tag === "finalized") return { number: "0x150", hash: SAFE };
+      if (tag === "finalized") return { number: mutation === "unbounded-early-head" ? "0x12f" : "0x150", hash: SAFE };
       if (tag === "0x9") return { number: "0x9", hash: mutation === "baseline" ? SAFE : BASELINE };
       const number = BigInt(tag); return { number: tag, hash: number === deliveryBlock ? EVENT_BLOCK : SAFE };
     }
@@ -182,8 +183,10 @@ function destinationRpc(mode: "split" | "combined" = "split", mutation?: Destina
     if (method === "eth_getLogs") { const filter = params[0], from = BigInt(filter.fromBlock), to = BigInt(filter.toBlock); ranges.push({ from, to });
       if (to - from + 1n > 100n) throw new Error("provider rejects ranges above 100 blocks");
       if (mutation === "provider-error" && from === 209n) throw new Error("provider range failure");
-      // A filtered provider returns only the requested emitter's rows matching every given topic.
-      return (byAddress[filter.address] ?? []).filter(row => BigInt(row.blockNumber) >= from && BigInt(row.blockNumber) <= to &&
+      // A filtered provider returns only the requested emitter's rows matching every given topic; an unbounded one
+      // ignores fromBlock and toBlock.
+      const unbounded = mutation === "unbounded-logs" || mutation === "unbounded-early-head";
+      return (byAddress[filter.address] ?? []).filter(row => (unbounded || (BigInt(row.blockNumber) >= from && BigInt(row.blockNumber) <= to)) &&
         (filter.topics as (Hex | null)[]).every((topic, index) => topic === null || row.topics[index] === topic));
     }
     if (method === "eth_getTransactionByHash") { transactionReads.push([...params]); throw new Error("delivery transaction is not read"); }
@@ -256,4 +259,17 @@ test("Polygon finalized unavailability fails closed without safe or latest fallb
 
 test("destination baseline hash mismatch refuses reorged evidence", async () => {
   await assert.rejects(observeStargateTokenDestination(destinationRpc("split","baseline") as any, destinationInput), (error: any) => error.code === "APN_RPC_PROTOCOL");
+});
+
+test("a provider that ignores the log block bounds cannot prove delivery outside baseline..finalized head", async () => {
+  // The delivery log is at block 304. A final log inside the range still proves delivery.
+  assert.ok(await observeStargateTokenDestination(destinationRpc("split", "unbounded-logs") as any, destinationInput));
+  // Finalized head 303 is below the log: it is not final yet.
+  const early = destinationRpc("split", "unbounded-early-head");
+  assert.equal(await observeStargateTokenDestination(early as any, destinationInput), null);
+  assert.deepEqual(early.transactionReads, []);
+  // A frozen baseline at block 305 is after the log: it predates the operation.
+  const late = destinationRpc("split", "unbounded-logs");
+  assert.equal(await observeStargateTokenDestination(late as any, { ...destinationInput, fromBlockNumberAtomic: "305", fromBlockHash: SAFE }), null);
+  assert.deepEqual(late.transactionReads, []);
 });

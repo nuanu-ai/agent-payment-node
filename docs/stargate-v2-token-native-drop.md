@@ -250,7 +250,11 @@ evidence block hash. If Polygon `finalized` is unavailable, the operation fails 
 `latest`, or `pending`.
 
 - It scans the exact inclusive baseline-to-horizon range in contiguous chunks of at most 100 blocks, deduplicates
-  identical provider rows, rejects conflicting duplicates, and refuses a horizon requiring more than 256 log queries.
+  identical provider rows and rejects conflicting duplicates. One observe scans at most 32 chunks; the next observe
+  resumes from a saved cursor, so a late horizon never dead-ends.
+- An `OFTReceived` log outside the baseline-to-horizon range is skipped, also when the provider ignores the requested
+  `fromBlock` or `toBlock`. A log above the finalized head proves delivery only on a later observe, after the head
+  reaches its block.
 - Exactly one successful native drop and exactly one delivery are required.
 - The drop may finalize in an earlier transaction or in the delivery transaction; its packet origin, nonce,
   TokenMessaging OApp, owner, amount, and success must match.

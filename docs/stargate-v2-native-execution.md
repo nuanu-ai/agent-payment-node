@@ -101,6 +101,10 @@ send again.
 - Safe source confirmation must contain the exact official `OFTSent` event.
 - Completion requires a safe Unichain `OFTReceived` emitted by the pinned destination pool and bound to the exact source
   EID, GUID, recipient and frozen received amount.
+- The `OFTReceived` block must be at or after the frozen destination baseline block and at or below the safe head. An
+  RPC that ignores the `eth_getLogs` `fromBlock` or `toBlock` can return a log outside that range. APN skips such a
+  log, as the token lane does. The operation stays pending. A later observe can use the same log once the safe head
+  reaches its block.
 - A balance delta is recorded only as corroboration and never terminalizes delivery.
 - The versioned route finality policy is frozen in the operation and canonical receipt: Ethereum and Unichain both use
   `safe`. The selected tag is never weakened to `latest` or `pending`.

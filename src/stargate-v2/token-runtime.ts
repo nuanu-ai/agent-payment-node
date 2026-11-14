@@ -20,7 +20,7 @@ import { cleanupStargateV2Token, executeStargateV2Token, FileStargateTokenJourna
   STARGATE_TOKEN_SOURCE_MESSAGING, STARGATE_TOKEN_SOURCE_TOKEN,
   type StargateTokenDestinationEvidence, type StargateTokenEnvelope, type StargateTokenExecutionPorts, type StargateTokenOperation } from "./token-execution.js";
 import { TtyStargateTokenApproval } from "./token-tty.js";
-import { scanStargateLogs, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
+import { scanStargateLogs, stargateLogInScan, StargateDestinationScanStore, STARGATE_POLYGON_SCAN_WINDOW, type StargateScanCursor } from "./destination-scan.js";
 import type { StargateTokenUsageState } from "./token-model.js";
 import { legacyStargateStatusAfter, type LegacyChainRead, type LegacyStargateStatus } from "../legacy/stargate-v2/status.js";
 import { checkNeverLands } from "../evm-finalized-proof.js";
@@ -185,7 +185,7 @@ export async function observeStargateTokenDestination(rpc: Pick<StargateJsonRpc,
   const oftTopics = encodeEventTopics({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", args: { guid: input.guid, toAddress: input.recipient } });
   const oftMatches: { log: Record<string, unknown>; amount: bigint }[] = [];
   for (const log of await scanStargateLogs(call, { address: STARGATE_TOKEN_DESTINATION_POOL, topics: oftTopics }, baselineNumber, head, STARGATE_POLYGON_SCAN_WINDOW, cursor)) { try { const event = decodeEventLog({ abi: STARGATE_SEND_ABI, eventName: "OFTReceived", topics: log.topics as [Hex, ...Hex[]], data: String(log.data) as Hex });
-    if (isAt(log, STARGATE_TOKEN_DESTINATION_POOL) && event.args.srcEid === 30111 && event.args.guid === input.guid && quantity(log.blockNumber) <= head &&
+    if (isAt(log, STARGATE_TOKEN_DESTINATION_POOL) && event.args.srcEid === 30111 && event.args.guid === input.guid && stargateLogInScan(quantity(log.blockNumber), baselineNumber, head) &&
       getAddress(event.args.toAddress) === input.recipient && event.args.amountReceivedLD.toString() === input.minimumAmountAtomic && await isCanonical(log)) oftMatches.push({ log, amount: event.args.amountReceivedLD });
   } catch { /* unrelated candidate */ } }
   if (oftMatches.length !== 1) return null;
