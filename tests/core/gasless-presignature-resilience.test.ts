@@ -120,7 +120,7 @@ test("a receipt a released version wrote with an earlier proof class for the cur
 test("QA F03: the bootstrap disclosure first re-takes the transfer's own account claim; a refusal discloses and sends nothing", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await gaslessFixture(temporary.root), { id } = await s.prepare();
-  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  // The guard (re-admission of a released entry, refused while another unresolved operation holds the account) refuses here.
   const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
   t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
   const refused = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });

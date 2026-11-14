@@ -81,6 +81,20 @@ export class MerchantExits {
       transactionHash: hash }), landed: false };
   }
 
+  /**
+   * Approve's own exit when its account check right after `signing_started` refuses (QA F03): custody was never asked,
+   * no SIGN claim or sealed bytes exist and nothing was sent, so the attempt ends `failed_before_effect` (`never_signed`)
+   * now and both holds it reserved are released, as observe would after the deadline. The caller holds merchantLocks.
+   */
+  async closeBeforeSigning(o: MerchantOperation): Promise<MerchantOperation> {
+    if (o.terminal || o.state !== "signing_started" || o.signingAttempts !== 1 || o.submissionAttempts !== 0 || o.txHash !== null || o.receipt !== null) {
+      refuse("merchant_exit_not_before_signing");
+    }
+    const fence = await this.fences.read(o);
+    if (fence.sign || fence.signed !== null || fence.retired) refuse("merchant_exit_fence_binding");
+    return await this.finish(o, "failed_before_effect", { reason: "never_signed" });
+  }
+
   async abandon(idInput: string, consent: OperationAbandonApprovalPort): Promise<MerchantOperation> {
     const found = await this.required(idInput);
     return await this.state.withLocks(merchantLocks(found.profileHash, found.operationId, found.idempotencyHash, found.custody.walletAddress), async () => {

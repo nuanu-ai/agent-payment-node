@@ -83,6 +83,10 @@ Foreground approval records `approved`. Before signing, APN:
 - requires the frozen fee envelope to remain includable (otherwise `fee_spike`);
 - simulates the exact frozen call with the frozen value and fee envelope;
 - requires a fresh gas estimate to remain within the frozen gas limit;
+- after these network reads and before the usage hold, re-admits the operation in the operation index when a machine
+  clock that ran ahead released it and then went back: `APN_OPERATION_BLOCKED` while another unresolved operation holds
+  the Ethereum account, leaving it `approved` (only the hold, the local signature and the marker follow; a refusal
+  inside them would release the hold and need a new prepare, so the check stays here);
 - reopens the encrypted signer profile to verify its address (otherwise `signer_identity_changed`);
 - after signing, checks the prepared expiry again (otherwise `APN_REPREPARE_REQUIRED`, `expired_before_marker`).
 

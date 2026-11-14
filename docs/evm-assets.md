@@ -381,8 +381,8 @@ contract. Because revoking only removes a permission, no asset admission applies
   sealed bytes once.
 - A revoke that was never consented stops holding the wallet's chain once its 240-second consent window plus a
   10-minute unstarted margin has passed. That reads the machine clock: should it go back inside the window, the revoke
-  re-takes its account claim before consent and again before it keeps its sealed bytes, and refuses with
-  `APN_OPERATION_BLOCKED` while another unresolved operation holds the wallet's chain.
+  is admitted again before consent and again before it keeps its sealed bytes, refused with `APN_OPERATION_BLOCKED`
+  (writing nothing) while another unresolved operation holds the wallet's chain.
 - Over MCP, revoke returns the CLI handoff.
 
 ## x402 on Ethereum and Arbitrum

@@ -199,12 +199,12 @@ Every attempt without a receipt has an exit that never signs, sends or delivers.
 **Account guard.** Every non-terminal payment holds the payer's MegaETH account. A `prepared` payment that was never
 approved also lets go of it by itself once its 300-second deadline plus a 10-minute margin has passed by the machine
 clock: no command is needed, and `observe` later records it `failed_before_effect`. Approve is the hard guard. Before
-consent, again after it, and once more after it records `signing_started`, approve re-takes the payment's own account
-claim and refuses with `APN_OPERATION_BLOCKED` while another unresolved operation holds the account. A clock that ran
-ahead, released a payment and then went back inside its deadline therefore cannot let two payments on one account
-sign. Once one of them is approved, the other's approve is refused while the first is unresolved. A released payment
-whose approve re-took its claim and was refused also blocks the other payment's approve, until one of them ends (a
-never-approved one lets go again when its deadline passes).
+consent, again after it, and once more after it records `signing_started`, approve checks the account. A payment the
+clock released (the clock ran ahead and then went back inside its deadline) is admitted again as a new payment is:
+refused with `APN_OPERATION_BLOCKED` while another unresolved operation holds the account, writing nothing, so it stays
+released and every later approve is checked again; the other payment's approve is not blocked by it. Two payments on
+one account therefore cannot both sign. A refusal of the check after `signing_started` (nothing signed yet, no SIGN
+claim) ends the attempt at once as `failed_before_effect` (`never_signed`) and releases both holds.
 
 ### `retire-unsent`
 

@@ -14,10 +14,11 @@ import { pastUnstartedDeadline } from "../../src/unstarted-deadline.js";
 import { temporaryState } from "./helpers.js";
 
 /**
- * QA F03, the shared approve-time guard (OperationIndex.reclaim through assertAvailable's `except`): a never-started
- * record that the index let go by the wall clock, read again after the clock went back inside its deadline, holds its
- * account again before its own approve signs. A synthetic family stands in for every family whose index rule releases a
- * never-started record past its deadline plus the unstarted margin.
+ * QA F03, the shared approve-time guard (re-admission through assertAvailable's `except` and assertOwnClaimsAvailable):
+ * a never-started record that the index let go by the wall clock, read again after the clock went back inside its
+ * deadline, is admitted again before its own approve signs: refused, writing nothing, while another operation holds the
+ * account. A synthetic family stands in for every family whose index rule releases a never-started record past its
+ * deadline plus the unstarted margin.
  */
 interface TestRecord { readonly schemaVersion: "test.v1"; readonly operationId: string; readonly profileHash: string; readonly idempotencyHash: string;
   readonly requestHash: string; readonly state: "prepared" | "finalized"; readonly deadline: number; readonly account: string }
@@ -52,7 +53,7 @@ async function setup(t: test.TestContext) {
   };
   const approveCheck = async (operationId: string) => await index.assertAvailable({ family: null, profileHash: P1, claims: ACCOUNT, except: operationId });
   const entry = async (operationId: string) => (await index.find(operationId))?.state;
-  return { clock, index, save, approveCheck, entry };
+  return { root: temporary.root, clock, index, save, approveCheck, entry };
 }
 const blockedBy = (operationId: string) => (error: unknown) => {
   const refused = error as { code?: string; details?: Record<string, unknown> };
@@ -60,7 +61,7 @@ const blockedBy = (operationId: string) => (error: unknown) => {
 };
 const SKEW = 16 * 60_000;
 
-test("a never-started record let go by a clock that ran ahead re-takes its account at its approve check once the clock went back", async t => {
+test("a never-started record let go by a clock that ran ahead is admitted again at its approve check once the clock went back", async t => {
   const s = await setup(t), first = await s.save(1);
   await s.index.reconcile();
   assert.equal(await s.entry(first.operationId), "active");
@@ -72,8 +73,10 @@ test("a never-started record let go by a clock that ran ahead re-takes its accou
   await s.index.reconcile();
   s.clock.now = T0;
   await assert.rejects(s.approveCheck(first.operationId), blockedBy(second.operationId));
-  assert.equal(await s.entry(first.operationId), "active", "the approve check re-took the first record's claim");
-  await assert.rejects(s.approveCheck(second.operationId), blockedBy(first.operationId));
+  assert.equal(await s.entry(first.operationId), "terminal", "a refused re-admission writes nothing: the record stays released");
+  // So the operation the account was admitted for is never blocked by it (no deadlock), and the next attempt is checked again.
+  await s.approveCheck(second.operationId);
+  await assert.rejects(s.approveCheck(first.operationId), blockedBy(second.operationId));
 });
 
 test("the other operation's approve check first: it passes, and the released record is then refused by it", async t => {
@@ -87,7 +90,7 @@ test("the other operation's approve check first: it passes, and the released rec
   await assert.rejects(s.approveCheck(first.operationId), blockedBy(second.operationId));
 });
 
-test("reclaim leaves alone a record its family reads as terminal now, and an entry that already holds its claims", async t => {
+test("re-admission leaves alone a record its family reads as terminal now, and an entry that already holds its claims", async t => {
   const s = await setup(t), first = await s.save(1);
   await s.index.reconcile();
   s.clock.now = T0 + SKEW; await s.index.refresh(first.operationId);
@@ -100,8 +103,8 @@ test("reclaim leaves alone a record its family reads as terminal now, and an ent
   s.clock.now = T0;
   await s.approveCheck(done.operationId);
   assert.equal(await s.entry(done.operationId), "terminal");
-  // An open entry is unchanged by its own check, and a released record nobody approves stays released: the guard is
-  // re-taken by the released record's own approve, which the second test shows is then refused.
+  // An open entry is unchanged by its own check, and a released record nobody approves stays released: the released
+  // record's own approve is checked, and refused while the open one holds the account.
   const open = await s.save(4);
   await s.index.reconcile();
   await s.approveCheck(open.operationId);
@@ -129,6 +132,27 @@ test("assertOwnClaimsAvailable, the families' shared approve-time guard: a relea
   // Once the account is free, the released record is admitted again and holds it: another admission now meets it.
   await s.save(2, { state: "finalized", deadline: T0 + SKEW + 300_000 });
   await s.index.refresh(second.operationId);
+  await s.index.assertOwnClaimsAvailable(first.operationId);
+  assert.equal(await s.entry(first.operationId), "active");
+  await assert.rejects(s.index.assertAvailable({ family: null, profileHash: P1, claims: ACCOUNT }), blockedBy(first.operationId));
+});
+
+test("an owner-released quarantine whose record reads again is admitted again by its own guard, refused while the account is held", async t => {
+  const s = await setup(t), first = await s.save(1), path = join(s.root, "test-reclaim", P1, `${first.operationId}.json`);
+  // The record could not be read, so the owner released its quarantine.
+  await writeFile(path, "not json\n", { mode: 0o600 });
+  await s.index.reconcile();
+  assert.equal(await s.entry(first.operationId), "unreadable");
+  await s.index.releaseByOwner(first.operationId, { approve: async () => undefined });
+  assert.equal(await s.entry(first.operationId), "released");
+  // A widened reader reads it again while another operation holds the account: refused, and it stays released.
+  await s.save(1);
+  const other = await s.save(2);
+  await s.index.reconcile();
+  await assert.rejects(s.index.assertOwnClaimsAvailable(first.operationId), blockedBy(other.operationId));
+  assert.equal(await s.entry(first.operationId), "released");
+  // Once the account is free it is admitted again and holds the account.
+  await s.save(2, { state: "finalized" }); await s.index.refresh(other.operationId);
   await s.index.assertOwnClaimsAvailable(first.operationId);
   assert.equal(await s.entry(first.operationId), "active");
   await assert.rejects(s.index.assertAvailable({ family: null, profileHash: P1, claims: ACCOUNT }), blockedBy(first.operationId));

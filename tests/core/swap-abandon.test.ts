@@ -102,7 +102,7 @@ test("QA F03: the submission marker first re-checks the swap's own account claim
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await marked(temporary.root, { send: false, mark: false });
   const reserved = await f.runtime.approve(f.prepared.operationId, f.clock.now());
-  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  // The guard (re-admission of a released entry, refused while another unresolved operation holds the account) refuses here.
   const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
   t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
   const calls = f.rpc.calls.length;

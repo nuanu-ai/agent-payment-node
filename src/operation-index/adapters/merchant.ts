@@ -17,8 +17,8 @@ export function merchantDomains(record: MerchantOperation): readonly MoneyConfli
  * (never signed: approve moves it to signing_started only while its 300 s local deadline holds) can never sign once that
  * deadline plus the unstarted margin has passed, so it stops holding its account without any command. Observe then
  * records it `failed_before_effect` and releases any hold a crashed approval reserved. That release reads the machine
- * clock: should the clock go back inside the deadline, approve's own account check first re-takes this payment's claim
- * (`OperationIndex.reclaim`) and refuses while another unresolved operation holds the account.
+ * clock: should the clock go back inside the deadline, approve's own account check first admits this payment again
+ * (`OperationIndex.assertAvailable` with `except`) and refuses, writing nothing, while another operation holds the account.
  */
 export const merchantTerminal = (record: Pick<MerchantOperation, "state" | "expiresAt">): boolean =>
   MERCHANT_TERMINAL_PHASES.includes(record.state) || record.state === "prepared" && pastUnstartedDeadline(record.expiresAt);

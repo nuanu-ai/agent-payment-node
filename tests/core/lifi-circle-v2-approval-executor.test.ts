@@ -112,7 +112,7 @@ test("signing failure records only classified code, never provider message", asy
 
 test("QA F03: execute re-takes the approval's own account claim before it leaves prepared; a refusal signs and sends nothing", async t => {
   const f = await fixture(t), prepared = await f.prepare();
-  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  // The guard (re-admission of a released entry, refused while another unresolved operation holds the account) refuses here.
   const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
   const guard = t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
   await assert.rejects(f.make().execute(prepared.id, async () => true), (error) => error === refusal);

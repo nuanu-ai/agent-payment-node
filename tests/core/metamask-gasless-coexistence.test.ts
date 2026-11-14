@@ -235,17 +235,19 @@ test("an expired MetaMask approval that never dispatched stops holding the accou
   assert.equal(f.approval.calls.length, 0); assert.equal(f.provider.submissions.length, 0);
 });
 
-test("QA F03: the dispatch marker first re-takes the transfer's own account claim, beside dispatched siblings; a refusal dispatches nothing", async (t) => {
+test("QA F03: right before the dispatch marker the transfer is admitted again as at prepare; a refusal dispatches nothing", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const f = await mmFixture(temporary.root), prepared = await prepare(f, "mm-guard-first");
   assert.equal(prepared.ok, true, JSON.stringify(prepared.error));
   const id = idOf(prepared.operation);
-  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  // The guard (re-admission of a released entry, then refusal while another operation holds the account) refuses here.
   const seen: unknown[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
-  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string, tag?: unknown) => { seen.push([operationId, tag]); throw refusal; });
+  t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string, options?: unknown) => { seen.push([operationId, options]); throw refusal; });
   const refused = await f.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(refused.error?.code, "APN_OPERATION_BLOCKED");
-  assert.deepEqual(seen, [[id, { kind: "metamask_gasless_beside_dispatched" }]]);
+  // Beside dispatched MetaMask siblings, waiting for the quarantine of every profile bound to the account, as prepare does.
+  assert.deepEqual(seen, [[id, { tag: { kind: "metamask_gasless_beside_dispatched" },
+    waits: [{ key: `unreadable:${f.state.profileHash(f.profile)}` }] }]]);
   const record = await f.record(id);
   assert.deepEqual([record.state, record.submissionAttempts], ["execution_pending", 0]);
 });

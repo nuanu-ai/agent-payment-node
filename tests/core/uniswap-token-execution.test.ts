@@ -377,7 +377,7 @@ test("sanitized live recovery fixture preserves the durable split-brain shape", 
 
 test("QA F03: approve re-checks the token swap's own account claim before consent; a refusal leaves it prepared, unasked and unsent", async (t) => {
   const temp = await temporaryState(); t.after(temp.cleanup); const f = await fixture(temp.root);
-  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  // The guard (re-admission of a released entry, refused while another unresolved operation holds the account) refuses here.
   const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
   t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
   await assert.rejects(f.runtime.approve(f.operation.operationId), (error) => error === refusal);

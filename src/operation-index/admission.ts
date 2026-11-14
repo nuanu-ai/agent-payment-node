@@ -22,9 +22,11 @@ export async function assertClaimsAvailable(state: SecureStateStore, profileHash
  * The approve-time account guard of a saved operation outside the OperationService facade, called right before its own
  * approve or execute starts the effect (QA F03): an entry the index let go by the wall clock (a never-started record
  * past its deadline plus the unstarted margin) while its record is open again by its family's rule (the clock went back)
- * is admitted again, refused with APN_OPERATION_BLOCKED while another unresolved operation holds one of its accounts.
- * An entry that held its claims since its admission passes. Nothing is written to the family's record.
+ * is admitted again, refused with APN_OPERATION_BLOCKED and left released while another unresolved operation holds one
+ * of its accounts. An entry that held its claims since its admission passes. `options` carry the family's admission
+ * tag and the quarantines its admission waited for. Nothing is written to the family's record.
  */
-export async function assertOwnClaimsAvailable(state: SecureStateStore, operationId: string, tag?: WantedTag): Promise<void> {
-  await new OperationIndex(state).assertOwnClaimsAvailable(operationId, tag);
+export async function assertOwnClaimsAvailable(state: SecureStateStore, operationId: string,
+  options: { readonly tag?: WantedTag; readonly waits?: readonly OperationClaim[] } = {}): Promise<void> {
+  await new OperationIndex(state).assertOwnClaimsAvailable(operationId, options);
 }

@@ -441,12 +441,14 @@ test("Smart Account observation RPC is ignored before exposure, validates names 
     { details: { reason: "sa_gasless_rpc_binding" } });
   assert.deepEqual(methods, []);
 });
-test("QA F03: run first re-takes the transfer's own account claim before its markers; a refusal seals, exposes and settles nothing", async t => {
+test("QA F03: right before the exposure marker the transfer is admitted again; a refusal leaves its sealed material unexposed", async t => {
   const f = await fixture(await temporary(t)); await f.service.prepare(f.input);
-  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  // The guard (re-admission of a released entry, then refusal while another operation holds the account) refuses here.
   const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
   t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
   await assert.rejects(f.service.approve(f.id), (error: unknown) => error === refusal);
   assert.deepEqual(seen, [f.id]);
-  assert.deepEqual([f.calls.approval, f.calls.seal, f.calls.expose, f.calls.verify, f.calls.settle], [1, 0, 0, 0, 0]);
+  assert.deepEqual([f.calls.approval, f.calls.seal, f.calls.expose, f.calls.verify, f.calls.settle], [1, 1, 0, 0, 0]);
+  const saved = await f.records.findOperation(f.id);
+  assert.deepEqual([saved?.state, saved?.exposureAttempts, saved?.terminal], ["material_sealed", 0, false]);
 });

@@ -49,10 +49,13 @@ neither keyless sponsor accepts EIP-7702 there.
   dispatch, disclosure or exposure marker, and for the Local wallet a signature that was never disclosed. Its own
   `approve` or `resume` still records it `failed_before_effect`. An operation whose signed effect may have left APN keeps
   its hold until a proof or the owner's abandonment.
-- That release reads the machine clock. Should the clock go back inside the deadline, `approve` and `resume` re-take the
-  operation's own account claim right before that first step (the Local disclosure, the MetaMask dispatch, the Smart
-  Account markers, the Avalanche signature) and refuse with `APN_OPERATION_BLOCKED` while another unresolved operation
-  holds the address. A MetaMask transfer still proceeds beside the address's dispatched MetaMask transfers.
+- That release reads the machine clock. Should the clock go back inside the deadline, `approve` and `resume` admit the
+  operation again after every network read, right before that first step (the Local disclosure marker, the MetaMask
+  dispatch marker, the Smart Account exposure marker; for Avalanche after the chain guard, before its hold and
+  signature), and refuse with `APN_OPERATION_BLOCKED` while another unresolved operation holds the address. A refusal
+  writes nothing and leaves the operation where it was, so a later attempt is checked again. A MetaMask transfer still
+  proceeds beside the address's dispatched MetaMask transfers and, as at prepare, waits for every profile bound to the
+  address. Only local steps can follow the check (a hold, a local signature, the marker write).
 - A saved operation is checked on every read only against its own fields and hashes. A later APN release that changes a
   protocol pin (for example after a Circle USDC or paymaster upgrade), an asset row or the gas-offer calibration never
   stops `status`, `resume`, `abandon` or another family's commands. Before any new signature, disclosure or send, the

@@ -1,6 +1,8 @@
 import type { ClockPort, WaitPort } from "../ports.js";
 import { takeSubmitDiagnostic } from "./client/submit-diagnostic.js";
 import { assertOwnClaimsAvailable } from "../operation-index/admission.js";
+import { unreadableProfileClaim } from "../operation-index/types.js";
+import { evmAccountProfileHashes } from "../evm-account-aliases.js";
 import type { StateStore } from "../state.js";
 import { metaMaskGaslessApprovalPhrase, metaMaskGaslessApprovalSummary } from "./approval.js";
 import { validateMetaMaskGaslessSnapshot } from "./chain/snapshot.js";
@@ -86,11 +88,8 @@ export class MetaMaskGaslessExecution {
     if (op.state !== "execution_pending" || op.approval === null || op.approval.fingerprint !== op.fingerprint) {
       mmFail("mm_gasless_state_corrupt");
     }
-    // The dispatch marker is the first step that leaves APN, and the index may have let an undispatched transfer go by
-    // the clock: it re-takes its account first, beside dispatched siblings as its admission is (QA F03).
-    await assertOwnClaimsAvailable(this.state, op.operationId, { kind: "metamask_gasless_beside_dispatched" });
     let submitted: MetaMaskGaslessProviderRead;
-    let markerWriteStarted = false;
+    let markerWriteStarted = false, accountRefusal: unknown = undefined;
     try {
       const result = await this.state.withLocks(["provider-session:metamask-agent-wallet"], async () => {
         const guarded = await this.steady(op, async () => await this.guard(op));
@@ -99,6 +98,14 @@ export class MetaMaskGaslessExecution {
         // Opened before the marker: a sealed request id that cannot be opened stops the dispatch before any effect. The
         // material is the very batch the marker records (the guard's reprice, or the prepared one).
         const sent = mmProviderIntent({ intent: op.intent, dispatch: guarded.dispatch }, await mmRequestId(this.references, op));
+        // The dispatch marker is the first step that leaves APN, and the index may have let an undispatched transfer go
+        // by the clock: after every read, it is admitted again as at prepare (beside dispatched siblings, waiting for each
+        // profile the account is bound to). A refusal leaves it execution_pending (QA F03).
+        try {
+          const profiles = await evmAccountProfileHashes(this.state, op.intent.binding.address, op.profileHash);
+          await assertOwnClaimsAvailable(this.state, op.operationId, { tag: { kind: "metamask_gasless_beside_dispatched" },
+            waits: [...profiles].map(unreadableProfileClaim) });
+        } catch (error) { accountRefusal = error; throw error; }
         const at = new Date(this.clock.beforeDispatchAtCurrent(op, guarded.observedAt)).toISOString();
         // Persistence must finish before starting any relay-capable helper.
         markerWriteStarted = true;
@@ -121,6 +128,7 @@ export class MetaMaskGaslessExecution {
       this.clock.check(op);
       submitted = result;
     } catch (error) {
+      if (accountRefusal !== undefined && error === accountRefusal) throw error;
       if (op.submissionAttempts === 0 && !markerWriteStarted) return await this.halt(op, error);
       if (op.submissionAttempts === 0) throw error;
       const failure = mmClassify(error, "mm_gasless_submit_unknown");

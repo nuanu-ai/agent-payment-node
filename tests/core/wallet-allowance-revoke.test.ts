@@ -201,7 +201,7 @@ test("QA F03: a prepared revoke first re-takes its own account claim, before con
     walletAllowanceTtyOptions: terminal.tty, finalizedRead: () => allowanceRpc(chain, posts) };
   const revoke = ["wallet", "allowance", "revoke", "--profile", PROFILE, "--chain", "eip155:1", "--asset", ETHEREUM_USDT, "--spender", UNISWAP_V3_SWAP_ROUTER,
     "--max-gas-limit", "60000", "--max-fee-per-gas-wei", "2000000000", "--max-priority-fee-per-gas-wei", "1000000"];
-  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  // The guard (re-admission of a released entry, refused while another unresolved operation holds the account) refuses here.
   const seen: string[] = [];
   t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => {
     seen.push(operationId); throw Object.assign(new Error("Another money operation for this network and account is not terminal."), { code: "APN_OPERATION_BLOCKED" });

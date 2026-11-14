@@ -36,14 +36,15 @@ export class FacilitatorExecution {
     const accepted = await approval.confirm({ operationId: op.operationId, fingerprint: op.fingerprint,
       exactPhrase: approvalCode("gasless", op.fingerprint), summary: publicFacilitatorOperation(op) });
     if (!accepted) return await this.save(op, { state: "failed_before_effect", failure: "facilitator_gasless_approval_rejected" });
-    // Nothing is signed yet, and the index may have let this unapproved transfer go by the clock: it re-takes its account
-    // first, and another unresolved operation on it refuses it, leaving it awaiting approval (QA F03).
-    await assertOwnClaimsAvailable(this.state, op.operationId);
     let startBlock: GaslessBlock;
-    try {
-      startBlock = await this.guard(op);
-      await this.policy.reserve(op); // charged before the owner signs
-    } catch (error) { return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_guard") }); }
+    try { startBlock = await this.guard(op); }
+    catch (error) { return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_guard") }); }
+    // Nothing is reserved or signed yet, and the index may have let this unapproved transfer go by the clock: after the
+    // chain guard's reads it is admitted again, refused while another unresolved operation holds the account, leaving it
+    // awaiting approval (QA F03). Only local steps follow: the hold, the signature and the exposure marker.
+    await assertOwnClaimsAvailable(this.state, op.operationId);
+    try { await this.policy.reserve(op); } // charged before the owner signs
+    catch (error) { return await this.save(op, { state: "failed_before_effect", failure: facilitatorReason(error, "facilitator_gasless_guard") }); }
     // A guard that outlived the deadline never signs: the operation index releases an unapproved one after it.
     if (this.expired(op)) return await this.save(op, { state: "failed_before_effect", failure: "facilitator_gasless_expired" });
     const authorization = newFacilitatorAuthorization(op.intent.owner.address.toLowerCase(), op.intent.requirement, this.now());

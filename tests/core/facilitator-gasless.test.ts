@@ -418,16 +418,17 @@ test("the authorization log scan stops at the first window that reaches validBef
   assert.deepEqual(transport.methods, ["eth_getLogs", "eth_getBlockByNumber", "eth_getLogs", "eth_getBlockByNumber"]);
 });
 
-test("QA F03: an accepted approval first re-takes the transfer's own account claim; a refusal signs, reserves and exposes nothing", async (t) => {
+test("QA F03: after its chain guard an accepted approval is admitted again; a refusal reserves, signs and exposes nothing", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
   const s = await fixture(temporary.root), id = await s.prepare();
-  // The guard (OperationIndex.reclaim, then the account check) refuses when another unresolved operation holds the account.
+  // The guard (re-admission of a released entry, then refusal while another operation holds the account) refuses here.
   const seen: string[] = [], refusal = new ApnError("APN_OPERATION_BLOCKED", "Another money operation for this network and account is not terminal.");
   t.mock.method(OperationIndex.prototype, "assertOwnClaimsAvailable", async (operationId: string) => { seen.push(operationId); throw refusal; });
   const response = await s.core.execute({ command: "gasless.transfer.approve", operationId: id });
   assert.equal(response.ok, false);
   assert.equal(response.error?.code, "APN_OPERATION_BLOCKED");
   assert.deepEqual(seen, [id]);
-  assert.deepEqual(s.facilitator.calls, ["supported"]); assert.equal(s.wrapping.loads, 0);
+  assert.deepEqual(s.facilitator.calls.filter(call => call === "verify" || call === "settle"), []);
+  assert.equal(s.wrapping.loads, 0);
   assert.equal(await s.lease(id), null); assert.equal(await s.charged(), "0");
 });
