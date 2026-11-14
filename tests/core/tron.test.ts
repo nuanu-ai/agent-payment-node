@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { utils } from "tronweb";
 import { bindArgv, bindMcpInput } from "../../src/command-binder.js";
+import { dispatchDiscovery } from "../../src/command-catalog.js";
 import { MCP_TOOLS } from "../../src/mcp-projection.js";
 import { chainAsset } from "../../src/chain-policy.js";
 import { TronRpc } from "../../src/tron/rpc.js";
@@ -154,4 +155,28 @@ test("TRON checksum normalization binds the equivalent 41hex address and rejects
   assert.throws(() => validateRailPrepared({ ...prepared, resources: { ...prepared.resources, bandwidthBytesAtomic: "1" } }, s.account), { code: "APN_STATE_CORRUPT" });
   const hex = await s.core.execute({ command: "transfer.prepare-tron", profile: s.account.profile, asset: "trx", recipient: tronHex(TRON_RECIPIENT), amount: "0.000001", maximumFee: "30", idempotencyKey: "tron-fixture-0001" });
   assert.equal(hex.ok, true); assert.equal((hex.operation as { operation_id: string }).operation_id, id);
+});
+
+// QA TRON-BALANCE-MANIFEST-RESOURCE-BOUNDS: every TRON command shared one manifest output text that promised frozen
+// resource bounds, which only prepare-tron returns. Each entry of `apn help --json` now describes its own envelope.
+test("the JSON manifest describes the real wallet balance-tron output; only prepare-tron promises frozen resource bounds", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup); const s = await tronFixture(temporary.root);
+  const manifest = JSON.parse(dispatchDiscovery(["help", "--json"])!.output) as { commands: { path: string[]; output: { success: string } }[] };
+  const success = (path: string) => manifest.commands.find((command) => command.path.join(" ") === path)!.output.success;
+  for (const asset of ["trx", "usdt"] as const) {
+    const balance = await s.core.execute({ command: "wallet.balance-tron", profile: s.account.profile, asset });
+    assert.equal(balance.ok, true, balance.error?.message);
+    const data = balance.data as Record<string, unknown>;
+    assert.deepEqual(Object.keys(data).sort(), ["account", "amountAtomic", "asset", "blockNumberAtomic", "nativeBalanceAtomic", "networkIdentity", "observedAt", "rpcOriginHash"], asset);
+    assert.doesNotMatch(JSON.stringify(data), /resource|bandwidth|energy|activation/iu, asset);
+  }
+  assert.doesNotMatch(success("wallet balance-tron"), /frozen resource bounds/u);
+  assert.match(success("wallet balance-tron"), /solidified balance, the separate solidified TRX fee balance, the account binding, verified mainnet identity, solidified block number, observation time and RPC origin hash/u);
+  assert.match(success("wallet balance-tron"), /reports no bandwidth, energy or activation figures; prepare-tron freezes those bounds/u);
+  for (const path of ["wallet ensure-tron", "wallet capabilities-tron", "policy admit-tron"]) assert.doesNotMatch(success(path), /resource bounds/u, path);
+  assert.match(success("pay transfer prepare-tron"), /frozen resource bounds/u);
+  const status = await s.core.execute({ command: "operation.status", operationId: await s.prepare("trx", "tron-manifest-bounds-0001") });
+  assert.equal(status.ok, true, status.error?.message);
+  const resources = (status.operation as { transfer: { resources: Record<string, unknown> } }).transfer.resources;
+  for (const key of ["bandwidthMaximumAtomic", "energyFeeLimitAtomic", "accountActivationMaximumAtomic", "totalFeeMaximumAtomic"]) assert.equal(typeof resources[key], "string", key);
 });
