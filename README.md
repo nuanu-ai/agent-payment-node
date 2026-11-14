@@ -227,14 +227,13 @@ tokens, seed phrases or private keys.
   The request ID of a direct transfer is sealed under the login-Keychain wrapping secret in
   `provider-direct-request-references/<profile-hash>/<operation-id>.json`, and the operation record keeps only its hash
   (provider effect reference `apn.provider-effect-reference.v2`, `recoveryTokenHash`); output shows that hash as
-  `provider_request_reference_hash`, as before. Approve reads the wrapping secret before the hand-off, so a secret
-  missing over sealed state or a refusing Keychain leaves the transfer `awaiting_approval` with nothing sent. Resume
-  opens the sealed ID before it watches the request; an ID that cannot be opened refuses that resume precisely
-  (`APN_STATE_CORRUPT` with `provider_request_reference_unmatched` or `wrapping_secret_missing`, or
-  `APN_NATIVE_REJECTED`) and changes nothing.
-  Records written by 0.5.106 and earlier keep their plaintext reference (`v1`) and are never migrated; 0.5.106 and
-  earlier cannot read a `v2` reference, so do not downgrade once one exists. A delegated Smart Account send keeps its
-  `v1` reference: its ID is the APN operation ID.
+  `provider_request_reference_hash`, as before. Approve reads the wrapping secret before the owner is asked, so a secret
+  missing over sealed state or a refusing Keychain leaves the transfer `awaiting_approval`, with no approval code asked
+  and nothing sent. Resume opens the sealed ID before it watches the request; an ID that cannot be opened refuses that
+  resume precisely (`APN_STATE_CORRUPT` with `provider_request_reference_unmatched` or `wrapping_secret_missing`, or
+  `APN_NATIVE_REJECTED`) and changes nothing. Records written by 0.5.106 and earlier keep their plaintext reference
+  (`v1`) and are never migrated; 0.5.106 and earlier cannot read a `v2` reference, so do not downgrade once one exists.
+  A delegated Smart Account send keeps its `v1` reference: its ID is the APN operation ID.
   A watch that `mm` answers with `REQUEST_NOT_FOUND` records where it missed the request, never an outcome:
   `metamask_request_not_in_local_state` (its local request list, emptied by a new `mm login`),
   `metamask_request_not_found_on_server`, or `provider_request_not_found`.
@@ -550,6 +549,26 @@ saved signed material or a MetaMask gasless, native or direct request reference)
 `wallet policy set`, or the first sealed record of a provider payment, such as a MetaMask gasless prepare, a MetaMask
 native transfer or a MetaMask direct transfer approve) fails with the same reason and restore step instead of minting a
 secret that would orphan those records and collide with the restored item.
+
+APN never deletes a sealed MetaMask request reference (`metamask-gasless-request-references/`,
+`metamask-native-request-references/`, `provider-direct-request-references/`), not even after its operation ends. A
+gasless prepare interrupted between its seal and its journal also leaves one that belongs to no operation. Each counts
+as sealed custody. So after the first MetaMask gasless, native or direct transfer that sealed a request ID, a lost
+wrapping secret makes every command listed above refuse with `APN_STATE_CORRUPT` / `wrapping_secret_missing`, also in a
+state root that holds no local wallet, where APN used to create a new secret. This fails closed. The owner has two
+options:
+
+1. Restore the login Keychain item from a backup of the login Keychain (the restore step). Every sealed record opens
+   again and nothing else changes.
+2. When the item is lost for good and the state holds nothing else sealed (no local wallet, chain key, policy,
+   permission or saved signed material), move the three request-reference directories out of the APN state root and keep
+   them. The next command creates a new wrapping secret. The moved references open only under the old item, which can no
+   longer be restored beside the new one: both share the Keychain name. A resolved operation never opens its reference
+   again and is not affected. An unresolved one keeps its state and status: a MetaMask native observe or direct resume
+   refuses with `provider_request_reference_unmatched`, a gasless approve refuses until its deadline ends it, and a
+   gasless resume reports a failed provider read and still observes the chain. Its exit is
+   `apn operation abandon --operation <operation-id>` once its window has passed. When other sealed records exist,
+   moving the references does not help: only option 1 does.
 
 `apn doctor keychain` reports the same two failures and also decrypts the wallet, so a secret that exists but does not
 unwrap it fails with `APN_STATE_CORRUPT` without that reason. Its successful answers carry `wrapping_secret: "present"`;
