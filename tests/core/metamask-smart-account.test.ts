@@ -125,6 +125,9 @@ const EXPIRY = NOW + 3_600;
 const CAP = "2000000";
 const IDEMPOTENCY_KEY = "smart-account-connect-0001";
 const PROFILE = "smart-account";
+/** A stale --expected-revision: read the current one with permission list, then repeat the same command with it. */
+const staleRevisionActions = (verb: "sync" | "disable" | "forget") => [`apn wallet permission list --profile ${PROFILE}`,
+  `apn wallet permission ${verb} --profile ${PROFILE} --expected-revision <revision>`];
 const DIRECT_RECIPIENT = "0x4444444444444444444444444444444444444444" as Address;
 const SMART_X402_AMOUNT = "1000";
 const SMART_X402_PAYEE = "0x2222222222222222222222222222222222222222" as Address;
@@ -527,6 +530,8 @@ test("explicit pending cancellation is revision-guarded and permits a changed re
       expectedRevision: 2,
     });
     assert.equal(stale.error?.code, "APN_PROFILE_REVISION_CONFLICT");
+    assert.equal(stale.error?.details?.current_revision, "1");
+    assert.deepEqual(stale.next_actions, staleRevisionActions("forget"), "read the revision, then repeat forget; never reconnect");
     const forgotten = await fixture.restart().execute({
       command: "wallet.permission.forget",
       profile: PROFILE,
@@ -671,12 +676,37 @@ test("Slice 3 capability is local and does not reopen browser consent", async ()
   } finally { await fixture.temporary.cleanup(); }
 });
 
+test("a stale permission revision is read with permission list and the same command repeated with it", async () => {
+  const fixture = await makeFixture();
+  const request = (verb: "disable" | "forget", expectedRevision: number) => verb === "disable"
+    ? { command: "wallet.permission.disable" as const, profile: PROFILE, expectedRevision }
+    : { command: "wallet.permission.forget" as const, profile: PROFILE, expectedRevision };
+  try {
+    assert.equal((await fixture.core.execute(connectCommand())).ok, true);
+    for (const verb of ["disable", "forget"] as const) {
+      const stale = await fixture.core.execute(request(verb, 99));
+      assert.equal(stale.error?.code, "APN_PROFILE_REVISION_CONFLICT", verb);
+      assert.deepEqual(stale.next_actions, staleRevisionActions(verb), verb);
+      assert.equal(stale.next_actions.some((action) => action.includes("wallet connect")), false, `${verb}: no reconnect`);
+      const listed = await fixture.core.execute({ command: "wallet.permission.list", profile: PROFILE });
+      assert.equal(listed.ok, true, JSON.stringify(listed.error));
+      const repeated = await fixture.core.execute(request(verb, (listed.data as any).revision));
+      assert.equal(repeated.ok, true, `${verb}: ${JSON.stringify(repeated.error)}`);
+      assert.equal((repeated.data as any).status, verb === "disable" ? "disabled" : "forgotten");
+    }
+    assert.equal(fixture.consent.requestCalls, 1, "following the advice opened no new consent");
+  } finally { await fixture.temporary.cleanup(); }
+});
+
 test("sync, disable, forget and durable expiry are revision guarded", async () => {
   const fixture = await makeFixture();
   try {
     assert.equal((await fixture.core.execute(connectCommand())).ok, true);
     const stale = await fixture.core.execute({ command: "wallet.permission.disable", profile: PROFILE, expectedRevision: 2 });
     assert.equal(stale.error?.code, "APN_PROFILE_REVISION_CONFLICT");
+    assert.deepEqual(stale.next_actions, staleRevisionActions("disable"), "read the revision, then repeat disable; never reconnect");
+    const staleSync = await fixture.core.execute({ command: "wallet.permission.sync", profile: PROFILE, expectedRevision: 2 });
+    assert.deepEqual(staleSync.next_actions, staleRevisionActions("sync"));
     const synced = await fixture.core.execute({ command: "wallet.permission.sync", profile: PROFILE, expectedRevision: 1 });
     assert.equal(synced.ok, true);
     assert.equal((synced.data as any).permission.revocation_freshness, "confirmed_present");
