@@ -198,3 +198,43 @@ test("state reads the primary serves are pinned by block hash at quote, prepare 
     assert.deepEqual([...new Set(origins)], [PRIMARY]);
   }
 });
+
+test("a directly read block keeps its first hash, a parent hash only fills an unread number, and two hashes for one block refuse", async (t) => {
+  const A = `0x${"a".repeat(64)}`, P = `0x${"c".repeat(64)}`, B = `0x${"d".repeat(64)}`, X = `0x${"e".repeat(64)}`;
+  for (const environment of [{ APN_ETHEREUM_RPC_URL: PRIMARY }, { APN_UNISWAP_TOKEN_PRIMARY_RPC_URLS: JSON.stringify([PRIMARY]) }]) {
+    const temporary = await temporaryState(); t.after(temporary.cleanup);
+    // The primary's answers: "latest" is whatever block the step sets; a numeric tag answers the blocks listed in `byNumber`.
+    let latest: Record<string, string> = { number: "0x10", hash: A, parentHash: P };
+    const byNumber = new Map<string, Record<string, string>>(), sent: SentRow[] = [];
+    const call = createTokenRpc({ environment, state: new StateStore(temporary.root), now: Date.now, maxHttpRequests: 12, deadlineMs: 10_000,
+      transport: { request: async (url: string, _method: string, body: string | null) => { const parsed = JSON.parse(body!) as unknown;
+        const rows = (Array.isArray(parsed) ? parsed : [parsed]) as { readonly id: string; readonly method: string; readonly params: readonly unknown[] }[];
+        sent.push(...rows.map((row) => ({ origin: new URL(url).origin, method: row.method, params: row.params })));
+        const answers = rows.map((row) => ({ jsonrpc: "2.0", id: row.id, result: row.method === "eth_chainId" ? "0x1" : row.method === "eth_getCode" ? "0x6000"
+          : row.params[0] === "latest" ? latest : byNumber.get(String(row.params[0])) ?? null }));
+        return { status: 200, body: JSON.stringify(Array.isArray(parsed) ? answers : answers[0]) }; } } });
+    const code = (tag: string) => [{ method: "eth_getCode", params: [ACCOUNT, tag], cachePolicy: "none" as const, decoder: tokenHex() }];
+    const block = (tag: string) => [{ method: "eth_getBlockByNumber", params: [tag, false], cachePolicy: "none" as const, decoder: (value: unknown) => value }];
+    const pinnedTo = () => sent.filter((row) => row.method === "eth_getCode").map((row) => row.params[1]);
+    await tokenBatch(call, "primary", [{ method: "eth_chainId", params: [], cachePolicy: "immutable", decoder: tokenChain }, ...block("latest")]);
+    // Precedence: block 0x10 was read directly (A); 0xf is known only as its parent (P) and fills that unread number.
+    await tokenBatch(call, "archive", code("0x10")); await tokenBatch(call, "archive", code("0xf"));
+    assert.deepEqual(pinnedTo(), [{ blockHash: A, requireCanonical: true }, { blockHash: P, requireCanonical: true }], JSON.stringify(environment));
+    // A direct read of 0xf that agrees with its parent entry keeps it; a later block whose parent agrees with 0x10 changes nothing.
+    byNumber.set("0xf", { number: "0xf", hash: P, parentHash: X }); await tokenBatch(call, "primary", block("0xf"));
+    latest = { number: "0x11", hash: B, parentHash: A }; await tokenBatch(call, "primary", block("latest"));
+    sent.length = 0; await tokenBatch(call, "archive", code("0x10")); await tokenBatch(call, "archive", code("0xf"));
+    assert.deepEqual(pinnedTo(), [{ blockHash: A, requireCanonical: true }, { blockHash: P, requireCanonical: true }]);
+    // A one-time inconsistent answer: the next block names another parent for 0x10. Neither hash is chosen; nothing is sent.
+    latest = { number: "0x12", hash: `0x${"f".repeat(64)}`, parentHash: X }; byNumber.set("0x11", { number: "0x11", hash: B, parentHash: X });
+    await tokenBatch(call, "primary", block("0x11"));
+    sent.length = 0;
+    await assert.rejects(tokenBatch(call, "archive", code("0x10")), { code: "APN_RPC_PROTOCOL",
+      details: { reason: "token_primary_block_hash_conflict", blockNumber: "16" } });
+    await assert.rejects(call("eth_call", [{ to: ACCOUNT, data: "0x" }, "0x10"]), { code: "APN_RPC_PROTOCOL",
+      details: { reason: "token_primary_block_hash_conflict", blockNumber: "16" } });
+    assert.deepEqual(sent, [], "a conflicted block is never read");
+    // The block whose own hash was read directly is unaffected by the conflict one below it.
+    await tokenBatch(call, "archive", code("0x11")); assert.deepEqual(pinnedTo(), [{ blockHash: B, requireCanonical: true }]);
+  }
+});

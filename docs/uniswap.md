@@ -31,9 +31,13 @@ selected its provider; such a batch before that refuses with
 lane state read the primary serves (`eth_call`, `eth_getCode`,
 `eth_getStorageAt`, `eth_getBalance` at a block the command read) is pinned
 to that block's hash (EIP-1898, `requireCanonical: true`), so a backend on
-another branch refuses it instead of answering other state. `eth_estimateGas`
-keeps the block number, since EIP-1898 does not define it there. Pinning
-changes no request count.
+another branch refuses it instead of answering other state. A block read by
+number keeps the first hash the primary answered; a later block's parent hash
+only names a block the command never read. If the primary answers two
+different hashes for one block, a read pinned there refuses with
+`APN_RPC_PROTOCOL` / `token_primary_block_hash_conflict` and is not sent.
+`eth_estimateGas` keeps the block number, since EIP-1898 does not define it
+there. Pinning changes no request count.
 Public endpoints that need no account or API key:
 
 ```sh
