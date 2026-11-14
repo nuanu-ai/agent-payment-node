@@ -11,7 +11,7 @@ import type { ProviderAdapterBundle, ProviderDirectExecutionInput } from "./prov
 import { approvalCode } from "./approval-code.js";
 import { capabilityHash, LOCAL_PROVIDER_ID, markProviderProfileDrift } from "./provider-profile.js";
 import { assertDirectTerminalReceiptAuthority } from "./direct-terminal-receipt.js";
-import { providerDirectReceipt } from "./provider-direct-receipt.js";
+import { coinbaseGaslessPolicyFailureReason, providerDirectReceipt } from "./provider-direct-receipt.js";
 import {
   createProviderEffectReference,
   observeProviderDirectRequest,
@@ -206,7 +206,7 @@ export class ProviderDirectTransferService {
       await this.assertFrozenPreconditions(operation, binding);
       if (binding.coinbaseGasless !== undefined) {
         try { await new CoinbaseGaslessPolicy(this.context).assert(operation); }
-        catch (error) { await this.failBeforeEffect(operation, "coinbase_gasless_policy_denied", error instanceof ApnError ? error : undefined); }
+        catch (error) { await this.failBeforeEffect(operation, coinbaseGaslessPolicyFailureReason(error), error instanceof ApnError ? error : undefined); }
         const approval = this.context.gasless?.approval;
         if (approval === undefined) throw new ApnError("APN_FOREGROUND_APPROVAL_REQUIRED", "Approve this Coinbase gasless transfer in a foreground terminal.", {
           nextActions: [`apn gasless transfer approve --operation ${operation.operationId}`],
@@ -242,7 +242,7 @@ export class ProviderDirectTransferService {
       if (binding.executionMode === "provider_atomic_send") await this.reobserveProvider(operation, binding, adapter);
       if (binding.coinbaseGasless !== undefined) {
         try { await new CoinbaseGaslessPolicy(this.context).reserve(operation); }
-        catch (error) { await this.failBeforeEffect(operation, "coinbase_gasless_policy_denied", error instanceof ApnError ? error : undefined); }
+        catch (error) { await this.failBeforeEffect(operation, coinbaseGaslessPolicyFailureReason(error), error instanceof ApnError ? error : undefined); }
       }
       operation = await this.durable.transition(operation, "started", false, "provider_effect_started", "durable_provider_no_replay");
       let result: Awaited<ReturnType<NonNullable<typeof adapter.direct.execute>>>;

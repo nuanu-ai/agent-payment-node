@@ -470,6 +470,19 @@ and checks the policy again before the provider invocation. A revoked, expired, 
 prepared operation. An uncertain provider effect keeps the reservation until positive terminal settlement; a proven
 no-start releases it. Activating the policy does not send a transfer.
 
+**A failed policy check at approval.** The checks before and after the foreground decision and the usage reservation
+end the operation `failed_before_effect` before the provider runs. The saved reason names the cause:
+
+| Cause | Reason |
+| --- | --- |
+| The owner policy refuses (`APN_ALLOWLIST_REFUSED`) | `coinbase_gasless_policy_denied` |
+| `APN_STATE_SECURITY`, `APN_STATE_CORRUPT`, `APN_STATE_BUSY`, `APN_INVALID_INPUT` or `APN_OPERATION_BLOCKED` from the state store, its locks, input validation or the usage ledger | `coinbase_gasless_policy_check_<error code in lower case>`, for example `coinbase_gasless_policy_check_apn_state_security` |
+| Any other error | `coinbase_gasless_policy_check_failed` |
+
+Records saved by 0.5.106 and earlier keep `coinbase_gasless_policy_denied` for every cause. A record saved with one of
+the new reasons is not fully readable by 0.5.106 and earlier: `operation status` reads it, but `receipt get` and the
+recovery of a receipt written just before a crash refuse it with `APN_STATE_CORRUPT`.
+
 ```sh
 export APN_BASE_RPC_URL='<https-base-rpc-url>'
 apn gasless balance --profile coinbase --chain 8453
