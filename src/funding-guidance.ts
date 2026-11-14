@@ -42,17 +42,20 @@ export interface WalletFundingGuidance {
   readonly next_actions: readonly string[];
 }
 
-/** Posture-aware funding advice: never suggests adding an asset that is at or above its owner limit. */
+/** Posture-aware funding advice: never suggests adding an asset that is at or above its owner limit. The balance re-read
+ * names the profile asked about, never the default one. */
 export function walletFundingGuidance(
+  profile: string,
   usdcAtomic: string,
   ethAtomic: string,
   policy: ProfilePolicyRecord | null,
   postureActions: readonly string[],
 ): WalletFundingGuidance {
+  const rerun = `Re-run apn wallet balance --profile ${profile}`;
   if (policy === null) {
     return {
       funding_guidance: { action: UNCONFIGURED_ACTION, warning: WARNING },
-      next_actions: [...postureActions, "Fund with low value only", "Re-run apn wallet balance"],
+      next_actions: [...postureActions, "Fund with low value only", rerun],
     };
   }
   const usdc = assetAdvice(parseAtomic(usdcAtomic), policy.maxBalanceUsdcAtomic, USDC_TERMS);
@@ -62,7 +65,7 @@ export function walletFundingGuidance(
       : eth.fundable ? ["Fund only Base ETH for gas, with low value only"] : [];
   return {
     funding_guidance: { action: `${usdc.sentence} ${eth.sentence}`, warning: WARNING },
-    next_actions: [...postureActions, ...fundAction, "Re-run apn wallet balance"],
+    next_actions: [...postureActions, ...fundAction, rerun],
   };
 }
 

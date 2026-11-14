@@ -541,6 +541,18 @@ unwrap it fails with `APN_STATE_CORRUPT` without that reason. Its successful ans
 without a wallet it answers `status: "absent"` with `wrapping_secret: "present"` or `"missing"`, and for a missing secret
 it suggests `apn wallet ensure` only when nothing encrypted exists, otherwise the restore step.
 
+`wallet ensure` and `wallet import` seal the key in `wallets/<profile>.json` first and write the public record
+(`wallets/<profile-hash>/wallet.json`) after it. A run interrupted between the two leaves an incomplete wallet:
+`wallet status` answers `status: "incomplete"` with `reason: "sealed_key_without_public_record"` and one next action,
+`apn wallet ensure --profile <profile>`, for the profile asked about (an absent wallet's next action names it too). That
+command completes the wallet from the sealed key alone. It decrypts the envelope once, under the same locks as a first
+`wallet ensure`, the key must derive the address the envelope records, and then it writes the public record and local
+profile a first run would have written. It creates no key and mints no wrapping secret; a missing secret fails with
+`wrapping_secret_missing` and the restore step, which `wallet status` also reports for such a wallet. A retried
+`wallet import` into that profile completes it the same way only when the key file holds that very key; any other key
+is refused with `APN_PROFILE_DRIFT` and `details.reason: "incomplete_wallet_key_differs"`, since an import never replaces
+a sealed key.
+
 `wallet import --key-file` reads only an owner-only (mode 0600), single-link regular file of at most 64 KiB, reached
 without symbolic links. A FIFO, device, socket or directory is refused at once from its `lstat`, before any open, with
 `APN_STATE_SECURITY`, `details.reason: "key_file_not_regular"` and `details.file_type`; nothing waits for a writer and no

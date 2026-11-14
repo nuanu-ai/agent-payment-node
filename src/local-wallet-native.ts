@@ -16,7 +16,7 @@ import { lstat } from "node:fs/promises";
 import { join, normalize, parse, resolve, sep } from "node:path";
 import { keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { domainHash, hashObject } from "./canonical.js";
+import { domainHash, exactKeys, hashObject } from "./canonical.js";
 import { BASE_USDC, CHAIN_ID } from "./constants.js";
 import {
   EncryptedWalletStore,
@@ -128,6 +128,7 @@ export class LocalWalletNative implements NativePort {
         case "wallet.ensure": return await this.ensureWallet(profile);
         case "wallet.import": return await this.importWallet(profile, payload);
         case "wallet.describe": return await this.describeWallet(profile);
+        case "wallet.complete": return await this.completeWallet(profile, payload);
         case "directTransfer.approveAndSign": return await this.approveAndSign(payload);
         case "effectMaterial.get": return await this.getEffect(payload);
         case "directTransfer.signedMaterial.get": return await signedDirectTransaction(this.state, payload, this.withWallet.bind(this));
@@ -204,7 +205,12 @@ export class LocalWalletNative implements NativePort {
 
   private async describeWallet(profile: string): Promise<unknown> {
     const wallet = await this.state.loadWallet(this.state.profileHash(profile));
-    if (wallet === null) return { found: false };
+    if (wallet === null) {
+      // A sealed key without its public record (an incomplete wallet) still needs this secret to be completed: status
+      // proves it exists, as for a complete wallet, and decrypts nothing.
+      if (await this.state.loadEncryptedWalletEnvelope(profile) !== null) await this.wallets.assertWrappingSecretPresent();
+      return { found: false };
+    }
     const envelope = await this.state.loadEncryptedWalletEnvelope(profile);
     if (envelope === null) throw protocol("Public wallet has no custody envelope.");
     await assertEvmNativeCustody(this.state, profile, await evmNativeCustody(this.state, profile), walletEnvelopeIdentity(envelope, profile));
@@ -212,6 +218,19 @@ export class LocalWalletNative implements NativePort {
     await this.wallets.assertWrappingSecretPresent();
     return { found: true, profile: wallet.profile, address: wallet.address, createdAt: wallet.createdAt, bindingHash: wallet.bindingHash };
   }
+  /**
+   * `wallet ensure` of an incomplete wallet: the identity of the key an earlier create or import sealed, proven by
+   * decrypting it (its key derives the address). The address the caller read from the envelope must be that identity's.
+   * This never creates a key and writes nothing; the caller writes the public record.
+   */
+  private async completeWallet(profile: string, payload: Readonly<Record<string, unknown>>): Promise<unknown> {
+    if (!exactKeys(payload, ["profile", "address"]) || typeof payload.address !== "string") throw protocol("Wallet completion request is invalid.");
+    if (await this.state.loadEncryptedWalletEnvelope(profile) === null) throw rejected("APN_WALLET_NOT_FOUND", "No sealed wallet key exists for this profile.");
+    const identity = await this.wallets.sealedIdentity(profile);
+    if (identity.address !== payload.address) throw rejected("APN_WALLET_MISMATCH", "The sealed wallet key differs from the identity named for completion.");
+    return publicIdentity(identity);
+  }
+
   private async approveAndSign(payload: Readonly<Record<string, unknown>>): Promise<unknown> {
     const intent = payload.evm === undefined ? Object.freeze(parseDirectIntent(payload)) : parseEvmNativeIntent(payload);
     // Read-only historical shapes: the cleanup85 cancellation and the 0.5.41 Circle native rider never sign again.

@@ -249,7 +249,7 @@ export class ProviderWalletService {
             action: `Manually send only Base USDC to ${bound.public_address}, then perform a separate balance read.`,
             warning: "This guidance performs no onramp, transfer, top-up or funding action and proves no finality, sufficiency or spending authority.",
           },
-          next_actions: ["Fund manually only if intended", "Re-run apn wallet balance"],
+          next_actions: ["Fund manually only if intended", `Re-run apn wallet balance --profile ${profile}`],
         } : {
           next_actions: [rebindCommand],
         }),

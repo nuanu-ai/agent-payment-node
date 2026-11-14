@@ -6,7 +6,7 @@ import { EVM_TOKEN, EvmTestRpc } from "./evm-helpers.js";
 import { TestNative, TestProfilePolicy, TestRpc, ensureWallet, makeCore, temporaryState } from "./helpers.js";
 
 const REDUCE = "Reduce excess manually only to an independently verified address; APN does not sweep or refund automatically.";
-const RERUN = "Re-run apn wallet balance";
+const RERUN = "Re-run apn wallet balance --profile default";
 
 class AbsentProfilePolicy implements ProfilePolicyPort {
   async load(_binding: ProfilePolicyBinding): Promise<null> { return null; }

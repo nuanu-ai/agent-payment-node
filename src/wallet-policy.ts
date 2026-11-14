@@ -68,6 +68,33 @@ export function publicWallet(wallet: WalletRecord, status: string): Readonly<Rec
   };
 }
 
+/** The command that creates a local wallet for this profile, or completes one whose key is sealed (see incompleteWallet). */
+export function completeWalletCommand(profile: string): string {
+  return `apn wallet ensure --profile ${canonicalProfile(profile)}`;
+}
+
+/** No local wallet: wallet ensure for the profile asked about, never the default profile. */
+export function absentWallet(profile: string): Readonly<Record<string, unknown>> {
+  return { profile, status: "absent", proof_class: "encrypted_apn_home_status", next_actions: [completeWalletCommand(profile)] };
+}
+
+/**
+ * A key sealed in `wallets/<profile>.json` with no public `wallet.json`: a `wallet ensure` or `wallet import` stopped
+ * between the two writes. `wallet ensure` for the profile completes it from that sealed key alone and creates no other.
+ * The address is not shown here: status decrypts nothing, so it is first proven by that completion.
+ */
+export function incompleteWallet(profile: string): Readonly<Record<string, unknown>> {
+  return {
+    profile,
+    status: "incomplete",
+    reason: "sealed_key_without_public_record",
+    detail: "A wallet ensure or wallet import stopped after sealing the wallet key and before writing its public record. " +
+      "The key is kept; wallet ensure for this profile completes the wallet from it and creates no other key.",
+    proof_class: "encrypted_apn_home_status",
+    next_actions: [completeWalletCommand(profile)],
+  };
+}
+
 export function validateBalance(snapshot: BalanceSnapshot, address: Address): void {
   if (snapshot.address.toLowerCase() !== address.toLowerCase()) {
     throw new ApnError("APN_RPC_PROTOCOL", "RPC balance response is for a different address.");

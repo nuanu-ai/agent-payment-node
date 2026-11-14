@@ -576,7 +576,7 @@ test("actual compiled CLI ignores caller HOME and leaves effective-user APN stat
     profile,
     status: "absent",
     proof_class: "encrypted_apn_home_status",
-    next_actions: ["apn wallet ensure"],
+    next_actions: [`apn wallet ensure --profile ${profile}`],
   });
   assert.equal(await treeMetadataDigest(effectiveRoot), before, "HOME is ignored by design; the effective-user ~/.apn tree metadata must remain unchanged");
   await assert.rejects(stat(join(temporary.base, ".apn")), { code: "ENOENT" });
@@ -664,7 +664,7 @@ test("wallet status for an absent unique profile is read-only before initializat
     profile: "manifest-only-agent",
     status: "absent",
     proof_class: "encrypted_apn_home_status",
-    next_actions: ["apn wallet ensure"],
+    next_actions: ["apn wallet ensure --profile manifest-only-agent"],
   });
   assert.equal(nativeCalls, 0);
   await assert.rejects(stat(missingRoot), { code: "ENOENT" });
