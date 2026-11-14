@@ -1,7 +1,7 @@
 import { canonicalJson, hashObject, sha256 } from "../canonical.js";
 import { SA_FILE_LIMIT, SA_HISTORY_LIMIT, SA_MUTABLE_KEYS, SA_OPERATION_KIND, SA_OPERATION_VERSION, SA_TERMINAL, SA_TERMINAL_RESERVE_BYTES, SA_TERMINAL_RESERVE_TRANSITIONS, saImmutable, saMutable, saRequestHash } from "./operation-model.js";
 import { saMaterialHash, saRequirementsHash, saSame } from "./integrity.js";
-import { saProviderReasonToken, saVerifyAccepted } from "./model.js";
+import { saStoredReasonToken, saVerifyAccepted } from "./model.js";
 import { SA_REASON_CODES, saFail } from "./reasons.js";
 import { saBlock, saBlockOrder, saCanonicalAddress, saExact, saHash, saHex, saIso, saStateCounters, saUint, validateSmartAccountGaslessIntent } from "./schema.js";
 const TRANSITION_KEYS = ["at", "previousHash", ...SA_MUTABLE_KEYS, "transitionHash"];
@@ -194,7 +194,7 @@ function journalMutable(value, intent, operationId, fingerprint, at) {
             // A refused answer: invalid, or valid for another payer. Its reason is a closed token or none.
             const payer = v.payer === null ? null : saCanonicalAddress(v.payer);
             if (typeof v.isValid !== "boolean" || (v.isValid && (payer === null || payer === intent.binding.ownerAddress)) ||
-                (v.invalidReason !== null && saProviderReasonToken(v.invalidReason) !== v.invalidReason))
+                (v.invalidReason !== null && !saStoredReasonToken(v.invalidReason)))
                 corrupt();
         }
         within(v.observedAt, exposedAt, at);

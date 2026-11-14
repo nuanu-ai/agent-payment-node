@@ -168,8 +168,13 @@ export interface SmartAccountGaslessVerifyRejection {
 export type SmartAccountGaslessVerifyAnswer = SmartAccountGaslessVerification | SmartAccountGaslessVerifyRejection;
 /** The only answer that lets an operation reach settle. */
 export declare function saVerifyAccepted(value: SmartAccountGaslessVerifyAnswer): value is SmartAccountGaslessVerification;
-/** A closed provider reason token: no spaces, no hex run long enough to carry an address, hash or id. */
+/**
+ * The facilitator's `invalidReason`, kept only as a closed snake_case token (all lower or all upper case) with no hex run
+ * of 12 or digit run of 6: an address, hash, UUID or request id never fits. Anything else is kept as none.
+ */
 export declare function saProviderReasonToken(value: unknown): string | null;
+/** The shape a saved `invalidReason` must have (frozen at 0.5.106); the provider-side filter above may only get stricter. */
+export declare function saStoredReasonToken(value: unknown): boolean;
 export interface SmartAccountGaslessProviderSettlement {
     readonly observedAt: string;
     readonly transactionHash: Hex | null;

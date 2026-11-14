@@ -49,9 +49,15 @@ export function selectPrepareOffer(challenge, underCap, evidence, wallet, contex
     let hasMatchingMethod = false;
     let hasSufficientBalance = false;
     let decimalsMismatch = false;
+    let facilitatorsUndeclared = false;
     for (const candidate of underCap) {
         if (candidate.assetTransferMethod === "permit2" || candidate.assetTransferMethod !== transferMethod)
             continue;
+        // A delegated offer that names no facilitator cannot say who may redeem it; the next offer is tried instead.
+        if (candidate.assetTransferMethod === "erc7710" && challenge.paymentRequired.accepts[Number(candidate.index)]?.extra?.facilitatorAddresses === undefined) {
+            facilitatorsUndeclared = true;
+            continue;
+        }
         hasMatchingMethod = true;
         const amount = parseAtomic(candidate.amountAtomic, { positive: true });
         if (amount > balance)
@@ -98,6 +104,10 @@ export function selectPrepareOffer(challenge, underCap, evidence, wallet, contex
             payee: candidate.payTo,
             maxTimeoutSeconds: Number(candidate.maxTimeoutSeconds),
         };
+    }
+    if (!hasMatchingMethod && facilitatorsUndeclared) {
+        throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "The seller's ERC-7710 offer names no extra.facilitatorAddresses, so APN cannot name " +
+            "who may redeem the delegation; nothing was signed.", { reason: "x402_erc7710_facilitators_undeclared", chain: context.asset.network, asset: context.asset.token });
     }
     if (!hasMatchingMethod)
         throw new ApnError("APN_X402_UNSUPPORTED_OFFER", "No fresh seller offer matches the payer transfer method.");
