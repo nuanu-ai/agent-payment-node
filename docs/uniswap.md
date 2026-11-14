@@ -49,8 +49,9 @@ Optional settings:
 Both families need owner admission: the profile's active allowlist policy must
 admit both assets of the swap for the `swap` rail with the family's route or
 mechanism pin from `inventory`. Without it, `prepare` refuses with
-`swap_owner_admission_required`; a policy changed after `prepare` refuses with
-`swap_policy_drift`. An active policy that does not admit one of the two
+`swap_owner_admission_required`, and `next_actions` name
+`apn allowlist policy status --profile <profile>`; a policy changed after
+`prepare` refuses with `swap_policy_drift`. An active policy that does not admit one of the two
 assets refuses with the same reason: `prepare` for the native-input family,
 `quote` for the token-input family. Its `details` name the `side` (`source` or
 `destination`), the `chain`, the `asset` (`native` or the token address) and
@@ -66,9 +67,19 @@ the `admissionGap`:
 Its `next_actions` are `apn allowlist policy status --profile <profile>` and
 the family's `inventory`, which prints the route to admit.
 
-The per-operation cap is checked at `prepare`; the daily cap is enforced by
-the shared usage ledger. Staging and foreground activation work as described
-in [Orca](orca.md#owner-admission).
+The per-operation cap is checked at `prepare` (the token-input family also
+checks it, with today's usage, at `quote`); the daily cap is enforced by the
+shared usage ledger when the approval reserves the input. Both refuse with
+`APN_OPERATION_BLOCKED` and the reasons the direct rail uses:
+
+| Reason | When | `details` |
+| --- | --- | --- |
+| `allowlist_per_transfer_cap_exceeded` | The amount is above the asset's per-transfer cap. For the output asset the amount is the minimum output. | `side`, `chain`, `asset`, `maximum_per_transfer_atomic`, `amount_atomic` |
+| `allowlist_daily_cap_exceeded` | Today's shared usage plus the input is above the daily cap. | `side`, `chain`, `asset`, `daily_limit_atomic`, `daily_usage_atomic`, `amount_atomic` |
+
+Lower the amount, wait for the next UTC day, or raise the cap in a new policy
+revision. Staging and foreground activation work as described in
+[Orca](orca.md#owner-admission).
 
 `--to` may name another address than the paying account. Either `swap`
 admission may pin `recipients`; the `--to` address must then be on each list

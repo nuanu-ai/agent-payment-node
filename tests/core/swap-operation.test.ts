@@ -136,7 +136,8 @@ test("shared keyless family guards keep each family's refusal reasons and consen
     assert.throws(() => assertOperationProtocolRegistry(op, other, family), { code: "APN_OPERATION_BLOCKED", details: { reason: `${family}_protocol_registry_drift` } });
   }
   await assertActiveSwapPolicyUnchanged(async () => policy, op);
-  await assert.rejects(assertActiveSwapPolicyUnchanged(async () => null, op), { details: { reason: "swap_owner_admission_required" } });
+  await assert.rejects(assertActiveSwapPolicyUnchanged(async () => null, op), { details: { reason: "swap_owner_admission_required",
+    nextActions: [`apn allowlist policy status --profile ${op.quote.profile}`] } });
   const restaged = compileAllowlistPolicyOverlay({ ...overlay, overlayVersion: "swap-owner.2" }).registry;
   await assert.rejects(assertActiveSwapPolicyUnchanged(async () => restaged, op), { details: { reason: "swap_policy_drift" } });
   // The shared consent keeps the bytes each family hashed before: an approval screen shown by 0.5.44 yields the same code.

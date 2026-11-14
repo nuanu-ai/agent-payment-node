@@ -189,8 +189,13 @@ TRX per-operation cap is checked at `prepare`; the USDT cap is checked against
 the minimum output; the daily caps are enforced by the shared usage ledger
 when the approval reserves the input. The caps above are examples; nothing
 defaults to them. Without an active admission `prepare` refuses with
-`swap_owner_admission_required`, and a policy changed after `prepare` refuses
-with `swap_policy_drift`. An active policy that does not admit TRX or USDT
+`swap_owner_admission_required` (`next_actions` name
+`apn allowlist policy status --profile <profile>`), and a policy changed after
+`prepare` refuses with `swap_policy_drift`. An amount above the TRX
+per-operation cap (or a minimum output above the USDT one) refuses at
+`prepare` with `allowlist_per_transfer_cap_exceeded`; a TRX input above what
+is left of the daily cap refuses at approval with
+`allowlist_daily_cap_exceeded`. `details` name the `side` and the amounts. An active policy that does not admit TRX or USDT
 also refuses with `swap_owner_admission_required`. Its `details` name the
 `side` (`source` or `destination`), the `chain`, the `asset` (`native` or the
 token address) and the `admissionGap`: `network_not_listed`,

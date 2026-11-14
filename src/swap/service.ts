@@ -12,7 +12,7 @@ import { SwapOperationRepository } from "./repository.js";
 import { isOrcaStableGuardedMechanismDigest } from "../legacy/orca-stable/mechanism.js";
 import { swapUnlandedProofHash, validateSwapUnlandedProof, type SwapUnlandedProof } from "./unlanded.js";
 import { isIdempotencyKey } from "../idempotency-key-contract.js";
-import { evaluateSwapAssetAdmission, GUARDED_SWAP_INVENTORY, swapOwnerAdmissionRequired, swapRouteGapSide,
+import { evaluateSwapAssetAdmission, GUARDED_SWAP_INVENTORY, swapOwnerAdmissionRequired, swapReservationRefusal, swapRouteGapSide,
   type SwapAssetSide } from "./owner-admission.js";
 
 export class GuardedSwapService {
@@ -72,10 +72,19 @@ export class GuardedSwapService {
       blocked("Swap asset policy does not match the prepared operation.");
     }
     assertPolicyBindings(operation, registry, at);
-    const lease = await this.usage.reserve({ account: operation.quote.account, chain: operation.quote.sourceAsset.chain,
-      asset: operation.quote.sourceAsset.kind === "native" ? { kind: "native", identifier: null } :
-        { kind: "token", identifier: operation.quote.sourceAsset.identifier! }, registry: policy, rail: "swap",
-      amountAtomic: operation.quote.inputAmountAtomic, idempotencyKey: `swap-${operation.idempotencyHash}`, now });
+    const idempotencyKey = `swap-${operation.idempotencyHash}`;
+    let lease: AssetUsageReservation;
+    try {
+      lease = await this.usage.reserve({ account: operation.quote.account, chain: operation.quote.sourceAsset.chain,
+        asset: operation.quote.sourceAsset.kind === "native" ? { kind: "native", identifier: null } :
+          { kind: "token", identifier: operation.quote.sourceAsset.identifier! }, registry: policy, rail: "swap",
+        amountAtomic: operation.quote.inputAmountAtomic, idempotencyKey, now });
+    } catch (error) {
+      // At approval the shared daily usage decides: a cap the reservation exceeds is named, nothing else changes.
+      throw await swapReservationRefusal(error, this.usage, { policy: registry, account: operation.quote.account, idempotencyKey, now,
+        amountAtomic: operation.quote.inputAmountAtomic,
+        subject: { profile: operation.quote.profile, side: "source", asset: operation.quote.sourceAsset, inventory: null } });
+    }
     return await this.operations.transition(operation.ownerProfileHash, operation.operationId, operation.integrityHash, "reserved", { usageLease: lease }, now);
   }
 

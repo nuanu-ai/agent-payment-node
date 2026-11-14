@@ -57,10 +57,10 @@ const native = (extra: object = {}) => ({ chain: "eip155:1", kind: "native", rai
 const usdc = (extra: object = {}) => ({ chain: "eip155:1", kind: "token", identifier: USDC, rail: "swap", maximumPerTransferAtomic: "100",
   dailyLimitAtomic: "100", mechanism: lane, ...extra });
 
-function policy(admissions: readonly object[]) {
+function policy(admissions: readonly object[], expiresAt = "2026-09-19T00:00:00.000Z") {
   return compileAllowlistPolicyOverlay({ overlayVersion: "gap-swap.1", profile: PROFILE, account: ACCOUNT, datasetVersion: inventory.dataset.version,
     datasetSha256: inventory.dataset.sha256, inventorySha256: inventory.inventorySha256, effectiveAt: "2026-09-18T00:00:00.000Z",
-    expiresAt: "2026-09-19T00:00:00.000Z", admissions } as unknown as AllowlistPolicyOverlayInput).registry;
+    expiresAt, admissions } as unknown as AllowlistPolicyOverlayInput).registry;
 }
 async function prepare(root: string, assetPolicy: unknown, key: string) {
   const service = new GuardedSwapService(new SwapOperationRepository(root), new AssetUsageLedger(root));
@@ -106,13 +106,28 @@ test("every missing admission of one swap asset refuses with swap_owner_admissio
   await assert.rejects(lstat(temporary.root), { code: "ENOENT" });
 });
 
-test("a refusal that is not a missing admission keeps its exact earlier shape", async (t) => {
+test("cap refusals keep their message and carry the direct rail's cap reasons, at prepare and at the approval's reservation", async (t) => {
   const temporary = await temporaryState(); t.after(temporary.cleanup);
-  await assert.rejects(prepare(temporary.root, policy([native({ maximumPerTransferAtomic: "99" }), usdc()]), "gap-swap-0007"), (error: unknown) =>
-    error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED" && error.message === "The transfer exceeds the asset policy per-transfer cap." &&
+  await assert.rejects(prepare(temporary.root, policy([native({ maximumPerTransferAtomic: "99" }), usdc()]), "gap-swap-0007"), {
+    code: "APN_OPERATION_BLOCKED", message: "The transfer exceeds the asset policy per-transfer cap.", details: { reason: "allowlist_per_transfer_cap_exceeded",
+      side: "source", chain: "eip155:1", asset: "native", maximum_per_transfer_atomic: "99", amount_atomic: "100" } });
+  // The output asset's cap is checked against the minimum output.
+  await assert.rejects(prepare(temporary.root, policy([native(), usdc({ maximumPerTransferAtomic: "98" })]), "gap-swap-0009"), {
+    code: "APN_OPERATION_BLOCKED", details: { reason: "allowlist_per_transfer_cap_exceeded", side: "destination", chain: "eip155:1", asset: USDC,
+      maximum_per_transfer_atomic: "98", amount_atomic: "99" } });
+  // A refusal that is neither a listing nor a cap (the policy expired before this instant) keeps its exact earlier shape.
+  await assert.rejects(prepare(temporary.root, policy([native(), usdc()], "2026-09-18T00:00:30.000Z"), "gap-swap-0010"), (error: unknown) =>
+    error instanceof ApnError && error.code === "APN_OPERATION_BLOCKED" && error.message === "The asset policy registry has expired." &&
       error.details === undefined);
-  const admitted = await prepare(temporary.root, policy([native(), usdc()]), "gap-swap-0008");
-  assert.equal(admitted.state, "awaiting_approval");
+  // At approval the shared daily usage decides: one unit spent earlier today leaves 99 of the 100 daily cap for a 100 input.
+  const active = policy([native(), usdc()]), ledger = new AssetUsageLedger(temporary.root);
+  const op = await prepare(temporary.root, active, "gap-swap-0008"); assert.equal(op.state, "awaiting_approval");
+  await ledger.reserve({ account: ACCOUNT, chain: "eip155:1", asset: { kind: "native", identifier: null }, registry: active, rail: "swap",
+    amountAtomic: "1", idempotencyKey: "gap-swap-earlier-0001", now: NOW });
+  await assert.rejects(new GuardedSwapService(new SwapOperationRepository(temporary.root), ledger).reserve(op, active, NOW), {
+    code: "APN_OPERATION_BLOCKED", message: "The transfer exceeds the asset policy daily cap.", details: { reason: "allowlist_daily_cap_exceeded",
+      side: "source", chain: "eip155:1", asset: "native", daily_limit_atomic: "100", daily_usage_atomic: "1", amount_atomic: "100" } });
+  assert.equal((await new SwapOperationRepository(temporary.root).loadAny(op.operationId))?.state, "awaiting_approval", "nothing was reserved");
 });
 
 const POOL_ABI = parseAbi(["function slot0() view returns(uint160,int24,uint16,uint16,uint16,uint8,bool)", "function liquidity() view returns(uint128)"]);
@@ -192,11 +207,13 @@ test("Orca USDC to USDT without one asset's admission refuses with the reason on
   }
 });
 
-test("the Uniswap token lane names the missing token or route at quote with the same reason", async (t) => {
-  const NOW_TOKEN = new Date("2026-09-22T00:00:00.000Z"), request = { command: "swap.uniswap-token.quote" as const, profile: "token-swap",
-    account: ACCOUNT, recipient: ACCOUNT, sourceToken: UNISWAP_USDC, outputToken: ETHEREUM_USDT, amountAtomic: "1000000", minimumOutputAtomic: "990000",
-    approvalCapAtomic: "1000000", deadline: 1_900_000_000, maxApprovalGasLimit: "100000", maxSwapGasLimit: "100000", maxCleanupGasLimit: "100000",
-    maxFeePerGas: "2", maxPriorityFeePerGas: "1", maxNativeDebitWei: "600000" };
+const NOW_TOKEN = new Date("2026-09-22T00:00:00.000Z"), tokenRequest = { command: "swap.uniswap-token.quote" as const, profile: "token-swap",
+  account: ACCOUNT, recipient: ACCOUNT, sourceToken: UNISWAP_USDC, outputToken: ETHEREUM_USDT, amountAtomic: "1000000", minimumOutputAtomic: "990000",
+  approvalCapAtomic: "1000000", deadline: 1_900_000_000, maxApprovalGasLimit: "100000", maxSwapGasLimit: "100000", maxCleanupGasLimit: "100000",
+  maxFeePerGas: "2", maxPriorityFeePerGas: "1", maxNativeDebitWei: "600000" };
+
+test("the Uniswap token lane names the missing token or route, and a cap, at quote", async (t) => {
+  const request = tokenRequest;
   const row = (identifier: string, mechanism: SwapMechanismPin) => ({ chain: "eip155:1", kind: "token" as const, identifier, rail: "swap" as const,
     maximumPerTransferAtomic: "1000000", dailyLimitAtomic: "1000000", mechanism });
   for (const [admissions, gap] of [[[row(UNISWAP_USDC, UNISWAP_TOKEN_MECHANISM_PIN)], "asset_not_listed"],
@@ -207,4 +224,32 @@ test("the Uniswap token lane names the missing token or route at quote with the 
     await assert.rejects(usage.admitQuote(request, NOW_TOKEN),
       admissionGap("destination", "eip155:1", ETHEREUM_USDT, gap, "token-swap", "apn swap ethereum uniswap-token inventory"));
   }
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  await activateDirectPolicy(temporary.root, "token-swap", { accounts: { evm: ACCOUNT }, now: NOW_TOKEN,
+    admissions: [row(UNISWAP_USDC, UNISWAP_TOKEN_MECHANISM_PIN), row(ETHEREUM_USDT, UNISWAP_TOKEN_MECHANISM_PIN)] });
+  const usage = new UniswapTokenUsage(new StateStore(temporary.root), { now: () => NOW_TOKEN }, new AssetUsageLedger(temporary.root));
+  await assert.rejects(usage.admitQuote({ ...request, amountAtomic: "1000001", approvalCapAtomic: "1000001" }, NOW_TOKEN), { code: "APN_OPERATION_BLOCKED",
+    details: { reason: "allowlist_per_transfer_cap_exceeded", side: "source", chain: "eip155:1", asset: UNISWAP_USDC,
+      maximum_per_transfer_atomic: "1000000", amount_atomic: "1000001" } });
+});
+
+test("no active policy refuses with the command that lists the profile's allowlist revisions", async (t) => {
+  const temporary = await temporaryState(); t.after(temporary.cleanup);
+  const state = new StateStore(temporary.root); await state.initialize();
+  const rpc = new KeylessRpc(), clock = { now: () => NOW }, deadline = Math.floor(NOW.getTime() / 1000) + 900;
+  const runtime = createUniswapKeylessRuntime({ state, wrapping: new MemoryWrapping(), clock, policy: async () => null,
+    foreground: REFUSING_SWAP_APPROVAL, call: rpc.call, verifyPins: async () => [], verifySendPins: async () => [] });
+  const quoted = await runtime.quote({ profile: KEYLESS_PROFILE, account: KEYLESS_ACCOUNT, recipient: KEYLESS_ACCOUNT, outputToken: UNISWAP_USDC,
+    amountAtomic: "1000000000000000", slippageBps: 50, ownerSlippageCapBps: 100, deadline, maxGasLimit: "300000", maxFeePerGas: "30000000000",
+    maxPriorityFeePerGas: "1000000000" }, NOW) as { quoteHash: string };
+  const statusCommand = `apn allowlist policy status --profile ${KEYLESS_PROFILE}`;
+  await assert.rejects(runtime.prepare({ profile: KEYLESS_PROFILE, quoteHash: quoted.quoteHash, idempotencyKey: "gap-no-policy-0001" }, NOW), {
+    code: "APN_OPERATION_BLOCKED", details: { reason: "swap_owner_admission_required", nextActions: [statusCommand] } });
+  const cli = await new ApnCore({ state, clock, uniswapRuntime: runtime }).execute({ command: "swap.uniswap.prepare", profile: KEYLESS_PROFILE,
+    quoteHash: quoted.quoteHash, idempotencyKey: "gap-no-policy-0002" });
+  assert.deepEqual(cli.next_actions, [statusCommand]); assert.ok(bindArgv(statusCommand.split(" ").slice(1)).request.command);
+  const token = await temporaryState(); t.after(token.cleanup); const tokenState = new StateStore(token.root); await tokenState.initialize();
+  const usage = new UniswapTokenUsage(tokenState, { now: () => NOW_TOKEN }, new AssetUsageLedger(token.root));
+  await assert.rejects(usage.admitQuote(tokenRequest, NOW_TOKEN), { code: "APN_OPERATION_BLOCKED",
+    details: { reason: "swap_owner_admission_required", nextActions: ["apn allowlist policy status --profile token-swap"] } });
 });

@@ -3,6 +3,7 @@ import { ApnError } from "../errors.js";
 import type { SwapOperationRecord } from "./model.js";
 import { requireSwapProtocol, validateSwapProtocolRegistry, type SwapProtocolRegistry } from "./protocol-registry.js";
 import type { GuardedSwapPolicyResolver } from "./runtime.js";
+import { swapPolicyStatusCommand } from "./owner-admission.js";
 
 /** The keyless swap families that share these pre-sign guards. The key is part of their reasons and hash domains. */
 export type SwapFamily = "uniswap" | "sunswap" | "orca";
@@ -22,7 +23,8 @@ export function assertOperationProtocolRegistry(operation: SwapOperationRecord, 
 /** Owner admission, policy half: the profile's active sealed policy must still be the one the operation was prepared under. */
 export async function assertActiveSwapPolicyUnchanged(policy: GuardedSwapPolicyResolver, operation: SwapOperationRecord): Promise<void> {
   const active = await policy(operation.quote.profile);
-  if (active === null) blocked("No active owner swap admission is installed for this profile.", "swap_owner_admission_required");
+  if (active === null) throw new ApnError("APN_OPERATION_BLOCKED", "No active owner swap admission is installed for this profile.",
+    { reason: "swap_owner_admission_required", nextActions: [swapPolicyStatusCommand(operation.quote.profile)] });
   const registry = validateAssetPolicyRegistry(active);
   if (registry.policyDigest !== operation.policyDigest || registry.registryVersion !== operation.policyVersion) {
     blocked("The active owner policy changed after preparation.", "swap_policy_drift");

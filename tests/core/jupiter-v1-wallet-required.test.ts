@@ -73,6 +73,6 @@ test("a provider-linked Solana account is refused with its provider, and a local
   const local = "jupiter-local-wallet";
   await accounts.ensureLocal({ profile: local, rail: "solana", create: async () => ({ address: payer, seed: Buffer.alloc(32, 9) }) });
   await assert.rejects(runtime().quote({ ...quoteRequest, profile: local }, new Date()), { code: "APN_OPERATION_BLOCKED",
-    details: { reason: "jupiter_v1_owner_admission" } });
+    details: { reason: "jupiter_v1_owner_admission", nextActions: [`apn allowlist policy status --profile ${local}`] } });
   assert.deepEqual(c.count, { reads: 0, secrets: 0 });
 });
